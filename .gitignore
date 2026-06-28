@@ -6,6 +6,9 @@ dist/
 out/
 *.tsbuildinfo
 
+# Turborepo
+.turbo/
+
 # Test coverage
 coverage/
 
