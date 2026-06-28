@@ -5,11 +5,11 @@
   "type": "module",
   "description": "Semantic IR extraction for high-level code review",
   "license": "MIT",
-  "author": "kage1020 <kage1020.dev@gmail.com>",
-  "homepage": "https://github.com/kage1020/aburi",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kage1020/aburi.git"
+    "url": "git+https://github.com/kage1020/Aburi.git"
   },
   "engines": {
     "node": ">=24"
