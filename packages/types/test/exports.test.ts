@@ -3,18 +3,28 @@ import type {
   CallCandidate,
   ClassifyContext,
   Config,
+  ConfigPluginRef,
+  DiffGenerator,
   DiffResult,
   EffectClassification,
   EffectPlugin,
+  EffectsManifest,
+  EffectVocab,
   ExtractionContext,
+  FrameworkManifest,
   FrameworkPlugin,
+  Generator,
   ImportEdge,
   IR,
+  IRSymbol,
+  LangManifest,
   LanguageCapabilities,
   LanguagePlugin,
+  ManifestEffectVocab,
   ParseResult,
   PluginContext,
   PluginManifest,
+  PluginRef,
   SourceFile,
   Symbol,
   SymbolCandidate,
@@ -93,5 +103,117 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<VocabRegistry["findFramework"]>().toBeFunction()
     expectTypeOf<VocabRegistry["assertEffectDeclared"]>().toBeFunction()
     expectTypeOf<VocabRegistry["assertExtKindDeclared"]>().toBeFunction()
+  })
+
+  it("disambiguating aliases stay distinct from their non-aliased siblings", () => {
+    // IR.Generator carries plugin metadata; DiffGenerator is the lite name/version pair.
+    expectTypeOf<Generator>().toHaveProperty("plugins")
+    expectTypeOf<DiffGenerator>().not.toHaveProperty("plugins")
+
+    // PluginRef in IR is the rich runtime snapshot; in config it is a string id (plugin spec).
+    expectTypeOf<PluginRef>().toHaveProperty("name")
+    expectTypeOf<ConfigPluginRef>().toEqualTypeOf<string>()
+
+    // Manifest-declared EffectVocab is {id, description}; resolved EffectVocab adds an owner.
+    expectTypeOf<ManifestEffectVocab>().not.toHaveProperty("owner")
+    expectTypeOf<EffectVocab>().toHaveProperty("owner")
+
+    // IRSymbol must be the same shape as Symbol (alias for callers that keep the global).
+    expectTypeOf<IRSymbol>().toEqualTypeOf<Symbol>()
+  })
+
+  it("narrowed plugin manifests reject the wrong type discriminator", () => {
+    const langOk: LangManifest = {
+      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      name: "lang-foo",
+      version: "1.0.0",
+      type: "lang",
+      engines: { aburi: "^1.0.0" },
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKinds: [],
+        extKindPrefixes: [],
+        derivedByPrefixes: [],
+        frameworks: [],
+      },
+    }
+    expectTypeOf(langOk.type).toEqualTypeOf<"lang">()
+
+    const effectsOk: EffectsManifest = {
+      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      name: "effects-foo",
+      version: "1.0.0",
+      type: "effects",
+      xPrefix: "foo",
+      engines: { aburi: "^1.0.0" },
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKinds: [],
+        extKindPrefixes: [],
+        derivedByPrefixes: [],
+        frameworks: [],
+      },
+    }
+    expectTypeOf(effectsOk.type).toEqualTypeOf<"effects">()
+
+    const fwOk: FrameworkManifest = {
+      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      name: "framework-foo",
+      version: "1.0.0",
+      type: "framework",
+      engines: { aburi: "^1.0.0" },
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKinds: [],
+        extKindPrefixes: [],
+        derivedByPrefixes: [],
+        frameworks: [],
+      },
+    }
+    expectTypeOf(fwOk.type).toEqualTypeOf<"framework">()
+
+    // @ts-expect-error -- type discriminator must match the narrow.
+    const wrongType: LangManifest = { ...langOk, type: "effects" }
+    expectTypeOf(wrongType).toEqualTypeOf<LangManifest>()
+  })
+
+  it("PluginManifest enforces required keys", () => {
+    // @ts-expect-error -- missing required keys.
+    const empty: PluginManifest = {}
+    expectTypeOf(empty).toEqualTypeOf<PluginManifest>()
+
+    // @ts-expect-error -- 'name' is required.
+    const noName: PluginManifest = {
+      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      version: "1.0.0",
+      type: "lang",
+      engines: { aburi: "^1.0.0" },
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKinds: [],
+        extKindPrefixes: [],
+        derivedByPrefixes: [],
+        frameworks: [],
+      },
+    }
+    expectTypeOf(noName).toEqualTypeOf<PluginManifest>()
+  })
+
+  it("ParseResult and SymbolCandidate are generic in the parser's tree/node types", () => {
+    interface FakeTree {
+      readonly __brand: "FakeTree"
+    }
+    interface FakeNode {
+      readonly __brand: "FakeNode"
+    }
+    type SpecialPlugin = LanguagePlugin<FakeTree, FakeNode>
+    type ParsedFake = Awaited<ReturnType<SpecialPlugin["parseFile"]>>
+    expectTypeOf<ParsedFake["tree"]>().toEqualTypeOf<FakeTree>()
+    type ExtractedFake = ReturnType<SpecialPlugin["extractSymbols"]>
+    expectTypeOf<ExtractedFake[number]["fullNode"]>().toEqualTypeOf<FakeNode>()
   })
 })
