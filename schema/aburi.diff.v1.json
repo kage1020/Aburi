@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aburi.dev/schema/aburi.diff.v1.json",
+  "title": "Aburi Diff Result",
+  "description": "Result of aburi diff <base>..<head>. JSON projection of the matched/added/removed/moved/changed symbol pairs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "base",
+    "components",
+    "dependencies",
+    "generator",
+    "head",
+    "summary",
+    "symbols"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://aburi.dev/schema/aburi.diff.v1.json"
+    },
+    "generator": { "$ref": "#/$defs/Generator" },
+    "base": { "$ref": "#/$defs/IRRef" },
+    "head": { "$ref": "#/$defs/IRRef" },
+    "summary": { "$ref": "#/$defs/Summary" },
+    "symbols": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SymbolChange" }
+    },
+    "components": { "$ref": "#/$defs/ComponentDiff" },
+    "dependencies": { "$ref": "#/$defs/DependencyDiff" }
+  },
+
+  "$defs": {
+    "Generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$" }
+      }
+    },
+
+    "IRRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["irSchema", "ref"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Git ref, file path, or other identifier of the IR source."
+        },
+        "irSchema": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Schema id of the input IR. Must match between base and head."
+        }
+      }
+    },
+
+    "Summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "added",
+        "changed",
+        "componentsAdded",
+        "componentsChanged",
+        "componentsRemoved",
+        "depsAdded",
+        "depsRemoved",
+        "droppedAdded",
+        "droppedRemoved",
+        "droppedToggled",
+        "moved",
+        "movedChanged",
+        "removed",
+        "unchanged"
+      ],
+      "properties": {
+        "added":             { "type": "integer", "minimum": 0 },
+        "removed":           { "type": "integer", "minimum": 0 },
+        "moved":             { "type": "integer", "minimum": 0 },
+        "movedChanged":      { "type": "integer", "minimum": 0 },
+        "changed":           { "type": "integer", "minimum": 0 },
+        "droppedToggled":    { "type": "integer", "minimum": 0 },
+        "unchanged":         { "type": "integer", "minimum": 0 },
+        "droppedAdded":      { "type": "integer", "minimum": 0 },
+        "droppedRemoved":    { "type": "integer", "minimum": 0 },
+        "componentsAdded":   { "type": "integer", "minimum": 0 },
+        "componentsRemoved": { "type": "integer", "minimum": 0 },
+        "componentsChanged": { "type": "integer", "minimum": 0 },
+        "depsAdded":         { "type": "integer", "minimum": 0 },
+        "depsRemoved":       { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "SymbolChange": {
+      "oneOf": [
+        { "$ref": "#/$defs/SymbolAdded" },
+        { "$ref": "#/$defs/SymbolRemoved" },
+        { "$ref": "#/$defs/SymbolMoved" },
+        { "$ref": "#/$defs/SymbolChanged" },
+        { "$ref": "#/$defs/SymbolMovedChanged" },
+        { "$ref": "#/$defs/SymbolDroppedToggled" }
+      ]
+    },
+
+    "SymbolDroppedToggled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["after", "before", "direction", "status"],
+      "properties": {
+        "status":    { "const": "dropped-toggled" },
+        "before":    { "$ref": "#/$defs/Symbol" },
+        "after":     { "$ref": "#/$defs/Symbol" },
+        "direction": { "enum": ["to-dropped", "to-kept"] }
+      }
+    },
+
+    "SymbolAdded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "symbol"],
+      "properties": {
+        "status": { "const": "added" },
+        "symbol": { "$ref": "#/$defs/Symbol" }
+      }
+    },
+
+    "SymbolRemoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "symbol"],
+      "properties": {
+        "status": { "const": "removed" },
+        "symbol": { "$ref": "#/$defs/Symbol" }
+      }
+    },
+
+    "SymbolMoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["after", "before", "rationale", "status"],
+      "properties": {
+        "status":    { "const": "moved" },
+        "before":    { "$ref": "#/$defs/Symbol" },
+        "after":     { "$ref": "#/$defs/Symbol" },
+        "rationale": { "$ref": "#/$defs/MatchRationale" }
+      }
+    },
+
+    "SymbolChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["after", "before", "delta", "status"],
+      "properties": {
+        "status": { "const": "changed" },
+        "before": { "$ref": "#/$defs/Symbol" },
+        "after":  { "$ref": "#/$defs/Symbol" },
+        "delta":  { "$ref": "#/$defs/SymbolDelta" }
+      }
+    },
+
+    "SymbolMovedChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["after", "before", "delta", "rationale", "status"],
+      "properties": {
+        "status":    { "const": "moved+changed" },
+        "before":    { "$ref": "#/$defs/Symbol" },
+        "after":     { "$ref": "#/$defs/Symbol" },
+        "rationale": { "$ref": "#/$defs/MatchRationale" },
+        "delta":     { "$ref": "#/$defs/SymbolDelta" }
+      }
+    },
+
+    "MatchRationale": {
+      "enum": [
+        "id-match",
+        "git-rename",
+        "logic-fingerprint",
+        "logic-fingerprint+name-disambiguation",
+        "name-signature",
+        "dropped-weak-match"
+      ]
+    },
+
+    "SymbolDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiChanged",
+        "componentChanged",
+        "logicChanged",
+        "syntaxChanged",
+        "visibilityChanged"
+      ],
+      "properties": {
+        "apiChanged":         { "type": "boolean" },
+        "logicChanged":       { "type": "boolean" },
+        "syntaxChanged":      { "type": "boolean" },
+        "componentChanged":   { "type": "boolean" },
+        "visibilityChanged":  { "type": "boolean" },
+        "rules":      { "$ref": "#/$defs/ArrayDelta" },
+        "effects":    { "$ref": "#/$defs/ArrayDelta" },
+        "calls":      { "$ref": "#/$defs/ArrayDelta" },
+        "decorators": { "$ref": "#/$defs/ArrayDelta" },
+        "signature":  {
+          "oneOf": [
+            { "$ref": "#/$defs/SignatureDelta" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+
+    "ArrayDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "modified", "removed"],
+      "properties": {
+        "added":    { "type": "array" },
+        "removed":  { "type": "array" },
+        "modified": { "type": "array" }
+      }
+    },
+
+    "SignatureDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asyncChanged",
+        "generatorChanged",
+        "inputs",
+        "outputs",
+        "throws",
+        "typeParametersChanged"
+      ],
+      "properties": {
+        "inputs":  { "$ref": "#/$defs/ArrayDelta" },
+        "outputs": { "$ref": "#/$defs/ArrayDelta" },
+        "throws":  { "$ref": "#/$defs/ArrayDelta" },
+        "asyncChanged":           { "type": "boolean" },
+        "generatorChanged":       { "type": "boolean" },
+        "typeParametersChanged":  { "type": "boolean" }
+      }
+    },
+
+    "ComponentDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "changed", "removed"],
+      "properties": {
+        "added":   { "type": "array", "items": { "$ref": "#/$defs/Component" } },
+        "removed": { "type": "array", "items": { "$ref": "#/$defs/Component" } },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["after", "before", "delta"],
+            "properties": {
+              "before": { "$ref": "#/$defs/Component" },
+              "after":  { "$ref": "#/$defs/Component" },
+              "delta": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["frameworksChanged", "publicApiChanged", "rootsChanged"],
+                "properties": {
+                  "rootsChanged":       { "type": "boolean" },
+                  "publicApiChanged":   { "type": "boolean" },
+                  "frameworksChanged":  { "type": "boolean" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "DependencyDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "removed"],
+      "properties": {
+        "added":   { "type": "array", "items": { "$ref": "#/$defs/Dependency" } },
+        "removed": { "type": "array", "items": { "$ref": "#/$defs/Dependency" } }
+      }
+    },
+
+    "Symbol": {
+      "type": "object",
+      "description": "Reference to a Symbol from aburi.ir.v1. Structurally validated as object only here; consumers should validate against aburi.ir.v1.json#/$defs/Symbol for stricter checking."
+    },
+
+    "Component": {
+      "type": "object",
+      "description": "Reference to a Component from aburi.ir.v1."
+    },
+
+    "Dependency": {
+      "type": "object",
+      "description": "Reference to a Dependency from aburi.ir.v1."
+    }
+  }
+}

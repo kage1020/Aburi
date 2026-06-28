@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "title": "Aburi Plugin Manifest",
+  "description": "Plugin manifest declaring extension vocabulary contributed to Aburi. Validated at plugin load time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "engines", "name", "provides", "type", "version"],
+  "properties": {
+    "$schema": {
+      "const": "https://aburi.dev/schema/aburi.plugin.v1.json"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "minLength": 1,
+      "description": "ASCII kebab-case plugin name (e.g., 'effects-prisma', 'framework-nestjs', 'lang-typescript')."
+    },
+    "xPrefix": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "(type=effects only) Identifier used as the x-<xPrefix> prefix for owned effect ids. Defaults to <name> with leading 'effects-' stripped. Example: name='effects-prisma' → xPrefix='prisma' → owned ids: 'x-prisma:*'."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$",
+      "description": "Semver."
+    },
+    "type": {
+      "enum": ["lang", "effects", "framework"],
+      "description": "Plugin role."
+    },
+    "engines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aburi"],
+      "properties": {
+        "aburi": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Semver range of compatible Aburi core."
+        }
+      }
+    },
+    "provides": { "$ref": "#/$defs/Provides" },
+    "capabilities": {
+      "$ref": "#/$defs/Capabilities",
+      "description": "Optional runtime capabilities the plugin advertises. Source-of-truth for CLI concurrency budgets (lang-plugin.md §8.1, cli-spec.md §11)."
+    }
+  },
+  "allOf": [
+    {
+      "description": "type=effects: only x-* effects/effectPrefixes allowed; no framework:*/fp:*/oop:*/meta:* extKinds. wasmHeapPerWorkerMB is lang-only and must be absent.",
+      "if": { "properties": { "type": { "const": "effects" } } },
+      "then": {
+        "properties": {
+          "provides": {
+            "type": "object",
+            "properties": {
+              "extKinds": { "maxItems": 0 },
+              "extKindPrefixes": { "maxItems": 0 },
+              "frameworks": { "maxItems": 0 }
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "wasmHeapPerWorkerMB": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "type=framework: only framework:* extKinds; no x-* effects. wasmHeapPerWorkerMB is lang-only and must be absent.",
+      "if": { "properties": { "type": { "const": "framework" } } },
+      "then": {
+        "properties": {
+          "provides": {
+            "type": "object",
+            "properties": {
+              "effects": { "maxItems": 0 },
+              "effectPrefixes": { "maxItems": 0 },
+              "extKinds": {
+                "items": { "properties": { "id": { "pattern": "^framework:" } } }
+              },
+              "extKindPrefixes": {
+                "items": { "pattern": "^framework:" }
+              }
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {
+              "wasmHeapPerWorkerMB": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "type=lang: only fp:*/oop:*/meta:* extKinds; no x-* effects, no frameworks.",
+      "if": { "properties": { "type": { "const": "lang" } } },
+      "then": {
+        "properties": {
+          "provides": {
+            "type": "object",
+            "properties": {
+              "effects": { "maxItems": 0 },
+              "effectPrefixes": { "maxItems": 0 },
+              "frameworks": { "maxItems": 0 },
+              "extKinds": {
+                "items": { "properties": { "id": { "pattern": "^(fp|oop|meta):" } } }
+              },
+              "extKindPrefixes": {
+                "items": { "pattern": "^(fp|oop|meta)(:|$)" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Provides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "derivedByPrefixes",
+        "effectPrefixes",
+        "effects",
+        "extKindPrefixes",
+        "extKinds",
+        "frameworks"
+      ],
+      "properties": {
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EffectVocab" },
+          "uniqueItems": true
+        },
+        "effectPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^x-[a-z][a-z0-9-]*$"
+          },
+          "uniqueItems": true,
+          "description": "Plugin-owned x-<ns> prefixes. The plugin may emit any x-<ns>:<action> under these at extraction time without enumerating each id."
+        },
+        "extKinds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ExtKindVocab" }
+        },
+        "extKindPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)+$"
+          },
+          "uniqueItems": true,
+          "description": "Plugin-owned extKind prefixes. Minimum 2 segments (e.g., 'framework:nestjs', not just 'framework'). The plugin may emit <prefix>:<extra> at extraction time without enumerating each id."
+        },
+        "derivedByPrefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)*$"
+          },
+          "uniqueItems": true
+        },
+        "frameworks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "EffectVocab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^x-[a-z][a-z0-9-]*:[a-z][a-z0-9.-]+$",
+          "description": "Plugin-extension effect id. Format: x-<plugin-namespace>:<action>"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "Capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wasmHeapPerWorkerMB": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4096,
+          "description": "(type=lang only) Expected WASM heap usage per parser worker in MiB. Aburi CLI multiplies this by concurrency to size the per-process budget and refuses to oversubscribe."
+        }
+      }
+    },
+
+    "ExtKindVocab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseKind", "description", "id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+$",
+          "description": "Multi-segment extKind id."
+        },
+        "baseKind": {
+          "enum": [
+            "function",
+            "method",
+            "class",
+            "interface",
+            "type",
+            "const",
+            "module",
+            "namespace",
+            "variable",
+            "enum",
+            "constructor"
+          ],
+          "description": "Nearest core SymbolKind that consumers without this extension can fall back to."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

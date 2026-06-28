@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aburi.dev/schema/aburi.config.v1.json",
+  "title": "Aburi Project Config",
+  "description": "aburi.json / aburi.jsonc project configuration. All fields optional; empty config is valid (autodetect handles everything).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://aburi.dev/schema/aburi.config.v1.json"
+    },
+    "ignore": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Glob patterns added to drop-list category A (file-level skip). POSIX, workspace-root relative."
+    },
+    "respectGitignore": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to merge .gitignore patterns into drop-list category A."
+    },
+    "languages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PluginRef" },
+      "uniqueItems": true,
+      "description": "Enabled language plugins (manifest names or relative paths)."
+    },
+    "frameworks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PluginRef" },
+      "uniqueItems": true,
+      "description": "Enabled framework plugins. Order has no semantic effect."
+    },
+    "effects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PluginRef" },
+      "uniqueItems": true,
+      "description": "Enabled effect plugins. Order determines first-match-wins priority."
+    },
+    "pluginOptions": {
+      "type": "object",
+      "additionalProperties": true,
+      "propertyNames": { "$ref": "#/$defs/PluginManifestName" },
+      "description": "Per-plugin opaque options keyed by manifest name."
+    },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ComponentOverride" }
+    },
+    "suppress": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Identifier prefixes added to drop-list category C call drop."
+    },
+    "keep": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Identifier prefixes or decorator names that escape drop. Wins over suppress and plugin/core drop rules."
+    },
+    "frameworkHints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/FrameworkHint" }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string", "minLength": 1, "default": "out" }
+      }
+    },
+    "strict": {
+      "type": "boolean",
+      "default": true,
+      "description": "If true, undeclared vocab emitted by plugins aborts extraction. If false, warnings are written to out/aburi-vocab-discovered.json."
+    },
+    "maxFileSizeBytes": {
+      "type": "integer",
+      "minimum": 1024,
+      "default": 2097152,
+      "description": "Files exceeding this size are skipped during scan to protect WASM heap. Default 2 MB."
+    },
+    "parseTimeoutMs": {
+      "type": "integer",
+      "minimum": 100,
+      "default": 5000,
+      "description": "Per-file parse timeout (parse + extract + walk combined). Files exceeding this are aborted and recorded as skipped. Default 5000 ms."
+    },
+    "classifyTimeoutMs": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 5000,
+      "default": 50,
+      "description": "Per-call timeout for effect plugin classify(). Exceeding calls fall through to next plugin and are recorded in stats.effectClassifyTimeouts[]. Default 50 ms; raise to 200-500 for SQL/regex-heavy effect plugins."
+    }
+  },
+
+  "$defs": {
+    "PluginRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative path ('./aburi-plugins/x.mjs')."
+    },
+
+    "PluginManifestName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+
+    "ComponentOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "roots"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "roots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RelativePath" },
+          "minItems": 1
+        },
+        "publicApi": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "languages": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9]*$" }
+        },
+        "frameworks": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+        },
+        "description": { "type": ["string", "null"] }
+      }
+    },
+
+    "FrameworkHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Identifier used as the auto-registered ad-hoc plugin name and as Component.frameworks[] value."
+        },
+        "decorators": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/HintRule" },
+          "description": "Keyed by decorator name (e.g., 'AcmeController')."
+        },
+        "classNamePatterns": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/HintRule" },
+          "description": "Keyed by class name glob pattern (e.g., '*Handler')."
+        }
+      }
+    },
+
+    "HintRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "boundary": {
+          "type": "boolean",
+          "description": "Override Decorator.boundary for matching decorators. Ignored for classNamePatterns."
+        },
+        "extKind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+$",
+          "description": "Set Symbol.extKind for matching symbols."
+        },
+        "derivedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Append to Symbol.derivedBy[]."
+        },
+        "drop": {
+          "type": "boolean",
+          "description": "If true, drop matching symbol as Category B with dropReason set from name."
+        }
+      }
+    },
+
+    "RelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": { "pattern": "\\\\" }
+    }
+  }
+}

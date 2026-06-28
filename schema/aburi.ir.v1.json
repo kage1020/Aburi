@@ -1,0 +1,554 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aburi.dev/schema/aburi.ir.v1.json",
+  "title": "Aburi IR",
+  "description": "Aburi intermediate representation (aburi.ir.v1). Source of truth for L3; L0-L2 Markdown views are derived deterministically from this.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "components",
+    "dependencies",
+    "generator",
+    "stats",
+    "symbols",
+    "workspace"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://aburi.dev/schema/aburi.ir.v1.json"
+    },
+    "generator": { "$ref": "#/$defs/Generator" },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC. Excluded from fingerprint. Omit with --no-timestamp when committing IR."
+    },
+    "workspace": { "$ref": "#/$defs/Workspace" },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Component" }
+    },
+    "symbols": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Symbol" }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Dependency" }
+    },
+    "stats": { "$ref": "#/$defs/Stats" }
+  },
+  "$defs": {
+    "Generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "plugins", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$" },
+        "plugins": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PluginRef" },
+          "description": "All plugins (lang/framework/effects) participating in this IR generation. Used for diff-time comparability checks (syntax fingerprint vs grammarRevision, effect classifications vs version)."
+        }
+      }
+    },
+
+    "PluginRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grammarRevision", "name", "type", "version"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "type": { "enum": ["lang", "framework", "effects"] },
+        "version": { "type": "string", "pattern": "^[\\w./@-]+@\\d+\\.\\d+\\.\\d+(?:[-+][\\w.-]+)?$|^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$" },
+        "grammarRevision": {
+          "type": ["string", "null"],
+          "description": "type=lang: required, format '<grammar-package>@<MAJOR.MINOR.PATCH>'. type=framework/effects: null."
+        }
+      },
+      "allOf": [
+        {
+          "description": "type=lang requires non-null grammarRevision in '<pkg>@<semver>' format.",
+          "if": { "properties": { "type": { "const": "lang" } } },
+          "then": {
+            "properties": {
+              "grammarRevision": {
+                "type": "string",
+                "pattern": "^[\\w./@-]+@\\d+\\.\\d+\\.\\d+(?:[-+][\\w.-]+)?$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "grammarRevision": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+
+    "Workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["languages", "managers", "root"],
+      "properties": {
+        "root": {
+          "const": ".",
+          "description": "Always '.'. IRs must not contain absolute paths."
+        },
+        "managers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/WorkspaceManager" }
+        },
+        "languages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LanguageId" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "WorkspaceManager": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roots", "tool"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Runtime-agnostic package/workspace manager id. Common values: pnpm, npm, yarn, bun, uv, poetry, pip, cargo, go, mvn, gradle, hatch, pixi."
+        },
+        "roots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RelativePath" }
+        }
+      }
+    },
+
+    "Stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["droppedSymbols", "keptSymbols", "parsedFiles", "totalFiles"],
+      "properties": {
+        "totalFiles": { "type": "integer", "minimum": 0 },
+        "parsedFiles": { "type": "integer", "minimum": 0 },
+        "keptSymbols": { "type": "integer", "minimum": 0 },
+        "droppedSymbols": { "type": "integer", "minimum": 0 },
+        "effectClassifyTimeouts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EffectClassifyTimeout" },
+          "description": "Effect 分類が classifyTimeoutMs を超えて打ち切られた件の記録 (effect-plugin.md §5.1.1)。空配列が原則。値があれば決定性ログとして残す。"
+        }
+      }
+    },
+
+    "EffectClassifyTimeout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin", "symbolId", "timeoutMs"],
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Effect plugin manifest name that timed out."
+        },
+        "symbolId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Affected Symbol id (extraction-stage uniqueness guaranteed)."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The classifyTimeoutMs value in effect at the time of timeout."
+        }
+      }
+    },
+
+    "Component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "languages", "name", "roots"],
+      "properties": {
+        "id": { "$ref": "#/$defs/ComponentId" },
+        "name": { "type": "string", "minLength": 1 },
+        "roots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RelativePath" },
+          "minItems": 1
+        },
+        "publicApi": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "not": { "pattern": "\\\\" } },
+          "description": "Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash)."
+        },
+        "languages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LanguageId" },
+          "minItems": 1
+        },
+        "frameworks": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+        },
+        "description": { "type": ["string", "null"] }
+      }
+    },
+
+    "Symbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calls",
+        "confidence",
+        "decorators",
+        "derivedBy",
+        "dropReason",
+        "dropped",
+        "effects",
+        "extKind",
+        "fingerprint",
+        "id",
+        "kind",
+        "language",
+        "name",
+        "rules",
+        "source",
+        "visibility"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/SymbolId" },
+        "kind": { "$ref": "#/$defs/SymbolKind" },
+        "extKind": { "$ref": "#/$defs/ExtKind" },
+        "name": { "type": "string", "minLength": 1 },
+        "language": { "$ref": "#/$defs/LanguageId" },
+        "component": {
+          "oneOf": [
+            { "$ref": "#/$defs/ComponentId" },
+            { "type": "null" }
+          ]
+        },
+        "visibility": { "$ref": "#/$defs/Visibility" },
+        "decorators": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Decorator" }
+        },
+        "signature": {
+          "oneOf": [
+            { "$ref": "#/$defs/Signature" },
+            { "type": "null" }
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Rule" }
+        },
+        "effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Effect" }
+        },
+        "calls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Call" }
+        },
+        "source": { "$ref": "#/$defs/SourceRange" },
+        "fingerprint": { "$ref": "#/$defs/Fingerprint" },
+        "confidence": { "$ref": "#/$defs/Confidence" },
+        "derivedBy": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "dropped": { "type": "boolean" },
+        "dropReason": { "type": ["string", "null"], "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "description": "dropped=true requires non-null dropReason; dropped=false requires null dropReason.",
+          "if": { "properties": { "dropped": { "const": true } } },
+          "then": { "properties": { "dropReason": { "type": "string", "minLength": 1 } } },
+          "else": { "properties": { "dropReason": { "type": "null" } } }
+        },
+        {
+          "description": "dropped=true forces empty rules/effects/calls and all-zero fingerprints (ir-schema §5.6).",
+          "if": { "properties": { "dropped": { "const": true } } },
+          "then": {
+            "properties": {
+              "rules":   { "maxItems": 0 },
+              "effects": { "maxItems": 0 },
+              "calls":   { "maxItems": 0 },
+              "fingerprint": {
+                "properties": {
+                  "api":    { "const": "000000000000" },
+                  "logic":  { "const": "000000000000" },
+                  "syntax": { "const": "000000000000" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "Decorator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arguments", "boundary", "line", "name", "raw"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "raw": { "type": "string", "minLength": 1 },
+        "arguments": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "boundary": { "type": "boolean" },
+        "line": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "Signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["async", "generator", "inputs", "outputs", "throws", "typeParameters"],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" }
+            }
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "throws": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "async": { "type": "boolean" },
+        "generator": { "type": "boolean" },
+        "typeParameters": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "Rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition", "expr", "line", "loopKind", "type", "what"],
+      "properties": {
+        "type": { "$ref": "#/$defs/RuleType" },
+        "line": { "type": "integer", "minimum": 1 },
+        "condition": { "type": ["string", "null"], "maxLength": 123 },
+        "what":      { "type": ["string", "null"], "maxLength": 123 },
+        "expr":      { "type": ["string", "null"], "maxLength": 123 },
+        "loopKind":  {
+          "oneOf": [
+            { "enum": ["for", "while", "do"] },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "description": "guard/switch/match require non-null condition, others null.",
+          "if": { "properties": { "type": { "enum": ["guard", "switch", "match"] } } },
+          "then": { "properties": { "condition": { "type": "string" } } },
+          "else": { "properties": { "condition": { "type": "null" } } }
+        },
+        {
+          "description": "throw requires non-null what, others null.",
+          "if": { "properties": { "type": { "const": "throw" } } },
+          "then": { "properties": { "what": { "type": "string" } } },
+          "else": { "properties": { "what": { "type": "null" } } }
+        },
+        {
+          "description": "return requires non-null expr, others null.",
+          "if": { "properties": { "type": { "const": "return" } } },
+          "then": { "properties": { "expr": { "type": "string" } } },
+          "else": { "properties": { "expr": { "type": "null" } } }
+        },
+        {
+          "description": "loop requires non-null loopKind, others null.",
+          "if": { "properties": { "type": { "const": "loop" } } },
+          "then": { "properties": { "loopKind": { "enum": ["for", "while", "do"] } } },
+          "else": { "properties": { "loopKind": { "type": "null" } } }
+        }
+      ]
+    },
+
+    "Effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confidence", "id", "line", "plugin", "target"],
+      "properties": {
+        "id": { "$ref": "#/$defs/EffectId" },
+        "target": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "confidence": { "$ref": "#/$defs/Confidence" }
+      }
+    },
+
+    "Call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "resolved", "target"],
+      "properties": {
+        "target": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "resolved": {
+          "oneOf": [
+            { "$ref": "#/$defs/SymbolId" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+
+    "Dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["direction", "effect", "from", "to", "via"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to":   { "type": "string", "minLength": 1 },
+        "via": {
+          "enum": ["import", "call", "inherit", "implement", "compose", "http", "event", "sql"]
+        },
+        "direction": {
+          "enum": ["outbound", "inbound", "bidirectional"]
+        },
+        "effect": {
+          "oneOf": [
+            { "$ref": "#/$defs/EffectId" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+
+    "SourceRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endLine", "file", "startLine"],
+      "properties": {
+        "file": { "$ref": "#/$defs/RelativePath" },
+        "startLine": { "type": "integer", "minimum": 1 },
+        "endLine":   { "type": "integer", "minimum": 1 },
+        "startColumn": { "type": ["integer", "null"], "minimum": 1 },
+        "endColumn":   { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+
+    "Fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api", "logic", "syntax"],
+      "properties": {
+        "api":    { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+        "logic":  { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+        "syntax": { "type": "string", "pattern": "^[0-9a-f]{12}$" }
+      }
+    },
+
+    "SymbolKind": {
+      "enum": [
+        "function",
+        "method",
+        "class",
+        "interface",
+        "type",
+        "const",
+        "module",
+        "namespace",
+        "variable",
+        "enum",
+        "constructor"
+      ]
+    },
+
+    "ExtKind": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+$",
+          "description": "Multi-segment id. Single-colon: fp:match, oop:abstract. Multi-colon: framework:nestjs:module, framework:react:hook. Reserved namespaces: fp, oop, meta, framework."
+        }
+      ]
+    },
+
+    "Visibility": {
+      "enum": ["public", "private", "protected", "internal", "package"]
+    },
+
+    "RuleType": {
+      "enum": ["guard", "throw", "return", "loop", "try", "switch", "match"]
+    },
+
+    "Confidence": {
+      "enum": ["high", "medium", "low"]
+    },
+
+    "EffectId": {
+      "oneOf": [
+        {
+          "description": "Core effect vocabulary, frozen within aburi.ir.v1.",
+          "enum": [
+            "db.read", "db.write", "db.transaction", "db.migration",
+            "network.http", "network.ws", "network.rpc",
+            "queue.publish", "queue.consume",
+            "event.publish", "event.subscribe",
+            "fs.read", "fs.write",
+            "state.mutate", "collection.mutate",
+            "time.now", "time.timer",
+            "random",
+            "env.read", "env.write",
+            "process.exit", "process.signal"
+          ]
+        },
+        {
+          "description": "Plugin extension effect. Format: x-<plugin>:<action>",
+          "type": "string",
+          "pattern": "^x-[a-z][a-z0-9-]*:[a-z][a-z0-9.-]+$"
+        }
+      ]
+    },
+
+    "LanguageId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$",
+      "description": "Language plugin id. Examples: ts, tsx, js, py, go, rs, java, kt, scala, rb, php, cs."
+    },
+
+    "ComponentId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "description": "ASCII kebab-case."
+    },
+
+    "SymbolId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*:[^#\\\\]+#[^\\\\]+$",
+      "description": "Format: <language>:<posix-relative-path>#<qualified-name>. Backslash forbidden anywhere (POSIX path enforcement)."
+    },
+
+    "RelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": { "pattern": "\\\\" },
+      "description": "POSIX path relative to workspace root. Backslash is disallowed."
+    }
+  }
+}
