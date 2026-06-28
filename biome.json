@@ -31,12 +31,21 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended",
-      "suspicious": {
-        "noShadowRestrictedNames": "off"
-      }
+      "preset": "recommended"
     }
   },
+  "overrides": [
+    {
+      "includes": ["packages/types/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noShadowRestrictedNames": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",
