@@ -4,9 +4,7 @@
 /**
  * Plugin manifest declaring extension vocabulary contributed to Aburi. Validated at plugin load time.
  */
-export type PluginManifest = ({
-[k: string]: unknown | undefined
-} & {
+export interface PluginManifest {
 $schema: "https://aburi.dev/schema/aburi.plugin.v1.json"
 /**
  * ASCII kebab-case plugin name (e.g., 'effects-prisma', 'framework-nestjs', 'lang-typescript').
@@ -32,7 +30,7 @@ aburi: string
 }
 provides: Provides
 capabilities?: Capabilities
-})
+}
 
 export interface Provides {
 effects: EffectVocab[]

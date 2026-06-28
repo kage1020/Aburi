@@ -1,9 +1,7 @@
 // AUTO-GENERATED — DO NOT EDIT.
 // Source: schema/aburi.ir.v1.json
 // Run `pnpm --filter @aburi/types codegen` to regenerate.
-export type PluginRef = ({
-[k: string]: unknown | undefined
-} & {
+export interface PluginRef {
 name: string
 type: ("lang" | "framework" | "effects")
 version: string
@@ -11,7 +9,7 @@ version: string
  * type=lang: required, format '<grammar-package>@<MAJOR.MINOR.PATCH>'. type=framework/effects: null.
  */
 grammarRevision: (string | null)
-})
+}
 /**
  * POSIX path relative to workspace root. Backslash is disallowed.
  */
@@ -24,9 +22,7 @@ export type LanguageId = string
  * ASCII kebab-case.
  */
 export type ComponentId = string
-export type Symbol = ({
-[k: string]: unknown | undefined
-} & {
+export interface Symbol {
 id: SymbolId
 kind: SymbolKind
 extKind: ExtKind
@@ -45,7 +41,7 @@ confidence: Confidence
 derivedBy: string[]
 dropped: boolean
 dropReason: (string | null)
-})
+}
 /**
  * Format: <language>:<posix-relative-path>#<qualified-name>. Backslash forbidden anywhere (POSIX path enforcement).
  */
@@ -53,16 +49,14 @@ export type SymbolId = string
 export type SymbolKind = ("function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor")
 export type ExtKind = (null | string)
 export type Visibility = ("public" | "private" | "protected" | "internal" | "package")
-export type Rule = ({
-[k: string]: unknown | undefined
-} & {
+export interface Rule {
 type: RuleType
 line: number
 condition: (string | null)
 what: (string | null)
 expr: (string | null)
 loopKind: (("for" | "while" | "do") | null)
-})
+}
 export type RuleType = ("guard" | "throw" | "return" | "loop" | "try" | "switch" | "match")
 export type EffectId = (("db.read" | "db.write" | "db.transaction" | "db.migration" | "network.http" | "network.ws" | "network.rpc" | "queue.publish" | "queue.consume" | "event.publish" | "event.subscribe" | "fs.read" | "fs.write" | "state.mutate" | "collection.mutate" | "time.now" | "time.timer" | "random" | "env.read" | "env.write" | "process.exit" | "process.signal") | string)
 export type Confidence = ("high" | "medium" | "low")
