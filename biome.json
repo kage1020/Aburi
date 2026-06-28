@@ -12,6 +12,9 @@
       "!**/dist",
       "!**/out",
       "!**/coverage",
+      "!**/.tsbuildinfo",
+      "!**/.turbo",
+      "!**/src/generated",
       "!pnpm-lock.yaml",
       "!design",
       "!schema"
@@ -28,7 +31,10 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "suspicious": {
+        "noShadowRestrictedNames": "off"
+      }
     }
   },
   "javascript": {

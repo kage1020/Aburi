@@ -8,11 +8,11 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": []
     },
     "typecheck": {
       "dependsOn": ["^build"],
-      "outputs": ["*.tsbuildinfo"]
+      "outputs": []
     }
   }
 }
