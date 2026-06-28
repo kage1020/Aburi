@@ -53,15 +53,25 @@ export interface ImportEdge {
   dynamic: boolean
 }
 
-export interface ParseResult {
-  tree: ParsedTree
+/**
+ * `TTree` defaults to the opaque `ParsedTree`. Lang plugins should specialize it
+ * to their own parser type so cross-plugin tree leaks are caught at compile time
+ * (e.g. handing a tree-sitter `Tree` to a SWC-based plugin's walkBody).
+ */
+export interface ParseResult<TTree = ParsedTree> {
+  tree: TTree
   errors: ParseError[]
   imports: ImportEdge[]
 }
 
 // --- Symbol candidate (lang plugin output, pre-drop) ---
 
-export interface SymbolCandidate {
+/**
+ * `TNode` defaults to the opaque `OpaqueAstNode`. Lang plugins should specialize it
+ * to their own AST node type so a SymbolCandidate from plugin A cannot be fed into
+ * plugin B's walkBody.
+ */
+export interface SymbolCandidate<TNode = OpaqueAstNode> {
   /** Format: `<language>:<file>#<qname>`. */
   id: string
   kind: SymbolKind
@@ -74,8 +84,8 @@ export interface SymbolCandidate {
   source: SourceRange
   /** Language-level rationale, e.g. `["export-keyword"]`. */
   derivedBy: string[]
-  bodyNode: OpaqueAstNode | null
-  fullNode: OpaqueAstNode
+  bodyNode: TNode | null
+  fullNode: TNode
 }
 
 // --- Body walk output ---
@@ -136,8 +146,8 @@ export interface ExtractionContext {
   config: Config
 }
 
-export interface WalkContext extends ExtractionContext {
-  symbol: SymbolCandidate
+export interface WalkContext<TNode = OpaqueAstNode> extends ExtractionContext {
+  symbol: SymbolCandidate<TNode>
 }
 
 // --- Effect classification context ---
@@ -212,12 +222,23 @@ export interface LanguageCapabilities {
 // --- Plugin interfaces ---
 
 /**
+ * Manifest narrowed to a specific plugin type. Each plugin interface uses the
+ * matching narrow so an `effects` manifest cannot be assigned to a LanguagePlugin
+ * etc.
+ */
+export type LangManifest = PluginManifest & { type: "lang" }
+export type EffectsManifest = PluginManifest & { type: "effects" }
+export type FrameworkManifest = PluginManifest & { type: "framework" }
+
+/**
  * Language plugin. Owns parsing and Symbol candidate extraction for a single
  * `language` id. See design/details/lang-plugin.md.
+ *
+ * Specialize `TTree` / `TNode` to the plugin's own parser types so a tree
+ * produced by plugin A cannot be fed into plugin B's walkBody.
  */
-export interface LanguagePlugin {
-  /** Must have type: "lang". */
-  manifest: PluginManifest
+export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
+  manifest: LangManifest
   /** Extension list (not glob), e.g. [".ts", ".tsx"]. */
   fileExtensions: string[]
   capabilities: LanguageCapabilities
@@ -225,14 +246,14 @@ export interface LanguagePlugin {
   init(ctx: PluginContext): Promise<void>
   cleanup?(): Promise<void>
 
-  parseFile(file: SourceFile): Promise<ParseResult>
-  extractSymbols(tree: ParsedTree, ctx: ExtractionContext): SymbolCandidate[]
-  walkBody(symbol: SymbolCandidate, ctx: WalkContext): BodyExtraction
-  normalizeAst(symbol: SymbolCandidate): string
+  parseFile(file: SourceFile): Promise<ParseResult<TTree>>
+  extractSymbols(tree: TTree, ctx: ExtractionContext): SymbolCandidate<TNode>[]
+  walkBody(symbol: SymbolCandidate<TNode>, ctx: WalkContext<TNode>): BodyExtraction
+  normalizeAst(symbol: SymbolCandidate<TNode>): string
 
   /** Language-specific glob list (e.g. `["** /*.d.ts"]`, sans the space). */
   fileDropPatterns?: string[]
-  symbolDropHint?(symbol: SymbolCandidate, ctx: ExtractionContext): DropHint | null
+  symbolDropHint?(symbol: SymbolCandidate<TNode>, ctx: ExtractionContext): DropHint | null
 }
 
 /**
@@ -240,8 +261,7 @@ export interface LanguagePlugin {
  * shape is strongly preferred. See design/details/effect-plugin.md.
  */
 export interface EffectPlugin {
-  /** Must have type: "effects". */
-  manifest: PluginManifest
+  manifest: EffectsManifest
   init(ctx: PluginContext): Promise<void>
   cleanup?(): Promise<void>
 
@@ -255,14 +275,19 @@ export interface EffectPlugin {
  * Framework plugin. Adjusts SymbolCandidate extKind / decorator boundaries based
  * on framework conventions. Runs between extractSymbols and walkBody.
  * See design/details/lang-plugin.md §5.2 and extension-vocab.md §3.
+ *
+ * `TNode` mirrors the lang plugin's AST node type so a framework plugin paired
+ * with a specific lang plugin sees the right tree.
  */
-export interface FrameworkPlugin {
-  /** Must have type: "framework". */
-  manifest: PluginManifest
+export interface FrameworkPlugin<TNode = OpaqueAstNode> {
+  manifest: FrameworkManifest
   init(ctx: PluginContext): Promise<void>
   cleanup?(): Promise<void>
 
-  classifySymbol(symbol: SymbolCandidate, ctx: ExtractionContext): SymbolClassification | null
+  classifySymbol(
+    symbol: SymbolCandidate<TNode>,
+    ctx: ExtractionContext,
+  ): SymbolClassification | null
 }
 
 // --- Vocab registry (implemented by @aburi/plugin-registry, consumed by plugins) ---

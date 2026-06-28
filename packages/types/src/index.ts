@@ -37,6 +37,7 @@ export type {
   SymbolRemoved,
 } from "./generated/diff"
 // ---------- IR (canonical runtime model) ----------
+// Disambiguating alias so callers can keep the global `Symbol` in scope.
 export type {
   Call,
   Component,
@@ -60,6 +61,7 @@ export type {
   SourceRange,
   Stats,
   Symbol,
+  Symbol as IRSymbol,
   SymbolId,
   SymbolKind,
   Visibility,
@@ -84,13 +86,16 @@ export type {
   DropHint,
   EffectClassification,
   EffectPlugin,
+  EffectsManifest,
   EffectVocab,
   ExtKindVocab,
   ExtractionContext,
   FileSummary,
+  FrameworkManifest,
   FrameworkPlugin,
   FrameworkVocab,
   ImportEdge,
+  LangManifest,
   LanguageCapabilities,
   LanguagePlugin,
   Logger,
