@@ -12,6 +12,9 @@
       "!**/dist",
       "!**/out",
       "!**/coverage",
+      "!**/.tsbuildinfo",
+      "!**/.turbo",
+      "!**/src/generated",
       "!pnpm-lock.yaml",
       "!design",
       "!schema"
@@ -31,6 +34,18 @@
       "preset": "recommended"
     }
   },
+  "overrides": [
+    {
+      "includes": ["packages/types/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noShadowRestrictedNames": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",
