@@ -30,6 +30,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null
 }
 
+/**
+ * Extract a string `code` property from any thrown value. Accepts both plain objects
+ * (`{ code: "X" }`) and class instances (Node's SystemError, which Error.prototype-inherits
+ * so a plain-object check would reject it). Falls back to "unknown" when no string code exists.
+ */
+function getErrno(value: unknown): string {
+  if (value === null || typeof value !== "object") return "unknown"
+  const code = (value as { code?: unknown }).code
+  return typeof code === "string" ? code : "unknown"
+}
+
 /** Extract the plugin name from a partially-parsed manifest for error attribution. */
 function tryGetName(parsed: unknown): string[] {
   if (isPlainObject(parsed) && typeof parsed.name === "string") {
@@ -74,7 +85,7 @@ export async function loadPluginManifest(path: string): Promise<PluginManifest> 
   } catch (err: unknown) {
     // Include the errno in the message so log shippers that strip `cause` still
     // surface why the read failed (ENOENT vs EACCES vs EISDIR, …).
-    const errno = isPlainObject(err) && typeof err.code === "string" ? err.code : "unknown"
+    const errno = getErrno(err)
     throw new RegistryError(
       `Failed to read plugin manifest at ${path} (${errno})`,
       { code: "manifest-read-failed", plugins: [] },

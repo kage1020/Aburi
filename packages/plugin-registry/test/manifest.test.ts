@@ -95,4 +95,16 @@ describe("loadPluginManifest", () => {
       RegistryError,
     )
   })
+
+  it("surfaces the errno in the read-failure message (regression: Error instances)", async () => {
+    let caught: unknown
+    try {
+      await loadPluginManifest(join(tmpDir, "still-missing.json"))
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RegistryError)
+    expect((caught as RegistryError).code).toBe("manifest-read-failed")
+    expect((caught as RegistryError).message).toMatch(/ENOENT/)
+  })
 })
