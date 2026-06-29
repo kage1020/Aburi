@@ -144,6 +144,70 @@ describe("parseConfig", () => {
       expect.objectContaining({ code: "config-invalid" }),
     )
   })
+
+  it("rejects ComponentOverride.id violating its kebab-case pattern", () => {
+    const text = JSON.stringify({
+      $schema: SCHEMA,
+      components: [{ id: "Billing", roots: ["apps/billing"] }],
+    })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
+
+  it("rejects ComponentOverride with empty roots[]", () => {
+    const text = JSON.stringify({
+      $schema: SCHEMA,
+      components: [{ id: "billing", roots: [] }],
+    })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
+
+  it("rejects Windows-style backslash in RelativePath", () => {
+    const text = JSON.stringify({
+      $schema: SCHEMA,
+      components: [{ id: "billing", roots: ["apps\\billing"] }],
+    })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
+
+  it("rejects HintRule.extKind that does not start with framework:", () => {
+    const text = JSON.stringify({
+      $schema: SCHEMA,
+      frameworkHints: [{ name: "acme", decorators: { X: { extKind: "foo:bar:baz" } } }],
+    })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
+
+  it("rejects HintRule.extKind with fewer than three segments (would collide at framework:hint after injection)", () => {
+    const text = JSON.stringify({
+      $schema: SCHEMA,
+      frameworkHints: [{ name: "acme", decorators: { X: { extKind: "framework:acme" } } }],
+    })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
+
+  it("rejects maxFileSizeBytes below the schema minimum", () => {
+    const text = JSON.stringify({ $schema: SCHEMA, maxFileSizeBytes: 512 })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
+
+  it("rejects classifyTimeoutMs above the schema maximum", () => {
+    const text = JSON.stringify({ $schema: SCHEMA, classifyTimeoutMs: 10_000 })
+    expect(() => parseConfig(text, "inline")).toThrowError(
+      expect.objectContaining({ code: "config-invalid" }),
+    )
+  })
 })
 
 describe("readConfigFile", () => {
@@ -172,5 +236,50 @@ describe("readConfigFile", () => {
     expect(caught).toBeInstanceOf(ConfigError)
     expect((caught as ConfigError).code).toBe("config-read-failed")
     expect((caught as ConfigError).message).toMatch(/ENOENT/)
+    expect((caught as ConfigError).cause).toBeInstanceOf(Error)
+  })
+
+  it("throws config-read-failed on EISDIR (path is a directory, exercises Error-derived getErrno)", async () => {
+    let caught: unknown
+    try {
+      // readFile() on a directory throws SystemError with code "EISDIR" — an Error-derived
+      // class instance, which any plain-object errno guard would silently demote to "unknown".
+      await readConfigFile(tmp)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ConfigError)
+    expect((caught as ConfigError).code).toBe("config-read-failed")
+    expect((caught as ConfigError).message).toMatch(/EISDIR/)
+  })
+
+  it("preserves the parse-error array as cause for config-parse-failed", () => {
+    let caught: unknown
+    try {
+      parseConfig("{ broken", "inline")
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ConfigError)
+    expect((caught as ConfigError).code).toBe("config-parse-failed")
+    const cause = (caught as ConfigError).cause
+    expect(Array.isArray(cause)).toBe(true)
+    expect((cause as unknown[]).length).toBeGreaterThan(0)
+  })
+
+  it("preserves the ajv error array as cause for config-invalid", () => {
+    let caught: unknown
+    try {
+      parseConfig(JSON.stringify({ $schema: SCHEMA, unknownField: 1 }), "inline")
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ConfigError)
+    expect((caught as ConfigError).code).toBe("config-invalid")
+    const cause = (caught as ConfigError).cause
+    expect(Array.isArray(cause)).toBe(true)
+    expect((cause as unknown[]).length).toBeGreaterThan(0)
+    // ajv params should be embedded in the message so log shippers without cause still see them.
+    expect((caught as ConfigError).message).toMatch(/additionalProperty/)
   })
 })
