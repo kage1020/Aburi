@@ -292,6 +292,12 @@ export interface FrameworkPlugin<TNode = OpaqueAstNode> {
 
 // --- Vocab registry (implemented by @aburi/plugin-registry, consumed by plugins) ---
 
+/**
+ * `description` / `baseKind` are `null` for ids that the registry resolves through
+ * prefix ownership only — the owning plugin declared `effectPrefixes` /
+ * `extKindPrefixes` but did not enumerate the specific id. Non-null when the id
+ * appears in the plugin manifest's `effects[]` / `extKinds[]` individually.
+ */
 export interface EffectVocab {
   id: EffectId
   description: string | null
@@ -300,7 +306,7 @@ export interface EffectVocab {
 
 export interface ExtKindVocab {
   id: string
-  baseKind: SymbolKind
+  baseKind: SymbolKind | null
   description: string | null
   owner: PluginManifest
 }
