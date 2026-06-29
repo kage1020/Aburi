@@ -1,8 +1,17 @@
 import { access, constants } from "node:fs/promises"
 import { dirname, isAbsolute, resolve } from "node:path"
+import { ConfigError } from "./errors"
 
 /** File names checked in priority order. JSONC takes precedence so comments survive a round-trip. */
 const CONFIG_FILENAMES = ["aburi.jsonc", "aburi.json"] as const
+
+/**
+ * Errnos that legitimately mean "no config here, keep walking". Anything else (EACCES, EIO,
+ * ELOOP, EMFILE, ENAMETOOLONG, …) is surfaced as ConfigError: silently swallowing them would
+ * make every transient filesystem failure indistinguishable from an honest absence and send
+ * the loader into autodetect mode with no diagnostic.
+ */
+const BENIGN_PROBE_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
 
 export interface FindConfigOptions {
   /**
@@ -16,8 +25,11 @@ export interface FindConfigOptions {
 /**
  * Walk up from `cwd` and return the absolute path of the first `aburi.jsonc` / `aburi.json`
  * encountered, or null if none exists at any ancestor. Does not stop at workspace markers:
- * a config above the workspace root is still honored (the user may share one across repos),
- * and `aburi init` is responsible for placing the file at the right level.
+ * a config above the workspace root is still honored (the user may share one across repos).
+ *
+ * Non-existence is a value (`null`); permission / IO failures are errors. The caller must
+ * not interpret a thrown ConfigError as "no config" — that conflation is the bug this
+ * function exists to prevent.
  */
 export async function findConfig(options: FindConfigOptions = {}): Promise<string | null> {
   const startRaw = options.cwd ?? process.cwd()
@@ -39,7 +51,18 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK)
     return true
-  } catch {
-    return false
+  } catch (err: unknown) {
+    const errno =
+      err !== null &&
+      typeof err === "object" &&
+      typeof (err as { code?: unknown }).code === "string"
+        ? (err as { code: string }).code
+        : "unknown"
+    if (BENIGN_PROBE_ERRNOS.has(errno)) return false
+    throw new ConfigError(
+      `Failed to probe config candidate ${path} (${errno})`,
+      { code: "config-read-failed" },
+      { cause: err },
+    )
   }
 }
