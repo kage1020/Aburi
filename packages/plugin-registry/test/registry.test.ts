@@ -76,6 +76,22 @@ describe("VocabRegistry.register (AC2 reserved namespace)", () => {
     reg.register(b)
     expect(reg.listPlugins()).toHaveLength(1)
   })
+
+  it("rejects derivedBy prefix under reserved _:* namespace (T1)", () => {
+    // _ is reserved for tests / private use; covered alongside core / aburi /
+    // framework:hint, but had no dedicated test until reviewer T1 surfaced the gap.
+    const reg = new VocabRegistry()
+    const m = langManifest()
+    m.provides.derivedByPrefixes.push("_:scratch")
+    expectRegistryError(() => reg.register(m), "reserved-namespace")
+  })
+
+  it("rejects the bare reserved root '_' alone", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest()
+    m.provides.derivedByPrefixes.push("_")
+    expectRegistryError(() => reg.register(m), "reserved-namespace")
+  })
 })
 
 describe("VocabRegistry.register (AC3 xPrefix consistency, V8)", () => {
@@ -344,9 +360,52 @@ describe("VocabRegistry.assert* (AC8 + V6 / V7)", () => {
       "vocab-undeclared",
     )
   })
+
+  it("assertExtKindDeclared throws when caller is not the owner (T3)", () => {
+    const reg = new VocabRegistry()
+    const owner = frameworkManifest({ name: "framework-acme" })
+    owner.provides.extKinds.push({
+      id: "framework:acme:controller",
+      baseKind: "class",
+      description: "x",
+    })
+    reg.register(owner)
+    expectRegistryError(
+      () => reg.assertExtKindDeclared("framework:acme:controller", "framework-impostor"),
+      "vocab-undeclared",
+    )
+  })
 })
 
-describe("VocabRegistry.derivedBy lookup", () => {
+describe("VocabRegistry.isEffectOwnedBy / isExtKindOwnedBy (T4)", () => {
+  it("isEffectOwnedBy true when caller owns the id (directly or via prefix)", () => {
+    const reg = new VocabRegistry()
+    const m = effectsManifest({ name: "effects-acme", xPrefix: "acme" })
+    m.provides.effects.push({ id: "x-acme:charge", description: "x" })
+    m.provides.effectPrefixes.push("x-acme")
+    // duplicate-prefix-id shadow would block this if effects also had prefix:
+    // but here we have prefix only listed, no extra effects in prefix range to shadow.
+    // Actually push removes shadow concern? Let me drop the direct effect since
+    // it's under the prefix and would self-shadow.
+    m.provides.effects.length = 0
+    reg.register(m)
+    expect(reg.isEffectOwnedBy("x-acme:custom", "effects-acme")).toBe(true)
+    expect(reg.isEffectOwnedBy("x-acme:custom", "effects-other")).toBe(false)
+    expect(reg.isEffectOwnedBy("x-unknown:thing", "effects-acme")).toBe(false)
+  })
+
+  it("isExtKindOwnedBy true when caller owns the id (directly or via prefix)", () => {
+    const reg = new VocabRegistry()
+    const m = frameworkManifest({ name: "framework-acme" })
+    m.provides.extKindPrefixes.push("framework:acme")
+    reg.register(m)
+    expect(reg.isExtKindOwnedBy("framework:acme:job", "framework-acme")).toBe(true)
+    expect(reg.isExtKindOwnedBy("framework:acme:job", "framework-other")).toBe(false)
+    expect(reg.isExtKindOwnedBy("framework:unknown:thing", "framework-acme")).toBe(false)
+  })
+})
+
+describe("VocabRegistry.derivedBy (T2: duplicate + overlap detection)", () => {
   it("findDerivedByOwner resolves a prefix-owned value to its owning plugin", () => {
     const reg = new VocabRegistry()
     const m = frameworkManifest({ name: "framework-nest" })
@@ -354,5 +413,74 @@ describe("VocabRegistry.derivedBy lookup", () => {
     reg.register(m)
     expect(reg.findDerivedByOwner("framework:nestjs:controller")?.name).toBe("framework-nest")
     expect(reg.findDerivedByOwner("framework:other:thing")).toBeNull()
+  })
+
+  it("rejects exact duplicate derivedByPrefix across plugins", () => {
+    const reg = new VocabRegistry()
+    const a = frameworkManifest({ name: "framework-a" })
+    a.provides.derivedByPrefixes.push("framework:nestjs")
+    reg.register(a)
+    const b = frameworkManifest({ name: "framework-b" })
+    b.provides.derivedByPrefixes.push("framework:nestjs")
+    expectRegistryError(() => reg.register(b), "duplicate-prefix")
+  })
+
+  it("rejects derivedByPrefix that contains an existing one (both directions)", () => {
+    const reg1 = new VocabRegistry()
+    const a = frameworkManifest({ name: "framework-a" })
+    a.provides.derivedByPrefixes.push("framework:acme")
+    reg1.register(a)
+    const b = frameworkManifest({ name: "framework-b" })
+    b.provides.derivedByPrefixes.push("framework:acme:sub")
+    expectRegistryError(() => reg1.register(b), "derivedby-prefix-overlap")
+
+    const reg2 = new VocabRegistry()
+    const c = frameworkManifest({ name: "framework-c" })
+    c.provides.derivedByPrefixes.push("framework:acme:sub")
+    reg2.register(c)
+    const d = frameworkManifest({ name: "framework-d" })
+    d.provides.derivedByPrefixes.push("framework:acme")
+    expectRegistryError(() => reg2.register(d), "derivedby-prefix-overlap")
+  })
+})
+
+describe("VocabRegistry.register (stableStringify hardening — C1)", () => {
+  it("rejects non-JSON values (Date) in the manifest so equality cannot lie", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest()
+    // Cast around the type system to simulate a hand-built object that bypassed
+    // ajv. stableStringify must throw rather than coerce Date → {} and pretend
+    // two distinct manifests are equal.
+    const withDate = {
+      ...m,
+      capabilities: { wasmHeapPerWorkerMB: new Date(0) },
+    } as unknown as typeof m
+    expectRegistryError(() => reg.register(withDate), "manifest-invalid")
+  })
+
+  it("rejects class instances (Map) in the manifest", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest()
+    const withMap = { ...m, weird: new Map() } as unknown as typeof m
+    expectRegistryError(() => reg.register(withMap), "manifest-invalid")
+  })
+})
+
+describe("VocabRegistry.register (provides shape — I4)", () => {
+  it("rejects missing provides.effects array with a coded error", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest()
+    const broken = {
+      ...m,
+      provides: { ...m.provides, effects: undefined as unknown as never[] },
+    }
+    expectRegistryError(() => reg.register(broken), "manifest-invalid")
+  })
+
+  it("rejects missing provides entirely with a coded error", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest()
+    const broken = { ...m, provides: undefined as unknown as typeof m.provides }
+    expectRegistryError(() => reg.register(broken), "manifest-invalid")
   })
 })
