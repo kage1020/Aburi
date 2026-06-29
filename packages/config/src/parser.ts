@@ -28,7 +28,11 @@ function getErrno(value: unknown): string {
   return typeof code === "string" ? code : "unknown"
 }
 
-/** Pure JSONC → Config. Useful for in-memory configs (tests, CLI overrides). */
+/**
+ * Parse + ajv-validate + duplicate-key-check a JSONC config string. The "Pure" qualifier
+ * means no I/O — not "no semantic work": this returns only when every rule the schema
+ * cannot express (duplicate component ids, duplicate hint names) also passes.
+ */
 export function parseConfig(text: string, sourcePath: string): Config {
   const errors: ParseError[] = []
   const parsed: unknown = parse(text, errors, {
@@ -37,18 +41,27 @@ export function parseConfig(text: string, sourcePath: string): Config {
   })
   if (errors.length > 0) {
     const summary = errors
-      .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`)
+      .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset} (len ${e.length})`)
       .join("; ")
-    throw new ConfigError(`Config at ${sourcePath} is not valid JSONC: ${summary}`, {
-      code: "config-parse-failed",
-    })
+    // cause carries the structured ParseError[] (codes + offsets + lengths) so IDE / Sentry
+    // integrations can render rich diagnostics without re-parsing the message string.
+    throw new ConfigError(
+      `Config at ${sourcePath} is not valid JSONC: ${summary}`,
+      { code: "config-parse-failed" },
+      { cause: errors },
+    )
   }
 
   if (!validate(parsed)) {
-    const errorDetail = formatAjvErrors(validate.errors)
+    const ajvErrors = validate.errors ?? []
+    const errorDetail = formatAjvErrors(ajvErrors)
+    // cause carries the structured ajv ErrorObject[] (instancePath, schemaPath, params,
+    // keyword) so the consumer can highlight the offending field in an editor without
+    // string-parsing the message.
     throw new ConfigError(
       `Config at ${sourcePath} does not conform to aburi.config.v1.json: ${errorDetail}`,
       { code: "config-invalid" },
+      { cause: ajvErrors },
     )
   }
 
@@ -56,7 +69,7 @@ export function parseConfig(text: string, sourcePath: string): Config {
   return parsed
 }
 
-/** Read + parse + ajv-validate a config file on disk. Does not apply normalization. */
+/** Read + parse + ajv-validate + duplicate-key-check a config file on disk. */
 export async function readConfigFile(path: string): Promise<Config> {
   let text: string
   try {
@@ -96,7 +109,29 @@ function enforceDuplicateRules(config: Config, sourcePath: string): void {
   }
 }
 
-function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
-  if (!errors || errors.length === 0) return "unknown validation failure"
-  return errors.map((e) => `${e.instancePath || "<root>"} ${e.message ?? ""}`.trim()).join("; ")
+/**
+ * ajv with `allErrors: true` always populates `errors[]` on a false result. An empty array
+ * here means ajv itself is in an unexpected state (likely a schema-compile bug), not a
+ * recoverable user error — throw so we don't silently emit a meaningless message.
+ */
+function formatAjvErrors(errors: ErrorObject[]): string {
+  if (errors.length === 0) {
+    throw new Error("ajv invariant violation: validate returned false with empty errors[]")
+  }
+  return errors
+    .map((e) => {
+      const where = e.instancePath || "<root>"
+      const params = formatAjvParams(e.params)
+      return `${where} ${e.message ?? ""}${params}`.trim()
+    })
+    .join("; ")
+}
+
+/** Format ajv's `params` (additionalProperty, allowedValues, missingProperty, …) inline. */
+function formatAjvParams(params: ErrorObject["params"]): string {
+  if (params === null || typeof params !== "object") return ""
+  const entries = Object.entries(params)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+  return entries.length > 0 ? ` [${entries.join(", ")}]` : ""
 }
