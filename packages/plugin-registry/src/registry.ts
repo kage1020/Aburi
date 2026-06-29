@@ -33,17 +33,44 @@ interface OwnedExtKind {
 }
 
 /**
- * Stable JSON serialization for manifest equality (idempotent register). Keys are
+ * Stable JSON serialization for manifest equality (idempotent `register`). Keys are
  * sorted deeply so logically-identical manifests round-trip to identical strings.
+ *
+ * `register` accepts any object typed `PluginManifest` — TS cannot guarantee the
+ * caller actually went through `parsePluginManifest`. A naive `JSON.stringify` would
+ * silently coerce `Date` / class instances / `Map` / `undefined` / functions into
+ * lossy forms, making two non-equal manifests look identical and short-circuiting
+ * the `name-collision` guard. Reject those values explicitly so the failure mode
+ * is loud rather than a silent no-op re-register.
  */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`
-  const keys = Object.keys(value as Record<string, unknown>).sort()
-  const entries = keys.map((k) => {
-    const v = (value as Record<string, unknown>)[k]
-    return `${JSON.stringify(k)}:${stableStringify(v)}`
-  })
+function stableStringify(value: unknown, path = "$"): string {
+  if (value === null) return "null"
+  const t = typeof value
+  if (t === "string" || t === "number" || t === "boolean") return JSON.stringify(value)
+  if (t === "undefined" || t === "function" || t === "symbol" || t === "bigint") {
+    throw new RegistryError(
+      `Plugin manifest contains a non-JSON value (${t}) at ${path}; only plain JSON ` +
+        `(string/number/boolean/null, plain object, array) is supported.`,
+      { code: "manifest-invalid", plugins: [] },
+    )
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v, i) => stableStringify(v, `${path}[${i}]`)).join(",")}]`
+  }
+  // Reject non-plain objects (Date, Map, Set, RegExp, class instances, …). Their
+  // structural shape would either crash the recursion or serialise as `{}`.
+  const proto = Object.getPrototypeOf(value as object)
+  if (proto !== Object.prototype && proto !== null) {
+    const ctor = (value as { constructor?: { name?: string } }).constructor?.name ?? "unknown"
+    throw new RegistryError(
+      `Plugin manifest contains a non-plain object (${ctor}) at ${path}; only plain JSON ` +
+        `objects are supported.`,
+      { code: "manifest-invalid", plugins: [] },
+    )
+  }
+  const obj = value as Record<string, unknown>
+  const keys = Object.keys(obj).sort()
+  const entries = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k], `${path}.${k}`)}`)
   return `{${entries.join(",")}}`
 }
 
@@ -82,6 +109,8 @@ export class VocabRegistry implements VocabRegistryContract {
    * throws `name-collision`.
    */
   register(manifest: PluginManifest): void {
+    this.#assertProvidesShape(manifest)
+
     const serialized = stableStringify(manifest)
     const existingStable = this.#pluginsStable.get(manifest.name)
     if (existingStable !== undefined) {
@@ -131,6 +160,41 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   // ---------- Validations ----------
+
+  /**
+   * Pre-flight: the schema requires every provides.* array, but `register` accepts
+   * any value typed PluginManifest at runtime (e.g. a hand-built object skipping
+   * `loadPluginManifest`). Without this check, a missing array would `TypeError`
+   * inside the commit loop after validation has already mutated nothing yet —
+   * still safe atomicity-wise, but the error message would be `Cannot read
+   * properties of undefined (reading 'length')`. Surface a coded error instead.
+   */
+  #assertProvidesShape(m: PluginManifest): void {
+    if (!m.provides || typeof m.provides !== "object") {
+      raise(`Plugin "${m.name}" is missing the required \`provides\` object.`, "manifest-invalid", [
+        m.name,
+      ])
+    }
+    const required = [
+      "effects",
+      "effectPrefixes",
+      "extKinds",
+      "extKindPrefixes",
+      "frameworks",
+      "derivedByPrefixes",
+    ] as const
+    const provides = m.provides as unknown as Record<string, unknown>
+    for (const key of required) {
+      const value = provides[key]
+      if (!Array.isArray(value)) {
+        raise(
+          `Plugin "${m.name}" provides.${key} must be an array (got ${typeof value}).`,
+          "manifest-invalid",
+          [m.name],
+        )
+      }
+    }
+  }
 
   #validateTypeNamespaces(m: PluginManifest): void {
     const rules = TYPE_NAMESPACE_RULES[m.type as PluginType]
@@ -391,15 +455,39 @@ export class VocabRegistry implements VocabRegistryContract {
 
   // ---------- Query API ----------
 
+  /**
+   * Returns the single prefix in `prefixes` that owns `id`, or `null` if none does.
+   * Throws an invariant error if more than one prefix matches — that would mean
+   * conflict detection let an overlap slip through and the registry's view of
+   * ownership is no longer well-defined.
+   */
+  #uniquePrefixOwner(id: string, prefixes: Map<string, OwnedPrefix>): OwnedPrefix | null {
+    let match: OwnedPrefix | null = null
+    for (const info of prefixes.values()) {
+      if (!isUnderPrefix(id, info.prefix)) continue
+      if (match !== null) {
+        raise(
+          `Internal invariant violation: id "${id}" matches both prefix "${match.prefix}" ` +
+            `(plugin "${match.owner.name}") and "${info.prefix}" (plugin "${info.owner.name}"). ` +
+            `register() should have rejected the second prefix as prefix-prefix-overlap.`,
+          "prefix-prefix-overlap",
+          [match.owner.name, info.owner.name],
+          id,
+        )
+      }
+      match = info
+    }
+    return match
+  }
+
   findEffect(id: string): EffectVocab | null {
     const direct = this.#effects.get(id)
     if (direct) {
       return { id: direct.id, description: direct.description, owner: direct.owner }
     }
-    for (const [prefix, info] of this.#effectPrefixes) {
-      if (isUnderPrefix(id, prefix)) {
-        return { id, description: null, owner: info.owner }
-      }
+    const prefixOwner = this.#uniquePrefixOwner(id, this.#effectPrefixes)
+    if (prefixOwner) {
+      return { id, description: null, owner: prefixOwner.owner }
     }
     return null
   }
@@ -414,10 +502,9 @@ export class VocabRegistry implements VocabRegistryContract {
         owner: direct.owner,
       }
     }
-    for (const [prefix, info] of this.#extKindPrefixes) {
-      if (isUnderPrefix(id, prefix)) {
-        return { id, baseKind: null, description: null, owner: info.owner }
-      }
+    const prefixOwner = this.#uniquePrefixOwner(id, this.#extKindPrefixes)
+    if (prefixOwner) {
+      return { id, baseKind: null, description: null, owner: prefixOwner.owner }
     }
     return null
   }
@@ -427,10 +514,7 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   findDerivedByOwner(value: string): PluginManifest | null {
-    for (const [prefix, info] of this.#derivedByPrefixes) {
-      if (isUnderPrefix(value, prefix)) return info.owner
-    }
-    return null
+    return this.#uniquePrefixOwner(value, this.#derivedByPrefixes)?.owner ?? null
   }
 
   isEffectOwnedBy(id: string, pluginName: string): boolean {
