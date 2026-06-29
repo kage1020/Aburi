@@ -2,11 +2,11 @@ import type { Config, FrameworkHint, HintRule, PluginManifest } from "@aburi/typ
 import { ConfigError } from "./errors"
 
 /**
- * Reserved root that consumers must NOT write directly in HintRule.extKind.
- * The loader injects "hint" as the second segment automatically (config.md §8.3.1), so a
- * user-written `framework:hint:*` would either double-prefix or collide with the auto form.
- * derivedBy has no such reservation: `framework-hint:*` is the legitimate user-written
- * shape (config.md §8 example) and the synthesized plugin owns its parent namespace.
+ * Reserved root that consumers must NOT write directly in HintRule.extKind. The loader
+ * always injects "hint" as the second segment, so a user who already wrote "framework:hint:*"
+ * would either double-prefix or collide with another hint entry's auto-derived prefix.
+ * derivedBy has no equivalent reservation: "framework-hint:*" (note the hyphen) is the
+ * legitimate user-written shape and the synthesized plugin owns its parent namespace.
  */
 const RESERVED_EXT_KIND_PREFIX = "framework:hint:"
 
@@ -18,13 +18,18 @@ interface NormalizedRule {
 }
 
 /**
- * Transform every frameworkHints[] entry into a synthesized framework-type PluginManifest.
+ * Transform every frameworkHints[] entry into a synthesized framework-type PluginManifest
+ * the registry can register without any plugin code.
  *
- * - extKind: `framework:<rest>` → `framework:hint:<rest>` (auto-prefix second segment).
- * - derivedBy: written verbatim by the user; the synthesized plugin only owns the
- *   parent prefix of each value.
- * - frameworks: `[hint.name]`.
- * - name: `hint-<hint.name>`.
+ * Transformation summary:
+ * - `extKind: "framework:<vendor>:<rest>"` → `"framework:hint:<vendor>:<rest>"`. The schema
+ *   guarantees at least three segments, so the post-injection value has at least four and
+ *   its parent prefix has at least three (`framework:hint:<vendor>`), which is unique per
+ *   hint name and cannot collide with another hint's prefix.
+ * - `derivedBy` is taken verbatim. The synthesized plugin claims ownership of each value's
+ *   parent prefix (or the value itself when single-segment).
+ * - `frameworks: [hint.name]`.
+ * - `name: "hint-<hint.name>"`.
  */
 export function normalizeFrameworkHints(config: Config): PluginManifest[] {
   const out: PluginManifest[] = []
@@ -44,8 +49,8 @@ function buildSyntheticPlugin(hint: FrameworkHint): PluginManifest {
     if (normalized.derivedBy !== undefined) derivedBys.add(normalized.derivedBy)
   }
 
-  const extKindPrefixes = uniqueSortedPrefixes(extKinds, 2)
-  const derivedByPrefixes = uniqueSortedPrefixes(derivedBys, 1)
+  const extKindPrefixes = uniqueSortedParentPrefixes(extKinds)
+  const derivedByPrefixes = uniqueSortedParentPrefixes(derivedBys)
 
   return {
     $schema: PLUGIN_SCHEMA,
@@ -94,8 +99,10 @@ function normalizeRule(rule: HintRule, hintName: string): NormalizedRule {
 }
 
 /**
- * "framework:acme:controller" → "framework:hint:acme:controller".
- * Splits on ":", inserts "hint" as the second segment, rejoins.
+ * "framework:acme:controller" → "framework:hint:acme:controller". Splits on ":", inserts
+ * "hint" as the second segment, rejoins. The schema guarantees extKind starts with
+ * "framework:" and has at least three segments, so the result has at least four and the
+ * caller can safely derive its parent prefix.
  */
 function injectHintSegment(extKind: string): string {
   const segments = extKind.split(":")
@@ -104,18 +111,15 @@ function injectHintSegment(extKind: string): string {
 }
 
 /**
- * Derive each value's parent namespace (all but the last segment) when it has multiple
- * segments, else the value itself. Deduplicates and sorts lexicographically.
- *
- * `minSegments` enforces the schema's minimum prefix length: extKindPrefixes require 2
- * segments, derivedByPrefixes allow 1. Pre-normalized inputs always satisfy these (the
- * full extKind already has ≥3 segments after hint injection, so its parent has ≥2).
+ * Drop the last segment of each value (the leaf id) to obtain the ownership prefix; values
+ * with a single segment are kept as-is so derivedBy "myhint" still produces a valid one-
+ * segment prefix. Deduplicates and sorts lexicographically.
  */
-function uniqueSortedPrefixes(values: Set<string>, minSegments: number): string[] {
+function uniqueSortedParentPrefixes(values: Set<string>): string[] {
   const prefixes = new Set<string>()
   for (const value of values) {
     const segments = value.split(":")
-    const parent = segments.length > minSegments ? segments.slice(0, -1).join(":") : value
+    const parent = segments.length > 1 ? segments.slice(0, -1).join(":") : value
     prefixes.add(parent)
   }
   return [...prefixes].sort()
