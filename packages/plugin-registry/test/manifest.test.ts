@@ -95,4 +95,30 @@ describe("loadPluginManifest", () => {
       RegistryError,
     )
   })
+
+  it("surfaces the errno in the read-failure message (regression: Error instances)", async () => {
+    let caught: unknown
+    try {
+      await loadPluginManifest(join(tmpDir, "still-missing.json"))
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RegistryError)
+    expect((caught as RegistryError).code).toBe("manifest-read-failed")
+    expect((caught as RegistryError).message).toMatch(/ENOENT/)
+  })
+
+  it("surfaces EISDIR when the path resolves to a directory", async () => {
+    let caught: unknown
+    try {
+      // readFile() on a directory throws SystemError with code "EISDIR" — Error-derived,
+      // so a plain-object errno guard would demote it to "unknown".
+      await loadPluginManifest(tmpDir)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RegistryError)
+    expect((caught as RegistryError).code).toBe("manifest-read-failed")
+    expect((caught as RegistryError).message).toMatch(/EISDIR/)
+  })
 })

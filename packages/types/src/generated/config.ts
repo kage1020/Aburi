@@ -104,7 +104,7 @@ export interface HintRule {
  */
 boundary?: boolean
 /**
- * Set Symbol.extKind for matching symbols.
+ * Set Symbol.extKind for matching symbols. Must start with 'framework:' and have at least three segments ('framework:<vendor>:<kind>'); the loader injects 'hint' as the second segment so the resulting ownership prefix is unique per hint name. Writing 'framework:hint:*' directly is rejected at load time.
  */
 extKind?: string
 /**
