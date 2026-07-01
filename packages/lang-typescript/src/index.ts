@@ -1,0 +1,8 @@
+export { classifySymbolDropHint, TYPESCRIPT_FILE_DROP_PATTERNS } from "./drop-hints"
+export { extractSymbols } from "./extract-symbols"
+export { extractImports } from "./imports"
+export { langTypescriptManifest } from "./manifest"
+export { normalizeAst } from "./normalize-ast"
+export { parseTypescriptFile } from "./parser"
+export { LangTypescriptPlugin, langTypescriptPlugin } from "./plugin"
+export { walkBody } from "./walk-body"
