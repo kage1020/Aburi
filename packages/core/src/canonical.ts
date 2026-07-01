@@ -15,8 +15,11 @@ export interface SerializeOptions {
  * 1. Every string is normalized to Unicode NFC before encoding. Composing characters from
  *    NFD ("é" written as "é") would otherwise change byte length even though the
  *    rendered text is identical.
- * 2. Object keys are sorted by Unicode codepoint (not locale-aware), matching how the IR
- *    schema requires sorted top-level keys and how fingerprint inputs are compared.
+ * 2. Object keys are sorted by UTF-16 code unit (not locale-aware). Within the Basic
+ *    Multilingual Plane the ordering coincides with Unicode codepoint order; astral-plane
+ *    strings differ, but this serializer, the integrity checker's sort-order invariant,
+ *    and every consumer that uses the default `<`/`>` operators or `Array.prototype.sort`
+ *    all agree on UTF-16 code unit order, so the three paths cannot diverge.
  * 3. Array order is preserved; the caller is responsible for sorting arrays per the IR
  *    schema's per-collection ordering rules (this serializer is not in the business of
  *    interpreting which collection is which).
@@ -68,7 +71,7 @@ function write(
       ([, v]) => v !== undefined,
     )
     if (entries.length === 0) return "{}"
-    entries.sort(([a], [b]) => compareByCodepoint(a, b))
+    entries.sort(([a], [b]) => compareByCodeUnit(a, b))
     const childIndent = indent.repeat(depth + 1)
     const closeIndent = indent.repeat(depth)
     const rendered = entries.map(([k, v]) => {
@@ -109,6 +112,6 @@ function rejectNonJson(type: string, path: string): CoreError {
 }
 
 /** Lexicographic compare by UTF-16 code unit (matches Array.prototype.sort default for strings). */
-function compareByCodepoint(a: string, b: string): number {
+function compareByCodeUnit(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
