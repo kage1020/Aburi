@@ -227,4 +227,165 @@ describe("apiFingerprint — change conditions", () => {
     const sym = makeSymbol(base().id, { ...base(), name: "InvoiceService.updateInvoice" })
     expect(apiFingerprint(sym)).not.toBe(beforeFp)
   })
+
+  it("A9b: toggling generator perturbs the hash", () => {
+    const gen = makeSymbol(base().id, {
+      ...base(),
+      signature: { ...sig(base()), generator: true },
+    })
+    expect(apiFingerprint(gen)).not.toBe(beforeFp)
+  })
+
+  it("A15: adding a typeParameter perturbs the hash", () => {
+    const withParam = makeSymbol(base().id, {
+      ...base(),
+      signature: { ...sig(base()), typeParameters: ["T"] },
+    })
+    expect(apiFingerprint(withParam)).not.toBe(beforeFp)
+  })
+
+  it("A15b: changing a typeParameter constraint perturbs the hash", () => {
+    const a = makeSymbol(base().id, {
+      ...base(),
+      signature: { ...sig(base()), typeParameters: ["T extends string"] },
+    })
+    const b = makeSymbol(base().id, {
+      ...base(),
+      signature: { ...sig(base()), typeParameters: ["T extends number"] },
+    })
+    expect(apiFingerprint(a)).not.toBe(apiFingerprint(b))
+  })
+
+  it("A16: toggling Decorator.boundary perturbs the hash", () => {
+    const asBoundary = makeSymbol(base().id, {
+      ...base(),
+      decorators: [
+        {
+          name: "Post",
+          raw: "Post('/invoices')",
+          arguments: ["'/invoices'"],
+          boundary: true,
+          line: 12,
+        },
+      ],
+    })
+    const notBoundary = makeSymbol(base().id, {
+      ...base(),
+      decorators: [
+        {
+          name: "Post",
+          raw: "Post('/invoices')",
+          arguments: ["'/invoices'"],
+          boundary: false,
+          line: 12,
+        },
+      ],
+    })
+    expect(apiFingerprint(asBoundary)).not.toBe(apiFingerprint(notBoundary))
+  })
+})
+
+describe("apiFingerprint — order preservation", () => {
+  it("A17: swapping signature.inputs order perturbs the hash (positional contract)", () => {
+    const ab = makeSymbol(base().id, {
+      ...base(),
+      signature: {
+        ...sig(base()),
+        inputs: [
+          { name: "a", type: "A" },
+          { name: "b", type: "B" },
+        ],
+      },
+    })
+    const ba = makeSymbol(base().id, {
+      ...base(),
+      signature: {
+        ...sig(base()),
+        inputs: [
+          { name: "b", type: "B" },
+          { name: "a", type: "A" },
+        ],
+      },
+    })
+    expect(apiFingerprint(ab)).not.toBe(apiFingerprint(ba))
+  })
+
+  it("A18: swapping signature.outputs order perturbs the hash (positional contract)", () => {
+    const ab = makeSymbol(base().id, {
+      ...base(),
+      signature: { ...sig(base()), outputs: ["A", "B"] },
+    })
+    const ba = makeSymbol(base().id, {
+      ...base(),
+      signature: { ...sig(base()), outputs: ["B", "A"] },
+    })
+    expect(apiFingerprint(ab)).not.toBe(apiFingerprint(ba))
+  })
+
+  it("A19: same-name decorators tie-break on line so their source order is preserved", () => {
+    // Two `@ApiResponse` on adjacent lines. Reversing the (line-ordered) input should
+    // give the same hash because the sort by (name, line) canonicalizes both permutations.
+    const inSourceOrder = makeSymbol(base().id, {
+      ...base(),
+      decorators: [
+        {
+          name: "ApiResponse",
+          raw: "ApiResponse(200)",
+          arguments: ["200"],
+          boundary: false,
+          line: 10,
+        },
+        {
+          name: "ApiResponse",
+          raw: "ApiResponse(404)",
+          arguments: ["404"],
+          boundary: false,
+          line: 11,
+        },
+      ],
+    })
+    const reversedInput = makeSymbol(base().id, {
+      ...base(),
+      decorators: [
+        {
+          name: "ApiResponse",
+          raw: "ApiResponse(404)",
+          arguments: ["404"],
+          boundary: false,
+          line: 11,
+        },
+        {
+          name: "ApiResponse",
+          raw: "ApiResponse(200)",
+          arguments: ["200"],
+          boundary: false,
+          line: 10,
+        },
+      ],
+    })
+    expect(apiFingerprint(inSourceOrder)).toBe(apiFingerprint(reversedInput))
+
+    // Swapping the LINE assignments (so the same-name decorators sit in a different source
+    // order) is a real source change and must register.
+    const linesSwapped = makeSymbol(base().id, {
+      ...base(),
+      decorators: [
+        {
+          name: "ApiResponse",
+          raw: "ApiResponse(200)",
+          arguments: ["200"],
+          boundary: false,
+          line: 11,
+        },
+        {
+          name: "ApiResponse",
+          raw: "ApiResponse(404)",
+          arguments: ["404"],
+          boundary: false,
+          line: 10,
+        },
+      ],
+    })
+    expect(apiFingerprint(inSourceOrder)).not.toBe(apiFingerprint(linesSwapped))
+  })
 })

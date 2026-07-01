@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { lastQnameSegment } from "../../src/index"
+import { CoreError, lastQnameSegment } from "../../src/index"
 
 describe("lastQnameSegment", () => {
   it("returns the identifier verbatim when no separator is present", () => {
@@ -26,5 +26,26 @@ describe("lastQnameSegment", () => {
 
   it("returns the last segment of deeply nested paths", () => {
     expect(lastQnameSegment("A.B.C.method")).toBe("method")
+  })
+
+  it("throws on an empty qualified name (upstream Symbol id builder bug)", () => {
+    expect(() => lastQnameSegment("")).toThrowError(CoreError)
+  })
+
+  it.each([
+    ["trailing '::'", "foo::"],
+    ["trailing '.'", "A."],
+    ["only '::'", "::"],
+    ["only '.'", "."],
+  ])("throws on a qname with an empty last segment (%s)", (_, qname) => {
+    let caught: unknown
+    try {
+      lastQnameSegment(qname)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("anonymous-symbol-id-attempted")
+    expect((caught as CoreError).value).toBe(qname)
   })
 })

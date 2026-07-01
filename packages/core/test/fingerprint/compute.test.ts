@@ -14,19 +14,27 @@ describe("computeSymbolFingerprint", () => {
   })
 
   it("delegates each axis to the axis-specific hasher", () => {
-    const fp = computeSymbolFingerprint(symbol, { normalizedAstString: "(x)" })
+    const fp = computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })
     expect(fp.api).toBe(apiFingerprint(symbol))
     expect(fp.logic).toBe(logicFingerprint(symbol))
     expect(fp.syntax).toBe(syntaxFingerprint("(x)"))
   })
 
-  it("D1: a dropped Symbol receives ZERO on every axis", () => {
+  it("100x determinism: repeated calls never diverge on any axis", () => {
+    const first = computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })
+    for (let i = 0; i < 100; i++) {
+      const fp = computeSymbolFingerprint({ symbol, normalizedAstString: "(x)" })
+      expect(fp).toEqual(first)
+    }
+  })
+
+  it("D1: a dropped Symbol receives ZERO on every axis without needing an AST string", () => {
     const dropped = makeSymbol(symbol.id, {
       ...symbol,
       dropped: true,
       dropReason: "pure DTO",
     })
-    const fp = computeSymbolFingerprint(dropped, { normalizedAstString: "(anything)" })
+    const fp = computeSymbolFingerprint({ symbol: dropped })
     expect(fp).toEqual({
       api: ZERO_FINGERPRINT,
       logic: ZERO_FINGERPRINT,
@@ -41,14 +49,16 @@ describe("computeSymbolFingerprint", () => {
       dropReason: "logger boilerplate",
     })
     const kept = makeSymbol(symbol.id, { ...symbol, dropped: false })
-    const droppedFp = computeSymbolFingerprint(dropped, { normalizedAstString: "(x)" })
-    const keptFp = computeSymbolFingerprint(kept, { normalizedAstString: "(x)" })
+    const droppedFp = computeSymbolFingerprint({ symbol: dropped })
+    const keptFp = computeSymbolFingerprint({ symbol: kept, normalizedAstString: "(x)" })
     expect(droppedFp.api).not.toBe(keptFp.api)
     expect(droppedFp.api).toBe(ZERO_FINGERPRINT)
   })
 
-  it("uses the empty string for syntax when normalizedAstString is omitted", () => {
-    const fp = computeSymbolFingerprint(symbol)
-    expect(fp.syntax).toBe(syntaxFingerprint(""))
+  it("refuses whitespace-only normalizedAstString so missing-AST Symbols cannot collapse to the same hash", () => {
+    const kept = makeSymbol(symbol.id, { ...symbol, dropped: false })
+    expect(() =>
+      computeSymbolFingerprint({ symbol: kept, normalizedAstString: "   \n\t " }),
+    ).toThrowError(/empty normalized AST/)
   })
 })

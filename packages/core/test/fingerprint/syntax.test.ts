@@ -18,7 +18,11 @@ describe("syntaxFingerprint", () => {
     expect(syntaxFingerprint(a)).not.toBe(syntaxFingerprint(b))
   })
 
-  it("returns a hash even for an empty string (deterministic but plugin-side should reject)", () => {
-    expect(syntaxFingerprint("")).toMatch(/^[0-9a-f]{12}$/)
+  it("refuses empty input so a broken language plugin cannot collapse every Symbol to SHA-256(''), the well-known e3b0c44298fc hash", () => {
+    expect(() => syntaxFingerprint("")).toThrowError(/empty normalized AST/)
+  })
+
+  it("refuses whitespace-only input for the same reason", () => {
+    expect(() => syntaxFingerprint("  \n\t ")).toThrowError(/empty normalized AST/)
   })
 })

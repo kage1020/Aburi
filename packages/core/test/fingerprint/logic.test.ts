@@ -49,11 +49,22 @@ describe("logicFingerprint — 12-hex determinism", () => {
 describe("logicFingerprint — invariance", () => {
   const baseFp = logicFingerprint(base())
 
-  it("L1: renaming variables that do not appear in rules or effects does not change the hash", () => {
-    // Rename touches only decorators / calls / signature — none of which feed the logic axis.
+  it("L1: renaming a local variable that does not appear in any rule/effect string is invariant", () => {
+    // At the fingerprint layer the "rename" surfaces as: Symbol fields that are NOT part
+    // of the logic input change, but the rule/effect strings stay byte-identical. Touch
+    // source line span, confidence, and derivedBy — all of which the IR carries but the
+    // logic axis excludes.
     const sym = makeSymbol(base().id, {
       ...base(),
-      decorators: [{ name: "Log", raw: "Log()", arguments: [], boundary: false, line: 1 }],
+      source: {
+        file: "src/a.ts",
+        startLine: 42,
+        endLine: 99,
+        startColumn: null,
+        endColumn: null,
+      },
+      confidence: "medium",
+      derivedBy: ["convention:service-suffix"],
     })
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
@@ -227,5 +238,103 @@ describe("logicFingerprint — change conditions", () => {
       ],
     })
     expect(logicFingerprint(sym)).not.toBe(baseFp)
+  })
+
+  it("L8b: changing Rule.what perturbs the hash", () => {
+    const sym = makeSymbol(base().id, {
+      ...base(),
+      rules: [
+        {
+          type: "guard",
+          line: 3,
+          condition: "amount <= 0",
+          what: null,
+          expr: null,
+          loopKind: null,
+        },
+        // Only the `what` string changed vs the base's throw rule.
+        {
+          type: "throw",
+          line: 5,
+          condition: null,
+          what: "NotFound",
+          expr: null,
+          loopKind: null,
+        },
+      ],
+    })
+    expect(logicFingerprint(sym)).not.toBe(baseFp)
+  })
+
+  it("L8c: changing Rule.type perturbs the hash", () => {
+    const sym = makeSymbol(base().id, {
+      ...base(),
+      rules: [
+        // Same shape as the base guard but re-typed as `return`.
+        {
+          type: "return",
+          line: 3,
+          condition: "amount <= 0",
+          what: null,
+          expr: null,
+          loopKind: null,
+        },
+        {
+          type: "throw",
+          line: 5,
+          condition: null,
+          what: "AmountInvalid",
+          expr: null,
+          loopKind: null,
+        },
+      ],
+    })
+    expect(logicFingerprint(sym)).not.toBe(baseFp)
+  })
+
+  it("L8d: changing Rule.loopKind perturbs the hash", () => {
+    const withFor = makeSymbol(base().id, {
+      ...base(),
+      rules: [
+        {
+          type: "loop",
+          line: 3,
+          condition: null,
+          what: null,
+          expr: null,
+          loopKind: "for",
+        },
+      ],
+    })
+    const withWhile = makeSymbol(base().id, {
+      ...base(),
+      rules: [
+        {
+          type: "loop",
+          line: 3,
+          condition: null,
+          what: null,
+          expr: null,
+          loopKind: "while",
+        },
+      ],
+    })
+    expect(logicFingerprint(withFor)).not.toBe(logicFingerprint(withWhile))
+  })
+
+  it("L8e: changing Rule.expr perturbs the hash", () => {
+    const a = makeSymbol(base().id, {
+      ...base(),
+      rules: [
+        { type: "return", line: 3, condition: null, what: null, expr: "invoice", loopKind: null },
+      ],
+    })
+    const b = makeSymbol(base().id, {
+      ...base(),
+      rules: [
+        { type: "return", line: 3, condition: null, what: null, expr: "receipt", loopKind: null },
+      ],
+    })
+    expect(logicFingerprint(a)).not.toBe(logicFingerprint(b))
   })
 })
