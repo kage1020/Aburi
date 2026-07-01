@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { basename, join, posix } from "node:path"
+import { basename, join } from "node:path"
 import type { Component, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
 import {
@@ -57,18 +57,6 @@ const NPM_DEP_TO_FRAMEWORK: ReadonlyArray<readonly [string, string]> = [
   ["@sveltejs/kit", "svelte"],
   ["solid-js", "solid"],
   ["@trpc/server", "trpc"],
-]
-
-const GO_DEP_TO_FRAMEWORK: ReadonlyArray<readonly [string, string]> = [
-  ["github.com/gin-gonic/gin", "gin"],
-  ["github.com/labstack/echo", "echo"],
-  ["github.com/gofiber/fiber", "fiber"],
-]
-
-const PY_DEP_TO_FRAMEWORK: ReadonlyArray<readonly [string, string]> = [
-  ["django", "django"],
-  ["fastapi", "fastapi"],
-  ["flask", "flask"],
 ]
 
 /** Language-frequency filter: skip extensions with fewer than this many files. */
@@ -290,17 +278,6 @@ function collectFrameworks(manifest: PackageJsonShape | null): string[] {
   for (const [dep, framework] of NPM_DEP_TO_FRAMEWORK) {
     if (depKeys.has(dep)) out.add(framework)
   }
-  // Go / Python lookups are placeholders for future polyglot detection; v0.1 only emits
-  // the JS/TS subset, but the framework lookup table is shaped so adding manifests later
-  // is purely additive.
-  for (const [_dep, _framework] of GO_DEP_TO_FRAMEWORK) {
-    void _dep
-    void _framework
-  }
-  for (const [_dep, _framework] of PY_DEP_TO_FRAMEWORK) {
-    void _dep
-    void _framework
-  }
   return [...out].sort(compareString)
 }
 
@@ -338,7 +315,24 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
   return raw.replace(/^\.\//, "")
 }
 
+/**
+ * Guarantee Component.id uniqueness in three passes:
+ *
+ * 1. Try the parent-directory suffix (`shared` at `apps/shared` and `libs/shared` becomes
+ *    `shared-apps` / `shared-libs`) — the human-readable case.
+ * 2. If two collided components share the same parent segment (`team1/shared/pkg` and
+ *    `team2/shared/pkg` both suffix to `pkg-shared`) or a suffix lands on another
+ *    already-unique id, disambiguate with a stable `-2`, `-3`, … numeric tail.
+ * 3. Validate that no id is duplicated on exit; anything left is a checker bug and must
+ *    surface as an integrity failure downstream, not a silent duplicate here.
+ */
 function resolveIdCollisions(components: Component[]): Component[] {
+  applyParentSuffixPass(components)
+  applyNumericSuffixPass(components)
+  return components
+}
+
+function applyParentSuffixPass(components: Component[]): void {
   const byId = new Map<string, Component[]>()
   for (const c of components) {
     const list = byId.get(c.id)
@@ -353,7 +347,27 @@ function resolveIdCollisions(components: Component[]): Component[] {
       c.id = parent !== undefined && parent !== null ? `${id}-${toKebabCase(parent)}` : id
     }
   }
-  return components
+}
+
+function applyNumericSuffixPass(components: Component[]): void {
+  const taken = new Set<string>()
+  // Two collided components can survive the parent-suffix pass either because their parent
+  // segments matched or because a rename collided with a third component. Walk in a stable
+  // order (roots[0]) so the tail assignment is deterministic; the first occurrence keeps
+  // its id and every subsequent duplicate takes -2, -3, …
+  const ordered = [...components].sort((a, b) =>
+    (a.roots[0] ?? "") < (b.roots[0] ?? "") ? -1 : (a.roots[0] ?? "") > (b.roots[0] ?? "") ? 1 : 0,
+  )
+  for (const c of ordered) {
+    if (!taken.has(c.id)) {
+      taken.add(c.id)
+      continue
+    }
+    let n = 2
+    while (taken.has(`${c.id}-${n}`)) n++
+    c.id = `${c.id}-${n}`
+    taken.add(c.id)
+  }
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -384,5 +398,3 @@ export const __testing = {
   collectFrameworks,
   collectPublicApi,
 }
-
-void posix

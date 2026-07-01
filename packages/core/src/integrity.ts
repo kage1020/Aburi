@@ -267,19 +267,24 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   assertSorted(
     ir.components.map((c) => c.id),
     "components[]",
-    (a, b) => compareCodepoint(a, b),
+    (a, b) => compareCodeUnit(a, b),
     out,
   )
   assertSorted(
     ir.symbols.map((s) => s.id),
     "symbols[]",
-    (a, b) => compareCodepoint(a, b),
+    (a, b) => compareCodeUnit(a, b),
     out,
   )
+  // The IR schema pins the dependency sort key to (from, to, via) lex order and does not
+  // extend the tiebreaker to `direction` / `effect`: two Dependency entries that share
+  // (from, to, via) but differ in direction/effect are allowed in any order relative to
+  // each other. Reproduce that shape here so the integrity check does not reject
+  // schema-valid IRs.
   assertSorted(
     ir.dependencies.map((d) => `${d.from}\t${d.to}\t${d.via}`),
     "dependencies[]",
-    (a, b) => compareCodepoint(a, b),
+    (a, b) => compareCodeUnit(a, b),
     out,
   )
   for (const symbol of ir.symbols) {
@@ -347,7 +352,13 @@ function assertNumericSorted(
   }
 }
 
-function compareCodepoint(a: string, b: string): number {
+/**
+ * Compare two strings by UTF-16 code unit (matches `Array.prototype.sort` default and the
+ * `<` operator on strings). BMP-only strings coincide with Unicode codepoint order; astral-
+ * plane strings differ, but the serializer, the schema, and every generator that uses the
+ * default JS ordering all agree on this comparator so the three paths cannot diverge.
+ */
+function compareCodeUnit(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 

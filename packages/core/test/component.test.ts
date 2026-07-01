@@ -133,4 +133,39 @@ describe("detectComponents", () => {
     const ids = components.map((c) => c.id).sort()
     expect(ids).toEqual(["shared-apps", "shared-libs"])
   })
+
+  it("collision resolution: same parent segment falls through to numeric suffix", async () => {
+    // team1/shared/pkg and team2/shared/pkg both suffix to "pkg-shared", so the numeric
+    // fallback must disambiguate them into pkg-shared and pkg-shared-2.
+    await writeFile(
+      join(tmp, "pnpm-workspace.yaml"),
+      "packages:\n  - team1/*/*\n  - team2/*/*\n",
+      "utf8",
+    )
+    for (const team of ["team1", "team2"]) {
+      const dir = await makeDir(tmp, team, "shared", "pkg")
+      await writeJson(join(dir, "package.json"), { name: "pkg" })
+      await seedTypescriptFiles(dir, 12)
+    }
+    const components = await detectComponents({ workspaceRoot: tmp })
+    const ids = components.map((c) => c.id).sort()
+    expect(ids).toEqual(["pkg-shared", "pkg-shared-2"])
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it("collision resolution: three-way collision produces -2 and -3 tails", async () => {
+    await writeFile(
+      join(tmp, "pnpm-workspace.yaml"),
+      "packages:\n  - a/*/*\n  - b/*/*\n  - c/*/*\n",
+      "utf8",
+    )
+    for (const team of ["a", "b", "c"]) {
+      const dir = await makeDir(tmp, team, "shared", "pkg")
+      await writeJson(join(dir, "package.json"), { name: "pkg" })
+      await seedTypescriptFiles(dir, 12)
+    }
+    const components = await detectComponents({ workspaceRoot: tmp })
+    const ids = components.map((c) => c.id).sort()
+    expect(ids).toEqual(["pkg-shared", "pkg-shared-2", "pkg-shared-3"])
+  })
 })
