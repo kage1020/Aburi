@@ -11,6 +11,19 @@ export {
   type IntegrityViolation,
 } from "./errors"
 export {
+  apiFingerprint,
+  type ComputeFingerprintInput,
+  computeSymbolFingerprint,
+  FP_HEX_LENGTH,
+  hashCanonicalObject,
+  hashRawString,
+  lastQnameSegment,
+  logicFingerprint,
+  normalizeFingerprintString,
+  syntaxFingerprint,
+  ZERO_FINGERPRINT,
+} from "./fingerprint"
+export {
   DEFAULT_EXPORT_QNAME,
   isDefaultExportQname,
   makeMemberQname,
