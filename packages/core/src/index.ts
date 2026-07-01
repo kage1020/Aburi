@@ -12,8 +12,9 @@ export {
 } from "./errors"
 export {
   apiFingerprint,
-  type ComputeFingerprintOptions,
+  type ComputeFingerprintInput,
   computeSymbolFingerprint,
+  FP_HEX_LENGTH,
   hashCanonicalObject,
   hashRawString,
   lastQnameSegment,

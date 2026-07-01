@@ -12,7 +12,7 @@ export const ZERO_FINGERPRINT = "000000000000" as const
  * collisions negligible (2^48 ≈ 2.8×10^14) while staying short enough to eyeball in
  * diff reports.
  */
-const FP_HEX_LENGTH = 12
+export const FP_HEX_LENGTH = 12
 
 /**
  * Serialize an object with the canonical rules (NFC strings, code-unit-sorted keys,
