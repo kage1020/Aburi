@@ -28,8 +28,15 @@ interface LogicInput {
  *     the same logic axis).
  *
  * decorators, signature, calls, and dropped decoration markers are NOT part of this axis.
- * The trade-off is documented in the design: an unintended reorder of effects is a
- * legitimate hash change (transaction / idempotency semantics depend on order).
+ * An unintended reorder of effects registers as a hash change on purpose: transaction and
+ * idempotency semantics depend on the actual side-effect order, so noise from a genuine
+ * reorder is cheaper than missing a semantics-changing bug.
+ *
+ * Effect.id is also intentionally excluded from the input. Two effects that hit the same
+ * `target` string are treated as identical logic even if the plugin classified them
+ * differently (e.g. `db.write` vs `x-prisma:create`). This is what keeps time-series
+ * comparisons stable across `config.effects[]` reshuffles — the target string carries the
+ * semantic identity, the id carries the plugin's opinion.
  */
 export function logicFingerprint(symbol: IRSymbol): string {
   return hashCanonicalObject(buildLogicInput(symbol))
@@ -43,8 +50,8 @@ function buildLogicInput(symbol: IRSymbol): LogicInput {
 }
 
 function canonicalizeRules(rules: readonly Rule[]): LogicInput["rules"] {
-  // Rules are consumed in the order the IR carries them (integrity #11 requires that
-  // order to be source-order-by-line already). Do not re-sort — the execution sequence
+  // Rules are consumed in the order they arrive (upstream IR generation is responsible
+  // for placing them in source-order-by-line). Do not re-sort — the execution sequence
   // of a guard-then-throw-then-return is semantically distinct from throw-then-guard.
   return rules.map((r) => ({
     condition: r.condition !== null ? normalizeFingerprintString(r.condition) : null,
@@ -56,8 +63,8 @@ function canonicalizeRules(rules: readonly Rule[]): LogicInput["rules"] {
 }
 
 function canonicalizeEffects(effects: readonly Effect[]): LogicInput["effects"] {
-  // Same rationale as rules: keep source order. Effect.id is deliberately dropped from the
-  // input so plugin-classification churn does not break time-series comparisons with older
-  // IRs.
+  // Keep source order: transaction and idempotency semantics depend on the actual
+  // side-effect sequence. Effect.id is excluded so the plugin's classification opinion
+  // does not perturb the hash for the same call target.
   return effects.map((e) => ({ target: normalizeFingerprintString(e.target) }))
 }
