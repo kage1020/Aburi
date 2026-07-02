@@ -21,8 +21,7 @@ export function extractImports(tree: Tree, _source: string): ImportEdge[] {
   for (const child of root.namedChildren) {
     if (child === null) continue
     if (child.type === "import_statement") {
-      const edge = readImportStatement(child)
-      if (edge !== null) edges.push(edge)
+      for (const edge of readImportStatement(child)) edges.push(edge)
     } else if (child.type === "export_statement") {
       const edge = readReExport(child)
       if (edge !== null) edges.push(edge)
@@ -37,34 +36,44 @@ export function extractImports(tree: Tree, _source: string): ImportEdge[] {
 }
 
 /**
- * `import ... from '...'` — read the module specifier and the imported symbol list. Missing
- * clauses (bare `import './side-effect'`) still produce a `"*"` edge so the dependency
- * relationship is visible in the IR.
+ * `import ... from '...'` — read the module specifier and every imported symbol shape.
+ * A single import statement can produce more than one ImportEdge when a namespace binding
+ * co-occurs with named or default bindings: keeping both edges preserves the "this module
+ * is referenced wholesale" signal (`*`) alongside the concrete bindings (`Foo`, `A`, `B`)
+ * that downstream dependency analysis needs.
+ *
+ * Missing clauses (bare `import './side-effect'`) still produce a `"*"` edge so the
+ * dependency relationship is visible in the IR.
  */
-function readImportStatement(node: Node): ImportEdge | null {
+function readImportStatement(node: Node): ImportEdge[] {
   const source = readStringLiteral(node.childForFieldName("source"))
-  if (source === null) return null
+  if (source === null) return []
   const line = node.startPosition.row + 1
   const clause = node.childForFieldName("import_clause") ?? findChildByType(node, "import_clause")
   if (clause === null) {
-    return { source, symbols: "*", line, dynamic: false }
+    return [{ source, symbols: "*", line, dynamic: false }]
   }
-  const symbols = readImportClause(clause)
-  return { source, symbols, line, dynamic: false }
+  const { names, sawNamespace } = readImportClauseParts(clause)
+  const edges: ImportEdge[] = []
+  if (names.length > 0) edges.push({ source, symbols: names, line, dynamic: false })
+  if (sawNamespace) edges.push({ source, symbols: "*", line, dynamic: false })
+  if (edges.length === 0) edges.push({ source, symbols: "*", line, dynamic: false })
+  return edges
 }
 
 /**
- * The import clause holds one or more of: default binding, namespace binding, named
- * bindings. Namespace bindings collapse the whole clause to `"*"` because that is how
- * downstream dependency analysis should treat them.
+ * Break an import_clause into its named identifiers and namespace flag. `readImportStatement`
+ * turns the pair into one or two edges depending on which shapes are present.
  */
-function readImportClause(clause: Node): string[] | "*" {
+function readImportClauseParts(clause: Node): { names: string[]; sawNamespace: boolean } {
   const names: string[] = []
+  let sawNamespace = false
   for (const child of clause.namedChildren) {
     if (child === null) continue
     switch (child.type) {
       case "namespace_import":
-        return "*"
+        sawNamespace = true
+        break
       case "identifier":
         // Default import binding: `import Foo from './x'` — the identifier IS the binding
         // name that downstream code will use, so include it verbatim.
@@ -84,7 +93,7 @@ function readImportClause(clause: Node): string[] | "*" {
         break
     }
   }
-  return names.length > 0 ? names : "*"
+  return { names, sawNamespace }
 }
 
 /**
@@ -174,11 +183,21 @@ function findChildByType(node: Node, type: string): Node | null {
   return null
 }
 
+/**
+ * Dedupe on the semantic identity of an edge: same source at the same line with the same
+ * shape of symbols (as an unordered set — `[A, B]` and `[B, A]` are the same import even
+ * if the user rearranged the specifiers) and the same dynamic flag. Using a sorted list
+ * inside the key keeps that invariant order-insensitive.
+ */
 function dedupeEdges(edges: readonly ImportEdge[]): ImportEdge[] {
   const seen = new Set<string>()
   const out: ImportEdge[] = []
   for (const edge of edges) {
-    const key = `${edge.line}\t${edge.source}\t${edge.dynamic}\t${JSON.stringify(edge.symbols)}`
+    const symbolsKey =
+      edge.symbols === "*"
+        ? '"*"'
+        : JSON.stringify([...edge.symbols].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)))
+    const key = `${edge.line}\t${edge.source}\t${edge.dynamic}\t${symbolsKey}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(edge)

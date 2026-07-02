@@ -1,6 +1,6 @@
 import type { Node } from "web-tree-sitter"
 
-/** True when the given node is null. Terse helper because tree-sitter APIs return `Node | null` everywhere. */
+/** Type guard: true when the given node is NOT null. Tree-sitter APIs return `Node | null` everywhere. */
 export function isPresent(node: Node | null): node is Node {
   return node !== null
 }

@@ -12,13 +12,15 @@ export const TYPESCRIPT_FILE_DROP_PATTERNS: readonly string[] = [
 ]
 
 /**
- * Category-B / C hints for a SymbolCandidate. Returned as a hint, not a hard drop; the
- * core drop-list evaluator decides the final outcome after config.keep / config.suppress
- * and framework overrides are folded in.
+ * Category-B hints for a SymbolCandidate. Returned as a hint, not a hard drop; the core
+ * drop-list evaluator decides the final outcome after config.keep / config.suppress and
+ * framework overrides are folded in.
  *
- * v0.1 covers the language-obvious cases: interface, type alias, empty body, re-export,
- * pure DTO, single-literal class. Everything else returns null (no hint) and the Symbol
- * flows through as-is.
+ * Covers the language-obvious cases the extractor is in a position to identify: interface,
+ * type alias, empty function or method body, pure DTO (fields-only class without a
+ * boundary decorator), and pure constants (static readonly literal fields only).
+ * Re-exports are handled upstream by the import extractor rather than by this classifier;
+ * everything else returns null and the Symbol flows through unchanged.
  */
 export function classifySymbolDropHint(
   symbol: SymbolCandidate<Node>,
