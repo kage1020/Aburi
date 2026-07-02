@@ -2,26 +2,56 @@ import type { Decorator } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 
 /**
- * Read every decorator attached to a declaration node. Tree-sitter-typescript exposes
- * decorators as sibling children of the decorated declaration whose type is
- * `decorator`. The design contract requires:
- *   - `name`: the identifier the decorator invokes (e.g. `Post` in `@Post('/x')`).
- *   - `raw`: the original text after the `@` (e.g. `Post('/x')`).
- *   - `arguments`: each argument's raw text (empty when there is no call).
- *   - `boundary`: the framework plugin decides this later; extract initializes to false.
- *   - `line`: 1-based start line.
+ * Read every decorator attached to a specific declaration node.
+ *
+ * Tree-sitter-typescript places decorators in two different positions depending on where
+ * the declaration sits:
+ *
+ * 1. Methods and free-standing top-level declarations: decorators are named siblings of
+ *    the declaration inside the shared parent (class body or program). Only siblings that
+ *    sit directly before *this* declaration belong to it — walking every decorator in the
+ *    container would attach every one to every member.
+ *
+ * 2. Exported declarations wrapped in an `export_statement`: the wrapper is the parent,
+ *    and decorators are `decorator:` field children of the wrapper (they precede the
+ *    inner declaration in source but the grammar hoists them onto the export node). Read
+ *    every decorator child of the wrapper.
+ *
+ * The two branches produce the same Decorator[] shape; the caller does not care which one
+ * fired.
  */
 export function readDecorators(declaration: Node): Decorator[] {
-  const out: Decorator[] = []
+  const found = collectDecoratorNodes(declaration)
+  const decorators = found.map(readDecorator).filter((d): d is Decorator => d !== null)
+  decorators.sort((a, b) => a.line - b.line || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  return decorators
+}
+
+/**
+ * Return the decorator nodes belonging to `declaration`, in source order. Handles the
+ * "wrapped in export_statement" and the "sibling to member" cases separately.
+ */
+function collectDecoratorNodes(declaration: Node): Node[] {
   const parent = declaration.parent
-  const scope = parent ?? declaration
-  for (const child of scope.namedChildren) {
-    if (child === null || child.type !== "decorator") continue
-    const decorator = readDecorator(child)
-    if (decorator !== null) out.push(decorator)
+  if (parent !== null && parent.type === "export_statement") {
+    // Wrapped export — decorators are field children of the wrapper itself.
+    return parent.namedChildren.filter((c): c is Node => c !== null && c.type === "decorator")
   }
-  out.sort((a, b) => a.line - b.line || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-  return out
+  if (parent === null) return []
+  const siblings = parent.namedChildren
+  const anchorIndex = siblings.findIndex((s) => s !== null && s.id === declaration.id)
+  if (anchorIndex <= 0) return []
+  const out: Node[] = []
+  for (let i = anchorIndex - 1; i >= 0; i--) {
+    const sibling = siblings[i]
+    if (sibling === null || sibling === undefined) continue
+    if (sibling.type === "decorator") {
+      out.push(sibling)
+      continue
+    }
+    break
+  }
+  return out.reverse()
 }
 
 function readDecorator(node: Node): Decorator | null {

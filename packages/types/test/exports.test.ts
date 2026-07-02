@@ -212,7 +212,7 @@ describe("@aburi/types public surface", () => {
     }
     type SpecialPlugin = LanguagePlugin<FakeTree, FakeNode>
     type ParsedFake = Awaited<ReturnType<SpecialPlugin["parseFile"]>>
-    expectTypeOf<ParsedFake["tree"]>().toEqualTypeOf<FakeTree>()
+    expectTypeOf<ParsedFake["tree"]>().toEqualTypeOf<FakeTree | null>()
     type ExtractedFake = ReturnType<SpecialPlugin["extractSymbols"]>
     expectTypeOf<ExtractedFake[number]["fullNode"]>().toEqualTypeOf<FakeNode>()
   })

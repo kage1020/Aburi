@@ -32,10 +32,14 @@ const languageCache = new Map<string, Promise<Language>>()
  * Initialize the tree-sitter WASM runtime exactly once per process. Every subsequent
  * parseFile call awaits the same promise, so the expensive Emscripten setup happens once
  * regardless of concurrency.
+ *
+ * A rejection is de-cached before it propagates: a transient I/O failure would otherwise
+ * poison the shared promise for the rest of the process lifetime and every future parse
+ * would fail without a way to recover.
  */
 async function ensureRuntimeInitialized(): Promise<void> {
   if (runtimeInitPromise !== null) return runtimeInitPromise
-  runtimeInitPromise = Parser.init({
+  const attempt = Parser.init({
     locateFile(name: string) {
       // Emscripten asks for the WASM runtime by its default filename; return our on-disk
       // path so the loader does not go looking on the network.
@@ -44,30 +48,46 @@ async function ensureRuntimeInitialized(): Promise<void> {
       }
       return name
     },
+  }).catch((err: unknown) => {
+    runtimeInitPromise = null
+    throw err
   })
-  return runtimeInitPromise
+  runtimeInitPromise = attempt
+  return attempt
 }
 
-/** Load (or reuse) the Language for a given grammar wasm path. Cached per process. */
+/**
+ * Load (or reuse) the Language for a given grammar wasm path. Cached per process. A
+ * rejected load is evicted from the cache so a transient read failure does not lock the
+ * grammar out for the rest of the run.
+ */
 async function loadLanguage(wasmPath: string): Promise<Language> {
   const cached = languageCache.get(wasmPath)
   if (cached !== undefined) return cached
-  const promise = readFile(wasmPath).then((bytes) => Language.load(new Uint8Array(bytes)))
-  languageCache.set(wasmPath, promise)
-  return promise
+  const attempt = readFile(wasmPath)
+    .then((bytes) => Language.load(new Uint8Array(bytes)))
+    .catch((err: unknown) => {
+      languageCache.delete(wasmPath)
+      throw err
+    })
+  languageCache.set(wasmPath, attempt)
+  return attempt
 }
 
 /**
  * Parse a single TypeScript / TSX source file.
  *
- * Every call creates a fresh Parser + Tree pair and releases both before returning: the
- * WASM heap that web-tree-sitter manages is separate from Node's heap and does not get
- * garbage-collected on its own. Long-running scans over thousands of files would exhaust
- * the WASM heap and crash the process without this discipline.
+ * Every call creates a fresh Parser and releases it in a `finally` so the WASM heap that
+ * web-tree-sitter manages stays flat across long scans. Downstream post-parse work
+ * (error collection, import extraction) is wrapped in its own try/catch that calls
+ * `tree.delete()` on failure, because the caller only receives the tree handle if we
+ * return successfully — an exception on the way out would strand the tree in the WASM
+ * heap otherwise.
  *
- * The returned tree is owned by the caller; core is responsible for eventually calling
- * `tree.delete()` after extractSymbols / walkBody / normalizeAst have all consumed it.
- * That handoff is documented in lang-plugin.md §8.1.
+ * When the parser returns null (a genuinely unrecoverable case — typically an OOM),
+ * `tree` is null on the result too and `errors[]` carries a `recoverable: false` entry.
+ * Callers must check `tree === null` before dispatching to extractSymbols / walkBody /
+ * normalizeAst.
  */
 export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult<Tree>> {
   const wasmPath = pickGrammarForPath(file.path)
@@ -80,7 +100,7 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
     const tree = parser.parse(file.content)
     if (tree === null) {
       return {
-        tree: emptyTree(),
+        tree: null,
         errors: [
           {
             message: "web-tree-sitter Parser.parse returned null",
@@ -92,9 +112,16 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
         imports: [],
       }
     }
-    const errors = collectParseErrors(tree)
-    const imports = extractImports(tree, file.content)
-    return { tree, errors, imports }
+    try {
+      const errors = collectParseErrors(tree)
+      const imports = extractImports(tree, file.content)
+      return { tree, errors, imports }
+    } catch (postParseError) {
+      // Release the tree before propagating; otherwise the WASM handle leaks because the
+      // caller never receives it.
+      tree.delete()
+      throw postParseError
+    }
   } finally {
     parser.delete()
   }
@@ -148,26 +175,4 @@ function walkForErrors(
   for (const child of node.children) {
     if (child !== null) walkForErrors(child, out)
   }
-}
-
-/**
- * Sentinel returned when the parser produces a null tree. The caller sees a non-recoverable
- * error above and will skip the file; this placeholder satisfies the ParseResult contract
- * without exposing null to downstream code.
- */
-function emptyTree(): Tree {
-  // Guarded null so the ParseResult<Tree> type stays honest without an unsafe cast; the
-  // caller must inspect `errors` and never touch `tree` when a non-recoverable error is
-  // present. In practice this branch only fires on a runtime bug in web-tree-sitter.
-  const placeholder = { rootNode: null, delete: () => {} } as unknown as Tree
-  return placeholder
-}
-
-/**
- * Testing helper: reset the module-level caches so a test that wants to observe the
- * initialization path can do so from a clean slate. Not exported from the barrel.
- */
-export function __resetParserForTests(): void {
-  runtimeInitPromise = null
-  languageCache.clear()
 }
