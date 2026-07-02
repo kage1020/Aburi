@@ -121,8 +121,11 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
   if (value === null) return
   if (value.type === "call_expression" || value.type === "new_expression") {
     // Call-only return: no rule, but the call still goes into calls[] so effect plugins
-    // can inspect it.
+    // can inspect it. Descend into the callee and arguments so nested calls like the
+    // `bar()` in `return foo(bar())` are recorded too — otherwise the outer call would
+    // shadow every inner one.
     handleCall(value, calls)
+    visitChildren(value, rules, calls)
     return
   }
   if (isTrivialExpr(value)) return

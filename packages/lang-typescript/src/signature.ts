@@ -15,17 +15,13 @@ import { findChild, isPresent, walkDescendants } from "./ast-helpers"
  *   `@throws` tags in the JSDoc block preceding the declaration.
  * - `typeParameters[]` carries the raw text of each type parameter (`T`, `T extends X`, …).
  */
-export function buildSignature(
-  declaration: Node,
-  jsDocText: string | null,
-  source: string,
-): Signature {
+export function buildSignature(declaration: Node, jsDocText: string | null): Signature {
   const async = detectAsync(declaration)
   const generator = detectGenerator(declaration)
   const typeParameters = readTypeParameters(declaration)
   const inputs = readParameters(declaration)
   const outputs = readReturnType(declaration)
-  const throws = readThrows(declaration, jsDocText, source)
+  const throws = readThrows(declaration, jsDocText)
   return { async, generator, inputs, outputs, throws, typeParameters }
 }
 
@@ -101,7 +97,7 @@ function readReturnType(node: Node): string[] {
   return text.length > 0 ? [text] : []
 }
 
-function readThrows(node: Node, jsDocText: string | null, _source: string): string[] {
+function readThrows(node: Node, jsDocText: string | null): string[] {
   const seen = new Set<string>()
   const body = node.childForFieldName("body")
   if (body !== null) {
@@ -118,14 +114,23 @@ function readThrows(node: Node, jsDocText: string | null, _source: string): stri
 }
 
 function extractThrownType(throwNode: Node): string | null {
-  // `throw new Foo(...)` or `throw someExpr` — dig into the argument.
   const argument = throwNode.namedChild(0)
   if (argument === null) return null
+  // `throw new Foo(...)` — the constructor identifier IS the thrown type.
   if (argument.type === "new_expression") {
     const ctor = argument.childForFieldName("constructor")
     if (isPresent(ctor)) return ctor.text
   }
+  // `throw err` — the identifier is likely a caught variable; keep it verbatim so at
+  // least the local name shows up in the signature. Consumers that want stronger typing
+  // can rely on JSDoc @throws.
   if (argument.type === "identifier") return argument.text
+  // `throw makeError()` / `throw errors.notFound()` — surface the callee identifier so
+  // factory-style error construction is not silently dropped.
+  if (argument.type === "call_expression") {
+    const callee = argument.childForFieldName("function")
+    if (isPresent(callee)) return callee.text
+  }
   return null
 }
 
