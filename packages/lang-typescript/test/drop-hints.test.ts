@@ -6,12 +6,12 @@ import {
   parseTypescriptFile,
   TYPESCRIPT_FILE_DROP_PATTERNS,
 } from "../src/index"
-import { makeExtractionCtx } from "./fixtures/ctx"
+import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
 
 async function hintOf(source: string, suffix: string): Promise<DropHint | null> {
   const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
   const ctx = makeExtractionCtx("src/a.ts", source)
-  const symbols = extractSymbols(result.tree, ctx)
+  const symbols = extractSymbols(requireTree(result.tree), ctx)
   const target = symbols.find((s) => s.id.endsWith(suffix))
   if (target === undefined) {
     throw new Error(

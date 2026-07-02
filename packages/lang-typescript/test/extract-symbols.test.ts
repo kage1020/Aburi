@@ -2,11 +2,11 @@ import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { extractSymbols, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx } from "./fixtures/ctx"
+import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
 
 async function symbolsOf(source: string): Promise<SymbolCandidate<Node>[]> {
   const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return extractSymbols(result.tree, makeExtractionCtx("src/a.ts", source))
+  return extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source))
 }
 
 function byId(symbols: SymbolCandidate<Node>[], suffix: string): SymbolCandidate<Node> {

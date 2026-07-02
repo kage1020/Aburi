@@ -8,7 +8,8 @@ describe("parseTypescriptFile", () => {
       content: "export function foo(): number { return 1 }",
     })
     expect(result.errors).toEqual([])
-    expect(result.tree.rootNode).not.toBeNull()
+    expect(result.tree).not.toBeNull()
+    expect(result.tree?.rootNode).not.toBeNull()
   })
 
   it("parses TSX via the tsx grammar (JSX-aware)", async () => {
@@ -17,7 +18,8 @@ describe("parseTypescriptFile", () => {
       content: "export const Foo = () => <div />",
     })
     expect(result.errors).toEqual([])
-    expect(result.tree.rootNode).not.toBeNull()
+    expect(result.tree).not.toBeNull()
+    expect(result.tree?.rootNode).not.toBeNull()
   })
 
   it("LP27: reports recoverable errors for a source with a syntax mistake", async () => {
@@ -38,7 +40,8 @@ describe("parseTypescriptFile", () => {
         content: `export function fn${i}(x: number): number { return x + ${i} }`,
       })
       expect(res.errors).toEqual([])
-      res.tree.delete()
+      expect(res.tree).not.toBeNull()
+      res.tree?.delete()
     }
   })
 })
