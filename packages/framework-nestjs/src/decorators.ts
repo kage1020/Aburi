@@ -1,9 +1,10 @@
 /**
- * NestJS decorator vocabulary.
+ * NestJS decorator vocabulary — three method-level sets and one class-level map.
  *
- * The classifier maps a decorator name to (a) the extKind it applies to the enclosing
- * Symbol and (b) whether it flags a decorator as a framework boundary. Class-level
- * entries land on the class Symbol; method-level entries land on individual methods.
+ * Only the class-level map carries per-entry extKind data; the method-level sets are
+ * flat name lists because their extKind assignment is uniform (HTTP verbs and pattern
+ * handlers all get `framework:nestjs:route`, cross-cutting handlers get nothing on the
+ * extKind axis and only flip the boundary flag).
  *
  * The tables are namespace-locked to `framework:nestjs` — any addition must live under
  * that prefix so the runtime registry stays consistent with the manifest's declared
@@ -11,8 +12,8 @@
  */
 
 /**
- * Class-level decorators. Each entry sets an extKind and marks its own decorator as a
- * boundary so the framework role is visible in the IR without a follow-up render pass.
+ * Class-level decorators, mapping the source identifier to its extKind and to the
+ * semantic role that `classifyClass` embeds in the emitted `derivedBy`.
  */
 export const NESTJS_CLASS_DECORATORS: ReadonlyMap<string, { extKind: string; role: string }> =
   new Map([
@@ -64,8 +65,9 @@ export const NESTJS_PATTERN_DECORATORS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Union of every decorator that flips a `Decorator.boundary` to true when it appears on a
- * method Symbol. Callers use this instead of walking each set individually.
+ * Predicate: true when `name` names a decorator that flips a `Decorator.boundary` to true
+ * on a method Symbol (HTTP verb OR pattern handler OR cross-cutting handler). Consumers
+ * use this instead of testing the three sets individually.
  */
 export function isMethodBoundaryDecorator(name: string): boolean {
   return (
@@ -75,7 +77,11 @@ export function isMethodBoundaryDecorator(name: string): boolean {
   )
 }
 
-/** Union of every decorator that appears on a class and produces a class extKind. */
+/**
+ * Lookup: return the `{ extKind, role }` entry for a class-level decorator name, or
+ * `undefined` when `name` is not one of the four class-level decorators this plugin
+ * recognizes. Same shape as `Map.get` for symmetry with the underlying table.
+ */
 export function classifyClassDecorator(
   name: string,
 ): { extKind: string; role: string } | undefined {
