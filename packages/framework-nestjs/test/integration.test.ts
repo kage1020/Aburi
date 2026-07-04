@@ -7,10 +7,10 @@ import { describe, expect, it } from "vitest"
 import { classifyNestjsSymbol } from "../src/index"
 
 /**
- * End-to-end: parse a TypeScript source with @aburi/lang-typescript, run classifyNestjsSymbol
- * on every SymbolCandidate the language plugin emits, and confirm that the framework
- * plugin correctly assigns extKinds and boundary flags. This locks the wire between
- * decorator extraction (WI-07) and framework classification (this WI).
+ * End-to-end: parse a TypeScript source with `@aburi/lang-typescript`, run
+ * `classifyNestjsSymbol` on every SymbolCandidate the language plugin emits, and confirm
+ * that the framework plugin correctly assigns extKinds and boundary flags. Locks the wire
+ * between decorator extraction in the language plugin and framework classification here.
  */
 
 async function classifyEach(source: string) {
@@ -74,5 +74,54 @@ describe("integration — lang-typescript → framework-nestjs", () => {
     const method = results.find((r) => r.id.endsWith("#Guarded.internal"))
     expect(method?.classification?.decoratorBoundaries).toEqual({ UseGuards: true })
     expect(method?.classification?.extKind).toBeUndefined()
+  })
+
+  it.each([
+    "Get",
+    "Post",
+    "Put",
+    "Delete",
+    "Patch",
+    "Options",
+    "Head",
+    "All",
+  ])("classifies all eight HTTP verbs (%s) through the real parser", async (verb) => {
+    const results = await classifyEach(
+      `@Controller('/x')\nexport class C {\n  @${verb}('/y')\n  handle() {}\n}`,
+    )
+    const method = results.find((r) => r.id.endsWith("#C.handle"))
+    expect(method?.classification?.extKind).toBe("framework:nestjs:route")
+    expect(method?.classification?.decoratorBoundaries?.[verb]).toBe(true)
+  })
+
+  it.each([
+    "MessagePattern",
+    "EventPattern",
+    "SubscribeMessage",
+  ])("classifies pattern handler %s as a route boundary", async (pattern) => {
+    const results = await classifyEach(`export class H {\n  @${pattern}('/y')\n  handle() {}\n}`)
+    const method = results.find((r) => r.id.endsWith("#H.handle"))
+    expect(method?.classification?.extKind).toBe("framework:nestjs:route")
+    expect(method?.classification?.decoratorBoundaries?.[pattern]).toBe(true)
+  })
+
+  it("classifies @Catch as framework:nestjs:filter", async () => {
+    const results = await classifyEach("@Catch(HttpException)\nexport class ExceptionFilter {}")
+    const cls = results.find((r) => r.id.endsWith("#ExceptionFilter"))
+    expect(cls?.classification?.extKind).toBe("framework:nestjs:filter")
+    expect(cls?.classification?.decoratorBoundaries).toEqual({ Catch: true })
+    expect(cls?.classification?.derivedBy).toBe("framework:nestjs:filter")
+  })
+
+  it("hybrid class with both @Controller and @Injectable flags both boundaries", async () => {
+    const results = await classifyEach("@Controller('/x')\n@Injectable()\nexport class Hybrid {}")
+    const cls = results.find((r) => r.id.endsWith("#Hybrid"))
+    // Source-order winner is Controller (line 1), so extKind takes controller
+    // and both boundaries flip.
+    expect(cls?.classification?.extKind).toBe("framework:nestjs:controller")
+    expect(cls?.classification?.decoratorBoundaries).toEqual({
+      Controller: true,
+      Injectable: true,
+    })
   })
 })

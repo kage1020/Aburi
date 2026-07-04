@@ -1,3 +1,4 @@
+import { CoreError } from "@aburi/core"
 import { describe, expect, it } from "vitest"
 import { classifyNestjsSymbol } from "../src/index"
 import { makeCandidate, makeCtx, makeDecorator } from "./fixtures/symbol"
@@ -140,6 +141,25 @@ describe("classifyNestjsSymbol — method decorators", () => {
     expect(result?.derivedBy).toBe("framework:nestjs:handler:UseGuards")
   })
 
+  it.each([
+    "UseGuards",
+    "UseInterceptors",
+    "UsePipes",
+    "UseFilters",
+  ])("NF7 variant: %s produces a handler-only classification with no extKind", (name) => {
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "method",
+        name: `S.method_${name}`,
+        decorators: [makeDecorator(name, ["Something"])],
+      }),
+      makeCtx(),
+    )
+    expect(result?.extKind).toBeUndefined()
+    expect(result?.decoratorBoundaries?.[name]).toBe(true)
+    expect(result?.derivedBy).toBe(`framework:nestjs:handler:${name}`)
+  })
+
   it("NF8: mixing HTTP method + Guard produces route extKind AND both boundaries", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
@@ -171,6 +191,24 @@ describe("classifyNestjsSymbol — method decorators", () => {
     expect(result?.extKind).toBe("framework:nestjs:route")
     expect(result?.decoratorBoundaries?.MessagePattern).toBe(true)
     expect(result?.derivedBy).toBe("framework:nestjs:route:MessagePattern")
+  })
+
+  it.each([
+    "MessagePattern",
+    "EventPattern",
+    "SubscribeMessage",
+  ])("NF9 variant: %s claims route extKind and boundary", (name) => {
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "method",
+        name: `H.method_${name}`,
+        decorators: [makeDecorator(name, ["'x'"])],
+      }),
+      makeCtx(),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:route")
+    expect(result?.decoratorBoundaries?.[name]).toBe(true)
+    expect(result?.derivedBy).toBe(`framework:nestjs:route:${name}`)
   })
 
   it("returns null for a method without any recognized decorator", () => {
@@ -229,5 +267,30 @@ describe("classifyNestjsSymbol — non-classifiable Symbol kinds", () => {
       makeCtx(),
     )
     expect(result).toBeNull()
+  })
+})
+
+describe("classifyNestjsSymbol — empty decorator name fail-fast", () => {
+  it.each([
+    "class",
+    "method",
+  ] as const)("throws CoreError when a %s Symbol has a decorator with an empty name", (kind) => {
+    let caught: unknown
+    try {
+      classifyNestjsSymbol(
+        makeCandidate({
+          kind,
+          id: "ts:src/a.ts#Broken",
+          name: "Broken",
+          decorators: [makeDecorator("")],
+        }),
+        makeCtx(),
+      )
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("anonymous-symbol-id-attempted")
+    expect((caught as CoreError).value).toBe("ts:src/a.ts#Broken")
   })
 })
