@@ -58,8 +58,15 @@ export interface ImportEdge {
  * to their own parser type so cross-plugin tree leaks are caught at compile time
  * (e.g. handing a tree-sitter `Tree` to a SWC-based plugin's walkBody).
  */
+/**
+ * `tree` is nullable so a plugin can report a genuinely unrecoverable parse (e.g. the
+ * underlying parser returned null) without fabricating a fake tree that would violate the
+ * plugin's own tree type. Callers must check `tree === null` before dispatching to
+ * extractSymbols / walkBody / normalizeAst; the paired `errors[]` is expected to carry a
+ * `recoverable: false` entry when that happens.
+ */
 export interface ParseResult<TTree = ParsedTree> {
-  tree: TTree
+  tree: TTree | null
   errors: ParseError[]
   imports: ImportEdge[]
 }

@@ -1,0 +1,325 @@
+import type {
+  BodyExtraction,
+  CallCandidate,
+  Rule,
+  SymbolCandidate,
+  WalkContext,
+} from "@aburi/types"
+import type { Node } from "web-tree-sitter"
+import { findChild } from "./ast-helpers"
+
+/**
+ * Walk a Symbol's body and produce control-flow rules + call candidates.
+ *
+ * Rule extraction follows the design contract:
+ *   - `guard`: an `if` statement whose body contains an early exit (`throw`, `return`,
+ *     `continue`, `break`, `process.exit`).
+ *   - `throw`: a bare `throw new X(...)` reachable from the body.
+ *   - `return`: only non-trivial return values (literals / identifiers / member chains /
+ *     unary + trivial / call-only returns are all dropped per drop-list §5.3-§5.5).
+ *   - `loop`: `for` / `for...in` / `for...of` / `while` / `do...while`.
+ *   - `try`: try / catch / finally — the catch body's contents do NOT feed the same
+ *     Symbol's rules.
+ *   - `switch`: switch statement.
+ *
+ * Calls are every call_expression whose callee we can normalize. `await` and `new`
+ * modifiers surface as flags; each argument's literal value (if any) is captured on
+ * `literalArgs` for effect plugins that pattern-match on constants (SQL strings, HTTP
+ * paths, event names, …).
+ */
+export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>): BodyExtraction {
+  const body = symbol.bodyNode
+  if (body === null) return { rules: [], calls: [] }
+  const rules: Rule[] = []
+  const calls: CallCandidate[] = []
+  visit(body, rules, calls)
+  rules.sort((a, b) => a.line - b.line)
+  calls.sort((a, b) => a.line - b.line)
+  return { rules, calls }
+}
+
+function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+  switch (node.type) {
+    case "if_statement":
+      handleIfStatement(node, rules, calls)
+      return
+    case "throw_statement":
+      rules.push(makeRule("throw", node, { what: extractThrowWhat(node) }))
+      visitCallsInside(node, calls)
+      return
+    case "return_statement":
+      handleReturnStatement(node, rules, calls)
+      return
+    case "for_statement":
+    case "for_in_statement":
+      rules.push(makeRule("loop", node, { loopKind: "for" }))
+      visitChildren(node, rules, calls)
+      return
+    case "while_statement":
+      rules.push(makeRule("loop", node, { loopKind: "while" }))
+      visitChildren(node, rules, calls)
+      return
+    case "do_statement":
+      rules.push(makeRule("loop", node, { loopKind: "do" }))
+      visitChildren(node, rules, calls)
+      return
+    case "try_statement":
+      rules.push(makeRule("try", node))
+      // Only the try block's statements contribute rules/calls; catch/finally are skipped
+      // per ir-schema §8.1 so a rewritten error handler does not perturb the logic axis.
+      handleTryStatement(node, rules, calls)
+      return
+    case "switch_statement":
+      rules.push(makeRule("switch", node, { condition: extractSwitchCondition(node) }))
+      visitChildren(node, rules, calls)
+      return
+    case "call_expression":
+    case "new_expression":
+      handleCall(node, calls)
+      visitChildren(node, rules, calls)
+      return
+    default:
+      visitChildren(node, rules, calls)
+      return
+  }
+}
+
+function visitChildren(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+  for (const child of node.namedChildren) {
+    if (child === null) continue
+    visit(child, rules, calls)
+  }
+}
+
+function visitCallsInside(node: Node, calls: CallCandidate[]): void {
+  for (const child of node.namedChildren) {
+    if (child === null) continue
+    if (child.type === "call_expression" || child.type === "new_expression") {
+      handleCall(child, calls)
+    }
+    visitCallsInside(child, calls)
+  }
+}
+
+function handleIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+  const consequence = node.childForFieldName("consequence")
+  if (consequence !== null && containsEarlyExit(consequence)) {
+    const condition = node.childForFieldName("condition")
+    rules.push(
+      makeRule("guard", node, {
+        condition: condition !== null ? stripParens(condition.text) : null,
+      }),
+    )
+  }
+  // Even when the `if` is a plain branch, its consequence still contributes to the same
+  // Symbol's logic (nested guards / calls / loops).
+  visitChildren(node, rules, calls)
+}
+
+function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+  const value = node.namedChildren[0] ?? null
+  if (value === null) return
+  if (value.type === "call_expression" || value.type === "new_expression") {
+    // Call-only return: no rule, but the call still goes into calls[] so effect plugins
+    // can inspect it. Descend into the callee and arguments so nested calls like the
+    // `bar()` in `return foo(bar())` are recorded too — otherwise the outer call would
+    // shadow every inner one.
+    handleCall(value, calls)
+    visitChildren(value, rules, calls)
+    return
+  }
+  if (isTrivialExpr(value)) return
+  rules.push(makeRule("return", node, { expr: normalizeExpression(value.text) }))
+  visitChildren(value, rules, calls)
+}
+
+function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+  const body = node.childForFieldName("body")
+  if (body !== null) visit(body, rules, calls)
+}
+
+function handleCall(node: Node, calls: CallCandidate[]): void {
+  const isNew = node.type === "new_expression"
+  const callee = node.childForFieldName(isNew ? "constructor" : "function") ?? node.namedChild(0)
+  if (callee === null) return
+  const target = normalizeCallee(callee)
+  if (target === null) return
+  const argsNode = node.childForFieldName("arguments") ?? findChild(node, "arguments") ?? null
+  const argChildren = argsNode !== null ? argsNode.namedChildren : []
+  const literalArgs: (string | null)[] = argChildren.map((arg) =>
+    arg === null ? null : extractLiteral(arg),
+  )
+  const inAwait = isUnderAwait(node)
+  const line = node.startPosition.row + 1
+  calls.push({
+    target,
+    line,
+    argumentCount: argChildren.length,
+    inAwait,
+    inNew: isNew,
+    literalArgs,
+  })
+}
+
+/**
+ * Trivial expression detector matching drop-list §5.5 exactly. Anything that reads like a
+ * simple identifier / literal / member chain / unary wrap should NOT surface as a return
+ * rule. Everything else does.
+ */
+function isTrivialExpr(node: Node): boolean {
+  switch (node.type) {
+    case "number":
+    case "string":
+    case "true":
+    case "false":
+    case "null":
+    case "undefined":
+      return true
+    case "identifier":
+    case "this":
+    case "super":
+      return true
+    case "member_expression":
+    case "subscript_expression": {
+      const object = node.childForFieldName("object")
+      return object !== null && isTrivialExpr(object)
+    }
+    case "unary_expression":
+    case "update_expression": {
+      const argument = node.childForFieldName("argument") ?? node.namedChild(0)
+      return argument !== null && isTrivialExpr(argument)
+    }
+    case "parenthesized_expression": {
+      const inner = node.namedChild(0)
+      return inner !== null && isTrivialExpr(inner)
+    }
+    default:
+      return false
+  }
+}
+
+function containsEarlyExit(node: Node): boolean {
+  const stack: Node[] = [node]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (current === undefined) break
+    switch (current.type) {
+      case "return_statement":
+      case "throw_statement":
+      case "continue_statement":
+      case "break_statement":
+        return true
+      case "call_expression": {
+        const callee = current.childForFieldName("function")
+        if (callee !== null && normalizeCallee(callee) === "process.exit") return true
+        break
+      }
+    }
+    for (const child of current.namedChildren) {
+      if (child !== null) stack.push(child)
+    }
+  }
+  return false
+}
+
+function normalizeCallee(node: Node): string | null {
+  switch (node.type) {
+    case "identifier":
+    case "property_identifier":
+      return node.text
+    case "this":
+      return "this"
+    case "super":
+      return "super"
+    case "member_expression": {
+      const object = node.childForFieldName("object")
+      const property = node.childForFieldName("property")
+      const objectStr = object !== null ? normalizeCallee(object) : null
+      const propertyStr = property !== null ? property.text : null
+      if (objectStr === null || propertyStr === null) return null
+      return `${objectStr}.${propertyStr}`
+    }
+    case "subscript_expression": {
+      const object = node.childForFieldName("object")
+      return object !== null ? normalizeCallee(object) : null
+    }
+    case "parenthesized_expression": {
+      const inner = node.namedChild(0)
+      return inner !== null ? normalizeCallee(inner) : null
+    }
+    case "call_expression": {
+      const inner = node.childForFieldName("function")
+      return inner !== null ? normalizeCallee(inner) : null
+    }
+    default:
+      return node.text.length > 0 ? node.text : null
+  }
+}
+
+function extractLiteral(node: Node): string | null {
+  switch (node.type) {
+    case "number":
+    case "true":
+    case "false":
+    case "null":
+    case "undefined":
+      return node.text
+    case "string": {
+      const parts: string[] = []
+      for (const child of node.namedChildren) {
+        if (child === null) continue
+        if (child.type === "string_fragment") parts.push(child.text)
+      }
+      if (parts.length > 0) return parts.join("")
+      const raw = node.text
+      return raw.length >= 2 ? raw.slice(1, -1) : raw
+    }
+    default:
+      return null
+  }
+}
+
+function isUnderAwait(node: Node): boolean {
+  const parent = node.parent
+  if (parent === null) return false
+  if (parent.type === "await_expression") return true
+  return false
+}
+
+function extractThrowWhat(node: Node): string | null {
+  const arg = node.namedChild(0)
+  if (arg === null) return null
+  if (arg.type === "new_expression") {
+    const ctor = arg.childForFieldName("constructor")
+    if (ctor !== null) return ctor.text
+  }
+  return arg.text
+}
+
+function extractSwitchCondition(node: Node): string | null {
+  const cond = node.childForFieldName("value") ?? node.childForFieldName("condition")
+  return cond !== null ? stripParens(cond.text) : null
+}
+
+function stripParens(text: string): string {
+  return text.replace(/^\s*\(([\s\S]*)\)\s*$/, "$1").trim()
+}
+
+function normalizeExpression(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
+}
+
+function makeRule(
+  type: Rule["type"],
+  node: Node,
+  overrides: Partial<Pick<Rule, "condition" | "what" | "expr" | "loopKind">> = {},
+): Rule {
+  return {
+    type,
+    line: node.startPosition.row + 1,
+    condition: overrides.condition ?? null,
+    what: overrides.what ?? null,
+    expr: overrides.expr ?? null,
+    loopKind: overrides.loopKind ?? null,
+  }
+}
