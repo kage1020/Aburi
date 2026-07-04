@@ -1,0 +1,78 @@
+import {
+  extractSymbols as extractTypescriptSymbols,
+  parseTypescriptFile,
+} from "@aburi/lang-typescript"
+import type { ExtractionContext, SourceFile } from "@aburi/types"
+import { describe, expect, it } from "vitest"
+import { classifyNestjsSymbol } from "../src/index"
+
+/**
+ * End-to-end: parse a TypeScript source with @aburi/lang-typescript, run classifyNestjsSymbol
+ * on every SymbolCandidate the language plugin emits, and confirm that the framework
+ * plugin correctly assigns extKinds and boundary flags. This locks the wire between
+ * decorator extraction (WI-07) and framework classification (this WI).
+ */
+
+async function classifyEach(source: string) {
+  const parseResult = await parseTypescriptFile({ path: "src/x.ts", content: source })
+  const tree = parseResult.tree
+  if (tree === null) throw new Error("parse returned null")
+  const file: SourceFile = { path: "src/x.ts", content: source }
+  const ctx: ExtractionContext = {
+    file,
+    registry: {
+      findEffect: () => null,
+      findExtKind: () => null,
+      findFramework: () => null,
+      findDerivedByOwner: () => null,
+      isEffectOwnedBy: () => false,
+      isExtKindOwnedBy: () => false,
+      listEffects: () => [],
+      listExtKinds: () => [],
+      listFrameworks: () => [],
+      listPlugins: () => [],
+      assertEffectDeclared: () => {},
+      assertExtKindDeclared: () => {},
+    },
+    config: {},
+  }
+  const candidates = extractTypescriptSymbols(tree, ctx)
+  return candidates.map((candidate) => ({
+    id: candidate.id,
+    classification: classifyNestjsSymbol(candidate, ctx),
+  }))
+}
+
+describe("integration — lang-typescript → framework-nestjs", () => {
+  it("classifies a real @Controller class through the language plugin", async () => {
+    const results = await classifyEach(
+      "@Controller('/invoices')\nexport class InvoiceController {\n  @Post('/x')\n  create() {}\n}",
+    )
+    const cls = results.find((r) => r.id.endsWith("#InvoiceController"))
+    const method = results.find((r) => r.id.endsWith("#InvoiceController.create"))
+    expect(cls?.classification?.extKind).toBe("framework:nestjs:controller")
+    expect(method?.classification?.extKind).toBe("framework:nestjs:route")
+    expect(method?.classification?.decoratorBoundaries).toEqual({ Post: true })
+  })
+
+  it("classifies @Module and @Injectable classes without misclassifying siblings", async () => {
+    const results = await classifyEach(
+      "import { X } from './x'\n@Module({})\nexport class AppModule {}\n@Injectable()\nexport class InvoiceService {}\nexport class Plain {}",
+    )
+    const app = results.find((r) => r.id.endsWith("#AppModule"))
+    const service = results.find((r) => r.id.endsWith("#InvoiceService"))
+    const plain = results.find((r) => r.id.endsWith("#Plain"))
+    expect(app?.classification?.extKind).toBe("framework:nestjs:module")
+    expect(service?.classification?.extKind).toBe("framework:nestjs:provider")
+    expect(plain?.classification).toBeNull()
+  })
+
+  it("flags Guard-wrapped internal methods as boundaries without assigning the route extKind", async () => {
+    const results = await classifyEach(
+      "@Injectable()\nexport class Guarded {\n  @UseGuards(RolesGuard)\n  internal() {}\n}",
+    )
+    const method = results.find((r) => r.id.endsWith("#Guarded.internal"))
+    expect(method?.classification?.decoratorBoundaries).toEqual({ UseGuards: true })
+    expect(method?.classification?.extKind).toBeUndefined()
+  })
+})
