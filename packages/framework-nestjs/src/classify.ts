@@ -1,3 +1,4 @@
+import { CoreError } from "@aburi/core"
 import type {
   ExtractionContext,
   OpaqueAstNode,
@@ -23,15 +24,15 @@ const ROUTE_EXT_KIND = "framework:nestjs:route"
  * Classify a SymbolCandidate emitted by the language plugin.
  *
  * Returns a `SymbolClassification` when at least one NestJS decorator applies, or `null`
- * when nothing matches — matching `null` is important because core runs classifiers with
- * first-match-wins semantics and returning a hollow classification would shadow other
- * plugins that would otherwise fire.
+ * when nothing matches — returning `null` is important because the framework pipeline
+ * runs classifiers with first-match-wins semantics and a hollow classification would
+ * shadow other plugins that would otherwise fire.
  *
- * Symbol.kind picks the branch: classes look for `@Module` / `@Controller` / `@Injectable`
- * / `@Catch`; methods look for HTTP method decorators plus Guards / Interceptors / Pipes
- * / Filters plus microservice pattern handlers. Nothing else is inspected because the
- * design defers non-decorator NestJS conventions (class name suffixes, folder
- * conventions) to later WIs.
+ * Symbol.kind picks the branch: classes look for `@Module` / `@Controller` /
+ * `@Injectable` / `@Catch`; methods look for HTTP method decorators plus Guards /
+ * Interceptors / Pipes / Filters plus microservice pattern handlers. Non-decorator NestJS
+ * conventions (class-name suffixes, folder conventions) are out of scope — they would
+ * belong to a separate classifier if we ever add one.
  */
 export function classifyNestjsSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -43,20 +44,21 @@ export function classifyNestjsSymbol(
 }
 
 /**
- * Class classification is winner-take-all: if @Module / @Controller / @Injectable /
- * @Catch appears, that is the class's role. When more than one class-level decorator is
- * present (e.g. `@Controller @Injectable class MyThing {}`), the first one found in
+ * Class classification is winner-take-all: if `@Module` / `@Controller` / `@Injectable`
+ * / `@Catch` appears, that is the class's role. When more than one class-level decorator
+ * is present (e.g. `@Controller @Injectable class MyThing {}`), the first one found in
  * decorator source order wins so results stay stable across re-runs.
  *
- * boundary flags are emitted for every recognized class-level decorator — the framework
- * cares about the shape as a whole, not just the "winning" one, so a `@Controller` that
- * also has `@Injectable` still gets both flagged in decoratorBoundaries.
+ * `decoratorBoundaries` gets a `true` entry for every recognized class-level decorator —
+ * the framework cares about the shape as a whole, not just the "winning" one, so a
+ * `@Controller` that also has `@Injectable` still surfaces both in the map.
  */
 function classifyClass(symbol: SymbolCandidate<OpaqueAstNode>): SymbolClassification | null {
-  const boundaries: Record<string, boolean> = {}
+  const boundaries: Record<string, true> = {}
   let winner: { extKind: string; role: string } | null = null
 
   for (const decorator of symbol.decorators) {
+    assertDecoratorName(decorator.name, symbol.id)
     const hit = classifyClassDecorator(decorator.name)
     if (hit === undefined) continue
     boundaries[decorator.name] = true
@@ -67,59 +69,75 @@ function classifyClass(symbol: SymbolCandidate<OpaqueAstNode>): SymbolClassifica
   return {
     extKind: winner.extKind,
     decoratorBoundaries: boundaries,
+    // Class derivedBy uses the semantic `role` (module / controller / provider / filter)
+    // rather than the source decorator identifier because NestJS renames the concept —
+    // `@Injectable` semantically means "provider", and the derivedBy string carries that
+    // meaning. Method derivedBy preserves the source decorator identifier verbatim (see
+    // classifyMethod) because HTTP verbs and handler names have no equivalent semantic
+    // rewrite; the source name IS the meaning.
     derivedBy: `framework:nestjs:${winner.role}`,
   }
 }
 
 /**
- * Method classification promotes the method to `framework:nestjs:route` when it carries an
- * HTTP verb decorator or a pattern-style entry point. Handler-only decorators (Guards /
- * Interceptors / Pipes / Filters) mark the enclosing method as a boundary without
- * assigning the route extKind — a service method wrapped in a Guard is still a
+ * Method classification promotes the method to `framework:nestjs:route` when it carries
+ * an HTTP verb decorator or a pattern-style entry point. Handler-only decorators
+ * (Guards / Interceptors / Pipes / Filters) mark the enclosing method as a boundary
+ * without assigning the route extKind — a service method wrapped in a Guard is still a
  * boundary-worthy check, but it is not the route itself.
  *
- * The design puts the boundary map on `decoratorBoundaries` regardless: framework core
- * flips the SymbolCandidate.decorators[].boundary flags from those keys after this
- * plugin returns, keeping the plugin idempotent.
+ * `derivedBy` preserves the source decorator identifier verbatim (`Post`, `UseGuards`,
+ * `MessagePattern`, …) so a grep from the emitted string lands directly on the source
+ * decorator in the `.ts` file. Class classification uses a semantic role name instead;
+ * the asymmetry is deliberate (see classifyClass).
  */
 function classifyMethod(symbol: SymbolCandidate<OpaqueAstNode>): SymbolClassification | null {
-  const boundaries: Record<string, boolean> = {}
-  let route: string | null = null
-  let handler: string | null = null
+  const boundaries: Record<string, true> = {}
+  let firstRoute: string | null = null
+  let firstHandler: string | null = null
 
   for (const decorator of symbol.decorators) {
-    if (!isMethodBoundaryDecorator(decorator.name)) continue
-    boundaries[decorator.name] = true
-    if (
-      NESTJS_HTTP_METHOD_DECORATORS.has(decorator.name) ||
-      NESTJS_PATTERN_DECORATORS.has(decorator.name)
-    ) {
-      if (route === null) route = decorator.name
-      continue
+    const name = decorator.name
+    assertDecoratorName(name, symbol.id)
+    if (!isMethodBoundaryDecorator(name)) continue
+    boundaries[name] = true
+    if (NESTJS_HTTP_METHOD_DECORATORS.has(name) || NESTJS_PATTERN_DECORATORS.has(name)) {
+      firstRoute ??= name
+    } else {
+      firstHandler ??= name
     }
-    if (handler === null) handler = decorator.name
   }
-  if (route === null && handler === null) return null
 
-  // derivedBy carries the original decorator identifier verbatim on both branches so a
-  // grep from `framework:nestjs:route:Post` lands on the source `@Post()` decorator
-  // without a case-transform round-trip. The class branch mirrors the same policy via a
-  // normalized `role` field on the vocabulary table.
-  if (route !== null) {
+  if (firstRoute !== null) {
     return {
       extKind: ROUTE_EXT_KIND,
       decoratorBoundaries: boundaries,
-      derivedBy: `framework:nestjs:route:${route}`,
+      derivedBy: `framework:nestjs:route:${firstRoute}`,
     }
   }
-  // Handler-only branch: `handler` is guaranteed non-null here — the earlier `route ===
-  // null && handler === null` guard is the single source of nullability truth, and the
-  // TS control-flow narrowing carries that guarantee through the assertion below.
-  if (handler === null) throw new Error("unreachable: guarded above")
-  return {
-    decoratorBoundaries: boundaries,
-    derivedBy: `framework:nestjs:handler:${handler}`,
+  if (firstHandler !== null) {
+    return {
+      decoratorBoundaries: boundaries,
+      derivedBy: `framework:nestjs:handler:${firstHandler}`,
+    }
   }
+  return null
+}
+
+/**
+ * Refuse to silently skip a decorator with an empty name. The upstream language plugin
+ * normally guarantees non-empty identifiers, but a grammar regression could produce an
+ * empty string that would then flow through `Set.has("")` / `Map.get("")` without
+ * matching anything and disappear — losing the signal that the grammar produced
+ * something unexpected. Match the fail-fast contract used by the language plugin's own
+ * name-required helpers.
+ */
+function assertDecoratorName(name: string, symbolId: string): void {
+  if (name.length > 0) return
+  throw new CoreError(
+    `Empty decorator name on Symbol "${symbolId}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
+    { code: "anonymous-symbol-id-attempted", value: symbolId },
+  )
 }
 
 // Re-export the decorator inspection surface symmetrically for classes and methods so a

@@ -88,6 +88,9 @@ importers:
 
   packages/framework-nestjs:
     dependencies:
+      '@aburi/core':
+        specifier: workspace:*
+        version: link:../core
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
