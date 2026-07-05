@@ -18,6 +18,10 @@ export type CoreErrorCode =
   | "workspace-root-not-found"
   /** A workspace manager manifest could not be parsed (malformed YAML / JSON). */
   | "workspace-manifest-malformed"
+  /** Two language plugins claim the same file extension — a plugin-registry misconfiguration. */
+  | "language-routing-collision"
+  /** A caller supplied a plugin list that violates the manifest-registry contract at scan wiring time. */
+  | "scan-plugin-misconfigured"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to ir-schema.md §14 numbering (1..11). */
