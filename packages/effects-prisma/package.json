@@ -1,0 +1,40 @@
+{
+  "name": "@aburi/effects-prisma",
+  "version": "0.0.0",
+  "description": "Aburi Prisma effects plugin: classifies prisma.<model>.<verb> and prisma.$transaction call expressions into core db.read / db.write / db.transaction effects",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aburi/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@aburi/lang-typescript": "workspace:*",
+    "@types/node": "^26.0.1",
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
