@@ -233,6 +233,42 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/scan-e2e:
+    devDependencies:
+      '@aburi/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aburi/effects-nest':
+        specifier: workspace:*
+        version: link:../effects-nest
+      '@aburi/effects-prisma':
+        specifier: workspace:*
+        version: link:../effects-prisma
+      '@aburi/framework-nestjs':
+        specifier: workspace:*
+        version: link:../framework-nestjs
+      '@aburi/framework-next':
+        specifier: workspace:*
+        version: link:../framework-next
+      '@aburi/lang-typescript':
+        specifier: workspace:*
+        version: link:../lang-typescript
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
+      '@aburi/types':
+        specifier: workspace:*
+        version: link:../types
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
+
   packages/types:
     devDependencies:
       '@types/node':

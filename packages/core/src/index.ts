@@ -34,6 +34,44 @@ export {
 } from "./id"
 export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
 export {
+  DEFAULT_MAX_FILE_SIZE_BYTES,
+  type DiscoveredFile,
+  type DiscoverOptions,
+  type DiscoverResult,
+  discoverFiles,
+  type SkippedFile,
+} from "./scan/discover"
+export { decideSymbolDrop } from "./scan/drop-b"
+export {
+  buildDropCFilter,
+  DropCFilter,
+  type DropCFilterInput,
+} from "./scan/drop-c"
+export {
+  type FilePipelineInput,
+  type FilePipelineResult,
+  runFilePipeline,
+} from "./scan/pipeline"
+export {
+  buildLanguageRouter,
+  LanguageRouter,
+} from "./scan/route"
+export {
+  type ParseErrorRecord,
+  type ScanInput,
+  type ScanResult,
+  scan,
+  writeCanonicalIR,
+} from "./scan/scan"
+export {
+  CLASSIFY_TIMEOUT_MAX_MS,
+  CLASSIFY_TIMEOUT_MIN_MS,
+  type ClassifyTimeoutEvent,
+  type ClassifyWithTimeoutOptions,
+  classifyWithTimeout,
+  DEFAULT_CLASSIFY_TIMEOUT_MS,
+} from "./scan/timeout"
+export {
   type DetectManagersResult,
   type DetectWorkspaceRootOptions,
   detectManagers,
