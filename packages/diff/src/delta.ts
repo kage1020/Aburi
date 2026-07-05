@@ -9,13 +9,19 @@ import type {
   SignatureDelta,
   SymbolDelta,
 } from "@aburi/types"
+import { DiffError } from "./errors"
 
 export const DEFAULT_LINE_FUZZ = 2
 export const MAX_LINE_FUZZ = 10
 export const MIN_LINE_FUZZ = 0
 
 export interface DeltaOptions {
-  /** §5.2.1 line fuzz for rule/call identity. Default 2, max 10, min 0 (fuzz disabled). */
+  /**
+   * §5.2.1 line fuzz for rule/call identity. Must be an integer in
+   * `[MIN_LINE_FUZZ, MAX_LINE_FUZZ]` (`0..10`); anything outside — or a non-finite value —
+   * throws `DiffError({ code: "invalid-line-fuzz" })`. Setting `0` disables fuzz; omitting
+   * the field falls back to `DEFAULT_LINE_FUZZ` (2).
+   */
   lineFuzz?: number
 }
 
@@ -30,7 +36,7 @@ export function computeSymbolDelta(
   head: IRSymbol,
   options: DeltaOptions = {},
 ): SymbolDelta {
-  const fuzz = clampLineFuzz(options.lineFuzz ?? DEFAULT_LINE_FUZZ)
+  const fuzz = validateLineFuzz(options.lineFuzz ?? DEFAULT_LINE_FUZZ)
   const delta: SymbolDelta = {
     apiChanged: base.fingerprint.api !== head.fingerprint.api,
     logicChanged: base.fingerprint.logic !== head.fingerprint.logic,
@@ -47,11 +53,25 @@ export function computeSymbolDelta(
   return delta
 }
 
-function clampLineFuzz(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_LINE_FUZZ
-  if (value < MIN_LINE_FUZZ) return MIN_LINE_FUZZ
-  if (value > MAX_LINE_FUZZ) return MAX_LINE_FUZZ
-  return Math.floor(value)
+/**
+ * §5.2.1 range check. Loud on violation rather than silently clamping so a config typo
+ * (`lineFuzz: 999`) or an upstream numeric bug (`NaN`, `Infinity`) surfaces at the diff
+ * boundary instead of quietly rounding into a range that produces the wrong deltas.
+ */
+function validateLineFuzz(value: number): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new DiffError(
+      `config.diff.lineFuzz must be an integer in [${MIN_LINE_FUZZ}, ${MAX_LINE_FUZZ}]; got ${String(value)}.`,
+      { code: "invalid-line-fuzz", value: String(value) },
+    )
+  }
+  if (value < MIN_LINE_FUZZ || value > MAX_LINE_FUZZ) {
+    throw new DiffError(
+      `config.diff.lineFuzz must be within [${MIN_LINE_FUZZ}, ${MAX_LINE_FUZZ}]; got ${value}.`,
+      { code: "invalid-line-fuzz", value: String(value) },
+    )
+  }
+  return value
 }
 
 interface Identified<T> {
@@ -76,12 +96,12 @@ function differentiate<T>(
   const removed: T[] = []
   const modified: T[] = []
   const consumedBase = new Set<number>()
-  for (let i = 0; i < head.length; i++) {
-    const h = head[i] as Identified<T>
+  for (const h of head) {
     let matchIdx = -1
     for (let j = 0; j < base.length; j++) {
       if (consumedBase.has(j)) continue
-      const b = base[j] as Identified<T>
+      const b = base[j]
+      if (b === undefined) continue
       if (b.key !== h.key) continue
       if (Math.abs(b.line - h.line) > lineFuzz) continue
       matchIdx = j
@@ -89,14 +109,18 @@ function differentiate<T>(
     }
     if (matchIdx === -1) {
       added.push(h.item)
-    } else {
-      consumedBase.add(matchIdx)
-      const bmatch = (base[matchIdx] as Identified<T>).item
-      if (!isEqual(bmatch, h.item)) modified.push(h.item)
+      continue
     }
+    consumedBase.add(matchIdx)
+    const bmatch = base[matchIdx]
+    if (bmatch === undefined) continue
+    if (!isEqual(bmatch.item, h.item)) modified.push(h.item)
   }
   for (let j = 0; j < base.length; j++) {
-    if (!consumedBase.has(j)) removed.push((base[j] as Identified<T>).item)
+    if (consumedBase.has(j)) continue
+    const b = base[j]
+    if (b === undefined) continue
+    removed.push(b.item)
   }
   return { added, removed, modified }
 }
@@ -176,9 +200,18 @@ function decoratorsEqual(a: Decorator, b: Decorator): boolean {
 }
 
 /**
- * §5.3 — signature delta. When either side is null the delta is `null` (nothing to
- * compare). When both are present, per-list diffs are produced with unbounded line-fuzz
- * (signatures do not carry line info) and three convenience booleans mark axis changes.
+ * §5.3 — signature delta. Three cases:
+ * - both sides `null` → `null` (nothing to compare)
+ * - exactly one side `null` → the present side is emitted verbatim as
+ *   `added` (when only head has a signature) or `removed` (when only base has one);
+ *   the three axis booleans compare the missing side against `false` defaults
+ * - both sides non-null → per-list sub-deltas:
+ *   - `inputs`: strict positional compare via `differentiate(..., lineFuzz: 0)` — index
+ *     used as the line key so ordered parameter lists match position-for-position
+ *   - `outputs`: positional compare (added/removed emitted when the arrays diverge at
+ *     an index), no `modified` category
+ *   - `throws`: unordered set diff — duplicates collapse per Set semantics
+ *   - `async` / `generator` / `typeParameters` change flags follow the raw fields
  */
 function diffSignature(base: Signature | null, head: Signature | null): SignatureDelta | null {
   if (base === null && head === null) return null

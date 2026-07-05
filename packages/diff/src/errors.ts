@@ -8,6 +8,13 @@ export type DiffErrorCode =
   | "schema-mismatch"
   /** `config.diff.lineFuzz` was outside the documented [0, 10] range (diff-algorithm.md §5.2.1). */
   | "invalid-line-fuzz"
+  /**
+   * `baseIR` or `headIR` failed the top-level shape check that `buildDiff` enforces
+   * before touching any Symbol. Missing / non-array `symbols`, `components`,
+   * `dependencies`, or an absent `$schema` — anything that would otherwise crash with a
+   * cryptic `TypeError: undefined is not iterable` deep in a matching stage.
+   */
+  | "ir-shape-invalid"
 
 export interface DiffErrorDetail {
   code: DiffErrorCode

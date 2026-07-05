@@ -1,5 +1,5 @@
 import { type SerializeOptions, serializeCanonical } from "@aburi/core"
-import type { DiffResult, IR, IRRef, Symbol as IRSymbol, Summary, SymbolChange } from "@aburi/types"
+import type { DiffResult, IR, IRRef, Summary, SymbolChange } from "@aburi/types"
 import { diffComponents, diffDependencies } from "./components"
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
 import { DiffError } from "./errors"
@@ -40,6 +40,8 @@ const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
  * serialisation.
  */
 export function buildDiff(input: DiffInput): DiffResult {
+  assertIRShape(input.baseIR, "baseIR")
+  assertIRShape(input.headIR, "headIR")
   ensureSchemasAgree(input.baseIR, input.headIR)
   const stage1 = matchStageId(input.baseIR.symbols, input.headIR.symbols)
   const stage2 = matchStageGitRename(
@@ -176,6 +178,36 @@ function ensureSchemasAgree(base: IR, head: IR): void {
 }
 
 /**
+ * Top-level shape check. Refuses to enter the 5-stage matcher when a caller hands in an
+ * IR-shaped object that is missing one of the collections the matcher requires as an
+ * array. Without this, a malformed `baseIR = { symbols: undefined, ... }` would crash
+ * deep inside `matchStageId` with `TypeError: undefined is not iterable`, leaving the
+ * root cause obscured. Not a full schema validation — just an entry-point smoke test.
+ */
+function assertIRShape(ir: IR, name: "baseIR" | "headIR"): void {
+  if (ir === null || typeof ir !== "object") {
+    throw new DiffError(`${name} must be an IR object; got ${typeof ir}.`, {
+      code: "ir-shape-invalid",
+      value: name,
+    })
+  }
+  if (typeof ir.$schema !== "string" || ir.$schema.length === 0) {
+    throw new DiffError(`${name}.$schema must be a non-empty schema URL.`, {
+      code: "ir-shape-invalid",
+      value: `${name}.$schema`,
+    })
+  }
+  for (const field of ["symbols", "components", "dependencies"] as const) {
+    if (!Array.isArray(ir[field])) {
+      throw new DiffError(`${name}.${field} must be an array.`, {
+        code: "ir-shape-invalid",
+        value: `${name}.${field}`,
+      })
+    }
+  }
+}
+
+/**
  * Deterministic ordering of the `symbols[]` output:
  * 1. by status (alphabetical) — pins added/changed/moved sections
  * 2. by the "reference" id (`after` for change/move/toggle, otherwise `symbol`)
@@ -191,11 +223,8 @@ function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
 }
 
 function referenceId(change: SymbolChange): string {
-  if (change.status === "added" || change.status === "removed") {
-    const s = change.symbol as IRSymbol
-    return s.id
-  }
-  return (change.after as IRSymbol).id
+  if (change.status === "added" || change.status === "removed") return change.symbol.id
+  return change.after.id
 }
 
 /**

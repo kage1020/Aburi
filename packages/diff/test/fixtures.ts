@@ -1,6 +1,10 @@
 import type {
+  Call,
   Component,
+  Decorator,
   Dependency,
+  Effect,
+  EffectId,
   Fingerprint,
   IR,
   Symbol as IRSymbol,
@@ -62,6 +66,36 @@ export function sig(overrides: Partial<Signature> = {}): Signature {
     async: overrides.async ?? false,
     generator: overrides.generator ?? false,
     typeParameters: overrides.typeParameters ?? [],
+  }
+}
+
+export function decorator(overrides: Partial<Decorator> & { name: string }): Decorator {
+  return {
+    name: overrides.name,
+    raw: overrides.raw ?? `@${overrides.name}()`,
+    arguments: overrides.arguments ?? [],
+    boundary: overrides.boundary ?? false,
+    line: overrides.line ?? 1,
+  }
+}
+
+export function effect(
+  overrides: Partial<Effect> & { id: EffectId; target: string; plugin: string },
+): Effect {
+  return {
+    id: overrides.id,
+    target: overrides.target,
+    line: overrides.line ?? 1,
+    plugin: overrides.plugin,
+    confidence: overrides.confidence ?? "high",
+  }
+}
+
+export function call(overrides: Partial<Call> & { target: string }): Call {
+  return {
+    target: overrides.target,
+    line: overrides.line ?? 1,
+    resolved: overrides.resolved ?? null,
   }
 }
 

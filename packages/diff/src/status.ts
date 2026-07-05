@@ -1,4 +1,4 @@
-import type { Symbol as IRSymbol, SymbolDelta } from "@aburi/types"
+import type { Symbol as IRSymbol } from "@aburi/types"
 
 export type SymbolStatus = "unchanged" | "moved" | "changed" | "moved+changed" | "dropped-toggled"
 
@@ -33,25 +33,4 @@ export type DropDirection = "to-dropped" | "to-kept"
 
 export function dropDirection(head: IRSymbol): DropDirection {
   return head.dropped ? "to-dropped" : "to-kept"
-}
-
-/**
- * §4.1 — `dropped-toggled` intentionally elides delta computation. This helper mirrors
- * that by returning a zeroed SymbolDelta: consumers that want to render "nothing changed"
- * can rely on a plain shape rather than optional-chaining every field. Not exported from
- * the package index because the JSON projection never persists it; used by tests only.
- */
-export function zeroedDelta(): SymbolDelta {
-  return {
-    apiChanged: false,
-    logicChanged: false,
-    syntaxChanged: false,
-    componentChanged: false,
-    visibilityChanged: false,
-    rules: { added: [], removed: [], modified: [] },
-    effects: { added: [], removed: [], modified: [] },
-    calls: { added: [], removed: [], modified: [] },
-    decorators: { added: [], removed: [], modified: [] },
-    signature: null,
-  }
 }

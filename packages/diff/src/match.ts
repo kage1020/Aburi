@@ -1,6 +1,6 @@
 import type { Symbol as IRSymbol, MatchRationale } from "@aburi/types"
 import { signatureSimilarity } from "./signature"
-import { nameSimilarity, ownerSimilarity, tokenizeName } from "./similarity"
+import { lastSegment, nameSimilarity, ownerSimilarity, tokenizeName } from "./similarity"
 
 /**
  * A concluded pairing of one base Symbol with one head Symbol, along with the
@@ -149,7 +149,8 @@ export function matchStageLogicFingerprint(
       continue
     }
     if (candidates.length === 1) {
-      const only = candidates[0] as IRSymbol
+      const only = candidates[0]
+      if (only === undefined) continue
       matched.push({ base: only, head: h, rationale: "logic-fingerprint" })
       usedBaseIds.add(only.id)
       logicMap.delete(h.fingerprint.logic)
@@ -273,19 +274,10 @@ function bucketKey(s: IRSymbol): string {
 }
 
 function thresholdFor(qname: string): number {
-  const last = lastSegmentForBucket(qname)
-  const tokens = tokenizeName(last).length
+  const tokens = tokenizeName(lastSegment(qname)).length
   if (tokens <= 1) return 1
   if (tokens === 2) return 0.95
   return 0.85
-}
-
-function lastSegmentForBucket(qname: string): string {
-  const staticIdx = qname.indexOf("::")
-  if (staticIdx >= 0) return qname.slice(staticIdx + 2)
-  const lastDot = qname.lastIndexOf(".")
-  if (lastDot >= 0) return qname.slice(lastDot + 1)
-  return qname
 }
 
 /**
@@ -293,7 +285,7 @@ function lastSegmentForBucket(qname: string): string {
  * name/signature are the only remaining signals. Score is a coarse "did the last name
  * segment or file basename survive?" — if either half matches we pair (threshold 0.5).
  *
- * This is deliberately lax; drop-list.md §3 already accepts that dropped Symbols live
+ * This is deliberately lax; diff-algorithm.md §3.4.5 already accepts that dropped Symbols live
  * outside the main IR review surface, so occasional false pairings only affect the
  * "Drop-rule variation" fold-out section in the Markdown projection.
  */
@@ -317,7 +309,7 @@ export function matchStageDroppedWeak(
     for (const b of droppedBase) {
       if (b.kind !== h.kind) continue
       if (usedBaseIds.has(b.id)) continue
-      const nameHit = lastNameSegment(b.name) === lastNameSegment(h.name) ? 1 : 0
+      const nameHit = lastSegment(b.name) === lastSegment(h.name) ? 1 : 0
       const fileHit = basename(b.source.file) === basename(h.source.file) ? 1 : 0
       const score = 0.5 * nameHit + 0.5 * fileHit
       if (best === null || score > best.score) best = { symbol: b, score }
@@ -338,14 +330,6 @@ export function matchStageDroppedWeak(
     remainingBase: carryBase,
     remainingHead: [...nonDroppedHead, ...carryHead],
   }
-}
-
-function lastNameSegment(qname: string): string {
-  const staticIdx = qname.indexOf("::")
-  if (staticIdx >= 0) return qname.slice(staticIdx + 2)
-  const lastDot = qname.lastIndexOf(".")
-  if (lastDot >= 0) return qname.slice(lastDot + 1)
-  return qname
 }
 
 function basename(path: string): string {
