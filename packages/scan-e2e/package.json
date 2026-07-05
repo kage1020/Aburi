@@ -1,0 +1,25 @@
+{
+  "name": "@aburi/scan-e2e",
+  "version": "0.0.0",
+  "description": "End-to-end tests for @aburi/core scan orchestration through real language / framework / effect plugins. Private test-only package.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@aburi/core": "workspace:*",
+    "@aburi/effects-nest": "workspace:*",
+    "@aburi/effects-prisma": "workspace:*",
+    "@aburi/framework-nestjs": "workspace:*",
+    "@aburi/framework-next": "workspace:*",
+    "@aburi/lang-typescript": "workspace:*",
+    "@aburi/plugin-registry": "workspace:*",
+    "@aburi/types": "workspace:*",
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
