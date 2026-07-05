@@ -15,25 +15,32 @@ import type { ImportEdge } from "@aburi/types"
  * bus) and misclassifying a stream's `.emit('data', ...)` as a domain event would drown
  * the diff report in noise.
  */
-const NEST_EMITTER_MODULES: ReadonlySet<string> = new Set([
-  "@nestjs/event-emitter",
-  "eventemitter2",
-])
+const NEST_EMITTER_MODULES_LIST = ["@nestjs/event-emitter", "eventemitter2"] as const
+
+export type NestEmitterModule = (typeof NEST_EMITTER_MODULES_LIST)[number]
+
+export const NEST_EMITTER_MODULES: ReadonlySet<NestEmitterModule> = new Set(
+  NEST_EMITTER_MODULES_LIST,
+)
 
 /**
  * True when the file's import list contains a recognized event-emitter module. An
  * empty `edge.source` throws — the language plugin's contract is a normalized non-empty
  * specifier, and silently returning false would hide upstream bugs.
+ *
+ * Validation runs across every edge before the match check so ImportEdge order does
+ * not make throw behavior non-deterministic. Using `.some()` alone would short-circuit
+ * on the first match and never notice a broken edge that happens to sit later.
  */
 export function hasNestEmitterImport(imports: readonly ImportEdge[]): boolean {
-  return imports.some((edge) => {
+  for (const edge of imports) {
     if (edge.source.length === 0) {
       throw new Error(
         "effects-nest: ImportEdge.source is empty — language plugin emitted an unnormalized import edge",
       )
     }
-    return NEST_EMITTER_MODULES.has(edge.source)
-  })
+  }
+  return imports.some((edge) => (NEST_EMITTER_MODULES as ReadonlySet<string>).has(edge.source))
 }
 
 /**
@@ -62,7 +69,16 @@ export function isNestEventEmitterIdentifier(name: string): name is NestEventEmi
   return (NEST_EVENT_EMITTER_IDENTIFIERS as ReadonlySet<string>).has(name)
 }
 
-/** The single method name the plugin classifies. Kept as a literal for template reuse. */
+/**
+ * The single method name the plugin classifies as `event.publish` for v0.1. Kept as a
+ * literal so downstream derivedBy templates keep their precision.
+ *
+ * EventEmitter2 also ships `.emitAsync(event, ...args)` (Promise-returning variant) and
+ * `.emitAsyncSerial` (serial variant). Those are legitimate publish APIs but sit
+ * outside v0.1 scope — a future patch can add them alongside the sync `.emit` once the
+ * IR's async-effect confidence model is settled. Recognition is deliberately narrow
+ * until then so we do not lock in a shape we would then need to unwind.
+ */
 export const NEST_EMIT_METHOD = "emit" as const
 export type NestEmitMethod = typeof NEST_EMIT_METHOD
 

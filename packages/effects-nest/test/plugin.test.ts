@@ -1,4 +1,4 @@
-import type { PluginContext, VocabRegistry } from "@aburi/types"
+import type { EffectPlugin, PluginContext, VocabRegistry } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { NestEffectsPlugin, nestEffectsPlugin } from "../src/index"
 import { makeCall, makeCtx, makeNestEmitterImport, noopRegistry } from "./fixtures/context"
@@ -51,6 +51,9 @@ describe("NestEffectsPlugin", () => {
   })
 
   it("does not declare dropCallees (Nest logger is DI'd per provider)", () => {
-    expect(nestEffectsPlugin.dropCallees).toBeUndefined()
+    // Access through the EffectPlugin lens because the class narrow type omits the
+    // optional field entirely — the absence at runtime is exactly what we assert.
+    const asInterface: EffectPlugin = nestEffectsPlugin
+    expect(asInterface.dropCallees).toBeUndefined()
   })
 })

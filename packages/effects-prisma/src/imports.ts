@@ -13,24 +13,31 @@ import type { ImportEdge } from "@aburi/types"
  * The set is a literal source of truth. Extending the plugin for community builds or a
  * future Prisma bundle is a table edit here.
  */
-const PRISMA_CLIENT_MODULES: ReadonlySet<string> = new Set([
-  "@prisma/client",
-  "@prisma/client/edge",
-])
+const PRISMA_CLIENT_MODULES_LIST = ["@prisma/client", "@prisma/client/edge"] as const
+
+export type PrismaClientModule = (typeof PRISMA_CLIENT_MODULES_LIST)[number]
+
+export const PRISMA_CLIENT_MODULES: ReadonlySet<PrismaClientModule> = new Set(
+  PRISMA_CLIENT_MODULES_LIST,
+)
 
 /**
  * True when the file's import list contains any recognized Prisma Client module. An
  * empty source string on an ImportEdge is rejected: the language plugin's contract is
  * to emit normalized non-empty specifiers, and treating `""` as unmatched would silently
  * hide upstream bugs.
+ *
+ * Validation runs across every edge before the match check so ImportEdge order does
+ * not make throw behavior non-deterministic. Using `.some()` alone would short-circuit
+ * on the first match and never notice a broken edge that happens to sit later.
  */
 export function hasPrismaImport(imports: readonly ImportEdge[]): boolean {
-  return imports.some((edge) => {
+  for (const edge of imports) {
     if (edge.source.length === 0) {
       throw new Error(
         "effects-prisma: ImportEdge.source is empty — language plugin emitted an unnormalized import edge",
       )
     }
-    return PRISMA_CLIENT_MODULES.has(edge.source)
-  })
+  }
+  return imports.some((edge) => (PRISMA_CLIENT_MODULES as ReadonlySet<string>).has(edge.source))
 }

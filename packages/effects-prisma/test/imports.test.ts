@@ -61,4 +61,15 @@ describe("hasPrismaImport", () => {
       hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 1, dynamic: false }]),
     ).toThrow(/ImportEdge\.source is empty/)
   })
+
+  it("throws even when a broken ImportEdge sits after a legitimate match", () => {
+    // Order-independence pin — using `.some()` alone would short-circuit on the first
+    // match and silently accept a broken edge later in the list.
+    expect(() =>
+      hasPrismaImport([
+        { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
+        { source: "", symbols: ["x"], line: 2, dynamic: false },
+      ]),
+    ).toThrow(/ImportEdge\.source is empty/)
+  })
 })

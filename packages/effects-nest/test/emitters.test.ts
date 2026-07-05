@@ -60,6 +60,17 @@ describe("hasNestEmitterImport", () => {
       hasNestEmitterImport([{ source: "", symbols: ["EventEmitter2"], line: 1, dynamic: false }]),
     ).toThrow(/ImportEdge\.source is empty/)
   })
+
+  it("throws even when a broken ImportEdge sits after a legitimate match", () => {
+    // Order-independence pin — using `.some()` alone would short-circuit on the first
+    // match and silently accept a broken edge later in the list.
+    expect(() =>
+      hasNestEmitterImport([
+        { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false },
+        { source: "", symbols: ["x"], line: 2, dynamic: false },
+      ]),
+    ).toThrow(/ImportEdge\.source is empty/)
+  })
 })
 
 describe("event-emitter identifier vocabulary", () => {
@@ -99,8 +110,15 @@ describe("emit method sentinel", () => {
     expect(isNestEmitMethod("emit")).toBe(true)
   })
 
-  it("rejects imposters (`.emitAsync`, `.emits`, `.emitEvent`)", () => {
+  it("rejects `.emitAsync` — a real EventEmitter2 API that is out of v0.1 scope", () => {
+    // `.emitAsync` and `.emitAsyncSerial` are legitimate publish APIs on EventEmitter2.
+    // v0.1 does not classify them (see NEST_EMIT_METHOD docstring). This test pins the
+    // scope so a future change that widens it does so deliberately.
     expect(isNestEmitMethod("emitAsync")).toBe(false)
+    expect(isNestEmitMethod("emitAsyncSerial")).toBe(false)
+  })
+
+  it("rejects unrelated near-miss names (`.emits`, `.emitEvent`)", () => {
     expect(isNestEmitMethod("emits")).toBe(false)
     expect(isNestEmitMethod("emitEvent")).toBe(false)
   })

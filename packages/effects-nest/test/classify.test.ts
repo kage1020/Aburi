@@ -61,11 +61,15 @@ describe("classifyNestCall — negative paths (two-signal defense)", () => {
   it("returns null when the name segment is not in the recognized identifier set", () => {
     // Common name-collision culprits: `socket.emit` (@nestjs/websockets), `process.emit`
     // (Node global), `stream.emit`, arbitrary user-named emitters (`bus.emit`,
-    // `notifier.emit`). All colocated with a legit @nestjs/event-emitter import.
+    // `notifier.emit`), and the generic `emitter.emit` / `this.emitter.emit` shape the
+    // docstring calls out as explicitly out of scope. All colocated with a legit
+    // @nestjs/event-emitter import to prove the name gate does the work.
     expect(classifyNestCall(makeCall({ target: "socket.emit" }), ctxWithNest)).toBeNull()
     expect(classifyNestCall(makeCall({ target: "process.emit" }), ctxWithNest)).toBeNull()
     expect(classifyNestCall(makeCall({ target: "stream.emit" }), ctxWithNest)).toBeNull()
     expect(classifyNestCall(makeCall({ target: "bus.emit" }), ctxWithNest)).toBeNull()
+    expect(classifyNestCall(makeCall({ target: "emitter.emit" }), ctxWithNest)).toBeNull()
+    expect(classifyNestCall(makeCall({ target: "this.emitter.emit" }), ctxWithNest)).toBeNull()
   })
 
   it("returns null when the method is not the exact `emit` sentinel", () => {
@@ -88,6 +92,20 @@ describe("classifyNestCall — malformed input fail-fast", () => {
 
   it("throws for an empty target", () => {
     expect(() => classifyNestCall(makeCall({ target: "" }), ctxWithNest)).toThrow(/target is empty/)
+  })
+
+  it("throws for malformed targets even when the file does not import a Nest emitter", () => {
+    // The import gate must NOT shadow malformed-input detection — otherwise the same
+    // upstream bug would surface only in Nest-consuming files and stay silent in the
+    // 99% of files that never import an emitter. Locking the order at the test seam.
+    const ctxNoImport = makeCtx({ imports: [] })
+    expect(() => classifyNestCall(makeCall({ target: "" }), ctxNoImport)).toThrow(/target is empty/)
+    expect(() => classifyNestCall(makeCall({ target: "eventBus..emit" }), ctxNoImport)).toThrow(
+      /empty segment/,
+    )
+    expect(() => classifyNestCall(makeCall({ target: ".emit" }), ctxNoImport)).toThrow(
+      /empty segment/,
+    )
   })
 
   it("throws for a leading dot", () => {

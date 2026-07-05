@@ -32,7 +32,13 @@ class NestEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan pipeline. */
-export const nestEffectsPlugin: EffectPlugin = new NestEffectsPlugin()
+/**
+ * Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan
+ * pipeline. The type annotation is omitted deliberately: `class implements EffectPlugin`
+ * already enforces the structural contract, and inferring the narrow class type keeps
+ * the manifest literals (`readonly ["effects-plugin:nest"]`, `"effects-nest"`) visible
+ * to consumers that want to compare against them without a separate manifest import.
+ */
+export const nestEffectsPlugin = new NestEffectsPlugin()
 
 export { NestEffectsPlugin }

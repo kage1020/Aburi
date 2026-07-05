@@ -33,7 +33,11 @@ class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   }
 }
 
-/** Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan pipeline. */
-export const nextFrameworkPlugin: FrameworkPlugin<OpaqueAstNode> = new NextFrameworkPlugin()
+/**
+ * Ready-to-register instance. `class implements FrameworkPlugin<OpaqueAstNode>` enforces
+ * the structural contract; inferring the narrow class type here keeps the manifest
+ * literals visible to consumers that compare against them directly.
+ */
+export const nextFrameworkPlugin = new NextFrameworkPlugin()
 
 export { NextFrameworkPlugin }

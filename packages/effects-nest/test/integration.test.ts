@@ -123,6 +123,32 @@ export function raiseSomething(bus: EventEmitter) {
     }
   })
 
+  it("classifies EventEmitter2.emit(...) (direct class name) through the real parser", async () => {
+    const results = await classifyCalls(
+      "src/publish-direct.ts",
+      `import { EventEmitter2 } from "@nestjs/event-emitter"
+export function publishDirect() {
+  EventEmitter2.emit("thing.happened", 1)
+}`,
+    )
+    const call = results.find((r) => r.target === "EventEmitter2.emit")
+    expect(call?.effectId).toBe("event.publish")
+    expect(call?.derivedBy).toBe("effects-plugin:nest:EventEmitter2.emit")
+  })
+
+  it("classifies eventBus.emit(...) via a direct eventemitter2 import", async () => {
+    const results = await classifyCalls(
+      "src/publish-raw.ts",
+      `import { EventEmitter2 } from "eventemitter2"
+export function publish(eventBus: EventEmitter2) {
+  eventBus.emit("raw.event", {})
+}`,
+      [{ source: "eventemitter2", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
+    )
+    const call = results.find((r) => r.target === "eventBus.emit")
+    expect(call?.effectId).toBe("event.publish")
+  })
+
   it("emits derivedBy under the shared effects-plugin:nest prefix", async () => {
     const results = await classifyCalls(
       "src/prefix-check.ts",
