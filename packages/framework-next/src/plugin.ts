@@ -22,7 +22,7 @@ class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkNextManifest
 
   async init(_ctx: PluginContext): Promise<void> {
-    // No lazy resources. App Router recognition is filename + directive text matching.
+    // Intentional no-op — see class-level docstring for the "no lazy resources" rationale.
   }
 
   classifySymbol(
