@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { isAbsolute, resolve } from "node:path"
 import type {
   Component,
   Config,
@@ -18,6 +18,7 @@ import type {
   WorkspaceManager,
 } from "@aburi/types"
 import { serializeCanonical } from "../canonical"
+import { CoreError } from "../errors"
 import { assertIRIntegrity } from "../integrity"
 import { type DiscoveredFile, discoverFiles, type SkippedFile } from "./discover"
 import { buildDropCFilter } from "./drop-c"
@@ -56,7 +57,8 @@ export interface ParseErrorRecord {
 }
 
 /**
- * Top-level scan orchestration. Delivers WI-11's ACs end-to-end:
+ * Top-level scan orchestration — the discover → route → pipeline → IR-assembly →
+ * integrity-check chain:
  *
  *   1. File discovery via `discoverFiles` — respects `config.ignore`, `.gitignore`, and
  *      `config.maxFileSizeBytes`. Only files whose extension is claimed by a loaded
@@ -74,6 +76,7 @@ export interface ParseErrorRecord {
  * object directly without touching the filesystem.
  */
 export async function scan(input: ScanInput): Promise<ScanResult> {
+  assertWorkspaceRootAbsolute(input.workspaceRoot)
   const logger = input.logger ?? silentLogger
 
   const router = buildLanguageRouter(input.languages)
@@ -101,11 +104,24 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const symbols: IR["symbols"] = []
   const parseErrors: ParseErrorRecord[] = []
   const timeoutEvents: ClassifyTimeoutEvent[] = []
-  const symbolIdsByFile = new Map<string, string[]>()
+  const additionalSkipped: SkippedFile[] = []
+  // Discovery's `languageExtensions` filter already narrowed the file list to
+  // extensions the router recognizes. If `route()` still returns null here it means
+  // the extension filter and the router disagree — the discovered file survived the
+  // filter but the plugin dispatcher rejected it. That is a contract bug worth
+  // recording rather than silently dropping.
+  let terminalParseFailures = 0
 
   for (const discoveredFile of discovered.files) {
     const language = router.route(discoveredFile.path)
-    if (language === null) continue
+    if (language === null) {
+      additionalSkipped.push({
+        path: discoveredFile.path,
+        reason: "unroutable",
+        detail: "extension survived discovery filter but no plugin claims it",
+      })
+      continue
+    }
 
     const sourceFile = await loadSourceFile(input.workspaceRoot, discoveredFile)
 
@@ -126,19 +142,21 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     if (result.parseErrors.length > 0) {
       parseErrors.push({ file: discoveredFile.path, errors: result.parseErrors })
     }
+    if (result.terminalParseFailure) terminalParseFailures++
     timeoutEvents.push(...result.timeoutEvents)
     symbols.push(...result.symbols)
-    symbolIdsByFile.set(
-      discoveredFile.path,
-      result.symbols.map((s) => s.id),
-    )
   }
 
   symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
+  // parsedFiles counts every file the pipeline successfully parsed. Files with
+  // recoverable parse errors still count as parsed (a non-null tree survived); only
+  // terminal parse failures (null tree) are excluded. Unroutable files never reach
+  // the pipeline and are recorded on `skipped` instead.
+  const attempted = discovered.files.length - additionalSkipped.length
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
-    parsedFiles: discovered.files.length - parseErrors.length,
+    parsedFiles: attempted - terminalParseFailures,
     symbols,
     timeoutEvents,
   })
@@ -165,26 +183,44 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   assertIRIntegrity(ir)
 
-  return { ir, parseErrors, skipped: discovered.skipped, timeoutEvents }
+  const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  )
+  return { ir, parseErrors, skipped, timeoutEvents }
 }
 
 /**
  * Serialize an IR to `<output-dir>/aburi.ir.json`. Uses `serializeCanonical` so the
  * output is byte-stable across runs — timestamps and unordered maps do not perturb it.
  */
+export interface WriteCanonicalIROptions {
+  /**
+   * Match `SerializeOptions.format`. "pretty" (the default) matches `aburi scan`'s
+   * standard on-disk layout; "compact" mirrors the `--compact` CLI flag.
+   */
+  format?: "pretty" | "compact"
+}
+
 export async function writeCanonicalIR(
   ir: IR,
   outputPath: string,
-  options: { pretty?: boolean } = {},
+  options: WriteCanonicalIROptions = {},
 ): Promise<string> {
-  const serialized = serializeCanonical(ir, {
-    format: options.pretty === false ? "compact" : "pretty",
-  })
+  const serialized = serializeCanonical(ir, { format: options.format ?? "pretty" })
   const { writeFile, mkdir } = await import("node:fs/promises")
   const { dirname } = await import("node:path")
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, serialized, "utf8")
   return serialized
+}
+
+function assertWorkspaceRootAbsolute(root: string): void {
+  if (!isAbsolute(root)) {
+    throw new CoreError(
+      `ScanInput.workspaceRoot must be an absolute path, got "${root}". A relative root would be resolved against process.cwd() and produce non-portable Symbol ids.`,
+      { code: "scan-workspace-not-absolute", value: root },
+    )
+  }
 }
 
 function collectLangDropPatterns(languages: readonly LanguagePlugin[]): string[] {
@@ -224,8 +260,8 @@ function buildStats(input: BuildStatsInput): Stats {
     stats.effectClassifyTimeouts = input.timeoutEvents.map(
       (event): EffectClassifyTimeout => ({
         plugin: event.plugin,
-        symbolId: `${event.plugin}#${event.target}@${event.file}:${event.line}`,
-        timeoutMs: Math.round(event.elapsedMs),
+        symbolId: event.symbolId,
+        timeoutMs: event.budgetMs,
       }),
     )
   }
@@ -252,8 +288,23 @@ function buildPluginRefs(input: ScanInput): PluginRef[] {
   return refs
 }
 
+/**
+ * Placeholder grammar revision emitted for lang plugins that do not yet expose their
+ * tree-sitter revision through the plugin surface. The schema (ir-schema §3.4) requires
+ * a non-null value for `type: "lang"`; using a stable sentinel keeps IRs schema-valid
+ * without pretending we know what revision produced them. Consumers can detect this
+ * value and treat it as "pending" for cross-run comparability. A future patch that
+ * teaches lang plugins to publish `grammarRevision` will thread it through here.
+ */
+const PENDING_GRAMMAR_REVISION = "pending@0.0.0"
+
 function buildPluginRef(name: string, type: PluginRef["type"], version: string): PluginRef {
-  return { name, type, version, grammarRevision: type === "lang" ? null : null }
+  return {
+    name,
+    type,
+    version,
+    grammarRevision: type === "lang" ? PENDING_GRAMMAR_REVISION : null,
+  }
 }
 
 const silentLogger: Logger = {

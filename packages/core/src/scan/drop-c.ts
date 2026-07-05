@@ -52,15 +52,16 @@ export class DropCFilter {
   readonly #dropPrefixes: readonly string[]
   readonly #keepPrefixes: readonly string[]
 
+  /** @internal — call `buildDropCFilter` instead so the `@Decorator` sigil strip is not bypassed. */
   constructor(
     core: readonly string[],
     pluginDropCallees: readonly string[],
     suppress: readonly string[],
     keep: readonly string[],
   ) {
-    // Decorator names in `keep[]` use `@Name` syntax per config.v1 §6.2. Strip the `@`
-    // for prefix comparison — a decorator can't reach here anyway (this is call-level)
-    // so the strip is defensive against consumers mixing the two syntaxes.
+    // Decorator names in `keep[]` use `@Name` syntax per drop-list.md §6.2. Strip the
+    // `@` for prefix comparison — a decorator can't reach here anyway (this is
+    // call-level) so the strip is defensive against consumers mixing the two syntaxes.
     this.#dropPrefixes = [...core, ...pluginDropCallees, ...suppress]
     this.#keepPrefixes = keep.map((k) => (k.startsWith("@") ? k.slice(1) : k))
   }

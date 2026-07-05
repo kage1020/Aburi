@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import { glob } from "tinyglobby"
+import { CoreError } from "../errors"
 import { toPosixRelative } from "../id"
 
 /**
@@ -45,7 +46,7 @@ export const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024
 export interface DiscoverOptions {
   /**
    * Workspace root absolute path. All returned file paths are POSIX-relative to this
-   * root — matches the `SourceRange.file` contract in ir-schema §5.1.
+   * root — matches the `SourceRange.file` contract in ir-schema §12 (SourceRange).
    */
   workspaceRoot: string
   /**
@@ -67,7 +68,7 @@ export interface DiscoverOptions {
   respectGitignore?: boolean
   /**
    * Cap in bytes. Files larger than this are dropped from discovery with a
-   * `stats.skipped` entry so the WASM parsers do not have to fight oversized inputs.
+   * `ScanResult.skipped` entry so the WASM parsers do not have to fight oversized inputs.
    */
   maxFileSizeBytes?: number
   /**
@@ -87,7 +88,7 @@ export interface DiscoveredFile {
 
 export interface SkippedFile {
   path: string
-  reason: "over-size" | "unreadable"
+  reason: "over-size" | "unreadable" | "unroutable"
   detail?: string
 }
 
@@ -172,9 +173,24 @@ async function readGitignore(workspaceRoot: string): Promise<string[]> {
   try {
     const content = await readFile(path, "utf8")
     return parseGitignore(content)
-  } catch {
-    return []
+  } catch (error) {
+    // Missing file is fine — most workspaces do not have a .gitignore at the root
+    // level and gracefully fall back to just the core ignore patterns. Any other
+    // failure (permission denied, I/O error, symlink loop) is a real problem the
+    // caller needs to see instead of a silently-empty pattern list.
+    if (isEnoent(error)) return []
+    throw new CoreError(
+      `.gitignore at "${path}" exists but could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      { code: "scan-gitignore-unreadable", value: path },
+      { cause: error },
+    )
   }
+}
+
+function isEnoent(error: unknown): boolean {
+  return (
+    typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT"
+  )
 }
 
 /**

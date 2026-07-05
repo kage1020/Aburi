@@ -22,6 +22,10 @@ export type CoreErrorCode =
   | "language-routing-collision"
   /** A caller supplied a plugin list that violates the manifest-registry contract at scan wiring time. */
   | "scan-plugin-misconfigured"
+  /** `.gitignore` exists but could not be read (I/O error, permission, symlink loop). Missing file is silently ignored. */
+  | "scan-gitignore-unreadable"
+  /** `ScanInput.workspaceRoot` was not an absolute path; scan cannot resolve files reliably. */
+  | "scan-workspace-not-absolute"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to ir-schema.md §14 numbering (1..11). */

@@ -20,6 +20,7 @@ import type {
   VocabRegistry,
   WalkContext,
 } from "@aburi/types"
+import { CoreError } from "../errors"
 import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { decideSymbolDrop } from "./drop-b"
 import type { DropCFilter } from "./drop-c"
@@ -28,14 +29,20 @@ import { type ClassifyTimeoutEvent, classifyWithTimeout } from "./timeout"
 /**
  * Per-file pipeline output. The Symbols carry finalized fingerprints and are already
  * routed through Category B / C drop rules. `imports` is preserved so caller-side
- * dependency extraction (v0.2) has access without re-parsing.
+ * dependency extraction (future dependency-extraction pass) has access without re-parsing.
  */
 export interface FilePipelineResult {
   symbols: IRSymbol[]
   imports: readonly ImportEdge[]
   parseErrors: readonly ParseError[]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
-  /** POSIX-relative path of the file; carried on the result so the scan orchestrator does not need to keep a parallel array. */
+  /**
+   * True when the language plugin's `parseFile` returned a null tree — the file could
+   * not be parsed at all. Recoverable errors (non-null tree + errors[]) do not flip
+   * this flag; those files are still counted as parsed even when they carry warnings.
+   */
+  terminalParseFailure: boolean
+  /** POSIX-relative path of the file. */
   path: string
 }
 
@@ -53,7 +60,8 @@ export interface FilePipelineInput {
 
 /**
  * Run the extraction pipeline for a single file. The steps follow
- * design/details/lang-plugin.md §5 and effect-plugin.md §3 in order:
+ * design/details/lang-plugin.md §5.3 (extraction order) and effect-plugin.md §5.1
+ * (first-match-wins) in order:
  *
  *   1. parse the file — a null tree is a terminal parse failure, everything else is
  *      surfaced as a recoverable error and we keep going.
@@ -83,6 +91,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       imports: parseResult.imports,
       parseErrors,
       timeoutEvents,
+      terminalParseFailure: true,
       path: file.path,
     }
   }
@@ -142,6 +151,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     imports: parseResult.imports,
     parseErrors,
     timeoutEvents,
+    terminalParseFailure: false,
     path: file.path,
   }
 }
@@ -237,7 +247,13 @@ function classifyCalls(input: ClassifyCallsInput): {
         },
       }
       if (input.classifyTimeoutMs !== undefined) timeoutOptions.timeoutMs = input.classifyTimeoutMs
-      const result = classifyWithTimeout(effect, call, ctx, input.file.path, timeoutOptions)
+      const result = classifyWithTimeout(
+        effect,
+        call,
+        ctx,
+        { symbolId: input.candidate.id, file: input.file.path },
+        timeoutOptions,
+      )
       if (result === null) continue
       classifiedEffects.push({
         id: result.effectId,
@@ -270,14 +286,21 @@ function byTargetThenLine(
 
 /**
  * Recover the LanguageId from a Symbol id. The id contract is
- * `<language>:<posix-relative-path>#<qualified-name>` per ir-schema §5.1, so the
- * language sits before the first colon. An id that does not carry a colon indicates a
- * language plugin violated the id contract — the caller surfaces that as a scan-time
- * error via the integrity check downstream rather than crashing here.
+ * `<language>:<posix-relative-path>#<qualified-name>` per ir-schema §3.1, so the
+ * language sits before the first colon. An id without a colon means the language
+ * plugin violated the id contract — throw so the scan surfaces the bug loudly rather
+ * than emitting a Symbol with an empty language that silently passes the (currently
+ * language-agnostic) integrity check.
  */
 function extractLanguageFromId(id: string): string {
   const colon = id.indexOf(":")
-  return colon < 0 ? "" : id.slice(0, colon)
+  if (colon <= 0) {
+    throw new CoreError(
+      `Symbol id "${id}" does not carry a language prefix; the language plugin violated the Symbol.id contract (\`<language>:<file>#<qname>\`).`,
+      { code: "scan-plugin-misconfigured", value: id },
+    )
+  }
+  return id.slice(0, colon)
 }
 
 function buildDroppedSymbol(

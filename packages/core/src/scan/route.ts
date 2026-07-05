@@ -1,4 +1,4 @@
-import type { LanguagePlugin, ParsedTree } from "@aburi/types"
+import type { LanguagePlugin } from "@aburi/types"
 import { CoreError } from "../errors"
 
 /**
@@ -10,10 +10,10 @@ import { CoreError } from "../errors"
  * plugin-registry already enforces manifest uniqueness at load time and reaching here
  * with a collision means something in the caller wiring is inconsistent.
  */
-export function buildLanguageRouter<TTree = ParsedTree>(
-  plugins: readonly LanguagePlugin<TTree, unknown>[],
-): LanguageRouter<TTree> {
-  const table = new Map<string, LanguagePlugin<TTree, unknown>>()
+export function buildLanguageRouter(
+  plugins: readonly LanguagePlugin<unknown, unknown>[],
+): LanguageRouter {
+  const table = new Map<string, LanguagePlugin<unknown, unknown>>()
   for (const plugin of plugins) {
     for (const ext of plugin.fileExtensions) {
       const key = ext.toLowerCase()
@@ -31,14 +31,14 @@ export function buildLanguageRouter<TTree = ParsedTree>(
 }
 
 /**
- * Extension-to-plugin dispatcher. Split into its own type (rather than a bare Map) so
- * consumers can hold the router across calls without exposing the internal table shape,
- * and so `knownExtensions` can be handed straight to `discoverFiles`.
+ * Extension-to-plugin dispatcher. Constructed only via `buildLanguageRouter` so the
+ * collision check cannot be bypassed by a direct `new LanguageRouter(...)` call.
  */
-export class LanguageRouter<TTree = ParsedTree> {
-  readonly #table: ReadonlyMap<string, LanguagePlugin<TTree, unknown>>
+export class LanguageRouter {
+  readonly #table: ReadonlyMap<string, LanguagePlugin<unknown, unknown>>
 
-  constructor(table: ReadonlyMap<string, LanguagePlugin<TTree, unknown>>) {
+  /** @internal — call `buildLanguageRouter` instead. */
+  constructor(table: ReadonlyMap<string, LanguagePlugin<unknown, unknown>>) {
     this.#table = table
   }
 
@@ -49,10 +49,10 @@ export class LanguageRouter<TTree = ParsedTree> {
 
   /**
    * Route a file path to its owning plugin. Returns `null` when the extension is not
-   * claimed by any plugin — the scan pipeline treats those files as unroutable and
-   * records them separately rather than trying to guess a fallback.
+   * claimed by any plugin — the scan pipeline records those as `skipped.reason ===
+   * "unroutable"` rather than guessing a fallback.
    */
-  route(path: string): LanguagePlugin<TTree, unknown> | null {
+  route(path: string): LanguagePlugin<unknown, unknown> | null {
     const dot = path.lastIndexOf(".")
     if (dot < 0) return null
     const ext = path.slice(dot).toLowerCase()
