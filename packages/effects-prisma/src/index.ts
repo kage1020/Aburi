@@ -1,4 +1,4 @@
-export { classifyPrismaCall } from "./classify"
+export { classifyPrismaCall, EFFECTS_PRISMA_DERIVED_BY_PREFIX } from "./classify"
 export { hasPrismaImport } from "./imports"
 export { effectsPrismaManifest } from "./manifest"
 export {

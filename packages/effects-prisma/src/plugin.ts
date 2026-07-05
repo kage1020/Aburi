@@ -21,9 +21,7 @@ import { effectsPrismaManifest } from "./manifest"
 class PrismaEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsPrismaManifest
 
-  async init(_ctx: PluginContext): Promise<void> {
-    // Intentional no-op — see class-level docstring for the "no lazy resources" rationale.
-  }
+  async init(_ctx: PluginContext): Promise<void> {}
 
   classify(call: CallCandidate, ctx: ClassifyContext): EffectClassification | null {
     return classifyPrismaCall(call, ctx)

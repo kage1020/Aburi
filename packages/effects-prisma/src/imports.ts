@@ -1,21 +1,36 @@
 import type { ImportEdge } from "@aburi/types"
 
 /**
- * npm packages that expose a `PrismaClient`. The plugin recognizes any file that pulls
- * in one of these; targets whose file lacks the import are left unclassified so an
- * unrelated `db.user.findMany()` from another ORM does not get miscategorized.
+ * npm module specifiers that expose a `PrismaClient`. Any file that pulls in one of
+ * these is treated as a Prisma consumer; files that reference the identifier without
+ * importing Prisma are ignored so an unrelated `db.user.findMany()` from another ORM
+ * does not get miscategorized.
  *
- * `@prisma/client` is the runtime import path Prisma Client uses since v4. The generated
- * client sits there regardless of how the schema was set up. Extensions / community
- * builds ship under distinct npm names — adding those is a table edit here.
+ * - `@prisma/client` — the default Prisma Client entry since v4.
+ * - `@prisma/client/edge` — the Edge runtime entry used by Vercel Edge, Cloudflare
+ *   Workers, and Prisma Accelerate. Different bundle, same delegate surface.
+ *
+ * The set is a literal source of truth. Extending the plugin for community builds or a
+ * future Prisma bundle is a table edit here.
  */
-const PRISMA_CLIENT_MODULES: ReadonlySet<string> = new Set(["@prisma/client"])
+const PRISMA_CLIENT_MODULES: ReadonlySet<string> = new Set([
+  "@prisma/client",
+  "@prisma/client/edge",
+])
 
 /**
- * True when the file's import list contains any Prisma Client module. Empty import list
- * yields `false` — no false positives for files that reference the identifier but do
- * not actually import Prisma.
+ * True when the file's import list contains any recognized Prisma Client module. An
+ * empty source string on an ImportEdge is rejected: the language plugin's contract is
+ * to emit normalized non-empty specifiers, and treating `""` as unmatched would silently
+ * hide upstream bugs.
  */
 export function hasPrismaImport(imports: readonly ImportEdge[]): boolean {
-  return imports.some((edge) => PRISMA_CLIENT_MODULES.has(edge.source))
+  return imports.some((edge) => {
+    if (edge.source.length === 0) {
+      throw new Error(
+        "effects-prisma: ImportEdge.source is empty — language plugin emitted an unnormalized import edge",
+      )
+    }
+    return PRISMA_CLIENT_MODULES.has(edge.source)
+  })
 }

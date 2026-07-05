@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { effectsPrismaManifest } from "../src/index"
+import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, effectsPrismaManifest } from "../src/index"
 
 describe("effectsPrismaManifest", () => {
   it("declares the effects-prisma name and effects type", () => {
@@ -8,8 +8,9 @@ describe("effectsPrismaManifest", () => {
   })
 
   it("does not declare any effect ids — core db.* vocabulary is used at classify() return", () => {
-    // Core vocab (`db.read`, `db.write`, `db.transaction`) is owned by the engine per
-    // extension-vocab.md §5.1 and MUST NOT appear in a plugin's provides.effects.
+    // Core vocab (`db.read`, `db.write`, `db.transaction`) is owned by the core engine
+    // per extension-vocab.md §5.1 (reserved namespaces) and MUST NOT appear in a
+    // plugin's provides.effects — validated at registry load time.
     expect(effectsPrismaManifest.provides.effects).toEqual([])
     expect(effectsPrismaManifest.provides.effectPrefixes).toEqual([])
   })
@@ -22,6 +23,15 @@ describe("effectsPrismaManifest", () => {
 
   it("owns the effects-plugin:prisma derivedBy prefix", () => {
     expect(effectsPrismaManifest.provides.derivedByPrefixes).toEqual(["effects-plugin:prisma"])
+  })
+
+  it("references the shared derivedBy prefix constant (single source of truth)", () => {
+    // The manifest's declared prefix and the classifier's tag builder must not drift
+    // apart across edits — pin they refer to the same literal.
+    expect(effectsPrismaManifest.provides.derivedByPrefixes).toEqual([
+      EFFECTS_PRISMA_DERIVED_BY_PREFIX,
+    ])
+    expect(EFFECTS_PRISMA_DERIVED_BY_PREFIX).toBe("effects-plugin:prisma")
   })
 
   it("targets aburi engine with a wildcard version (v0.1 pre-1.0 compatibility posture)", () => {

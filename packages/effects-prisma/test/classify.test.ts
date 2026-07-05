@@ -109,14 +109,62 @@ describe("classifyPrismaCall — negative paths", () => {
     ).toBeNull()
   })
 
-  it("returns null when the target is empty", () => {
-    expect(classifyPrismaCall(makeCall({ target: "" }), ctxWithPrisma)).toBeNull()
+  it("returns null for raw SQL escapes ($queryRaw / $executeRaw / $queryRawUnsafe)", () => {
+    // These are Prisma Client methods, but they do not fit the model.<verb> shape and
+    // v0.1 does not attempt to classify them. Locking as regression pins so a future
+    // change that adds them cannot silently start matching them here first.
+    expect(classifyPrismaCall(makeCall({ target: "prisma.$queryRaw" }), ctxWithPrisma)).toBeNull()
+    expect(classifyPrismaCall(makeCall({ target: "prisma.$executeRaw" }), ctxWithPrisma)).toBeNull()
+    expect(
+      classifyPrismaCall(makeCall({ target: "prisma.$queryRawUnsafe" }), ctxWithPrisma),
+    ).toBeNull()
   })
 
   it("does not classify `$transactional` — only the exact `$transaction` sentinel", () => {
     expect(
       classifyPrismaCall(makeCall({ target: "prisma.$transactional" }), ctxWithPrisma),
     ).toBeNull()
+  })
+
+  it("returns null for a bare `$transaction` (no client segment)", () => {
+    // Naked `$transaction()` is not a Prisma call — the transaction API is a method on
+    // the client. Locking the 2-segment minimum for the transaction path.
+    expect(classifyPrismaCall(makeCall({ target: "$transaction" }), ctxWithPrisma)).toBeNull()
+  })
+
+  it("classifies deeply chained services.prisma.$transaction as db.transaction", () => {
+    expect(
+      classifyPrismaCall(makeCall({ target: "services.prisma.$transaction" }), ctxWithPrisma)
+        ?.effectId,
+    ).toBe("db.transaction")
+  })
+})
+
+describe("classifyPrismaCall — malformed input fail-fast", () => {
+  const ctxWithPrisma = makeCtx({ imports: [makePrismaImport()] })
+
+  it("throws for an empty target — language plugin contract violation", () => {
+    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPrisma)).toThrow(
+      /target is empty/,
+    )
+  })
+
+  it("throws for a target with a leading dot (empty first segment)", () => {
+    expect(() => classifyPrismaCall(makeCall({ target: ".create" }), ctxWithPrisma)).toThrow(
+      /empty segment/,
+    )
+  })
+
+  it("throws for a target with a trailing dot", () => {
+    expect(() => classifyPrismaCall(makeCall({ target: "prisma.user." }), ctxWithPrisma)).toThrow(
+      /empty segment/,
+    )
+  })
+
+  it("throws for a target with adjacent dots — otherwise `prisma..create` would false-classify as db.write", () => {
+    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxWithPrisma)).toThrow(
+      /empty segment/,
+    )
   })
 })
 
@@ -129,13 +177,20 @@ describe("classifyPrismaCall — purity", () => {
     expect(first).toEqual(second)
   })
 
-  it("does not mutate the input CallCandidate or ClassifyContext", () => {
+  it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
+    // structuredClone would reject the VocabRegistry's function properties, so clone
+    // the data slices the classifier actually reads (file + owner + language) plus the
+    // CallCandidate. If any of those change, we know the classifier mutated its input.
     const ctx = makeCtx({ imports: [makePrismaImport()] })
-    const originalImports = [...ctx.file.imports]
-    const call = makeCall({ target: "prisma.user.findMany" })
-    const originalCall = { ...call }
+    const call = makeCall({ target: "prisma.user.findMany", literalArgs: ["value"] })
+    const fileSnapshot = structuredClone(ctx.file)
+    const ownerSnapshot = structuredClone(ctx.owner)
+    const languageSnapshot = ctx.language
+    const callSnapshot = structuredClone(call)
     classifyPrismaCall(call, ctx)
-    expect(call).toEqual(originalCall)
-    expect(ctx.file.imports).toEqual(originalImports)
+    expect(call).toEqual(callSnapshot)
+    expect(ctx.file).toEqual(fileSnapshot)
+    expect(ctx.owner).toEqual(ownerSnapshot)
+    expect(ctx.language).toBe(languageSnapshot)
   })
 })

@@ -3,6 +3,13 @@ import { hasPrismaImport } from "./imports"
 import { isPrismaReadMethod, isPrismaTransactionMethod, isPrismaWriteMethod } from "./methods"
 
 /**
+ * Shared derivedBy namespace. Duplicated in `manifest.ts` `derivedByPrefixes` so a
+ * registry check will flag divergence at load time, but both point at the same string
+ * literal here to keep them coupled at edit time too.
+ */
+export const EFFECTS_PRISMA_DERIVED_BY_PREFIX = "effects-plugin:prisma" as const
+
+/**
  * Classify a CallCandidate against Prisma Client conventions.
  *
  * Recognition strategy:
@@ -10,15 +17,14 @@ import { isPrismaReadMethod, isPrismaTransactionMethod, isPrismaWriteMethod } fr
  *      import → `null`, so callers can chain other effect plugins after this one.
  *   2. The target is split on `.`; the plugin looks at the trailing segments to match
  *      Prisma's fixed client surface. Two shapes are accepted:
- *        - `<...>.<model>.<verb>` — a model delegate call. `<verb>` decides read/write.
- *        - `<...>.$transaction` — the top-level transaction API on the client itself.
- *      The leading segments are irrelevant — `prisma.user.create` and
- *      `this.prisma.user.create` and `container.services.prisma.user.create` all
- *      resolve to the same effect. The design intentionally does not verify the leaf
- *      identifier is literally `prisma`; the import gate is the accuracy control.
- *   3. The classifier returns `null` for any callee whose trailing method is not on
- *      the Prisma delegate surface. Unrelated helpers colocated in a Prisma file flow
- *      through to the next plugin.
+ *        - `<...>.<model>.<verb>` (3+ segments) — a model delegate call. The client
+ *          segment stops two-segment method collisions (Express `router.create(...)`)
+ *          from false-classifying.
+ *        - `<...>.$transaction` (2+ segments) — the top-level transaction API on the
+ *          client itself.
+ *   3. Malformed targets (empty string, adjacent / leading / trailing dots) throw — the
+ *      language plugin's contract is a normalized non-empty callee, so a violation
+ *      here is an upstream bug we surface loudly instead of silently miscategorizing.
  *
  * The function is a pure lookup — no I/O, no state, no async — matching the per-call
  * timeout budget the core enforces (effect-plugin.md §5.1.1).
@@ -29,30 +35,31 @@ export function classifyPrismaCall(
 ): EffectClassification | null {
   if (!hasPrismaImport(ctx.file.imports)) return null
 
-  const parts = call.target.split(".")
-  const method = parts.at(-1)
-  if (method === undefined) return null
+  const parts = assertNonEmptySegments(call.target)
+  const method = parts[parts.length - 1] ?? ""
 
   if (isPrismaTransactionMethod(method)) {
+    // Bare `$transaction()` (single segment) is not a Prisma call — the transaction
+    // API only makes sense as a method on the client (`<client>.$transaction(...)`).
+    if (parts.length < 2) return null
     return {
       effectId: "db.transaction",
       confidence: "high",
-      derivedBy: "effects-plugin:prisma:tx",
+      derivedBy: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:tx`,
     }
   }
 
-  // Model-delegate calls need at least three segments — `<client>.<model>.<verb>` —
-  // to be distinguishable from unrelated two-segment method calls (e.g. Express's
-  // `router.create(...)` or an Array's `.findMany` name collision). Requiring the
-  // client segment blocks those false positives even when the file happens to import
-  // `@prisma/client` for a colocated reason.
+  // Model delegate calls need `<client>.<model>.<verb>` to distinguish them from
+  // unrelated two-segment method calls (Express `router.create(...)`, an Array's
+  // hypothetical `.findMany` collision) that would otherwise false-positive in files
+  // that colocate Prisma with another library.
   if (parts.length < 3) return null
 
   if (isPrismaReadMethod(method)) {
     return {
       effectId: "db.read",
       confidence: "high",
-      derivedBy: "effects-plugin:prisma:read",
+      derivedBy: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:read`,
     }
   }
 
@@ -60,9 +67,33 @@ export function classifyPrismaCall(
     return {
       effectId: "db.write",
       confidence: "high",
-      derivedBy: "effects-plugin:prisma:write",
+      derivedBy: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:write`,
     }
   }
 
   return null
+}
+
+/**
+ * Split `target` on `.` and reject any shape a well-formed language plugin would never
+ * emit: an empty target, or one with an empty segment (leading, trailing, or adjacent
+ * dots). A malformed target here would otherwise slip through the length gate and
+ * false-classify — e.g. `"prisma..create"` has three segments and would match a write
+ * verb — so this is the fail-fast the sibling classifiers apply at their entry points.
+ */
+function assertNonEmptySegments(target: string): string[] {
+  if (target.length === 0) {
+    throw new Error(
+      "effects-prisma: CallCandidate.target is empty — language plugin emitted an unnormalized callee",
+    )
+  }
+  const parts = target.split(".")
+  for (const segment of parts) {
+    if (segment.length === 0) {
+      throw new Error(
+        `effects-prisma: CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`,
+      )
+    }
+  }
+  return parts
 }

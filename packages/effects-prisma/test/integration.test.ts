@@ -144,4 +144,39 @@ export async function listUsers() {
       expect(r.effectId).toBeNull()
     }
   })
+
+  it("classifies inner tx callback calls (tx.user.create inside $transaction) as db.write", async () => {
+    // The callback form `prisma.$transaction(async (tx) => tx.user.create(...))` is the
+    // idiomatic interactive transaction pattern. Each nested call has its own target so
+    // the classifier sees them independently — pin that the inner target classifies as
+    // a normal write.
+    const results = await classifyCalls(
+      "src/services/tx.ts",
+      `import { PrismaClient } from "@prisma/client"
+export async function moveUser(prisma: PrismaClient) {
+  return prisma.$transaction(async (tx) => {
+    return tx.user.create({ data: {} })
+  })
+}`,
+    )
+    const outerTx = results.find((r) => r.target === "prisma.$transaction")
+    const innerCall = results.find((r) => r.target === "tx.user.create")
+    expect(outerTx?.effectId).toBe("db.transaction")
+    expect(innerCall?.effectId).toBe("db.write")
+  })
+
+  it("emits derivedBy under the shared effects-plugin:prisma prefix", async () => {
+    const results = await classifyCalls(
+      "src/services/prefix-check.ts",
+      `import { PrismaClient } from "@prisma/client"
+export async function work(prisma: PrismaClient) {
+  await prisma.user.findMany()
+  await prisma.user.create({ data: {} })
+  await prisma.$transaction([])
+}`,
+    )
+    for (const r of results.filter((r) => r.derivedBy !== null)) {
+      expect(r.derivedBy?.startsWith("effects-plugin:prisma:")).toBe(true)
+    }
+  })
 })
