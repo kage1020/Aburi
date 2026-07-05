@@ -28,7 +28,14 @@ class PrismaEffectsPlugin implements EffectPlugin {
   }
 }
 
-/** Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan pipeline. */
-export const prismaEffectsPlugin: EffectPlugin = new PrismaEffectsPlugin()
+/**
+ * Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan
+ * pipeline. The type annotation is omitted deliberately: `class implements EffectPlugin`
+ * already enforces the structural contract, and inferring the narrow class type keeps
+ * the manifest literals (`readonly ["effects-plugin:prisma"]`, `"effects-prisma"`)
+ * visible to consumers that want to compare against them without a separate manifest
+ * import.
+ */
+export const prismaEffectsPlugin = new PrismaEffectsPlugin()
 
 export { PrismaEffectsPlugin }

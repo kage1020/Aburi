@@ -149,6 +149,22 @@ describe("classifyPrismaCall — malformed input fail-fast", () => {
     )
   })
 
+  it("throws for malformed targets even when the file does not import Prisma", () => {
+    // The import gate must NOT shadow malformed-input detection — otherwise the same
+    // upstream bug would surface only in Prisma-consuming files and stay silent
+    // everywhere else. Locking the order at the test seam.
+    const ctxNoImport = makeCtx({ imports: [] })
+    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxNoImport)).toThrow(
+      /target is empty/,
+    )
+    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxNoImport)).toThrow(
+      /empty segment/,
+    )
+    expect(() => classifyPrismaCall(makeCall({ target: ".create" }), ctxNoImport)).toThrow(
+      /empty segment/,
+    )
+  })
+
   it("throws for a target with a leading dot (empty first segment)", () => {
     expect(() => classifyPrismaCall(makeCall({ target: ".create" }), ctxWithPrisma)).toThrow(
       /empty segment/,
