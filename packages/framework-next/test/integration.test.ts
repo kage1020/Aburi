@@ -56,6 +56,22 @@ describe("integration — lang-typescript → framework-next", () => {
     expect(pageSymbol?.classification?.extKind).toBe("framework:next:page")
   })
 
+  it.each([
+    ["page", "Page"],
+    ["layout", "Layout"],
+    ["template", "Template"],
+    ["loading", "Loading"],
+    ["error", "ErrorBoundary"],
+    ["not-found", "NotFound"],
+  ] as const)("classifies app/**/%s.tsx default export as framework:next:%s (table-driven)", async (role, componentName) => {
+    const results = await classifyEach(
+      `app/dashboard/${role}.tsx`,
+      `export default function ${componentName}() { return null }`,
+    )
+    const found = results.find((r) => r.name === componentName)
+    expect(found?.classification?.extKind).toBe(`framework:next:${role}`)
+  })
+
   it("classifies an app/**/route.ts named GET / POST as framework:next:route", async () => {
     const results = await classifyEach(
       "app/api/users/route.ts",
