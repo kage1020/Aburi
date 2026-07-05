@@ -9,12 +9,17 @@ import { type AppRouterFile, recognizeAppRouterFile } from "./app-router"
 import { detectModuleDirective, type ModuleDirective } from "./directives"
 
 /**
- * Named HTTP verb exports that the App Router recognizes inside `route.ts` / `route.js`.
+ * Every HTTP verb the App Router recognizes as a named export inside `route.{ts,js}`.
  * A verb export becomes a `framework:next:route` Symbol; consumers can inspect the set
  * directly (via the public re-export from `./index`) if they need to detect route
  * handlers themselves.
+ *
+ * Literal union so `Set.has(x)` narrows `x` to the union inside a truthy branch, and
+ * template-literal types over `derivedBy` inherit the same literal precision downstream.
  */
-export const NEXT_ROUTE_HTTP_VERBS: ReadonlySet<string> = new Set([
+export type NextHttpVerb = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD"
+
+export const NEXT_ROUTE_HTTP_VERBS: ReadonlySet<NextHttpVerb> = new Set<NextHttpVerb>([
   "GET",
   "POST",
   "PUT",
@@ -23,6 +28,15 @@ export const NEXT_ROUTE_HTTP_VERBS: ReadonlySet<string> = new Set([
   "OPTIONS",
   "HEAD",
 ])
+
+/**
+ * Type guard: true when `name` is one of the seven recognized HTTP verbs. Emits the
+ * narrowed literal type so downstream template-literal builders (`derivedBy` etc.)
+ * inherit the precision.
+ */
+export function isNextHttpVerb(name: string): name is NextHttpVerb {
+  return (NEXT_ROUTE_HTTP_VERBS as ReadonlySet<string>).has(name)
+}
 
 /**
  * Classify a SymbolCandidate emitted by the language plugin against the Next.js App
@@ -37,9 +51,9 @@ export const NEXT_ROUTE_HTTP_VERBS: ReadonlySet<string> = new Set([
  *     even when the extKind alone would look identical.
  *
  * Non-app-router files can still carry `"use client"` / `"use server"` directives — a
- * colocated component under `app/` for example — but v0.1 only annotates them when the
- * enclosing Symbol is already an App Router special file. Broader server-action
- * detection is deferred.
+ * colocated component under `app/` for example — but this classifier only annotates them
+ * when the enclosing Symbol is already an App Router special file. Broader server-action
+ * detection across arbitrary files is out of the current recognizer's scope.
  */
 export function classifyNextSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -48,7 +62,7 @@ export function classifyNextSymbol(
   const file = recognizeAppRouterFile(symbol.source.file)
   if (file === null) return null
 
-  if (file.isRoute) return classifyRouteSymbol(symbol, ctx)
+  if (file.role === "route") return classifyRouteSymbol(symbol, ctx)
   return classifyComponentSymbol(symbol, file, ctx)
 }
 
@@ -68,7 +82,7 @@ function classifyRouteSymbol(
   // `lastQnameSegment` throws on a broken qname, which is the right behavior — a route
   // handler with a malformed name is a language-plugin bug we do not want to swallow.
   const leaf = lastQnameSegment(symbol.name)
-  if (!NEXT_ROUTE_HTTP_VERBS.has(leaf)) return null
+  if (!isNextHttpVerb(leaf)) return null
   return withDirective(
     {
       extKind: "framework:next:route",
@@ -125,7 +139,9 @@ function withDirective(base: SymbolClassification, ctx: ExtractionContext): Symb
   }
 }
 
-function directiveTag(directive: ModuleDirective): string {
+type DirectiveTag = "client-component" | "server-action"
+
+function directiveTag(directive: ModuleDirective): DirectiveTag {
   return directive === "client" ? "client-component" : "server-action"
 }
 

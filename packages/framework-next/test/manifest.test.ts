@@ -47,11 +47,14 @@ describe("public vocabulary exports", () => {
   })
 
   it("exposes the recognized HTTP verbs so consumers can share the predicate", () => {
-    for (const verb of ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]) {
+    for (const verb of ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"] as const) {
       expect(NEXT_ROUTE_HTTP_VERBS.has(verb)).toBe(true)
     }
-    expect(NEXT_ROUTE_HTTP_VERBS.has("CONNECT")).toBe(false)
-    expect(NEXT_ROUTE_HTTP_VERBS.has("TRACE")).toBe(false)
+    // Non-verbs are not in the literal union — the type-erased Set surface is used
+    // deliberately here to lock the runtime behavior alongside the type shape.
+    const untyped = NEXT_ROUTE_HTTP_VERBS as ReadonlySet<string>
+    expect(untyped.has("CONNECT")).toBe(false)
+    expect(untyped.has("TRACE")).toBe(false)
   })
 
   it("keeps the manifest extKind ids in sync with the App Router roles", () => {

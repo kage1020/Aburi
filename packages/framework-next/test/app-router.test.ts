@@ -17,7 +17,6 @@ describe("recognizeAppRouterFile — App Router special files", () => {
   ])("recognizes %s as %s", (path, role) => {
     const result = recognizeAppRouterFile(path)
     expect(result?.role).toBe(role)
-    expect(result?.isRoute).toBe(role === "route")
   })
 
   it.each([
@@ -39,9 +38,21 @@ describe("recognizeAppRouterFile — App Router special files", () => {
     expect(recognizeAppRouterFile("apps/foo/page.tsx")).toBeNull()
   })
 
-  it("isRoute is true only for `route.ts` / `route.js`", () => {
-    expect(recognizeAppRouterFile("app/api/route.ts")?.isRoute).toBe(true)
-    expect(recognizeAppRouterFile("app/api/route.js")?.isRoute).toBe(true)
-    expect(recognizeAppRouterFile("app/dashboard/page.tsx")?.isRoute).toBe(false)
+  it("role === 'route' only for `route.ts` / `route.js`", () => {
+    expect(recognizeAppRouterFile("app/api/route.ts")?.role).toBe("route")
+    expect(recognizeAppRouterFile("app/api/route.js")?.role).toBe("route")
+    expect(recognizeAppRouterFile("app/api/route.tsx")).toBeNull()
+    expect(recognizeAppRouterFile("app/api/route.jsx")).toBeNull()
+    expect(recognizeAppRouterFile("app/dashboard/page.tsx")?.role).toBe("page")
+  })
+
+  it("base name is case-sensitive (Page.tsx is a colocated component, not a page)", () => {
+    expect(recognizeAppRouterFile("app/Page.tsx")).toBeNull()
+    expect(recognizeAppRouterFile("app/PAGE.tsx")).toBeNull()
+    expect(recognizeAppRouterFile("app/Layout.tsx")).toBeNull()
+  })
+
+  it("backslash-separated paths are rejected (POSIX-only, matches Symbol.id contract)", () => {
+    expect(recognizeAppRouterFile("app\\dashboard\\page.tsx")).toBeNull()
   })
 })
