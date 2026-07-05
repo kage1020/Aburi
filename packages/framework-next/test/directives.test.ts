@@ -51,4 +51,32 @@ describe("detectModuleDirective — top-of-module directive detection", () => {
     // The string continues into a larger expression, so it is not a bare statement.
     expect(detectModuleDirective("'use client' + 'x'\nexport function X() {}")).toBeNull()
   })
+
+  it("finds 'use client' after a leading 'use strict' directive (multi-directive prologue)", () => {
+    expect(detectModuleDirective("'use strict';\n'use client';\nexport function X() {}")).toBe(
+      "client",
+    )
+  })
+
+  it("finds 'use server' after a leading 'use strict' directive", () => {
+    expect(detectModuleDirective("'use strict'\n'use server'\nexport async function X() {}")).toBe(
+      "server",
+    )
+  })
+
+  it("stops at the first non-string statement even when unknown directives precede it", () => {
+    expect(detectModuleDirective("'unknown-directive'\nconst x = 1\n'use client'")).toBeNull()
+  })
+
+  it("transparently skips a leading UTF-8 BOM before the directive", () => {
+    // "﻿" is the encoded BOM; editors often paste one in front of otherwise valid
+    // sources without the writer noticing.
+    expect(detectModuleDirective("﻿'use client'\nexport function X() {}")).toBe("client")
+  })
+
+  it("handles BOM + leading comments + directive together", () => {
+    expect(detectModuleDirective("﻿// copyright\n'use client'\nexport function X() {}")).toBe(
+      "client",
+    )
+  })
 })
