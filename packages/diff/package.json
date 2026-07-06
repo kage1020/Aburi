@@ -1,0 +1,40 @@
+{
+  "name": "@aburi/diff",
+  "version": "0.0.0",
+  "description": "Aburi diff engine: 5-stage semantic matcher (id / git-rename / logic fingerprint / name+signature / dropped weak) followed by status classification and per-Symbol delta computation, emitting aburi.diff.v1-conformant output for PR-review workflows",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aburi/core": "workspace:*",
+    "@aburi/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
