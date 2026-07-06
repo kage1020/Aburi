@@ -1,4 +1,5 @@
 import type { IR } from "@aburi/types"
+import { compareStrings } from "./format"
 
 /** §4.2 — nodes above this render as text-only fallback so GitHub mermaid does not choke. */
 export const MERMAID_NODE_LIMIT = 100
@@ -62,7 +63,7 @@ function renderManagers(ir: IR): string {
   if (ir.workspace.managers.length === 0) return "—"
   return ir.workspace.managers
     .slice()
-    .sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0))
+    .sort((a, b) => compareStrings(a.tool, b.tool))
     .map((m) => `${m.tool} (${m.roots.map((r) => `\`${r}\``).join(", ")})`)
     .join(", ")
 }
@@ -75,7 +76,7 @@ function renderComponentsTable(ir: IR): string[] {
   rows.push("| id | roots | languages | frameworks | symbols |")
   rows.push("|---|---|---|---|---|")
   const symbolCountsByComponent = countSymbolsPerComponent(ir)
-  for (const c of [...ir.components].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+  for (const c of [...ir.components].sort((a, b) => compareStrings(a.id, b.id))) {
     const roots = c.roots.map((r) => `\`${r}\``).join(", ")
     const languages = c.languages.join(", ")
     const frameworks = (c.frameworks ?? []).length > 0 ? (c.frameworks ?? []).join(", ") : "—"
@@ -131,9 +132,9 @@ function renderDependencies(ir: IR): string[] {
 
 function sortedDeps(ir: IR): typeof ir.dependencies {
   return [...ir.dependencies].sort((a, b) => {
-    if (a.from !== b.from) return a.from < b.from ? -1 : 1
-    if (a.to !== b.to) return a.to < b.to ? -1 : 1
-    return a.via < b.via ? -1 : a.via > b.via ? 1 : 0
+    if (a.from !== b.from) return compareStrings(a.from, b.from)
+    if (a.to !== b.to) return compareStrings(a.to, b.to)
+    return compareStrings(a.via, b.via)
   })
 }
 
@@ -170,7 +171,7 @@ function renderEffectSurface(ir: IR): string[] {
   if (rowsByEffect.size === 0) return []
   const sorted = [...rowsByEffect.values()].sort((a, b) => {
     if (a.count !== b.count) return b.count - a.count
-    return a.effect < b.effect ? -1 : a.effect > b.effect ? 1 : 0
+    return compareStrings(a.effect, b.effect)
   })
   const top = sorted.slice(0, EFFECT_SURFACE_TOP_N)
   const out: string[] = ["| effect | count | components |", "|---|---|---|"]

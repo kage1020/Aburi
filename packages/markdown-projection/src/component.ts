@@ -1,12 +1,14 @@
 import type { Component, Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
   callRow,
+  compareStrings,
   decoratorRows,
   droppedFoldout,
   effectRow,
   fingerprintLine,
   orderFilesAscending,
   orderSymbolsWithinFile,
+  requireDropReason,
   ruleRow,
   signatureLine,
   symbolHeading,
@@ -75,7 +77,7 @@ export function projectComponent(input: ProjectComponentInput): string {
         droppedSymbols
           .slice()
           .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-          .map((s) => `\`${s.id}\` — ${s.dropReason ?? "unspecified"}`),
+          .map((s) => `\`${s.id}\` — ${requireDropReason(s)}`),
       ),
     )
   }
@@ -93,9 +95,9 @@ function joinCode(items: readonly string[]): string {
 
 function sortDeps(deps: readonly Dependency[]): Dependency[] {
   return [...deps].sort((a, b) => {
-    if (a.from !== b.from) return a.from < b.from ? -1 : 1
-    if (a.to !== b.to) return a.to < b.to ? -1 : 1
-    return a.via < b.via ? -1 : a.via > b.via ? 1 : 0
+    if (a.from !== b.from) return compareStrings(a.from, b.from)
+    if (a.to !== b.to) return compareStrings(a.to, b.to)
+    return compareStrings(a.via, b.via)
   })
 }
 

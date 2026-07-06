@@ -49,6 +49,23 @@ export function codeFragment(source: string, options: { forceFence?: boolean } =
 }
 
 /**
+ * Read the `dropReason` off a dropped Symbol. The IR schema (aburi.ir.v1) enforces
+ * `dropped=true → dropReason: string (minLength 1)`, so `null` here is an upstream
+ * invariant violation the projection layer must surface loudly instead of quietly
+ * emitting `— unspecified` in reviewer-facing Markdown.
+ */
+export function requireDropReason(symbol: {
+  id: string
+  dropped: boolean
+  dropReason: string | null | undefined
+}): string {
+  if (symbol.dropReason === null || symbol.dropReason === undefined || symbol.dropReason === "") {
+    throw new ProjectionInvariantError("dropReason", `Symbol(id=${symbol.id}, dropped=true)`)
+  }
+  return symbol.dropReason
+}
+
+/**
  * §3.6 — dropped fold-out. `entries` are pre-sorted lines that go inside the `<details>`
  * block; the summary count is derived from the array length.
  */
@@ -77,16 +94,36 @@ export function droppedFoldout(entries: readonly string[]): string {
  * "omit the row" rather than inserting a blank line, so section spacing stays tight.
  */
 export function decoratorRows(decorators: readonly Decorator[]): string[] {
-  if (decorators.length === 0) return []
-  const boundary = decorators.filter((d) => d.boundary)
-  const regular = decorators.filter((d) => !d.boundary)
+  const parts = splitDecorators(decorators)
   const rows: string[] = []
-  if (boundary.length > 0) rows.push(`**Boundary**: ${renderDecoratorList(boundary)}`)
-  if (regular.length > 0) rows.push(`**Decorators**: ${renderDecoratorList(regular)}`)
+  if (parts.boundary !== null) rows.push(`**Boundary**: ${parts.boundary}`)
+  if (parts.regular !== null) rows.push(`**Decorators**: ${parts.regular}`)
   return rows
 }
 
-function renderDecoratorList(decorators: readonly Decorator[]): string {
+/**
+ * Structured variant of `decoratorRows`. Returns the boundary / regular decorator lists
+ * as pre-rendered inline strings (or `null` when the corresponding bucket is empty), so
+ * callers that render into different section shapes (§7 `aburi explain` layout, §6 diff
+ * "decorator added" rows) do not have to re-parse the compact `**Boundary**: …` string
+ * back into fields.
+ */
+export interface DecoratorLists {
+  boundary: string | null
+  regular: string | null
+}
+
+export function splitDecorators(decorators: readonly Decorator[]): DecoratorLists {
+  if (decorators.length === 0) return { boundary: null, regular: null }
+  const boundary = decorators.filter((d) => d.boundary)
+  const regular = decorators.filter((d) => !d.boundary)
+  return {
+    boundary: boundary.length === 0 ? null : renderDecoratorList(boundary),
+    regular: regular.length === 0 ? null : renderDecoratorList(regular),
+  }
+}
+
+export function renderDecoratorList(decorators: readonly Decorator[]): string {
   return decorators.map((d) => `\`@${d.raw}\``).join(" ")
 }
 
@@ -112,29 +149,68 @@ export function signatureLine(signature: Signature | null | undefined): string |
 
 /**
  * §5.6 — Rule row. Each RuleType renders differently so the reviewer can tell what
- * failed at a glance. Unknown types (unlikely, but the schema is `string`-ish) fall back
- * to a plain `<type> (L<line>)` row so they never disappear silently.
+ * failed at a glance. Missing per-type payloads (a `guard` without `condition`, a `loop`
+ * without `loopKind`, etc.) violate the IR contract in ir-schema §5.5 and throw
+ * `ProjectionInvariantError` so an upstream extractor bug does not surface as
+ * `- guard:  (L5)` in a reviewer's PR.
+ *
+ * `switch` exhaustiveness is enforced by the trailing `never` branch — adding a new
+ * `RuleType` to the schema will produce a compile error here instead of a silent
+ * "plain `<type>` (L<line>)" fallback.
  */
 export function ruleRow(rule: Rule): string {
   const lineTag = `(L${rule.line})`
   switch (rule.type) {
     case "guard":
-      return `- guard: ${inlineOrFence(rule.condition ?? "")} ${lineTag}`
+      return `- guard: ${inlineOrFence(requireField(rule, "condition"))} ${lineTag}`
     case "throw":
-      return `- throw: ${inlineOrFence(rule.what ?? "")} ${lineTag}`
+      return `- throw: ${inlineOrFence(requireField(rule, "what"))} ${lineTag}`
     case "return":
-      return `- return: ${inlineOrFence(rule.expr ?? "")} ${lineTag}`
+      return `- return: ${inlineOrFence(requireField(rule, "expr"))} ${lineTag}`
     case "loop":
-      return `- loop (\`${rule.loopKind ?? "?"}\`) ${lineTag}`
+      return `- loop (\`${requireField(rule, "loopKind")}\`) ${lineTag}`
     case "try":
       return `- try ${lineTag}`
     case "switch":
-      return `- switch: ${inlineOrFence(rule.condition ?? "")} ${lineTag}`
+      return `- switch: ${inlineOrFence(requireField(rule, "condition"))} ${lineTag}`
     case "match":
-      return `- match: ${inlineOrFence(rule.condition ?? "")} ${lineTag}`
+      return `- match: ${inlineOrFence(requireField(rule, "condition"))} ${lineTag}`
     default:
-      return `- ${rule.type} ${lineTag}`
+      return assertNeverRule(rule)
   }
+}
+
+/**
+ * Raised when the projection layer encounters a Symbol/Rule/... whose IR-mandatory field
+ * is missing. The `field` is the schema name so error messages remain greppable in CI
+ * logs, and `subject` is a diagnostic identifier (usually the Rule's line + type combo).
+ */
+export class ProjectionInvariantError extends Error {
+  readonly field: string
+  readonly subject: string
+  constructor(field: string, subject: string) {
+    super(`markdown-projection invariant violated: ${field} required on ${subject}`)
+    this.name = "ProjectionInvariantError"
+    this.field = field
+    this.subject = subject
+  }
+}
+
+function requireField(rule: Rule, field: "condition" | "what" | "expr" | "loopKind"): string {
+  const value = rule[field]
+  if (value === null || value === undefined) {
+    throw new ProjectionInvariantError(field, `Rule(type=${rule.type}, line=${rule.line})`)
+  }
+  return value
+}
+
+function assertNeverRule(rule: Rule): never {
+  // `rule.type` is narrowed to `never` inside the default branch when every RuleType
+  // discriminant is handled by the switch above, so this line only compiles if the
+  // union is fully covered — TypeScript's assertNever pattern applied to a nested
+  // discriminant.
+  const exhaustive: never = rule.type as never
+  throw new ProjectionInvariantError("type", `Rule(type=${JSON.stringify(exhaustive)})`)
 }
 
 function inlineOrFence(text: string): string {
@@ -152,9 +228,10 @@ export function effectRow(eff: Effect): string {
 }
 
 /**
- * §5.8 — Call row. `resolved: null` renders the plain form; a resolved id would future-
- * link to the callee, but v0.1 keeps the row shape identical to avoid PR churn later
- * when the anchor scheme is finalised.
+ * §5.8 — Call row. The row shape is deliberately identical whether or not `resolved` is
+ * populated; v0.1 does not render the `resolved` Symbol id yet because the anchor scheme
+ * for cross-Symbol links inside a single Markdown file is not finalised. Emitting the
+ * resolved id here now would create PR churn when that scheme lands.
  */
 export function callRow(callObj: Call): string {
   return `- \`${callObj.target}\` (L${callObj.line})`
@@ -198,5 +275,15 @@ export function orderSymbolsWithinFile(symbols: readonly IRSymbol[]): IRSymbol[]
 
 /** §3.2 — file grouping preserves POSIX ordering per §3.3. */
 export function orderFilesAscending(files: readonly string[]): string[] {
-  return [...files].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return [...files].sort(compareStrings)
+}
+
+/**
+ * Three-value string comparator. The two-value form `a < b ? -1 : 1` is subtly wrong:
+ * equal strings still return `1`, which destabilises `Array.prototype.sort` on ties even
+ * though the algorithm itself is stable. Every string-key sort in this package routes
+ * through here so the tiebreak stays deterministic.
+ */
+export function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
 }

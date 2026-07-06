@@ -57,4 +57,10 @@ describe("assignSymbolFilenames — collision handling", () => {
     expect(b).toMatch(/^a-b-[0-9a-f]{6}$/)
     expect(a).not.toBe(b)
   })
+
+  it("throws on a duplicate Symbol id (IR contract forbids duplicates)", () => {
+    expect(() => assignSymbolFilenames(["ts:src/a.ts#Foo", "ts:src/a.ts#Foo"])).toThrow(
+      /duplicate Symbol id/,
+    )
+  })
 })

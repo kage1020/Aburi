@@ -9,6 +9,7 @@ export {
 } from "./diff"
 export { projectSymbolExplain } from "./explain"
 export {
+  type DroppedToggledBreakdown,
   evaluateFailOn,
   type FailOnClause,
   type FailOnComparator,
@@ -19,7 +20,9 @@ export {
 export {
   callRow,
   codeFragment,
+  compareStrings,
   confidenceBadge,
+  type DecoratorLists,
   decoratorRows,
   droppedFoldout,
   effectRow,
@@ -28,8 +31,12 @@ export {
   inlineCodePath,
   orderFilesAscending,
   orderSymbolsWithinFile,
+  ProjectionInvariantError,
+  renderDecoratorList,
+  requireDropReason,
   ruleRow,
   signatureLine,
+  splitDecorators,
   symbolHeading,
 } from "./format"
 export {

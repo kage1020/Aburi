@@ -1,5 +1,12 @@
 import type { Symbol as IRSymbol } from "@aburi/types"
-import { callRow, decoratorRows, effectRow, ruleRow, signatureLine } from "./format"
+import {
+  callRow,
+  effectRow,
+  requireDropReason,
+  ruleRow,
+  signatureLine,
+  splitDecorators,
+} from "./format"
 
 /**
  * §7 — `aburi explain <id>`. A stand-alone Symbol view, richer than the per-Component
@@ -7,7 +14,7 @@ import { callRow, decoratorRows, effectRow, ruleRow, signatureLine } from "./for
  * inlining them under a compact `**Signature**` row. Also carries `derivedBy` and the
  * full fingerprint list (as dedicated `## Fingerprint` block, not the compact `<sub>` line).
  *
- * When the Symbol is `dropped: true`, the design falls back to a 3-line summary —
+ * When the Symbol is `dropped: true`, the design falls back to a short summary —
  * dropped Symbols have no rules/effects/calls/fingerprint by construction (ir-schema §5.6).
  */
 export function projectSymbolExplain(symbol: IRSymbol): string {
@@ -29,19 +36,17 @@ function renderKeptExplain(symbol: IRSymbol): string {
   lines.push(`**Language**: ${symbol.language}`)
   lines.push("")
 
-  const boundaryRows = decoratorRows(symbol.decorators)
-  const boundary = boundaryRows.find((r) => r.startsWith("**Boundary**"))
-  const decorators = boundaryRows.find((r) => r.startsWith("**Decorators**"))
-  if (boundary !== undefined) {
+  const decoratorParts = splitDecorators(symbol.decorators)
+  if (decoratorParts.boundary !== null) {
     lines.push("## Boundary")
     lines.push("")
-    lines.push(boundary.replace("**Boundary**: ", ""))
+    lines.push(decoratorParts.boundary)
     lines.push("")
   }
-  if (decorators !== undefined) {
+  if (decoratorParts.regular !== null) {
     lines.push("## Decorators")
     lines.push("")
-    lines.push(decorators.replace("**Decorators**: ", ""))
+    lines.push(decoratorParts.regular)
     lines.push("")
   }
 
@@ -106,7 +111,7 @@ function renderDroppedExplain(symbol: IRSymbol): string {
   lines.push(
     `**File**: \`${symbol.source.file}:${symbol.source.startLine}-${symbol.source.endLine}\``,
   )
-  lines.push(`**Drop reason**: ${symbol.dropReason ?? "unspecified"}`)
+  lines.push(`**Drop reason**: ${requireDropReason(symbol)}`)
   lines.push("")
   lines.push("_(dropped symbols carry no rules / effects / calls / fingerprint by IR contract.)_")
   lines.push("")

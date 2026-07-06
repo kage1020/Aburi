@@ -7,20 +7,25 @@ import {
 } from "../src"
 import { emptySummary } from "./fixtures"
 
-describe("formatFailOnClause (WI-13 AC 5)", () => {
+describe("formatFailOnClause", () => {
   it("emits bare status for clauses with no threshold", () => {
-    expect(formatFailOnClause({ status: "changed" })).toBe("changed")
-    expect(formatFailOnClause({ status: "dropped-toggled" })).toBe("dropped-toggled")
+    expect(formatFailOnClause({ kind: "bare", status: "changed" })).toBe("changed")
+    expect(formatFailOnClause({ kind: "bare", status: "dropped-toggled" })).toBe("dropped-toggled")
   })
 
   it("emits `status:>N` when a threshold is attached", () => {
-    expect(formatFailOnClause({ status: "changed", comparator: ">", count: 10 })).toBe(
-      "changed:>10",
-    )
+    expect(
+      formatFailOnClause({
+        kind: "threshold",
+        status: "changed",
+        comparator: ">",
+        count: 10,
+      }),
+    ).toBe("changed:>10")
   })
 
   it("supports dropped-toggled sub-directions", () => {
-    expect(formatFailOnClause({ status: "dropped-toggled:to-kept" })).toBe(
+    expect(formatFailOnClause({ kind: "bare", status: "dropped-toggled:to-kept" })).toBe(
       "dropped-toggled:to-kept",
     )
   })
@@ -28,23 +33,28 @@ describe("formatFailOnClause (WI-13 AC 5)", () => {
 
 describe("formatFailOnTriggered — diagnostic phrasing", () => {
   it("mentions the clause + observed count", () => {
-    const clause: FailOnClause = { status: "changed", comparator: ">", count: 10 }
+    const clause: FailOnClause = {
+      kind: "threshold",
+      status: "changed",
+      comparator: ">",
+      count: 10,
+    }
     expect(formatFailOnTriggered(clause, 42)).toBe(
       "--fail-on changed:>10 tripped (observed: 42 changed symbols)",
     )
   })
 
   it("handles bare-status clauses", () => {
-    expect(formatFailOnTriggered({ status: "dropped-toggled" }, 3)).toBe(
+    expect(formatFailOnTriggered({ kind: "bare", status: "dropped-toggled" }, 3)).toBe(
       "--fail-on dropped-toggled tripped (observed: 3 dropped-toggled symbols)",
     )
   })
 })
 
-describe("evaluateFailOn — trigger evaluation", () => {
-  it("fires bare status when observed > 0", () => {
+describe("evaluateFailOn — bare-status branch", () => {
+  it("fires when observed > 0", () => {
     const summary = { ...emptySummary(), changed: 1 }
-    expect(evaluateFailOn({ status: "changed" }, summary)).toEqual({
+    expect(evaluateFailOn({ kind: "bare", status: "changed" }, summary)).toEqual({
       triggered: true,
       observed: 1,
     })
@@ -52,40 +62,117 @@ describe("evaluateFailOn — trigger evaluation", () => {
 
   it("does not fire when observed = 0", () => {
     const summary = emptySummary()
-    expect(evaluateFailOn({ status: "changed" }, summary).triggered).toBe(false)
+    expect(evaluateFailOn({ kind: "bare", status: "changed" }, summary).triggered).toBe(false)
   })
+})
 
-  it("applies > comparator strictly (>10 not fired at 10)", () => {
-    const summary = { ...emptySummary(), changed: 10 }
+describe("evaluateFailOn — comparator matrix", () => {
+  const observedAt = (value: number) => ({ ...emptySummary(), changed: value })
+
+  it("applies > strictly (10 vs threshold 10 = false)", () => {
     expect(
-      evaluateFailOn({ status: "changed", comparator: ">", count: 10 }, summary).triggered,
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: ">", count: 10 },
+        observedAt(10),
+      ).triggered,
     ).toBe(false)
-    const above = { ...emptySummary(), changed: 11 }
-    expect(evaluateFailOn({ status: "changed", comparator: ">", count: 10 }, above).triggered).toBe(
-      true,
-    )
-  })
-
-  it("applies >= comparator inclusively", () => {
-    const summary = { ...emptySummary(), changed: 10 }
     expect(
-      evaluateFailOn({ status: "changed", comparator: ">=", count: 10 }, summary).triggered,
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: ">", count: 10 },
+        observedAt(11),
+      ).triggered,
     ).toBe(true)
   })
 
-  it("evaluates dropped-toggled:to-kept from the caller-supplied breakdown", () => {
-    const summary = { ...emptySummary(), droppedToggled: 5 }
-    // Breakdown: 3 to-dropped + 2 to-kept
-    const evalKept = evaluateFailOn({ status: "dropped-toggled:to-kept" }, summary, {
-      toDropped: 3,
-      toKept: 2,
-    })
-    expect(evalKept.observed).toBe(2)
-    expect(evalKept.triggered).toBe(true)
-    const evalDropped = evaluateFailOn({ status: "dropped-toggled:to-dropped" }, summary, {
-      toDropped: 3,
-      toKept: 2,
-    })
-    expect(evalDropped.observed).toBe(3)
+  it("applies >= inclusively (10 vs threshold 10 = true)", () => {
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: ">=", count: 10 },
+        observedAt(10),
+      ).triggered,
+    ).toBe(true)
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: ">=", count: 10 },
+        observedAt(9),
+      ).triggered,
+    ).toBe(false)
+  })
+
+  it("applies == on exact match", () => {
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: "==", count: 5 },
+        observedAt(5),
+      ).triggered,
+    ).toBe(true)
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: "==", count: 5 },
+        observedAt(4),
+      ).triggered,
+    ).toBe(false)
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: "==", count: 5 },
+        observedAt(6),
+      ).triggered,
+    ).toBe(false)
+  })
+
+  it("applies <= inclusively", () => {
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: "<=", count: 5 },
+        observedAt(5),
+      ).triggered,
+    ).toBe(true)
+    expect(
+      evaluateFailOn(
+        { kind: "threshold", status: "changed", comparator: "<=", count: 5 },
+        observedAt(6),
+      ).triggered,
+    ).toBe(false)
+  })
+})
+
+describe("evaluateFailOn — observedCount status matrix (all 8 branches)", () => {
+  it("maps each FailOnStatus to the correct Summary/breakdown field", () => {
+    const summary = {
+      ...emptySummary(),
+      added: 1,
+      removed: 2,
+      changed: 3,
+      moved: 4,
+      movedChanged: 5,
+      droppedToggled: 7, // 4 to-dropped + 3 to-kept
+    }
+    const breakdown = { toDropped: 4, toKept: 3 }
+    const observe = (status: FailOnClause["status"]) =>
+      evaluateFailOn({ kind: "bare", status }, summary, breakdown).observed
+    expect(observe("added")).toBe(1)
+    expect(observe("removed")).toBe(2)
+    expect(observe("changed")).toBe(3)
+    expect(observe("moved")).toBe(4)
+    expect(observe("moved+changed")).toBe(5)
+    expect(observe("dropped-toggled")).toBe(7)
+    expect(observe("dropped-toggled:to-dropped")).toBe(4)
+    expect(observe("dropped-toggled:to-kept")).toBe(3)
+  })
+})
+
+describe("evaluateFailOn — sub-status without breakdown throws", () => {
+  it("refuses to silently report zero when breakdown is missing", () => {
+    expect(() =>
+      evaluateFailOn({ kind: "bare", status: "dropped-toggled:to-kept" }, emptySummary()),
+    ).toThrow(/droppedToggledBreakdown/)
+    expect(() =>
+      evaluateFailOn({ kind: "bare", status: "dropped-toggled:to-dropped" }, emptySummary()),
+    ).toThrow(/droppedToggledBreakdown/)
+  })
+
+  it("does NOT require breakdown for the bare dropped-toggled bucket", () => {
+    const summary = { ...emptySummary(), droppedToggled: 4 }
+    expect(evaluateFailOn({ kind: "bare", status: "dropped-toggled" }, summary).observed).toBe(4)
   })
 })

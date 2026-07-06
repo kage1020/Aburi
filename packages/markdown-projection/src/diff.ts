@@ -9,11 +9,15 @@ import type {
   SymbolMovedChanged,
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
+import { compareStrings, requireDropReason } from "./format"
 
 /**
  * §6 — `out/diff.md`. Sections are emitted in the fixed importance order
- * (API 変更 → Syntax-only) and the bottom three are collapsed inside `<details>` so PR
- * comments stay reviewer-friendly. Empty sections are dropped entirely (§5.3 rule).
+ * (API 変更 → Syntax-only). Three sections — Moved (semantic no-op), Dropped 変動 (drop
+ * rule flips), Syntax-only 変更 (implementation refactors) — are collapsed inside
+ * `<details>` so PR comments stay reviewer-friendly. Moved + Changed is intentionally
+ * NOT folded because the delta carries semantic impact worth reading. Empty sections
+ * are dropped entirely (§5.3 rule).
  */
 export function projectDiff(diff: DiffResult): string {
   const lines: string[] = []
@@ -133,7 +137,7 @@ function appendSection(lines: string[], heading: string, body: string[]): void {
 }
 
 /**
- * §6.1 — bottom-three sections (Moved / Dropped / Syntax-only) live inside a `<details>`
+ * §6.1 — three sections (Moved / Dropped / Syntax-only) live inside a `<details>`
  * fold-out. Skipping the wrapper when body is empty keeps the file from carrying dangling
  * empty `<details>` blocks that GitHub still renders as a clickable arrow.
  */
@@ -166,63 +170,83 @@ function renderChangedList(items: readonly (SymbolChanged | SymbolMovedChanged)[
 
 function renderDeltaBody(delta: SymbolDelta): string[] {
   const rows: string[] = []
-  const sig = delta.signature
-  if (sig !== null && sig !== undefined) {
-    if (sig.outputs.added.length > 0 || sig.outputs.removed.length > 0) {
-      const before = sig.outputs.removed.map(String).join(" | ") || "—"
-      const after = sig.outputs.added.map(String).join(" | ") || "—"
-      rows.push(`- signature.outputs: \`${before}\` → \`${after}\``)
-    }
-    if (sig.throws.added.length > 0) {
-      rows.push(
-        `- signature.throws added: ${sig.throws.added.map((t) => `\`${String(t)}\``).join(", ")}`,
-      )
-    }
-    if (sig.throws.removed.length > 0) {
-      rows.push(
-        `- signature.throws removed: ${sig.throws.removed.map((t) => `\`${String(t)}\``).join(", ")}`,
-      )
-    }
-    if (sig.inputs.added.length > 0) {
-      rows.push(`- signature.inputs added: ${sig.inputs.added.length} item(s)`)
-    }
-    if (sig.inputs.removed.length > 0) {
-      rows.push(`- signature.inputs removed: ${sig.inputs.removed.length} item(s)`)
-    }
-    if (sig.asyncChanged) rows.push(`- signature.async: toggled`)
-    if (sig.generatorChanged) rows.push(`- signature.generator: toggled`)
-    if (sig.typeParametersChanged) rows.push(`- signature.typeParameters: changed`)
-  }
-  const decorators = delta.decorators
-  if (decorators !== undefined) {
-    for (const added of decorators.added) {
-      const d = added as { name?: string; raw?: string }
-      rows.push(`- decorator added: \`@${d.raw ?? d.name ?? "?"}\``)
-    }
-    for (const removed of decorators.removed) {
-      const d = removed as { name?: string; raw?: string }
-      rows.push(`- decorator removed: \`@${d.raw ?? d.name ?? "?"}\``)
-    }
-    for (const modified of decorators.modified) {
-      const d = modified as { name?: string }
-      rows.push(`- decorator modified: \`@${d.name ?? "?"}\``)
-    }
-  }
-  const rules = delta.rules
-  if (rules !== undefined) {
-    appendArrayGroup(rows, "rules", rules.added, rules.removed)
-  }
-  const effects = delta.effects
-  if (effects !== undefined) {
-    appendArrayGroup(rows, "effects", effects.added, effects.removed)
-  }
-  const calls = delta.calls
-  if (calls !== undefined) {
-    appendArrayGroup(rows, "calls", calls.added, calls.removed)
-  }
+  appendSignatureDelta(rows, delta.signature ?? null)
+  appendDecoratorDelta(rows, delta.decorators)
+  appendRuleDelta(rows, delta.rules)
+  appendEffectDelta(rows, delta.effects)
+  appendCallDelta(rows, delta.calls)
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
   return rows
+}
+
+function appendSignatureDelta(
+  rows: string[],
+  sig: NonNullable<SymbolDelta["signature"]> | null,
+): void {
+  if (sig === null) return
+  if (sig.outputs.added.length > 0 || sig.outputs.removed.length > 0) {
+    const before = renderStringList(sig.outputs.removed)
+    const after = renderStringList(sig.outputs.added)
+    rows.push(`- signature.outputs: \`${before}\` → \`${after}\``)
+  }
+  if (sig.throws.added.length > 0) {
+    rows.push(`- signature.throws added: ${renderInlineList(sig.throws.added)}`)
+  }
+  if (sig.throws.removed.length > 0) {
+    rows.push(`- signature.throws removed: ${renderInlineList(sig.throws.removed)}`)
+  }
+  if (sig.inputs.added.length > 0) {
+    rows.push(`- signature.inputs added: ${sig.inputs.added.length} item(s)`)
+  }
+  if (sig.inputs.removed.length > 0) {
+    rows.push(`- signature.inputs removed: ${sig.inputs.removed.length} item(s)`)
+  }
+  if (sig.asyncChanged) rows.push(`- signature.async: toggled`)
+  if (sig.generatorChanged) rows.push(`- signature.generator: toggled`)
+  if (sig.typeParametersChanged) rows.push(`- signature.typeParameters: changed`)
+}
+
+/**
+ * `ArrayDelta.added/removed/modified` is typed `unknown[]` in the generated schema layer
+ * because the schema erases the per-field element type. The runtime shape, however, is
+ * fixed: `delta.decorators` items are always Decorators, `delta.rules` items are Rules,
+ * etc. Rather than sprinkling `as` casts, we route through predicate-narrowed helpers
+ * so a schema regeneration that adds a field will fail to compile here instead of
+ * silently emitting `@?` placeholders.
+ */
+function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]): void {
+  if (delta === undefined) return
+  for (const raw of delta.added) {
+    const d = asDecoratorLike(raw)
+    if (d === null) continue
+    rows.push(`- decorator added: \`@${d.raw ?? d.name}\``)
+  }
+  for (const raw of delta.removed) {
+    const d = asDecoratorLike(raw)
+    if (d === null) continue
+    rows.push(`- decorator removed: \`@${d.raw ?? d.name}\``)
+  }
+  for (const raw of delta.modified) {
+    const d = asDecoratorLike(raw)
+    if (d === null) continue
+    rows.push(`- decorator modified: \`@${d.name}\``)
+  }
+}
+
+function appendRuleDelta(rows: string[], delta: SymbolDelta["rules"]): void {
+  if (delta === undefined) return
+  appendArrayGroup(rows, "rules", delta.added, delta.removed, describeRuleLike)
+}
+
+function appendEffectDelta(rows: string[], delta: SymbolDelta["effects"]): void {
+  if (delta === undefined) return
+  appendArrayGroup(rows, "effects", delta.added, delta.removed, describeEffectLike)
+}
+
+function appendCallDelta(rows: string[], delta: SymbolDelta["calls"]): void {
+  if (delta === undefined) return
+  appendArrayGroup(rows, "calls", delta.added, delta.removed, describeCallLike)
 }
 
 function appendArrayGroup(
@@ -230,56 +254,129 @@ function appendArrayGroup(
   label: string,
   added: readonly unknown[],
   removed: readonly unknown[],
+  describe: (item: unknown) => string | null,
 ): void {
   if (added.length > 0) {
-    rows.push(`- ${label} added:`)
-    for (const item of added) rows.push(`  - ${describe(item)}`)
+    const lines = added.map(describe).filter((line): line is string => line !== null)
+    if (lines.length > 0) {
+      rows.push(`- ${label} added:`)
+      for (const line of lines) rows.push(`  - ${line}`)
+    }
   }
   if (removed.length > 0) {
-    rows.push(`- ${label} removed:`)
-    for (const item of removed) rows.push(`  - ${describe(item)}`)
+    const lines = removed.map(describe).filter((line): line is string => line !== null)
+    if (lines.length > 0) {
+      rows.push(`- ${label} removed:`)
+      for (const line of lines) rows.push(`  - ${line}`)
+    }
   }
 }
 
-function describe(value: unknown): string {
-  if (value === null || value === undefined) return "—"
-  if (typeof value !== "object") return String(value)
-  const obj = value as {
-    id?: unknown
-    target?: unknown
-    line?: unknown
-    type?: unknown
-    condition?: unknown
-    what?: unknown
-    expr?: unknown
-    name?: unknown
-    raw?: unknown
+// -----------------------------------------------------------------------------
+// Predicate-narrowed views of ArrayDelta entries
+// -----------------------------------------------------------------------------
+
+interface DecoratorLike {
+  name: string
+  raw?: string | undefined
+}
+interface RuleLike {
+  type: string
+  line: number
+  condition?: string | undefined
+  what?: string | undefined
+  expr?: string | undefined
+}
+interface EffectLike {
+  id: string
+  target: string
+  line: number
+}
+interface CallLike {
+  target: string
+  line: number
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function asDecoratorLike(value: unknown): DecoratorLike | null {
+  if (!isRecord(value)) return null
+  const name = value.name
+  const raw = value.raw
+  if (typeof name !== "string") return null
+  return { name, raw: typeof raw === "string" ? raw : undefined }
+}
+
+function asRuleLike(value: unknown): RuleLike | null {
+  if (!isRecord(value)) return null
+  const type = value.type
+  const line = value.line
+  if (typeof type !== "string" || typeof line !== "number") return null
+  const readOptional = (key: "condition" | "what" | "expr"): string | undefined => {
+    const v = value[key]
+    return typeof v === "string" ? v : undefined
   }
-  const line = typeof obj.line === "number" ? ` (L${obj.line})` : ""
-  if (typeof obj.id === "string" && typeof obj.target === "string") {
-    return `${obj.id}: \`${obj.target}\`${line}`
+  return {
+    type,
+    line,
+    condition: readOptional("condition"),
+    what: readOptional("what"),
+    expr: readOptional("expr"),
   }
-  if (typeof obj.target === "string") return `\`${obj.target}\`${line}`
-  if (typeof obj.type === "string") {
-    const detail =
-      typeof obj.condition === "string"
-        ? `: \`${obj.condition}\``
-        : typeof obj.what === "string"
-          ? `: \`${obj.what}\``
-          : typeof obj.expr === "string"
-            ? `: \`${obj.expr}\``
-            : ""
-    return `${obj.type}${detail}${line}`
-  }
-  if (typeof obj.raw === "string") return `\`@${obj.raw}\`${line}`
-  if (typeof obj.name === "string") return `\`${obj.name}\`${line}`
-  return "…"
+}
+
+function asEffectLike(value: unknown): EffectLike | null {
+  if (!isRecord(value)) return null
+  const { id, target, line } = value
+  if (typeof id !== "string" || typeof target !== "string" || typeof line !== "number") return null
+  return { id, target, line }
+}
+
+function asCallLike(value: unknown): CallLike | null {
+  if (!isRecord(value)) return null
+  const { target, line } = value
+  if (typeof target !== "string" || typeof line !== "number") return null
+  return { target, line }
+}
+
+function describeRuleLike(value: unknown): string | null {
+  const rule = asRuleLike(value)
+  if (rule === null) return null
+  const detail = rule.condition ?? rule.what ?? rule.expr
+  const detailPart = detail === undefined ? "" : `: \`${detail}\``
+  return `${rule.type}${detailPart} (L${rule.line})`
+}
+
+function describeEffectLike(value: unknown): string | null {
+  const eff = asEffectLike(value)
+  if (eff === null) return null
+  return `${eff.id}: \`${eff.target}\` (L${eff.line})`
+}
+
+function describeCallLike(value: unknown): string | null {
+  const c = asCallLike(value)
+  if (c === null) return null
+  return `\`${c.target}\` (L${c.line})`
+}
+
+function renderStringList(values: readonly unknown[]): string {
+  const strings = values.filter((v): v is string => typeof v === "string")
+  return strings.length === 0 ? "—" : strings.join(" | ")
+}
+
+function renderInlineList(values: readonly unknown[]): string {
+  return values
+    .filter((v): v is string => typeof v === "string")
+    .map((s) => `\`${s}\``)
+    .join(", ")
 }
 
 function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
   if (symbols.length === 0) return []
   const rows: string[] = []
-  for (const s of [...symbols].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+  for (const s of [...symbols].sort((a, b) => compareStrings(a.id, b.id))) {
     rows.push(`### \`${s.name}\` *(${s.kind})*`)
     rows.push(`**File**: \`${s.source.file}:${s.source.startLine}\``)
     rows.push(...renderSymbolBlock(s).slice(1))
@@ -306,7 +403,7 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 function renderMoved(items: readonly SymbolMoved[]): string[] {
   if (items.length === 0) return []
   return [...items]
-    .sort((a, b) => (a.after.id < b.after.id ? -1 : 1))
+    .sort((a, b) => compareStrings(a.after.id, b.after.id))
     .map(
       (m) =>
         `- \`${m.after.name}\`: \`${m.before.source.file}\` → \`${m.after.source.file}\` (\`${m.rationale}\`)`,
@@ -320,14 +417,14 @@ function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] 
   const rows: string[] = []
   if (toDropped.length > 0) {
     rows.push(`**${toDropped.length} to-dropped**`)
-    for (const i of toDropped.sort((a, b) => (a.after.id < b.after.id ? -1 : 1))) {
-      rows.push(`- \`${i.after.id}\` — ${i.after.dropReason ?? "unspecified"}`)
+    for (const i of toDropped.sort((a, b) => compareStrings(a.after.id, b.after.id))) {
+      rows.push(`- \`${i.after.id}\` — ${requireDropReason(i.after)}`)
     }
   }
   if (toKept.length > 0) {
     if (rows.length > 0) rows.push("")
     rows.push(`**${toKept.length} to-kept**`)
-    for (const i of toKept.sort((a, b) => (a.after.id < b.after.id ? -1 : 1))) {
+    for (const i of toKept.sort((a, b) => compareStrings(a.after.id, b.after.id))) {
       rows.push(`- \`${i.after.id}\``)
     }
   }
@@ -345,14 +442,14 @@ function renderComponentChanges(diff: DiffResult): string[] {
   const rows: string[] = []
   if (diff.components.added.length > 0) {
     rows.push("### Added")
-    for (const c of [...diff.components.added].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    for (const c of [...diff.components.added].sort((a, b) => compareStrings(a.id, b.id))) {
       rows.push(`- \`${c.id}\` — roots: ${c.roots.map((r) => `\`${r}\``).join(", ")}`)
     }
     rows.push("")
   }
   if (diff.components.removed.length > 0) {
     rows.push("### Removed")
-    for (const c of [...diff.components.removed].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    for (const c of [...diff.components.removed].sort((a, b) => compareStrings(a.id, b.id))) {
       rows.push(`- \`${c.id}\``)
     }
     rows.push("")
