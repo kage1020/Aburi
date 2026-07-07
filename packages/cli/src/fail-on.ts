@@ -31,7 +31,7 @@ export type FailOnToken = FailOnStatusToken | FailOnDeltaAxis
 
 export interface FailOnClause {
   token: FailOnToken
-  /** Undefined when the clause is bare (fires on `observed > 0`). */
+  /** `null` when the clause is bare (fires on `observed > 0`); the numeric bound otherwise. */
   threshold: number | null
 }
 
@@ -63,15 +63,26 @@ export class FailOnParseError extends Error {
 
 /**
  * Parse the raw `--fail-on` argument (comma-separated). Returns one clause per token.
- * Empty segments (`--fail-on changed,,removed`) are silently skipped so users can build
- * the list programmatically without stripping trailing commas.
+ * Empty intra-list segments (`--fail-on changed,,removed`) are tolerated so users can
+ * build the list programmatically without stripping trailing commas — but a value that
+ * yields zero clauses in total is rejected with `FailOnParseError`. The CLI treats
+ * `--fail-on ""` (from an unset shell variable, for example) as a configuration mistake
+ * rather than "gate disabled": a silently-empty gate would let regressions through with
+ * a green exit code, which is the opposite of what a fail-on gate exists to prevent.
  */
 export function parseFailOn(value: string): FailOnClause[] {
-  return value
+  const clauses = value
     .split(",")
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0)
     .map((segment) => parseSingle(segment))
+  if (clauses.length === 0) {
+    throw new FailOnParseError(
+      value,
+      "expected at least one clause; an empty --fail-on value would silently disable the CI gate.",
+    )
+  }
+  return clauses
 }
 
 function parseSingle(segment: string): FailOnClause {

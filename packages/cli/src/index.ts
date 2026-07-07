@@ -4,6 +4,7 @@ export {
   formatFailOnMessage,
   type GitRunner,
   runDiff,
+  type WarnFn,
 } from "./commands/diff"
 export {
   type ExplainOptions,
@@ -20,6 +21,7 @@ export {
   type ScanOptions,
   type ScanReport,
 } from "./commands/scan"
+export { resolveConfigPath } from "./config-path"
 export { type AburiEnv, type LogLevel, readEnv } from "./env"
 export { CliError, type CliErrorCode } from "./errors"
 export { EXIT, type ExitCode } from "./exit-codes"
@@ -34,6 +36,6 @@ export {
   formatTriggered,
   parseFailOn,
 } from "./fail-on"
-export { type CreateLoggerOptions, createLogger } from "./logger"
+export { readIR } from "./ir-io"
 export { type LoadedPlugins, type LoadPluginsOptions, loadPlugins } from "./plugin-loader"
 export { type RunCliOptions, runCli } from "./run"

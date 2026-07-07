@@ -94,13 +94,35 @@ async function resolveWorkspaceRoot(cwd: string): Promise<string> {
   }
 }
 
+/**
+ * Existence probe that only treats "file is not here" as absence. EACCES / EIO / ELOOP
+ * are re-thrown as CliError so a permission-denied on `aburi.json` cannot silently
+ * bypass the overwrite guard (which would let `writeFile` clobber whatever the user is
+ * unable to read).
+ */
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if (isBenignErrno(error)) return false
+    throw new CliError(`Failed to probe ${path}: ${errorMessage(error)}`, "runtime-error", {
+      cause: error,
+    })
   }
+}
+
+const BENIGN_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
+
+function isBenignErrno(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" && BENIGN_ERRNOS.has(code)
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
 }
 
 /**

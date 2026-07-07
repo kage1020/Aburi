@@ -12,6 +12,7 @@ import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
 import type { Component, Config, IR } from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
+import { readGeneratorInfo } from "../generator-info"
 import { loadPlugins } from "../plugin-loader"
 
 export interface ScanOptions {
@@ -19,7 +20,6 @@ export interface ScanOptions {
   configPath?: string
   outputDir?: string
   format?: "json" | "md" | "both"
-  concurrency?: number
   ignore?: readonly string[]
   respectGitignore?: boolean
   compact?: boolean
@@ -36,6 +36,12 @@ export interface ScanReport {
   droppedSymbols: number
   parseErrorCount: number
   timeoutCount: number
+  /**
+   * Files that never made it into the IR (over-size, unreadable, unroutable). Surfaced
+   * separately from `parseErrorCount` because a discovery-time drop is silent by design
+   * in `@aburi/core` — it belongs on the CLI report so `aburi scan` can warn on stderr.
+   */
+  skipped: readonly { path: string; reason: string; detail?: string }[]
   exitCode: ExitCode
 }
 
@@ -74,7 +80,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       roots: [...m.roots],
     })),
     components,
-    generator: { name: "aburi", version: "0.0.0" },
+    generator: await readGeneratorInfo(),
   }
   const scanResult = await scan(scanInput)
 
@@ -101,6 +107,14 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     droppedSymbols: scanResult.ir.stats.droppedSymbols,
     parseErrorCount: scanResult.parseErrors.length,
     timeoutCount: scanResult.timeoutEvents.length,
+    skipped: scanResult.skipped.map((s) => {
+      const entry: { path: string; reason: string; detail?: string } = {
+        path: s.path,
+        reason: s.reason,
+      }
+      if (s.detail !== undefined) entry.detail = s.detail
+      return entry
+    }),
     exitCode: EXIT.SUCCESS,
   }
 }

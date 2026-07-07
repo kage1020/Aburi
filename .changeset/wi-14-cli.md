@@ -7,9 +7,9 @@ Add the Aburi command-line entry — `@aburi/cli` — that wires `@aburi/config`
 ### Commands
 
 - **`aburi init`** — autodetect the workspace root and every JS/TS Component, write an `aburi.json` (or `--output <path>`) with the discovered `languages` / `frameworks` / `components`. Refuses to overwrite unless `--force`. `--with-suggestions` appends JSONC install comments (`pnpm add -D @aburi/framework-nestjs`) for every framework that has a first-party plugin.
-- **`aburi scan`** — resolve config → load plugins → run `@aburi/core` `scan` → write `out/aburi.ir.json` + `out/workspace.md` + `out/components/*.md`. Respects `--format json|md|both`, `--no-json` / `--no-md` shortcuts, `--compact`, `--ignore <glob>` (repeatable), `--no-respect-gitignore`, `--concurrency`.
+- **`aburi scan`** — resolve config → load plugins → run `@aburi/core` `scan` → write `out/aburi.ir.json` + `out/workspace.md` + `out/components/*.md`. Respects `--format json|md|both`, `--no-json` / `--no-md` shortcuts, `--compact`, `--ignore <glob>` (repeatable), `--no-respect-gitignore`, `--no-timestamp`. Parse errors, effect-classify timeouts, and discovery-time skips surface on stderr so a scan that silently ate 50 broken files still leaves a visible signal.
 - **`aburi diff`** — two dispatch paths (§6):
-  - `<base>..<head>` — `git rev-parse` sanity checks, refuse shallow repos, create a temporary `git worktree add --detach` for the base ref, scan it, then diff against the head IR. Cleans up on success and on error. Collects `git diff --find-renames --name-status` output so the diff engine's stage-2 matcher lights up automatically.
+  - `<base>..<head>` — `git rev-parse --verify` is run against BOTH refs (a mistyped head no longer silently degrades to a "current tree vs base" diff), the shallow-repository guard fires, then `git worktree add --detach` materialises the base and `runScan` executes inside it. The head is always scanned from the working tree (the head ref label is used only for the report). Cleanup runs in `finally`, and every intermediate scan output lives under `mkdtemp` so the user's repo stays clean even if the run aborts. Rename collection failures warn on stderr instead of silently degrading `moved` results into `removed + added` pairs. A missing `git` binary produces a distinct install-git error instead of the "ref not found" false alarm.
   - `--base <ir.json> --head <ir.json>` — parses two IR files and jumps straight into `buildDiff`.
 - **`aburi explain`** — three-arm dispatch (§7.2): full Symbol id (contains `#`) → direct lookup, file path (contains `/`, exists on disk) → all Symbols in the file, otherwise → case-sensitive substring match on `Symbol.name`. Ambiguous substring hits exit 2 with the candidate list on stdout.
 
@@ -22,7 +22,7 @@ Comma-separated clause list supporting every taxonomy the design (§6.7) calls o
 - Delta axes: `api-changed` / `logic-changed` / `syntax-changed`.
 - Optional threshold: `<token>:>N` fires only when observed count exceeds `N` (strict `>` semantics; other comparators reserved for a future extension).
 
-The parser is exhaustive — unknown tokens, unsupported comparators, non-integer or negative thresholds all throw `FailOnParseError`. Evaluation returns the first triggered clause so the CI log stays tight; a triggered clause maps to `exit 3` per the design's exit-code table.
+The parser is exhaustive — unknown tokens, unsupported comparators, non-integer / negative thresholds, and an **empty** `--fail-on` value (from an unset shell variable) all throw `FailOnParseError`. A silently-empty gate would let regressions through with a green exit code, so `--fail-on ""` is treated as a configuration mistake, not "gate disabled". `FailOnParseError` maps to `EXIT.INPUT_ERROR` (not runtime) so a grammar typo does not masquerade as a runtime bug. Evaluation returns the first triggered clause so the CI log stays tight; a triggered clause maps to `EXIT.GATE`.
 
 ### Exit codes (§9)
 

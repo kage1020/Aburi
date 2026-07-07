@@ -2,12 +2,13 @@ import { Command, InvalidArgumentError } from "commander"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
 import { runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
-import { runScan } from "./commands/scan"
+import { runScan, type ScanReport } from "./commands/scan"
+import { resolveConfigPath } from "./config-path"
 import { readEnv } from "./env"
 import { CliError } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
-
-const VERSION = "0.0.0"
+import { FailOnParseError } from "./fail-on"
+import { readGeneratorInfo } from "./generator-info"
 
 export interface RunCliOptions {
   argv: readonly string[]
@@ -28,11 +29,12 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
   const env = readEnv(options.env ?? process.env)
   const cwd = options.cwd ?? process.cwd()
 
+  const { version } = await readGeneratorInfo()
   const program = new Command()
   program
     .name("aburi")
     .description("Render meaningful code structure as IR for review")
-    .version(VERSION, "-v, --version")
+    .version(version, "-v, --version")
     .exitOverride() // don't call process.exit — surface as CommanderError
     .configureOutput({
       writeOut: (str) => {
@@ -96,7 +98,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--no-respect-gitignore", "ignore .gitignore patterns")
     .option("--compact", "compact JSON output")
     .option("--no-timestamp", "omit generatedAt from IR (default when running under CI env)")
-    .option("--concurrency <n>", "parser concurrency", parsePositiveInt)
     .option("--config <path>", "config file path")
     .action(
       (cmdOptions: {
@@ -109,7 +110,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         compact?: boolean
         timestamp?: boolean
         config?: string
-        concurrency?: number
       }) =>
         wrap(async () => {
           const format = deriveFormat(cmdOptions)
@@ -125,17 +125,14 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               : { respectGitignore: cmdOptions.respectGitignore }),
             ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
             ...(cmdOptions.timestamp === false || env.ci ? { suppressTimestamp: true } : {}),
-            ...(cmdOptions.config === undefined ? {} : { configPath: cmdOptions.config }),
-            ...(env.configPath === null ? {} : { configPath: env.configPath }),
-            ...(cmdOptions.concurrency === undefined
-              ? {}
-              : { concurrency: cmdOptions.concurrency }),
+            ...withConfigPath(cmdOptions.config, env),
           })
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files\n`,
           )
           if (report.irPath !== null) stdout.write(`→ ${report.irPath}\n`)
           if (report.workspaceMdPath !== null) stdout.write(`→ ${report.workspaceMdPath}\n`)
+          warnOnScanIncidents(report, stderr)
           return report.exitCode
         })(),
     )
@@ -174,7 +171,10 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.format === undefined ? {} : { format: cmdOptions.format }),
             ...(cmdOptions.failOn === undefined ? {} : { failOn: cmdOptions.failOn }),
             ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
-            ...(cmdOptions.config === undefined ? {} : { configPath: cmdOptions.config }),
+            ...withConfigPath(cmdOptions.config, env),
+            warn: (message: string) => {
+              stderr.write(`${message}\n`)
+            },
           })
           stdout.write(`${report.summaryLine}\n`)
           if (report.diffMdPath !== null) stdout.write(`→ ${report.diffMdPath}\n`)
@@ -205,13 +205,19 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.ir === undefined ? {} : { irPath: cmdOptions.ir }),
             ...(cmdOptions.output === undefined ? {} : { outputPath: cmdOptions.output }),
             ...(cmdOptions.rescan === undefined ? {} : { noRescan: !cmdOptions.rescan }),
-            ...(cmdOptions.config === undefined ? {} : { configPath: cmdOptions.config }),
+            ...withConfigPath(cmdOptions.config, env),
           })
           switch (outcome.kind) {
             case "single":
             case "file":
-              stdout.write(outcome.markdown)
-              if (!outcome.markdown.endsWith("\n")) stdout.write("\n")
+              // §7 — when --output is set the markdown lives in the file only.
+              // Otherwise mirror to stdout so the user can `aburi explain foo | less`.
+              if (outcome.writtenTo === null) {
+                stdout.write(outcome.markdown)
+                if (!outcome.markdown.endsWith("\n")) stdout.write("\n")
+              } else {
+                stdout.write(`→ ${outcome.writtenTo}\n`)
+              }
               break
             case "ambiguous":
               stdout.write(`Multiple matches for "${argument}":\n`)
@@ -249,7 +255,19 @@ function isCommanderError(value: unknown): value is { code: string; message: str
   )
 }
 
+/**
+ * Error mapping (see design/details/cli-spec.md §9 for the exit-code contract):
+ *   - `input-error` / `config-error` → EXIT.INPUT_ERROR
+ *   - `runtime-error`                → EXIT.RUNTIME
+ *   - `plugin-error`                 → EXIT.GATE
+ *   - FailOnParseError               → EXIT.INPUT_ERROR (grammar mistake, not a runtime bug)
+ *   - Any other Error                → EXIT.RUNTIME
+ */
 function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
+  if (error instanceof FailOnParseError) {
+    stderr.write(`${error.message}\n`)
+    return EXIT.INPUT_ERROR
+  }
   if (error instanceof CliError) {
     stderr.write(`${error.message}\n`)
     switch (error.code) {
@@ -270,17 +288,49 @@ function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
   return EXIT.RUNTIME
 }
 
+/**
+ * §11 — `--config` takes precedence over `ABURI_CONFIG`. When neither is present the
+ * object contribution is empty so the downstream command falls through to on-disk
+ * config discovery.
+ */
+function withConfigPath(
+  cliFlag: string | undefined,
+  env: ReturnType<typeof readEnv>,
+): { configPath?: string } {
+  const resolved = resolveConfigPath(cliFlag, env)
+  return resolved === undefined ? {} : { configPath: resolved }
+}
+
+/**
+ * §5.6 — surface parse failures / soft timeouts / discovery-time skips on stderr so a
+ * scan that ate 50 broken files still produces a visible signal. The main summary line
+ * on stdout stays clean; this only fires when a non-empty incident list exists.
+ */
+function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream): void {
+  if (report.parseErrorCount > 0) {
+    stderr.write(`⚠ ${report.parseErrorCount} file(s) had recoverable parse errors.\n`)
+  }
+  if (report.timeoutCount > 0) {
+    stderr.write(
+      `⚠ ${report.timeoutCount} effect classification(s) hit the per-call timeout budget.\n`,
+    )
+  }
+  if (report.skipped.length > 0) {
+    stderr.write(
+      `⚠ ${report.skipped.length} file(s) were skipped during discovery: ${summariseSkipped(report.skipped)}\n`,
+    )
+  }
+}
+
+function summariseSkipped(skipped: readonly { reason: string }[]): string {
+  const counts = new Map<string, number>()
+  for (const s of skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1)
+  return [...counts.entries()].map(([reason, n]) => `${reason}=${n}`).join(", ")
+}
+
 function parseFormat(value: string): "json" | "md" | "both" {
   if (value === "json" || value === "md" || value === "both") return value
   throw new InvalidArgumentError(`--format must be one of: json | md | both`)
-}
-
-function parsePositiveInt(value: string): number {
-  const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed) || parsed <= 0 || String(parsed) !== value) {
-    throw new InvalidArgumentError(`must be a positive integer`)
-  }
-  return parsed
 }
 
 function collect(value: string, accumulator: string[]): string[] {

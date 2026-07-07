@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
@@ -8,7 +8,12 @@ import type { DiffResult, IR, IRRef } from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
+import { readGeneratorInfo } from "../generator-info"
+import { readIR } from "../ir-io"
 import { runScan, type ScanReport } from "./scan"
+
+/** Warning emitter for non-fatal diff-time observations (git errors, cleanup issues). */
+export type WarnFn = (message: string) => void
 
 export interface DiffOptions {
   cwd?: string
@@ -22,6 +27,8 @@ export interface DiffOptions {
   compact?: boolean
   /** Injected git runner for tests. Defaults to a real `git` child process. */
   git?: GitRunner
+  /** Non-fatal warning sink (defaults to `process.stderr.write`). */
+  warn?: WarnFn
 }
 
 export interface GitRunner {
@@ -40,21 +47,32 @@ export interface DiffReport {
 }
 
 /**
- * §6 — `aburi diff`. Two dispatch paths:
- * - `<base>..<head>` ref spec — runs `git worktree add` for the base ref, executes
- *   `runScan` in the temporary worktree, then loads or scans the head IR. Cleans up on
- *   success and on error (§6.4 tail).
- * - `--base <ir.json> --head <ir.json>` — parses both files, jumps directly to
+ * `aburi diff` — two dispatch paths, both defined by `design/details/cli-spec.md §6`:
+ *
+ * - `<base>..<head>` ref spec (§6.4). Both refs are validated with `git rev-parse
+ *   --verify` before we touch the working tree; the base ref materialises via a
+ *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
+ *   tree itself is scanned as the head. The base's intermediate IR lives under
+ *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
+ *   NOTE: the head is always the working tree — a mismatched `<head>` label in the
+ *   ref spec (e.g. `main..v1.1.0` when the checkout is `v1.0.0`) does NOT rescope the
+ *   head scan; it only labels the report. This mirrors the design's "head is always
+ *   the current checkout" contract but is easy to miss so we spell it out here.
+ * - `--base <ir.json> --head <ir.json>` — parses both files and jumps directly to
  *   `buildDiff`. No git required.
  *
  * `--fail-on` is parsed once and evaluated post-diff; the first triggered clause maps to
- * exit 3 with a stable diagnostic phrasing (§6.7).
+ * `EXIT.GATE` with a stable diagnostic phrasing (§6.7). An empty `--fail-on` value
+ * (from an unset shell variable, for example) is rejected by the parser rather than
+ * silently disabling the CI gate.
  */
 export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
+  const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
-  const [baseIR, headIR, baseRef, headRef, gitRenames] = await resolveIRs(options, cwd)
+  const [baseIR, headIR, baseRef, headRef, gitRenames] = await resolveIRs(options, cwd, warn)
 
+  const generator = await readGeneratorInfo()
   let diff: DiffResult
   try {
     diff = buildDiff({
@@ -62,7 +80,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       headIR,
       base: irRef(baseRef, baseIR),
       head: irRef(headRef, headIR),
-      generator: { name: "aburi", version: "0.0.0" },
+      generator,
       ...(gitRenames === null ? {} : { gitRenames }),
     })
   } catch (error) {
@@ -134,6 +152,7 @@ function parseRefSpec(spec: string): RefSpec {
 async function resolveIRs(
   options: DiffOptions,
   cwd: string,
+  warn: WarnFn,
 ): Promise<[IR, IR, string, string, GitRenameMap | null]> {
   if (options.refSpec !== undefined && options.refSpec !== null && options.refSpec.length > 0) {
     if (options.base !== undefined && options.base !== null) {
@@ -142,7 +161,7 @@ async function resolveIRs(
         "input-error",
       )
     }
-    return resolveViaGit(options, cwd, parseRefSpec(options.refSpec))
+    return resolveViaGit(options, cwd, parseRefSpec(options.refSpec), warn)
   }
   if (options.base === undefined || options.base === null || options.base.length === 0) {
     throw new CliError(
@@ -158,67 +177,59 @@ async function resolveIRs(
   return [baseIR, headIR, options.base, options.head, null]
 }
 
-async function readIR(path: string): Promise<IR> {
-  let raw: string
-  try {
-    raw = await readFile(path, "utf8")
-  } catch (error) {
-    throw new CliError(`Failed to read IR file "${path}": ${errorMessage(error)}`, "input-error", {
-      cause: error,
-    })
-  }
-  try {
-    return JSON.parse(raw) as IR
-  } catch (error) {
-    throw new CliError(
-      `IR file "${path}" is not valid JSON: ${errorMessage(error)}`,
-      "input-error",
-      { cause: error },
-    )
-  }
-}
-
 async function resolveViaGit(
   options: DiffOptions,
   cwd: string,
   spec: RefSpec,
+  warn: WarnFn,
 ): Promise<[IR, IR, string, string, GitRenameMap | null]> {
   const git = options.git ?? defaultGitRunner
-  await assertRefResolvable(git, cwd, spec.base)
+  await assertRefResolvable(git, cwd, spec.base, "base")
+  await assertRefResolvable(git, cwd, spec.head, "head")
   await assertNotShallow(git, cwd)
 
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   const worktreeDir = resolve(tempParent, "base")
+  const baseOutputDir = resolve(tempParent, "base-out")
+  const headOutputDir = resolve(tempParent, "head-out")
   let baseIR: IR
-  const renames = await collectRenames(git, cwd, spec)
+  let headIR: IR
+  const renames = await collectRenames(git, cwd, spec, warn)
   try {
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
-    const baseReport = await runScanInDir(worktreeDir, options)
+    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir)
     if (baseReport.irPath === null) {
       throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
     }
     baseIR = await readIR(baseReport.irPath)
+
+    const headReport = await runScanInDir(cwd, options, headOutputDir)
+    if (headReport.irPath === null) {
+      throw new CliError("scan for head ref produced no IR file.", "runtime-error")
+    }
+    headIR = await readIR(headReport.irPath)
   } finally {
     try {
       await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
-    } catch {
-      // Best-effort cleanup; the temp dir removal below still runs.
+    } catch (error) {
+      warn(
+        `git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
+      )
     }
     await rm(tempParent, { recursive: true, force: true })
   }
 
-  const headReport = await runScanInDir(cwd, options)
-  if (headReport.irPath === null) {
-    throw new CliError("scan for head ref produced no IR file.", "runtime-error")
-  }
-  const headIR = await readIR(headReport.irPath)
   return [baseIR, headIR, spec.base, spec.head, renames]
 }
 
-async function runScanInDir(cwd: string, options: DiffOptions): Promise<ScanReport> {
+async function runScanInDir(
+  cwd: string,
+  options: DiffOptions,
+  outputDir: string,
+): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
     cwd,
-    outputDir: resolve(cwd, "out-aburi-diff"),
+    outputDir,
     format: "json",
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
     ...(options.compact === undefined ? {} : { compact: options.compact }),
@@ -226,16 +237,42 @@ async function runScanInDir(cwd: string, options: DiffOptions): Promise<ScanRepo
   return runScan(scanOptions)
 }
 
-async function assertRefResolvable(git: GitRunner, cwd: string, ref: string): Promise<void> {
+/**
+ * `git rev-parse --verify` fails distinguishably for two very different situations:
+ *   1. `git` is not installed on the host (`ENOENT` spawn failure) — reporting this as
+ *      "base ref not found" is a wrong-remediation nightmare in CI logs.
+ *   2. `git` is installed but the ref cannot be resolved (bad name, shallow clone).
+ * We split them so the user gets the correct next step for each.
+ */
+async function assertRefResolvable(
+  git: GitRunner,
+  cwd: string,
+  ref: string,
+  role: "base" | "head",
+): Promise<void> {
   try {
     await git.run(["rev-parse", "--verify", ref], { cwd })
   } catch (error) {
+    if (isGitMissing(error)) {
+      throw new CliError(
+        "git executable not found in PATH. aburi diff <base>..<head> requires a working git installation. Install git or use --base/--head with pre-generated IR files.",
+        "runtime-error",
+        { cause: error },
+      )
+    }
+    const roleTag = role === "base" ? "Base" : "Head"
     throw new CliError(
-      `Base ref '${ref}' not found. If this is a CI shallow clone, run: git fetch --deepen=50 origin ${ref}`,
+      `${roleTag} ref '${ref}' could not be resolved. If this is a CI shallow clone, run: git fetch --deepen=50 origin ${ref}`,
       "runtime-error",
       { cause: error },
     )
   }
+}
+
+function isGitMissing(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  const code = (error as { code?: unknown }).code
+  return code === "ENOENT"
 }
 
 async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
@@ -248,10 +285,17 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
   }
 }
 
+/**
+ * `git diff --find-renames --name-status` powers the diff engine's stage-2 rename map.
+ * A failure here is non-fatal — the diff will still run, just without the rename hints —
+ * so we warn on stderr instead of aborting, but the warning is loud enough that a
+ * reviewer noticing "moved -> removed + added" churn can trace the cause.
+ */
 async function collectRenames(
   git: GitRunner,
   cwd: string,
   spec: RefSpec,
+  warn: WarnFn,
 ): Promise<GitRenameMap | null> {
   try {
     const { stdout } = await git.run(
@@ -270,7 +314,10 @@ async function collectRenames(
       map.set(oldPath, newPath)
     }
     return map
-  } catch {
+  } catch (error) {
+    warn(
+      `Failed to collect git renames (${errorMessage(error)}); the diff will treat renamed files as removed + added.`,
+    )
     return null
   }
 }

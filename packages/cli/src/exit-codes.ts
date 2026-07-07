@@ -1,16 +1,26 @@
 /**
- * §9 — CLI exit code contract. Kept in a named enum-ish object so command handlers use
- * `EXIT.INPUT_ERROR` instead of magic `2`, and the compiler will complain if the value
- * spectrum ever drifts from what the design document promises.
+ * CLI exit code table — matches the contract in `design/details/cli-spec.md §9`.
+ * The `as const` annotation gives every value a literal type so `ExitCode` is a
+ * discriminated union of the four numeric literals, not the widened `number`.
+ * Individual mappings from CliErrorCode / FailOnParseError to these values live in
+ * `run.ts`; that mapping is not enforced by TypeScript here, only by tests.
  */
 export const EXIT = {
-  /** Full success, no CI gate fired. */
+  /** Full success — the command finished and no CI gate fired. */
   SUCCESS: 0,
-  /** Runtime error (IO / git / IR shape). */
+  /** Runtime failure (IO, git, filesystem, unexpected exception). */
   RUNTIME: 1,
-  /** Input error (bad argv, missing file, ambiguous explain target). */
+  /**
+   * Input error: bad argv, missing / malformed file, unresolvable IR shape, ambiguous
+   * explain target. Configuration and grammar mistakes surface here too so a fail-on
+   * typo does not produce a green pipeline.
+   */
   INPUT_ERROR: 2,
-  /** Plugin / --fail-on / strict mode violation. */
+  /**
+   * Plugin load failure, `--fail-on` clause tripped, or strict-mode violation. This is
+   * the code CI pipelines gate on ("aburi diff must exit 0 or 3 to be considered
+   * healthy").
+   */
   GATE: 3,
 } as const
 

@@ -1,9 +1,11 @@
-import { access, readFile, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { access, writeFile } from "node:fs/promises"
+import { relative, resolve } from "node:path"
+import { detectWorkspaceRoot } from "@aburi/core"
 import { projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
+import { readIR } from "../ir-io"
 import { runScan } from "./scan"
 
 export interface ExplainOptions {
@@ -16,74 +18,101 @@ export interface ExplainOptions {
 }
 
 export type ExplainOutcome =
-  | { kind: "single"; markdown: string; symbol: IRSymbol; exitCode: ExitCode }
-  | { kind: "file"; markdown: string; symbols: readonly IRSymbol[]; exitCode: ExitCode }
   | {
-      kind: "ambiguous"
-      candidates: readonly IRSymbol[]
+      kind: "single"
+      markdown: string
+      symbol: IRSymbol
       exitCode: ExitCode
+      writtenTo: string | null
     }
+  | {
+      kind: "file"
+      markdown: string
+      symbols: readonly IRSymbol[]
+      exitCode: ExitCode
+      writtenTo: string | null
+    }
+  | { kind: "ambiguous"; candidates: readonly IRSymbol[]; exitCode: ExitCode }
   | { kind: "not-found"; exitCode: ExitCode }
 
 /**
- * §7 — `aburi explain <id-or-pattern>`. Three-arm dispatch mirrored from §7.2:
- * - contains `#` → full Symbol id lookup
- * - contains `/` but no `#` AND exists on disk → file-scoped lookup (all Symbols in file)
- * - otherwise → case-sensitive substring match on `Symbol.name`
+ * `aburi explain <id-or-pattern>` — three-arm dispatch mirrored from
+ * `design/details/cli-spec.md §7.2`:
  *
- * When the substring match hits more than one Symbol, returns an `ambiguous` outcome so
- * the CLI wrapper can list candidates on stdout and exit 2. When it hits none, returns
- * `not-found` (exit 1 per §7.6).
+ * - argument contains `#` → full Symbol id lookup.
+ * - argument contains `/` but no `#` AND resolves to an existing file → all Symbols
+ *   whose `source.file` matches (compared against the workspace-root-relative POSIX
+ *   path so a run from a subdirectory still hits the right rows).
+ * - otherwise → case-sensitive substring match on `Symbol.name`.
+ *
+ * When the substring match hits more than one Symbol the caller receives an
+ * `ambiguous` outcome (exit 2) so they can add more of the qualified name. Zero hits
+ * become `not-found` (exit 1). Every "single" / "file" outcome carries the resolved
+ * `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
+ * stdout mirror (avoiding the "output to file *and* stdout" behaviour the design
+ * intentionally rules out).
  */
 export async function runExplain(options: ExplainOptions): Promise<ExplainOutcome> {
   const cwd = options.cwd ?? process.cwd()
-  const ir = await resolveIR(cwd, options)
+  const workspaceRoot = await resolveWorkspaceRoot(cwd)
+  const ir = await resolveIR(cwd, workspaceRoot, options)
 
   const arg = options.argument
+  const outputPath = options.outputPath === undefined ? null : resolve(cwd, options.outputPath)
+
   if (arg.includes("#")) {
     const hit = ir.symbols.find((s) => s.id === arg)
     if (hit === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
+    const markdown = projectSymbolExplain(hit)
+    if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
     return {
       kind: "single",
-      markdown: projectSymbolExplain(hit),
+      markdown,
       symbol: hit,
       exitCode: EXIT.SUCCESS,
+      writtenTo: outputPath,
     }
   }
 
-  if (arg.includes("/") && (await pathExists(resolve(cwd, arg)))) {
-    const relative = relativeToWorkspace(arg, cwd)
-    const inFile = ir.symbols.filter((s) => s.source.file === relative)
-    if (inFile.length === 0) {
-      return { kind: "not-found", exitCode: EXIT.RUNTIME }
-    }
+  if (arg.includes("/") && (await pathExistsStrict(resolve(cwd, arg)))) {
+    const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/")
+    const inFile = ir.symbols.filter((s) => s.source.file === relPath)
+    if (inFile.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME }
     const markdown = inFile.map((s) => projectSymbolExplain(s)).join("\n---\n\n")
-    const written = options.outputPath === undefined ? null : resolve(cwd, options.outputPath)
-    if (written !== null) await writeFile(written, markdown, "utf8")
-    return { kind: "file", markdown, symbols: inFile, exitCode: EXIT.SUCCESS }
+    if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+    return {
+      kind: "file",
+      markdown,
+      symbols: inFile,
+      exitCode: EXIT.SUCCESS,
+      writtenTo: outputPath,
+    }
   }
 
   const matches = ir.symbols.filter((s) => s.name.includes(arg))
-  if (matches.length === 0) {
-    return { kind: "not-found", exitCode: EXIT.RUNTIME }
-  }
+  if (matches.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME }
   if (matches.length > 1) {
     return { kind: "ambiguous", candidates: matches, exitCode: EXIT.INPUT_ERROR }
   }
   const only = matches[0]
   if (only === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
   const markdown = projectSymbolExplain(only)
-  const written = options.outputPath === undefined ? null : resolve(cwd, options.outputPath)
-  if (written !== null) await writeFile(written, markdown, "utf8")
-  return { kind: "single", markdown, symbol: only, exitCode: EXIT.SUCCESS }
+  if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+  return {
+    kind: "single",
+    markdown,
+    symbol: only,
+    exitCode: EXIT.SUCCESS,
+    writtenTo: outputPath,
+  }
 }
 
-async function resolveIR(cwd: string, options: ExplainOptions): Promise<IR> {
+async function resolveIR(cwd: string, workspaceRoot: string, options: ExplainOptions): Promise<IR> {
   const explicit = options.irPath === undefined ? null : resolve(cwd, options.irPath)
   if (explicit !== null) return readIR(explicit)
 
-  const defaultPath = resolve(cwd, "out/aburi.ir.json")
-  if (await pathExists(defaultPath)) return readIR(defaultPath)
+  const defaultPath = resolve(workspaceRoot, "out/aburi.ir.json")
+  if (await pathExistsStrict(defaultPath)) return readIR(defaultPath)
 
   if (options.noRescan) {
     throw new CliError(
@@ -92,7 +121,6 @@ async function resolveIR(cwd: string, options: ExplainOptions): Promise<IR> {
     )
   }
 
-  // §7.4 fallback: silently run scan to produce an IR
   const scanOptions: Parameters<typeof runScan>[0] = {
     cwd,
     format: "json",
@@ -105,39 +133,39 @@ async function resolveIR(cwd: string, options: ExplainOptions): Promise<IR> {
   return readIR(report.irPath)
 }
 
-async function readIR(path: string): Promise<IR> {
-  let raw: string
+async function resolveWorkspaceRoot(cwd: string): Promise<string> {
   try {
-    raw = await readFile(path, "utf8")
-  } catch (error) {
-    throw new CliError(`Failed to read IR file "${path}": ${errorMessage(error)}`, "input-error", {
-      cause: error,
-    })
-  }
-  try {
-    return JSON.parse(raw) as IR
-  } catch (error) {
-    throw new CliError(
-      `IR file "${path}" is not valid JSON: ${errorMessage(error)}`,
-      "input-error",
-      { cause: error },
-    )
+    return await detectWorkspaceRoot({ cwd })
+  } catch {
+    return resolve(cwd)
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
+/**
+ * `access` treats every errno as "not usable", but "does not exist" and "permission
+ * denied" mean very different things to the caller: the first is a fall-through, the
+ * second is a configuration mistake we must surface. This wrapper only treats
+ * ENOENT / ENOTDIR as absence; anything else is re-thrown as a `CliError` so an EACCES
+ * cannot silently bypass the "config exists" check upstream in `init`.
+ */
+async function pathExistsStrict(path: string): Promise<boolean> {
   try {
     await access(path)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if (isBenignErrno(error)) return false
+    throw new CliError(`Failed to probe ${path}: ${errorMessage(error)}`, "runtime-error", {
+      cause: error,
+    })
   }
 }
 
-function relativeToWorkspace(arg: string, cwd: string): string {
-  const absolute = resolve(cwd, arg)
-  const relative = absolute.slice(cwd.length + 1).replace(/\\/g, "/")
-  return relative
+const BENIGN_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
+
+function isBenignErrno(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" && BENIGN_ERRNOS.has(code)
 }
 
 function errorMessage(error: unknown): string {
