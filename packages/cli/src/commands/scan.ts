@@ -1,0 +1,222 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { resolve } from "node:path"
+import { type LoadedConfig, loadConfig, readConfigFile } from "@aburi/config"
+import {
+  detectComponents,
+  detectManagers,
+  detectWorkspaceRoot,
+  scan,
+  writeCanonicalIR,
+} from "@aburi/core"
+import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
+import type { Component, Config, IR } from "@aburi/types"
+import { CliError } from "../errors"
+import { EXIT, type ExitCode } from "../exit-codes"
+import { readGeneratorInfo } from "../generator-info"
+import { loadPlugins } from "../plugin-loader"
+
+export interface ScanOptions {
+  cwd?: string
+  configPath?: string
+  outputDir?: string
+  format?: "json" | "md" | "both"
+  ignore?: readonly string[]
+  respectGitignore?: boolean
+  compact?: boolean
+  suppressTimestamp?: boolean
+  strict?: boolean
+}
+
+export interface ScanReport {
+  irPath: string | null
+  workspaceMdPath: string | null
+  componentMdPaths: string[]
+  totalFiles: number
+  keptSymbols: number
+  droppedSymbols: number
+  parseErrorCount: number
+  timeoutCount: number
+  /**
+   * Files that never made it into the IR (over-size, unreadable, unroutable). Surfaced
+   * separately from `parseErrorCount` because a discovery-time drop is silent by design
+   * in `@aburi/core` — it belongs on the CLI report so `aburi scan` can warn on stderr.
+   */
+  skipped: readonly { path: string; reason: string; detail?: string }[]
+  exitCode: ExitCode
+}
+
+/**
+ * §5 — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
+ * writes IR JSON and per-Component Markdown into `--output-dir` (default `out/`). The
+ * function is pure with respect to stdout/stderr — the CLI wrapper prints summaries. That
+ * separation lets integration tests assert on the returned report without swallowing
+ * stream output.
+ */
+export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
+  const cwd = options.cwd ?? process.cwd()
+  const workspaceRoot = await resolveWorkspaceRoot(cwd)
+
+  const loaded = await resolveConfig(workspaceRoot, options.configPath)
+  const config = mergeCliOverrides(loaded.config, options)
+
+  const plugins = await loadPlugins({
+    config,
+    workspaceRoot,
+    syntheticPlugins: loaded.syntheticPlugins,
+  })
+
+  const managers = await detectManagers(workspaceRoot)
+  const components = await resolveComponents(config, workspaceRoot)
+
+  const scanInput: Parameters<typeof scan>[0] = {
+    workspaceRoot,
+    config,
+    languages: plugins.languages,
+    frameworks: plugins.frameworks,
+    effects: plugins.effects,
+    registry: plugins.registry,
+    workspaceManagers: managers.managers.map((m) => ({
+      tool: m.tool,
+      roots: [...m.roots],
+    })),
+    components,
+    generator: await readGeneratorInfo(),
+  }
+  const scanResult = await scan(scanInput)
+
+  const format = options.format ?? "both"
+  const outputDir = resolve(cwd, options.outputDir ?? "out")
+  await mkdir(outputDir, { recursive: true })
+
+  let irPath: string | null = null
+  const workspaceMdPath = await maybeWriteWorkspaceMd(format, outputDir, scanResult.ir, options)
+  const componentMdPaths = await maybeWriteComponentMd(format, outputDir, scanResult.ir)
+  if (format !== "md") {
+    irPath = resolve(outputDir, "aburi.ir.json")
+    await writeCanonicalIR(scanResult.ir, irPath, {
+      format: options.compact ? "compact" : "pretty",
+    })
+  }
+
+  return {
+    irPath,
+    workspaceMdPath,
+    componentMdPaths,
+    totalFiles: scanResult.ir.stats.totalFiles,
+    keptSymbols: scanResult.ir.stats.keptSymbols,
+    droppedSymbols: scanResult.ir.stats.droppedSymbols,
+    parseErrorCount: scanResult.parseErrors.length,
+    timeoutCount: scanResult.timeoutEvents.length,
+    skipped: scanResult.skipped.map((s) => {
+      const entry: { path: string; reason: string; detail?: string } = {
+        path: s.path,
+        reason: s.reason,
+      }
+      if (s.detail !== undefined) entry.detail = s.detail
+      return entry
+    }),
+    exitCode: EXIT.SUCCESS,
+  }
+}
+
+async function resolveWorkspaceRoot(cwd: string): Promise<string> {
+  try {
+    return await detectWorkspaceRoot({ cwd })
+  } catch {
+    return resolve(cwd)
+  }
+}
+
+async function resolveConfig(
+  workspaceRoot: string,
+  overridePath: string | undefined,
+): Promise<LoadedConfig> {
+  try {
+    if (overridePath !== undefined) {
+      const absolute = resolve(workspaceRoot, overridePath)
+      const config = await readConfigFile(absolute)
+      const { normalizeFrameworkHints } = await import("@aburi/config")
+      return {
+        found: true,
+        source: absolute,
+        config,
+        syntheticPlugins: normalizeFrameworkHints(config),
+      }
+    }
+    return await loadConfig({ cwd: workspaceRoot })
+  } catch (error) {
+    throw new CliError(`Failed to load Aburi config: ${errorMessage(error)}`, "config-error", {
+      cause: error,
+    })
+  }
+}
+
+function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Config {
+  const merged: Partial<Config> = { ...config }
+  if (options.ignore !== undefined && options.ignore.length > 0) {
+    merged.ignore = [...(merged.ignore ?? []), ...options.ignore]
+  }
+  if (options.respectGitignore !== undefined) merged.respectGitignore = options.respectGitignore
+  if (options.strict !== undefined) merged.strict = options.strict
+  return merged as Config
+}
+
+async function resolveComponents(
+  config: Partial<Config>,
+  workspaceRoot: string,
+): Promise<Component[]> {
+  if (config.components !== undefined && config.components.length > 0) {
+    return config.components.map((entry) => ({
+      id: entry.id,
+      name: entry.name ?? entry.id,
+      roots: [...entry.roots],
+      publicApi: entry.publicApi ?? [],
+      languages: [...(entry.languages ?? [])],
+      frameworks: [...(entry.frameworks ?? [])],
+      description: entry.description ?? null,
+    }))
+  }
+  return detectComponents({ workspaceRoot })
+}
+
+async function maybeWriteWorkspaceMd(
+  format: "json" | "md" | "both",
+  outputDir: string,
+  ir: IR,
+  options: ScanOptions,
+): Promise<string | null> {
+  if (format === "json") return null
+  const path = resolve(outputDir, "workspace.md")
+  const md = projectWorkspace(ir, {
+    suppressTimestamp: options.suppressTimestamp ?? false,
+  })
+  await writeFile(path, md, "utf8")
+  return path
+}
+
+async function maybeWriteComponentMd(
+  format: "json" | "md" | "both",
+  outputDir: string,
+  ir: IR,
+): Promise<string[]> {
+  if (format === "json") return []
+  const paths: string[] = []
+  await mkdir(resolve(outputDir, "components"), { recursive: true })
+  for (const component of ir.components) {
+    const symbolsInComponent = ir.symbols.filter((s) => s.component === component.id)
+    const md = projectComponent({
+      component,
+      symbols: symbolsInComponent,
+      dependencies: ir.dependencies,
+    })
+    const path = resolve(outputDir, "components", `${component.id}.md`)
+    await writeFile(path, md, "utf8")
+    paths.push(path)
+  }
+  return paths
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}

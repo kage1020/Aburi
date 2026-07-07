@@ -1,0 +1,48 @@
+{
+  "name": "@aburi/cli",
+  "version": "0.0.0",
+  "description": "Aburi CLI: `aburi init | scan | diff | explain | vocab`. Wires @aburi/config + @aburi/core + @aburi/diff + @aburi/markdown-projection into the commands defined in design/details/cli-spec.md, with commander-driven subcommands, git-worktree-backed ref diff, stable exit codes (0/1/2/3), and a --fail-on gate parser for CI enforcement.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "aburi": "./dist/bin/aburi.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aburi/config": "workspace:*",
+    "@aburi/core": "workspace:*",
+    "@aburi/diff": "workspace:*",
+    "@aburi/markdown-projection": "workspace:*",
+    "@aburi/plugin-registry": "workspace:*",
+    "@aburi/types": "workspace:*",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
