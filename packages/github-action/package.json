@@ -1,0 +1,40 @@
+{
+  "name": "@aburi/github-action",
+  "version": "0.0.0",
+  "description": "GitHub Action wrapper around @aburi/cli: runs `aburi diff` for a pull request, uploads the semantic diff Markdown as a PR comment (upserted by a hidden marker), and forwards `--fail-on` so CI gates fire off Aburi's status/count clauses. Composite action; the runtime binary is resolved via `pnpm dlx @aburi/cli@<version>` so consumers pin the CLI, not this wrapper.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./action.yml": "./action.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "action.yml",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@aburi/cli": "workspace:*",
+    "@types/node": "^26.0.1",
+    "tsdown": "^0.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "yaml": "^2.9.0"
+  }
+}

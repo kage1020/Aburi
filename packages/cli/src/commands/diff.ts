@@ -5,6 +5,7 @@ import { resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
 import { projectDiff } from "@aburi/markdown-projection"
 import type { DiffResult, IR, IRRef } from "@aburi/types"
+import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../artifact-paths"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
@@ -97,14 +98,14 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   let diffJsonPath: string | null = null
   let diffMdPath: string | null = null
   if (format !== "md") {
-    diffJsonPath = resolve(outputDir, "diff.json")
+    diffJsonPath = resolve(outputDir, DIFF_JSON_FILENAME)
     const serialized = writeCanonicalDiff(diff, {
       format: options.compact ? "compact" : "pretty",
     })
     await writeFile(diffJsonPath, serialized, "utf8")
   }
   if (format !== "json") {
-    diffMdPath = resolve(outputDir, "diff.md")
+    diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
     await writeFile(diffMdPath, projectDiff(diff), "utf8")
   }
 
