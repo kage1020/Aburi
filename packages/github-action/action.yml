@@ -1,0 +1,228 @@
+name: "Aburi"
+description: >-
+  Run `aburi diff` on a pull request and upsert the semantic-diff Markdown as a PR
+  comment. The CLI is resolved via `pnpm dlx @aburi/cli@<version>` so consumers pin
+  the CLI version rather than this action.
+author: "kage1020"
+branding:
+  icon: "eye"
+  color: "orange"
+
+inputs:
+  version:
+    description: >-
+      npm dist-tag or exact version of `@aburi/cli` to run (e.g. `latest`, `0.1.0`).
+      Passed straight to `pnpm dlx`.
+    required: false
+    default: "latest"
+  refspec:
+    description: >-
+      `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls
+      back to `${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}`
+      on `pull_request` events. Any other event with an empty `refspec` fails with
+      exit code 2.
+    required: false
+    default: ""
+  fail-on:
+    description: >-
+      Value passed to `aburi diff --fail-on`. Follows the CI gate grammar defined in
+      `design/details/cli-spec.md` §8 (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
+      Leave empty to run in report-only mode.
+    required: false
+    default: ""
+  config:
+    description: "Path to an `aburi.json` / `aburi.config.jsonc` (forwarded to `--config`)."
+    required: false
+    default: ""
+  output-dir:
+    description: "Where `aburi diff` writes `aburi.diff.json` and `aburi.diff.md` (forwarded to `--output-dir`)."
+    required: false
+    default: "out"
+  format:
+    description: "`json | md | both`. Must include `md` when `comment: true`; the action verifies this."
+    required: false
+    default: "both"
+  working-directory:
+    description: "Directory to run the CLI from (defaults to the repository root)."
+    required: false
+    default: "."
+  comment:
+    description: "Upsert the produced Markdown as a PR comment. Set to `false` to run diff only."
+    required: false
+    default: "true"
+  token:
+    description: "GitHub token used to read PR comments and create/update the marker comment."
+    required: false
+    default: ${{ github.token }}
+  node-version:
+    description: "Node.js version to install via `actions/setup-node`."
+    required: false
+    default: "24"
+  pnpm-version:
+    description: "pnpm version to install via `pnpm/action-setup`."
+    required: false
+    default: "10"
+
+outputs:
+  diff-json-path:
+    description: "Path to the JSON diff artefact produced by `aburi diff` (empty when `format=md`)."
+    value: ${{ steps.diff.outputs.diff-json-path }}
+  diff-md-path:
+    description: "Path to the Markdown diff artefact produced by `aburi diff` (empty when `format=json`)."
+    value: ${{ steps.diff.outputs.diff-md-path }}
+  cli-exit-code:
+    description: "Numeric exit code from `aburi diff` (0=clean, 1=gate triggered, 2=input error, 3=plugin error)."
+    value: ${{ steps.diff.outputs.cli-exit-code }}
+  comment-id:
+    description: "Numeric id of the PR comment that was created or updated, or empty when `comment=false`."
+    value: ${{ steps.post-comment.outputs.comment-id }}
+  comment-action:
+    description: "`created`, `updated`, `unchanged`, or empty when no comment step ran."
+    value: ${{ steps.post-comment.outputs.action }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Aburi: validate inputs"
+      shell: bash
+      env:
+        FORMAT: ${{ inputs.format }}
+        COMMENT: ${{ inputs.comment }}
+      run: |
+        set -euo pipefail
+        if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
+          echo "::error::comment=true requires format to include markdown; got format=json." >&2
+          exit 2
+        fi
+        case "$FORMAT" in
+          json|md|both) : ;;
+          *) echo "::error::format must be one of: json | md | both (got '$FORMAT')." >&2; exit 2 ;;
+        esac
+
+    - name: "Aburi: resolve refspec"
+      id: refspec
+      shell: bash
+      env:
+        INPUT_REFSPEC: ${{ inputs.refspec }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        set -euo pipefail
+        if [ -n "$INPUT_REFSPEC" ]; then
+          echo "value=$INPUT_REFSPEC" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "pull_request_target" ]; then
+          echo "::error::No 'refspec' input and event '$EVENT_NAME' does not carry a PR base/head." >&2
+          exit 2
+        fi
+        if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
+          echo "::error::pull_request event is missing base/head SHAs; refuse to guess." >&2
+          exit 2
+        fi
+        echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+    - name: "Setup pnpm"
+      uses: "pnpm/action-setup@v4"
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - name: "Setup Node.js"
+      uses: "actions/setup-node@v4"
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: "Aburi: run diff"
+      id: diff
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ inputs.version }}
+        REFSPEC: ${{ steps.refspec.outputs.value }}
+        FORMAT: ${{ inputs.format }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        args=(diff "$REFSPEC" --format "$FORMAT" --output-dir "$OUTPUT_DIR")
+        if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
+        if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
+
+        set +e
+        pnpm dlx "@aburi/cli@$VERSION" "${args[@]}"
+        status=$?
+        set -e
+
+        json_path=""
+        md_path=""
+        if [ "$FORMAT" = "json" ] || [ "$FORMAT" = "both" ]; then
+          json_path="$OUTPUT_DIR/aburi.diff.json"
+        fi
+        if [ "$FORMAT" = "md" ] || [ "$FORMAT" = "both" ]; then
+          md_path="$OUTPUT_DIR/aburi.diff.md"
+        fi
+        echo "diff-json-path=$json_path" >> "$GITHUB_OUTPUT"
+        echo "diff-md-path=$md_path" >> "$GITHUB_OUTPUT"
+        # Preserve the CLI's own exit code (1 = gate triggered, 2 = input, 3 = plugin, 0 = clean).
+        # The subsequent comment step still runs — a triggered gate is still worth surfacing to the PR.
+        echo "cli-exit-code=$status" >> "$GITHUB_OUTPUT"
+
+    - name: "Aburi: upsert PR comment"
+      id: post-comment
+      if: ${{ inputs.comment == 'true' && steps.diff.outputs.diff-md-path != '' }}
+      uses: "actions/github-script@v7"
+      env:
+        MARKDOWN_PATH: ${{ inputs.working-directory }}/${{ steps.diff.outputs.diff-md-path }}
+        MARKER: "<!-- aburi:diff-comment -->"
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const fs = require('fs')
+          const path = process.env.MARKDOWN_PATH
+          const marker = process.env.MARKER
+          const raw = fs.readFileSync(path, 'utf8')
+          const body = raw.includes(marker) ? raw : `${marker}\n\n${raw}`
+          if (!context.issue.number) {
+            core.setFailed('actions/github-script has no issue.number in this context; cannot post PR comment.')
+            return
+          }
+          const { owner, repo } = context.repo
+          const issue_number = context.issue.number
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner, repo, issue_number, per_page: 100,
+          })
+          const existing = comments.find((c) => typeof c.body === 'string' && c.body.includes(marker))
+          if (existing && existing.body === body) {
+            core.info(`Aburi comment ${existing.id} already up to date`)
+            core.setOutput('action', 'unchanged')
+            core.setOutput('comment-id', String(existing.id))
+            return
+          }
+          if (existing) {
+            const { data } = await github.rest.issues.updateComment({
+              owner, repo, comment_id: existing.id, body,
+            })
+            core.info(`Aburi comment ${data.id} updated`)
+            core.setOutput('action', 'updated')
+            core.setOutput('comment-id', String(data.id))
+            return
+          }
+          const { data } = await github.rest.issues.createComment({
+            owner, repo, issue_number, body,
+          })
+          core.info(`Aburi comment ${data.id} created`)
+          core.setOutput('action', 'created')
+          core.setOutput('comment-id', String(data.id))
+
+    - name: "Aburi: propagate CLI exit code"
+      shell: bash
+      env:
+        CLI_EXIT: ${{ steps.diff.outputs.cli-exit-code }}
+      run: |
+        set -euo pipefail
+        if [ "${CLI_EXIT:-0}" != "0" ]; then
+          echo "::error::aburi diff exited with status $CLI_EXIT (see previous log). Failing the step so the PR check reflects it." >&2
+          exit "$CLI_EXIT"
+        fi
