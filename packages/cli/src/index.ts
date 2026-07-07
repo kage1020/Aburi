@@ -1,0 +1,39 @@
+export {
+  type DiffOptions,
+  type DiffReport,
+  formatFailOnMessage,
+  type GitRunner,
+  runDiff,
+} from "./commands/diff"
+export {
+  type ExplainOptions,
+  type ExplainOutcome,
+  runExplain,
+} from "./commands/explain"
+export {
+  type InitOptions,
+  type InitReport,
+  runInit,
+} from "./commands/init"
+export {
+  runScan,
+  type ScanOptions,
+  type ScanReport,
+} from "./commands/scan"
+export { type AburiEnv, type LogLevel, readEnv } from "./env"
+export { CliError, type CliErrorCode } from "./errors"
+export { EXIT, type ExitCode } from "./exit-codes"
+export {
+  evaluateClause,
+  evaluateFailOn,
+  type FailOnClause,
+  type FailOnDeltaAxis,
+  FailOnParseError,
+  type FailOnStatusToken,
+  type FailOnToken,
+  formatTriggered,
+  parseFailOn,
+} from "./fail-on"
+export { type CreateLoggerOptions, createLogger } from "./logger"
+export { type LoadedPlugins, type LoadPluginsOptions, loadPlugins } from "./plugin-loader"
+export { type RunCliOptions, runCli } from "./run"
