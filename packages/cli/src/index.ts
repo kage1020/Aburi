@@ -1,3 +1,4 @@
+export { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "./artifact-paths"
 export {
   type DiffOptions,
   type DiffReport,

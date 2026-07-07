@@ -51,9 +51,9 @@ jobs:
 
 | Output | Meaning |
 |---|---|
-| `diff-json-path` | Path to `aburi.diff.json` (empty when `format=md`). |
-| `diff-md-path` | Path to `aburi.diff.md` (empty when `format=json`). |
-| `cli-exit-code` | `0` clean · `1` gate triggered · `2` input error · `3` plugin error. |
+| `diff-json-path` | Path to `diff.json` (empty when `format=md`). |
+| `diff-md-path` | Path to `diff.md` (empty when `format=json`). |
+| `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). |
 | `comment-id` | Numeric id of the created/updated comment (empty when `comment=false`). |
 | `comment-action` | `created` / `updated` / `unchanged`. |
 
@@ -64,8 +64,11 @@ jobs:
 - When the produced Markdown matches the existing comment byte-for-byte the action reports
   `unchanged` and skips the PATCH request — this keeps notification noise low for
   no-op re-runs.
-- A triggered `--fail-on` gate makes the step exit with the CLI's exit code (typically `1`),
+- A triggered `--fail-on` gate makes the step exit with the CLI's exit code (`3`),
   which fails the PR check while still leaving the comment on the PR for the reviewer.
+- The comment step is skipped when the CLI exits with `1` (runtime error) or `2`
+  (input error) so a missing `diff.md` cannot bury the real failure inside a
+  secondary `ENOENT` from the comment upsert.
 
 ## Programmatic API
 

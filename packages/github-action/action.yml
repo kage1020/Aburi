@@ -35,7 +35,7 @@ inputs:
     required: false
     default: ""
   output-dir:
-    description: "Where `aburi diff` writes `aburi.diff.json` and `aburi.diff.md` (forwarded to `--output-dir`)."
+    description: "Where `aburi diff` writes `diff.json` and `diff.md` (forwarded to `--output-dir`)."
     required: false
     default: "out"
   format:
@@ -71,7 +71,7 @@ outputs:
     description: "Path to the Markdown diff artefact produced by `aburi diff` (empty when `format=json`)."
     value: ${{ steps.diff.outputs.diff-md-path }}
   cli-exit-code:
-    description: "Numeric exit code from `aburi diff` (0=clean, 1=gate triggered, 2=input error, 3=plugin error)."
+    description: "Numeric exit code from `aburi diff` (0=clean, 1=runtime error, 2=input error, 3=--fail-on gate or plugin error). Matches `packages/cli/src/exit-codes.ts`."
     value: ${{ steps.diff.outputs.cli-exit-code }}
   comment-id:
     description: "Numeric id of the PR comment that was created or updated, or empty when `comment=false`."
@@ -155,23 +155,43 @@ runs:
         status=$?
         set -e
 
+        # Filenames pinned by `packages/cli/src/artifact-paths.ts`
+        # (DIFF_JSON_FILENAME=diff.json, DIFF_MD_FILENAME=diff.md). The parity test at
+        # `packages/github-action/test/action-yml.test.ts` re-imports those constants
+        # so a rename on the CLI side fails CI here before it ever hits an ENOENT.
         json_path=""
         md_path=""
         if [ "$FORMAT" = "json" ] || [ "$FORMAT" = "both" ]; then
-          json_path="$OUTPUT_DIR/aburi.diff.json"
+          json_path="$OUTPUT_DIR/diff.json"
         fi
         if [ "$FORMAT" = "md" ] || [ "$FORMAT" = "both" ]; then
-          md_path="$OUTPUT_DIR/aburi.diff.md"
+          md_path="$OUTPUT_DIR/diff.md"
         fi
         echo "diff-json-path=$json_path" >> "$GITHUB_OUTPUT"
         echo "diff-md-path=$md_path" >> "$GITHUB_OUTPUT"
-        # Preserve the CLI's own exit code (1 = gate triggered, 2 = input, 3 = plugin, 0 = clean).
-        # The subsequent comment step still runs — a triggered gate is still worth surfacing to the PR.
+        # Preserve the CLI's own exit code:
+        #   0 = success, 1 = runtime error, 2 = input error, 3 = --fail-on gate or plugin error.
+        # See `packages/cli/src/exit-codes.ts` for the canonical mapping.
+        # We propagate `status` instead of failing here so the subsequent comment step
+        # can still post the diff (which is especially valuable when status=3 — a
+        # triggered gate is precisely what reviewers need to see on the PR).
         echo "cli-exit-code=$status" >> "$GITHUB_OUTPUT"
 
     - name: "Aburi: upsert PR comment"
       id: post-comment
-      if: ${{ inputs.comment == 'true' && steps.diff.outputs.diff-md-path != '' }}
+      # Only post when the CLI actually produced the Markdown file. That means:
+      #   - `comment: true` (opt-in),
+      #   - `format` included markdown (diff-md-path is non-empty),
+      #   - the CLI exited either clean (0) or with a --fail-on gate trip (3).
+      # We deliberately skip on exit=1 (runtime error) and exit=2 (input error)
+      # because the diff artefact will be missing or partial, and running the
+      # comment step against a non-existent file would surface as an ENOENT that
+      # obscures the CLI's real failure in the workflow log.
+      if: >-
+        ${{ inputs.comment == 'true'
+            && steps.diff.outputs.diff-md-path != ''
+            && (steps.diff.outputs.cli-exit-code == '0'
+                || steps.diff.outputs.cli-exit-code == '3') }}
       uses: "actions/github-script@v7"
       env:
         MARKDOWN_PATH: ${{ inputs.working-directory }}/${{ steps.diff.outputs.diff-md-path }}

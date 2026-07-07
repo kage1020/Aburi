@@ -241,6 +241,9 @@ importers:
 
   packages/github-action:
     devDependencies:
+      '@aburi/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1

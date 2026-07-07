@@ -230,6 +230,43 @@ describe("upsertPullRequestComment", () => {
     expect(calls[0]?.url.startsWith("https://ghe.example.com/api/v3/repos/")).toBe(true)
   })
 
+  it("throws when the patch request fails", async () => {
+    const existing = {
+      id: 555,
+      body: `${ABURI_COMMENT_MARKER}\n\nold`,
+      html_url: "u",
+    }
+    const { fetch } = makeFakeFetch({ listPages: [[existing]], patchStatus: 422 })
+    await expect(
+      upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
+    ).rejects.toThrow(/GitHub API failed to update PR comment: 422/)
+  })
+
+  it("throws when the create response is missing id / body / html_url", async () => {
+    const { fetch } = makeFakeFetch({
+      listPages: [[]],
+      createResponse: { id: 1, body: "no html_url" },
+    })
+    await expect(
+      upsertPullRequestComment({ ref: REF, body: "x", token: "t", fetch }),
+    ).rejects.toThrow(/without id\/body\/html_url/)
+  })
+
+  it("throws when the patch response is missing id / body / html_url", async () => {
+    const existing = {
+      id: 777,
+      body: `${ABURI_COMMENT_MARKER}\n\nold`,
+      html_url: "u",
+    }
+    const { fetch } = makeFakeFetch({
+      listPages: [[existing]],
+      patchResponse: { id: 777 },
+    })
+    await expect(
+      upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
+    ).rejects.toThrow(/without id\/body\/html_url/)
+  })
+
   it("rejects a non-array list response instead of silently treating it as empty", async () => {
     const fetch: typeof globalThis.fetch = async () =>
       new Response(JSON.stringify({ message: "oops" }), {

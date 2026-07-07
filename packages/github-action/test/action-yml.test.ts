@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
 import { describe, expect, it } from "vitest"
 import { parse } from "yaml"
 import { ABURI_COMMENT_MARKER } from "../src/comment"
@@ -86,6 +87,46 @@ describe("action.yml", () => {
   it("embeds the same marker string as the programmatic upsert helper", async () => {
     const raw = await readFile(ACTION_PATH, "utf8")
     expect(raw).toContain(ABURI_COMMENT_MARKER)
+  })
+
+  it("reads the exact artefact filenames that @aburi/cli writes", async () => {
+    // Parity check between action.yml (which resolves diff-json-path /
+    // diff-md-path via string concatenation in bash) and the CLI's actual
+    // artifact-paths module. Without this, a rename of `diff.json` / `diff.md`
+    // on the CLI side would surface only at runtime as an ENOENT inside the
+    // github-script comment step — long after CI green.
+    const raw = await readFile(ACTION_PATH, "utf8")
+    expect(raw).toContain(`$OUTPUT_DIR/${DIFF_JSON_FILENAME}`)
+    expect(raw).toContain(`$OUTPUT_DIR/${DIFF_MD_FILENAME}`)
+    // Defence in depth: also assert the pre-refactor "aburi.diff.*" names are
+    // gone. A stale copy would satisfy the concat above but still break at
+    // runtime because the CLI never writes them.
+    expect(raw).not.toContain("aburi.diff.json")
+    expect(raw).not.toContain("aburi.diff.md")
+  })
+
+  it("skips the comment step when the CLI failed with runtime or input error", async () => {
+    // Guarding on cli-exit-code == '0' || '3' means exit=1 (runtime) and
+    // exit=2 (input) suppress the comment. Without that guard, github-script
+    // would attempt to read a missing / partial diff.md and its ENOENT would
+    // bury the CLI's real failure in the workflow log.
+    const action = await loadAction()
+    const commentStep = action.runs.steps.find((s) => s.id === "post-comment")
+    expect(commentStep?.if).toContain("cli-exit-code")
+    expect(commentStep?.if).toContain("'0'")
+    expect(commentStep?.if).toContain("'3'")
+  })
+
+  it("documents the exit-code table in the cli-exit-code output description", async () => {
+    // The initial revision of this action had the 1/3 codes swapped in every
+    // docstring. Keep the description literal-checked so a future edit can't
+    // regress the mapping.
+    const action = await loadAction()
+    const description = action.outputs["cli-exit-code"]?.description ?? ""
+    expect(description).toContain("1=runtime")
+    expect(description).toContain("2=input")
+    expect(description).toContain("3=")
+    expect(description).toContain("gate")
   })
 
   it("propagates the CLI exit code so PR checks reflect a triggered gate", async () => {
