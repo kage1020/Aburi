@@ -350,7 +350,13 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     signature: input.candidate.signature,
     rules: [...input.rules].sort((a, b) => a.line - b.line),
     effects: input.effects,
-    calls: input.calls,
+    // Sort calls by line to satisfy IR invariant #11 (`calls[].line` monotonic).
+    // Language plugins walk bodies in AST traversal order, which is *usually* source
+    // order — but not guaranteed once tree-sitter's child iteration surfaces branch
+    // arms or when a language plugin visits `else` before the `if` body's tail
+    // statements. Sorting here means every downstream consumer can rely on the
+    // invariant without pushing the burden onto every plugin.
+    calls: [...input.calls].sort((a, b) => a.line - b.line),
     source: input.candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
     confidence: "high",

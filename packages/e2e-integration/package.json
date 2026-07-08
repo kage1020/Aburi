@@ -1,0 +1,24 @@
+{
+  "name": "@aburi/e2e-integration",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests exercising @aburi/cli against fixtures/nestjs-billing. Runs runInit / runScan / runDiff (no subprocess spawn — the CLI is imported directly) and drives the three PR scenarios in design/implementation-plan.md §4 WI-16 with in-tree fixture mutations. Snapshots are structural (component counts, diff status distribution, gate outcome) rather than byte-exact — a full IR snapshot would rot on every plugin tweak.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@aburi/cli": "workspace:*",
+    "@aburi/core": "workspace:*",
+    "@aburi/diff": "workspace:*",
+    "@aburi/effects-nest": "workspace:*",
+    "@aburi/framework-nestjs": "workspace:*",
+    "@aburi/lang-typescript": "workspace:*",
+    "@aburi/plugin-registry": "workspace:*",
+    "@aburi/types": "workspace:*",
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
