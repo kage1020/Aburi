@@ -56,14 +56,34 @@ tweak.
 ### `@aburi/core` bug fix (patch)
 
 WI-16 uncovered a real integrity violation in `buildKeptSymbol`
-(`packages/core/src/scan/pipeline.ts`): `rules[]` was sorted by line but `calls[]`
-was written back in AST-traversal order, which is not always source order. Any
-Symbol with two calls that the language plugin visited out of order failed IR
-invariant #11 (`calls[].line` monotonic). The fixture's BillingService methods
-were the first test surface long enough to trigger the misordering; smaller unit
-tests happened to pass because their bodies contained ≤ 1 call. Fixed here so
-every downstream consumer can rely on the invariant without pushing the burden
-onto every plugin.
+(`packages/core/src/scan/pipeline.ts`): only `rules[]` was line-sorted before
+entering the IR, while `decorators[]` / `effects[]` / `calls[]` were kept in
+their producer's order. That order comes from either language-plugin AST
+traversal (which is *usually* source order but not contractually guaranteed)
+or `classifyCalls`'s `byTargetThenLine` (which prioritises target-alpha and
+disregards line). Both violate IR invariant #11 (`decorators/rules/effects/calls[].line`
+monotonic — `integrity.ts:284-311`) the moment a Symbol has two entries whose
+producer-order disagrees with source order.
+
+The BillingService methods were the first surface long enough to trigger the
+`calls[]` failure; earlier unit tests happened to pass because their method
+bodies had ≤ 1 call. The `effects[]` and `decorators[]` siblings shared the
+same latent bug — surfaced by PR review — and would trip any Symbol that
+classified two effects with target-alpha vs source-line disagreement.
+
+Fixed in one place: `buildKeptSymbol` now stable-line-sorts all four arrays.
+Same-line entries retain their producer order (schema §17 phrases the
+same-line contract as "appearance order"; JavaScript's stable sort preserves
+that). A caveat: for `effects[]` / `calls[]` the "producer order" is
+`byTargetThenLine`'s output, so same-line entries land in target-alpha order
+rather than tree-sitter emission order — the integrity check only asserts
+line monotonicity, so this is a documented deviation from the strictest
+reading of §17, not a runtime issue.
+
+Guards: 4 new unit tests in `packages/core/test/scan/pipeline.test.ts` cover
+calls / effects / decorators reverse-line-order inputs plus same-line stable
+sort. Written against `runFilePipeline` so a regression fires here — long
+before the fixture-level integration test does.
 
 ### Tooling
 

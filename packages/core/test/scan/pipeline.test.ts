@@ -155,8 +155,8 @@ function baseCandidate(): SymbolCandidate<OpaqueAstNode> {
   }
 }
 
-function stubCall(target: string): CallCandidate {
-  return { target, line: 1, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
+function stubCall(target: string, line = 1): CallCandidate {
+  return { target, line, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
 }
 
 const stubFile: SourceFile = { path: "test.stub", content: "" }
@@ -323,6 +323,84 @@ describe("runFilePipeline — effect classify dispatch", () => {
       body: { rules: [], calls: [stubCall("helper.doWork")] },
     })
     expect(result.symbols[0]?.calls).toEqual([{ target: "helper.doWork", line: 1, resolved: null }])
+  })
+})
+
+describe("runFilePipeline — array line ordering (IR integrity invariant #11)", () => {
+  it("sorts calls[] by line even when the language plugin visits body children out of source order", async () => {
+    // Reverse-alpha targets in reverse-line order — `classifyCalls` sorts unclassified
+    // calls by `byTargetThenLine`, which would leave them in target-alpha order:
+    // [alpha (line 40), zeta (line 20)]. Integrity invariant #11 demands line
+    // ascending. buildKeptSymbol must re-sort.
+    const result = await runPipelineWithStubs({
+      effects: [],
+      body: {
+        rules: [],
+        calls: [stubCall("zeta.doWork", 20), stubCall("alpha.doWork", 40)],
+      },
+    })
+    const lines = result.symbols[0]?.calls.map((c) => c.line) ?? []
+    expect(lines).toEqual([...lines].sort((a, b) => a - b))
+  })
+
+  it("sorts effects[] by line — regression guard for the sibling of the calls sort bug", async () => {
+    // Two effect classifications whose target-alpha order ("alpha.emit" < "zeta.emit")
+    // is inverted from their source-line order (zeta on 15, alpha on 60). Without
+    // the sort in buildKeptSymbol, effects[] would leave classifyCalls's
+    // byTargetThenLine result untouched and violate invariant #11.
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-loud"),
+      init: async () => {},
+      classify: (call: CallCandidate): EffectClassification => ({
+        effectId: "event.publish",
+        confidence: "high",
+        derivedBy: `effects-loud:${call.target}`,
+      }),
+    }
+    const result = await runPipelineWithStubs({
+      effects: [eff],
+      body: {
+        rules: [],
+        calls: [stubCall("zeta.emit", 15), stubCall("alpha.emit", 60)],
+      },
+    })
+    const lines = result.symbols[0]?.effects.map((e) => e.line) ?? []
+    expect(lines).toEqual([15, 60])
+  })
+
+  it("sorts decorators[] by line when the language plugin emits them out of order", async () => {
+    // Decorators are typed as source-order by convention but the pipeline enforces
+    // it here so downstream integrity does not rely on unwritten plugin contracts.
+    const candidate: SymbolCandidate<OpaqueAstNode> = {
+      ...baseCandidate(),
+      decorators: [
+        { name: "Later", raw: "@Later()", arguments: [], boundary: false, line: 30 },
+        { name: "Earlier", raw: "@Earlier()", arguments: [], boundary: false, line: 5 },
+      ],
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    const lines = result.symbols[0]?.decorators.map((d) => d.line) ?? []
+    expect(lines).toEqual([5, 30])
+  })
+
+  it("preserves the relative order of same-line entries (stable sort)", async () => {
+    // Schema §17 phrases the same-line contract as "appearance order". Node's
+    // Array.prototype.sort has been stable since ES2019 — we depend on that here
+    // so callers can trust the ordering of e.g. two calls on the same line.
+    const result = await runPipelineWithStubs({
+      effects: [],
+      body: {
+        rules: [],
+        calls: [stubCall("first.hit", 10), stubCall("second.hit", 10), stubCall("third.hit", 10)],
+      },
+    })
+    const targets = result.symbols[0]?.calls.map((c) => c.target) ?? []
+    // classifyCalls re-sorts unclassified calls by byTargetThenLine before
+    // buildKeptSymbol receives them, so same-line entries land in target-alpha
+    // order. The relevant assertion is that they stay grouped and in some
+    // deterministic order — not that source order survives (see the "known
+    // limitation" note in the changeset).
+    expect(targets).toEqual(["first.hit", "second.hit", "third.hit"])
   })
 })
 
