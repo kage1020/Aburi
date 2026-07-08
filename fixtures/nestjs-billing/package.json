@@ -1,0 +1,11 @@
+{
+  "name": "nestjs-billing",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fixture project for Aburi integration tests. NestJS-shaped billing service kept intentionally small but wide enough that dropped-toggled / added / moved statuses have room to fire in the scenario mutations. Not a runnable app; the TypeScript is scanned in place, no install ever happens.",
+  "type": "commonjs",
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0"
+  }
+}

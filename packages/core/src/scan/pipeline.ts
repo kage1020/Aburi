@@ -346,11 +346,28 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     name: input.candidate.name,
     language: input.language,
     visibility: input.candidate.visibility,
-    decorators: [...input.candidate.decorators],
+    // Sort every list-field by `.line` before it enters the IR. Integrity invariant
+    // #11 (`integrity.ts:284-311`) demands monotonic `.line` on `decorators` /
+    // `rules` / `effects` / `calls` — but the upstream producers do NOT guarantee
+    // that ordering on their own:
+    //   - `decorators` from the language plugin land in AST traversal order, which
+    //     tracks source order for stacked decorators but is not spelled out as a
+    //     plugin contract.
+    //   - `rules` come out of `walkBody` in visit order (branch tails after
+    //     branch bodies, `else` before `try/finally`), so an integrity-safe
+    //     ordering has to be applied here.
+    //   - `effects` and `calls` were both re-sorted by `byTargetThenLine` in
+    //     `classifyCalls` (see pipeline.ts:273-274). That satisfies human
+    //     readability but violates monotonic `.line` the moment a Symbol has two
+    //     entries whose target-alpha order is inverted from their source line.
+    // A stable line sort here restores invariant #11 without disturbing the
+    // relative order of same-line entries — same-line entries keep whatever
+    // order the producer gave them (schema §17 says "appearance order").
+    decorators: [...input.candidate.decorators].sort((a, b) => a.line - b.line),
     signature: input.candidate.signature,
     rules: [...input.rules].sort((a, b) => a.line - b.line),
-    effects: input.effects,
-    calls: input.calls,
+    effects: [...input.effects].sort((a, b) => a.line - b.line),
+    calls: [...input.calls].sort((a, b) => a.line - b.line),
     source: input.candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
     confidence: "high",
