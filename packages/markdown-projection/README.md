@@ -9,13 +9,16 @@ snapshot-test outputs without stubbing side effects.
 
 | Function | Emits | Consumer |
 |---|---|---|
-| `projectWorkspace(ir)` | L0 workspace overview (component list + dependency edges) | `out/workspace.md` |
-| `projectComponent(ir, component)` | L1 + L2 component detail (public API surface + module logic) | `out/components/<id>.md` |
+| `projectWorkspace(ir, options?)` | L0 workspace overview (component list + dependency edges); `options.suppressTimestamp` mirrors the CLI's `--no-timestamp` for reproducible snapshots. | `out/workspace.md` |
+| `projectComponent({ component, symbols, dependencies })` | L1 + L2 component detail (public API surface + module logic). The single-argument form makes it explicit that the caller must have pre-filtered `symbols` / `dependencies` to the ones belonging to `component`. | `out/components/<id>.md` |
 | `projectDiff(diff)` | Review-facing PR summary (added / removed / changed / moved with confidence badges) | `out/diff.md`, PR comment |
 | `projectSymbolExplain(symbol)` | Per-Symbol detail (rules / effects / calls / dropped fold-out) | `aburi explain` stdout |
 
-Also exports the `formatTriggered` helper the CLI uses to phrase `--fail-on`
-gate messages.
+Also exports the `formatFailOnClause` / `formatFailOnTriggered` helpers that
+render `--fail-on` clauses and triggered outcomes into review-facing Markdown.
+The CLI's stderr-facing phrasing (`formatTriggered`) is a separate helper
+exported from `@aburi/cli` — the two are intentionally distinct so the
+Markdown side stays projection-only and the CLI side stays terminal-friendly.
 
 ## Install
 

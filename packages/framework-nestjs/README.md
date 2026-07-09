@@ -33,10 +33,18 @@ pnpm add @aburi/framework-nestjs
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 ```
 
-The plugin package name is `framework-nestjs` — `aburi init` writes it into
-`aburi.json` under `frameworks` when it autodetects NestJS in your dependencies.
+In v0.1, `aburi init` writes the short framework name `"nestjs"` into
+`aburi.json` under `frameworks` (matching the component-autodetect vocabulary
+in `@aburi/core`). The plugin loader currently resolves that short name to
+`@aburi/nestjs` (bare-name prefix, no bucket segment inferred — see
+[`docs/plugin-development.md`](../../docs/plugin-development.md)), so the
+generated `aburi.json` needs a one-time edit from `"nestjs"` → `"framework-nestjs"`
+for the loader to pick this package up. A follow-up will close the gap by
+teaching either `init` to emit `framework-nestjs` or the loader to widen its
+resolution table.
 
 ## See also
 
-- [`design/details/framework-plugin.md`](../../design/details/framework-plugin.md)
+- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md) §5.2 — the framework `classifySymbol` contract this plugin implements.
+- [`design/details/extension-vocab.md`](../../design/details/extension-vocab.md) — how framework `extKind` namespaces (`framework:nestjs:*`) plug into the shared vocab.
 - [`design/details/drop-list.md`](../../design/details/drop-list.md)

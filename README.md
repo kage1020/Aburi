@@ -7,10 +7,11 @@ judge): parses with tree-sitter, matches Symbols across revisions with a 5-stage
 semantic diff, and emits a JSON IR plus a decision-focused Markdown projection
 that CI can gate on.
 
-> **Status: v0.1 implementation.** Detailed design (D1-D11) and v1 JSON Schemas
-> are frozen. Every package listed below is implemented, unit-tested, and
-> exercised end-to-end against `fixtures/nestjs-billing/`. `npm publish` is
-> gated by [WI-18](design/implementation-plan.md) and has not run yet.
+> **Status: v0.1 implementation.** The v1 JSON Schemas are frozen. Every
+> package listed below is implemented, unit-tested, and exercised end-to-end
+> against `fixtures/nestjs-billing/`. `npm publish` is gated by the release
+> preparation step in [`design/implementation-plan.md`](design/implementation-plan.md)
+> and has not run yet.
 
 ## Why not just `git diff`
 
@@ -52,7 +53,8 @@ pnpm exec aburi scan
 ### Diff a PR
 
 ```bash
-pnpm exec aburi diff main..HEAD --fail-on changed,removed:>5
+# Quote --fail-on: `>` is a shell redirect if left bare.
+pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
 # → out/diff.json          (aburi.diff.v1 schema)
 # → out/diff.md            (review-facing Markdown)
 # exit 0 = clean, 3 = --fail-on gate tripped
@@ -114,7 +116,7 @@ Same IR in → same Markdown / same diff out.
 
 Design docs: [`design.md`](design.md), [`design/roadmap.md`](design/roadmap.md),
 [`design/implementation-plan.md`](design/implementation-plan.md),
-[`design/details/`](design/details/) (D1-D11), [`schema/`](schema/) (JSON Schemas).
+[`design/details/`](design/details/) (11 topical designs), [`schema/`](schema/) (JSON Schemas).
 
 Reference: [`docs/cli-reference.md`](docs/cli-reference.md),
 [`docs/plugin-development.md`](docs/plugin-development.md).
@@ -130,7 +132,7 @@ Reference: [`docs/cli-reference.md`](docs/cli-reference.md),
 pnpm install
 pnpm check       # Biome lint + format check
 pnpm typecheck   # tsc --noEmit across packages (turbo)
-pnpm test        # Vitest across packages (~900 tests)
+pnpm test        # Vitest across packages
 pnpm build       # tsdown across packages
 ```
 

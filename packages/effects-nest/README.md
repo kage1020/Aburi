@@ -9,7 +9,12 @@ Recognised shapes:
 | Source shape | Effect |
 |---|---|
 | `eventBus.emit(...)` | `event.publish` |
-| `eventEmitter2.emit(...)` (or any identifier matching `EventEmitter2`) | `event.publish` |
+| `EventEmitter2.emit(...)` | `event.publish` |
+
+The identifier check is a case-sensitive exact match against a fixed set
+(currently `["eventBus", "EventEmitter2"]`) — `eventemitter2.emit(...)` and
+`myBus.emit(...)` intentionally fall through so the recognizer is loud and
+narrow rather than heuristic.
 
 Layered gate: the owning file must import a recognised event-emitter module
 (`@nestjs/event-emitter` or similar), and the trailing two target segments must

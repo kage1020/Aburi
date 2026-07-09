@@ -62,6 +62,12 @@ pnpm exec aburi --version
 `evaluateFailOn`, `DIFF_JSON_FILENAME`, `DIFF_MD_FILENAME`, …) so integration
 tests can drive the CLI without spawning a subprocess.
 
+`runCli({ argv, stdout, stderr, env, cwd })` returns the exit code and never
+calls `process.exit` itself — the caller decides whether to `process.exit(code)`,
+assign `process.exitCode`, or ignore it entirely. That is what lets the
+integration suite drive the CLI with captured streams and assert on the exit
+code without terminating the test process.
+
 ## See also
 
 - [`docs/cli-reference.md`](../../docs/cli-reference.md) — per-subcommand flags and examples.

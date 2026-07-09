@@ -38,5 +38,5 @@ import { langTypescriptPlugin } from "@aburi/lang-typescript"
 
 ## See also
 
-- [`design/details/language-plugin.md`](../../design/details/language-plugin.md)
+- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md)
 - [`design/details/drop-list.md`](../../design/details/drop-list.md)

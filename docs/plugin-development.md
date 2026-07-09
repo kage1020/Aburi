@@ -11,8 +11,8 @@ different things:
 
 The full type signatures live in
 [`@aburi/types`](../packages/types/src/plugins.ts) and the design contracts in
-[`design/details/language-plugin.md`](../design/details/language-plugin.md),
-[`design/details/framework-plugin.md`](../design/details/framework-plugin.md),
+[`design/details/lang-plugin.md`](../design/details/lang-plugin.md),
+[`design/details/extension-vocab.md`](../design/details/extension-vocab.md) (framework classification lives inside `lang-plugin.md §5.2` — there is no separate framework-plugin.md today),
 [`design/details/effect-plugin.md`](../design/details/effect-plugin.md).
 
 This document is the operator-facing walkthrough.
@@ -207,12 +207,22 @@ discovers them by package name from `aburi.json`:
 }
 ```
 
-The loader resolves each ref as follows:
+The loader resolves each ref as follows (`packages/cli/src/plugin-loader.ts:84-90`):
 
-- Bare manifest name (`mytool`) → `@aburi/framework-mytool` (bucketed by list).
-- Scope-prefixed (`@myorg/pkg`) or package-shaped → verbatim.
+- Bare name with no `@` and no `/` → prefixed with `@aburi/` verbatim.
+  `"typescript"` → `@aburi/typescript`, `"framework-mytool"` → `@aburi/framework-mytool`.
+  The loader does **not** infer a bucket prefix — a config entry `frameworks: ["mytool"]`
+  resolves to `@aburi/mytool`, NOT `@aburi/framework-mytool`. Third-party plugin
+  authors should write the full package name (`framework-mytool` for a first-party
+  bucket-prefixed name, or `@myorg/mypkg` for a scoped package) in `aburi.json`.
+- Scoped or slash-containing (`@myorg/pkg`, `some-pkg/subpath`) → verbatim.
 - Relative path (`./plugins/mytool.mjs`) → resolved against the workspace root
   as a `file:` URL.
+
+Bucket assignment (`languages` / `frameworks` / `effects` in `aburi.json`) is
+still enforced at load time: if the loaded manifest's `type` does not match the
+bucket it was listed under, the loader throws with a `plugin-error`
+(`CliError` → `EXIT.GATE`).
 
 Your module must export the plugin as a default export, a `plugin` export, or
 any top-level export whose value has a `manifest` field. The first hit wins.

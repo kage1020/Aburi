@@ -50,12 +50,16 @@ const result = await scan({
 Canonical write:
 
 ```ts
-import { writeFile } from "node:fs/promises"
-await writeFile("out/aburi.ir.json", writeCanonicalIR(result.ir), "utf8")
+// writeCanonicalIR(ir, outputPath, options?) creates the parent directory and
+// writes the canonical bytes for you; the returned string is the serialized
+// payload for callers that also want it in memory.
+await writeCanonicalIR(result.ir, "out/aburi.ir.json")
+// or with the compact format used by `aburi scan --compact`:
+await writeCanonicalIR(result.ir, "out/aburi.ir.json", { format: "compact" })
 ```
 
 ## See also
 
 - [`design/details/ir-schema.md`](../../design/details/ir-schema.md) — IR contract + 11 invariants.
-- [`design/details/scan-pipeline.md`](../../design/details/scan-pipeline.md) — pipeline stages.
+- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md) — the language-plugin contract the scan pipeline drives.
 - [`design/details/drop-list.md`](../../design/details/drop-list.md) — drop rules A / B / C.

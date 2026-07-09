@@ -2,7 +2,7 @@
 
 Plugin manifest validator + vocab registry. Loads every plugin's manifest,
 enforces the reservation and conflict rules from
-[`design/details/plugin-registry.md`](../../design/details/plugin-registry.md),
+[`design/details/extension-vocab.md`](../../design/details/extension-vocab.md),
 and answers the runtime lookups the scan / diff paths need:
 
 - Which plugin owns this `extKind` / `effect id` / `framework` / `derivedBy`
@@ -32,11 +32,20 @@ registry.register(langTypescriptPlugin.manifest)
 registry.register(nestjsFrameworkPlugin.manifest)
 
 // Attempts to re-register a conflicting namespace throw.
-registry.findExtKind("framework:nestjs:controller")
-// → { plugin: "framework-nestjs", baseKind: "class", ... }
+const vocab = registry.findExtKind("framework:nestjs:controller")
+// vocab === {
+//   id: "framework:nestjs:controller",
+//   baseKind: "class",
+//   description: "...",
+//   owner: <the framework-nestjs PluginManifest>,
+// }
 ```
+
+`findExtKind` / `findEffect` / `findFramework` return an object whose `owner`
+field is the full `PluginManifest` that claimed the namespace (not just the
+plugin's name). Callers that only need the name read `owner.name`.
 
 ## See also
 
-- [`design/details/plugin-registry.md`](../../design/details/plugin-registry.md)
+- [`design/details/extension-vocab.md`](../../design/details/extension-vocab.md) — namespace ownership, reservation rules, conflict semantics.
 - [`schema/aburi.plugin.v1.json`](../../schema/aburi.plugin.v1.json)

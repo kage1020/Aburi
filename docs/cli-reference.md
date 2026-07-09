@@ -21,7 +21,7 @@ the operator-facing reference.
 | Variable | Purpose |
 |---|---|
 | `ABURI_CONFIG` | Alternate config file path. Overridden by the `--config` flag when present. |
-| `ABURI_LOG_LEVEL` | `debug` / `info` (default) / `warn` / `error`. |
+| `ABURI_LOG_LEVEL` | Reserved for future logger wiring. In v0.1 the CLI reads the variable into `env.logLevel` but no code consumes it yet, so setting it has no runtime effect. |
 | `NO_COLOR` | Suppress ANSI colour output. |
 | `CI` | When set, `aburi scan` implicitly enables `--no-timestamp` for reproducible IR bytes. |
 

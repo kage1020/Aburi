@@ -30,11 +30,16 @@ import type { LanguagePlugin, FrameworkPlugin, EffectPlugin } from "@aburi/types
 
 ```bash
 pnpm --filter @aburi/types codegen
-# → src/generated/{ir,config,diff,plugins}.ts (do not hand-edit)
+# → src/generated/{ir,config,diff,plugin}.ts (do not hand-edit)
 ```
+
+Note: `src/generated/plugin.ts` is singular (schema-generated). The
+hand-written plugin interfaces live at `src/plugins.ts` (plural). Keeping the
+two clearly separated means a re-run of codegen never clobbers the interfaces
+that the schemas cannot express.
 
 ## See also
 
 - [`schema/`](../../schema) — the JSON Schemas this package projects.
 - [`design/details/ir-schema.md`](../../design/details/ir-schema.md) — IR contract.
-- [`design/details/language-plugin.md`](../../design/details/language-plugin.md) — plugin interface.
+- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md) — plugin interface.
