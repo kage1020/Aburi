@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Aburi project config loader: JSONC parser + ajv strict validation of aburi.json against aburi.config.v1.json, frameworkHints hint:-prefix normalization, and workspace-aware config file discovery",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/config#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/config"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

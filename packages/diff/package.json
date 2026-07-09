@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Aburi diff engine: 5-stage semantic matcher (id / git-rename / logic fingerprint / name+signature / dropped weak) followed by status classification and per-Symbol delta computation, emitting aburi.diff.v1-conformant output for PR-review workflows",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/diff#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/diff"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

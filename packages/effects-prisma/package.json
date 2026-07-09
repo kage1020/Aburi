@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Aburi Prisma effects plugin: classifies prisma.<model>.<verb> and prisma.$transaction call expressions into core db.read / db.write / db.transaction effects",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/effects-prisma#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/effects-prisma"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
