@@ -84,7 +84,7 @@
 
   `@aburi/types` patch: `EffectVocab.description` and `ExtKindVocab.{baseKind, description}` are now nullable to model registry resolution through prefix ownership (`findEffect` / `findExtKind` return non-null for prefix-owned ids that the plugin did not enumerate individually).
 
-- 405dcfa: Ship the v0.1 documentation set required by WI-17.
+- 405dcfa: Ship the v0.1 documentation set.
 
   - **Root `README.md`** — rewritten from a status placeholder into a full quick
     start: install / init / scan / diff / GitHub Action, a "why not just `git diff`"
@@ -97,7 +97,7 @@
     `@aburi/effects-prisma`, `@aburi/effects-nest`, `@aburi/diff`,
     `@aburi/markdown-projection`, `@aburi/cli`). Each covers the pitch, install,
     the shape of the API the package exports, and design-doc references.
-    `@aburi/github-action` already had one from WI-15 and is untouched.
+    `@aburi/github-action` already had one and is untouched.
   - **`docs/cli-reference.md`** — operator-facing per-subcommand reference for
     `aburi init / scan / diff / explain`: flags, `--fail-on` grammar, exit-code
     table, environment variables, config discovery order, and programmatic entry

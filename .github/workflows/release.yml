@@ -72,7 +72,7 @@ jobs:
       # lines as "these packages published; create GitHub Releases for them".
       #
       # Trusted Publishing prerequisites (must be configured on npmjs.com
-      # BEFORE the first release run; see the WI-18 changeset for details):
+      # BEFORE the first release run):
       #   - Every @aburi/* package has a trusted publisher entry pointing to:
       #     repository = kage1020/Aburi, workflow = .github/workflows/release.yml
       #   - The publisher entry has no environment restriction, or matches an
