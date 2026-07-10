@@ -1,4 +1,4 @@
-// Reservation policy. See design/details/extension-vocab.md §5.
+// Reservation policy. See docs/design/extension-vocab.md §5.
 
 /**
  * Central-reservation prefixes. No plugin may declare an id or prefix that begins

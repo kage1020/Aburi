@@ -1,4 +1,4 @@
-// Hand-written plugin interface signatures. Source: design/details/lang-plugin.md,
+// Hand-written plugin interface signatures. Source: docs/design/lang-plugin.md,
 // effect-plugin.md, and extension-vocab.md. These complement the schema-generated
 // types in src/generated/ and form the contract between @aburi/core and individual
 // language / effects / framework plugins.
@@ -239,7 +239,7 @@ export type FrameworkManifest = PluginManifest & { type: "framework" }
 
 /**
  * Language plugin. Owns parsing and Symbol candidate extraction for a single
- * `language` id. See design/details/lang-plugin.md.
+ * `language` id. See docs/design/lang-plugin.md.
  *
  * Specialize `TTree` / `TNode` to the plugin's own parser types so a tree
  * produced by plugin A cannot be fed into plugin B's walkBody.
@@ -265,7 +265,7 @@ export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
 
 /**
  * Effect plugin. Classifies a CallCandidate into a semantic effect. Pure-function
- * shape is strongly preferred. See design/details/effect-plugin.md.
+ * shape is strongly preferred. See docs/design/effect-plugin.md.
  */
 export interface EffectPlugin {
   manifest: EffectsManifest
@@ -281,7 +281,7 @@ export interface EffectPlugin {
 /**
  * Framework plugin. Adjusts SymbolCandidate extKind / decorator boundaries based
  * on framework conventions. Runs between extractSymbols and walkBody.
- * See design/details/lang-plugin.md §5.2 and extension-vocab.md §3.
+ * See docs/design/lang-plugin.md §5.2 and extension-vocab.md §3.
  *
  * `TNode` mirrors the lang plugin's AST node type so a framework plugin paired
  * with a specific lang plugin sees the right tree.

@@ -3,9 +3,8 @@
 `aburi <subcommand> [flags]`. Global flags: `-v, --version` prints the CLI
 version and exits `SUCCESS`; `-h, --help` prints usage and exits `SUCCESS`.
 
-The authoritative contract lives in
-[`design/details/cli-spec.md`](../design/details/cli-spec.md). This document is
-the operator-facing reference.
+The authoritative contract lives in the [CLI spec](/design/cli-spec). This
+document is the operator-facing reference.
 
 ## Exit codes
 

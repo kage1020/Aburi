@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- b4cfb61: Introduce `@aburi/framework-nestjs`, the first Aburi framework plugin. Implements the FrameworkPlugin contract from design/details/lang-plugin.md §5.2 for NestJS conventions.
+- b4cfb61: Introduce `@aburi/framework-nestjs`, the first Aburi framework plugin. Implements the FrameworkPlugin contract from docs/design/lang-plugin.md §5.2 for NestJS conventions.
 
   ### Class-level classification
   - `@Module` → `framework:nestjs:module`
@@ -36,7 +36,7 @@
 - 358f76f: Cut the initial `0.1.0` release of the Aburi ecosystem.
 
   This is the first public version of every workspace package that ships. The
-  v0.1 scope defined in [`design/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/design/roadmap.md)
+  v0.1 scope defined in [`docs/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/docs/roadmap.md)
   is complete:
 
   - **Foundation** — `@aburi/types` (schema-generated + hand-written interfaces),

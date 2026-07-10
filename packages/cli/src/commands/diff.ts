@@ -48,7 +48,7 @@ export interface DiffReport {
 }
 
 /**
- * `aburi diff` — two dispatch paths, both defined by `design/details/cli-spec.md §6`:
+ * `aburi diff` — two dispatch paths, both defined by `docs/design/cli-spec.md §6`:
  *
  * - `<base>..<head>` ref spec (§6.4). Both refs are validated with `git rev-parse
  *   --verify` before we touch the working tree; the base ref materialises via a

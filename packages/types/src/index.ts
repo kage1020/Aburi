@@ -2,7 +2,7 @@
 //
 // Three sources are merged here:
 //   1. Schema-generated types (src/generated/*.ts, regenerate via `pnpm --filter @aburi/types codegen`)
-//   2. Hand-written plugin contracts (src/plugins.ts, derived from design/details/*.md)
+//   2. Hand-written plugin contracts (src/plugins.ts, derived from docs/design/*.md)
 //
 // A few names appear in multiple schemas with intentionally different shapes
 // (e.g. IR's rich Generator vs Diff's lite Generator, manifest-declared EffectVocab vs

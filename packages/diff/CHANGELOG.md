@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 121c177: Add the semantic diff engine — `@aburi/diff` — that compares two `aburi.ir.v1` documents and emits an `aburi.diff.v1`-conformant JSON projection tuned for PR-review workflows. Implements the full contract from `design/details/diff-algorithm.md`.
+- 121c177: Add the semantic diff engine — `@aburi/diff` — that compares two `aburi.ir.v1` documents and emits an `aburi.diff.v1`-conformant JSON projection tuned for PR-review workflows. Implements the full contract from `docs/design/diff-algorithm.md`.
 
   ### Matching pipeline (5 stages)
   - **Stage 1 — exact id match** (`matchStageId`) — hash-map lookup; the highest-confidence signal.
@@ -32,7 +32,7 @@
 - 358f76f: Cut the initial `0.1.0` release of the Aburi ecosystem.
 
   This is the first public version of every workspace package that ships. The
-  v0.1 scope defined in [`design/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/design/roadmap.md)
+  v0.1 scope defined in [`docs/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/docs/roadmap.md)
   is complete:
 
   - **Foundation** — `@aburi/types` (schema-generated + hand-written interfaces),

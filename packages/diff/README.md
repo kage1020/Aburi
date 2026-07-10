@@ -21,7 +21,7 @@ Symbols are paired across base / head via cascading stages:
 
 Unmatched base Symbols become `removed`, unmatched head Symbols become `added`.
 Matched pairs are classified into one of five statuses per
-[`design/details/diff-algorithm.md`](../../design/details/diff-algorithm.md):
+[`docs/design/diff-algorithm.md`](../../docs/design/diff-algorithm.md):
 `unchanged` / `moved` / `changed` / `moved+changed` / `dropped-toggled`
 (with `to-dropped` / `to-kept` direction).
 
@@ -59,4 +59,4 @@ await writeFile("out/diff.json", writeCanonicalDiff(diff, { format: "compact" })
 ## See also
 
 - [`schema/aburi.diff.v1.json`](../../schema/aburi.diff.v1.json)
-- [`design/details/diff-algorithm.md`](../../design/details/diff-algorithm.md)
+- [`docs/design/diff-algorithm.md`](../../docs/design/diff-algorithm.md)

@@ -37,4 +37,4 @@ import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 
 ## See also
 
-- [`design/details/effect-plugin.md`](../../design/details/effect-plugin.md)
+- [`docs/design/effect-plugin.md`](../../docs/design/effect-plugin.md)

@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 7a6cfeb: Add the deterministic Markdown projection engine — `@aburi/markdown-projection` — that turns any `aburi.ir.v1` document (and, optionally, an `aburi.diff.v1` output) into human + AI-readable Markdown views, following `design/details/markdown-projection.md` end to end.
+- 7a6cfeb: Add the deterministic Markdown projection engine — `@aburi/markdown-projection` — that turns any `aburi.ir.v1` document (and, optionally, an `aburi.diff.v1` output) into human + AI-readable Markdown views, following `docs/design/markdown-projection.md` end to end.
 
   ### Projections
   - **`projectWorkspace(ir)`** (§4 — `workspace.md`) — Managers / Languages / Symbol counts header, Components table (with per-component symbol counts), `graph LR` mermaid dependency diagram with an always-attached text fallback and a `MERMAID_NODE_LIMIT` (100) auto-fallback for oversized graphs, and the top-`EFFECT_SURFACE_TOP_N` (10) effect surface table sorted by count.
@@ -36,7 +36,7 @@
 - 358f76f: Cut the initial `0.1.0` release of the Aburi ecosystem.
 
   This is the first public version of every workspace package that ships. The
-  v0.1 scope defined in [`design/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/design/roadmap.md)
+  v0.1 scope defined in [`docs/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/docs/roadmap.md)
   is complete:
 
   - **Foundation** — `@aburi/types` (schema-generated + hand-written interfaces),

@@ -2,7 +2,7 @@
 
 Plugin manifest validator + vocab registry. Loads every plugin's manifest,
 enforces the reservation and conflict rules from
-[`design/details/extension-vocab.md`](../../design/details/extension-vocab.md),
+[`docs/design/extension-vocab.md`](../../docs/design/extension-vocab.md),
 and answers the runtime lookups the scan / diff paths need:
 
 - Which plugin owns this `extKind` / `effect id` / `framework` / `derivedBy`
@@ -47,5 +47,5 @@ plugin's name). Callers that only need the name read `owner.name`.
 
 ## See also
 
-- [`design/details/extension-vocab.md`](../../design/details/extension-vocab.md) — namespace ownership, reservation rules, conflict semantics.
+- [`docs/design/extension-vocab.md`](../../docs/design/extension-vocab.md) — namespace ownership, reservation rules, conflict semantics.
 - [`schema/aburi.plugin.v1.json`](../../schema/aburi.plugin.v1.json)

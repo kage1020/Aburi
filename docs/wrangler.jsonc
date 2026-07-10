@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "aburi-docs",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./.vitepress/dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    {
+      "pattern": "aburi.kage1020.com",
+      "custom_domain": true
+    }
+  ]
+}

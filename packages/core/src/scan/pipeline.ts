@@ -60,7 +60,7 @@ export interface FilePipelineInput {
 
 /**
  * Run the extraction pipeline for a single file. The steps follow
- * design/details/lang-plugin.md §5.3 (extraction order) and effect-plugin.md §5.1
+ * docs/design/lang-plugin.md §5.3 (extraction order) and effect-plugin.md §5.1
  * (first-match-wins) in order:
  *
  *   1. parse the file — a null tree is a terminal parse failure, everything else is

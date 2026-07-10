@@ -52,5 +52,5 @@ for the loader to pick this package up. A follow-up will close the gap.
 
 ## See also
 
-- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md) §5.2 — the framework `classifySymbol` contract this plugin implements.
-- [`design/details/extension-vocab.md`](../../design/details/extension-vocab.md) — how framework `extKind` namespaces (`framework:next:*`) plug into the shared vocab.
+- [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) §5.2 — the framework `classifySymbol` contract this plugin implements.
+- [`docs/design/extension-vocab.md`](../../docs/design/extension-vocab.md) — how framework `extKind` namespaces (`framework:next:*`) plug into the shared vocab.

@@ -5,7 +5,7 @@
  * can import the exact literal string instead of hard-coding a copy that would drift
  * silently the moment we rename either artefact.
  *
- * `design/details/cli-spec.md §6.4` and `design/details/diff-algorithm.md §5` pin the
+ * `docs/design/cli-spec.md §6.4` and `docs/design/diff-algorithm.md §5` pin the
  * names to `diff.json` and `diff.md`; if that contract ever changes, this is the sole
  * place that has to move.
  */

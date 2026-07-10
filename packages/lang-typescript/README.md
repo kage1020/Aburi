@@ -19,7 +19,7 @@ Responsibilities:
   `readonly` / `abstract` tracking.
 
 Emits `SymbolCandidate.id` under the `ts:` language prefix per the id contract in
-`design/details/ir-schema.md §3.1`.
+`docs/design/ir-schema.md §3.1`.
 
 ## Install
 
@@ -38,5 +38,5 @@ import { langTypescriptPlugin } from "@aburi/lang-typescript"
 
 ## See also
 
-- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md)
-- [`design/details/drop-list.md`](../../design/details/drop-list.md)
+- [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md)
+- [`docs/design/drop-list.md`](../../docs/design/drop-list.md)

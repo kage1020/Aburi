@@ -7,11 +7,11 @@ judge): parses with tree-sitter, matches Symbols across revisions with a 5-stage
 semantic diff, and emits a JSON IR plus a decision-focused Markdown projection
 that CI can gate on.
 
-> **Status: v0.1 implementation.** The v1 JSON Schemas are frozen. Every
-> package listed below is implemented, unit-tested, and exercised end-to-end
-> against `fixtures/nestjs-billing/`. `npm publish` is gated by the release
-> preparation step in [`design/implementation-plan.md`](design/implementation-plan.md)
-> and has not run yet.
+> **Status: v0.1.** The v1 JSON Schemas are frozen. Every package listed below
+> is implemented, unit-tested, and exercised end-to-end against
+> `fixtures/nestjs-billing/`.
+
+**Documentation: [aburi.kage1020.com](https://aburi.kage1020.com)**
 
 ## Why not just `git diff`
 
@@ -114,12 +114,12 @@ Same IR in → same Markdown / same diff out.
 | [`@aburi/cli`](packages/cli) | CLI | `aburi init / scan / diff / explain`, git-worktree ref diff, exit codes 0 / 1 / 2 / 3, `--fail-on` gate. |
 | [`@aburi/github-action`](packages/github-action) | Delivery | Composite GH Action wrapper around the CLI, marker-based PR comment upsert. |
 
-Design docs: [`design.md`](design.md), [`design/roadmap.md`](design/roadmap.md),
-[`design/implementation-plan.md`](design/implementation-plan.md),
-[`design/details/`](design/details/) (11 topical designs), [`schema/`](schema/) (JSON Schemas).
+Design docs: [`docs/design/`](docs/design/) (overview + 11 topical designs),
+[`docs/roadmap.md`](docs/roadmap.md), [`schema/`](schema/) (JSON Schemas).
 
 Reference: [`docs/cli-reference.md`](docs/cli-reference.md),
-[`docs/plugin-development.md`](docs/plugin-development.md).
+[`docs/plugin-development.md`](docs/plugin-development.md) — rendered at
+[aburi.kage1020.com](https://aburi.kage1020.com).
 
 ## Requirements
 
@@ -144,10 +144,9 @@ dropped-toggled:to-dropped:>10` gate.
 
 ## Contributing
 
-- New language / framework / effects plugins: see [`docs/plugin-development.md`](docs/plugin-development.md).
-- Follow the TDD flow declared in the project's `CLAUDE.md` (design → AC → tests → impl).
-- Never commit directly to `main` — always PR from a feature branch.
-- Never hardcode dependency versions in `package.json`; install via CLI.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). New language / framework / effects
+plugins are especially welcome — start from
+[`docs/plugin-development.md`](docs/plugin-development.md).
 
 ## License
 
