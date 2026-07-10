@@ -1,7 +1,7 @@
 {
   "name": "@aburi/cli",
   "version": "0.1.0",
-  "description": "Aburi CLI: `aburi init | scan | diff | explain | vocab`. Wires @aburi/config + @aburi/core + @aburi/diff + @aburi/markdown-projection into the commands defined in design/details/cli-spec.md, with commander-driven subcommands, git-worktree-backed ref diff, stable exit codes (0/1/2/3), and a --fail-on gate parser for CI enforcement.",
+  "description": "Aburi CLI: `aburi init | scan | diff | explain | vocab`. Wires @aburi/config + @aburi/core + @aburi/diff + @aburi/markdown-projection into the commands defined in docs/design/cli-spec.md, with commander-driven subcommands, git-worktree-backed ref diff, stable exit codes (0/1/2/3), and a --fail-on gate parser for CI enforcement.",
   "license": "MIT",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/cli#readme",

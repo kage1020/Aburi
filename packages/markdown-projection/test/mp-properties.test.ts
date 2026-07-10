@@ -241,8 +241,8 @@ describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () =
       ],
     })
     const md = projectDiff(diff)
-    expect(md).toContain("## 🎨 Syntax-only 変更")
-    expect(md).not.toContain("## ⚠ API 変更")
+    expect(md).toContain("## 🎨 Syntax-only changes")
+    expect(md).not.toContain("## ⚠ API changes")
   })
 })
 

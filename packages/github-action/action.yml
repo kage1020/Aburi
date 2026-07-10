@@ -26,7 +26,7 @@ inputs:
   fail-on:
     description: >-
       Value passed to `aburi diff --fail-on`. Follows the CI gate grammar defined in
-      `design/details/cli-spec.md` §8 (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
+      `docs/design/cli-spec.md` §8 (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
       Leave empty to run in report-only mode.
     required: false
     default: ""
