@@ -19,10 +19,16 @@ permissions:
 jobs:
   release:
     name: version + publish
+    # Fork guard: never run the publish workflow from a fork. A fork would have
+    # `secrets.NPM_TOKEN === ''` and would 401 loudly, but skipping saves the
+    # confusing failure telemetry.
+    if: github.repository == 'kage1020/Aburi'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          # Full history so `changeset version` can walk the log to compute
+          # cross-package bumps that reference historical commits.
           fetch-depth: 0
 
       - name: Setup pnpm
@@ -30,31 +36,56 @@ jobs:
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
+        # No `registry-url` here on purpose: setting it makes setup-node write a
+        # temporary .npmrc that expects `NODE_AUTH_TOKEN`, which then overrides
+        # the .npmrc that `changesets/action` writes at $HOME/.npmrc using
+        # `NPM_TOKEN`. Two auth-config sources fighting each other is exactly
+        # the "401 with valid token" trap. Let changesets/action own .npmrc.
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build all packages
-        run: pnpm build
+      # Fail-fast before install-side effects hit disk if the publish token is
+      # missing — the 401 would otherwise land after ~30 seconds of build/test
+      # work. A branch push from a maintainer who forgot to configure the secret
+      # in the repository settings sees the reason within seconds.
+      - name: Assert publish credentials are present
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN secret is missing. Set it in the repository settings before pushing release changesets."
+            exit 1
+          fi
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # changesets/action opens a PR ("Version Packages") when there are pending
-      # changesets. Merging that PR consumes the changesets and re-triggers this
-      # workflow, at which point `publish: pnpm release` runs `changeset publish`
-      # → `npm publish` for every workspace package whose version bumped since
-      # the last tag. --provenance emits a Sigstore attestation from GitHub OIDC
-      # so consumers can verify the tarball's build origin.
+      # `pnpm release` chains typecheck → test → build → `changeset publish`
+      # (see the root package.json script). We reuse the same script the
+      # workflow calls from local machines so there is exactly one publish path
+      # for the whole project. `changesets/action` invokes it via its `publish`
+      # input and treats a zero exit code + emitted `New tag: …` stdout lines
+      # as "these packages published; create GitHub Releases for them".
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:
           version: pnpm changeset version
-          publish: pnpm changeset publish --no-git-tag
+          publish: pnpm release
           commit: "chore(release): version packages"
           title: "chore(release): version packages"
+          # Explicit rather than relying on the action's default `true` — the
+          # release contract is "npm tag + GitHub Release + Sigstore
+          # provenance", and pinning the flag makes that visible at review
+          # time instead of hiding behind a default that could shift between
+          # major versions of the action.
+          createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
+          # Emits a Sigstore attestation for every published tarball via the
+          # workflow's `id-token: write` permission. Consumers can then verify
+          # the build origin with `npm audit signatures`. This is a runtime env
+          # var, not a CLI flag on the publish command — the reviewer flagged
+          # the earlier "--provenance flag" wording as inaccurate.
+          NPM_CONFIG_PROVENANCE: "true"

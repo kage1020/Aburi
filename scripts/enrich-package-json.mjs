@@ -1,9 +1,18 @@
 #!/usr/bin/env node
-// One-shot script: enrich every publishable package.json under packages/* with
-// the metadata npm needs to route back to the correct monorepo subdirectory
-// (repository.directory), plus author / homepage / bugs. Idempotent — reading
-// an already-enriched package.json is a no-op. Not part of the CI pipeline;
-// invoke once from the release-prep PR.
+// One-shot script used during the WI-18 release-prep PR to add
+// repository.directory / author / homepage / bugs to every publishable
+// package.json under packages/*. Kept in-tree as documentation of the shape
+// convention rather than as a periodic tool — the release workflow does not
+// invoke it. Re-run only when adding a new publishable package.
+//
+// Contract:
+//   - Skips private packages (private === true).
+//   - Preserves any pre-existing metadata field the package.json already has;
+//     the `??` fallbacks below only fill gaps.
+//   - Names the file that failed on parse error, so a corrupt package.json
+//     stops the whole pass with a locatable message.
+//   - Reports the number of packages touched (and warns loudly on 0) so an
+//     accidental scope-wide misconfiguration cannot pass as a silent no-op.
 
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
@@ -18,12 +27,26 @@ const root = resolve(dirname(here), "..")
 const packagesDir = resolve(root, "packages")
 const entries = await readdir(packagesDir, { withFileTypes: true })
 
+let touched = 0
+let skippedPrivate = 0
+
 for (const entry of entries) {
   if (!entry.isDirectory()) continue
   const pkgPath = resolve(packagesDir, entry.name, "package.json")
-  const raw = await readFile(pkgPath, "utf8")
-  const pkg = JSON.parse(raw)
-  if (pkg.private === true) continue
+
+  let pkg
+  try {
+    pkg = JSON.parse(await readFile(pkgPath, "utf8"))
+  } catch (error) {
+    process.stderr.write(`ERROR: failed to parse ${pkgPath}: ${error.message}\n`)
+    process.exit(1)
+  }
+
+  if (pkg.private === true) {
+    process.stdout.write(`skipped (private): packages/${entry.name}\n`)
+    skippedPrivate += 1
+    continue
+  }
 
   const relative = `packages/${entry.name}`
   const enriched = {
@@ -38,8 +61,10 @@ for (const entry of entries) {
     },
   }
 
-  // Preserve key order that changesets / npm expect: name, version, description,
-  // then metadata, then the rest. JSON.stringify preserves insertion order.
+  // Field order convention borrowed from other pnpm/changesets monorepos:
+  // name / version / description on top, metadata next, runtime shape after,
+  // scripts/deps at the bottom. Nothing enforces this order at parse time —
+  // it is a readability choice for reviewers, not a tool requirement.
   const ordered = {}
   const priority = [
     "name",
@@ -73,4 +98,13 @@ for (const entry of entries) {
 
   await writeFile(pkgPath, `${JSON.stringify(ordered, null, 2)}\n`, "utf8")
   process.stdout.write(`updated ${relative}/package.json\n`)
+  touched += 1
+}
+
+process.stdout.write(`\n${touched} package.json touched, ${skippedPrivate} skipped (private).\n`)
+if (touched === 0) {
+  process.stderr.write(
+    "WARNING: no packages were touched. Check that packages/* still contains publishable entries.\n",
+  )
+  process.exit(1)
 }

@@ -23,7 +23,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: kage1020/Aburi/packages/github-action@v0
+      # Pin by branch (main) or by the per-package tag `changesets/action`
+      # creates on release (e.g. `@aburi/github-action@0.1.0`). An unscoped
+      # `v0.1.0` tag is intentionally not published because `changeset publish`
+      # names monorepo tags per package.
+      - uses: kage1020/Aburi/packages/github-action@main
         with:
           version: latest
           fail-on: "removed,dropped-toggled:to-dropped:>10"
