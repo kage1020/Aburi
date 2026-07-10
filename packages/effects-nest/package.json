@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Aburi NestJS effects plugin: classifies EventEmitter2 / eventBus .emit(...) call expressions into the core event.publish effect",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/effects-nest#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/effects-nest"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

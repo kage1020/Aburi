@@ -1,0 +1,20 @@
+# Force LF line endings on checkout regardless of platform. Windows runners
+# default to `core.autocrlf=true` which rewrites LF → CRLF at checkout; Biome
+# is configured with `"lineEnding": "lf"` and fails every text file. Setting
+# `eol=lf` at the repository level is the standard fix — see
+# https://git-scm.com/docs/gitattributes#_end_of_line_conversion.
+
+* text=auto eol=lf
+
+# Binary formats that must not be text-normalised.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+
+# Lockfile is generated and rewriting whitespace here would defeat cache hits.
+pnpm-lock.yaml -text

@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Plugin manifest validator and vocab registry: loads, validates, and tracks every @aburi/* plugin's owned extKind / effect id / framework namespaces, enforcing reservation and conflict rules",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/plugin-registry#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/plugin-registry"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

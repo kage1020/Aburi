@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Aburi TypeScript / TSX language plugin: tree-sitter WASM-based parseFile / extractSymbols / walkBody / normalizeAst, JSDoc-aware Signature + throws extraction, decorator + drop-hint contract, Category B / C drop rules per the drop-list design",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/lang-typescript#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/lang-typescript"
+  },
   "type": "module",
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

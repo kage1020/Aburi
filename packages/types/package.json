@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "description": "Aburi shared types: schema-generated IR / config / diff / plugin manifest, plus hand-written plugin interface signatures",
   "license": "MIT",
+  "author": "kage1020",
+  "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/types#readme",
+  "bugs": {
+    "url": "https://github.com/kage1020/Aburi/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kage1020/Aburi.git",
+    "directory": "packages/types"
+  },
   "type": "module",
   "types": "./dist/index.d.mts",
   "exports": {

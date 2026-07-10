@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -7,7 +7,13 @@ import { findConfig } from "../src/index"
 describe("findConfig", () => {
   let tmp: string
   beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), "aburi-discovery-test-"))
+    // `realpath` here is macOS-specific hygiene: `os.tmpdir()` returns `/tmp`
+    // which is a symlink to `/private/tmp` on macOS. Without resolving,
+    // `process.chdir(tmp)` + `process.cwd()` returns the resolved
+    // `/private/tmp/...` path while `tmp` still holds `/tmp/...`, and the
+    // string-equal assertion downstream fails despite pointing at the same
+    // directory.
+    tmp = await realpath(await mkdtemp(join(tmpdir(), "aburi-discovery-test-")))
   })
   afterEach(async () => {
     await rm(tmp, { recursive: true, force: true })

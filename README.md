@@ -65,7 +65,7 @@ pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
-- uses: kage1020/Aburi/packages/github-action@v0
+- uses: kage1020/Aburi/packages/github-action@main
   with:
     version: latest
     fail-on: "removed,dropped-toggled:to-dropped:>10"
