@@ -42,14 +42,38 @@ is complete:
 - `.github/workflows/release.yml` — on push to `main`, `changesets/action@v1`
   either opens a "Version Packages" PR (when there are pending changesets) or,
   if that PR was already merged, runs `pnpm release` (typecheck + test + build
-  + `changeset publish`) to push every bumped package to npm. Sigstore
-  attestation is emitted via `NPM_CONFIG_PROVENANCE=true` and the workflow's
-  `id-token: write` permission, so consumers can verify tarballs with
-  `npm audit signatures`. `changesets/action` reads the `New tag: …` lines
-  the publish command prints and creates a matching GitHub Release per tag.
+  + `changeset publish`) to push every bumped package to npm.
+- Authentication uses [**npm Trusted Publishing**](https://docs.npmjs.com/trusted-publishers)
+  (OIDC). No `NPM_TOKEN` secret is stored anywhere; pnpm 11.11.0 exchanges the
+  workflow's OIDC token for a short-lived publish credential at publish time.
+  Sigstore attestation is emitted via `provenance=true` in the workflow's
+  `.npmrc`, and consumers verify tarballs with `npm audit signatures`.
+- `changesets/action` reads the `New tag: …` lines the publish command prints
+  and creates a matching GitHub Release per per-package tag
+  (`@aburi/<pkg>@0.1.0`).
 - Every public package.json carries `repository.directory` so npm links back
   to the correct monorepo subdirectory, plus explicit `author`, `homepage`,
   and `bugs` fields.
+
+### One-time trusted-publisher setup (required before the first publish)
+
+For each of the 13 publishable `@aburi/*` packages, register a trusted
+publisher on npmjs.com pointing at this repository's release workflow:
+
+1. On the package settings page (e.g.
+   `https://www.npmjs.com/package/@aburi/cli/access` — for a not-yet-published
+   package, first do a one-time manual `npm publish` to reserve the name, or
+   configure the trusted publisher on the org account before publishing).
+2. Under "Trusted Publisher", add:
+   - **Provider**: GitHub Actions
+   - **Repository**: `kage1020/Aburi`
+   - **Workflow filename**: `release.yml`
+   - **Environment**: leave blank (no environment gating today)
+3. Repeat for all 13 packages, or configure the trusted publisher on the
+   `@aburi` org so newly-scoped packages inherit it.
+
+Once configured, no rotation, no secret storage, and no static credential is
+ever created. Revoking access is a one-click delete on the npm settings page.
 
 ### Consumer entry points at 0.1.0
 

@@ -1,2 +1,10 @@
 packages:
   - "packages/*"
+
+# esbuild ships a small platform-specific binary that its postinstall script
+# extracts. Vitest / tsdown pull esbuild in transitively; approving the build
+# here is what turns the pnpm 11 "ignored builds" hard-fail into a normal
+# install. If a future dependency adds another native postinstall, add it here
+# after auditing the script.
+allowBuilds:
+  esbuild: true

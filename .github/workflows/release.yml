@@ -11,6 +11,13 @@ concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# `id-token: write` is what makes npm Trusted Publishing possible: pnpm reads
+# ACTIONS_ID_TOKEN_REQUEST_URL / ACTIONS_ID_TOKEN_REQUEST_TOKEN from this env,
+# exchanges the OIDC token with the npm registry (which has our workflow
+# pre-registered as a trusted publisher on every @aburi/* package), and gets a
+# short-lived publish token that never touches disk. `contents: write` and
+# `pull-requests: write` are for changesets/action's Version Packages PR
+# creation and its GitHub Release step, not for auth.
 permissions:
   contents: write
   pull-requests: write
@@ -19,9 +26,10 @@ permissions:
 jobs:
   release:
     name: version + publish
-    # Fork guard: never run the publish workflow from a fork. A fork would have
-    # `secrets.NPM_TOKEN === ''` and would 401 loudly, but skipping saves the
-    # confusing failure telemetry.
+    # Fork guard: never run the publish workflow from a fork. A fork cannot
+    # obtain an OIDC token that matches this repository's trusted publisher
+    # config, so it would fail loudly — the guard just avoids emitting
+    # confusing telemetry.
     if: github.repository == 'kage1020/Aburi'
     runs-on: ubuntu-latest
     steps:
@@ -36,37 +44,39 @@ jobs:
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
-        # No `registry-url` here on purpose: setting it makes setup-node write a
-        # temporary .npmrc that expects `NODE_AUTH_TOKEN`, which then overrides
-        # the .npmrc that `changesets/action` writes at $HOME/.npmrc using
-        # `NPM_TOKEN`. Two auth-config sources fighting each other is exactly
-        # the "401 with valid token" trap. Let changesets/action own .npmrc.
+        # No `registry-url` on purpose: setting it makes setup-node write a
+        # temp .npmrc with an `_authToken` line, which shadows the .npmrc we
+        # write ourselves in the next step and blocks pnpm's OIDC flow.
         with:
           node-version: 24
           cache: pnpm
 
+      # Pre-create a minimal .npmrc so changesets/action does NOT overwrite it
+      # with its default `_authToken=${NPM_TOKEN}` template (which would break
+      # Trusted Publishing by forcing static-token auth). The registry line is
+      # the only content pnpm needs to publish; auth comes from the OIDC
+      # exchange at publish time.
+      - name: Configure .npmrc for Trusted Publishing
+        run: |
+          {
+            echo "registry=https://registry.npmjs.org/"
+            echo "provenance=true"
+          } > "$HOME/.npmrc"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Fail-fast before install-side effects hit disk if the publish token is
-      # missing — the 401 would otherwise land after ~30 seconds of build/test
-      # work. A branch push from a maintainer who forgot to configure the secret
-      # in the repository settings sees the reason within seconds.
-      - name: Assert publish credentials are present
-        run: |
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::NPM_TOKEN secret is missing. Set it in the repository settings before pushing release changesets."
-            exit 1
-          fi
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       # `pnpm release` chains typecheck → test → build → `changeset publish`
-      # (see the root package.json script). We reuse the same script the
-      # workflow calls from local machines so there is exactly one publish path
-      # for the whole project. `changesets/action` invokes it via its `publish`
-      # input and treats a zero exit code + emitted `New tag: …` stdout lines
-      # as "these packages published; create GitHub Releases for them".
+      # (see the root package.json script). changesets/action calls it via its
+      # `publish` input and treats a zero exit + emitted `New tag: …` stdout
+      # lines as "these packages published; create GitHub Releases for them".
+      #
+      # Trusted Publishing prerequisites (must be configured on npmjs.com
+      # BEFORE the first release run; see the WI-18 changeset for details):
+      #   - Every @aburi/* package has a trusted publisher entry pointing to:
+      #     repository = kage1020/Aburi, workflow = .github/workflows/release.yml
+      #   - The publisher entry has no environment restriction, or matches an
+      #     `environment:` we set on this job (currently unset).
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:
@@ -75,17 +85,10 @@ jobs:
           commit: "chore(release): version packages"
           title: "chore(release): version packages"
           # Explicit rather than relying on the action's default `true` — the
-          # release contract is "npm tag + GitHub Release + Sigstore
+          # release contract is "npm publish + GitHub Release + Sigstore
           # provenance", and pinning the flag makes that visible at review
           # time instead of hiding behind a default that could shift between
           # major versions of the action.
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # Emits a Sigstore attestation for every published tarball via the
-          # workflow's `id-token: write` permission. Consumers can then verify
-          # the build origin with `npm audit signatures`. This is a runtime env
-          # var, not a CLI flag on the publish command — the reviewer flagged
-          # the earlier "--provenance flag" wording as inaccurate.
-          NPM_CONFIG_PROVENANCE: "true"
