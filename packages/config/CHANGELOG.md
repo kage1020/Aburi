@@ -11,7 +11,7 @@
 - 358f76f: Cut the initial `0.1.0` release of the Aburi ecosystem.
 
   This is the first public version of every workspace package that ships. The
-  v0.1 scope defined in [`design/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/design/roadmap.md)
+  v0.1 scope defined in [`docs/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/docs/roadmap.md)
   is complete:
 
   - **Foundation** — `@aburi/types` (schema-generated + hand-written interfaces),
@@ -83,7 +83,7 @@
 
 ### Patch Changes
 
-- 405dcfa: Ship the v0.1 documentation set required by WI-17.
+- 405dcfa: Ship the v0.1 documentation set.
 
   - **Root `README.md`** — rewritten from a status placeholder into a full quick
     start: install / init / scan / diff / GitHub Action, a "why not just `git diff`"
@@ -96,7 +96,7 @@
     `@aburi/effects-prisma`, `@aburi/effects-nest`, `@aburi/diff`,
     `@aburi/markdown-projection`, `@aburi/cli`). Each covers the pitch, install,
     the shape of the API the package exports, and design-doc references.
-    `@aburi/github-action` already had one from WI-15 and is untouched.
+    `@aburi/github-action` already had one and is untouched.
   - **`docs/cli-reference.md`** — operator-facing per-subcommand reference for
     `aburi init / scan / diff / explain`: flags, `--fail-on` grammar, exit-code
     table, environment variables, config discovery order, and programmatic entry

@@ -5,7 +5,7 @@ The `aburi` command-line entry — wires
 [`@aburi/core`](../core) +
 [`@aburi/diff`](../diff) +
 [`@aburi/markdown-projection`](../markdown-projection) into the four subcommands
-defined in [`design/details/cli-spec.md`](../../design/details/cli-spec.md).
+defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 
 ## Subcommands
 
@@ -71,5 +71,5 @@ code without terminating the test process.
 ## See also
 
 - [`docs/cli-reference.md`](../../docs/cli-reference.md) — per-subcommand flags and examples.
-- [`design/details/cli-spec.md`](../../design/details/cli-spec.md) — CLI contract.
+- [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md) — CLI contract.
 - [`packages/github-action`](../github-action) — GH Action wrapper.

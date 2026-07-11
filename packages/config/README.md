@@ -61,4 +61,4 @@ segment and let the loader add it" error.
 ## See also
 
 - [`schema/aburi.config.v1.json`](../../schema/aburi.config.v1.json)
-- [`design/details/config.md`](../../design/details/config.md)
+- [`docs/design/config.md`](../../docs/design/config.md)

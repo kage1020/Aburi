@@ -11,7 +11,7 @@ import { emptySummary, fp, makeDiff, makeSymbol } from "./fixtures"
 
 function baseDelta(): SymbolDelta {
   return {
-    apiChanged: true, // force routing into API 変更 so the block emits
+    apiChanged: true, // force routing into API changes so the block emits
     logicChanged: false,
     syntaxChanged: false,
     componentChanged: false,

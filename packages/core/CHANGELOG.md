@@ -20,7 +20,7 @@
 
   Public API: `apiFingerprint`, `logicFingerprint`, `syntaxFingerprint`, `computeSymbolFingerprint` (all-axes orchestrator with `dropped` short-circuit), `hashCanonicalObject`, `hashRawString`, `lastQnameSegment`, `normalizeFingerprintString`, `ZERO_FINGERPRINT`, plus `ComputeFingerprintOptions`.
 
-- f8598d1: Add the scan orchestration layer under `packages/core/src/scan/` — the wire that turns a workspace + configured plugin set into a canonical IR. Delivers every WI-11 acceptance criterion end-to-end:
+- f8598d1: Add the scan orchestration layer under `packages/core/src/scan/` — the wire that turns a workspace + configured plugin set into a canonical IR. Delivers the full scan-orchestration contract end-to-end:
 
   - **File discovery** (`discoverFiles`) — glob-driven, respects the core Category A ignore set (`node_modules/`, `dist/`, `*.d.ts`, snapshots, framework caches …), `config.ignore[]`, `.gitignore` (togglable via `respectGitignore`), language-plugin `fileDropPatterns`, and `config.maxFileSizeBytes` with a 2 MiB default. Returned paths are POSIX-relative to the workspace root and sorted asciibetically for determinism.
   - **Language routing** (`buildLanguageRouter`) — case-insensitive extension → LanguagePlugin dispatch. Extension collisions across two plugins throw at build time with a `CoreError("language-routing-collision")`.
@@ -44,7 +44,7 @@
 - 358f76f: Cut the initial `0.1.0` release of the Aburi ecosystem.
 
   This is the first public version of every workspace package that ships. The
-  v0.1 scope defined in [`design/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/design/roadmap.md)
+  v0.1 scope defined in [`docs/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/docs/roadmap.md)
   is complete:
 
   - **Foundation** — `@aburi/types` (schema-generated + hand-written interfaces),
@@ -116,12 +116,12 @@
 
 ### Patch Changes
 
-- 115be7a: Add `fixtures/nestjs-billing/` + `packages/e2e-integration` — the end-to-end suite
-  demanded by WI-16.
+- 115be7a: Add `packages/e2e-integration` (with its `fixtures/nestjs-billing/` project) — the end-to-end suite
+  for the v0.1 release.
 
   ### Fixture
 
-  `fixtures/nestjs-billing/` is a handwritten NestJS-shaped billing service (10 `.ts`
+  `fixtures/nestjs-billing/` (inside the package) is a handwritten NestJS-shaped billing service (10 `.ts`
   files under `src/`, two modules × controller × service, one DTO, a shared logger).
   Structured to exercise every axis the diff engine care about: 6 boundary-decorated
   route handlers, 3 `@Injectable()` providers with real method bodies, module classes,
@@ -159,7 +159,7 @@
   - **Diff scenario B** — every `BillingService` method body reduced to `{}`. Eleven+
     `dropped-toggled:to-dropped` changes fire (`empty body` drop hint per
     `lang-typescript` drop-hints), `--fail-on dropped-toggled:to-dropped:>10` trips.
-    The plan's AC quoted "exit 1", which pre-dates the WI-14 exit-code table; the
+    An earlier draft expected "exit 1", which pre-dates the CLI exit-code table; the
     test asserts against the settled contract (`EXIT.GATE = 3`).
   - **Diff scenario C** — `common/logger.service.ts` moves under `common/logging/`
     with importer paths updated. Stage-3 logic-fingerprint matching pairs the moved
@@ -168,7 +168,7 @@
 
   ### `@aburi/core` bug fix (patch)
 
-  WI-16 uncovered a real integrity violation in `buildKeptSymbol`
+  Building the e2e suite uncovered a real integrity violation in `buildKeptSymbol`
   (`packages/core/src/scan/pipeline.ts`): only `rules[]` was line-sorted before
   entering the IR, while `decorators[]` / `effects[]` / `calls[]` were kept in
   their producer's order. That order comes from either language-plugin AST
@@ -203,7 +203,7 @@
     intentionally shaped (unused decorator-consumed parameters, non-`import type`
     refs) and must not be judged against production lint rules.
 
-- 405dcfa: Ship the v0.1 documentation set required by WI-17.
+- 405dcfa: Ship the v0.1 documentation set.
 
   - **Root `README.md`** — rewritten from a status placeholder into a full quick
     start: install / init / scan / diff / GitHub Action, a "why not just `git diff`"
@@ -216,7 +216,7 @@
     `@aburi/effects-prisma`, `@aburi/effects-nest`, `@aburi/diff`,
     `@aburi/markdown-projection`, `@aburi/cli`). Each covers the pitch, install,
     the shape of the API the package exports, and design-doc references.
-    `@aburi/github-action` already had one from WI-15 and is untouched.
+    `@aburi/github-action` already had one and is untouched.
   - **`docs/cli-reference.md`** — operator-facing per-subcommand reference for
     `aburi init / scan / diff / explain`: flags, `--fail-on` grammar, exit-code
     table, environment variables, config discovery order, and programmatic entry

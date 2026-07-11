@@ -34,7 +34,7 @@ describe("effectsPrismaManifest", () => {
     expect(EFFECTS_PRISMA_DERIVED_BY_PREFIX).toBe("effects-plugin:prisma")
   })
 
-  it("targets aburi engine with a wildcard version (v0.1 pre-1.0 compatibility posture)", () => {
+  it("targets aburi engine with a wildcard version (pre-1.0 compatibility posture)", () => {
     expect(effectsPrismaManifest.engines).toEqual({ aburi: "*" })
   })
 

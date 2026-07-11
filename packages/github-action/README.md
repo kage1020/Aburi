@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
       # Pin by branch (main) or by the per-package tag `changesets/action`
       # creates on release (e.g. `@aburi/github-action@0.1.0`). An unscoped
-      # `v0.1.0` tag is intentionally not published because `changeset publish`
+      # `vX.Y.Z` tag is intentionally not published because `changeset publish`
       # names monorepo tags per package.
       - uses: kage1020/Aburi/packages/github-action@main
         with:
@@ -41,7 +41,7 @@ jobs:
 |---|---|---|
 | `version` | `latest` | npm dist-tag or exact version of `@aburi/cli`. |
 | `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`. Falls back to the PR's `base.sha..head.sha` for `pull_request` / `pull_request_target` events. |
-| `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `design/details/cli-spec.md` §8 for the grammar. Empty = report only. |
+| `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` §8 for the grammar. Empty = report only. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.config.jsonc`. |
 | `output-dir` | `out` | Where the CLI writes `aburi.diff.json` / `aburi.diff.md`. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |

@@ -9,8 +9,8 @@ export type SymbolStatus = "unchanged" | "moved" | "changed" | "moved+changed" |
  * drop-rule flip, not a genuine code edit (§4.1 rationale).
  *
  * "pathChanged" catches both physical file relocation AND in-file rename: any Symbol id
- * mismatch between base and head means the identifier moved, and DF9 ("method 名 rename
- * (同 file、同 logic) → moved") relies on this. Stage-1 pairs cannot trigger the id branch
+ * mismatch between base and head means the identifier moved, and DF9 ("method rename
+ * (same file, same logic) → moved") relies on this. Stage-1 pairs cannot trigger the id branch
  * (they match by exact id), so this only affects stage-2+ pairings where the pair was
  * discovered via fingerprint or name/signature similarity.
  */

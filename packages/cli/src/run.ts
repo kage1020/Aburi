@@ -256,7 +256,7 @@ function isCommanderError(value: unknown): value is { code: string; message: str
 }
 
 /**
- * Error mapping (see design/details/cli-spec.md §9 for the exit-code contract):
+ * Error mapping (see docs/design/cli-spec.md §9 for the exit-code contract):
  *   - `input-error` / `config-error` → EXIT.INPUT_ERROR
  *   - `runtime-error`                → EXIT.RUNTIME
  *   - `plugin-error`                 → EXIT.GATE

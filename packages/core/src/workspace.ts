@@ -102,7 +102,7 @@ async function packageJsonDeclaresWorkspaces(path: string): Promise<boolean> {
 /**
  * Lightweight TOML probe: we only need to know whether `[workspace]` or `[tool.uv.workspace]` /
  * `[tool.hatch.workspaces]` / `[tool.poetry]` headers exist. Avoiding a full TOML parser
- * dependency here keeps the v0.1 surface narrow; the language plugins will bring proper
+ * dependency here keeps the surface narrow; the language plugins will bring proper
  * TOML parsing when they ship.
  */
 async function tomlContainsWorkspaceSection(path: string): Promise<boolean> {
@@ -140,7 +140,7 @@ export interface WorkspaceCandidate {
 }
 
 /**
- * Resolve every JS/TS workspace manager that the v0.1 detectors can recognize: pnpm,
+ * Resolve every JS/TS workspace manager the detectors currently recognize: pnpm,
  * npm/yarn/bun (via `package.json#workspaces`), turbo (as a hint), and nx (via project.json
  * presence). Each manager's roots are recorded once on `managers[]` (workspace-relative
  * POSIX paths), and every candidate directory is materialized on `workspaces[]` for

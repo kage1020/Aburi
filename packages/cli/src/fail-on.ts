@@ -13,7 +13,7 @@ import type { DiffResult, SymbolChange, SymbolChanged, SymbolMovedChanged } from
  *
  * Every value may carry a count threshold: `<value>:><N>` triggers only when observed
  * count exceeds N (strict greater-than). The design lists `>` as the only comparator in
- * v0.1; other operators are reserved for a future extension.
+ * today; other operators are reserved for a future extension.
  */
 export type FailOnStatusToken =
   | "added"

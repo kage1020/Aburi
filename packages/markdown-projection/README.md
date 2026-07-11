@@ -43,4 +43,4 @@ const markdown = projectDiff(diffResult)
 
 ## See also
 
-- [`design/details/markdown-projection.md`](../../design/details/markdown-projection.md)
+- [`docs/design/markdown-projection.md`](../../docs/design/markdown-projection.md)

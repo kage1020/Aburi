@@ -3,9 +3,8 @@
 `aburi <subcommand> [flags]`. Global flags: `-v, --version` prints the CLI
 version and exits `SUCCESS`; `-h, --help` prints usage and exits `SUCCESS`.
 
-The authoritative contract lives in
-[`design/details/cli-spec.md`](../design/details/cli-spec.md). This document is
-the operator-facing reference.
+The authoritative contract lives in the [CLI spec](/design/cli-spec). This
+document is the operator-facing reference.
 
 ## Exit codes
 
@@ -21,7 +20,7 @@ the operator-facing reference.
 | Variable | Purpose |
 |---|---|
 | `ABURI_CONFIG` | Alternate config file path. Overridden by the `--config` flag when present. |
-| `ABURI_LOG_LEVEL` | Reserved for future logger wiring. In v0.1 the CLI reads the variable into `env.logLevel` but no code consumes it yet, so setting it has no runtime effect. |
+| `ABURI_LOG_LEVEL` | Reserved for future logger wiring. The CLI currently reads the variable into `env.logLevel` but no code consumes it yet, so setting it has no runtime effect. |
 | `NO_COLOR` | Suppress ANSI colour output. |
 | `CI` | When set, `aburi scan` implicitly enables `--no-timestamp` for reproducible IR bytes. |
 

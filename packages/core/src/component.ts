@@ -11,7 +11,7 @@ import {
 
 /**
  * Language id assigned to each file extension when counting language frequency in a
- * candidate directory. The list mirrors design/details/component-detect.md §4.4; the
+ * candidate directory. The list mirrors docs/design/component-detect.md §4.4; the
  * future lang-plugin path will register additions on top of this table.
  */
 const EXTENSION_TO_LANGUAGE: ReadonlyMap<string, LanguageId> = new Map([

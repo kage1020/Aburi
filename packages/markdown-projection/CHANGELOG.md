@@ -4,13 +4,13 @@
 
 ### Minor Changes
 
-- 7a6cfeb: Add the deterministic Markdown projection engine — `@aburi/markdown-projection` — that turns any `aburi.ir.v1` document (and, optionally, an `aburi.diff.v1` output) into human + AI-readable Markdown views, following `design/details/markdown-projection.md` end to end.
+- 7a6cfeb: Add the deterministic Markdown projection engine — `@aburi/markdown-projection` — that turns any `aburi.ir.v1` document (and, optionally, an `aburi.diff.v1` output) into human + AI-readable Markdown views, following `docs/design/markdown-projection.md` end to end.
 
   ### Projections
   - **`projectWorkspace(ir)`** (§4 — `workspace.md`) — Managers / Languages / Symbol counts header, Components table (with per-component symbol counts), `graph LR` mermaid dependency diagram with an always-attached text fallback and a `MERMAID_NODE_LIMIT` (100) auto-fallback for oversized graphs, and the top-`EFFECT_SURFACE_TOP_N` (10) effect surface table sorted by count.
   - **`projectComponent({component, symbols, dependencies})`** (§5 — `components/<id>.md`) — Component header (Roots / Languages / Frameworks / Symbols counts), Public API list, Dependencies list, `## Symbols` grouped by file with §3.2 ordering (`startLine` primary, `id` tiebreaker), and a `## Dropped` `<details>` fold-out (§3.6). §5.3 section-omit rules are applied: empty `decorators` / `signature: null` / empty `rules|effects|calls` skip the row, zero fingerprints skip the `<sub>` line.
   - **`projectSymbolExplain(symbol)`** (§7 — `aburi explain`) — Stand-alone Symbol view with dedicated `## Boundary` / `## Decorators` / `## Signature` / `## Rules` / `## Effects` / `## Calls` / `## Derived by` / `## Fingerprint` sections. Dropped Symbols fall back to a 3-line summary (name + drop reason + IR-contract note).
-  - **`projectDiff(diff)`** (§6 — `diff.md`) — Ten sections in importance order: `## ⚠ API 変更` / `## 🔧 Logic 変更` / `## ➕ Added` / `## ➖ Removed` / `## 🔀 Moved + Changed` / `## 🔀 Moved` (fold-out) / `## 🧱 Component changes` / `## 🔗 Dependency changes` / `## 💧 Dropped 変動` (fold-out) / `## 🎨 Syntax-only 変更` (fold-out). Changed entries are routed by delta priority (`apiChanged` > `logicChanged` > `syntaxChanged`) into exactly one of the top three sections; `moved+changed` entries are surfaced both under `Moved + Changed` and their delta-priority section by design (§6.2), so a reviewer can see the move context and the impact simultaneously. Empty sections are dropped entirely so PR comments stay tight.
+  - **`projectDiff(diff)`** (§6 — `diff.md`) — Ten sections in importance order: `## ⚠ API changes` / `## 🔧 Logic changes` / `## ➕ Added` / `## ➖ Removed` / `## 🔀 Moved + Changed` / `## 🔀 Moved` (fold-out) / `## 🧱 Component changes` / `## 🔗 Dependency changes` / `## 💧 Dropped changes` (fold-out) / `## 🎨 Syntax-only changes` (fold-out). Changed entries are routed by delta priority (`apiChanged` > `logicChanged` > `syntaxChanged`) into exactly one of the top three sections; `moved+changed` entries are surfaced both under `Moved + Changed` and their delta-priority section by design (§6.2), so a reviewer can see the move context and the impact simultaneously. Empty sections are dropped entirely so PR comments stay tight.
   - **`projectDiffSummaryLine(diff)`** (§6.3) — Compact `+A -R ~C ↔M ⤴MC` string for CLI stdout.
 
   ### Confidence badges & shared formatters
@@ -36,7 +36,7 @@
 - 358f76f: Cut the initial `0.1.0` release of the Aburi ecosystem.
 
   This is the first public version of every workspace package that ships. The
-  v0.1 scope defined in [`design/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/design/roadmap.md)
+  v0.1 scope defined in [`docs/roadmap.md`](https://github.com/kage1020/Aburi/blob/main/docs/roadmap.md)
   is complete:
 
   - **Foundation** — `@aburi/types` (schema-generated + hand-written interfaces),
@@ -108,7 +108,7 @@
 
 ### Patch Changes
 
-- 405dcfa: Ship the v0.1 documentation set required by WI-17.
+- 405dcfa: Ship the v0.1 documentation set.
 
   - **Root `README.md`** — rewritten from a status placeholder into a full quick
     start: install / init / scan / diff / GitHub Action, a "why not just `git diff`"
@@ -121,7 +121,7 @@
     `@aburi/effects-prisma`, `@aburi/effects-nest`, `@aburi/diff`,
     `@aburi/markdown-projection`, `@aburi/cli`). Each covers the pitch, install,
     the shape of the API the package exports, and design-doc references.
-    `@aburi/github-action` already had one from WI-15 and is untouched.
+    `@aburi/github-action` already had one and is untouched.
   - **`docs/cli-reference.md`** — operator-facing per-subcommand reference for
     `aburi init / scan / diff / explain`: flags, `--fail-on` grammar, exit-code
     table, environment variables, config discovery order, and programmatic entry

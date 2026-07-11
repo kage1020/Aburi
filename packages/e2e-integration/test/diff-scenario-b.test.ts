@@ -21,10 +21,9 @@ afterEach(async () => {
  * "empty body" rule). The `--fail-on dropped-toggled:to-dropped:>10` gate must
  * trip because BillingService has 12 methods, all of which now qualify.
  *
- * The plan's AC quotes "exit 1", which pre-dates the exit-code table locked in
- * by WI-14 (`packages/cli/src/exit-codes.ts`): a `--fail-on` gate trip maps to
- * `EXIT.GATE = 3`, not `EXIT.RUNTIME = 1`. We assert against the settled contract
- * so this test guards the CLI's actual behaviour.
+ * Per the exit-code table in `packages/cli/src/exit-codes.ts`, a `--fail-on`
+ * gate trip maps to `EXIT.GATE = 3`, not `EXIT.RUNTIME = 1`. We assert against
+ * that contract so this test guards the CLI's actual behaviour.
  */
 const HEAD_BILLING_SERVICE = [
   'import { Injectable } from "@nestjs/common"',
@@ -103,8 +102,7 @@ describe("e2e diff — scenario B: BillingService stubbed → dropped-toggled:>1
     expect(triggered.firstTriggered?.clause.threshold).toBe(10)
     expect(triggered.firstTriggered?.observed).toBeGreaterThan(10)
 
-    // Per current CLI contract: EXIT.GATE = 3. The implementation plan (WI-16 AC)
-    // said "exit 1", which was superseded by the WI-14 exit-code table.
+    // Per the CLI exit-code contract, a gate trip is EXIT.GATE = 3.
     expect(EXIT.GATE).toBe(3)
   })
 })

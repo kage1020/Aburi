@@ -36,4 +36,4 @@ import { nestEffectsPlugin } from "@aburi/effects-nest"
 
 ## See also
 
-- [`design/details/effect-plugin.md`](../../design/details/effect-plugin.md)
+- [`docs/design/effect-plugin.md`](../../docs/design/effect-plugin.md)

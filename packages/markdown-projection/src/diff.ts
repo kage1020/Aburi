@@ -13,8 +13,8 @@ import { compareStrings, requireDropReason } from "./format"
 
 /**
  * §6 — `out/diff.md`. Sections are emitted in the fixed importance order
- * (API 変更 → Syntax-only). Three sections — Moved (semantic no-op), Dropped 変動 (drop
- * rule flips), Syntax-only 変更 (implementation refactors) — are collapsed inside
+ * (API changes → Syntax-only). Three sections — Moved (semantic no-op), Dropped changes
+ * (drop rule flips), Syntax-only changes (implementation refactors) — are collapsed inside
  * `<details>` so PR comments stay reviewer-friendly. Moved + Changed is intentionally
  * NOT folded because the delta carries semantic impact worth reading. Empty sections
  * are dropped entirely (§5.3 rule).
@@ -28,16 +28,16 @@ export function projectDiff(diff: DiffResult): string {
 
   const buckets = partition(diff.symbols)
 
-  appendSection(lines, "## ⚠ API 変更", renderChangedList(buckets.apiChanged))
-  appendSection(lines, "## 🔧 Logic 変更", renderChangedList(buckets.logicOnly))
+  appendSection(lines, "## ⚠ API changes", renderChangedList(buckets.apiChanged))
+  appendSection(lines, "## 🔧 Logic changes", renderChangedList(buckets.logicOnly))
   appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
   appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
   appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
   appendSection(lines, "## 🧱 Component changes", renderComponentChanges(diff))
   appendSection(lines, "## 🔗 Dependency changes", renderDependencyChanges(diff))
-  appendFolded(lines, "## 💧 Dropped 変動", renderDroppedToggled(buckets.droppedToggled))
-  appendFolded(lines, "## 🎨 Syntax-only 変更", renderSyntaxOnly(buckets.syntaxOnly))
+  appendFolded(lines, "## 💧 Dropped changes", renderDroppedToggled(buckets.droppedToggled))
+  appendFolded(lines, "## 🎨 Syntax-only changes", renderSyntaxOnly(buckets.syntaxOnly))
 
   return (
     lines
@@ -74,8 +74,8 @@ interface Buckets {
  * `SymbolChange[]`: a `changed` entry with both `apiChanged` and `syntaxChanged` belongs
  * in the API section only (higher priority wins). The ordering below is:
  *
- *   1. `apiChanged`         → API 変更
- *   2. `logicChanged` only  → Logic 変更  (api MUST be false to reach here)
+ *   1. `apiChanged`         → API changes
+ *   2. `logicChanged` only  → Logic changes  (api MUST be false to reach here)
  *   3. `syntaxChanged` only → Syntax-only (both api and logic MUST be false)
  *
  * Non-overlapping buckets (added / removed / moved-only / moved+changed / droppedToggled)
@@ -146,7 +146,7 @@ function appendFolded(lines: string[], heading: string, body: string[]): void {
   lines.push(heading)
   lines.push("")
   lines.push("<details>")
-  lines.push(`<summary>${body.length} 件</summary>`)
+  lines.push(`<summary>${body.length} entries</summary>`)
   lines.push("")
   lines.push(...body)
   lines.push("")

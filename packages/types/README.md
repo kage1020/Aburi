@@ -41,5 +41,5 @@ that the schemas cannot express.
 ## See also
 
 - [`schema/`](../../schema) — the JSON Schemas this package projects.
-- [`design/details/ir-schema.md`](../../design/details/ir-schema.md) — IR contract.
-- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md) — plugin interface.
+- [`docs/design/ir-schema.md`](../../docs/design/ir-schema.md) — IR contract.
+- [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) — plugin interface.

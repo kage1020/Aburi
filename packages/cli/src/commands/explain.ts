@@ -37,7 +37,7 @@ export type ExplainOutcome =
 
 /**
  * `aburi explain <id-or-pattern>` — three-arm dispatch mirrored from
- * `design/details/cli-spec.md §7.2`:
+ * `docs/design/cli-spec.md §7.2`:
  *
  * - argument contains `#` → full Symbol id lookup.
  * - argument contains `/` but no `#` AND resolves to an existing file → all Symbols

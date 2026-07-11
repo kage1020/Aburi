@@ -60,6 +60,6 @@ await writeCanonicalIR(result.ir, "out/aburi.ir.json", { format: "compact" })
 
 ## See also
 
-- [`design/details/ir-schema.md`](../../design/details/ir-schema.md) — IR contract + 11 invariants.
-- [`design/details/lang-plugin.md`](../../design/details/lang-plugin.md) — the language-plugin contract the scan pipeline drives.
-- [`design/details/drop-list.md`](../../design/details/drop-list.md) — drop rules A / B / C.
+- [`docs/design/ir-schema.md`](../../docs/design/ir-schema.md) — IR contract + 11 invariants.
+- [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) — the language-plugin contract the scan pipeline drives.
+- [`docs/design/drop-list.md`](../../docs/design/drop-list.md) — drop rules A / B / C.

@@ -1,5 +1,5 @@
 /**
- * CLI exit code table — matches the contract in `design/details/cli-spec.md §9`.
+ * CLI exit code table — matches the contract in `docs/design/cli-spec.md §9`.
  * The `as const` annotation gives every value a literal type so `ExitCode` is a
  * discriminated union of the four numeric literals, not the widened `number`.
  * Individual mappings from CliErrorCode / FailOnParseError to these values live in

@@ -20,7 +20,7 @@ import { effectsNestManifest } from "./manifest"
  *
  * The plugin does NOT declare `dropCallees`: NestJS's built-in logger (`Logger` from
  * `@nestjs/common`) is dependency-injected on a per-provider basis, so a general prefix
- * drop would sweep too widely (design/details/effect-plugin.md §9.2).
+ * drop would sweep too widely (docs/design/effect-plugin.md §9.2).
  */
 class NestEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsNestManifest

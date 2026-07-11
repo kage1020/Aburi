@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "docs"
 
 # esbuild ships a small platform-specific binary that its postinstall script
 # extracts. Vitest / tsdown pull esbuild in transitively; approving the build

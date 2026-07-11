@@ -10,10 +10,12 @@ different things:
 | **Effects** | `classify` | `EffectClassification` (`effectId`, `derivedBy`, `confidence`) |
 
 The full type signatures live in
-[`@aburi/types`](../packages/types/src/plugins.ts) and the design contracts in
-[`design/details/lang-plugin.md`](../design/details/lang-plugin.md),
-[`design/details/extension-vocab.md`](../design/details/extension-vocab.md) (framework classification lives inside `lang-plugin.md §5.2` — there is no separate framework-plugin.md today),
-[`design/details/effect-plugin.md`](../design/details/effect-plugin.md).
+[`@aburi/types`](https://github.com/kage1020/Aburi/blob/main/packages/types/src/plugins.ts)
+and the design contracts in the [language plugin spec](/design/lang-plugin),
+the [extension vocabulary spec](/design/extension-vocab) (framework
+classification lives inside the language plugin spec §5.2 — there is no
+separate framework-plugin spec today), and the
+[effect plugin spec](/design/effect-plugin).
 
 This document is the operator-facing walkthrough.
 
@@ -230,12 +232,12 @@ any top-level export whose value has a `manifest` field. The first hit wins.
 ## Testing
 
 - Unit-test your plugin in isolation — see
-  [`packages/framework-nestjs/test`](../packages/framework-nestjs/test) for the
-  pattern (fake `ExtractionContext`, hand-authored `SymbolCandidate`s).
+  [`packages/framework-nestjs/test`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/test)
+  for the pattern (fake `ExtractionContext`, hand-authored `SymbolCandidate`s).
 - Snapshot-verify the manifest against `schema/aburi.plugin.v1.json` — reuse the
   existing schema validation helpers in `@aburi/plugin-registry`.
-- Wire the plugin into `packages/scan-e2e` or `packages/e2e-integration` for an
-  integration pass against a small handwritten fixture project.
+- Wire the plugin into `packages/e2e-integration` for an integration pass
+  against a small handwritten fixture project.
 
 ## Publishing
 

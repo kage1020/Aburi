@@ -8,7 +8,7 @@ import { EFFECTS_NEST_DERIVED_BY_PREFIX } from "./classify"
  * The plugin returns the core-owned `event.publish` effect id from `classify()`; per
  * extension-vocab.md §5.1 core vocab lives in the reserved namespace and MUST NOT
  * appear in a plugin's `provides.effects`. The plugin's own `x-nest:*` namespace is
- * reserved by the derived xPrefix but claims no v0.1 bindings. `derivedByPrefixes`
+ * reserved by the derived xPrefix but currently claims no bindings. `derivedByPrefixes`
  * shares its literal with the classifier's tag builder so both stay in lockstep across
  * edits.
  *

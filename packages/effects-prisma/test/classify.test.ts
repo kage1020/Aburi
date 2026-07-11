@@ -111,7 +111,7 @@ describe("classifyPrismaCall — negative paths", () => {
 
   it("returns null for raw SQL escapes ($queryRaw / $executeRaw / $queryRawUnsafe)", () => {
     // These are Prisma Client methods, but they do not fit the model.<verb> shape and
-    // v0.1 does not attempt to classify them. Locking as regression pins so a future
+    // they are deliberately not classified. Locking as regression pins so a future
     // change that adds them cannot silently start matching them here first.
     expect(classifyPrismaCall(makeCall({ target: "prisma.$queryRaw" }), ctxWithPrisma)).toBeNull()
     expect(classifyPrismaCall(makeCall({ target: "prisma.$executeRaw" }), ctxWithPrisma)).toBeNull()

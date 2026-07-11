@@ -170,7 +170,7 @@ function addClassAndMembers(
   // convention in ir-schema.md §3.2 — the `<default>` sentinel is reserved for the
   // class itself, and `<default>.m` violates the identifier-segment pattern the core id
   // builder enforces. Refactor the class to a named form (or export it named separately)
-  // to get member Symbols. Deferred to v0.2 alongside the anonymous-scope proposal.
+  // to get member Symbols. Deferred alongside the anonymous-scope proposal.
   const body = node.childForFieldName("body")
   if (body === null || className === null) return
   const ownerChain = [...namespacePath, className]

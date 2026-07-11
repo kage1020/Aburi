@@ -1,0 +1,618 @@
+# CLI Specification
+
+Complete signatures, flags, arguments, exit codes, and stdout/stderr conventions for the `aburi` command.
+
+References:
+- [`config.md`](./config.md) — config file resolution and CLI-flag overrides
+- [`diff-algorithm.md`](./diff-algorithm.md) — how inputs are supplied to `aburi diff`
+- [`markdown-projection.md`](./markdown-projection.md) — output Markdown conventions
+- [`extension-vocab.md`](./extension-vocab.md) — what `aburi vocab` queries
+
+---
+
+## 1. Purpose
+
+The single entry point to Aburi. Every capability is exposed through a subcommand.
+
+Design principles:
+- **Easy to automate in CI**: stable exit codes, JSON output available, non-interactive by default
+- **Friendly to humans**: proper help, colored output, progress indication
+- **Follow Unix conventions**: stdout/stderr separation, long/short options, env vars
+
+## 2. Command Overview
+
+```
+aburi init                                  # generate config file
+aburi scan                                  # generate IR
+aburi diff <base>..<head>                   # compute diff
+aburi explain <id-or-pattern>               # show a single symbol/file
+aburi vocab list|effects|extkinds|plugins|who-owns   # query extension vocabulary
+aburi --version / aburi -v                  # version
+aburi --help / aburi -h                     # global help
+```
+
+## 3. Common Options
+
+Available on every command:
+
+| Option | Short | Meaning |
+|---|---|---|
+| `--cwd <path>` | — | Change the working directory (origin for config resolution) |
+| `--config <path>` | — | Explicitly specify the config file location |
+| `--log-level <level>` | — | `debug` / `info` / `warn` / `error` (default: `info`) |
+| `--no-color` | — | Disable colored output |
+| `--help` | `-h` | Show command-specific help |
+
+Top-level only:
+| Option | Short | Meaning |
+|---|---|---|
+| `--version` | `-v` | Show version |
+
+## 4. `aburi init`
+
+Generates `aburi.json` from autodetect results.
+
+### 4.1 Signature
+
+```
+aburi init [--output <path>] [--force] [--with-suggestions]
+```
+
+### 4.2 Options
+
+| Option | Meaning |
+|---|---|
+| `--output <path>` | Output destination (default: `./aburi.json`) |
+| `--force` | Overwrite an existing file |
+| `--with-suggestions` | Include enable candidates for plugins matching detected frameworks as JSONC comments |
+
+### 4.3 Behavior
+
+1. Detect the workspace root ([`component-detect.md`](./component-detect.md) §2.1)
+2. Run each detector (§3)
+3. Convert results into Component candidates
+4. Generate JSON and write it to `--output`
+5. Print a summary to stdout
+
+### 4.4 When the File Already Exists
+
+- Without `--force` → exit with an error (exit 2): `Use --force or specify another path`
+- With `--force` → overwrite; warning goes to stderr
+
+### 4.5 Exit Codes
+
+| code | Meaning |
+|---|---|
+| 0 | Generation succeeded |
+| 1 | Autodetect failure (permissions, etc.) |
+| 2 | Existing file present without `--force`, or invalid `--output` |
+
+### 4.6 stdout Example
+
+```
+✓ Detected 3 components (pnpm workspaces)
+✓ Detected 2 languages: ts, tsx
+✓ Detected 1 framework: nestjs (in apps/billing)
+✓ Wrote ./aburi.json
+
+Next steps:
+  1. Install lang plugin: pnpm add -D @aburi/lang-typescript
+  2. Install framework plugin (optional): pnpm add -D @aburi/framework-nestjs
+  3. Install effect plugins (optional): pnpm add -D @aburi/effects-prisma
+  4. Enable them in aburi.json (uncomment the suggested entries)
+  5. Run: aburi scan
+```
+
+With `--with-suggestions`, install/enable lines for official plugins matching the detected frameworks are included in `aburi.json` **as commented-out entries**. Uncommenting them enables the plugins immediately:
+
+```jsonc
+{
+  "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
+  "languages": ["lang-typescript"],
+  // Detected: nestjs. Install with: pnpm add -D @aburi/framework-nestjs
+  // "frameworks": ["framework-nestjs"],
+  "components": [/* ... */]
+}
+```
+
+## 5. `aburi scan`
+
+Scans the workspace and generates the IR.
+
+### 5.1 Signature
+
+```
+aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
+           [--strict|--no-strict] [--discover]
+           [--quiet] [--compact]
+           [--concurrency <n>]
+           [--no-respect-gitignore]
+           [--ignore <glob>]
+```
+
+### 5.2 Options
+
+| Option | Meaning |
+|---|---|
+| `--output-dir <path>` | Output directory (default: `config.output.dir` or `out`) |
+| `--format <json\|md\|both>` | Output format (default: `both`) |
+| `--no-md` | Shortcut for `--format json` |
+| `--no-json` | Shortcut for `--format md` |
+| `--strict` / `--no-strict` | Override `config.strict` |
+| `--discover` | `--no-strict` + record undeclared vocab to `out/aburi-vocab-discovered.json` |
+| `--quiet` | Suppress progress output; stdout carries the final summary only |
+| `--compact` | Compact the JSON to a single line |
+| `--concurrency <n>` | Parser concurrency (default: CPU - 1) |
+| `--no-respect-gitignore` | Equivalent to `config.respectGitignore: false` |
+| `--ignore <glob>` | Append to `config.ignore[]` (repeatable) |
+
+### 5.3 Behavior
+
+1. Resolve the config
+2. Load plugins and build the registry
+3. Walk the workspace, parsing each file in parallel
+4. Extraction pipeline: drop list → tag propagation → effect classification → fingerprint → Symbol finalization
+5. Write `<output-dir>/ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md`
+6. Print a one-line final summary to stdout
+
+### 5.4 Exit Codes
+
+| code | Meaning |
+|---|---|
+| 0 | Extraction succeeded |
+| 1 | Extraction error (file access, cascade of unrecoverable parse errors) |
+| 2 | Config error (schema violation, resolution failure) |
+| 3 | Plugin error (load failure, manifest violation, undeclared vocab detected in strict mode) |
+
+### 5.5 stdout Example
+
+```
+✓ Loaded 3 plugins (1 lang, 1 framework, 1 effects)
+✓ Parsed 1234 files in 12.4s
+✓ Extracted 542 kept · 87 dropped symbols
+✓ Wrote out/ir.json + out/workspace.md + 3 component files
+```
+
+With `--quiet`, only the final line:
+```
+542 kept · 87 dropped · 3 components
+```
+
+### 5.6 stderr (Warnings)
+
+```
+⚠ Plugin "effects-prisma" emitted undeclared id "x-prisma:bulk-delete" (use --discover to record)
+⚠ Parse failed (recoverable): apps/legacy/old.ts:42 — Unexpected token
+```
+
+## 6. `aburi diff`
+
+Compares two IRs.
+
+### 6.1 Signature
+
+```
+aburi diff <base>..<head>                                  # specify git refs
+aburi diff --base <ir.json> --head <ir.json>               # specify existing IRs directly
+```
+
+### 6.2 Options
+
+| Option | Meaning |
+|---|---|
+| `--base <path>` | Base IR file path (instead of a ref) |
+| `--head <path>` | Head IR file path |
+| `--output-dir <path>` | Destination for diff.json / diff.md |
+| `--format <json\|md\|both>` | Output format |
+| `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
+| `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
+| `--quiet` | Limit stdout to a single final summary line |
+
+### 6.3 Arguments
+
+Ref forms:
+- `main..HEAD` — base=main, head=HEAD
+- `v1.2.0..v1.3.0` — tag comparison
+- `abc123..def456` — direct commit specification
+
+If git is unavailable, pass existing IR files via the `--base / --head` pair.
+
+### 6.4 Behavior
+
+With refs:
+1. **Pre-validation** (§6.4.1)
+2. Create a temporary git worktree and check out the base ref
+3. Run `aburi scan` on the base and store the IR temporarily
+   - **Config used**: apply the **head-side `aburi.json`** to the base scan as well (the base is interpreted through the head's view; a stale config remaining in the base is ignored)
+   - Rationale: using the config as of the base ref would make "config change = the entire IR changes", breaking the diff. Fixing the view to the head automatically resolves config differences
+   - A future `--base-config <path>` may be provided to override this (planned — see the [roadmap](../roadmap.md))
+4. Run `aburi scan` on the head (the original cwd)
+5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
+6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`
+7. Print a one-line summary to stdout
+8. Clean up the worktree
+
+With file inputs: skip steps 1-3 and start at step 5.
+
+### 6.4.1 Git Pre-Validation (Ref Form)
+
+Before creating the worktree, the following checks run in order; on failure, exit 1 with a concrete remediation message on stderr:
+
+| Check | Failure message |
+|---|---|
+| `git rev-parse <base>` succeeds | `Base ref '<base>' not found. If this is a CI shallow clone, run: git fetch --deepen=50 origin <base>` |
+| Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` |
+| Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` |
+| `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) |
+| On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) |
+
+#### 6.4.1.5 Plugin Dependency Resolution at the Base Ref
+
+When scanning the base ref for `aburi diff <base>..<head>`, Aburi **shares the head's `node_modules`** (the worktree only materializes the base sources at a separate path; dependency resolution uses the original cwd's `node_modules`).
+
+- **Rationale**: since §6.4 decided to "apply the head's `aburi.json` to the base scan as well", the plugin set also comes from the head. Reinstalling from the base ref's `package.json` for the base scan would explode build time, and `--frozen-lockfile` does not work on shallow clones
+- **Known limitation**: when the base ref's sources cannot be extracted with the head's plugins (e.g. the base uses syntax from an older framework version and the head's framework plugin only supports the newer one), parsing/extraction may fail
+  - This is a consequence of the "IR generator is pinned to the head environment" design
+  - On failure, the affected file is skipped with a warning log
+- The request "apply the base ref's contemporaneous plugin set" is under consideration as `--base-plugins <path>` for a future release (see the [roadmap](../roadmap.md))
+
+#### 6.4.2 GitHub Actions Guidance
+
+Required setup when using `aburi diff` in CI:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0    # full history (aburi diff fails on shallow clones)
+```
+
+Or `fetch-depth: 50` or more, at a depth that includes the base ref. The default of `1` cannot be used.
+
+### 6.5 Exit Codes
+
+| code | Meaning |
+|---|---|
+| 0 | Diff computed successfully (regardless of whether differences exist) |
+| 1 | Computation error (invalid IR, git error) |
+| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing) |
+| 3 | Changes matching `--fail-on` were detected (CI gate) |
+
+### 6.6 stdout Example
+
+Normal:
+```
++5 -3 ~12 ↔2 ⤴1   (added · removed · changed · moved · moved+changed)
+→ out/diff.md
+```
+
+`--quiet`:
+```
++5 -3 ~12 ↔2 ⤴1
+```
+
+### 6.7 Uses of `--fail-on`
+
+Used in CI for gates such as "PRs containing changes of a specific status require approval before merge":
+
+```bash
+aburi diff main..HEAD --fail-on changed,removed
+# exit 3 if even one symbol has status "changed" or "removed"
+```
+
+#### Accepted Values
+
+| Kind | Values |
+|---|---|
+| Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` |
+| Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` |
+| Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` |
+| Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
+
+Multiple values may be given, comma-separated.
+
+#### Uses of Direction-Specific fail-on
+
+`--fail-on dropped-toggled:to-kept` detects "symbols previously treated as dropped became kept". Useful for deliberate review of drop-rule relaxation.
+The inverse, `dropped-toggled:to-dropped`, detects "symbols that were kept became dropped" (e.g. checking the blast radius of a DTO consolidation).
+
+#### Uses of Count Thresholds
+
+In cases where a drop-rule change legitimately fires `dropped-toggled` in bulk (e.g. changing all DTOs), a plain `--fail-on dropped-toggled` misfires. A threshold such as `--fail-on dropped-toggled:>50` — "block only when there are more than 50" — is the practical choice.
+
+#### Evaluation Rules
+
+- Status granularity (`changed`, etc.): fires if even one Symbol has the given status
+- Delta granularity (`api-changed`, etc.): fires if even one Symbol has status `changed` or `moved+changed` with the corresponding `delta.<axis>Changed: true`
+
+Examples:
+
+```bash
+aburi diff main..HEAD --fail-on api-changed
+# exit 3 if even one symbol has delta.apiChanged: true
+# changed symbols where only logic changed, and moved (status only), have no effect
+
+aburi diff main..HEAD --fail-on api-changed,removed,dropped-toggled
+# fires on API change OR removal OR drop-rule fluctuation
+```
+
+This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible today.
+
+## 7. `aburi explain`
+
+Shows details of a single Symbol / file / pattern match.
+
+### 7.1 Signature
+
+```
+aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan]
+```
+
+### 7.2 Arguments
+
+`<id-or-pattern>` is one of:
+- **Full Symbol id** — the string contains `#` and matches the `<language>:<path>#<qname>` form → direct lookup
+- **File path** — the string contains `/`, contains no `#`, and is an existing file → show all Symbols in that file
+- **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
+
+#### 7.2.1 Exact Definition of Partial Matching
+
+- **case-sensitive** (`getUser` and `getuser` are distinct)
+- **substring match** on `Symbol.name` only (= a partial match against the whole qualified name; `Service.create` hits `InvoiceService.createInvoice`)
+- **no glob support** (patterns like `*Service` are under consideration for a future release — see the [roadmap](../roadmap.md))
+- If multiple candidates match, exit 2 + candidate list on stdout
+
+### 7.3 Options
+
+| Option | Meaning |
+|---|---|
+| `--output <path>` | Write to a file (default: stdout) |
+| `--ir <path>` | Use an existing IR file (default: `out/ir.json`, or trigger a scan if missing) |
+| `--no-rescan` | Do not rescan even if the IR file is stale |
+
+### 7.4 Behavior
+
+1. Read the IR (invoke `aburi scan` internally if missing)
+2. Resolve the argument:
+   - Full id → direct lookup
+   - File → all Symbols in that file
+   - Pattern → collect candidates by partial name match
+3. Generate the Markdown projection ([`markdown-projection.md`](./markdown-projection.md) §7)
+4. Emit to stdout (or `--output`)
+
+### 7.5 When Multiple Candidates Match
+
+```
+Multiple matches for "createInvoice":
+  1. ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice
+  2. ts:apps/billing/src/legacy/OldService.ts#OldService.createInvoice
+  3. ts:packages/test/src/factories.ts#createInvoice
+
+Specify the full id to disambiguate.
+```
+
+exit code: 2 (ambiguous).
+
+### 7.6 Exit Codes
+
+| code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | The requested symbol was not found |
+| 2 | Multiple candidates; disambiguation required |
+
+## 8. `aburi vocab`
+
+Queries the registered extension vocabulary.
+
+### 8.1 Subcommands
+
+```
+aburi vocab list                            # all vocab
+aburi vocab effects                         # effect ids only
+aburi vocab extkinds                        # extKinds only
+aburi vocab plugins                         # plugin list
+aburi vocab who-owns <id>                   # the plugin that owns this id
+```
+
+### 8.2 Common Options
+
+| Option | Meaning |
+|---|---|
+| `--json` | Machine-readable JSON output instead of a table |
+
+### 8.3 Exit Codes
+
+| code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | id not found (who-owns only) |
+| 2 | Subcommand missing or invalid |
+
+### 8.4 Output Examples
+
+`aburi vocab effects`:
+```
+core / db.read           — Database read operation
+core / db.write          — Database write operation
+...
+effects-nest / x-nest:lifecycle.on-module-init      — NestJS OnModuleInit hook
+effects-prisma / (prefix x-prisma)                  — Prisma plugin namespace
+```
+
+`aburi vocab who-owns x-nest:lifecycle.on-module-init`:
+```
+Plugin:      effects-nest (v1.2.3)
+Type:        effects
+Declaration: explicit (provides.effects[])
+Description: NestJS OnModuleInit hook
+```
+
+## 9. Exit Code Conventions (All Commands)
+
+| code | Use |
+|---|---|
+| 0 | Complete success |
+| 1 | Runtime error (IO, extraction, git) |
+| 2 | Input error (CLI arguments / config / missing / ambiguous) |
+| 3 | Plugin error / fail-on gate / strict violation |
+
+128+N is for fatal signals (Aburi itself does not use it).
+
+## 10. stdout / stderr Conventions
+
+| Stream | Use |
+|---|---|
+| stdout | Results (summary lines, JSON, Markdown body). Pipeable; the target of CI parsing |
+| stderr | Progress, warnings, error messages, colored UI |
+
+Example: `aburi diff main..HEAD --quiet > result.txt 2> log.txt`
+
+The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON.
+
+## 11. Environment Variables
+
+| Variable | Meaning |
+|---|---|
+| `ABURI_CONFIG` | Config file path (equivalent to --config) |
+| `ABURI_LOG_LEVEL` | Equivalent to --log-level |
+| `NO_COLOR` | If set, disable coloring (standard convention) |
+| `FORCE_COLOR` | If set, force coloring on (standard convention) |
+| `CI` | If set, CI mode (§12) |
+
+Precedence: CLI flags > environment variables > config file.
+
+## 12. CI Mode
+
+Automatic switches when the `CI=true` env is detected:
+
+- Suppress progress animations (final summary only)
+- Disable coloring (on if `FORCE_COLOR` is set)
+- Emit stack traces on errors (debug only)
+
+Can also be enabled via an explicit `--ci` flag (for CI environments where the env is not set).
+
+## 13. Config Resolution Order
+
+```
+1. --config CLI flag
+2. ABURI_CONFIG env
+3. <cwd>/aburi.jsonc
+4. <cwd>/aburi.json
+5. Repeat 3-4 recursively in parent directories (up to the workspace root)
+6. autodetect (works with no config present)
+```
+
+Passing `--cwd` changes the cwd and therefore the search origin.
+
+## 14. Concurrency
+
+- Parser concurrency for `aburi scan`: default = `max(1, CPU_count - 1)`
+- Override with `--concurrency <n>`
+- The effective concurrency is capped at `min(specified, floor(availableMemoryMB / wasmHeapPerWorkerMB))` ([`lang-plugin.md`](./lang-plugin.md) §8.1)
+  - A guard against crashes from exceeding the WASM heap budget
+  - The per-worker budget's source of truth is **`capabilities.wasmHeapPerWorkerMB` in the plugin manifest** (range: 16–4096 MiB; 256 MiB when undeclared)
+  - When multiple lang plugins coexist in the same run, the **maximum** of the declared values is used
+- On memory-constrained CI, `--concurrency 1` is recommended (for debugging)
+
+A future release will switch to Node worker_threads instead of a worker pool (see the [roadmap](../roadmap.md)).
+
+## 15. Planned Features
+
+| Feature | Summary |
+|---|---|
+| `aburi watch` | Watch file changes and regenerate the IR |
+| `aburi doctor` | Consistency check of config / plugins |
+| `aburi serve` | LSP-like local server (IDE integration) |
+| `aburi vocab list --json` extension | merged with discoverer output |
+
+None of these are implemented yet; see the [roadmap](../roadmap.md). The signatures are reserved to avoid future compatibility breaks.
+
+## 16. Help Output
+
+`aburi --help`:
+
+```
+aburi - Render meaningful code structure as IR for review
+
+Usage:
+  aburi <command> [options]
+
+Commands:
+  init       Generate aburi.json from autodetect
+  scan       Generate IR from current workspace
+  diff       Compute diff between two IRs
+  explain    Show single symbol details
+  vocab      Show registered extension vocabulary
+
+Common options:
+  --cwd <path>           Set working directory
+  --config <path>        Override config file location
+  --log-level <level>    debug | info | warn | error
+  --no-color             Disable colored output
+  -h, --help             Show help for command
+  -v, --version          Show version
+
+Run "aburi <command> --help" for command-specific options.
+```
+
+Each command's `--help` follows the same three-section structure: "Usage / Options / Examples".
+
+## 17. Verifiable Properties
+
+| ID | Input | Expectation |
+|---|---|---|
+| CL1 | `aburi --version` | One-line version string, exit 0 |
+| CL2 | `aburi --help` | Help for all commands, exit 0 |
+| CL3 | `aburi nope` | Unknown command, exit 2 |
+| CL4 | `aburi init` with existing aburi.json | exit 2, error message on stderr |
+| CL5 | `aburi init --force` | Overwrites existing file, exit 0, warning on stderr |
+| CL6 | `aburi scan` (no config) | Runs via autodetect, exit 0 |
+| CL7 | `aburi scan --discover` | Records undeclared vocab, exit 0 |
+| CL8 | `aburi scan` strict + undeclared vocab | exit 3 |
+| CL9 | `aburi diff main..HEAD --fail-on changed` with changes | exit 3 |
+| CL10 | `aburi diff` with missing arguments | exit 2 |
+| CL11 | `aburi explain <ambiguous>` | exit 2, candidate list on stdout |
+| CL12 | `aburi vocab who-owns <unknown>` | exit 1 |
+| CL13 | `aburi vocab list --json` | machine-readable JSON, exit 0 |
+| CL14 | Piping stdout (`aburi scan --quiet | wc -l`) | Readable without escape sequences |
+| CL15 | `NO_COLOR=1 aburi scan` | No coloring |
+| CL16 | `CI=true aburi scan` | Progress animation suppressed |
+| CL17 | `--log-level debug aburi diff` on error | Stack trace on stderr |
+| CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
+
+## 18. Design Decisions
+
+### 18.1 Limiting Status-Class Exit Codes to Three
+
+Only the four values 0 / 1 / 2 / 3. Respects Linux convention while reserving code 3 for the CI gate (`--fail-on`).
+Finer-grained exit codes increase the burden on consumers, so they are avoided.
+
+### 18.2 Strict stdout / stderr Separation
+
+To avoid confusion when CI uses `2>/dev/null` or `> result.txt`, all progress and warnings go to stderr.
+Only result data (summary / JSON / Markdown) goes to stdout.
+
+### 18.3 Why `--fail-on` Ships from the Start
+
+A CI gate is the feature that delivers the most value at review adoption time. Once "automatically block PRs with dangerous changes" works, Aburi adoption accelerates sharply. Retrofitting it would require rewriting CI configurations, so it is provided from the start.
+
+### 18.4 Why `aburi diff` Uses git worktree
+
+Checking out the base ref would require stashing the current work, risking accidental loss of uncommitted changes. With git worktree, the base can be materialized at a separate path while the head's working directory is preserved.
+
+### 18.5 Partial Matching in `aburi explain`
+
+Typing the full id every time is burdensome. Returning candidates on a partial match and disambiguating when there are several is the practical UX.
+In the majority of cases without ID collisions there is 1 hit; ambiguity is an explicit error.
+
+### 18.6 Why `aburi vocab` Is a Standalone Subcommand
+
+Vocab is a query target independent of the IR. A standalone `aburi vocab` command has higher discoverability than a flag like `aburi scan --show-vocab` (it also appears on its own in the help output).
+
+### 18.7 Why Environment Variables Substitute for CLI Flags
+
+In CI / Docker / Makefiles, configuring via env is easier than threading flags through. Standard conventions (`NO_COLOR` / `CI`) are respected, and Aburi-specific envs (`ABURI_*`) are provided as well.
+
+### 18.8 Why Planned Features Are Reserved
+
+Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` today prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.

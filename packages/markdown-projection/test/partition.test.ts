@@ -6,7 +6,7 @@ import { emptySummary, fp, makeDiff, makeSymbol } from "./fixtures"
 /**
  * §6.2 tail — `partition` routes overlapping delta flags by priority:
  *   apiChanged > logicChanged > syntaxChanged
- * A single `changed` entry lands in exactly one of API 変更 / Logic 変更 / Syntax-only.
+ * A single `changed` entry lands in exactly one of API changes / Logic changes / Syntax-only.
  */
 
 function makeDelta(overrides: Partial<SymbolDelta> = {}): SymbolDelta {
@@ -35,42 +35,42 @@ function makeChangedEntry(delta: SymbolDelta): SymbolChanged {
 }
 
 describe("partition — delta-priority routing (C4)", () => {
-  it("routes api+logic → API 変更 only", () => {
+  it("routes api+logic → API changes only", () => {
     const md = projectDiff(
       makeDiff({
         summary: { ...emptySummary(), changed: 1 },
         symbols: [makeChangedEntry(makeDelta({ apiChanged: true, logicChanged: true }))],
       }),
     )
-    expect(md).toContain("## ⚠ API 変更")
-    expect(md).not.toContain("## 🔧 Logic 変更")
-    expect(md).not.toContain("## 🎨 Syntax-only 変更")
+    expect(md).toContain("## ⚠ API changes")
+    expect(md).not.toContain("## 🔧 Logic changes")
+    expect(md).not.toContain("## 🎨 Syntax-only changes")
   })
 
-  it("routes api+syntax → API 変更 only", () => {
+  it("routes api+syntax → API changes only", () => {
     const md = projectDiff(
       makeDiff({
         summary: { ...emptySummary(), changed: 1 },
         symbols: [makeChangedEntry(makeDelta({ apiChanged: true, syntaxChanged: true }))],
       }),
     )
-    expect(md).toContain("## ⚠ API 変更")
-    expect(md).not.toContain("## 🎨 Syntax-only 変更")
+    expect(md).toContain("## ⚠ API changes")
+    expect(md).not.toContain("## 🎨 Syntax-only changes")
   })
 
-  it("routes logic+syntax → Logic 変更 only", () => {
+  it("routes logic+syntax → Logic changes only", () => {
     const md = projectDiff(
       makeDiff({
         summary: { ...emptySummary(), changed: 1 },
         symbols: [makeChangedEntry(makeDelta({ logicChanged: true, syntaxChanged: true }))],
       }),
     )
-    expect(md).toContain("## 🔧 Logic 変更")
-    expect(md).not.toContain("## 🎨 Syntax-only 変更")
-    expect(md).not.toContain("## ⚠ API 変更")
+    expect(md).toContain("## 🔧 Logic changes")
+    expect(md).not.toContain("## 🎨 Syntax-only changes")
+    expect(md).not.toContain("## ⚠ API changes")
   })
 
-  it("routes api+logic+syntax → API 変更 only (top of the priority chain)", () => {
+  it("routes api+logic+syntax → API changes only (top of the priority chain)", () => {
     const md = projectDiff(
       makeDiff({
         summary: { ...emptySummary(), changed: 1 },
@@ -81,9 +81,9 @@ describe("partition — delta-priority routing (C4)", () => {
         ],
       }),
     )
-    expect(md).toContain("## ⚠ API 変更")
-    expect(md).not.toContain("## 🔧 Logic 変更")
-    expect(md).not.toContain("## 🎨 Syntax-only 変更")
+    expect(md).toContain("## ⚠ API changes")
+    expect(md).not.toContain("## 🔧 Logic changes")
+    expect(md).not.toContain("## 🎨 Syntax-only changes")
   })
 
   it("emits nothing for a `changed` entry where every axis is false", () => {
@@ -95,8 +95,8 @@ describe("partition — delta-priority routing (C4)", () => {
         symbols: [makeChangedEntry(makeDelta())],
       }),
     )
-    expect(md).not.toContain("## ⚠ API 変更")
-    expect(md).not.toContain("## 🔧 Logic 変更")
-    expect(md).not.toContain("## 🎨 Syntax-only 変更")
+    expect(md).not.toContain("## ⚠ API changes")
+    expect(md).not.toContain("## 🔧 Logic changes")
+    expect(md).not.toContain("## 🎨 Syntax-only changes")
   })
 })

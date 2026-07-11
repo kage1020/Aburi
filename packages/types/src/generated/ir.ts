@@ -176,7 +176,7 @@ parsedFiles: number
 keptSymbols: number
 droppedSymbols: number
 /**
- * Effect 分類が classifyTimeoutMs を超えて打ち切られた件の記録 (effect-plugin.md §5.1.1)。空配列が原則。値があれば決定性ログとして残す。
+ * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Empty in the normal case; non-empty entries are kept as a determinism log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 }
