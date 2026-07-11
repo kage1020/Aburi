@@ -10,7 +10,7 @@ References:
 - [`markdown-projection.md`](./markdown-projection.md) §2 — "1 output artifact = 1 file" convention; §3 — shared display conventions (paths, badges, dropped folds); §6 — the existing diff.md section skeleton; §9 — the stub this document resolves
 - [`ir-schema.md`](./ir-schema.md) §3 — Symbol id shape used verbatim in cluster identity; §15.2 — non-breaking optional-field policy for the schema extension in §11
 - `multi-language-id.md` (planned — see [`roadmap.md`](../roadmap.md)) — future cross-language slice composition
-- `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)) — indirectly affects Slice View by lifting more `resolved: null` calls to real `CallEdge` records
+- [`lsp-enrichment.md`](./lsp-enrichment.md) — indirectly affects Slice View by lifting more `resolved: null` calls to real `CallEdge` records
 
 ---
 
