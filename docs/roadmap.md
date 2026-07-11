@@ -52,7 +52,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 
 Detailed designs required before starting:
 
-- [`call-resolution.md`](./design/call-resolution.md) — call resolution (in both untyped and LSP environments) ✓
+- [`call-resolution.md`](./design/call-resolution.md) — call resolution (in both untyped and LSP environments)
 - `effect-propagation.md` — propagation rules
 - `slice-view.md` — clustering algorithm selection (graph SCC vs. Louvain)
 - `lsp-enrichment.md` — LSP communication / fallback conventions

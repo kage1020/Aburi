@@ -4,11 +4,11 @@ Specification of how Aburi resolves the identity of a callee at a call site — 
 
 References:
 - [`ir-schema.md`](./ir-schema.md) §10 — the shape of `Call` and the `resolved` field
-- [`lang-plugin.md`](./lang-plugin.md) §4.4, §5.1 — `CallCandidate` and the Language Plugin's boundary
+- [`lang-plugin.md`](./lang-plugin.md) §2.2, §4.4 — the Language Plugin's boundary (call resolution is out of scope) and the `CallCandidate` shape
 - [`effect-plugin.md`](./effect-plugin.md) — how effect classification takes precedence over resolution
-- [`effect-propagation.md`](./effect-propagation.md) — the consumer that propagates effects along resolved edges
-- [`slice-view.md`](./slice-view.md) — the consumer that clusters over the resolved call graph
-- [`lsp-enrichment.md`](./lsp-enrichment.md) — the optional layer that refines resolution outcomes
+- `effect-propagation.md` (planned — see [`roadmap.md`](../roadmap.md)) — the consumer that propagates effects along resolved edges
+- `slice-view.md` (planned — see [`roadmap.md`](../roadmap.md)) — the consumer that clusters over the resolved call graph
+- `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)) — the optional layer that refines resolution outcomes
 
 ---
 
@@ -27,7 +27,7 @@ Aburi runs in two environments:
 | Tier | Availability | Refines |
 |---|---|---|
 | **Untyped (default)** | always | resolves by import binding + qualified-name matching over the Symbol table |
-| **LSP-enriched (optional)** | when a language server is running and available (see [`lsp-enrichment.md`](./lsp-enrichment.md)) | resolves method dispatch through the actual receiver type + interface implementations |
+| **LSP-enriched (optional)** | when a language server is running and available (spec: `lsp-enrichment.md`, planned — see [`roadmap.md`](../roadmap.md)) | resolves method dispatch through the actual receiver type + interface implementations |
 
 The two tiers share a **single output contract** (§7). Enabling LSP MUST NOT change the shape or ordering of `calls[]`; it only lifts more `resolved: null` entries to non-null and lifts `confidence`. This preserves time-series diff stability (`overview.md` §2 — "diff stability" is non-negotiable).
 
@@ -98,12 +98,14 @@ Resolving `./y` to a Symbol file requires the file-path normalizer defined in §
 
 For a specifier `'./y'` (or `'../y'`, `'@workspace-alias/foo'`) in file `apps/billing/src/svc/InvoiceService.ts`:
 
-1. If the specifier begins with `.` or `..`, resolve relative to the caller's file directory.
-2. If it matches a `tsconfig.json` `paths` alias or a `pnpm-workspace.yaml` package name, apply that mapping.
-3. Try extensions in the order declared by the language plugin (`fileExtensions`) and append `/index.<ext>` for directory targets.
-4. Confirm the resolved file exists in `symbolTable`. If not — `resolved` stays `null`, confidence stays `high` for the negative result.
+1. **Relative** (`.`/`..` prefix) — resolve against the caller's file directory.
+2. **Path alias** — apply the mapping table read from the language plugin's config at startup:
+   - For TypeScript: the `paths` field of the caller's nearest `tsconfig.json` (Node16/NodeNext resolution semantics), plus each workspace package name declared in `pnpm-workspace.yaml` / `workspaces` / `turbo.json`.
+   - For other languages: the equivalent lookup surface the plugin declares (out of scope here).
+3. **Extension probing** — try extensions in the order declared by the language plugin (`fileExtensions`, [`lang-plugin.md`](./lang-plugin.md) §4.1). For a directory target, append `/index.<ext>` and probe again.
+4. **Symbol table hit** — confirm the resolved absolute path (workspace-relativized to POSIX) exists as a Symbol id prefix in `symbolTable`. If not, `resolved` stays `null`, `confidence` = `high` (a definite miss).
 
-Path alias resolution rules are described in [`component-detect.md`](./component-detect.md); this document only says "call the workspace-aware resolver". It must be deterministic (no filesystem race conditions influencing which candidate wins).
+The mapping table is built once per `aburi scan` invocation from the config already loaded by [`config.md`](./config.md) and the workspace-manager information already produced by [`component-detect.md`](./component-detect.md) §3; the resolver reads it, never re-parses `tsconfig.json` or workspace manifests. Determinism follows: no filesystem race can influence which candidate wins because the candidate order is fixed by the language plugin's `fileExtensions` list and the mapping table is deterministic input.
 
 ### 4.5 Step 4: component scope
 
@@ -143,7 +145,7 @@ When LSP is available, resolution runs a second pass that reads receiver types.
 - `receiverType(callSite)` — the resolved type of the receiver expression at the call site (returned from the language server's `textDocument/hover` or `typeDefinition` request).
 - `implementers(interfaceName)` — the set of Symbols known to `implements`/`extends` the given interface (from `textDocument/implementation`).
 
-The exact protocol subset used, plus fallback and timeout policy, is specified in [`lsp-enrichment.md`](./lsp-enrichment.md). This document only names the two capabilities and treats them as inputs.
+The exact protocol subset used, plus fallback and timeout policy, will be specified in `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)). This document only names the two capabilities and treats them as inputs.
 
 ### 5.2 Method dispatch through `this` / `super`
 
@@ -206,7 +208,7 @@ CallEdge {
 }
 ```
 
-A call with `resolved: null` produces **no edge** — the graph is built only from resolved calls. Effect propagation ([`effect-propagation.md`](./effect-propagation.md)) and Slice View ([`slice-view.md`](./slice-view.md)) consume `CallEdge[]` and do not need to inspect `resolved: null` entries themselves.
+A call with `resolved: null` produces **no edge** — the graph is built only from resolved calls. Effect propagation (`effect-propagation.md`, planned) and Slice View (`slice-view.md`, planned) consume `CallEdge[]` and do not need to inspect `resolved: null` entries themselves.
 
 ### 7.2 Confidence propagation
 
@@ -223,7 +225,7 @@ The edge's `confidence` is the resolution confidence at the moment of resolution
 | §5.3 LSP interface with single impl | `medium` |
 | §5.3 LSP interface with DI-resolved impl | `medium` |
 
-Effect propagation must respect edge confidence when combining propagated effect confidence — see [`effect-propagation.md`](./effect-propagation.md).
+Effect propagation must respect edge confidence when combining propagated effect confidence — see `effect-propagation.md` (planned).
 
 ### 7.3 Cross-language edges
 
@@ -243,7 +245,7 @@ Every unresolved call is a **first-class outcome**, not a warning. Consumers mus
 
 ### 8.1 Classification of `resolved: null`
 
-The core does not currently persist a "why null" reason field in the IR (adding one would break the frozen `aburi.ir.v1` schema — see [`ir-schema.md`](./ir-schema.md) §15). Instead, the resolver emits a per-run diagnostic log with buckets:
+The core does not persist a "why null" reason field on `Call` in the IR. Adding an optional field is non-breaking under [`ir-schema.md`](./ir-schema.md) §15.2, so this is a design choice, not a compatibility constraint: diagnostic buckets are per-run debugging output and belong in logs, not in the fingerprinted IR (they would enlarge every IR document for review value that only matters when investigating a specific resolution outcome). The resolver emits a per-run diagnostic log with buckets:
 
 | Bucket | Meaning | Example |
 |---|---|---|
@@ -266,7 +268,7 @@ Diagnostic counts go to `stats` (extension planned — see [`roadmap.md`](../roa
 Explicitly out of scope:
 
 - **Renaming a resolved id after the fact** (e.g. following re-exports transitively across five files). The first matching Symbol id wins; if that Symbol re-exports another, the edge points at the re-exporter, not the origin. Rationale: transitive re-export following is stateful and hurts determinism.
-- **Distinguishing "instance call" from "static call" at the resolved id level.** Both point at the same Symbol id when the language uses the same qname convention (`ClassName.method` vs `ClassName::method` — [`ir-schema.md`](./ir-schema.md) §3.2 already distinguishes them at the qname level).
+- **Adding a distinction beyond what the qname convention already carries.** [`ir-schema.md`](./ir-schema.md) §3.2 already distinguishes instance vs. static methods at the qname level (`ClassName.method` vs. `ClassName::method`), so an instance-call and a static-call resolve to different Symbol ids without further work. The resolver does not add any extra layer on top: whatever the language plugin's qname says is the identity of the callee, that is the identity used in `resolved`.
 - **Confidence numbers.** Categorical only, per [`overview.md`](./overview.md) §2.
 
 ## 9. Determinism Guarantees
@@ -352,7 +354,7 @@ Resolution requires knowledge of every file's imports and every Symbol in the wo
 
 ### 11.5 Why confidence is per-edge, not per-Symbol
 
-An edge from A to B is a distinct fact from A's own confidence. Downgrading A's `confidence` because one of its outgoing edges is `low` would be a category error. Effect propagation is where the two confidences combine — see [`effect-propagation.md`](./effect-propagation.md).
+An edge from A to B is a distinct fact from A's own confidence. Downgrading A's `confidence` because one of its outgoing edges is `low` would be a category error. Effect propagation is where the two confidences combine — see `effect-propagation.md` (planned).
 
 ### 11.6 Why re-export transitivity is not followed
 
