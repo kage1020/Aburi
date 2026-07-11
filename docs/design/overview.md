@@ -82,6 +82,7 @@ Details are covered by the documents in this directory:
 - Language plugin interface: [`lang-plugin.md`](./lang-plugin.md)
 - Fingerprint computation: [`fingerprint.md`](./fingerprint.md)
 - Call resolution (filling in `Call.resolved`): [`call-resolution.md`](./call-resolution.md)
+- Effect propagation (augmenting `Symbol.effects[]` along resolved edges): [`effect-propagation.md`](./effect-propagation.md)
 
 ## 5. IR and Config
 
