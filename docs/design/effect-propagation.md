@@ -9,7 +9,7 @@ References:
 - [`fingerprint.md`](./fingerprint.md) §4.1, §4.4, §4.5, §4.7 — the `logic` fingerprint input and its plugin-configuration robustness rule
 - [`diff-algorithm.md`](./diff-algorithm.md) §5.2 — `Effect` identity `(id, target)`; §7.2 — Markdown projection section ordering; §10.1 — the diff `status` enum is closed
 - [`overview.md`](./overview.md) §2 — categorical `confidence` only; §4 — extraction pipeline placement
-- `slice-view.md` (planned — see [`roadmap.md`](../roadmap.md)) — the sibling consumer of the resolved Symbol graph
+- [`slice-view.md`](./slice-view.md) — the sibling consumer of the resolved Symbol graph
 - `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)) — the optional layer that lifts `CallEdge` confidence
 
 ---

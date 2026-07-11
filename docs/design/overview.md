@@ -53,6 +53,8 @@ Horizontal layers are good at bundling like with like, but for a single feature 
 
 **Slice View**: cluster the set of changed symbols into connected components over the call graph and display them as vertical slices (per feature). It is derived from the same L3 IR.
 
+Full specification: [`slice-view.md`](./slice-view.md).
+
 ## 4. Extraction Pipeline
 
 ```

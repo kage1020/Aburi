@@ -52,10 +52,9 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 
 Detailed designs required before starting:
 
-- `slice-view.md` — clustering algorithm selection (graph SCC vs. Louvain)
 - `lsp-enrichment.md` — LSP communication / fallback conventions
 
-(`call-resolution.md` and `effect-propagation.md` were required for this phase and are now landed; see the Design documents table below.)
+(`call-resolution.md`, `effect-propagation.md`, and `slice-view.md` were required for this phase and are now landed; see the Design documents table below.)
 
 ## Later: multi-language
 
@@ -98,6 +97,7 @@ The full behaviour of everything in "What works today" is specified in
 | Language plugin interface | [`lang-plugin.md`](./design/lang-plugin.md) |
 | Call resolution (filling in `Call.resolved`) | [`call-resolution.md`](./design/call-resolution.md) |
 | Effect propagation (augmenting `Symbol.effects[]` along resolved edges) | [`effect-propagation.md`](./design/effect-propagation.md) |
+| Slice View clustering (weakly-connected components over the resolved call graph) | [`slice-view.md`](./design/slice-view.md) |
 | Effect plugin interface | [`effect-plugin.md`](./design/effect-plugin.md) |
 | Fingerprint computation | [`fingerprint.md`](./design/fingerprint.md) |
 | Component autodetect | [`component-detect.md`](./design/component-detect.md) |
