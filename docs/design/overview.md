@@ -81,6 +81,7 @@ Details are covered by the documents in this directory:
 - Effect plugin interface: [`effect-plugin.md`](./effect-plugin.md)
 - Language plugin interface: [`lang-plugin.md`](./lang-plugin.md)
 - Fingerprint computation: [`fingerprint.md`](./fingerprint.md)
+- Call resolution (filling in `Call.resolved`): [`call-resolution.md`](./call-resolution.md)
 
 ## 5. IR and Config
 
