@@ -5,11 +5,10 @@ Specification of how Aburi clusters the set of changed Symbols from `aburi diff`
 References:
 - [`overview.md`](./overview.md) §3.2 — the vertical Slice View concept sketched in three sentences; this document is the full specification
 - [`call-resolution.md`](./call-resolution.md) §7 — the `CallEdge` contract this pass consumes; §7.3 — the "no cross-language edges" invariant
-- [`effect-propagation.md`](./effect-propagation.md) §2, §11.5 — sibling pass that ALSO consumes the resolved Symbol graph; its `propagated: true` records affect Node selection (§4)
+- [`effect-propagation.md`](./effect-propagation.md) §2 — sibling pass placement; §5.1, §9 — the `propagated: true` discriminator and its diff-side rendering, which drive Node selection (§4.4)
 - [`diff-algorithm.md`](./diff-algorithm.md) §3–§5 — how base/head Symbols are paired and the six `status` values that gate Node inclusion; §7.2 — the Markdown section order Slice View slots into; §10.1 — the diff-schema compatibility policy this pass MUST respect
 - [`markdown-projection.md`](./markdown-projection.md) §2 — "1 output artifact = 1 file" convention; §3 — shared display conventions (paths, badges, dropped folds); §6 — the existing diff.md section skeleton; §9 — the stub this document resolves
 - [`ir-schema.md`](./ir-schema.md) §3 — Symbol id shape used verbatim in cluster identity; §15.2 — non-breaking optional-field policy for the schema extension in §11
-- [`fingerprint.md`](./fingerprint.md) §4 — what "changed" in the diff actually means (fingerprint deltas), the condition for a Symbol to be a Node
 - `multi-language-id.md` (planned — see [`roadmap.md`](../roadmap.md)) — future cross-language slice composition
 - `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)) — indirectly affects Slice View by lifting more `resolved: null` calls to real `CallEdge` records
 
@@ -61,7 +60,7 @@ The pass runs after the diff matcher and delta computation of [`diff-algorithm.m
 Preconditions the pass MUST assume:
 
 1. Every `pairedSymbols[i]` has a fully populated `status`. `unchanged` entries have already been dropped per [`diff-algorithm.md`](./diff-algorithm.md) §4.
-2. Every `CallEdge.from` and `CallEdge.to` resolves to a Symbol in the corresponding IR's `symbols[]`. Dangling ids are a resolver bug ([`call-resolution.md`](./call-resolution.md) §7.1), not something Slice View tolerates.
+2. Every `CallEdge.from` and `CallEdge.to` resolves to a Symbol in the corresponding IR's `symbols[]`. Dangling ids are a resolver bug, not something Slice View tolerates.
 3. Both `baseIR` and `headIR` share the same `$schema` value. [`diff-algorithm.md`](./diff-algorithm.md) §9.1 already rejects mismatches with a fatal error; the pass runs after that check.
 4. [`effect-propagation.md`](./effect-propagation.md) has already run on both IRs. Its outputs are read by the pass only to answer "is this `changed` status attributable to a propagated effect?" (§4.4).
 
@@ -105,17 +104,14 @@ A Symbol whose `changed` status is driven **solely** by a `propagated: true` ent
 
 ### 5.1 The Edge set
 
-Edges are drawn from the **union** of `baseCallEdges` and `headCallEdges`, then undirected, then restricted to edges whose **both** endpoints are in the Node set (§4).
+Edges are drawn from the **union** of `baseCallEdges` and `headCallEdges`, then undirected, then restricted to edges whose **both** endpoints are in the Node set (§4). Each edge is canonicalised as an ordered pair `(u, v)` with `u < v` in ascending Symbol id order:
 
 ```
-E = { (u, v) undirected  |  ∃ CallEdge {from:u, to:v} ∈ baseCallEdges ∪ headCallEdges,
-                            u ∈ Nodes  ∧  v ∈ Nodes,
-                            u ≠ v }
+E = { (u, v)  |  u, v ∈ Nodes,  u < v (ascending Symbol id order),
+                 ∃ CallEdge in baseCallEdges ∪ headCallEdges from u to v  OR  from v to u }
 ```
 
-Multi-edges (the same `(u, v)` pair contributed by both `baseCallEdges` and `headCallEdges`, or by multiple call sites in one direction) collapse to one undirected edge — clustering is a set-connectivity question, not a weight question.
-
-Self-loops (`u === v`, e.g. direct recursion) are dropped. They contribute no connectivity between distinct Nodes.
+The canonical `u < v` form collapses the multi-edge case (the same pair contributed by both `baseCallEdges` and `headCallEdges`, or by multiple call sites in either direction) into one undirected edge — clustering is a set-connectivity question, not a weight question. Self-loops (a `CallEdge` where `from === to`, e.g. direct recursion) are excluded by the strict `u < v` constraint. They contribute no connectivity between distinct Nodes.
 
 ### 5.2 No bridging via non-Node Symbols
 
@@ -182,7 +178,7 @@ has
 sliceId = "slice:ts:apps/billing/src/RefundController.ts#RefundController.refund"
 ```
 
-because that id is the lexicographically smallest of the three (`R` < `R` at the file path level, resolved letter by letter).
+because that id is the lexicographically smallest of the three: the three ids share the `ts:apps/billing/src/Refund` prefix; the first differing character is `C` (Controller) < `R` (Repo) < `S` (Service), so `RefundController.ts#…` sorts first.
 
 ### 7.2 Stability under small edits
 
@@ -236,7 +232,7 @@ The pass matches [`effect-propagation.md`](./effect-propagation.md) §10's rigor
 
 - The Node set is enumerated in ascending Symbol id order.
 - The Edge set is deduplicated (§5.1) and then sorted in ascending `(min(u,v), max(u,v))` order.
-- Union-Find `union` calls happen in that sorted Edge order. Root selection uses "smaller Symbol id wins" as the union-by-rank tie-breaker, so the final root of every Slice is exactly the anchor of §7.1 with no extra rewriting pass.
+- Union-Find `union` calls happen in that sorted Edge order. The Union-Find root chosen by union-by-rank is an implementation-internal identifier; the `sliceId` anchor is derived by scanning each cluster's `members[]` for the smallest Symbol id per §7.1 after clustering terminates, independent of which representative Union-Find happens to have picked as the root.
 - `slices[]` is emitted in ascending `sliceId` order.
 - Each Slice's `members[]` is emitted in ascending Symbol id order.
 
@@ -464,7 +460,7 @@ The private-helper-anchor cost is real (the id reads less nicely) but bounded (t
 
 ### 14.7 No `--fail-on cluster-count>N` or slice-size selectors
 
-[`overview.md`](./overview.md) §2 lists "Highly configurable" as an explicitly rejected design axis. Introducing per-cluster-count or per-slice-size CI gates would put reviewers in the position of tuning the gate on every large PR, and re-tuning on every mid-PR clustering shift caused by a rename. The existing gates (`changed`, `removed`, `dropped-toggled:to-dropped`, ...) already operate on stable per-Symbol counts and cover the "did this PR touch too much" question at a lower level.
+[`overview.md`](./overview.md) §2 lists "Highly configurable" as an explicitly rejected design axis. Introducing per-cluster-count or per-slice-size CI gates would put reviewers in the position of tuning the gate on every large PR, and re-tuning on every mid-PR clustering shift caused by a rename. The existing gates (`changed`, `removed`, `dropped-toggled`, ...) already operate on stable per-Symbol counts and cover the "did this PR touch too much" question at a lower level.
 
 The `--fail-on` surface stays exactly as [`diff-algorithm.md`](./diff-algorithm.md) §10.1 declares it.
 

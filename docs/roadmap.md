@@ -31,6 +31,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
   dependencies only
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
 - **No workspace-level mermaid overview / Slice View / graph visualization**
+  (Slice View: design landed; implementation upcoming)
 - **No LLM integration** — Aburi is a deterministic static analyser by design;
   AI-assisted review on top of the IR is a separate concern
 
