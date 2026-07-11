@@ -17,7 +17,7 @@
  * embedded SQL, regex, or template text carried on `Decorator.raw` or `Rule.condition` —
  * is not distinguished from formatting whitespace. `@Query("SELECT a  b")` and
  * `@Query("SELECT a b")` hash identically. A follow-up axis that preserves in-literal
- * whitespace would require the language plugin to mark literal spans; v0.1 accepts the
+ * whitespace would require the language plugin to mark literal spans; we accept the
  * loss in exchange for reformat tolerance across the rest of the input.
  */
 export function normalizeFingerprintString(input: string): string {

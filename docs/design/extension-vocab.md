@@ -386,7 +386,7 @@ aburi scan --discover
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.vocab-discovered.v1.json",   // does not exist in v0.1; formalized in v0.2
+  "$schema": "https://aburi.dev/schema/aburi.vocab-discovered.v1.json",   // does not exist yet; formalization is planned
   "discoveredAt": "2026-06-21T15:30:00Z",
   "items": [
     {

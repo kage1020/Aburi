@@ -303,7 +303,7 @@ Future addition candidates:
 - `format`: `"json"` / `"md"` / `"both"` (default `"both"`)
 - `compact`: `true` for single-line JSON
 
-v0.1 has `dir` only.
+Currently only `dir` is supported.
 
 ## 10. `strict`
 

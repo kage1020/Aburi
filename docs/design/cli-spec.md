@@ -212,7 +212,7 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 
 Ref forms:
 - `main..HEAD` — base=main, head=HEAD
-- `v1.0.0..v1.1.0` — tag comparison
+- `v1.2.0..v1.3.0` — tag comparison
 - `abc123..def456` — direct commit specification
 
 If git is unavailable, pass existing IR files via the `--base / --head` pair.
@@ -225,7 +225,7 @@ With refs:
 3. Run `aburi scan` on the base and store the IR temporarily
    - **Config used**: apply the **head-side `aburi.json`** to the base scan as well (the base is interpreted through the head's view; a stale config remaining in the base is ignored)
    - Rationale: using the config as of the base ref would make "config change = the entire IR changes", breaking the diff. Fixing the view to the head automatically resolves config differences
-   - A future `--base-config <path>` may be provided to override this (under consideration for v0.2)
+   - A future `--base-config <path>` may be provided to override this (planned — see the [roadmap](../roadmap.md))
 4. Run `aburi scan` on the head (the original cwd)
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
 6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`
@@ -243,7 +243,7 @@ Before creating the worktree, the following checks run in order; on failure, exi
 | `git rev-parse <base>` succeeds | `Base ref '<base>' not found. If this is a CI shallow clone, run: git fetch --deepen=50 origin <base>` |
 | Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` |
 | Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` |
-| `git submodule status` is empty (v0.1 does not support submodules) | `Submodules detected: <list>. v0.1 does not support submodule-aware diff.` (warning; continue) |
+| `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) |
 | On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) |
 
 #### 6.4.1.5 Plugin Dependency Resolution at the Base Ref
@@ -254,7 +254,7 @@ When scanning the base ref for `aburi diff <base>..<head>`, Aburi **shares the h
 - **Known limitation**: when the base ref's sources cannot be extracted with the head's plugins (e.g. the base uses syntax from an older framework version and the head's framework plugin only supports the newer one), parsing/extraction may fail
   - This is a consequence of the "IR generator is pinned to the head environment" design
   - On failure, the affected file is skipped with a warning log
-- The request "apply the base ref's contemporaneous plugin set" is under consideration as `--base-plugins <path>` for v0.2 or later
+- The request "apply the base ref's contemporaneous plugin set" is under consideration as `--base-plugins <path>` for a future release (see the [roadmap](../roadmap.md))
 
 #### 6.4.2 GitHub Actions Guidance
 
@@ -299,7 +299,7 @@ aburi diff main..HEAD --fail-on changed,removed
 # exit 3 if even one symbol has status "changed" or "removed"
 ```
 
-#### Accepted Values (v0.1)
+#### Accepted Values
 
 | Kind | Values |
 |---|---|
@@ -335,7 +335,7 @@ aburi diff main..HEAD --fail-on api-changed,removed,dropped-toggled
 # fires on API change OR removal OR drop-rule fluctuation
 ```
 
-This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible from v0.1.
+This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible today.
 
 ## 7. `aburi explain`
 
@@ -354,11 +354,11 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan]
 - **File path** — the string contains `/`, contains no `#`, and is an existing file → show all Symbols in that file
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
 
-#### 7.2.1 Exact Definition of Partial Matching (v0.1)
+#### 7.2.1 Exact Definition of Partial Matching
 
 - **case-sensitive** (`getUser` and `getuser` are distinct)
 - **substring match** on `Symbol.name` only (= a partial match against the whole qualified name; `Service.create` hits `InvoiceService.createInvoice`)
-- **no glob support** (patterns like `*Service` are under consideration for v0.2)
+- **no glob support** (patterns like `*Service` are under consideration for a future release — see the [roadmap](../roadmap.md))
 - If multiple candidates match, exit 2 + candidate list on stdout
 
 ### 7.3 Options
@@ -441,7 +441,7 @@ effects-prisma / (prefix x-prisma)                  — Prisma plugin namespace
 
 `aburi vocab who-owns x-nest:lifecycle.on-module-init`:
 ```
-Plugin:      effects-nest (v1.0.0)
+Plugin:      effects-nest (v1.2.3)
 Type:        effects
 Declaration: explicit (provides.effects[])
 Description: NestJS OnModuleInit hook
@@ -514,9 +514,9 @@ Passing `--cwd` changes the cwd and therefore the search origin.
   - When multiple lang plugins coexist in the same run, the **maximum** of the declared values is used
 - On memory-constrained CI, `--concurrency 1` is recommended (for debugging)
 
-Future (v0.2+): use Node worker_threads instead of a worker pool.
+A future release will switch to Node worker_threads instead of a worker pool (see the [roadmap](../roadmap.md)).
 
-## 15. Planned Features (v0.2+)
+## 15. Planned Features
 
 | Feature | Summary |
 |---|---|
@@ -525,7 +525,7 @@ Future (v0.2+): use Node worker_threads instead of a worker pool.
 | `aburi serve` | LSP-like local server (IDE integration) |
 | `aburi vocab list --json` extension | merged with discoverer output |
 
-Not implemented in v0.1. The signatures are reserved to avoid future compatibility breaks.
+None of these are implemented yet; see the [roadmap](../roadmap.md). The signatures are reserved to avoid future compatibility breaks.
 
 ## 16. Help Output
 
@@ -592,7 +592,7 @@ Finer-grained exit codes increase the burden on consumers, so they are avoided.
 To avoid confusion when CI uses `2>/dev/null` or `> result.txt`, all progress and warnings go to stderr.
 Only result data (summary / JSON / Markdown) goes to stdout.
 
-### 18.3 Why `--fail-on` Ships in v0.1
+### 18.3 Why `--fail-on` Ships from the Start
 
 A CI gate is the feature that delivers the most value at review adoption time. Once "automatically block PRs with dangerous changes" works, Aburi adoption accelerates sharply. Retrofitting it would require rewriting CI configurations, so it is provided from the start.
 
@@ -613,6 +613,6 @@ Vocab is a query target independent of the IR. A standalone `aburi vocab` comman
 
 In CI / Docker / Makefiles, configuring via env is easier than threading flags through. Standard conventions (`NO_COLOR` / `CI`) are respected, and Aburi-specific envs (`ABURI_*`) are provided as well.
 
-### 18.8 Why v0.2 Features Are Reserved
+### 18.8 Why Planned Features Are Reserved
 
-Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` in v0.1 prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.
+Reserving the names `aburi watch` / `aburi doctor` / `aburi serve` today prevents name collisions and compatibility breaks when they are added later. They are not implemented, but are documented.

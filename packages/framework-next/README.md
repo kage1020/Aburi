@@ -23,7 +23,7 @@ files export named HTTP verb handlers and do not participate in JSX rendering,
 so restricting extensions matches the Next.js runtime and prevents `route.tsx`
 siblings from being misclassified.
 
-Out of scope in v0.1 (documented but not classified): `default`, `global-error`,
+Not classified today (documented for completeness): `default`, `global-error`,
 `middleware`, `instrumentation`, and the metadata files (`sitemap`, `icon`,
 `opengraph-image`, …). Adding them is a table extension inside `app-router.ts`.
 
@@ -42,7 +42,7 @@ pnpm add @aburi/framework-next
 import { nextFrameworkPlugin } from "@aburi/framework-next"
 ```
 
-In v0.1, `aburi init` writes the short framework name `"nextjs"` into
+Currently, `aburi init` writes the short framework name `"nextjs"` into
 `aburi.json` under `frameworks` (matching the component-autodetect vocabulary
 in `@aburi/core`). The plugin loader currently resolves that short name to
 `@aburi/nextjs` (bare-name prefix, no bucket segment inferred — see

@@ -193,14 +193,14 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 - Adding / removing effect plugins or reordering the config does not break the logic stability of the IR
 - Time-series comparison against past IRs is robust to plugin configuration changes
 
-### 4.6 Known v0.1 limitations (before LSP enrichment)
+### 4.6 Known current limitations (before LSP enrichment)
 
 - `effects[].target` uses the string as-is. `this.storedCats.push` and `this.cats.push` are different fingerprints
   - When a field rename shows up in the targets of effects, `logic` changes
-  - Resolution comes with v0.2 call-resolution / LSP enrichment, which introduces type-informed normalization
+  - Resolution comes with the planned call-resolution / LSP enrichment (see the [roadmap](../roadmap.md)), which introduces type-informed normalization
 - The same applies to identifiers inside `rules[].condition` (`if (storedCats.length > 0)` and `if (cats.length > 0)` are different fingerprints)
 
-These are explicitly declared as "not guaranteed in v0.1". A field rename appearing as `logic changed` during review is, in current v0.1, per spec.
+These are explicitly declared as "not yet guaranteed". A field rename appearing as `logic changed` during review is, today, per spec.
 
 ### 4.7 Why effects order is preserved (= not sorted)
 

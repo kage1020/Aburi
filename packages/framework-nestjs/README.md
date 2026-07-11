@@ -33,7 +33,7 @@ pnpm add @aburi/framework-nestjs
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 ```
 
-In v0.1, `aburi init` writes the short framework name `"nestjs"` into
+Currently, `aburi init` writes the short framework name `"nestjs"` into
 `aburi.json` under `frameworks` (matching the component-autodetect vocabulary
 in `@aburi/core`). The plugin loader currently resolves that short name to
 `@aburi/nestjs` (bare-name prefix, no bucket segment inferred — see

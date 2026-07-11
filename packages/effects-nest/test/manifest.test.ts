@@ -30,7 +30,7 @@ describe("effectsNestManifest", () => {
     expect(EFFECTS_NEST_DERIVED_BY_PREFIX).toBe("effects-plugin:nest")
   })
 
-  it("targets aburi engine with a wildcard version (v0.1 pre-1.0 compatibility posture)", () => {
+  it("targets aburi engine with a wildcard version (pre-1.0 compatibility posture)", () => {
     expect(effectsNestManifest.engines).toEqual({ aburi: "*" })
   })
 

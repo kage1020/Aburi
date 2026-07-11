@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
       # Pin by branch (main) or by the per-package tag `changesets/action`
       # creates on release (e.g. `@aburi/github-action@0.1.0`). An unscoped
-      # `v0.1.0` tag is intentionally not published because `changeset publish`
+      # `vX.Y.Z` tag is intentionally not published because `changeset publish`
       # names monorepo tags per package.
       - uses: kage1020/Aburi/packages/github-action@main
         with:

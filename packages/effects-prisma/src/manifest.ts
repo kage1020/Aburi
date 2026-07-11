@@ -8,7 +8,7 @@ import { EFFECTS_PRISMA_DERIVED_BY_PREFIX } from "./classify"
  * The plugin returns core-owned effect ids (`db.read` / `db.write` / `db.transaction`)
  * from `classify()`; per extension-vocab.md §5.1 core vocab lives in the reserved
  * namespace and MUST NOT appear in a plugin's `provides.effects`. The plugin's own
- * `x-prisma:*` namespace has no v0.1 bindings — model-specific effects would sit there
+ * `x-prisma:*` namespace currently has no bindings — model-specific effects would sit there
  * once introduced. `derivedByPrefixes` shares its literal with the classifier's tag
  * builder so both stay in lockstep across edits.
  */

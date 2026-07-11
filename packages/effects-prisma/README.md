@@ -13,7 +13,7 @@ Recognised shapes:
 | `<client>.$transaction(...)` | `db.transaction` |
 
 Raw SQL (`$queryRaw` / `$executeRaw` / `$queryRawUnsafe` / `$executeRawUnsafe`)
-is intentionally **not** classified in v0.1 — statically distinguishing a read
+is intentionally **not** classified today — statically distinguishing a read
 raw query from a write raw query would require SQL parsing, which is out of the
 current scope. A future revision may add it under a `medium` confidence tier.
 

@@ -107,7 +107,7 @@ If there is a standalone `Cargo.toml` without `[workspace]`, the root is a singl
 
 Python workspace standards are fragmented, so multiple detectors exist.
 
-### 3.5 Others (targets for v1.0 and later)
+### 3.5 Others (planned)
 
 | Manager | Marker | Notes |
 |---|---|---|
@@ -118,7 +118,7 @@ Python workspace standards are fragmented, so multiple detectors exist.
 | Elixir | `mix.exs` umbrella project | Everything under `apps_path` |
 | Composer | `composer.json` (when using composer/installers) | Not generalized; deferred |
 
-v0.1 implements JS/TS only. For the others, the detector plugin interface is defined so that each language plugin can add detectors in v1.0 (§7).
+Currently only JS/TS detectors are implemented. For the others, the detector plugin interface is defined so that each language plugin can add detectors in a future release (§7; see the [roadmap](../roadmap.md)).
 
 ## 4. Inference of Component fields
 
@@ -207,7 +207,7 @@ Detect known frameworks from dependency manifests:
 | Same as above | `fastapi` → `fastapi` |
 | Same as above | `flask` → `flask` |
 
-The list is owned by the Aburi core, but a mechanism will be introduced in v0.2 whereby a framework plugin, once it declares its name in `manifest.provides.frameworks[]`, can extend the "detection pattern → name" mapping on the plugin side (v0.1 uses the fixed core list).
+The list is owned by the Aburi core, but a mechanism is planned whereby a framework plugin, once it declares its name in `manifest.provides.frameworks[]`, can extend the "detection pattern → name" mapping on the plugin side (see the [roadmap](../roadmap.md)). Today the fixed core list is used.
 
 Detected frameworks are **only recorded in `Component.frameworks[]`**; the corresponding plugin is not auto-enabled ([`config.md`](./config.md) §15.1).
 
@@ -236,7 +236,7 @@ Resolve `exports` / `main` / `module` / `types` from `package.json`:
 If there is no `exports`, take the file path from `main` / `module` / `types`.
 If none exist, `publicApi: []` (empty).
 
-For Python / Go / Rust, each language plugin will provide "public API file" inference logic in v1.0. v0.1 covers JS/TS only.
+For Python / Go / Rust, each language plugin will provide "public API file" inference logic in a future release (see the [roadmap](../roadmap.md)). Today only JS/TS is covered.
 
 ## 5. Single project (non-monorepo)
 
@@ -274,7 +274,7 @@ interface WorkspaceCandidate {
 }
 ```
 
-Whether each language plugin's `manifest.provides` may include a detector will be extended in v0.2 (v0.1 uses the fixed core detector set).
+Allowing each language plugin's `manifest.provides` to include a detector is a planned extension (see the [roadmap](../roadmap.md)); today the fixed core detector set is used.
 
 ## 6.5 Handling mixed languages/runtimes
 
@@ -283,10 +283,10 @@ A monorepo mixing multiple managers, such as `apps/web` (pnpm) + `apps/api` (car
 - Record all detected tools in `workspace.managers[]` (e.g. `[{tool:"pnpm",...}, {tool:"cargo",...}, {tool:"uv",...}]`)
 - Each workspace becomes a Component under its own manager's naming conventions
 - Each Component's `languages` is determined automatically by scanning its subtree (§4.4)
-- Since v0.1 is **TS only**, when a non-TS workspace is detected:
+- Since **only TS is supported today**, when a non-TS workspace is detected:
   - The Component is still created (to preserve the full architectural picture)
   - The language is included in `languages`, but Symbol extraction is skipped
-  - Recorded in `stats.skippedFiles[]` as "no corresponding lang plugin" (to be revisited in v0.2)
+  - Recorded in `stats.skippedFiles[]` as "no corresponding lang plugin" (to be revisited when more languages land — see the [roadmap](../roadmap.md))
   - Warning on stderr: `Component <id> has language <lang> but no lang plugin enabled. Symbols not extracted.`
 
 ## 7. Conflict resolution
@@ -351,13 +351,13 @@ The package.json name in a monorepo is an identifier deliberately chosen by a hu
 
 Allowing a "zero Components" state breaks the structure of the whole IR (Symbols would have `component: null`). Guaranteeing at least one Component simplifies Markdown projection / diff.
 
-### 11.5 Why per-language detectors are deferred to v0.2 and later
+### 11.5 Why per-language detectors are deferred
 
-v0.1 is TS only. Building multi-language detectors when no plugin other than lang-typescript exists would leave them unused. Providing the corresponding detector at the same time each language plugin is added keeps responsibilities clear.
+Only TS is supported today. Building multi-language detectors when no plugin other than lang-typescript exists would leave them unused. Providing the corresponding detector at the same time each language plugin is added keeps responsibilities clear.
 
 ### 11.6 Limits of publicApi auto-inference
 
 The public API expressed by `package.json#exports` is file-granular; it cannot express fine-grained symbol-level selection (Aburi's `publicApi[]` accepts globs or symbol ids).
-v0.1 stops at file glob output; if symbol-level filtering is needed, users specify it manually in the config.
+Autodetect currently stops at file glob output; if symbol-level filtering is needed, users specify it manually in the config.
 
 In the future, cross-referencing each language plugin's `extractSymbols` results with `package.json#exports` leaves room to extend to symbol-level output such as `publicApi: ["ts:src/index.ts#Invoice", "ts:src/index.ts#createInvoice"]`.

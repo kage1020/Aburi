@@ -229,7 +229,7 @@ export function effectRow(eff: Effect): string {
 
 /**
  * §5.8 — Call row. The row shape is deliberately identical whether or not `resolved` is
- * populated; v0.1 does not render the `resolved` Symbol id yet because the anchor scheme
+ * populated; the `resolved` Symbol id is not rendered yet because the anchor scheme
  * for cross-Symbol links inside a single Markdown file is not finalised. Emitting the
  * resolved id here now would create PR churn when that scheme lands.
  */

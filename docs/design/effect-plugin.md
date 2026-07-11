@@ -143,7 +143,7 @@ The core sets a **per-call timeout** on each plugin's `classify(call, ctx)` invo
   - For plugins containing an SQL parser, raising it to 200-500ms is realistic
   - No per-plugin override (a single config value shared by all plugins)
 - Timeout exceeded → treated as if `null` were returned; the call flows to the next plugin
-- **Non-determinism recording**: each timeout occurrence (plugin, target, file:line) is recorded in `stats.effectClassifyTimeouts[]` (a v0.1 schema addition)
+- **Non-determinism recording**: each timeout occurrence (plugin, target, file:line) is recorded in `stats.effectClassifyTimeouts[]`
   - This makes non-determinism detectable from the IR: "the same input classifies successfully in run 1 but times out in run 2 and stays in calls[]"
   - CI can compare `effectClassifyTimeouts` across runs to spot plugin performance regressions
 - warning log: `Plugin <name> classify() timed out for <target> at <file>:<line>`
@@ -151,15 +151,15 @@ The core sets a **per-call timeout** on each plugin's `classify(call, ctx)` invo
 
 This prevents a slow plugin from stalling the whole double loop of thousands of AST symbols × dozens of calls × number of plugins.
 
-### 5.2 Why multiple classification is disallowed (v0.1)
+### 5.2 Why multiple classification is disallowed
 
-There is a temptation to record `prisma.invoice.create` as both `db.write` (core) and `x-prisma:invoice.create` (Prisma detail), but in v0.1:
+There is a temptation to record `prisma.invoice.create` as both `db.write` (core) and `x-prisma:invoice.create` (Prisma detail), but currently:
 
 - The IR's `Symbol.effects[]` grows complex (differing ids side by side for the same target/line)
 - The diff report's ordering conventions break down (which one is canonical?)
 - The comprehension load on consumers rises
 
-v0.1 adopts a single effectId via first-match-wins. Multiple classification remains an option for v0.2 or later via a separate field (`Effect.aliases?: string[]`).
+A single effectId is adopted via first-match-wins. Multiple classification remains an option for a future release via a separate field (`Effect.aliases?: string[]`) — see the [roadmap](../roadmap.md).
 
 ### 5.3 Expressing "do not classify" in a higher-priority plugin
 
@@ -213,7 +213,7 @@ Writing a drop-only plugin is also possible (`provides.effects: []` but declarin
 | `@aburi/effects-winston` | `winston.*` | same as above |
 | `@aburi/effects-otel` | `tracer.*` / `metrics.*` / `span.*` | same as above |
 
-Implementation details of each plugin live in their respective READMEs. v0.1 implements NestJS + Prisma as the minimum; the rest come in v0.2 or later.
+Implementation details of each plugin live in their respective READMEs. Today NestJS + Prisma are implemented as the minimum; the rest are planned — see the [roadmap](../roadmap.md).
 
 ## 9. Pattern-Matching Implementation Examples
 
@@ -256,7 +256,7 @@ export const plugin: EffectPlugin = {
 
 function isPrismaIdentifier(name, imports) {
   // imports contains '@prisma/client' and name looks like an instance of PrismaClient from there
-  // v0.1 uses a heuristic on the level of "if '@prisma/client' is imported, trust prisma-looking identifiers"
+  // currently a heuristic on the level of "if '@prisma/client' is imported, trust prisma-looking identifiers"
   return imports.some(i => i.source === '@prisma/client')
 }
 ```
@@ -275,7 +275,7 @@ export const plugin: EffectPlugin = {
   manifest: { /* see plugin-effects-nest.json */ },
   classify(call, ctx) {
     // If we design effect propagation for "calls to other symbols inside a lifecycle hook body", that is a separate consideration
-    // v0.1 does not treat "the invocation of the lifecycle hook itself" as an effect (the framework plugin handles that via extKind)
+    // currently "the invocation of the lifecycle hook itself" is not treated as an effect (the framework plugin handles that via extKind)
     return null
   },
   dropCallees: []  // NestJS passes loggers via DI rather than a separate module, so nothing is dropped here
@@ -340,7 +340,7 @@ To preserve the responsibility split of the whole extraction pipeline, effects s
 
 ### 11.2 Choosing first-match-wins
 
-Config order is a deterministic priority control: behavior is controlled with a single setting. Neither "complex consensus schemes" nor "weighted voting" needs to be introduced in v0.1.
+Config order is a deterministic priority control: behavior is controlled with a single setting. Neither "complex consensus schemes" nor "weighted voting" needs to be introduced today.
 
 If a user wants Prisma's `db.write` emitted as `x-prisma:create`, they place the Prisma plugin first.
 
@@ -360,6 +360,6 @@ Prisma is used from TS and from Python alike (`prisma-client-py`). Because effec
 
 It enables context-dependent determinations such as "treat `this.eventBus.publish(...)` as `event.publish` only inside `framework:nestjs:provider`". owner.extKind has already been determined by the framework plugin (extraction order per lang-plugin §5.3).
 
-### 11.6 Why literal analysis of SQL strings is included from v0.1
+### 11.6 Why literal analysis of SQL strings is included from the start
 
 String-based ORMs like `db.query("SELECT * FROM users WHERE id = ?")` are common in real projects. Including `literalArgs` in CallCandidate makes analysis of string contents possible in a plugin, combined with an SQL parser library. The constraint of never accessing the AST stays intact; only the necessary information is added.

@@ -167,7 +167,7 @@ describe("I5: variable-assigned-function derivedBy carries export-keyword", () =
 describe("I8: anonymous default class members deferred (documented)", () => {
   it("emits the class Symbol but not member Symbols for an anonymous default class", async () => {
     // Documented deferral: the ir-schema does not specify a member qname convention for
-    // anonymous default classes, so members are skipped until v0.2 resolves the naming.
+    // anonymous default classes, so members are skipped until the naming is resolved.
     const symbols = await symbolsOf("export default class { hello() {} }")
     expect(symbols.map((s) => s.name)).toContain("<default>")
     expect(symbols.some((s) => s.id.includes(".hello"))).toBe(false)

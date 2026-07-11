@@ -110,9 +110,9 @@ describe("emit method sentinel", () => {
     expect(isNestEmitMethod("emit")).toBe(true)
   })
 
-  it("rejects `.emitAsync` — a real EventEmitter2 API that is out of v0.1 scope", () => {
+  it("rejects `.emitAsync` — a real EventEmitter2 API that is not classified yet", () => {
     // `.emitAsync` and `.emitAsyncSerial` are legitimate publish APIs on EventEmitter2.
-    // v0.1 does not classify them (see NEST_EMIT_METHOD docstring). This test pins the
+    // they are not classified yet (see NEST_EMIT_METHOD docstring). This test pins the
     // scope so a future change that widens it does so deliberately.
     expect(isNestEmitMethod("emitAsync")).toBe(false)
     expect(isNestEmitMethod("emitAsyncSerial")).toBe(false)

@@ -7,9 +7,9 @@ judge): parses with tree-sitter, matches Symbols across revisions with a 5-stage
 semantic diff, and emits a JSON IR plus a decision-focused Markdown projection
 that CI can gate on.
 
-> **Status: v0.1.** The v1 JSON Schemas are frozen. Every package listed below
-> is implemented, unit-tested, and exercised end-to-end against
-> a NestJS-shaped fixture project.
+> The v1 JSON Schemas are frozen. Every package listed below is implemented,
+> unit-tested, and exercised end-to-end against a NestJS-shaped fixture project.
+> See the [roadmap](docs/roadmap.md) for what works today and what's next.
 
 **Documentation: [aburi.kage1020.com](https://aburi.kage1020.com)**
 

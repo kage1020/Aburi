@@ -291,7 +291,7 @@ Files whose size exceeds `config.maxFileSizeBytes` (default: `2 * 1024 * 1024` =
 
 - Normal code does not exceed 2MB (only generated bundles / minified files do)
 - Large files exhaust the WASM heap and make parse time explode
-- Skipped files are recorded in `stats.skippedFiles[]` (planned for v0.2; v0.1 emits a warning only)
+- Skipped files will be recorded in `stats.skippedFiles[]` (planned — see the [roadmap](../roadmap.md)); currently only a warning is emitted
 - warning stderr: `Skipped <file>: <size>MB exceeds maxFileSizeBytes (2MB). Override with config.maxFileSizeBytes.`
 
 ### 7.1.2 Timeout
@@ -354,8 +354,8 @@ Each plugin must follow these conventions:
    - The core caps `--concurrency` at `min(specified value, floor(availableMemoryMB / wasmHeapPerWorkerMB))`
    - When multiple lang plugins coexist in the same run, the **maximum** of each plugin's declared value is used (sized for the hungriest lang)
 3. **Reservation for a native-binding fallback**
-   - From v0.2 onward, switching to native bindings (e.g. the `tree-sitter` Node bindings) may be added via flags such as `capabilities.preferNative`
-   - v0.1 implements WASM only; no native fallback is provided
+   - In a future release, switching to native bindings (e.g. the `tree-sitter` Node bindings) may be added via flags such as `capabilities.preferNative` (see the [roadmap](../roadmap.md))
+   - Currently only WASM is implemented; no native fallback is provided
 
 ## 9. Verifiable Properties (Test Criteria)
 

@@ -54,7 +54,7 @@ export function hasNestEmitterImport(imports: readonly ImportEdge[]): boolean {
  *
  * Non-recognized emitters (`socket.emit(...)`, `process.emit(...)`, `stream.emit(...)`,
  * arbitrary user-named `bus`, `notifier`, `dispatcher`, ...) are intentionally out of
- * scope for v0.1 — they are not universally domain events, and a name-based match
+ * scope today — they are not universally domain events, and a name-based match
  * without the two-signal defense would over-classify.
  */
 const NEST_EVENT_EMITTER_IDENTIFIERS_LIST = ["eventBus", "EventEmitter2"] as const
@@ -70,12 +70,12 @@ export function isNestEventEmitterIdentifier(name: string): name is NestEventEmi
 }
 
 /**
- * The single method name the plugin classifies as `event.publish` for v0.1. Kept as a
+ * The single method name the plugin currently classifies as `event.publish`. Kept as a
  * literal so downstream derivedBy templates keep their precision.
  *
  * EventEmitter2 also ships `.emitAsync(event, ...args)` (Promise-returning variant) and
  * `.emitAsyncSerial` (serial variant). Those are legitimate publish APIs but sit
- * outside v0.1 scope — a future patch can add them alongside the sync `.emit` once the
+ * outside the current scope — a future patch can add them alongside the sync `.emit` once the
  * IR's async-effect confidence model is settled. Recognition is deliberately narrow
  * until then so we do not lock in a shape we would then need to unwind.
  */

@@ -40,7 +40,7 @@ out/
 One file per symbol would explode the file count (hundreds to thousands) and scatter git diffs.
 L1 (architecture) and L2 (symbol details) are combined within a component: 1 component = 1 file.
 
-If a huge component (>500 symbols) becomes hard to read, a future split into `components/<id>/symbols.md` will be considered, but v0.1 keeps the combined form.
+If a huge component (>500 symbols) becomes hard to read, a future split into `components/<id>/symbols.md` will be considered, but currently the combined form is kept.
 
 ## 3. Common format conventions
 
@@ -155,7 +155,7 @@ graph LR
 ### 4.2 mermaid
 
 If a mermaid graph exceeds 100 nodes it is omitted and only the text bullet list is emitted (avoids unreadability).
-Can be disabled via config `output.mermaid: false` (v0.2).
+Disabling it via config `output.mermaid: false` is planned — see the [roadmap](../roadmap.md).
 
 ### 4.3 generation metadata
 
@@ -284,7 +284,7 @@ Extension effects with the `x-` prefix use the same form:
 - `<target>` (L<line>)
 ```
 
-When `resolved` is non-null this may be elided (v0.2 will consider internal links to the symbol id):
+When `resolved` is non-null this may be elided (a future release will consider internal links to the symbol id — see the [roadmap](../roadmap.md)):
 ```
 - `pricing.calculateTotal` (L70) → [`pricing.calculateTotal`](#pricing-calculatetotal)
 ```
@@ -538,19 +538,19 @@ The hash algorithm is the same as for fingerprints:
 
 ## 9. Mermaid diagrams (optional)
 
-Planned for the L0 workspace.md and the future slice view (v0.2).
+Planned for the L0 workspace.md and the future slice view (see the [roadmap](../roadmap.md)).
 
 - `graph LR` (left → right) is used for Component dependencies
 - omitted above 100 nodes (falls back to the text bullet list)
 - a text version accompanies the mermaid even when it fails to render (guards the rare case where GitHub's mermaid breaks)
 
-mermaid output can be disabled entirely via `config.output.mermaid: false` (v0.2).
+Disabling mermaid output entirely via `config.output.mermaid: false` is planned (see the [roadmap](../roadmap.md)).
 
 ## 10. Localization
 
 All Markdown projection output is **English, with fixed wording**.
 
-- v0.1 ships no i18n mechanism; every heading, label, and message is a fixed English string.
+- There is currently no i18n mechanism; every heading, label, and message is a fixed English string.
 - Section headings and labels are stable identifiers: CI pipelines and reviewers can rely on their exact text (e.g. matching `## Dropped` or the diff section titles).
 - Fixed wording also keeps the projection deterministic and portable across environments and teams.
 
@@ -603,4 +603,4 @@ Unnecessary during review, but valuable for debugging and for explaining "why di
 
 ### 12.8 Whether to use emoji
 
-Emoji in section headings (⚠ / 🔧 / ➕ etc.) serve visibility. Only emoji that are CommonMark-compatible and render stably on GitHub are used. A config to disable them by preference (`output.emoji: false`) will be considered for v0.2.
+Emoji in section headings (⚠ / 🔧 / ➕ etc.) serve visibility. Only emoji that are CommonMark-compatible and render stably on GitHub are used. A config to disable them by preference (`output.emoji: false`) will be considered for a future release (see the [roadmap](../roadmap.md)).
