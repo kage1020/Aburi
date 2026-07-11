@@ -70,6 +70,8 @@ filtered AST
   ↓ score & filter (symbols with no tags are dropped)
 symbols
   ↓ normalize (callee whitespace, expression canonicalize, sort)
+  ↓ call resolution (fill in Symbol.calls[].resolved → CallEdge[])
+  ↓ effect propagation (augment Symbol.effects[] along resolved edges)
   ↓ fingerprint (api / logic / syntax)
 L3 IR (JSON)
   ↓ project
@@ -82,6 +84,7 @@ Details are covered by the documents in this directory:
 - Language plugin interface: [`lang-plugin.md`](./lang-plugin.md)
 - Fingerprint computation: [`fingerprint.md`](./fingerprint.md)
 - Call resolution (filling in `Call.resolved`): [`call-resolution.md`](./call-resolution.md)
+- Effect propagation (augmenting `Symbol.effects[]` along resolved edges): [`effect-propagation.md`](./effect-propagation.md)
 
 ## 5. IR and Config
 

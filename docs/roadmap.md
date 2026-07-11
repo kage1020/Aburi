@@ -52,10 +52,10 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 
 Detailed designs required before starting:
 
-- [`call-resolution.md`](./design/call-resolution.md) — call resolution (in both untyped and LSP environments)
-- `effect-propagation.md` — propagation rules
 - `slice-view.md` — clustering algorithm selection (graph SCC vs. Louvain)
 - `lsp-enrichment.md` — LSP communication / fallback conventions
+
+(`call-resolution.md` and `effect-propagation.md` were required for this phase and are now landed; see the Design documents table below.)
 
 ## Later: multi-language
 
@@ -97,6 +97,7 @@ The full behaviour of everything in "What works today" is specified in
 | Complete IR schema definition | [`ir-schema.md`](./design/ir-schema.md) + [`schema/aburi.ir.v1.json`](https://github.com/kage1020/Aburi/blob/main/schema/aburi.ir.v1.json) |
 | Language plugin interface | [`lang-plugin.md`](./design/lang-plugin.md) |
 | Call resolution (filling in `Call.resolved`) | [`call-resolution.md`](./design/call-resolution.md) |
+| Effect propagation (augmenting `Symbol.effects[]` along resolved edges) | [`effect-propagation.md`](./design/effect-propagation.md) |
 | Effect plugin interface | [`effect-plugin.md`](./design/effect-plugin.md) |
 | Fingerprint computation | [`fingerprint.md`](./design/fingerprint.md) |
 | Component autodetect | [`component-detect.md`](./design/component-detect.md) |
