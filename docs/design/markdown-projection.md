@@ -538,7 +538,7 @@ The hash algorithm is the same as for fingerprints:
 
 ## 9. Mermaid diagrams (optional)
 
-Planned for the L0 workspace.md and the future slice view (see the [roadmap](../roadmap.md)).
+Planned for the L0 workspace.md (see the [roadmap](../roadmap.md)). Slice View has its own `## 🧵 Slice View` section within `out/diff.md`; see [`slice-view.md`](./slice-view.md) §12 for the rendering conventions.
 
 - `graph LR` (left → right) is used for Component dependencies
 - omitted above 100 nodes (falls back to the text bullet list)

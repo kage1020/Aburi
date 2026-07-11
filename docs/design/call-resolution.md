@@ -7,7 +7,7 @@ References:
 - [`lang-plugin.md`](./lang-plugin.md) §2.2, §4.4 — the Language Plugin's boundary (call resolution is out of scope) and the `CallCandidate` shape
 - [`effect-plugin.md`](./effect-plugin.md) — how effect classification takes precedence over resolution
 - `effect-propagation.md` (planned — see [`roadmap.md`](../roadmap.md)) — the consumer that propagates effects along resolved edges
-- `slice-view.md` (planned — see [`roadmap.md`](../roadmap.md)) — the consumer that clusters over the resolved call graph
+- [`slice-view.md`](./slice-view.md) — the consumer that clusters over the resolved call graph
 - `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)) — the optional layer that refines resolution outcomes
 
 ---
@@ -208,7 +208,7 @@ CallEdge {
 }
 ```
 
-A call with `resolved: null` produces **no edge** — the graph is built only from resolved calls. Effect propagation (`effect-propagation.md`, planned) and Slice View (`slice-view.md`, planned) consume `CallEdge[]` and do not need to inspect `resolved: null` entries themselves.
+A call with `resolved: null` produces **no edge** — the graph is built only from resolved calls. Effect propagation ([`effect-propagation.md`](./effect-propagation.md)) and Slice View ([`slice-view.md`](./slice-view.md)) consume `CallEdge[]` and do not need to inspect `resolved: null` entries themselves.
 
 ### 7.2 Confidence propagation
 
