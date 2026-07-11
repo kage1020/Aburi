@@ -9,7 +9,7 @@ that CI can gate on.
 
 > **Status: v0.1.** The v1 JSON Schemas are frozen. Every package listed below
 > is implemented, unit-tested, and exercised end-to-end against
-> `fixtures/nestjs-billing/`.
+> a NestJS-shaped fixture project.
 
 **Documentation: [aburi.kage1020.com](https://aburi.kage1020.com)**
 
@@ -137,7 +137,7 @@ pnpm build       # tsdown across packages
 ```
 
 Fixture used by the integration suite:
-[`fixtures/nestjs-billing/`](fixtures/nestjs-billing) — a small NestJS-shaped
+[`packages/e2e-integration/fixtures/nestjs-billing/`](packages/e2e-integration/fixtures/nestjs-billing) — a small NestJS-shaped
 billing service that exercises boundary routes, providers, modules, and a
 12-method service that scenario B mutates to prove the `--fail-on
 dropped-toggled:to-dropped:>10` gate.

@@ -5,15 +5,15 @@ import { fileURLToPath } from "node:url"
 
 /**
  * Absolute path to the checked-in `fixtures/nestjs-billing` project. Resolved by walking
- * up from this file (`packages/e2e-integration/src/fixture.ts`) three directory levels
- * to the repo root and then diving into `fixtures/`. Doing the resolution here instead
- * of at the call site keeps the tests portable — Vitest, tsc, and future tooling can
- * import this without knowing where they live relative to the repo.
+ * up from this file (`packages/e2e-integration/src/fixture.ts`) to the package root and
+ * then diving into `fixtures/`. Doing the resolution here instead of at the call site
+ * keeps the tests portable — Vitest, tsc, and future tooling can import this without
+ * knowing where they live relative to the package.
  */
 export function fixtureRoot(): string {
   const here = fileURLToPath(import.meta.url)
-  const repoRoot = resolve(dirname(here), "..", "..", "..")
-  return resolve(repoRoot, "fixtures", "nestjs-billing")
+  const packageRoot = resolve(dirname(here), "..")
+  return resolve(packageRoot, "fixtures", "nestjs-billing")
 }
 
 /**

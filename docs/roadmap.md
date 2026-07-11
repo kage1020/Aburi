@@ -28,7 +28,7 @@ Every document is guaranteed to be readable without external context. Implementa
 
 ## v0.1: MVP (shipped)
 
-The minimal configuration for validating value in PR review, released as version 0.1.0. All packages are built, unit-tested, and exercised end-to-end against the `fixtures/nestjs-billing` fixture; release automation via changesets is in place.
+The minimal configuration for validating value in PR review, released as version 0.1.0. All packages are built, unit-tested, and exercised end-to-end against the `packages/e2e-integration/fixtures/nestjs-billing` fixture; release automation via changesets is in place.
 
 ### Shipped scope
 

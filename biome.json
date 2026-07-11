@@ -16,9 +16,8 @@
       "!**/.turbo",
       "!**/src/generated",
       "!pnpm-lock.yaml",
-      "!design",
       "!schema",
-      "!fixtures"
+      "!packages/e2e-integration/fixtures"
     ]
   },
   "formatter": {

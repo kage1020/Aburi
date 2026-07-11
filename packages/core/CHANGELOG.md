@@ -116,12 +116,12 @@
 
 ### Patch Changes
 
-- 115be7a: Add `fixtures/nestjs-billing/` + `packages/e2e-integration` — the end-to-end suite
+- 115be7a: Add `packages/e2e-integration` (with its `fixtures/nestjs-billing/` project) — the end-to-end suite
   for the v0.1 release.
 
   ### Fixture
 
-  `fixtures/nestjs-billing/` is a handwritten NestJS-shaped billing service (10 `.ts`
+  `fixtures/nestjs-billing/` (inside the package) is a handwritten NestJS-shaped billing service (10 `.ts`
   files under `src/`, two modules × controller × service, one DTO, a shared logger).
   Structured to exercise every axis the diff engine care about: 6 boundary-decorated
   route handlers, 3 `@Injectable()` providers with real method bodies, module classes,
