@@ -70,6 +70,8 @@ filtered AST
   ↓ score & filter (symbols with no tags are dropped)
 symbols
   ↓ normalize (callee whitespace, expression canonicalize, sort)
+  ↓ call resolution (fill in Symbol.calls[].resolved → CallEdge[])
+  ↓ effect propagation (augment Symbol.effects[] along resolved edges)
   ↓ fingerprint (api / logic / syntax)
 L3 IR (JSON)
   ↓ project

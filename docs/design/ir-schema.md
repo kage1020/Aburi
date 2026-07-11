@@ -323,7 +323,7 @@ If a call_expression is recognized by an effect plugin, it is recorded in `effec
 
 ### 9.4 Propagated effects
 
-`Effect` records may carry the optional fields `propagated: boolean` and `derivedFrom: SymbolId[]` when produced by the effect-propagation pass; see [`effect-propagation.md`](./effect-propagation.md) §5. On entries with `propagated: true`, the `line` field is omitted (the effect originates N hops away and has no line in the containing Symbol's body). These extensions are non-breaking under §15.2.
+`Effect` records may carry the optional fields `propagated: boolean` and `derivedFrom: SymbolId[]` when produced by the effect-propagation pass; see [`effect-propagation.md`](./effect-propagation.md) §5. On entries with `propagated: true`, the `line` field is **omitted from the JSON output** — not set to `null`, not set to a placeholder — because the effect originates N hops away and has no line in the containing Symbol's body. The JSON Schema (`aburi.ir.v1.json`) narrows `line` accordingly: required when `propagated` is absent or `false`; forbidden when `propagated` is `true`. These extensions are non-breaking under §15.2.
 
 ## 10. Call
 

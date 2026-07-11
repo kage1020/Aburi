@@ -5,7 +5,7 @@ Specification of how Aburi propagates locally-detected `Effect` records up throu
 References:
 - [`ir-schema.md`](./ir-schema.md) §9 — the `Effect` record and the core `id` vocabulary; §14 — invariants; §15.2 — non-breaking optional-field policy; §16 — extension zone
 - [`call-resolution.md`](./call-resolution.md) §7 — the `CallEdge` contract this pass consumes; §7.2 & §11.5 — edge confidence and the fact that "effect propagation is where the two confidences combine"
-- [`effect-plugin.md`](./effect-plugin.md) §2.2, §9.2 — propagation is explicitly deferred by the plugin interface to this document; §11.3 — per-`Effect.derivedBy` scope
+- [`effect-plugin.md`](./effect-plugin.md) §4.4 — per-`Effect.derivedBy` string returned by `classify()`; §9.2 — the NestJS pseudocode notes propagation is a separate consideration; §11.3 — why plugins cannot write `Symbol.derivedBy[]` directly
 - [`fingerprint.md`](./fingerprint.md) §4.1, §4.4, §4.5, §4.7 — the `logic` fingerprint input and its plugin-configuration robustness rule
 - [`diff-algorithm.md`](./diff-algorithm.md) §5.2 — `Effect` identity `(id, target)`; §7.2 — Markdown projection section ordering; §10.1 — the diff `status` enum is closed
 - [`overview.md`](./overview.md) §2 — categorical `confidence` only; §4 — extraction pipeline placement
@@ -97,11 +97,11 @@ Non-breaking extension: adding an optional field to `Effect` is permitted under 
 
 Dedup rule (concrete form of §4.2's join): when the transitive closure would introduce a propagated entry with the same `(effectId, target)` as an existing locally-detected entry, the propagated entry MUST be dropped. Two propagated entries with the same key from distinct upstream sources are merged into one, with the combined `derivedFrom` and combined `confidence` per §5.3. This preserves [`ir-schema.md`](./ir-schema.md) §9.3's "no duplicate output" invariant end-to-end.
 
-The `line` field, required on locally-detected effects ([`ir-schema.md`](./ir-schema.md) §9), is meaningless N hops away: a propagated `db.write` on a controller does not correspond to any line inside the controller. `line` MUST therefore be omitted (or set to `null` where the schema requires the field) on entries with `propagated: true`. Consumers of `effects[]` MUST NOT assume `line` is present.
+The `line` field, required on locally-detected effects ([`ir-schema.md`](./ir-schema.md) §9), is meaningless N hops away: a propagated `db.write` on a controller does not correspond to any line inside the controller. `line` MUST therefore be **omitted** on entries with `propagated: true` — not set to `null`, not set to a placeholder line number. Consumers of `effects[]` MUST NOT assume `line` is present. The JSON Schema (`aburi.ir.v1.json`) narrows `line` to be conditionally required: required when `propagated` is absent or `false`; forbidden when `propagated` is `true`.
 
 Alternative rejected — a sibling `Symbol.propagatedEffects[]` array: this would force every downstream consumer (Markdown projection, diff, `aburi explain`) to iterate two arrays and merge them by hand, splitting the dedup logic across two code paths. Keeping propagation in `effects[]` with a discriminator flag localizes the distinction to one field.
 
-### 5.2 `derivedBy` preservation
+### 5.2 `derivedFrom` (new field) and `derivedBy` preservation
 
 Each propagated `Effect` record carries an optional `derivedFrom?: SymbolId[]` field listing the **direct upstream callee(s)** that contributed this `(effectId, target)`. For a propagated effect on Symbol `A` that traces back to a local effect on Symbol `C` through the path `A → B → C`, `derivedFrom` on `A`'s entry is `[B]` — not `[C]`, not `[A, B, C]`.
 
@@ -109,7 +109,7 @@ Rationale: the reviewer investigating why `A` has an effect wants to know **whic
 
 When multiple direct callees of `A` independently contribute the same `(effectId, target)` (e.g. two of `A`'s callees each perform `db.write` on `prisma.invoice.create`), `derivedFrom` is the sorted union of those callee Symbol ids.
 
-The per-`Effect.derivedBy` string that the effect plugin originally attached ([`effect-plugin.md`](./effect-plugin.md) §4.4) is **not** overwritten. When multiple upstream classifications differ in `derivedBy` (e.g. one from `effects-plugin:prisma:write`, another from `effects-plugin:drizzle:write`), the propagated entry MUST keep them, either by picking one deterministically (lexicographically smallest) or by adjusting the schema in a follow-up doc; §12.6 records the choice. Locally-detected entries always keep the plugin's original `derivedBy` value untouched.
+The per-`Effect.derivedBy` string that the effect plugin originally attached ([`effect-plugin.md`](./effect-plugin.md) §4.4) is preserved on propagated entries. Locally-detected entries always keep the plugin's original `derivedBy` value untouched. When multiple upstream classifications differ in `derivedBy` (e.g. one callee's `db.write` was classified by `effects-plugin:prisma:write` and another's by `effects-plugin:drizzle:write`), the propagated entry keeps **the lexicographically smallest `derivedBy` string**. This is the deterministic single-string choice — see §12.9 for why we do not extend `derivedBy` to `string[]` here.
 
 `Symbol.derivedBy[]` (the array on the Symbol itself, [`ir-schema.md`](./ir-schema.md) §5.5) is **not** appended to during propagation. That array records evidence for why the Symbol exists in the IR in its current shape; the origin of a specific effect is a per-effect property, and mixing the two would violate the boundary drawn in [`effect-plugin.md`](./effect-plugin.md) §11.3.
 
@@ -203,10 +203,12 @@ This is the intended review signal. The reviewer of a diff that added a `db.writ
 
 Reconciliation with [`fingerprint.md`](./fingerprint.md) §4.5. §4.5 guarantees the `logic` fingerprint is unchanged when an effect plugin **renames** an effect's `id` (e.g. `db.write` ↔ `x-prisma:create`) while the `target` stays the same. That robustness is preserved here because `target` (not Symbol id) is the merge key (§5.4) and because the `logic` fingerprint input for effects is `{ target }` only. Propagation, by contrast, **adds and removes** `Effect` records, which is already covered by [`fingerprint.md`](./fingerprint.md) §4.4 test case `L10` ("add / remove an effect → logic changes"). Adding effects to a caller because the callee gained one is a legitimate `logic` change; suppressing it would blind the reviewer.
 
-Ordering rule: within `Symbol.effects[]`, propagated entries appear **after** locally-detected entries at the same line. Since `line` is omitted on propagated entries, the effective order at emission time is:
+Ordering rule: within `Symbol.effects[]`, propagated entries appear **after** locally-detected entries. The effective order at emission time is:
 
-1. Locally-detected entries, in call order (per [`fingerprint.md`](./fingerprint.md) §4.7).
-2. Propagated entries, sorted by `(effectId, target)` ascending.
+1. Locally-detected entries, in call order (per [`fingerprint.md`](./fingerprint.md) §4.7 — order is preserved, not sorted; a locally-detected effect at `line: 30` precedes one at `line: 45`).
+2. Propagated entries, sorted deterministically by `(effectId, target)` ascending. Because `line` is omitted on propagated entries (§5.1), a stable position by call order is not available; the lexicographic sort is the deterministic substitute.
+
+This reconciles with `fingerprint.md` §4.7: the "order is preserved" guarantee applies to entries that have an intrinsic call-site position. Propagated entries lack that position, so a fixed lexicographic order is applied only within the propagated segment; the locally-detected segment ahead of it retains call order verbatim.
 
 Dedup (§5.1) is applied **before** the fingerprint reads the array so that no `(effectId, target)` pair appears twice.
 
@@ -227,7 +229,8 @@ Example — two diff scenarios:
 | Scenario | Callee change | Caller status | Caller `delta` | Rendered as |
 |---|---|---|---|---|
 | Local addition | Callee's own body gained a `db.write` line | `changed` | `delta.logicChanged: true`, `delta.effects.added` has one entry, `propagated: false` | "Logic change — added `db.write` on `prisma.invoice.create`" |
-| Propagated only | Callee (or a further downstream Symbol) gained a `db.write`; caller body unchanged | `changed` | `delta.logicChanged: true`, `delta.effects.added` has one entry, `propagated: true`, `derivedFrom: [<callee>]` | "Logic change — propagated `db.write` from `<callee>`" |
+| Propagated addition | Callee (or a further downstream Symbol) gained a `db.write`; caller body unchanged | `changed` | `delta.logicChanged: true`, `delta.effects.added` has one entry, `propagated: true`, `derivedFrom: [<callee>]` | "Logic change — propagated `db.write` from `<callee>`" |
+| Propagated removal | Callee lost a `db.write` (removed the underlying call); caller body unchanged | `changed` | `delta.logicChanged: true`, `delta.effects.removed` has one entry, `propagated: true`, `derivedFrom: [<callee>]` | "Logic change — no longer propagates `db.write` from `<callee>`" |
 
 The `delta.effects.added` / `delta.effects.removed` shape from [`diff-algorithm.md`](./diff-algorithm.md) §5.2 is reused unchanged. The identity used for pairing is `(id, target)`; the `propagated` flag is metadata carried alongside, not part of the identity, so a local `db.write` on `prisma.invoice.create` and a propagated `db.write` on the same `target` are treated as the same effect entry (which is the correct behavior — the callee's change becomes visible on the caller without duplicating).
 
@@ -288,7 +291,7 @@ Every implementation of the propagation pass MUST pass the following. IDs are pr
 | PR12 | Base: `B` has no effects, `A → B`. Head: `B` gained a local `db.write`; `A`'s body unchanged | Diff emits `A` with `status="changed"`, `delta.logicChanged=true`, `delta.effects.added` includes the propagated `db.write` with `propagated: true` and `derivedFrom=[B]` |
 | PR13 | Run propagation twice on the same input | Byte-identical `effects[]` on every Symbol (idempotence) |
 | PR14 | Shuffle the input `CallEdge[]` order and rerun | Byte-identical `effects[]` on every Symbol (determinism under input reordering) |
-| PR15 | Every propagated entry | `line` is absent (or `null`); locally-detected entries retain the plugin-set `line` |
+| PR15 | Every propagated entry | `line` field is **absent** (omitted from the JSON output — not `null`, not a placeholder); locally-detected entries retain the plugin-set `line` |
 
 ## 12. Design Decisions
 
@@ -327,3 +330,13 @@ A separate `Symbol.propagatedEffects[]` would force every consumer — Markdown 
 ### 12.8 Why no new diff status is introduced
 
 [`diff-algorithm.md`](./diff-algorithm.md) §10.1 declares status-enum growth a breaking change. Propagation-only differences already surface through `status: "changed"` + `delta.logicChanged: true` — the existing statuses are sufficient. The `propagated: true` discriminator lets the Markdown projection render the sub-line differently without touching the status enum. Introducing `propagated-only-change` as a new status would break every existing consumer of the diff schema for a rendering convenience that the discriminator flag already delivers.
+
+### 12.9 Why the lexicographically smallest `derivedBy` on merge, and not `string[]`
+
+When two upstream paths reach the same `(effectId, target)` with different plugin-issued `derivedBy` strings, three shapes are conceivable:
+
+1. Keep both by widening the type: `derivedBy: string | string[]`.
+2. Keep both by adding a companion field: `derivedByAll?: string[]`.
+3. Keep one deterministically.
+
+Options (1) and (2) force every consumer that reads `derivedBy` today (locally-detected entries, [`ir-schema.md`](./ir-schema.md) §9) to add a shape check, and they leak a propagation-internal detail (the fact that two plugins classified the same effect) into a field whose stable meaning is "the single evidence string for this effect". Locally-detected entries stay `string`; propagated entries stay `string`; the merge picks the lexicographically smallest string. This is deterministic, requires no schema widening, and keeps the field's contract uniform across all `Effect` records. The one lost fact — "a second plugin also classified this effect under a different name" — is recoverable by walking `derivedFrom` and inspecting each origin's local `Effect.derivedBy`.
