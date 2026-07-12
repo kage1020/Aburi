@@ -31,7 +31,8 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Effects are local** — an effect is attached to the method that makes the
   call, not propagated up through the call graph
 - **Call resolution is syntactic only** — file-scope and import-scope resolution
-  are wired up; workspace-scope and LSP-based resolution tiers are not
+  (plus local-parameter shadow guarding) are wired up; component-scope,
+  workspace-scope, and LSP-based resolution tiers are not
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
   (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
 - **No workspace-level mermaid overview / Slice View / graph visualization**

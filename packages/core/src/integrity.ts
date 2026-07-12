@@ -375,12 +375,15 @@ function looksLikeSymbolId(endpoint: string): boolean {
 /**
  * Invariant #12 (ir-schema.md §14): a `via: "call"` Dependency is a projection of
  * a resolved call edge, so both endpoints MUST be Symbol ids AND both MUST exist
- * in `symbols[]`. This strengthens #4 (which only rejects a *dangling* symbol
- * id) by additionally rejecting component-id endpoints on call edges — a call
- * edge can never target a whole component.
+ * in `symbols[]` as `dropped: false` entries. This strengthens #4 (which only
+ * rejects a *dangling* symbol id) by additionally rejecting component-id
+ * endpoints on call edges (a call edge can never target a whole component) and
+ * by rejecting edges that point at Symbols whose body was dropped by Category
+ * B/C rules — those Symbols carry no body, zeroed fingerprints, and would
+ * silently corrupt effect propagation.
  */
 function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
-  const symbolIds = new Set(ir.symbols.map((s) => s.id))
+  const symbolsById = new Map(ir.symbols.map((s) => [s.id, s]))
   for (const dep of ir.dependencies) {
     if (dep.via !== "call") continue
     for (const role of ["from", "to"] as const) {
@@ -393,11 +396,20 @@ function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
         })
         continue
       }
-      if (!symbolIds.has(endpoint)) {
+      const target = symbolsById.get(endpoint)
+      if (target === undefined) {
         out.push({
           invariant: 12,
           subject: `dependencies[${role}=${endpoint}]`,
           message: `via:"call" dependency ${role} "${endpoint}" is not a declared Symbol`,
+        })
+        continue
+      }
+      if (target.dropped) {
+        out.push({
+          invariant: 12,
+          subject: `dependencies[${role}=${endpoint}]`,
+          message: `via:"call" dependency ${role} "${endpoint}" points at a dropped Symbol`,
         })
       }
     }

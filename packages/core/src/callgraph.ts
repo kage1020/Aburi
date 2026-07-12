@@ -63,7 +63,12 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
 export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraphResult {
   const extensions = input.fileExtensions ?? DEFAULT_EXTENSIONS
 
-  const symbolIds = new Set<SymbolId>(input.symbols.map((s) => s.id))
+  // Every downstream lookup uses `keptSymbolIds` (i.e. `dropped: false`) so
+  // the resolver never fabricates an edge into a Symbol body that was dropped
+  // by Category B/C rules. The body of a dropped Symbol is intentionally
+  // empty and its fingerprints are zeroed — pretending calls target it would
+  // mislead the reviewer.
+  const keptSymbolIds = new Set<SymbolId>(input.symbols.filter((s) => !s.dropped).map((s) => s.id))
   const topLevelByFile = indexTopLevelByFile(input.symbols)
   const filesByLanguage = indexFilesByLanguage(input.symbols)
 
@@ -76,16 +81,18 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
       continue
     }
     const imports = input.importsByFile.get(symbol.source.file) ?? []
+    const parameterNames = collectParameterNames(symbol)
     const updatedCalls = symbol.calls.map((call) => {
       if (call.resolved !== null) return call
       const resolved = resolveTarget({
         caller: symbol,
         target: call.target,
         imports,
-        symbolIds,
+        keptSymbolIds,
         topLevelByFile,
         filesByLanguage,
         extensions,
+        parameterNames,
       })
       if (resolved === null) return call
       edges.push({
@@ -104,6 +111,28 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   return { symbols: nextSymbols, edges }
 }
 
+/**
+ * Step 1 (call-resolution.md §4.2) requires the resolver to leave a call
+ * unresolved when the callee identifier shadows a caller-local declaration
+ * (parameter, local variable, or nested function). The IR only surfaces the
+ * parameter list today — `Symbol.signature.inputs[].name` — so this helper
+ * captures the parameter subset of the §4.2 domain. Local variables and
+ * nested functions inside the body are NOT visible in the IR yet; catching
+ * them fully requires the language plugin to expose local declarations via a
+ * follow-up seam on `walkBody`. Guarding parameters alone still eliminates
+ * the most common false-positive shape (a Symbol name that coincides with a
+ * caller's parameter identifier).
+ */
+function collectParameterNames(symbol: IRSymbol): ReadonlySet<string> {
+  const inputs = symbol.signature?.inputs
+  if (inputs === undefined) return EMPTY_NAME_SET
+  const out = new Set<string>()
+  for (const input of inputs) out.add(input.name)
+  return out
+}
+
+const EMPTY_NAME_SET: ReadonlySet<string> = new Set()
+
 interface ResolutionHit {
   id: SymbolId
   confidence: Confidence
@@ -113,10 +142,11 @@ interface ResolveTargetContext {
   caller: IRSymbol
   target: string
   imports: readonly ImportEdge[]
-  symbolIds: ReadonlySet<SymbolId>
+  keptSymbolIds: ReadonlySet<SymbolId>
   topLevelByFile: TopLevelIndex
   filesByLanguage: Map<string, Set<string>>
   extensions: readonly string[]
+  parameterNames: ReadonlySet<string>
 }
 
 function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
@@ -125,7 +155,13 @@ function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
   const head = segments[0] as string
   const tail = segments.slice(1)
 
-  const fileHit = resolveInFileScope(ctx.caller, head, tail, ctx.symbolIds, ctx.topLevelByFile)
+  // §4.2 Step 1: local scope shadows every outer binding. A caller parameter
+  // named `helper` invoked as `helper(...)` — or as `helper.method(...)` —
+  // is a runtime value, not a Symbol reference, so the correct outcome is a
+  // null resolution and no edge.
+  if (ctx.parameterNames.has(head)) return null
+
+  const fileHit = resolveInFileScope(ctx.caller, head, tail, ctx.keptSymbolIds, ctx.topLevelByFile)
   if (fileHit !== null) return fileHit
 
   const importHit = resolveInImportScope(ctx, head, tail)
@@ -144,7 +180,7 @@ function resolveInFileScope(
   caller: IRSymbol,
   head: string,
   tail: readonly string[],
-  symbolIds: ReadonlySet<SymbolId>,
+  keptSymbolIds: ReadonlySet<SymbolId>,
   topLevelByFile: TopLevelIndex,
 ): ResolutionHit | null {
   const perFile = topLevelByFile.get(caller.source.file)
@@ -159,7 +195,7 @@ function resolveInFileScope(
   }
   const compositeQname = `${head}.${tail.join(".")}`
   const compositeId: SymbolId = `${caller.language}:${caller.source.file}#${compositeQname}`
-  if (symbolIds.has(compositeId)) {
+  if (keptSymbolIds.has(compositeId)) {
     return { id: compositeId, confidence: "high" }
   }
   return null
@@ -178,6 +214,11 @@ function resolveInImportScope(
   head: string,
   tail: readonly string[],
 ): ResolutionHit | null {
+  // Collect every candidate id that the imports of this file could bind `head`
+  // to. Multiple hits (re-export barrel forwarding the same name from two
+  // sources, generated code, ...) is an ambiguity — §7.1 requires the
+  // resolver to yield null rather than silently picking the first one.
+  const candidates = new Set<SymbolId>()
   for (const edge of ctx.imports) {
     if (edge.dynamic) continue
     if (!isRelativeSpecifier(edge.source)) continue
@@ -192,13 +233,10 @@ function resolveInImportScope(
 
     if (edge.symbols === "*") {
       if (tail.length === 0) continue
-      const namespaceBinding = deriveNamespaceBinding(edge)
-      if (namespaceBinding !== head) continue
+      if (edge.namespaceBinding !== head) continue
       const qname = tail.join(".")
       const candidateId: SymbolId = `${ctx.caller.language}:${targetFile}#${qname}`
-      if (ctx.symbolIds.has(candidateId)) {
-        return { id: candidateId, confidence: "high" }
-      }
+      if (ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
       continue
     }
 
@@ -207,12 +245,12 @@ function resolveInImportScope(
       if (local !== head) continue
       const qname = tail.length === 0 ? imported : `${imported}.${tail.join(".")}`
       const candidateId: SymbolId = `${ctx.caller.language}:${targetFile}#${qname}`
-      if (ctx.symbolIds.has(candidateId)) {
-        return { id: candidateId, confidence: "high" }
-      }
+      if (ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
     }
   }
-  return null
+  if (candidates.size !== 1) return null
+  const [only] = candidates
+  return { id: only as SymbolId, confidence: "high" }
 }
 
 /**
@@ -224,24 +262,6 @@ function resolveInImportScope(
 function splitTargetSegments(target: string): string[] {
   if (target.length === 0) return []
   return target.split(".").filter((s) => s.length > 0)
-}
-
-/**
- * ImportEdge does not currently record the namespace alias explicitly — the
- * `symbols: "*"` shape means "namespace import" but the local binding is not
- * separately captured. Fall back to the last path segment of the module specifier
- * uppercased as a heuristic. When the language plugin evolves to carry the alias,
- * this helper collapses to reading it directly.
- */
-function deriveNamespaceBinding(edge: ImportEdge): string | null {
-  if (edge.symbols !== "*") return null
-  const raw = edge.source
-  if (raw.length === 0) return null
-  const lastSlash = raw.lastIndexOf("/")
-  const tail = lastSlash < 0 ? raw : raw.slice(lastSlash + 1)
-  const withoutExt = tail.replace(/\.[^.]+$/, "")
-  if (withoutExt.length === 0) return null
-  return withoutExt
 }
 
 /**

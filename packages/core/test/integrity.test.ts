@@ -196,6 +196,27 @@ describe("checkIRIntegrity", () => {
     expect(violations.some((v) => v.invariant === 12)).toBe(true)
   })
 
+  it("#12: rejects via:call edges whose to points at a dropped Symbol", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "helper", line: 1, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper", { dropped: true, dropReason: "test" }),
+    ]
+    ir.dependencies = [
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 12)).toBe(true)
+  })
+
   it("#12: accepts via:call edges whose both endpoints exist in symbols[]", () => {
     const ir = minimalIR()
     ir.symbols = [

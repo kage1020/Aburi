@@ -53,27 +53,53 @@ function readImportStatement(node: Node): ImportEdge[] {
   if (clause === null) {
     return [{ source, symbols: "*", line, dynamic: false }]
   }
-  const { names, sawNamespace } = readImportClauseParts(clause)
+  const { names, namespaceBinding } = readImportClauseParts(clause)
   const edges: ImportEdge[] = []
   if (names.length > 0) edges.push({ source, symbols: names, line, dynamic: false })
-  if (sawNamespace) edges.push({ source, symbols: "*", line, dynamic: false })
+  if (namespaceBinding !== null) {
+    edges.push({
+      source,
+      symbols: "*",
+      line,
+      dynamic: false,
+      namespaceBinding,
+    })
+  }
   if (edges.length === 0) edges.push({ source, symbols: "*", line, dynamic: false })
   return edges
 }
 
 /**
- * Break an import_clause into its named identifiers and namespace flag. `readImportStatement`
- * turns the pair into one or two edges depending on which shapes are present.
+ * Break an import_clause into its named identifiers and namespace binding.
+ * `readImportStatement` turns the pair into one or two edges depending on
+ * which shapes are present.
+ *
+ * Aliased named imports (`{ A as B }`) are emitted as the composite string
+ * `"A as B"` so downstream consumers see BOTH the exported name (A — the one
+ * that matches the target module's Symbol id) and the local rebind (B — the
+ * one the caller writes at the call site). Splitting on ` as ` recovers both
+ * halves without a second AST pass. Un-aliased entries stay as the plain
+ * exported name.
+ *
+ * Namespace imports (`* as N`) carry the local binding N on
+ * `ImportEdge.namespaceBinding` — recovering it from the module specifier
+ * (`./util-helpers` → `helpers`?) is guesswork that fails on every renamed or
+ * kebab-cased module.
  */
-function readImportClauseParts(clause: Node): { names: string[]; sawNamespace: boolean } {
+function readImportClauseParts(clause: Node): {
+  names: string[]
+  namespaceBinding: string | null
+} {
   const names: string[] = []
-  let sawNamespace = false
+  let namespaceBinding: string | null = null
   for (const child of clause.namedChildren) {
     if (child === null) continue
     switch (child.type) {
-      case "namespace_import":
-        sawNamespace = true
+      case "namespace_import": {
+        const alias = findChildByType(child, "identifier")
+        if (alias !== null) namespaceBinding = alias.text
         break
+      }
       case "identifier":
         // Default import binding: `import Foo from './x'` — the identifier IS the binding
         // name that downstream code will use, so include it verbatim.
@@ -82,18 +108,21 @@ function readImportClauseParts(clause: Node): { names: string[]; sawNamespace: b
       case "named_imports":
         for (const spec of child.namedChildren) {
           if (spec === null || spec.type !== "import_specifier") continue
-          // `{ A }` or `{ A as B }` — the exported name (A) is what appears in dependency
-          // analysis, not the local rebind (B). Field name follows tree-sitter-typescript's
-          // grammar.
+          // `{ A }` or `{ A as B }` — grammar exposes both `name` (imported) and `alias`
+          // (local). Emit "A as B" when the alias differs; otherwise emit the bare name.
           const exportedName = spec.childForFieldName("name")
-          if (exportedName !== null && exportedName.type === "identifier") {
+          if (exportedName === null || exportedName.type !== "identifier") continue
+          const aliasNode = spec.childForFieldName("alias")
+          if (aliasNode !== null && aliasNode.type === "identifier") {
+            names.push(`${exportedName.text} as ${aliasNode.text}`)
+          } else {
             names.push(exportedName.text)
           }
         }
         break
     }
   }
-  return { names, sawNamespace }
+  return { names, namespaceBinding }
 }
 
 /**

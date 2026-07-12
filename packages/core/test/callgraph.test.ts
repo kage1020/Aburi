@@ -103,14 +103,31 @@ describe("resolveCallGraph", () => {
     expect(result.edges[0]?.to).toBe("ts:src/util.ts#helper")
   })
 
-  it("import scope: namespace import resolves ns.member when basename matches the binding", () => {
+  it("import scope: namespace import resolves ns.member via the explicit namespaceBinding", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "util.helper", line: 8 }])
     const callee = makeSymbol("ts:src/util.ts#helper")
     const imports = new Map<string, readonly ImportEdge[]>([
-      ["src/a.ts", [importEdge({ source: "./util", symbols: "*" })]],
+      ["src/a.ts", [importEdge({ source: "./util", symbols: "*", namespaceBinding: "util" })]],
     ])
     const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: imports })
     expect(result.edges[0]?.to).toBe("ts:src/util.ts#helper")
+  })
+
+  it("import scope: namespace binding uses the local alias even when the specifier basename differs", () => {
+    // `import * as helpers from './my-utilities'` — the module basename is
+    // `my-utilities` (not a legal identifier) but the caller writes
+    // `helpers.helper()`. The resolver must key off the explicit binding, not
+    // the specifier basename.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helpers.helper", line: 8 }])
+    const callee = makeSymbol("ts:src/my-utilities.ts#helper")
+    const imports = new Map<string, readonly ImportEdge[]>([
+      [
+        "src/a.ts",
+        [importEdge({ source: "./my-utilities", symbols: "*", namespaceBinding: "helpers" })],
+      ],
+    ])
+    const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: imports })
+    expect(result.edges[0]?.to).toBe("ts:src/my-utilities.ts#helper")
   })
 
   it("import scope: external bare specifier is not resolved", () => {
@@ -194,6 +211,125 @@ describe("resolveCallGraph", () => {
     const callee = makeSymbol("ts:src/a.ts#helper")
     const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: new Map() })
     expect(result.edges.map((e) => e.line)).toEqual([3, 7])
+  })
+
+  it("local shadow (§4.2): a caller parameter named `helper` prevents an edge to the file-scope `helper` Symbol", () => {
+    const caller = makeSymbol("ts:src/a.ts#caller", {
+      signature: {
+        inputs: [{ name: "helper", type: "() => void" }],
+        outputs: ["void"],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+      calls: [{ target: "helper", line: 5, resolved: null }],
+    })
+    const helper = makeSymbol("ts:src/a.ts#helper")
+    const result = resolveCallGraph({ symbols: [caller, helper], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("local shadow also blocks dotted targets whose head is a parameter (`helper.method`)", () => {
+    const caller = makeSymbol("ts:src/a.ts#caller", {
+      signature: {
+        inputs: [{ name: "helper", type: "{ method(): void }" }],
+        outputs: ["void"],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+      calls: [{ target: "helper.method", line: 5, resolved: null }],
+    })
+    const shadowed = makeSymbol("ts:src/a.ts#helper", { kind: "class" })
+    const method = makeSymbol("ts:src/a.ts#helper.method", { kind: "method" })
+    const result = resolveCallGraph({
+      symbols: [caller, shadowed, method],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+  })
+
+  it("never fabricates an edge into a dropped Symbol body (file scope, direct name)", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 5 }])
+    const dropped = makeSymbol("ts:src/a.ts#helper", {
+      dropped: true,
+      dropReason: "test",
+    })
+    const result = resolveCallGraph({ symbols: [caller, dropped], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("never fabricates an edge into a dropped Symbol body (file scope, composite Cls.method)", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls.method", line: 5 }])
+    const cls = makeSymbol("ts:src/a.ts#Cls", { kind: "class" })
+    const droppedMethod = makeSymbol("ts:src/a.ts#Cls.method", {
+      kind: "method",
+      dropped: true,
+      dropReason: "test",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, cls, droppedMethod],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+  })
+
+  it("never fabricates an edge into a dropped Symbol body (import scope)", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 5 }])
+    const droppedImported = makeSymbol("ts:src/util.ts#helper", {
+      dropped: true,
+      dropReason: "test",
+    })
+    const imports = new Map<string, readonly ImportEdge[]>([
+      ["src/a.ts", [importEdge({ source: "./util", symbols: ["helper"] })]],
+    ])
+    const result = resolveCallGraph({
+      symbols: [caller, droppedImported],
+      importsByFile: imports,
+    })
+    expect(result.edges).toEqual([])
+  })
+
+  it("import scope ambiguity (§7.1): two imports binding the same head are left null, not silently picked", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 5 }])
+    const first = makeSymbol("ts:src/one.ts#helper")
+    const second = makeSymbol("ts:src/two.ts#helper")
+    const imports = new Map<string, readonly ImportEdge[]>([
+      [
+        "src/a.ts",
+        [
+          importEdge({ source: "./one", symbols: ["helper"] }),
+          importEdge({ source: "./two", symbols: ["helper"] }),
+        ],
+      ],
+    ])
+    const result = resolveCallGraph({
+      symbols: [caller, first, second],
+      importsByFile: imports,
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("import scope: cross-file dotted target resolves the composite id when the class Symbol exists over there", () => {
+    // `import { Cls } from './x'; new Cls().method()` — the head `Cls` binds
+    // to `x.ts#Cls`, the tail `method` extends the composite qname, and the
+    // resulting id `ts:src/x.ts#Cls.method` is looked up as a whole.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls.method", line: 5 }])
+    const cls = makeSymbol("ts:src/x.ts#Cls", { kind: "class" })
+    const method = makeSymbol("ts:src/x.ts#Cls.method", { kind: "method" })
+    const imports = new Map<string, readonly ImportEdge[]>([
+      ["src/a.ts", [importEdge({ source: "./x", symbols: ["Cls"] })]],
+    ])
+    const result = resolveCallGraph({
+      symbols: [caller, cls, method],
+      importsByFile: imports,
+    })
+    expect(result.edges[0]?.to).toBe("ts:src/x.ts#Cls.method")
   })
 
   it("sorts edges deterministically by (from, to, line)", () => {

@@ -357,7 +357,7 @@ An edge between symbols or between components. Both endpoint kinds live in the s
 
 `"import" | "call" | "inherit" | "implement" | "compose" | "http" | "event" | "sql"`
 
-`"call"` is reserved for symbol-to-symbol edges emitted from the resolved call graph (see `call-resolution.md` §7). Symbol-to-symbol Dependencies are always emitted with `direction: "outbound"` and `effect: null`; the per-edge confidence and caller-site line live on `Symbol.calls[]` (the `resolved` field of the caller-side `Call`) and are deliberately not duplicated onto Dependency.
+`"call"` is reserved for symbol-to-symbol edges emitted from the resolved call graph (see `call-resolution.md` §7). Symbol-to-symbol Dependencies are always emitted with `direction: "outbound"` and `effect: null`. Per-edge confidence and caller-site line are held on the resolver's internal `CallEdge` shape (`call-resolution.md` §7.1) and deliberately NOT projected onto Dependency — `Call.resolved` is `SymbolId | null` alone. The caller-site line still survives on `Symbol.calls[].line`; per-edge confidence is not persisted at all in v1 and is a candidate for a `Call.confidence` extension in a later phase.
 
 ### 11.2 `direction` (enum)
 

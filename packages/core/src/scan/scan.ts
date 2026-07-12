@@ -71,7 +71,7 @@ export interface ParseErrorRecord {
  *      Category B/C drop → fingerprint.
  *   4. Assemble the IR (Symbols + Components + Dependencies + Stats), sort every array
  *      per the schema's ordering rules.
- *   5. `assertIRIntegrity` — the 11 invariants must pass before we hand the IR back.
+ *   5. `assertIRIntegrity` — the 14 invariants must pass before we hand the IR back.
  *
  * Serialization to disk is the caller's job (`writeCanonicalIR` handles the canonical
  * JSON write). Keeping serialization off the scan path lets tests assert on the IR

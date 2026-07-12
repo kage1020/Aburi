@@ -63,7 +63,7 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   if (arg.includes("#")) {
     const hit = ir.symbols.find((s) => s.id === arg)
     if (hit === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-    const markdown = projectSymbolExplain(hit)
+    const markdown = projectSymbolExplain(hit, { dependencies: ir.dependencies })
     if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
     return {
       kind: "single",
@@ -78,7 +78,9 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
     const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/")
     const inFile = ir.symbols.filter((s) => s.source.file === relPath)
     if (inFile.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-    const markdown = inFile.map((s) => projectSymbolExplain(s)).join("\n---\n\n")
+    const markdown = inFile
+      .map((s) => projectSymbolExplain(s, { dependencies: ir.dependencies }))
+      .join("\n---\n\n")
     if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
     return {
       kind: "file",
@@ -96,7 +98,7 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   }
   const only = matches[0]
   if (only === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-  const markdown = projectSymbolExplain(only)
+  const markdown = projectSymbolExplain(only, { dependencies: ir.dependencies })
   if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
   return {
     kind: "single",

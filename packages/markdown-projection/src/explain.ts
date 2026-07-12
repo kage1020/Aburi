@@ -14,8 +14,7 @@ export interface ProjectSymbolExplainContext {
    * Every Dependency in the current IR. When provided, `projectSymbolExplain`
    * renders a `## Called by` section listing the callers of this Symbol —
    * discovered by scanning `via: "call"` edges whose `to` equals this Symbol's
-   * id. Absent → the section is silently omitted (backwards-compatible with
-   * the pre-issue-#26 single-argument signature).
+   * id. Absent → the section is silently omitted.
    */
   dependencies?: readonly Dependency[]
 }
@@ -29,9 +28,9 @@ export interface ProjectSymbolExplainContext {
  * When the Symbol is `dropped: true`, the design falls back to a short summary —
  * dropped Symbols have no rules/effects/calls/fingerprint by construction (ir-schema §5.6).
  *
- * `context.dependencies` is optional so existing single-argument call sites keep
- * working; passing it in enables the `## Called by` section derived from the
- * resolved call graph.
+ * `context.dependencies` is optional so a caller with no reachable call graph
+ * can still explain a single Symbol; supplying it enables the `## Called by`
+ * section derived from the resolved edges.
  */
 export function projectSymbolExplain(
   symbol: IRSymbol,

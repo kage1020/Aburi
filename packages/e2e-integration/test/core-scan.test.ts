@@ -203,6 +203,34 @@ describe("scan — integration through real plugins", () => {
     expect(resolvedCall?.resolved).toBe(callEdge?.to)
   })
 
+  it("dedupes multi-line calls to the same callee into a single via:call Dependency", async () => {
+    await writeSource(
+      "src/service.ts",
+      `export function helper(n: number): number {\n  return n + 1\n}\nexport function caller(): number {\n  const a = helper(1)\n  const b = helper(2)\n  const c = helper(3)\n  return a + b + c\n}\n`,
+    )
+
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: {},
+      languages: [langTypescriptPlugin],
+      frameworks: [],
+      effects: [],
+      registry: buildRegistry(),
+    })
+
+    const caller = result.ir.symbols.find((s) => s.name === "caller")
+    // Three per-line Call entries survive on the Symbol side (integrity #11
+    // requires monotonic line order).
+    const resolvedCalls = (caller?.calls ?? []).filter((c) => c.resolved !== null)
+    expect(resolvedCalls.length).toBe(3)
+    // ...but the Dependency projection collapses them into ONE triple
+    // (invariant #13). This is the projectSymbolEdges dedup contract.
+    const edges = result.ir.dependencies.filter(
+      (d) => d.via === "call" && d.from.endsWith("#caller") && d.to.endsWith("#helper"),
+    )
+    expect(edges.length).toBe(1)
+  })
+
   it("resolves relative-import calls into via:call symbol edges (import scope)", async () => {
     await writeSource(
       "src/util.ts",
