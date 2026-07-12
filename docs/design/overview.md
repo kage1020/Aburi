@@ -25,7 +25,7 @@ Aburi outputs an **intermediate representation (IR)** that is neither full sourc
 | IR format | JSON, fixed (Markdown is a deterministic derivation) | Markdown as primary IR (weak machine processing / schema validation) |
 | Config format | JSONC (`biome.json` style) | TypeScript / YAML (no dynamic logic needed; static is better given AI integration) |
 | Extraction strategy | "Drop" as primary, "keep" as secondary | Defining only "what to keep" (decoration is finite, logic is infinite) |
-| Parser layer | Tree-sitter core, always resident + optional LSP enrichment | LSP only (unstable in CI; large per-language variance) |
+| Parser layer | Tree-sitter core, always resident + optional [LSP enrichment](./lsp-enrichment.md) | LSP only (unstable in CI; large per-language variance) |
 | Structural interpretation | Static heuristics + symbol graph | LLM judgment (verifiability and diff stability disappear) |
 | Diff stability | Semantic ID + 3-layer fingerprint (`api`/`logic`/`syntax`) + rename tracking | Line-based diff |
 | Diff statuses | `added`/`removed`/`moved`/`changed`/`moved+changed` | `added`/`removed` only (loses trust on file moves) |
@@ -87,6 +87,7 @@ Details are covered by the documents in this directory:
 - Fingerprint computation: [`fingerprint.md`](./fingerprint.md)
 - Call resolution (filling in `Call.resolved`): [`call-resolution.md`](./call-resolution.md)
 - Effect propagation (augmenting `Symbol.effects[]` along resolved edges): [`effect-propagation.md`](./effect-propagation.md)
+- Optional LSP enrichment (columns, typed dispatch, inferred throws): [`lsp-enrichment.md`](./lsp-enrichment.md)
 
 ## 5. IR and Config
 

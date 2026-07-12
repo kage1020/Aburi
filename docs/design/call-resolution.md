@@ -6,9 +6,9 @@ References:
 - [`ir-schema.md`](./ir-schema.md) §10 — the shape of `Call` and the `resolved` field
 - [`lang-plugin.md`](./lang-plugin.md) §2.2, §4.4 — the Language Plugin's boundary (call resolution is out of scope) and the `CallCandidate` shape
 - [`effect-plugin.md`](./effect-plugin.md) — how effect classification takes precedence over resolution
-- `effect-propagation.md` (planned — see [`roadmap.md`](../roadmap.md)) — the consumer that propagates effects along resolved edges
+- [`effect-propagation.md`](./effect-propagation.md) — the consumer that propagates effects along resolved edges
 - [`slice-view.md`](./slice-view.md) — the consumer that clusters over the resolved call graph
-- `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)) — the optional layer that refines resolution outcomes
+- [`lsp-enrichment.md`](./lsp-enrichment.md) — the optional layer that refines resolution outcomes
 
 ---
 
@@ -27,7 +27,7 @@ Aburi runs in two environments:
 | Tier | Availability | Refines |
 |---|---|---|
 | **Untyped (default)** | always | resolves by import binding + qualified-name matching over the Symbol table |
-| **LSP-enriched (optional)** | when a language server is running and available (spec: `lsp-enrichment.md`, planned — see [`roadmap.md`](../roadmap.md)) | resolves method dispatch through the actual receiver type + interface implementations |
+| **LSP-enriched (optional)** | when a language server is running and available (spec: [`lsp-enrichment.md`](./lsp-enrichment.md)) | resolves method dispatch through the actual receiver type + interface implementations |
 
 The two tiers share a **single output contract** (§7). Enabling LSP MUST NOT change the shape or ordering of `calls[]`; it only lifts more `resolved: null` entries to non-null and lifts `confidence`. This preserves time-series diff stability (`overview.md` §2 — "diff stability" is non-negotiable).
 
@@ -145,7 +145,7 @@ When LSP is available, resolution runs a second pass that reads receiver types.
 - `receiverType(callSite)` — the resolved type of the receiver expression at the call site (returned from the language server's `textDocument/hover` or `typeDefinition` request).
 - `implementers(interfaceName)` — the set of Symbols known to `implements`/`extends` the given interface (from `textDocument/implementation`).
 
-The exact protocol subset used, plus fallback and timeout policy, will be specified in `lsp-enrichment.md` (planned — see [`roadmap.md`](../roadmap.md)). This document only names the two capabilities and treats them as inputs.
+The exact protocol subset used, plus fallback and timeout policy, is specified in [`lsp-enrichment.md`](./lsp-enrichment.md) §4. This document only names the two capabilities and treats them as inputs.
 
 ### 5.2 Method dispatch through `this` / `super`
 
@@ -225,7 +225,7 @@ The edge's `confidence` is the resolution confidence at the moment of resolution
 | §5.3 LSP interface with single impl | `medium` |
 | §5.3 LSP interface with DI-resolved impl | `medium` |
 
-Effect propagation must respect edge confidence when combining propagated effect confidence — see `effect-propagation.md` (planned).
+Effect propagation must respect edge confidence when combining propagated effect confidence — see [`effect-propagation.md`](./effect-propagation.md) §5.3.
 
 ### 7.3 Cross-language edges
 
@@ -354,7 +354,7 @@ Resolution requires knowledge of every file's imports and every Symbol in the wo
 
 ### 11.5 Why confidence is per-edge, not per-Symbol
 
-An edge from A to B is a distinct fact from A's own confidence. Downgrading A's `confidence` because one of its outgoing edges is `low` would be a category error. Effect propagation is where the two confidences combine — see `effect-propagation.md` (planned).
+An edge from A to B is a distinct fact from A's own confidence. Downgrading A's `confidence` because one of its outgoing edges is `low` would be a category error. Effect propagation is where the two confidences combine — see [`effect-propagation.md`](./effect-propagation.md) §5.3.
 
 ### 11.6 Why re-export transitivity is not followed
 

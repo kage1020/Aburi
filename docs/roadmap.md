@@ -30,6 +30,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **No symbol-to-symbol dependency edges** — the IR carries component → component
   dependencies only
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
+  (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
 - **No workspace-level mermaid overview / Slice View / graph visualization**
   (Slice View: design landed; implementation upcoming)
 - **No LLM integration** — Aburi is a deterministic static analyser by design;
@@ -46,16 +47,14 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Slice View**: cluster a PR's changed symbol set into connected components
   over the call graph and render vertical slices in Markdown
 - **L0 workspace overview**: output the full monorepo view as a mermaid graph
-- **LSP optional enrichment**: improve effect-inference precision using type
+- **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
 - **Additional frameworks**: React function components / Express middleware
 - **Additional effect plugins**: `@aburi/effects-drizzle` / `@aburi/effects-trpc`
 
-Detailed designs required before starting:
-
-- `lsp-enrichment.md` — LSP communication / fallback conventions
-
-(`call-resolution.md`, `effect-propagation.md`, and `slice-view.md` were required for this phase and are now landed; see the Design documents table below.)
+All detailed designs for this phase have landed:
+`call-resolution.md`, `effect-propagation.md`, `slice-view.md`, and
+`lsp-enrichment.md` — see the Design documents table below.
 
 ## Later: multi-language
 
@@ -99,6 +98,7 @@ The full behaviour of everything in "What works today" is specified in
 | Call resolution (filling in `Call.resolved`) | [`call-resolution.md`](./design/call-resolution.md) |
 | Effect propagation (augmenting `Symbol.effects[]` along resolved edges) | [`effect-propagation.md`](./design/effect-propagation.md) |
 | Slice View clustering (weakly-connected components over the resolved call graph) | [`slice-view.md`](./design/slice-view.md) |
+| Optional LSP enrichment (columns, typed dispatch, inferred throws) | [`lsp-enrichment.md`](./design/lsp-enrichment.md) |
 | Effect plugin interface | [`effect-plugin.md`](./design/effect-plugin.md) |
 | Fingerprint computation | [`fingerprint.md`](./design/fingerprint.md) |
 | Component autodetect | [`component-detect.md`](./design/component-detect.md) |
