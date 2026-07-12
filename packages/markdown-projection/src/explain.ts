@@ -1,12 +1,24 @@
-import type { Symbol as IRSymbol } from "@aburi/types"
+import type { Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
   callRow,
+  compareStrings,
   effectRow,
   requireDropReason,
   ruleRow,
   signatureLine,
   splitDecorators,
 } from "./format"
+
+export interface ProjectSymbolExplainContext {
+  /**
+   * Every Dependency in the current IR. When provided, `projectSymbolExplain`
+   * renders a `## Called by` section listing the callers of this Symbol —
+   * discovered by scanning `via: "call"` edges whose `to` equals this Symbol's
+   * id. Absent → the section is silently omitted (backwards-compatible with
+   * the pre-issue-#26 single-argument signature).
+   */
+  dependencies?: readonly Dependency[]
+}
 
 /**
  * §7 — `aburi explain <id>`. A stand-alone Symbol view, richer than the per-Component
@@ -16,13 +28,20 @@ import {
  *
  * When the Symbol is `dropped: true`, the design falls back to a short summary —
  * dropped Symbols have no rules/effects/calls/fingerprint by construction (ir-schema §5.6).
+ *
+ * `context.dependencies` is optional so existing single-argument call sites keep
+ * working; passing it in enables the `## Called by` section derived from the
+ * resolved call graph.
  */
-export function projectSymbolExplain(symbol: IRSymbol): string {
+export function projectSymbolExplain(
+  symbol: IRSymbol,
+  context: ProjectSymbolExplainContext = {},
+): string {
   if (symbol.dropped) return renderDroppedExplain(symbol)
-  return renderKeptExplain(symbol)
+  return renderKeptExplain(symbol, context)
 }
 
-function renderKeptExplain(symbol: IRSymbol): string {
+function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContext): string {
   const lines: string[] = []
   lines.push(`# \`${symbol.name}\` *(${symbol.kind})*`)
   lines.push("")
@@ -79,6 +98,14 @@ function renderKeptExplain(symbol: IRSymbol): string {
     lines.push("")
   }
 
+  const callers = collectCallers(symbol, context.dependencies ?? [])
+  if (callers.length > 0) {
+    lines.push("## Called by")
+    lines.push("")
+    for (const from of callers) lines.push(`- \`${from}\``)
+    lines.push("")
+  }
+
   if (symbol.derivedBy.length > 0) {
     lines.push("## Derived by")
     lines.push("")
@@ -99,6 +126,22 @@ function renderKeptExplain(symbol: IRSymbol): string {
       .replace(/\n{3,}/g, "\n\n")
       .trimEnd() + "\n"
   )
+}
+
+/**
+ * Reverse the `via: "call"` edges to find every Symbol id whose `resolved`
+ * points at `symbol`. The list is deduplicated (the same caller can call the
+ * same callee on multiple lines, but `Called by` is caller-granular, not
+ * per-line) and lex-sorted so the section is byte-stable across runs.
+ */
+function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): string[] {
+  const callers = new Set<string>()
+  for (const d of dependencies) {
+    if (d.via !== "call") continue
+    if (d.to !== symbol.id) continue
+    callers.add(d.from)
+  }
+  return [...callers].sort(compareStrings)
 }
 
 function renderDroppedExplain(symbol: IRSymbol): string {

@@ -6,6 +6,7 @@ import {
   droppedFoldout,
   effectRow,
   fingerprintLine,
+  isSymbolIdEndpoint,
   orderFilesAscending,
   orderSymbolsWithinFile,
   requireDropReason,
@@ -54,13 +55,31 @@ export function projectComponent(input: ProjectComponentInput): string {
     lines.push("")
   }
 
-  const componentDeps = dependencies.filter((d) => d.from === component.id || d.to === component.id)
-  if (componentDeps.length > 0) {
+  const componentLevelDeps = dependencies.filter(
+    (d) =>
+      (d.from === component.id || d.to === component.id) &&
+      !isSymbolIdEndpoint(d.from) &&
+      !isSymbolIdEndpoint(d.to),
+  )
+  const symbolIdsInComponent = new Set(symbols.filter((s) => !s.dropped).map((s) => s.id))
+  const symbolLevelDeps = dependencies.filter(
+    (d) =>
+      (isSymbolIdEndpoint(d.from) && symbolIdsInComponent.has(d.from)) ||
+      (isSymbolIdEndpoint(d.to) && symbolIdsInComponent.has(d.to)),
+  )
+  if (componentLevelDeps.length > 0 || symbolLevelDeps.length > 0) {
     lines.push("## Dependencies")
     lines.push("")
-    for (const d of sortDeps(componentDeps)) {
+    for (const d of sortDeps(componentLevelDeps)) {
       const effectTag = d.effect === null ? "" : ` [${d.effect}]`
       lines.push(`- ${d.from} → ${d.to} (via \`${d.via}\`)${effectTag}`)
+    }
+    if (symbolLevelDeps.length > 0) {
+      if (componentLevelDeps.length > 0) lines.push("")
+      lines.push("### Symbol edges")
+      for (const d of sortDeps(symbolLevelDeps)) {
+        lines.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
+      }
     }
     lines.push("")
   }

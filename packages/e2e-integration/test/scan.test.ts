@@ -12,7 +12,7 @@ afterEach(async () => {
 })
 
 describe("e2e: scan on fixtures/nestjs-billing", () => {
-  it("passes all 11 integrity invariants and emits the schema-pinned IR", async () => {
+  it("passes all 14 integrity invariants and emits the schema-pinned IR", async () => {
     const fixture = await checkoutFixture()
     cleanup = fixture.cleanup
 
@@ -23,6 +23,29 @@ describe("e2e: scan on fixtures/nestjs-billing", () => {
     expect(result.ir.$schema).toBe("https://aburi.dev/schema/aburi.ir.v1.json")
     expect(result.parseErrors).toEqual([])
     expect(result.skipped).toEqual([])
+  })
+
+  it("emits well-shaped via:call edges when the resolver produces any (untyped tier ⇒ may be zero)", async () => {
+    const fixture = await checkoutFixture()
+    cleanup = fixture.cleanup
+
+    const result = await scanFixture(fixture.root)
+
+    const callEdges = result.ir.dependencies.filter((d) => d.via === "call")
+    // The NestJS billing fixture is dominated by `this.<service>.<method>()`
+    // patterns — those are §4.7 "runtime receivers" that the untyped resolution
+    // tier cannot resolve, so zero call edges is the *expected* outcome for
+    // this fixture. What we assert is the shape contract: any edge that IS
+    // emitted must be a symbol → symbol projection with the fixed direction/
+    // effect defaults that scan.projectSymbolEdges guarantees. A fixture that
+    // exercises file-scope / import-scope call resolution positively lives in
+    // core-scan.test.ts.
+    for (const edge of callEdges) {
+      expect(edge.from).toMatch(/^[a-z][a-z0-9]*:[^#]+#.+$/)
+      expect(edge.to).toMatch(/^[a-z][a-z0-9]*:[^#]+#.+$/)
+      expect(edge.direction).toBe("outbound")
+      expect(edge.effect).toBeNull()
+    }
   })
 
   it("recognises every fixture source file and none get skipped", async () => {

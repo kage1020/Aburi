@@ -1,5 +1,5 @@
-import type { IR } from "@aburi/types"
-import { compareStrings } from "./format"
+import type { Dependency, IR } from "@aburi/types"
+import { compareStrings, isSymbolIdEndpoint } from "./format"
 
 /** §4.2 — nodes above this render as text-only fallback so GitHub mermaid does not choke. */
 export const MERMAID_NODE_LIMIT = 100
@@ -100,11 +100,19 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
  * §4.2 — mermaid graph LR with a text-fallback block always attached. When there are no
  * dependencies at all, only a short note is emitted; when the node count exceeds
  * `MERMAID_NODE_LIMIT`, the mermaid block is dropped and only the text list survives.
+ *
+ * Symbol-to-symbol call edges are deliberately excluded from the workspace-level
+ * mermaid graph. A monorepo with many resolved calls would explode the node count
+ * past the mermaid render limit and drown the L0 overview in method-granularity
+ * detail. Symbol edges surface in the per-Symbol explain view and the diff view;
+ * this section stays component-scoped so the workspace overview keeps its
+ * architectural altitude.
  */
 function renderDependencies(ir: IR): string[] {
-  if (ir.dependencies.length === 0) return ["_No inter-component dependencies._"]
+  const componentDeps = ir.dependencies.filter((d) => !isSymbolEdge(d))
+  if (componentDeps.length === 0) return ["_No inter-component dependencies._"]
   const nodeSet = new Set<string>()
-  for (const d of ir.dependencies) {
+  for (const d of componentDeps) {
     nodeSet.add(d.from)
     nodeSet.add(d.to)
   }
@@ -113,7 +121,7 @@ function renderDependencies(ir: IR): string[] {
     rows.push("```mermaid")
     rows.push("graph LR")
     const seen = new Set<string>()
-    for (const d of sortedDeps(ir)) {
+    for (const d of sortedDeps(componentDeps)) {
       const key = `${d.from}->${d.to}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -124,18 +132,22 @@ function renderDependencies(ir: IR): string[] {
     rows.push("Fallback list:")
     rows.push("")
   }
-  for (const d of sortedDeps(ir)) {
+  for (const d of sortedDeps(componentDeps)) {
     rows.push(`- ${d.from} → ${d.to} (via \`${d.via}\`)`)
   }
   return rows
 }
 
-function sortedDeps(ir: IR): typeof ir.dependencies {
-  return [...ir.dependencies].sort((a, b) => {
+function sortedDeps(deps: readonly Dependency[]): Dependency[] {
+  return [...deps].sort((a, b) => {
     if (a.from !== b.from) return compareStrings(a.from, b.from)
     if (a.to !== b.to) return compareStrings(a.to, b.to)
     return compareStrings(a.via, b.via)
   })
+}
+
+function isSymbolEdge(d: Dependency): boolean {
+  return isSymbolIdEndpoint(d.from) || isSymbolIdEndpoint(d.to)
 }
 
 /**

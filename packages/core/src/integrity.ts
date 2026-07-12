@@ -63,7 +63,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
  * empty); callers that want the throwing form use `assertIRIntegrity`.
  *
- * The 11 invariants checked here are:
+ * The 14 invariants checked here are:
  *   1. Symbol id uniqueness
  *   2. Component id uniqueness
  *   3. Symbol.component → Components[].id existence
@@ -75,6 +75,9 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *   9. Symbol.extKind null or matches namespace:segment+ pattern
  *  10. All file paths POSIX (forward slash, no backslash, no absolute prefix)
  *  11. Arrays are sorted per the IR schema's ordering rules
+ *  12. via:"call" edges: both endpoints are Symbol ids present in Symbols[]
+ *  13. dependencies[]: no duplicate (from, to, via) triples
+ *  14. Symbol.calls[].resolved and via:"call" edges agree (call-graph projection is total)
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -90,6 +93,9 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkSymbolExtKindShape(ir, violations)
   checkPathsArePosix(ir, violations)
   checkArraySortOrder(ir, violations)
+  checkCallEdgeEndpoints(ir, violations)
+  checkDependencyTupleUniqueness(ir, violations)
+  checkCallGraphProjectionAgrees(ir, violations)
 
   return violations
 }
@@ -364,4 +370,109 @@ function compareCodeUnit(a: string, b: string): number {
 
 function looksLikeSymbolId(endpoint: string): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
+}
+
+/**
+ * Invariant #12 (ir-schema.md §14): a `via: "call"` Dependency is a projection of
+ * a resolved call edge, so both endpoints MUST be Symbol ids AND both MUST exist
+ * in `symbols[]`. This strengthens #4 (which only rejects a *dangling* symbol
+ * id) by additionally rejecting component-id endpoints on call edges — a call
+ * edge can never target a whole component.
+ */
+function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
+  const symbolIds = new Set(ir.symbols.map((s) => s.id))
+  for (const dep of ir.dependencies) {
+    if (dep.via !== "call") continue
+    for (const role of ["from", "to"] as const) {
+      const endpoint = dep[role]
+      if (!looksLikeSymbolId(endpoint)) {
+        out.push({
+          invariant: 12,
+          subject: `dependencies[${role}=${endpoint}]`,
+          message: `via:"call" dependency ${role} must be a Symbol id, got "${endpoint}"`,
+        })
+        continue
+      }
+      if (!symbolIds.has(endpoint)) {
+        out.push({
+          invariant: 12,
+          subject: `dependencies[${role}=${endpoint}]`,
+          message: `via:"call" dependency ${role} "${endpoint}" is not a declared Symbol`,
+        })
+      }
+    }
+  }
+}
+
+/**
+ * Invariant #13 (ir-schema.md §14): `(from, to, via)` triples in `dependencies[]`
+ * must be unique. Direction / effect are deliberately excluded from identity —
+ * `diff-algorithm.md §6.2` surfaces direction/effect flips as an added+removed
+ * pair on the same key, so duplicate triples with differing direction/effect
+ * would silently corrupt the diff output.
+ */
+function checkDependencyTupleUniqueness(ir: IR, out: IntegrityViolation[]): void {
+  const seen = new Set<string>()
+  for (const dep of ir.dependencies) {
+    const key = `${dep.from}\t${dep.to}\t${dep.via}`
+    if (seen.has(key)) {
+      out.push({
+        invariant: 13,
+        subject: `dependencies[from=${dep.from},to=${dep.to},via=${dep.via}]`,
+        message: "duplicate (from, to, via) triple in dependencies[]",
+      })
+      continue
+    }
+    seen.add(key)
+  }
+}
+
+/**
+ * Invariant #14 (ir-schema.md §14): the call-graph projection is total in both
+ * directions. Every `Symbol.calls[].resolved !== null` must correspond to a
+ * `via: "call"` Dependency `(from = caller.id, to = resolved)`; conversely every
+ * `via: "call"` Dependency must be backed by at least one such Call entry. This
+ * catches (a) an emitter that produced calls but forgot to project them into
+ * `dependencies[]`, and (b) a scripted patch that added or removed Dependencies
+ * without touching the corresponding `Symbol.calls[]`.
+ */
+function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void {
+  const expectedFromCalls = new Set<string>()
+  for (const symbol of ir.symbols) {
+    for (const call of symbol.calls) {
+      if (call.resolved === null) continue
+      expectedFromCalls.add(dependencyKey(symbol.id, call.resolved))
+    }
+  }
+
+  const foundInDeps = new Set<string>()
+  for (const dep of ir.dependencies) {
+    if (dep.via !== "call") continue
+    foundInDeps.add(dependencyKey(dep.from, dep.to))
+  }
+
+  for (const key of expectedFromCalls) {
+    if (!foundInDeps.has(key)) {
+      const [from, to] = key.split("\t")
+      out.push({
+        invariant: 14,
+        subject: `dependencies[from=${from},to=${to},via=call]`,
+        message: `Symbol.calls[].resolved -> ${to} has no matching via:"call" Dependency`,
+      })
+    }
+  }
+  for (const key of foundInDeps) {
+    if (!expectedFromCalls.has(key)) {
+      const [from, to] = key.split("\t")
+      out.push({
+        invariant: 14,
+        subject: `symbols[id=${from}].calls[resolved=${to}]`,
+        message: `via:"call" Dependency ${from} -> ${to} has no matching Symbol.calls[].resolved entry`,
+      })
+    }
+  }
+}
+
+function dependencyKey(from: string, to: string): string {
+  return `${from}\t${to}`
 }

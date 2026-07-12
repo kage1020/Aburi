@@ -7,6 +7,7 @@ import type {
   EffectClassifyTimeout,
   EffectPlugin,
   FrameworkPlugin,
+  ImportEdge,
   IR,
   LanguagePlugin,
   Logger,
@@ -17,6 +18,7 @@ import type {
   VocabRegistry,
   WorkspaceManager,
 } from "@aburi/types"
+import { type CallEdge, resolveCallGraph } from "../callgraph"
 import { serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
 import { assertIRIntegrity } from "../integrity"
@@ -105,6 +107,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const parseErrors: ParseErrorRecord[] = []
   const timeoutEvents: ClassifyTimeoutEvent[] = []
   const additionalSkipped: SkippedFile[] = []
+  const importsByFile = new Map<string, readonly ImportEdge[]>()
   // Discovery's `languageExtensions` filter already narrowed the file list to
   // extensions the router recognizes. If `route()` still returns null here it means
   // the extension filter and the router disagree — the discovered file survived the
@@ -145,9 +148,20 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     if (result.terminalParseFailure) terminalParseFailures++
     timeoutEvents.push(...result.timeoutEvents)
     symbols.push(...result.symbols)
+    importsByFile.set(result.path, result.imports)
   }
 
   symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
+  // Call-resolution + symbol → symbol edge projection (call-resolution.md §7,
+  // ir-schema.md §11). The resolver rewrites `Symbol.calls[].resolved` in
+  // place and returns per-call-site CallEdges; those are then collapsed into
+  // `(from, to, via: "call")` Dependency triples with a stable `(from, to, via)`
+  // sort. Higher-tier resolution (component / workspace / LSP) will hook into
+  // the same seam without disturbing this projection.
+  const callGraph = resolveCallGraph({ symbols, importsByFile })
+  const resolvedSymbols = callGraph.symbols
+  const symbolEdges = projectSymbolEdges(callGraph.edges)
 
   // parsedFiles counts every file the pipeline successfully parsed. Files with
   // recoverable parse errors still count as parsed (a non-null tree survived); only
@@ -157,7 +171,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
     parsedFiles: attempted - terminalParseFailures,
-    symbols,
+    symbols: resolvedSymbols,
     timeoutEvents,
   })
 
@@ -176,8 +190,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     },
     workspace,
     components: sortComponents(input.components ?? []),
-    symbols,
-    dependencies: [] as Dependency[],
+    symbols: resolvedSymbols,
+    dependencies: symbolEdges,
     stats,
   }
 
@@ -270,6 +284,38 @@ function buildStats(input: BuildStatsInput): Stats {
 
 function sortComponents(components: readonly Component[]): Component[] {
   return [...components].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+/**
+ * Collapse per-call-site `CallEdge[]` (`from`, `to`, `via`, `confidence`, `line`)
+ * into deduplicated `Dependency` triples keyed on `(from, to, via)`. Multiple
+ * calls from the same caller to the same callee become one Dependency — the
+ * per-line detail lives on `Symbol.calls[]` and is deliberately not duplicated
+ * onto Dependency (ir-schema.md §11). `direction` is fixed to `"outbound"`
+ * (call edges are inherently directional) and `effect` to `null` (effect
+ * annotation is a separate propagation pass — effect-propagation.md).
+ */
+function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
+  const seen = new Set<string>()
+  const out: Dependency[] = []
+  for (const edge of edges) {
+    const key = `${edge.from}\t${edge.to}\t${edge.via}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      from: edge.from,
+      to: edge.to,
+      via: edge.via,
+      direction: "outbound",
+      effect: null,
+    })
+  }
+  out.sort((a, b) => {
+    if (a.from !== b.from) return a.from < b.from ? -1 : 1
+    if (a.to !== b.to) return a.to < b.to ? -1 : 1
+    return a.via < b.via ? -1 : a.via > b.via ? 1 : 0
+  })
+  return out
 }
 
 function uniqueSorted(values: readonly string[]): string[] {

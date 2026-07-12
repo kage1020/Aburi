@@ -36,7 +36,7 @@ function buildRegistry() {
 }
 
 describe("scan — integration through real plugins", () => {
-  it("produces an IR that survives the 11 integrity invariants", async () => {
+  it("produces an IR that survives the 14 integrity invariants", async () => {
     await writeSource(
       "app/dashboard/page.tsx",
       "export default function DashboardPage() {\n  return null\n}\n",
@@ -173,6 +173,60 @@ describe("scan — integration through real plugins", () => {
     expect([foo?.dropReason, bar?.dropReason]).toEqual(
       expect.arrayContaining(["interface (data model)", "type alias"]),
     )
+  })
+
+  it("resolves same-file top-level calls into via:call symbol edges", async () => {
+    await writeSource(
+      "src/service.ts",
+      `export function helper(n: number): number {\n  return n + 1\n}\nexport function caller(): number {\n  return helper(3)\n}\n`,
+    )
+
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: {},
+      languages: [langTypescriptPlugin],
+      frameworks: [],
+      effects: [],
+      registry: buildRegistry(),
+    })
+
+    const callEdge = result.ir.dependencies.find(
+      (d) => d.via === "call" && d.from.endsWith("#caller") && d.to.endsWith("#helper"),
+    )
+    expect(callEdge).toBeDefined()
+    expect(callEdge?.direction).toBe("outbound")
+    expect(callEdge?.effect).toBeNull()
+    // The Call entry on the caller Symbol carries the resolved id too — this
+    // is the round-trip invariant #14 (`call-resolution.md` §7.1).
+    const caller = result.ir.symbols.find((s) => s.name === "caller")
+    const resolvedCall = caller?.calls.find((c) => c.target === "helper")
+    expect(resolvedCall?.resolved).toBe(callEdge?.to)
+  })
+
+  it("resolves relative-import calls into via:call symbol edges (import scope)", async () => {
+    await writeSource(
+      "src/util.ts",
+      `export function stringify(v: unknown): string {\n  return JSON.stringify(v)\n}\n`,
+    )
+    await writeSource(
+      "src/main.ts",
+      `import { stringify } from "./util"\nexport function main(): string {\n  return stringify({ hello: "world" })\n}\n`,
+    )
+
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: {},
+      languages: [langTypescriptPlugin],
+      frameworks: [],
+      effects: [],
+      registry: buildRegistry(),
+    })
+
+    const callEdge = result.ir.dependencies.find(
+      (d) =>
+        d.via === "call" && d.from.endsWith("main.ts#main") && d.to.endsWith("util.ts#stringify"),
+    )
+    expect(callEdge).toBeDefined()
   })
 
   it("writes a canonical JSON IR to disk via writeCanonicalIR", async () => {

@@ -341,7 +341,7 @@ A call that does not qualify as an effect.
 
 ## 11. Dependency
 
-An edge between symbols or between components.
+An edge between symbols or between components. Both endpoint kinds live in the same `dependencies[]` array — the schema for `from`/`to` is a plain `string`, and the endpoint kind is recovered from the id shape (`<language>:<file>#<qname>` for a Symbol id, ASCII kebab-case for a Component id).
 
 ```jsonc
 {
@@ -356,6 +356,8 @@ An edge between symbols or between components.
 ### 11.1 `via` (enum)
 
 `"import" | "call" | "inherit" | "implement" | "compose" | "http" | "event" | "sql"`
+
+`"call"` is reserved for symbol-to-symbol edges emitted from the resolved call graph (see `call-resolution.md` §7). Symbol-to-symbol Dependencies are always emitted with `direction: "outbound"` and `effect: null`; the per-edge confidence and caller-site line live on `Symbol.calls[]` (the `resolved` field of the caller-side `Call`) and are deliberately not duplicated onto Dependency.
 
 ### 11.2 `direction` (enum)
 
@@ -414,6 +416,9 @@ Guaranteed by the schema validator plus Aburi internals:
 9. `extKind` is `null` or of the form `<namespace>(:<segment>)+` (at least 2 segments, arbitrarily deep)
 10. All paths are POSIX (forward slash), relative to the workspace root
 11. The array-ordering conventions (§1) are satisfied
+12. If `dependencies[].via` is `"call"`, both `from` and `to` are symbol ids present in `symbols[].id` (strengthens #4 for call edges — a call edge with a component-id endpoint or a dangling symbol id is rejected outright)
+13. Within `dependencies[]`, the triple `(from, to, via)` is unique — the same directed edge cannot be recorded twice
+14. For every `Symbol.calls[]` entry with a non-null `resolved`, there is a matching Dependency `{ from: caller.id, to: resolved, via: "call" }` in `dependencies[]`, and conversely every `via: "call"` Dependency corresponds to at least one such Call entry (the call-graph projection is total and lossless in both directions)
 
 An invariant violation is a **fatal error**, not a warning.
 
