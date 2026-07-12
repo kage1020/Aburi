@@ -30,7 +30,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **No symbol-to-symbol dependency edges** — the IR carries component → component
   dependencies only
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
-  (design: [`lsp-enrichment.md`](./design/lsp-enrichment.md); implementation upcoming)
+  (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
 - **No workspace-level mermaid overview / Slice View / graph visualization**
   (Slice View: design landed; implementation upcoming)
 - **No LLM integration** — Aburi is a deterministic static analyser by design;

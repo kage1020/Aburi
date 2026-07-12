@@ -225,7 +225,7 @@ The edge's `confidence` is the resolution confidence at the moment of resolution
 | §5.3 LSP interface with single impl | `medium` |
 | §5.3 LSP interface with DI-resolved impl | `medium` |
 
-Effect propagation must respect edge confidence when combining propagated effect confidence — see `effect-propagation.md` (planned).
+Effect propagation must respect edge confidence when combining propagated effect confidence — see [`effect-propagation.md`](./effect-propagation.md) §5.3.
 
 ### 7.3 Cross-language edges
 
@@ -354,7 +354,7 @@ Resolution requires knowledge of every file's imports and every Symbol in the wo
 
 ### 11.5 Why confidence is per-edge, not per-Symbol
 
-An edge from A to B is a distinct fact from A's own confidence. Downgrading A's `confidence` because one of its outgoing edges is `low` would be a category error. Effect propagation is where the two confidences combine — see `effect-propagation.md` (planned).
+An edge from A to B is a distinct fact from A's own confidence. Downgrading A's `confidence` because one of its outgoing edges is `low` would be a category error. Effect propagation is where the two confidences combine — see [`effect-propagation.md`](./effect-propagation.md) §5.3.
 
 ### 11.6 Why re-export transitivity is not followed
 
