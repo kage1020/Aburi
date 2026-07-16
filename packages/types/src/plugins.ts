@@ -46,11 +46,27 @@ export interface ParseError {
 export interface ImportEdge {
   /** Module specifier verbatim (e.g. "@billing/domain", "./util"). */
   source: string
-  /** Named imports, or "*" for namespace / wildcard. */
+  /**
+   * Named imports, or "*" for namespace / wildcard.
+   *
+   * For aliased named imports (`import { X as Y }`) the entry is the string
+   * `"X as Y"` — the exported name paired with the local rebind separated by
+   * ` as `. Callers that only care about the exported name split on the
+   * separator; callers that need the local binding (call resolution) do the
+   * same split and pick the right half. Un-aliased imports emit the plain
+   * exported name (`"X"`).
+   */
   symbols: string[] | "*"
   line: number
   /** True for `import()` and equivalent dynamic forms. */
   dynamic: boolean
+  /**
+   * Local binding for a namespace import (`import * as Foo from './x'` → `"Foo"`).
+   * Present only on edges whose `symbols` is `"*"`. Absent on bare side-effect
+   * imports (`import './x'`) and on wildcard re-exports (`export * from './x'`)
+   * where there is no in-scope binding for the caller to reference.
+   */
+  namespaceBinding?: string
 }
 
 /**

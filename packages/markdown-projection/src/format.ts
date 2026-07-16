@@ -287,3 +287,21 @@ export function orderFilesAscending(files: readonly string[]): string[] {
 export function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
+
+/**
+ * ir-schema.md §3.1 Symbol id shape (`<language>:<file>#<qname>`). Kept as a
+ * private constant so this module's helpers do not need to re-import the same
+ * pattern from `@aburi/core` — the two definitions are pin-linked to the
+ * schema and would drift in lockstep on any future change.
+ */
+const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
+
+/**
+ * True when a Dependency endpoint (from/to) matches the Symbol id shape rather
+ * than the Component id shape. Used to route symbol-to-symbol call edges
+ * through their dedicated Markdown sections while leaving component-to-component
+ * edges in the existing sections.
+ */
+export function isSymbolIdEndpoint(endpoint: string): boolean {
+  return SYMBOL_ID_PATTERN.test(endpoint)
+}

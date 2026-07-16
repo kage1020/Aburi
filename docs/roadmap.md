@@ -14,6 +14,9 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Framework classification**: NestJS and Next.js (App Router) plugins
 - **Effect detection**: Prisma (`db.read` / `db.write` / `db.transaction`) and
   NestJS events (`event.publish`) — local detection at the call site
+- **Symbol-to-symbol dependency edges**: file-scope and import-scope call
+  resolution filling `Symbol.calls[].resolved`, projected as `via: "call"`
+  entries in `dependencies[]`
 - **Extraction**: drop list (boilerplate removal) + Rules + Boundaries + local Effects
 - **Commands**: `aburi init` / `aburi scan` / `aburi diff <base>..<head>` / `aburi explain`
 - **Diff**: all 6 statuses — `added` / `removed` / `moved` / `changed` /
@@ -27,8 +30,9 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **TypeScript only** — no other languages yet
 - **Effects are local** — an effect is attached to the method that makes the
   call, not propagated up through the call graph
-- **No symbol-to-symbol dependency edges** — the IR carries component → component
-  dependencies only
+- **Call resolution is syntactic only** — file-scope and import-scope resolution
+  (plus local-parameter shadow guarding) are wired up; component-scope,
+  workspace-scope, and LSP-based resolution tiers are not
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
   (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
 - **No workspace-level mermaid overview / Slice View / graph visualization**
@@ -40,10 +44,8 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 
 ## Next: effect propagation and the vertical axis
 
-- **Effect propagation**: build the symbol call graph and propagate `db.write`
+- **Effect propagation**: build on the symbol call graph and propagate `db.write`
   to methods that call methods that call `prisma.invoice.create`
-- **Symbol-to-symbol dependencies**: add symbol → symbol edges to the IR's
-  `dependencies[]`
 - **Slice View**: cluster a PR's changed symbol set into connected components
   over the call graph and render vertical slices in Markdown
 - **L0 workspace overview**: output the full monorepo view as a mermaid graph

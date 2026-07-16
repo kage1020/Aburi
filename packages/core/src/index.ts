@@ -1,3 +1,9 @@
+export {
+  type CallEdge,
+  type ResolveCallGraphInput,
+  type ResolveCallGraphResult,
+  resolveCallGraph,
+} from "./callgraph"
 export { type SerializeOptions, serializeCanonical } from "./canonical"
 export {
   __testing as __testing_component,

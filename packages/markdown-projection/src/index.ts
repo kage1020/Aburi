@@ -7,7 +7,7 @@ export {
   projectDiff,
   projectDiffSummaryLine,
 } from "./diff"
-export { projectSymbolExplain } from "./explain"
+export { type ProjectSymbolExplainContext, projectSymbolExplain } from "./explain"
 export {
   type DroppedToggledBreakdown,
   evaluateFailOn,
@@ -29,6 +29,7 @@ export {
   fingerprintLine,
   INLINE_CODE_MAX_LENGTH,
   inlineCodePath,
+  isSymbolIdEndpoint,
   orderFilesAscending,
   orderSymbolsWithinFile,
   ProjectionInvariantError,

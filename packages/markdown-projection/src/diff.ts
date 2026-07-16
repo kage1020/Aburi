@@ -1,4 +1,5 @@
 import type {
+  Dependency,
   DiffResult,
   Symbol as IRSymbol,
   SymbolChange,
@@ -9,7 +10,7 @@ import type {
   SymbolMovedChanged,
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
-import { compareStrings, requireDropReason } from "./format"
+import { compareStrings, isSymbolIdEndpoint, requireDropReason } from "./format"
 
 /**
  * §6 — `out/diff.md`. Sections are emitted in the fixed importance order
@@ -468,23 +469,40 @@ function renderComponentChanges(diff: DiffResult): string[] {
   return rows
 }
 
+/**
+ * §6 Dependency changes — split into two levels so reviewers can scan
+ * component-shape movement (architectural) separately from method call
+ * movement (implementation detail). Both live in the same section heading
+ * because both are `Dependency` records under the hood; the sub-headings
+ * (`### Component-level added`, `### Symbol-level added`, ...) do the routing.
+ * A group that has no entries collapses entirely — an empty section reads as
+ * "nothing changed at this level", not as an intentional silence.
+ */
 function renderDependencyChanges(diff: DiffResult): string[] {
+  const compAdded = diff.dependencies.added.filter((d) => !isSymbolEdge(d))
+  const compRemoved = diff.dependencies.removed.filter((d) => !isSymbolEdge(d))
+  const symAdded = diff.dependencies.added.filter((d) => isSymbolEdge(d))
+  const symRemoved = diff.dependencies.removed.filter((d) => isSymbolEdge(d))
+
   const rows: string[] = []
-  if (diff.dependencies.added.length > 0) {
-    rows.push("### Added")
-    for (const d of diff.dependencies.added) {
-      rows.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
-    }
-    rows.push("")
-  }
-  if (diff.dependencies.removed.length > 0) {
-    rows.push("### Removed")
-    for (const d of diff.dependencies.removed) {
-      rows.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
-    }
-    rows.push("")
-  }
+  appendDependencyGroup(rows, "Component-level added", compAdded)
+  appendDependencyGroup(rows, "Component-level removed", compRemoved)
+  appendDependencyGroup(rows, "Symbol-level added", symAdded)
+  appendDependencyGroup(rows, "Symbol-level removed", symRemoved)
   return rows
+}
+
+function appendDependencyGroup(rows: string[], heading: string, deps: readonly Dependency[]): void {
+  if (deps.length === 0) return
+  rows.push(`### ${heading}`)
+  for (const d of deps) {
+    rows.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
+  }
+  rows.push("")
+}
+
+function isSymbolEdge(d: Dependency): boolean {
+  return isSymbolIdEndpoint(d.from) || isSymbolIdEndpoint(d.to)
 }
 
 function sortByAfterId<T extends { after: IRSymbol }>(items: readonly T[]): T[] {

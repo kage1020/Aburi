@@ -134,4 +134,55 @@ describe("diffDependencies (I5)", () => {
     const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
     expect(keys).toEqual([...keys].sort())
   })
+
+  it("treats a symbol-id endpoint added in head as a plain add on the same (from, to, via) key", () => {
+    const after = dependency({
+      from: "ts:src/a.ts#caller",
+      to: "ts:src/util.ts#helper",
+      via: "call",
+      direction: "outbound",
+      effect: null,
+    })
+    const result = diffDependencies([], [after])
+    expect(result.added).toHaveLength(1)
+    expect(result.added[0]?.from).toBe("ts:src/a.ts#caller")
+    expect(result.added[0]?.via).toBe("call")
+  })
+
+  it("mixes component-level and symbol-level edges in one added[] and sorts them together", () => {
+    const compEdge = dependency({
+      from: "billing",
+      to: "payments",
+      via: "import",
+    })
+    const symEdge = dependency({
+      from: "ts:src/a.ts#caller",
+      to: "ts:src/util.ts#helper",
+      via: "call",
+      direction: "outbound",
+      effect: null,
+    })
+    const result = diffDependencies([], [symEdge, compEdge])
+    expect(result.added).toHaveLength(2)
+    const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
+    expect(keys).toEqual([...keys].sort())
+    // The composite-key sort places the component-level "billing::payments::import"
+    // before the symbol-id "ts:src/..." endpoints because lowercase kebab-case
+    // component ids sort ahead of the language-prefixed symbol ids.
+    expect(result.added[0]?.from).toBe("billing")
+    expect(result.added[1]?.from).toBe("ts:src/a.ts#caller")
+  })
+
+  it("emits pure removed when a symbol-level edge disappears from head", () => {
+    const before = dependency({
+      from: "ts:src/a.ts#caller",
+      to: "ts:src/util.ts#helper",
+      via: "call",
+      direction: "outbound",
+      effect: null,
+    })
+    const result = diffDependencies([before], [])
+    expect(result.removed).toHaveLength(1)
+    expect(result.added).toEqual([])
+  })
 })

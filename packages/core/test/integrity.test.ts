@@ -159,6 +159,140 @@ describe("checkIRIntegrity", () => {
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 11)).toBe(true)
   })
+
+  it("#12: rejects via:call edges whose from is a Component id (non-symbol shape)", () => {
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#foo")]
+    ir.dependencies = [
+      {
+        from: "billing",
+        to: "ts:src/a.ts#foo",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 12)).toBe(true)
+  })
+
+  it("#12: rejects via:call edges whose to is a dangling Symbol id", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", {
+        calls: [{ target: "gone", line: 1, resolved: "ts:src/missing.ts#gone" }],
+      }),
+    ]
+    ir.dependencies = [
+      {
+        from: "ts:src/a.ts#foo",
+        to: "ts:src/missing.ts#gone",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 12)).toBe(true)
+  })
+
+  it("#12: rejects via:call edges whose to points at a dropped Symbol", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "helper", line: 1, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper", { dropped: true, dropReason: "test" }),
+    ]
+    ir.dependencies = [
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 12)).toBe(true)
+  })
+
+  it("#12: accepts via:call edges whose both endpoints exist in symbols[]", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "helper", line: 3, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper"),
+    ]
+    ir.dependencies = [
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    expect(checkIRIntegrity(ir)).toEqual([])
+  })
+
+  it("#13: detects duplicate (from, to, via) triples in dependencies[]", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "helper", line: 3, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper"),
+    ]
+    ir.dependencies = [
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 13)).toBe(true)
+  })
+
+  it("#14: detects a resolved call with no matching via:call Dependency", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "helper", line: 3, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper"),
+    ]
+    ir.dependencies = []
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 14)).toBe(true)
+  })
+
+  it("#14: detects a via:call Dependency with no backing Symbol.calls[].resolved", () => {
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#caller"), makeSymbol("ts:src/a.ts#helper")]
+    ir.dependencies = [
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        direction: "outbound",
+        effect: null,
+      },
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 14)).toBe(true)
+  })
 })
 
 describe("assertIRIntegrity", () => {

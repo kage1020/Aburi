@@ -103,12 +103,12 @@ describe("C8: dynamic import specifier shapes", () => {
   })
 })
 
-describe("C8: aliased named import preserves the exported name", () => {
-  it("keeps the exported name `A`, not the local rebind `B`", async () => {
+describe("C8: aliased named import preserves both exported name and local rebind", () => {
+  it("emits the composite `A as B` so call resolution can recover both halves", async () => {
     const imports = await importsOf("import { A as B } from './y'")
     const edge = imports.find((e) => Array.isArray(e.symbols))
     if (edge === undefined) throw new Error("edge missing")
-    expect(edge.symbols).toEqual(["A"])
+    expect(edge.symbols).toEqual(["A as B"])
   })
 })
 

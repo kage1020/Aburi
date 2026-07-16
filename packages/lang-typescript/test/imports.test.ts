@@ -14,7 +14,14 @@ describe("import extraction", () => {
 
   it("LP25: namespace import", async () => {
     const { imports } = await parseAndImports("import * as Y from 'z'")
-    expect(imports).toEqual([{ source: "z", symbols: "*", line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: "z", symbols: "*", line: 1, dynamic: false, namespaceBinding: "Y" },
+    ])
+  })
+
+  it("carries the ` as ` alias on an aliased named import", async () => {
+    const { imports } = await parseAndImports("import { A as B } from './x'")
+    expect(imports).toEqual([{ source: "./x", symbols: ["A as B"], line: 1, dynamic: false }])
   })
 
   it("LP26: dynamic import()", async () => {
