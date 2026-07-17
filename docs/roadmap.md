@@ -30,9 +30,10 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **TypeScript only** — no other languages yet
 - **Effects are local** — an effect is attached to the method that makes the
   call, not propagated up through the call graph
-- **Call resolution is syntactic only** — file-scope and import-scope resolution
-  (plus local-parameter shadow guarding) are wired up; component-scope,
-  workspace-scope, and LSP-based resolution tiers are not
+- **Call resolution is syntactic only** — file-scope, import-scope,
+  component-scope, and workspace-scope resolution (plus local-parameter shadow
+  guarding and `this` / `super` guarding per §4.7) are wired up; the LSP-based
+  resolution tier is not
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
   (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
 - **No workspace-level mermaid overview / Slice View / graph visualization**
