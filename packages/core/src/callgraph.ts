@@ -287,10 +287,10 @@ function resolveInImportScope(
  * Step 4 (call-resolution.md §4.5): if steps 1–3 miss and `target` is a
  * qualified name, search Symbols within the caller's component whose `name`
  * equals `target`. Unique match → medium confidence; ambiguous → null. The
- * language filter (§7.3) is applied by the outer `WorkspaceIndex` keying;
- * `ComponentIndex` inherits it because `Symbol.language` is part of the outer
- * key. Component-scope search ignores `import` bindings — that is the whole
- * point of §4.5 (barrel re-exports, inheritance-style references).
+ * language filter (§7.3) is enforced by `ComponentIndex`'s own outer language
+ * key, so cross-language buckets never share a `(component, name)` cell.
+ * Component-scope search ignores `import` bindings — that is the whole point
+ * of §4.5 (barrel re-exports, inheritance-style references).
  */
 function resolveInComponentScope(ctx: ResolveTargetContext): ResolutionHit | null {
   const perLang = ctx.componentIndex.get(ctx.caller.language)

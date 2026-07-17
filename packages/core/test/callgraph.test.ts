@@ -604,6 +604,59 @@ describe("resolveCallGraph", () => {
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
   })
 
+  it("§4.7: `super.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
+    // Symmetric guard to CR14 — `super` resolves through the class hierarchy,
+    // which only the LSP tier can see. Without a dedicated test the `super`
+    // branch of the §4.7 guard could be dropped in a refactor without any
+    // regression being caught.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "super.method", line: 5 }], {
+      component: "billing",
+    })
+    const fake = makeSymbol("ts:src/other.ts#super.method", {
+      kind: "method",
+      component: "billing",
+    })
+    const result = resolveCallGraph({ symbols: [caller, fake], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("§4.2 parameter shadow also blocks §4.5 / §4.6 for dotted targets", () => {
+    // If §4.5 / §4.6 ran before the parameter guard — or if the guard only
+    // covered §4.3 / §4.4 — a caller parameter named `helper` could still
+    // resolve to a workspace Symbol `helper.method` through component or
+    // workspace scope. The tier order must ensure parameters short-circuit
+    // every subsequent scope, not just the file / import scopes.
+    const caller = makeSymbol("ts:src/a.ts#caller", {
+      component: "billing",
+      signature: {
+        inputs: [{ name: "helper", type: "{ method(): void }" }],
+        outputs: ["void"],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+      calls: [{ target: "helper.method", line: 5, resolved: null }],
+    })
+    // Component-scope candidate (would resolve to medium without the guard).
+    const inComponent = makeSymbol("ts:src/x.ts#helper.method", {
+      kind: "method",
+      component: "billing",
+    })
+    // Workspace-scope candidate (would resolve to low without the guard).
+    const inWorkspace = makeSymbol("ts:src/y.ts#helper.method", {
+      kind: "method",
+      component: "reporting",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, inComponent, inWorkspace],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
   it("CR15: `new ClassName()` resolves the class Symbol via imports (confidence high)", () => {
     // `walkBody` normalizes `new Cls()` to the callee identifier `Cls`; that
     // reaches import scope and lands on the class Symbol with confidence high.
@@ -625,7 +678,7 @@ describe("resolveCallGraph", () => {
   })
 
   // ---------------------------------------------------------------------------
-  // Fixture-driven integrated matrix — issue #27's headline requirement
+  // Integrated matrix — intra-file / intra-component / workspace / dynamic in one run
   // ---------------------------------------------------------------------------
 
   describe("resolveCallGraph — integrated resolution matrix", () => {
