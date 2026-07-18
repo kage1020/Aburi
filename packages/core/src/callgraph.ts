@@ -49,15 +49,18 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
 
 /**
  * Resolve every `Symbol.calls[]` entry against the workspace Symbol table using the
- * untyped resolution tiers from `call-resolution.md` §4.3 (file scope) and §4.4
- * (import scope). Higher tiers — component scope, workspace scope, and the LSP tier —
- * are intentionally deferred to a follow-up implementation; unresolved calls stay
- * `resolved: null`, exactly as §7.1 requires.
+ * untyped resolution tiers from `call-resolution.md`: §4.2 local shadow (parameter
+ * subset), §4.3 file scope, §4.4 import scope, §4.5 component scope, §4.6 workspace
+ * scope. Each tier is tried in order and the first hit wins; the confidence of the
+ * emitted edge reflects the tier that produced it (§7.2). The LSP-enriched tier
+ * (§5) is intentionally deferred to a follow-up implementation; unresolved calls
+ * stay `resolved: null`, exactly as §7.1 requires.
  *
  * Determinism: the resolver reads `symbols` and `importsByFile` and no filesystem
  * state, so the same inputs always produce the same outputs. Ambiguous matches
  * (two same-named top-level Symbols in the same file, two importable candidates
- * for the same specifier) are conservatively left null — never silently picked —
+ * for the same specifier, two qname candidates in the same component, two globally
+ * unique-name candidates) are conservatively left null — never silently picked —
  * so the caller never sees an edge that the resolver could not justify.
  */
 export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraphResult {
@@ -71,6 +74,8 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   const keptSymbolIds = new Set<SymbolId>(input.symbols.filter((s) => !s.dropped).map((s) => s.id))
   const topLevelByFile = indexTopLevelByFile(input.symbols)
   const filesByLanguage = indexFilesByLanguage(input.symbols)
+  const componentIndex = indexByComponent(input.symbols)
+  const workspaceIndex = indexByWorkspace(input.symbols)
 
   const nextSymbols: IRSymbol[] = []
   const edges: CallEdge[] = []
@@ -91,6 +96,8 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         keptSymbolIds,
         topLevelByFile,
         filesByLanguage,
+        componentIndex,
+        workspaceIndex,
         extensions,
         parameterNames,
       })
@@ -145,6 +152,8 @@ interface ResolveTargetContext {
   keptSymbolIds: ReadonlySet<SymbolId>
   topLevelByFile: TopLevelIndex
   filesByLanguage: Map<string, Set<string>>
+  componentIndex: ComponentIndex
+  workspaceIndex: WorkspaceIndex
   extensions: readonly string[]
   parameterNames: ReadonlySet<string>
 }
@@ -161,11 +170,32 @@ function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
   // null resolution and no edge.
   if (ctx.parameterNames.has(head)) return null
 
+  // §4.7 Special normalized targets: `this.<method>` / `super.<method>` MUST
+  // stay unresolved in the untyped tier because the receiver identity depends
+  // on the caller's class hierarchy, which only the LSP tier can see. Even if
+  // a Symbol whose `name` happens to be `this.method` appeared in the table,
+  // it would not be a legitimate call target — never fabricate a name for a
+  // receiver that isn't a name.
+  if (head === "this" || head === "super") return null
+
   const fileHit = resolveInFileScope(ctx.caller, head, tail, ctx.keptSymbolIds, ctx.topLevelByFile)
   if (fileHit !== null) return fileHit
 
   const importHit = resolveInImportScope(ctx, head, tail)
   if (importHit !== null) return importHit
+
+  // §4.5 / §4.6 only apply to qualified names ("Cls.method",
+  // "Namespace.Cls.method"). A single identifier that missed §4.3 / §4.4 is
+  // either a local, an external, or a genuine miss — resolving it via
+  // workspace search would just produce weak-evidence edges to unrelated
+  // Symbols that happen to share the name.
+  if (tail.length === 0) return null
+
+  const componentHit = resolveInComponentScope(ctx)
+  if (componentHit !== null) return componentHit
+
+  const workspaceHit = resolveInWorkspaceScope(ctx)
+  if (workspaceHit !== null) return workspaceHit
 
   return null
 }
@@ -251,6 +281,43 @@ function resolveInImportScope(
   if (candidates.size !== 1) return null
   const [only] = candidates
   return { id: only as SymbolId, confidence: "high" }
+}
+
+/**
+ * Step 4 (call-resolution.md §4.5): if steps 1–3 miss and `target` is a
+ * qualified name, search Symbols within the caller's component whose `name`
+ * equals `target`. Unique match → medium confidence; ambiguous → null. The
+ * language filter (§7.3) is enforced by `ComponentIndex`'s own outer language
+ * key, so cross-language buckets never share a `(component, name)` cell.
+ * Component-scope search ignores `import` bindings — that is the whole point
+ * of §4.5 (barrel re-exports, inheritance-style references).
+ */
+function resolveInComponentScope(ctx: ResolveTargetContext): ResolutionHit | null {
+  const perLang = ctx.componentIndex.get(ctx.caller.language)
+  if (perLang === undefined) return null
+  const componentKey = componentKeyOf(ctx.caller.component ?? null)
+  const perComponent = perLang.get(componentKey)
+  if (perComponent === undefined) return null
+  const bucket = perComponent.get(ctx.target)
+  if (bucket === undefined || bucket.length !== 1) return null
+  const hit = bucket[0] as IRSymbol
+  if (!ctx.keptSymbolIds.has(hit.id)) return null
+  return { id: hit.id, confidence: "medium" }
+}
+
+/**
+ * Step 5 (call-resolution.md §4.6): same as §4.5 but workspace-wide within a
+ * single language (§7.3 — cross-language edges are not emitted by the untyped
+ * tier). Unique match → low confidence; ambiguous → null; no match → null.
+ */
+function resolveInWorkspaceScope(ctx: ResolveTargetContext): ResolutionHit | null {
+  const perLang = ctx.workspaceIndex.get(ctx.caller.language)
+  if (perLang === undefined) return null
+  const bucket = perLang.get(ctx.target)
+  if (bucket === undefined || bucket.length !== 1) return null
+  const hit = bucket[0] as IRSymbol
+  if (!ctx.keptSymbolIds.has(hit.id)) return null
+  return { id: hit.id, confidence: "low" }
 }
 
 /**
@@ -378,6 +445,66 @@ function indexFilesByLanguage(symbols: readonly IRSymbol[]): Map<string, Set<str
     out.set(symbol.language, bucket)
   }
   return out
+}
+
+/**
+ * `language → componentKey → Symbol.name → Symbol[]`. Used by §4.5 to search
+ * for a qualified name within the caller's component boundary. `componentKey`
+ * folds `null`/`undefined` into a single "no component" bucket (see
+ * `componentKeyOf`) so callers with `component: null` still resolve against
+ * peers that also have `component: null`. Dropped Symbols are skipped — they
+ * are never valid callees. The final list is left in the original input order;
+ * `resolveInComponentScope` treats a `length !== 1` bucket as ambiguous, so no
+ * tiebreak is needed to keep the result deterministic (§9).
+ */
+type ComponentIndex = Map<string, Map<string, Map<string, IRSymbol[]>>>
+
+function indexByComponent(symbols: readonly IRSymbol[]): ComponentIndex {
+  const out: ComponentIndex = new Map()
+  for (const symbol of symbols) {
+    if (symbol.dropped) continue
+    const perLang = out.get(symbol.language) ?? new Map<string, Map<string, IRSymbol[]>>()
+    const componentKey = componentKeyOf(symbol.component ?? null)
+    const perComponent = perLang.get(componentKey) ?? new Map<string, IRSymbol[]>()
+    const bucket = perComponent.get(symbol.name) ?? []
+    bucket.push(symbol)
+    perComponent.set(symbol.name, bucket)
+    perLang.set(componentKey, perComponent)
+    out.set(symbol.language, perLang)
+  }
+  return out
+}
+
+/**
+ * `language → Symbol.name → Symbol[]`. Used by §4.6 to search the whole
+ * workspace within a single language. Cross-language matches are prevented by
+ * the outer language key — call-resolution.md §7.3 defers cross-language
+ * resolution to a follow-up phase. Dropped Symbols are skipped for the same
+ * reason as in `indexByComponent`.
+ */
+type WorkspaceIndex = Map<string, Map<string, IRSymbol[]>>
+
+function indexByWorkspace(symbols: readonly IRSymbol[]): WorkspaceIndex {
+  const out: WorkspaceIndex = new Map()
+  for (const symbol of symbols) {
+    if (symbol.dropped) continue
+    const perLang = out.get(symbol.language) ?? new Map<string, IRSymbol[]>()
+    const bucket = perLang.get(symbol.name) ?? []
+    bucket.push(symbol)
+    perLang.set(symbol.name, bucket)
+    out.set(symbol.language, perLang)
+  }
+  return out
+}
+
+/**
+ * Fold `Symbol.component` (`ComponentId | null | undefined`) into a stable
+ * string key. An empty-string key represents "no component" and can never
+ * collide with a real component id (which per `ir-schema.md` is required to be
+ * ASCII kebab-case — non-empty).
+ */
+function componentKeyOf(component: string | null): string {
+  return component ?? ""
 }
 
 function compareCallEdge(a: CallEdge, b: CallEdge): number {

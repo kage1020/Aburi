@@ -354,4 +354,417 @@ describe("resolveCallGraph", () => {
       "ts:src/z.ts#z->ts:src/util.ts#other@8",
     ])
   })
+
+  // ---------------------------------------------------------------------------
+  // §4.5 Component scope — CR11 / CR13, precedence, dropped, cross-language guard
+  // ---------------------------------------------------------------------------
+
+  it("component scope (CR11): qualified name unique within the caller's component resolves with medium confidence", () => {
+    // No explicit import for `PricingService` — the resolver must fall through
+    // §4.3 (file scope, no such Symbol) and §4.4 (no import), then find the
+    // method Symbol by qname within the same component.
+    const caller = withCalls(
+      "ts:src/checkout.ts#caller",
+      [{ target: "PricingService.calc", line: 5 }],
+      { component: "billing" },
+    )
+    const callee = makeSymbol("ts:src/pricing.ts#PricingService.calc", {
+      kind: "method",
+      component: "billing",
+    })
+    const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: new Map() })
+    expect(result.edges).toEqual([
+      {
+        from: "ts:src/checkout.ts#caller",
+        to: "ts:src/pricing.ts#PricingService.calc",
+        via: "call",
+        confidence: "medium",
+        line: 5,
+      },
+    ])
+  })
+
+  it("component scope: does not cross component boundaries", () => {
+    // Two same-named candidates exist workspace-wide but neither shares the
+    // caller's component. §4.5 must NOT pick either (its filter is strict); §4.6
+    // must NOT pick either (workspace ambiguity). Result: no edge — proving
+    // §4.5's component filter is real and not accidentally satisfied by §4.6.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "PricingService.calc", line: 5 }], {
+      component: "billing",
+    })
+    const firstElsewhere = makeSymbol("ts:src/one.ts#PricingService.calc", {
+      kind: "method",
+      component: "reporting",
+    })
+    const secondElsewhere = makeSymbol("ts:src/two.ts#PricingService.calc", {
+      kind: "method",
+      component: "analytics",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, firstElsewhere, secondElsewhere],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("component scope (CR13): ambiguous qualified name within a component stays unresolved", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "PricingService.calc", line: 5 }], {
+      component: "billing",
+    })
+    const first = makeSymbol("ts:src/one.ts#PricingService.calc", {
+      kind: "method",
+      component: "billing",
+    })
+    const second = makeSymbol("ts:src/two.ts#PricingService.calc", {
+      kind: "method",
+      component: "billing",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, first, second],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("component scope: single-identifier target is not searched (must be qualified)", () => {
+    // `helper` alone must not be resolved through §4.5 even when a Symbol
+    // named `helper` exists in the same component but a different file —
+    // otherwise §4.3/§4.4's "same file / imported only" contract would leak.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 3 }], {
+      component: "billing",
+    })
+    const callee = makeSymbol("ts:src/b.ts#helper", { component: "billing" })
+    const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+  })
+
+  it("component scope: dropped Symbol is skipped as callee candidate", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "PricingService.calc", line: 5 }], {
+      component: "billing",
+    })
+    const dropped = makeSymbol("ts:src/pricing.ts#PricingService.calc", {
+      kind: "method",
+      component: "billing",
+      dropped: true,
+      dropReason: "test",
+    })
+    const result = resolveCallGraph({ symbols: [caller, dropped], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+  })
+
+  // ---------------------------------------------------------------------------
+  // §4.6 Workspace scope — CR12, ambiguity, cross-language guard, precedence
+  // ---------------------------------------------------------------------------
+
+  it("workspace scope (CR12): globally-unique qualified name resolves with low confidence", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Uniq.method", line: 9 }], {
+      component: "billing",
+    })
+    const callee = makeSymbol("ts:src/other.ts#Uniq.method", {
+      kind: "method",
+      component: "reporting",
+    })
+    const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: new Map() })
+    expect(result.edges).toEqual([
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/other.ts#Uniq.method",
+        via: "call",
+        confidence: "low",
+        line: 9,
+      },
+    ])
+  })
+
+  it("workspace scope: ambiguous globally leaves the call null (no silent pick)", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Uniq.method", line: 9 }], {
+      component: "billing",
+    })
+    const first = makeSymbol("ts:src/one.ts#Uniq.method", {
+      kind: "method",
+      component: "reporting",
+    })
+    const second = makeSymbol("ts:src/two.ts#Uniq.method", {
+      kind: "method",
+      component: "analytics",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, first, second],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("§7.3 cross-language: workspace scope only matches within the caller's language", () => {
+    // A Python Symbol with the same qname must not be selected by a TS caller.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Uniq.method", line: 4 }], {
+      component: "billing",
+    })
+    const py = makeSymbol("py:src/other.py#Uniq.method", {
+      kind: "method",
+      language: "py",
+      component: "reporting",
+    })
+    const result = resolveCallGraph({ symbols: [caller, py], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+  })
+
+  it("component scope wins over workspace scope when both would match (§4.5 precedes §4.6)", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Shared.method", line: 5 }], {
+      component: "billing",
+    })
+    const inComponent = makeSymbol("ts:src/near.ts#Shared.method", {
+      kind: "method",
+      component: "billing",
+    })
+    const outOfComponent = makeSymbol("ts:src/far.ts#Shared.method", {
+      kind: "method",
+      component: "reporting",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, inComponent, outOfComponent],
+      importsByFile: new Map(),
+    })
+    // Component-scope match must win: medium, not low.
+    expect(result.edges).toEqual([
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/near.ts#Shared.method",
+        via: "call",
+        confidence: "medium",
+        line: 5,
+      },
+    ])
+  })
+
+  it("import scope wins over component/workspace scope (Step 3 precedes Step 4/5)", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls.method", line: 4 }], {
+      component: "billing",
+    })
+    const imported = makeSymbol("ts:src/x.ts#Cls.method", { kind: "method", component: "billing" })
+    const clsForImport = makeSymbol("ts:src/x.ts#Cls", { kind: "class", component: "billing" })
+    const componentOnly = makeSymbol("ts:src/y.ts#Cls.method", {
+      kind: "method",
+      component: "billing",
+    })
+    const imports = new Map<string, readonly ImportEdge[]>([
+      ["src/a.ts", [importEdge({ source: "./x", symbols: ["Cls"] })]],
+    ])
+    const result = resolveCallGraph({
+      symbols: [caller, imported, clsForImport, componentOnly],
+      importsByFile: imports,
+    })
+    // Import wins: confidence must be high, targeting the imported file — not
+    // medium via the component-scope candidate in y.ts.
+    expect(result.edges).toEqual([
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/x.ts#Cls.method",
+        via: "call",
+        confidence: "high",
+        line: 4,
+      },
+    ])
+  })
+
+  it("workspace scope: dropped Symbol is skipped as callee candidate", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Uniq.method", line: 4 }], {
+      component: "billing",
+    })
+    const dropped = makeSymbol("ts:src/other.ts#Uniq.method", {
+      kind: "method",
+      component: "reporting",
+      dropped: true,
+      dropReason: "test",
+    })
+    const result = resolveCallGraph({ symbols: [caller, dropped], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+  })
+
+  // ---------------------------------------------------------------------------
+  // §4.7 dynamic-dispatch / special targets — CR14, CR15
+  // ---------------------------------------------------------------------------
+
+  it("CR14: `this.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
+    // `this` is a runtime value; the untyped tier must not fabricate an edge
+    // to `SomeClass.method` just because the qname `this.method` would
+    // textually match a workspace Symbol.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "this.method", line: 5 }], {
+      component: "billing",
+    })
+    const fake = makeSymbol("ts:src/other.ts#this.method", {
+      kind: "method",
+      component: "billing",
+    })
+    const result = resolveCallGraph({ symbols: [caller, fake], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("§4.7: `super.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
+    // Symmetric guard to CR14 — `super` resolves through the class hierarchy,
+    // which only the LSP tier can see. Without a dedicated test the `super`
+    // branch of the §4.7 guard could be dropped in a refactor without any
+    // regression being caught.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "super.method", line: 5 }], {
+      component: "billing",
+    })
+    const fake = makeSymbol("ts:src/other.ts#super.method", {
+      kind: "method",
+      component: "billing",
+    })
+    const result = resolveCallGraph({ symbols: [caller, fake], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("§4.2 parameter shadow also blocks §4.5 / §4.6 for dotted targets", () => {
+    // If §4.5 / §4.6 ran before the parameter guard — or if the guard only
+    // covered §4.3 / §4.4 — a caller parameter named `helper` could still
+    // resolve to a workspace Symbol `helper.method` through component or
+    // workspace scope. The tier order must ensure parameters short-circuit
+    // every subsequent scope, not just the file / import scopes.
+    const caller = makeSymbol("ts:src/a.ts#caller", {
+      component: "billing",
+      signature: {
+        inputs: [{ name: "helper", type: "{ method(): void }" }],
+        outputs: ["void"],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+      calls: [{ target: "helper.method", line: 5, resolved: null }],
+    })
+    // Component-scope candidate (would resolve to medium without the guard).
+    const inComponent = makeSymbol("ts:src/x.ts#helper.method", {
+      kind: "method",
+      component: "billing",
+    })
+    // Workspace-scope candidate (would resolve to low without the guard).
+    const inWorkspace = makeSymbol("ts:src/y.ts#helper.method", {
+      kind: "method",
+      component: "reporting",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, inComponent, inWorkspace],
+      importsByFile: new Map(),
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
+  it("CR15: `new ClassName()` resolves the class Symbol via imports (confidence high)", () => {
+    // `walkBody` normalizes `new Cls()` to the callee identifier `Cls`; that
+    // reaches import scope and lands on the class Symbol with confidence high.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls", line: 6 }])
+    const cls = makeSymbol("ts:src/x.ts#Cls", { kind: "class" })
+    const imports = new Map<string, readonly ImportEdge[]>([
+      ["src/a.ts", [importEdge({ source: "./x", symbols: ["Cls"] })]],
+    ])
+    const result = resolveCallGraph({ symbols: [caller, cls], importsByFile: imports })
+    expect(result.edges).toEqual([
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/x.ts#Cls",
+        via: "call",
+        confidence: "high",
+        line: 6,
+      },
+    ])
+  })
+
+  // ---------------------------------------------------------------------------
+  // Integrated matrix — intra-file / intra-component / workspace / dynamic in one run
+  // ---------------------------------------------------------------------------
+
+  describe("resolveCallGraph — integrated resolution matrix", () => {
+    it("resolves intra-file / intra-package / cross-package / dynamic in one run", () => {
+      // caller invokes four callees in one body — each one exercises a
+      // distinct tier of the resolver:
+      //   L10 same-file       → high  (file scope, §4.3)
+      //   L20 same-component  → medium (component scope, §4.5)
+      //   L30 workspace-only  → low    (workspace scope, §4.6)
+      //   L40 dynamic (this.) → null   (§4.7 — no edge)
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        component: "billing",
+        calls: [
+          { target: "sameFile", line: 10, resolved: null },
+          { target: "PkgSvc.calc", line: 20, resolved: null },
+          { target: "GlobalUniq.method", line: 30, resolved: null },
+          { target: "this.method", line: 40, resolved: null },
+        ],
+      })
+      const sameFile = makeSymbol("ts:src/a.ts#sameFile", { component: "billing" })
+      const pkgSvc = makeSymbol("ts:src/pricing.ts#PkgSvc.calc", {
+        kind: "method",
+        component: "billing",
+      })
+      const globalUniq = makeSymbol("ts:src/report.ts#GlobalUniq.method", {
+        kind: "method",
+        component: "reporting",
+      })
+      const result = resolveCallGraph({
+        symbols: [caller, sameFile, pkgSvc, globalUniq],
+        importsByFile: new Map(),
+      })
+      expect(result.edges).toEqual([
+        {
+          from: "ts:src/a.ts#caller",
+          to: "ts:src/a.ts#sameFile",
+          via: "call",
+          confidence: "high",
+          line: 10,
+        },
+        {
+          from: "ts:src/a.ts#caller",
+          to: "ts:src/pricing.ts#PkgSvc.calc",
+          via: "call",
+          confidence: "medium",
+          line: 20,
+        },
+        {
+          from: "ts:src/a.ts#caller",
+          to: "ts:src/report.ts#GlobalUniq.method",
+          via: "call",
+          confidence: "low",
+          line: 30,
+        },
+      ])
+      const updated = result.symbols.find((s) => s.id === "ts:src/a.ts#caller")
+      expect(updated?.calls.map((c) => c.resolved)).toEqual([
+        "ts:src/a.ts#sameFile",
+        "ts:src/pricing.ts#PkgSvc.calc",
+        "ts:src/report.ts#GlobalUniq.method",
+        null,
+      ])
+    })
+
+    it("determinism (CR23): running the same input twice yields byte-identical edges", () => {
+      const caller = withCalls(
+        "ts:src/a.ts#caller",
+        [
+          { target: "PricingService.calc", line: 5 },
+          { target: "GlobalUniq.method", line: 6 },
+        ],
+        { component: "billing" },
+      )
+      const inComponent = makeSymbol("ts:src/pricing.ts#PricingService.calc", {
+        kind: "method",
+        component: "billing",
+      })
+      const inWorkspace = makeSymbol("ts:src/report.ts#GlobalUniq.method", {
+        kind: "method",
+        component: "reporting",
+      })
+      const symbols = [caller, inComponent, inWorkspace]
+      const first = resolveCallGraph({ symbols, importsByFile: new Map() })
+      const second = resolveCallGraph({ symbols, importsByFile: new Map() })
+      expect(JSON.stringify(first.edges)).toBe(JSON.stringify(second.edges))
+      expect(JSON.stringify(first.symbols)).toBe(JSON.stringify(second.symbols))
+    })
+  })
 })
