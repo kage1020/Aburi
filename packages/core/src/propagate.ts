@@ -6,6 +6,11 @@ import type {
   SymbolId,
 } from "@aburi/types"
 import type { CallEdge } from "./callgraph"
+import { CoreError } from "./errors"
+
+function invariantFailure(message: string): never {
+  throw new CoreError(`propagate: ${message}`, { code: "propagation-invariant-violated" })
+}
 
 /**
  * Transitive effect propagation over the resolved call graph. Implements
@@ -31,7 +36,10 @@ export interface PropagateResult {
   stats: EffectPropagationStats
 }
 
-/** Public alias so downstream consumers can reference the stats shape by module. */
+/**
+ * Alias for `EffectPropagationStats` re-exported through the propagation module so
+ * callers can import stats and pass alongside without also reaching into `@aburi/types`.
+ */
 export type PropagationStats = EffectPropagationStats
 
 const CONFIDENCE_RANK: Record<Confidence, number> = { low: 0, medium: 1, high: 2 }
@@ -77,14 +85,18 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
   const aggregateBySccIdx: Map<string, AggregatedEntry>[] = condensed.map(() => new Map())
 
   for (const sccIdx of sweepOrder) {
-    const scc = condensed[sccIdx]
-    if (scc === undefined) continue
-    const agg = aggregateBySccIdx[sccIdx]
-    if (agg === undefined) continue
+    // sweepOrder is a permutation of condensed's indices — every entry MUST index
+    // into both condensed and aggregateBySccIdx. A miss here would mean the DAG
+    // reverse-topo order and the SCC list have desynchronized, and silently
+    // skipping would swallow the whole SCC's effect set. Throw so upstream sees it.
+    const scc = condensed[sccIdx] ?? invariantFailure(`sweepOrder references missing SCC ${sccIdx}`)
+    const agg =
+      aggregateBySccIdx[sccIdx] ?? invariantFailure(`aggregate slot missing for SCC ${sccIdx}`)
 
     for (const memberId of scc.members) {
-      const symbol = symbolById.get(memberId)
-      if (symbol === undefined) continue
+      const symbol =
+        symbolById.get(memberId) ??
+        invariantFailure(`SCC member ${memberId} missing from symbolById`)
       for (const effect of symbol.effects) {
         if (effect.propagated === true) continue
         const k = keyOf(effect.id, effect.target)
@@ -110,9 +122,12 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
     }
 
     for (const toScc of scc.outSccs) {
-      const edgeConfidence = scc.outEdgeConfidence.get(toScc)
-      const downstream = aggregateBySccIdx[toScc]
-      if (edgeConfidence === undefined || downstream === undefined) continue
+      const edgeConfidence =
+        scc.outEdgeConfidence.get(toScc) ??
+        invariantFailure(`outSccs entry ${toScc} missing edge-confidence for SCC ${sccIdx}`)
+      const downstream =
+        aggregateBySccIdx[toScc] ??
+        invariantFailure(`downstream aggregate missing for SCC ${toScc}`)
       for (const downEntry of downstream.values()) {
         const propagatedConfidence = minConfidence(downEntry.confidence, edgeConfidence)
         const k = keyOf(downEntry.id, downEntry.target)
@@ -129,9 +144,15 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
           continue
         }
         existing.confidence = maxConfidence(existing.confidence, propagatedConfidence)
-        if (downEntry.derivedBy < existing.derivedBy) {
+        // Keep `plugin` and `derivedBy` in lock-step. When a local classification is
+        // already present anywhere in the SCC the local's (plugin, derivedBy) pair
+        // wins verbatim per effect-propagation.md §5.1 — downstream cannot rename
+        // either field. When there is no local, the downstream contribution with
+        // the lexicographically smallest `derivedBy` wins (§5.2) and BOTH fields
+        // move together so a reader never sees "plugin says X, derivedBy says Y".
+        if (!existing.hasLocal && downEntry.derivedBy < existing.derivedBy) {
           existing.derivedBy = downEntry.derivedBy
-          if (!existing.hasLocal) existing.plugin = downEntry.plugin
+          existing.plugin = downEntry.plugin
         }
       }
     }
@@ -165,10 +186,16 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         const k = keyOf(entry.id, entry.target)
         const derivedFromSet = new Set<SymbolId>()
         for (const callee of outCallees) {
-          const calleeSccIdx = sccOfNode.get(callee)
-          if (calleeSccIdx === undefined) continue
-          const calleeAgg = aggregateBySccIdx[calleeSccIdx]
-          if (calleeAgg?.has(k)) derivedFromSet.add(callee)
+          // callee came from `adjacency.get(original.id)`, which only contains
+          // nodes present in the input; sccOfNode was populated for every one.
+          // A miss means the SCC book-keeping is inconsistent.
+          const calleeSccIdx =
+            sccOfNode.get(callee) ??
+            invariantFailure(`out-callee ${callee} of ${original.id} has no SCC`)
+          const calleeAgg =
+            aggregateBySccIdx[calleeSccIdx] ??
+            invariantFailure(`aggregate missing for callee SCC ${calleeSccIdx}`)
+          if (calleeAgg.has(k)) derivedFromSet.add(callee)
         }
         if (derivedFromSet.size === 0) continue
         const derivedFrom = [...derivedFromSet].sort(compareCodeUnit)
@@ -217,7 +244,16 @@ function buildAdjacency(
   for (const id of nodeIds) adj.set(id, [])
   const seen = new Map<string, Confidence>()
   for (const e of edges) {
-    if (!adj.has(e.from) || !adj.has(e.to)) continue
+    // Every CallEdge must reference Symbols in the input set — resolveCallGraph
+    // filters against `keptSymbolIds`. A dangling endpoint here means the caller
+    // passed a `symbols`/`edges` pair that disagrees, and silently dropping the
+    // edge would hide propagation from every path that transits it.
+    if (!adj.has(e.from)) {
+      invariantFailure(`CallEdge.from ${e.from} is not present in input symbols`)
+    }
+    if (!adj.has(e.to)) {
+      invariantFailure(`CallEdge.to ${e.to} is not present in input symbols`)
+    }
     const key = `${e.from}\t${e.to}`
     const prior = seen.get(key)
     seen.set(key, prior === undefined ? e.confidence : maxConfidence(prior, e.confidence))
@@ -288,7 +324,14 @@ function tarjanSCC(
         if (idx !== undefined && low !== undefined && idx === low) {
           const component: SymbolId[] = []
           while (true) {
-            const popped = stack.pop() as SymbolId
+            const popped = stack.pop()
+            // Tarjan's contract: the stack must contain at least frame.node when
+            // we detect a root (idx === low), so this can only trigger if the
+            // recursion has a bug. Convert the silent `as SymbolId` cast into an
+            // observable failure so a future refactor cannot loop forever here.
+            if (popped === undefined) {
+              invariantFailure(`SCC stack drained before reaching root ${frame.node}`)
+            }
             onStack.delete(popped)
             component.push(popped)
             if (popped === frame.node) break

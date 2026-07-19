@@ -86,8 +86,20 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   if (symbol.effects.length > 0) {
     lines.push("## Effects")
     lines.push("")
-    for (const e of [...symbol.effects].sort((a, b) => (a.line ?? 0) - (b.line ?? 0)))
-      lines.push(effectRow(e))
+    // Two-segment emission — local (line-monotonic) first, propagated
+    // ((id, target)-monotonic) after — matches effect-propagation.md §8 and the
+    // integrity segmentation check. A single-key sort by `line ?? 0` would put
+    // every propagated entry before local (they compare as 0), inverting the
+    // documented output shape.
+    const locals = symbol.effects
+      .filter((e) => e.propagated !== true)
+      .sort((a, b) => (a.line ?? 0) - (b.line ?? 0))
+    const propagated = symbol.effects
+      .filter((e) => e.propagated === true)
+      .sort((a, b) =>
+        a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
+      )
+    for (const e of [...locals, ...propagated]) lines.push(effectRow(e))
     lines.push("")
   }
 

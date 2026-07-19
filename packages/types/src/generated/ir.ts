@@ -191,7 +191,7 @@ droppedSymbols: number
  * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Empty in the normal case; non-empty entries are kept as a determinism log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
-effectPropagation?: EffectPropagationStats
+effectPropagation: EffectPropagationStats
 }
 export interface EffectClassifyTimeout {
 /**
@@ -208,7 +208,7 @@ symbolId: string
 timeoutMs: number
 }
 /**
- * Counters produced by the effect-propagation pass (effect-propagation.md §10). Emitted unconditionally so a run with zero propagated effects still reports the SCC shape it observed.
+ * Counters produced by the effect-propagation pass (effect-propagation.md §10). Always present so a run with zero propagated effects still reports the SCC shape it observed.
  */
 export interface EffectPropagationStats {
 /**

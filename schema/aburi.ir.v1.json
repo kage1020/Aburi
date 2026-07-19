@@ -131,7 +131,13 @@
     "Stats": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["droppedSymbols", "keptSymbols", "parsedFiles", "totalFiles"],
+      "required": [
+        "droppedSymbols",
+        "effectPropagation",
+        "keptSymbols",
+        "parsedFiles",
+        "totalFiles"
+      ],
       "properties": {
         "totalFiles": { "type": "integer", "minimum": 0 },
         "parsedFiles": { "type": "integer", "minimum": 0 },
@@ -144,7 +150,7 @@
         },
         "effectPropagation": {
           "$ref": "#/$defs/EffectPropagationStats",
-          "description": "Counters produced by the effect-propagation pass (effect-propagation.md §10). Emitted unconditionally so a run with zero propagated effects still reports the SCC shape it observed."
+          "description": "Counters produced by the effect-propagation pass (effect-propagation.md §10). Always present so a run with zero propagated effects still reports the SCC shape it observed."
         }
       }
     },

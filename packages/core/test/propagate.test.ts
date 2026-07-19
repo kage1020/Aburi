@@ -383,3 +383,89 @@ describe("propagateEffects — additional invariants (§5, §8, §12.9)", () => 
     expect(stats.symbolsWithPropagatedEffects).toBe(2)
   })
 })
+
+describe("propagateEffects — coverage for merge / condense internals", () => {
+  it("multiple call sites on the same (from,to) collapse to the max edge confidence", () => {
+    // Two edges A→B with confidences (low, high) MUST be treated as one edge with
+    // confidence=high; the propagated entry then survives min-along-path with B's
+    // high-confidence local at high. If the pair silently kept the first-seen edge
+    // (low), min(low, high) would demote the propagated confidence to low.
+    const symbols: IRSymbol[] = [
+      makeSymbol("ts:a.ts#A"),
+      makeSymbol("ts:b.ts#B", {
+        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
+      }),
+    ]
+    const edges: CallEdge[] = [
+      edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "low", line: 5 }),
+      edge("ts:a.ts#A", "ts:b.ts#B", { confidence: "high", line: 12 }),
+    ]
+    const { symbols: out } = propagateEffects({ symbols, edges })
+    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
+    expect(prop?.confidence).toBe("high")
+  })
+
+  it("condense collapses parallel SCC→SCC edges by max confidence", () => {
+    // Multi-member SCC {A, B} calling out to a downstream SCC {C}, with A→C at
+    // low confidence and B→C at high confidence. `condense()` MUST aggregate the
+    // pair (fromScc=SCC{A,B}, toScc=SCC{C}) with the max, so A's propagated entry
+    // ends up at min(high, high)=high — not min(low, high)=low.
+    const symbols: IRSymbol[] = [
+      makeSymbol("ts:a.ts#A"),
+      makeSymbol("ts:b.ts#B"),
+      makeSymbol("ts:c.ts#C", {
+        effects: [local({ id: "db.write", target: "x", confidence: "high" })],
+      }),
+    ]
+    const edges: CallEdge[] = [
+      edge("ts:a.ts#A", "ts:b.ts#B"),
+      edge("ts:b.ts#B", "ts:a.ts#A"),
+      edge("ts:a.ts#A", "ts:c.ts#C", { confidence: "low" }),
+      edge("ts:b.ts#B", "ts:c.ts#C", { confidence: "high" }),
+    ]
+    const { symbols: out } = propagateEffects({ symbols, edges })
+    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
+    expect(prop?.confidence).toBe("high")
+    expect(prop?.derivedFrom).toEqual(["ts:b.ts#B", "ts:c.ts#C"])
+  })
+
+  it("plugin and derivedBy stay locked together on the winning tie-break", () => {
+    // The invariant: for a purely propagated aggregate entry, `derivedBy` and
+    // `plugin` reflect the SAME upstream classification. A reader must never see
+    // "derivedBy says plugin A, plugin field says plugin B".
+    const symbols: IRSymbol[] = [
+      makeSymbol("ts:a.ts#A"),
+      makeSymbol("ts:b.ts#B", {
+        effects: [
+          local({
+            id: "db.write",
+            target: "x",
+            derivedBy: "effects-plugin:z:write",
+            plugin: "effects-z",
+          }),
+        ],
+      }),
+      makeSymbol("ts:c.ts#C", {
+        effects: [
+          local({
+            id: "db.write",
+            target: "x",
+            derivedBy: "effects-plugin:a:write",
+            plugin: "effects-a",
+          }),
+        ],
+      }),
+    ]
+    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B"), edge("ts:a.ts#A", "ts:c.ts#C")]
+    const { symbols: out } = propagateEffects({ symbols, edges })
+    const prop = bySymbolId(out, "ts:a.ts#A").effects.find((e) => e.propagated === true)
+    expect(prop?.derivedBy).toBe("effects-plugin:a:write")
+    expect(prop?.plugin).toBe("effects-a")
+  })
+
+  it("throws when a CallEdge endpoint is not in the input symbols", () => {
+    const symbols: IRSymbol[] = [makeSymbol("ts:a.ts#A")]
+    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:ghost.ts#Ghost")]
+    expect(() => propagateEffects({ symbols, edges })).toThrow(/CallEdge\.to/)
+  })
+})
