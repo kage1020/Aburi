@@ -148,7 +148,10 @@ function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDel
   const mapper = (e: Effect): Identified<Effect> => ({
     item: e,
     key: `${e.id}::${e.target}`,
-    line: e.line,
+    // Propagated entries (effect-propagation.md §5.1) omit `line`; the diff
+    // matcher tolerates missing lines by treating them as position-0. Effect
+    // pairing here uses lineFuzz=Infinity anyway, so any placeholder is safe.
+    line: e.line ?? 0,
   })
   return differentiate(base.map(mapper), head.map(mapper), effectsEqual, Number.POSITIVE_INFINITY)
 }

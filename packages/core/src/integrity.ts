@@ -304,11 +304,7 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
       `symbols[id=${symbol.id}].rules[].line`,
       out,
     )
-    assertNumericSorted(
-      symbol.effects.map((e) => e.line),
-      `symbols[id=${symbol.id}].effects[].line`,
-      out,
-    )
+    assertEffectSegmentation(symbol, out)
     assertNumericSorted(
       symbol.calls.map((c) => c.line),
       `symbols[id=${symbol.id}].calls[].line`,
@@ -370,6 +366,84 @@ function compareCodeUnit(a: string, b: string): number {
 
 function looksLikeSymbolId(endpoint: string): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
+}
+
+/**
+ * Invariant #11 — `effects[]` segmentation (effect-propagation.md §5.1, §8).
+ *
+ *   1. All locally-detected entries (`propagated !== true`) precede all
+ *      propagated entries (`propagated === true`).
+ *   2. Local segment: `line` is required and monotonically ascending.
+ *   3. Propagated segment: `line` is absent; `derivedFrom` is present and
+ *      non-empty; `(id, target)` is monotonically ascending.
+ *
+ * These three sub-checks jointly reproduce the schema-side `if/then/else` on
+ * `Effect` (aburi.ir.v1.json) as a set of readable integrity messages the
+ * pre-serialize surface can point at.
+ */
+function assertEffectSegmentation(symbol: IR["symbols"][number], out: IntegrityViolation[]): void {
+  const subject = `symbols[id=${symbol.id}].effects[]`
+  const firstPropagated = symbol.effects.findIndex((e) => e.propagated === true)
+  if (firstPropagated >= 0) {
+    for (let i = firstPropagated + 1; i < symbol.effects.length; i++) {
+      const entry = symbol.effects[i]
+      if (entry === undefined) continue
+      if (entry.propagated !== true) {
+        out.push({
+          invariant: 11,
+          subject,
+          message: `${subject}: locally-detected entry appears after a propagated entry (${entry.id}/${entry.target})`,
+        })
+        break
+      }
+    }
+  }
+  const locals: Array<{ line?: number; id: string; target: string }> = []
+  const propagated: Array<{ id: string; target: string }> = []
+  for (const effect of symbol.effects) {
+    if (effect.propagated === true) {
+      if (effect.line !== undefined) {
+        out.push({
+          invariant: 11,
+          subject,
+          message: `${subject}: propagated entry (${effect.id}/${effect.target}) carries line=${effect.line}; propagated entries must omit line`,
+        })
+      }
+      if (effect.derivedFrom === undefined || effect.derivedFrom.length === 0) {
+        out.push({
+          invariant: 11,
+          subject,
+          message: `${subject}: propagated entry (${effect.id}/${effect.target}) missing non-empty derivedFrom`,
+        })
+      }
+      propagated.push({ id: effect.id, target: effect.target })
+    } else {
+      if (effect.line === undefined) {
+        out.push({
+          invariant: 11,
+          subject,
+          message: `${subject}: locally-detected entry (${effect.id}/${effect.target}) missing line`,
+        })
+      }
+      const entry: { line?: number; id: string; target: string } = {
+        id: effect.id,
+        target: effect.target,
+      }
+      if (effect.line !== undefined) entry.line = effect.line
+      locals.push(entry)
+    }
+  }
+  assertNumericSorted(
+    locals.filter((e) => e.line !== undefined).map((e) => e.line as number),
+    `${subject}/local.line`,
+    out,
+  )
+  assertSorted(
+    propagated.map((e) => `${e.id}\t${e.target}`),
+    `${subject}/propagated(id,target)`,
+    compareCodeUnit,
+    out,
+  )
 }
 
 /**

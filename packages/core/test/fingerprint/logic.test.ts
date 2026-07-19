@@ -23,6 +23,7 @@ function base(): IRSymbol {
         line: 8,
         plugin: "effects-prisma",
         confidence: "high",
+        derivedBy: "convention:test",
       },
       {
         id: "event.publish",
@@ -30,6 +31,7 @@ function base(): IRSymbol {
         line: 10,
         plugin: "effects-nest",
         confidence: "high",
+        derivedBy: "convention:test",
       },
     ],
   })
@@ -104,6 +106,7 @@ describe("logicFingerprint — invariance", () => {
           line: 8,
           plugin: "effects-prisma",
           confidence: "high",
+          derivedBy: "convention:test",
         },
         {
           id: "x-nest:emit",
@@ -111,6 +114,7 @@ describe("logicFingerprint — invariance", () => {
           line: 10,
           plugin: "effects-nest",
           confidence: "high",
+          derivedBy: "convention:test",
         },
       ],
     })
@@ -129,6 +133,7 @@ describe("logicFingerprint — invariance", () => {
           line: 8,
           plugin: "effects-alternate",
           confidence: "high",
+          derivedBy: "convention:test",
         },
         {
           id: "event.publish",
@@ -136,6 +141,7 @@ describe("logicFingerprint — invariance", () => {
           line: 10,
           plugin: "effects-alternate",
           confidence: "high",
+          derivedBy: "convention:test",
         },
       ],
     })
@@ -210,6 +216,7 @@ describe("logicFingerprint — change conditions", () => {
           line: 8,
           plugin: "effects-prisma",
           confidence: "high",
+          derivedBy: "convention:test",
         },
         {
           id: "event.publish",
@@ -217,6 +224,7 @@ describe("logicFingerprint — change conditions", () => {
           line: 10,
           plugin: "effects-nest",
           confidence: "high",
+          derivedBy: "convention:test",
         },
       ],
     })
@@ -234,6 +242,7 @@ describe("logicFingerprint — change conditions", () => {
           line: 12,
           plugin: "effects-fs",
           confidence: "high",
+          derivedBy: "convention:test",
         },
       ],
     })

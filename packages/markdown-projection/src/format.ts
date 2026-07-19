@@ -222,8 +222,16 @@ function inlineOrFence(text: string): string {
  * §5.7 — Effect row. Format: `- <id>: \`<target>\` (L<line>) [<plugin>]<confidence-badge>`.
  * Extension effects (`x-<plugin>:<name>`) use the same shape — no special-casing needed
  * because id/target/plugin/confidence are all schema-mandatory.
+ *
+ * Propagated entries (effect-propagation.md §5.1) omit `line`; the row substitutes a
+ * `[propagated from <sorted derivedFrom>]` marker in its place, so a reviewer can trace
+ * the effect back to the direct callee that carried it into this Symbol.
  */
 export function effectRow(eff: Effect): string {
+  if (eff.propagated === true) {
+    const derivedFrom = (eff.derivedFrom ?? []).join(", ")
+    return `- ${eff.id}: \`${eff.target}\` [propagated from ${derivedFrom}] [${eff.plugin}]${confidenceBadge(eff.confidence)}`
+  }
   return `- ${eff.id}: \`${eff.target}\` (L${eff.line}) [${eff.plugin}]${confidenceBadge(eff.confidence)}`
 }
 

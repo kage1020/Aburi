@@ -21,7 +21,9 @@ import type {
 import { type CallEdge, resolveCallGraph } from "../callgraph"
 import { serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
+import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
+import { type PropagationStats, propagateEffects } from "../propagate"
 import { type DiscoveredFile, discoverFiles, type SkippedFile } from "./discover"
 import { buildDropCFilter } from "./drop-c"
 import { runFilePipeline } from "./pipeline"
@@ -160,8 +162,26 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   // sort. Higher-tier resolution (component / workspace / LSP) will hook into
   // the same seam without disturbing this projection.
   const callGraph = resolveCallGraph({ symbols, importsByFile })
-  const resolvedSymbols = callGraph.symbols
   const symbolEdges = projectSymbolEdges(callGraph.edges)
+
+  // Transitive effect propagation over the resolved call graph
+  // (effect-propagation.md §2). Runs AFTER call resolution and BEFORE the
+  // logic-fingerprint recompute below; `api` and `syntax` axes do not read
+  // `effects[]`, so only `logic` needs to be refreshed on the augmented
+  // symbols (effect-propagation.md §8).
+  const propagation = propagateEffects({
+    symbols: callGraph.symbols,
+    edges: callGraph.edges,
+  })
+  const propagatedSymbols = propagation.symbols.map((s) =>
+    s.dropped
+      ? s
+      : {
+          ...s,
+          fingerprint: { ...s.fingerprint, logic: logicFingerprint(s) },
+        },
+  )
+  const resolvedSymbols = propagatedSymbols
 
   // parsedFiles counts every file the pipeline successfully parsed. Files with
   // recoverable parse errors still count as parsed (a non-null tree survived); only
@@ -173,6 +193,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     parsedFiles: attempted - terminalParseFailures,
     symbols: resolvedSymbols,
     timeoutEvents,
+    propagation: propagation.stats,
   })
 
   const workspace: IR["workspace"] = {
@@ -259,6 +280,7 @@ interface BuildStatsInput {
   parsedFiles: number
   symbols: readonly IR["symbols"][number][]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
+  propagation: PropagationStats
 }
 
 function buildStats(input: BuildStatsInput): Stats {
@@ -269,6 +291,7 @@ function buildStats(input: BuildStatsInput): Stats {
     parsedFiles: input.parsedFiles,
     keptSymbols: kept,
     droppedSymbols: dropped,
+    effectPropagation: input.propagation,
   }
   if (input.timeoutEvents.length > 0) {
     stats.effectClassifyTimeouts = input.timeoutEvents.map(

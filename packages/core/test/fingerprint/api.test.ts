@@ -79,6 +79,7 @@ describe("apiFingerprint — invariance", () => {
           line: 7,
           plugin: "effects-prisma",
           confidence: "high",
+          derivedBy: "convention:test",
         },
       ],
     })

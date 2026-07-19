@@ -86,7 +86,8 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   if (symbol.effects.length > 0) {
     lines.push("## Effects")
     lines.push("")
-    for (const e of [...symbol.effects].sort((a, b) => a.line - b.line)) lines.push(effectRow(e))
+    for (const e of [...symbol.effects].sort((a, b) => (a.line ?? 0) - (b.line ?? 0)))
+      lines.push(effectRow(e))
     lines.push("")
   }
 

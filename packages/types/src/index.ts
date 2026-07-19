@@ -48,6 +48,7 @@ export type {
   Effect,
   EffectClassifyTimeout,
   EffectId,
+  EffectPropagationStats,
   ExtKind,
   Fingerprint,
   Generator,

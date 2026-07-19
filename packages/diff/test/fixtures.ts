@@ -88,6 +88,7 @@ export function effect(
     line: overrides.line ?? 1,
     plugin: overrides.plugin,
     confidence: overrides.confidence ?? "high",
+    derivedBy: overrides.derivedBy ?? "convention:test",
   }
 }
 

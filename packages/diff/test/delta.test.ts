@@ -163,6 +163,7 @@ describe("Effects delta (I2)", () => {
           target: "prisma.user.create",
           plugin: "effects-prisma",
           confidence: "medium",
+          derivedBy: "convention:test",
           line: 10,
         }),
       ],

@@ -58,6 +58,25 @@ expr: (string | null)
 loopKind: (("for" | "while" | "do") | null)
 }
 export type RuleType = ("guard" | "throw" | "return" | "loop" | "try" | "switch" | "match")
+export interface Effect {
+id: EffectId
+target: string
+line?: number
+plugin: string
+confidence: Confidence
+/**
+ * Evidence string from the effect plugin classifier (effect-plugin.md §4.4). Locally-detected entries carry the plugin's original value verbatim. On merge across propagation paths, the lexicographically-smallest string wins (effect-propagation.md §5.2).
+ */
+derivedBy: string
+/**
+ * True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Absent or false for locally-detected entries.
+ */
+propagated?: boolean
+/**
+ * Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Present only when propagated=true.
+ */
+derivedFrom?: SymbolId[]
+}
 export type EffectId = (("db.read" | "db.write" | "db.transaction" | "db.migration" | "network.http" | "network.ws" | "network.rpc" | "queue.publish" | "queue.consume" | "event.publish" | "event.subscribe" | "fs.read" | "fs.write" | "state.mutate" | "collection.mutate" | "time.now" | "time.timer" | "random" | "env.read" | "env.write" | "process.exit" | "process.signal") | string)
 export type Confidence = ("high" | "medium" | "low")
 
@@ -139,13 +158,6 @@ async: boolean
 generator: boolean
 typeParameters: string[]
 }
-export interface Effect {
-id: EffectId
-target: string
-line: number
-plugin: string
-confidence: Confidence
-}
 export interface Call {
 target: string
 line: number
@@ -179,6 +191,7 @@ droppedSymbols: number
  * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Empty in the normal case; non-empty entries are kept as a determinism log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
+effectPropagation?: EffectPropagationStats
 }
 export interface EffectClassifyTimeout {
 /**
@@ -193,4 +206,25 @@ symbolId: string
  * The classifyTimeoutMs value in effect at the time of timeout.
  */
 timeoutMs: number
+}
+/**
+ * Counters produced by the effect-propagation pass (effect-propagation.md §10). Emitted unconditionally so a run with zero propagated effects still reports the SCC shape it observed.
+ */
+export interface EffectPropagationStats {
+/**
+ * Number of strongly connected components observed in the call graph. Singleton (non-cyclic) Symbols each count as one SCC.
+ */
+sccCount: number
+/**
+ * Largest SCC size. 0 when the graph is empty; 1 when acyclic.
+ */
+maxSccSize: number
+/**
+ * Total number of propagated Effect entries written across all Symbols.
+ */
+propagatedEffectCount: number
+/**
+ * Number of Symbols that received at least one propagated Effect.
+ */
+symbolsWithPropagatedEffects: number
 }

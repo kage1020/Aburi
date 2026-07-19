@@ -73,6 +73,7 @@ describe("checkIRIntegrity", () => {
             line: 1,
             plugin: "effects-prisma",
             confidence: "high",
+            derivedBy: "convention:test",
           },
           {
             id: "x-stripe:charge",
@@ -80,6 +81,7 @@ describe("checkIRIntegrity", () => {
             line: 2,
             plugin: "effects-stripe",
             confidence: "high",
+            derivedBy: "convention:test",
           },
         ],
       }),
@@ -91,7 +93,16 @@ describe("checkIRIntegrity", () => {
     const ir = minimalIR()
     ir.symbols = [
       makeSymbol("ts:src/a.ts#foo", {
-        effects: [{ id: "unknown.effect", target: "x", line: 1, plugin: "p", confidence: "high" }],
+        effects: [
+          {
+            id: "unknown.effect",
+            target: "x",
+            line: 1,
+            plugin: "p",
+            confidence: "high",
+            derivedBy: "convention:test",
+          },
+        ],
       }),
     ]
     const violations = checkIRIntegrity(ir)
@@ -142,6 +153,77 @@ describe("checkIRIntegrity", () => {
   it("#11: detects unsorted symbols[] by id", () => {
     const ir = minimalIR()
     ir.symbols = [makeSymbol("ts:src/a.ts#z"), makeSymbol("ts:src/a.ts#a")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 11)).toBe(true)
+  })
+
+  it("#11: rejects a locally-detected effect appearing after a propagated effect", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", {
+        effects: [
+          {
+            id: "db.write",
+            target: "x",
+            plugin: "p",
+            confidence: "high",
+            derivedBy: "convention:test",
+            propagated: true,
+            derivedFrom: ["ts:src/a.ts#other"],
+          },
+          {
+            id: "db.read",
+            target: "y",
+            line: 5,
+            plugin: "p",
+            confidence: "high",
+            derivedBy: "convention:test",
+          },
+        ],
+      }),
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 11)).toBe(true)
+  })
+
+  it("#11: rejects a propagated effect that carries line", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", {
+        effects: [
+          {
+            id: "db.write",
+            target: "x",
+            line: 3,
+            plugin: "p",
+            confidence: "high",
+            derivedBy: "convention:test",
+            propagated: true,
+            derivedFrom: ["ts:src/a.ts#other"],
+          },
+        ],
+      }),
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 11)).toBe(true)
+  })
+
+  it("#11: rejects a propagated effect missing derivedFrom", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", {
+        effects: [
+          {
+            id: "db.write",
+            target: "x",
+            plugin: "p",
+            confidence: "high",
+            derivedBy: "convention:test",
+            propagated: true,
+          },
+        ],
+      }),
+    ]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 11)).toBe(true)
   })

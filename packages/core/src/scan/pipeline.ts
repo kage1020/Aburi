@@ -261,6 +261,7 @@ function classifyCalls(input: ClassifyCallsInput): {
         line: call.line,
         plugin: effect.manifest.name,
         confidence: result.confidence,
+        derivedBy: result.derivedBy,
       })
       classified = true
       break
@@ -276,12 +277,17 @@ function classifyCalls(input: ClassifyCallsInput): {
 }
 
 function byTargetThenLine(
-  a: { target: string; line: number },
-  b: { target: string; line: number },
+  a: { target: string; line?: number },
+  b: { target: string; line?: number },
 ): number {
   if (a.target < b.target) return -1
   if (a.target > b.target) return 1
-  return a.line - b.line
+  // Effect.line became optional in the schema when the propagation pass landed
+  // (effect-propagation.md §5.1 — propagated entries omit line). At this call
+  // site, both inputs are locally-detected effects seeded from `call.line`, so
+  // `line` is present; the ?? 0 fallback is a type-level completeness hedge and
+  // never runs.
+  return (a.line ?? 0) - (b.line ?? 0)
 }
 
 /**
@@ -366,7 +372,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     decorators: [...input.candidate.decorators].sort((a, b) => a.line - b.line),
     signature: input.candidate.signature,
     rules: [...input.rules].sort((a, b) => a.line - b.line),
-    effects: [...input.effects].sort((a, b) => a.line - b.line),
+    effects: [...input.effects].sort((a, b) => (a.line ?? 0) - (b.line ?? 0)),
     calls: [...input.calls].sort((a, b) => a.line - b.line),
     source: input.candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },

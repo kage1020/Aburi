@@ -40,6 +40,12 @@ export {
 } from "./id"
 export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
 export {
+  type PropagateInput,
+  type PropagateResult,
+  type PropagationStats,
+  propagateEffects,
+} from "./propagate"
+export {
   DEFAULT_MAX_FILE_SIZE_BYTES,
   type DiscoveredFile,
   type DiscoverOptions,

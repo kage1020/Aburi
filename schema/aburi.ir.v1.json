@@ -141,6 +141,38 @@
           "type": "array",
           "items": { "$ref": "#/$defs/EffectClassifyTimeout" },
           "description": "Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Empty in the normal case; non-empty entries are kept as a determinism log."
+        },
+        "effectPropagation": {
+          "$ref": "#/$defs/EffectPropagationStats",
+          "description": "Counters produced by the effect-propagation pass (effect-propagation.md §10). Emitted unconditionally so a run with zero propagated effects still reports the SCC shape it observed."
+        }
+      }
+    },
+
+    "EffectPropagationStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxSccSize", "propagatedEffectCount", "sccCount", "symbolsWithPropagatedEffects"],
+      "properties": {
+        "sccCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of strongly connected components observed in the call graph. Singleton (non-cyclic) Symbols each count as one SCC."
+        },
+        "maxSccSize": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Largest SCC size. 0 when the graph is empty; 1 when acyclic."
+        },
+        "propagatedEffectCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of propagated Effect entries written across all Symbols."
+        },
+        "symbolsWithPropagatedEffects": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of Symbols that received at least one propagated Effect."
         }
       }
     },
@@ -390,14 +422,49 @@
     "Effect": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["confidence", "id", "line", "plugin", "target"],
+      "required": ["confidence", "derivedBy", "id", "plugin", "target"],
       "properties": {
         "id": { "$ref": "#/$defs/EffectId" },
         "target": { "type": "string", "minLength": 1 },
         "line": { "type": "integer", "minimum": 1 },
         "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "confidence": { "$ref": "#/$defs/Confidence" }
-      }
+        "confidence": { "$ref": "#/$defs/Confidence" },
+        "derivedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Evidence string from the effect plugin classifier (effect-plugin.md §4.4). Locally-detected entries carry the plugin's original value verbatim. On merge across propagation paths, the lexicographically-smallest string wins (effect-propagation.md §5.2)."
+        },
+        "propagated": {
+          "type": "boolean",
+          "description": "True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Absent or false for locally-detected entries."
+        },
+        "derivedFrom": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SymbolId" },
+          "uniqueItems": true,
+          "description": "Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Present only when propagated=true."
+        }
+      },
+      "allOf": [
+        {
+          "description": "Locally-detected entries require line and forbid derivedFrom; propagated entries forbid line and require a non-empty derivedFrom (effect-propagation.md §5.1, §5.2).",
+          "if": {
+            "properties": { "propagated": { "const": true } },
+            "required": ["propagated"]
+          },
+          "then": {
+            "required": ["derivedFrom"],
+            "not": { "required": ["line"] },
+            "properties": {
+              "derivedFrom": { "minItems": 1 }
+            }
+          },
+          "else": {
+            "required": ["line"],
+            "not": { "required": ["derivedFrom"] }
+          }
+        }
+      ]
     },
 
     "Call": {
