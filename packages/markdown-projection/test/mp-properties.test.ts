@@ -133,6 +133,7 @@ describe("MP5 / MP6 — confidence badge visibility", () => {
           target: "bus.emit",
           plugin: "effects-nest",
           confidence: "medium",
+          derivedBy: "convention:test",
         }),
       ],
     })

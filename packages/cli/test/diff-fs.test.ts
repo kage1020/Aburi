@@ -32,6 +32,12 @@ function makeEmptyIR(): IR {
       parsedFiles: 0,
       keptSymbols: 0,
       droppedSymbols: 0,
+      effectPropagation: {
+        sccCount: 0,
+        maxSccSize: 0,
+        propagatedEffectCount: 0,
+        symbolsWithPropagatedEffects: 0,
+      },
     },
   }
 }

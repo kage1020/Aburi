@@ -84,6 +84,8 @@ export function projectComponent(input: ProjectComponentInput): string {
     lines.push("")
   }
 
+  lines.push(...renderBoundaryEffectSurface(keptSymbols))
+
   if (keptSymbols.length > 0) {
     lines.push("## Symbols")
     lines.push("")
@@ -118,6 +120,49 @@ function sortDeps(deps: readonly Dependency[]): Dependency[] {
     if (a.to !== b.to) return compareStrings(a.to, b.to)
     return compareStrings(a.via, b.via)
   })
+}
+
+/**
+ * Aggregate effects for Boundary Symbols in the component (framework entry
+ * points — decorators with `boundary: true` or `extKind` prefixed `framework:`).
+ * effect-propagation.md §4.3 explicitly puts this rollup in the projection
+ * layer: propagation runs to full transitive closure regardless of boundary
+ * status; the view chooses whether to surface only boundary Symbols.
+ *
+ * Rows list every effect (local + propagated) attached to each boundary Symbol,
+ * sorted by `(id, target)`. Propagated entries include a `[propagated from …]`
+ * annotation naming the direct upstream callee. Symbols with no effects are
+ * skipped; if no Symbol has both boundary status and at least one effect, the
+ * section is omitted entirely.
+ */
+function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
+  const boundaries = symbols
+    .filter(
+      (s) =>
+        s.decorators.some((d) => d.boundary === true) ||
+        (s.extKind?.startsWith("framework:") ?? false),
+    )
+    .filter((s) => s.effects.length > 0)
+    .sort((a, b) => compareStrings(a.id, b.id))
+  if (boundaries.length === 0) return []
+  const lines: string[] = ["## Boundary effect surface", ""]
+  for (const s of boundaries) {
+    const cells = [...s.effects]
+      .sort((a, b) =>
+        a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
+      )
+      .map((e) => {
+        const base = `${e.id}(\`${e.target}\`)`
+        if (e.propagated === true) {
+          const derivedFrom = (e.derivedFrom ?? []).join(", ")
+          return `${base} [propagated from ${derivedFrom}]`
+        }
+        return base
+      })
+    lines.push(`- \`${s.name}\` — ${cells.join(", ")}`)
+  }
+  lines.push("")
+  return lines
 }
 
 function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
@@ -157,7 +202,18 @@ export function renderSymbolBlock(symbol: IRSymbol): string[] {
   }
   if (symbol.effects.length > 0) {
     rows.push("**Effects**:")
-    for (const e of [...symbol.effects].sort((a, b) => a.line - b.line)) rows.push(effectRow(e))
+    // Locally-detected entries have `line` and sort by it; propagated entries
+    // omit `line` (effect-propagation.md §5.1) and are ordered by
+    // `(id, target)` after all locals, matching the schema-wide emission order.
+    const locals = symbol.effects
+      .filter((e) => e.propagated !== true)
+      .sort((a, b) => (a.line ?? 0) - (b.line ?? 0))
+    const propagated = symbol.effects
+      .filter((e) => e.propagated === true)
+      .sort((a, b) =>
+        a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
+      )
+    for (const e of [...locals, ...propagated]) rows.push(effectRow(e))
   }
   if (symbol.calls.length > 0) {
     rows.push("**Calls**:")

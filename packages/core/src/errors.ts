@@ -26,6 +26,8 @@ export type CoreErrorCode =
   | "scan-gitignore-unreadable"
   /** `ScanInput.workspaceRoot` was not an absolute path; scan cannot resolve files reliably. */
   | "scan-workspace-not-absolute"
+  /** The effect-propagation pass observed an internal-invariant violation (e.g. an edge referencing a Symbol not in the input, an unreachable branch executing). */
+  | "propagation-invariant-violated"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to ir-schema.md §14 numbering (1..11). */

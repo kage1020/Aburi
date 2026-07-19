@@ -99,6 +99,7 @@ export function effect(
     line: overrides.line ?? 1,
     plugin: overrides.plugin,
     confidence: overrides.confidence ?? "high",
+    derivedBy: overrides.derivedBy ?? "convention:test",
   }
 }
 
@@ -147,6 +148,12 @@ export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): 
       parsedFiles: 0,
       keptSymbols: overrides.symbols?.filter((s) => !s.dropped).length ?? 0,
       droppedSymbols: overrides.symbols?.filter((s) => s.dropped).length ?? 0,
+      effectPropagation: {
+        sccCount: 0,
+        maxSccSize: 0,
+        propagatedEffectCount: 0,
+        symbolsWithPropagatedEffects: 0,
+      },
     },
   }
 }

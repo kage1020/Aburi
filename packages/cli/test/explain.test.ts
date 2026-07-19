@@ -73,6 +73,12 @@ function makeIRWithTwoNamed(): IR {
       parsedFiles: 2,
       keptSymbols: 2,
       droppedSymbols: 0,
+      effectPropagation: {
+        sccCount: 0,
+        maxSccSize: 0,
+        propagatedEffectCount: 0,
+        symbolsWithPropagatedEffects: 0,
+      },
     },
   }
 }

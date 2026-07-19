@@ -170,7 +170,18 @@ describe("SUCCESS smoke — file-mode diff still resolves EXIT.SUCCESS", () => {
       components: [],
       symbols: [],
       dependencies: [],
-      stats: { totalFiles: 0, parsedFiles: 0, keptSymbols: 0, droppedSymbols: 0 },
+      stats: {
+        totalFiles: 0,
+        parsedFiles: 0,
+        keptSymbols: 0,
+        droppedSymbols: 0,
+        effectPropagation: {
+          sccCount: 0,
+          maxSccSize: 0,
+          propagatedEffectCount: 0,
+          symbolsWithPropagatedEffects: 0,
+        },
+      },
     }
     await writeFile(basePath, JSON.stringify(emptyIR), "utf8")
     await writeFile(headPath, JSON.stringify(emptyIR), "utf8")
