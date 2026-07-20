@@ -16,22 +16,22 @@ afterEach(async () => {
 })
 
 /**
- * Slice View e2e (#30) — the "3-layer feature addition" scenario from the
- * issue body. Starts from the empty `slice-view-3layer` fixture (three
- * placeholder files with no top-level functions), then rewrites the three
- * files to a Controller → Service → Repository chain where the caller in
- * each layer imports and calls the next.
+ * Slice View e2e — the "3-layer feature addition" scenario. Starts from the
+ * empty `slice-view-3layer` fixture (three placeholder files with no
+ * top-level functions), then rewrites the three files to a
+ * Controller → Service → Repository chain where the caller in each layer
+ * imports and calls the next.
  *
  * Expected shape:
  *   ctl.ts#handleRequest        (added)  ─┐
  *   svc.ts#saveRecordService    (added)  ─┼─ one Slice, members ascending
  *   repo.ts#writeRecord         (added)  ─┘
  *
- * The design-doc requirement (issue #30 body): "a feature addition touching
- * 3 layers should produce 1 slice, not 3 scattered rows." This test asserts
- * exactly that — one Slice, all three members, no bridging, no phantom
- * cluster, and the Markdown projection carries a `## 🧵 Slice View` section
- * with the three members rendered as one bullet block.
+ * The design-doc requirement: a feature addition touching 3 layers must
+ * produce 1 slice, not 3 scattered rows. This test asserts exactly that —
+ * one Slice, all three members, no bridging, no phantom cluster, and the
+ * Markdown projection carries a `## 🧵 Slice View` section with the three
+ * members rendered as one bullet block.
  */
 const REPO_HEAD = `export function writeRecord(input: { amount: number }): { id: string; amount: number } {
   return { id: "r1", amount: input.amount }
@@ -97,14 +97,22 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     expect(slice.id).toBe(`slice:${memberIds[0]}`)
 
     // 5. Markdown side: the `## 🧵 Slice View` section is present and names
-    //    every member; the flat `## ➕ Added` still lists the three symbols too
-    //    (Slice View is additive per slice-view.md §14.10).
+    //    every member. Contain-checks must be scoped to the Slice View
+    //    subsection because the flat `## ➕ Added` section also lists the
+    //    same three symbols (Slice View is additive per slice-view.md §14.10),
+    //    and a naive `md.toContain("handleRequest")` would pass even if the
+    //    Slice View rendering broke entirely.
     const md = projectDiff(diff)
-    expect(md).toContain("🧵 Slice View")
-    expect(md).toContain(slice.id)
-    expect(md).toContain("handleRequest")
-    expect(md).toContain("saveRecordService")
-    expect(md).toContain("writeRecord")
     expect(md).toContain("➕ Added")
+    const sliceStart = md.indexOf("🧵 Slice View")
+    const nextSectionStart = md.indexOf("\n## ", sliceStart + 1)
+    expect(sliceStart).toBeGreaterThan(0)
+    expect(nextSectionStart).toBeGreaterThan(sliceStart)
+    const sliceSection = md.slice(sliceStart, nextSectionStart)
+    expect(sliceSection).toContain(slice.id)
+    expect(sliceSection).toContain("handleRequest")
+    expect(sliceSection).toContain("saveRecordService")
+    expect(sliceSection).toContain("writeRecord")
+    expect(sliceSection).toContain("(3 members)")
   })
 })

@@ -1,5 +1,5 @@
 import type { CallEdge } from "@aburi/core"
-import type { Confidence, SymbolChange } from "@aburi/types"
+import type { Confidence, Effect, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSlices } from "../src/slice"
 import { fp, makeSymbol, zeroFp } from "./fixtures"
@@ -130,12 +130,44 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
   })
 
   it("SV5: propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
-    // The pass does not need to look inside delta.effects.propagated —
-    // "any status: changed is a Node" already covers §4.4.
+    // §4.4 — the Boundary controller's body is byte-identical between base
+    // and head; the *only* semantic change is that effect propagation has
+    // now attached a `db.write` entry with `propagated: true` because the
+    // downstream service `Svc.op` began invoking a repository write. The
+    // controller therefore appears as `status: changed` even though its
+    // own source is unchanged.
+    //
+    // The Slice View pass MUST NOT reach into `delta.effects` to distinguish
+    // this from a "real" body change — "any status: changed is a Node" is
+    // the whole rule (§4.4). This test constructs the propagated-only case
+    // faithfully so a future refactor that added such a distinction would
+    // silently break here.
     const Ctl = "ts:src/ctl.ts#Ctl.route"
     const Svc = "ts:src/svc.ts#Svc.op"
+    const propagatedWrite: Effect = {
+      id: "db.write",
+      target: "prisma.record.create",
+      plugin: "effects-prisma",
+      confidence: "high",
+      derivedBy: "propagation:svc.op",
+      propagated: true,
+      derivedFrom: [Svc],
+    }
+    const ctlPropagatedOnly: SymbolChange = {
+      status: "changed",
+      before: makeSymbol({ id: Ctl, name: Ctl }),
+      after: makeSymbol({ id: Ctl, name: Ctl, effects: [propagatedWrite] }),
+      delta: {
+        apiChanged: false,
+        logicChanged: true,
+        syntaxChanged: false,
+        componentChanged: false,
+        visibilityChanged: false,
+        effects: { added: [propagatedWrite], removed: [], modified: [] },
+      },
+    }
     const slices = computeSlices({
-      changes: [changed(Ctl), changed(Svc)],
+      changes: [ctlPropagatedOnly, changed(Svc)],
       baseCallEdges: [],
       headCallEdges: [edge(Ctl, Svc)],
     })
@@ -374,5 +406,46 @@ describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + 
       headCallEdges: [edge(A, External), edge(External, A)],
     })
     expect(slices).toEqual([{ id: `slice:${A}`, members: [A] }])
+  })
+})
+
+describe("computeSlices — SV21: cross-language partition", () => {
+  it("partitions Nodes by language when the changes span multiple languages", () => {
+    // slice-view.md §5.5 / §14.13: cross-language edges do not exist yet, so
+    // a PR touching TypeScript and Python files produces disjoint slices per
+    // language. The e2e fixture only covers a single language; this unit
+    // test enforces the partition property at the pass boundary — even when
+    // Node ids from different languages are interleaved in the input.
+    const tsCtl = "ts:src/ctl.ts#Ctl.route"
+    const tsSvc = "ts:src/svc.ts#Svc.op"
+    const pyCtl = "py:app/ctl.py#route"
+    const pySvc = "py:app/svc.py#op"
+    const slices = computeSlices({
+      changes: [changed(tsCtl), changed(tsSvc), changed(pyCtl), changed(pySvc)],
+      baseCallEdges: [],
+      headCallEdges: [edge(tsCtl, tsSvc), edge(pyCtl, pySvc)],
+    })
+    expect(slices).toEqual([
+      { id: `slice:${pyCtl}`, members: [pyCtl, pySvc] },
+      { id: `slice:${tsCtl}`, members: [tsCtl, tsSvc] },
+    ])
+  })
+
+  it("a cross-language edge that reaches the pass anyway still unifies (defensive: no language-aware short-circuit)", () => {
+    // If a future resolver produces a genuine cross-language edge (planned in
+    // multi-language-id.md), the WCC pass MUST cluster the two Symbols —
+    // Slice View has no language-aware filter of its own. This test guards
+    // against a well-meaning "only same-language edges" filter being added
+    // here, which would violate §14.13's promise ("Slice View will then
+    // automatically produce cross-language clusters via the same WCC rule
+    // with no code change").
+    const tsA = "ts:src/a.ts#a"
+    const pyB = "py:app/b.py#b"
+    const slices = computeSlices({
+      changes: [changed(tsA), changed(pyB)],
+      baseCallEdges: [],
+      headCallEdges: [edge(tsA, pyB)],
+    })
+    expect(slices).toEqual([{ id: `slice:${pyB}`, members: [pyB, tsA] }])
   })
 })

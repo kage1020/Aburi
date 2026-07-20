@@ -481,8 +481,7 @@ function renderSliceView(
     rows.push("")
     for (const slice of singleton) {
       const memberId = slice.members[0] as string
-      const change = changeById.get(memberId)
-      const label = renderSingletonLabel(memberId, change)
+      const label = renderSingletonLabel(memberId, slice.id, changeById)
       rows.push(`- \`${slice.id}\` — ${label}`)
     }
     rows.push("")
@@ -507,36 +506,58 @@ function renderSliceSection(
   rows.push(`### \`${slice.id}\` (${slice.members.length} members)`)
   rows.push("")
   for (const memberId of slice.members) {
-    const change = changeById.get(memberId)
+    const change = requireChangeForMember(memberId, slice.id, changeById)
     const symbol = symbolForMember(change)
-    const shortName = symbol?.name ?? lastQnameSegment(memberId)
-    const filePart =
-      symbol !== null ? `\`${symbol.source.file}:${symbol.source.startLine}\`` : `\`${memberId}\``
-    const statusLabel = change !== undefined ? `*(${change.status})*` : "*(unknown)*"
-    rows.push(`- \`${shortName}\` — ${statusLabel}`)
-    rows.push(`  **File**: ${filePart}`)
-    const followup = renderMemberFollowup(change)
-    if (followup !== null) rows.push(`  ↳ ${followup}`)
+    rows.push(`- \`${symbol.name}\` — *(${change.status})*`)
+    rows.push(`  **File**: \`${symbol.source.file}:${symbol.source.startLine}\``)
+    rows.push(`  ↳ ${renderMemberFollowup(change)}`)
   }
   rows.push("")
   return rows
 }
 
-function renderSingletonLabel(memberId: string, change: SymbolChange | undefined): string {
+function renderSingletonLabel(
+  memberId: string,
+  sliceId: string,
+  changeById: ReadonlyMap<string, SymbolChange>,
+): string {
+  const change = requireChangeForMember(memberId, sliceId, changeById)
   const symbol = symbolForMember(change)
-  const name = symbol?.name ?? lastQnameSegment(memberId)
-  const status = change?.status ?? "unknown"
-  return `\`${name}\` *(${status})*`
+  return `\`${symbol.name}\` *(${change.status})*`
+}
+
+/**
+ * Every Slice member is defined as a Node in slice-view.md §4.1, and every
+ * Node is emitted by `buildDiff` as a SymbolChange in `diff.symbols[]`. A
+ * missing entry therefore means the producer violated the pass invariant
+ * ("union of all members equals the Node set", §11.2) — we throw so the
+ * mismatch surfaces at render time instead of being silently masked with
+ * an "unknown" label the reviewer cannot interpret.
+ */
+function requireChangeForMember(
+  memberId: string,
+  sliceId: string,
+  changeById: ReadonlyMap<string, SymbolChange>,
+): SymbolChange {
+  const change = changeById.get(memberId)
+  if (change === undefined) {
+    throw new Error(
+      `projectDiff: slice ${sliceId} lists member ${memberId} that is not present in diff.symbols[]; ` +
+        `every Slice member must have a corresponding SymbolChange (slice-view.md §11.2).`,
+    )
+  }
+  return change
 }
 
 /**
  * Pick the SymbolChange's IRSymbol side that best represents the member's
  * head-visible identity (§4.1): `after` for changed / moved+changed /
- * dropped-toggled, `symbol` for added / removed, `after` for pure moved
- * (though moved never becomes a Node — defensive fallback only).
+ * dropped-toggled, `symbol` for added / removed. Pure `moved` never reaches
+ * this function because pure moved Symbols are excluded from the Node set
+ * (§4.3), but the switch stays exhaustive to keep TypeScript's type
+ * narrowing engaged.
  */
-function symbolForMember(change: SymbolChange | undefined): IRSymbol | null {
-  if (change === undefined) return null
+function symbolForMember(change: SymbolChange): IRSymbol {
   switch (change.status) {
     case "added":
     case "removed":
@@ -550,8 +571,7 @@ function symbolForMember(change: SymbolChange | undefined): IRSymbol | null {
   }
 }
 
-function renderMemberFollowup(change: SymbolChange | undefined): string | null {
-  if (change === undefined) return null
+function renderMemberFollowup(change: SymbolChange): string {
   switch (change.status) {
     case "added":
       return "new symbol"
@@ -564,8 +584,6 @@ function renderMemberFollowup(change: SymbolChange | undefined): string | null {
       return deltaAxisSummary(change.delta)
     case "dropped-toggled":
       return `dropped-toggled: ${change.direction}`
-    default:
-      return null
   }
 }
 
@@ -598,12 +616,6 @@ function indexChangesById(symbols: readonly SymbolChange[]): Map<string, SymbolC
     }
   }
   return map
-}
-
-function lastQnameSegment(symbolId: string): string {
-  const hashIdx = symbolId.lastIndexOf("#")
-  if (hashIdx < 0) return symbolId
-  return symbolId.slice(hashIdx + 1)
 }
 
 function renderComponentChanges(diff: DiffResult): string[] {

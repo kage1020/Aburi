@@ -2,6 +2,6 @@
   "name": "slice-view-3layer",
   "version": "0.0.0",
   "private": true,
-  "description": "Fixture for Slice View e2e (#30). Base version is an empty 3-file scaffolding — the test mutates it to a Controller → Service → Repository chain to verify that the diff clusters the three added Symbols into one Slice, not three scattered rows.",
+  "description": "Fixture for Slice View e2e. Base version is an empty 3-file scaffolding; the test rewrites the files to a Controller → Service → Repository chain to verify that the diff clusters the three added Symbols into one Slice instead of three scattered rows.",
   "type": "commonjs"
 }

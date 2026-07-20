@@ -74,9 +74,13 @@ export function computeWeaklyConnectedComponents<TNode>(
   // are dropped — they add no cross-node connectivity. Multi-edges collapse
   // naturally because `union` is a no-op on already-merged roots.
   //
-  // Sorting the canonical edge list before unioning is what makes the output
-  // input-order insensitive: `union` decisions and therefore the parent-tree
-  // shapes become a function of the sorted edge stream, not caller iteration.
+  // The final connected-component partition is a property of the graph and
+  // does not depend on the order `union` sees the edges — Union-Find over
+  // any permutation of a fixed edge set yields the same partition. Sorting
+  // is a defence-in-depth choice: the internal parent-tree shape becomes a
+  // function of the sorted stream, which keeps traces reproducible and
+  // simplifies debugging without changing the visible output. Output
+  // ordering is enforced separately by the `compareKey` sorts below.
   interface CanonEdge {
     lo: number
     hi: number

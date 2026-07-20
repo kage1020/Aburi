@@ -84,6 +84,8 @@ function nodeIdOf(change: SymbolChange): SymbolId | null {
       // §4.3 — pure moved is not a Node and is not used for bridging either.
       return null
   }
+  // Exhaustive: if SymbolChange grows a new status the compile error above
+  // fires before this fallback is reachable.
 }
 
 /**
