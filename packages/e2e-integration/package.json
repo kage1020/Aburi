@@ -17,6 +17,7 @@
     "@aburi/framework-nestjs": "workspace:*",
     "@aburi/framework-next": "workspace:*",
     "@aburi/lang-typescript": "workspace:*",
+    "@aburi/markdown-projection": "workspace:*",
     "@aburi/plugin-registry": "workspace:*",
     "@aburi/types": "workspace:*",
     "@types/node": "^26.0.1",

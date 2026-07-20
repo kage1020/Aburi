@@ -21,7 +21,8 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Commands**: `aburi init` / `aburi scan` / `aburi diff <base>..<head>` / `aburi explain`
 - **Diff**: all 6 statuses — `added` / `removed` / `moved` / `changed` /
   `moved+changed` / `dropped-toggled` — with a `--fail-on` CI gate
-- **Output**: JSON IR (`aburi.ir.v1`) + Markdown projection (workspace overview,
+- **Output**: JSON IR (`aburi.ir.v1`) + Markdown projection (workspace
+  overview with mermaid dependency graph covering every declared component,
   per-component detail, PR diff, per-Symbol explain)
 - **Distribution**: `@aburi/cli` on npm + `@aburi/github-action` for PR comments
 
@@ -36,7 +37,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
   resolution tier is not
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
   (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
-- **No workspace-level mermaid overview / Slice View / graph visualization**
+- **No Slice View / graph visualization beyond the workspace overview**
   (Slice View: design landed; implementation upcoming)
 - **No LLM integration** — Aburi is a deterministic static analyser by design;
   AI-assisted review on top of the IR is a separate concern
@@ -49,7 +50,6 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
   to methods that call methods that call `prisma.invoice.create`
 - **Slice View**: cluster a PR's changed symbol set into connected components
   over the call graph and render vertical slices in Markdown
-- **L0 workspace overview**: output the full monorepo view as a mermaid graph
 - **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
 - **Additional frameworks**: React function components / Express middleware

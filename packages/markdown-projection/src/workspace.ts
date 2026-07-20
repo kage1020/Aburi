@@ -97,9 +97,11 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
 }
 
 /**
- * §4.2 — mermaid graph LR with a text-fallback block always attached. When there are no
- * dependencies at all, only a short note is emitted; when the node count exceeds
- * `MERMAID_NODE_LIMIT`, the mermaid block is dropped and only the text list survives.
+ * §4.2 — mermaid graph LR of the workspace: every declared component is a node,
+ * component→component dependencies are edges. A text-fallback bullet list is
+ * appended when at least one edge exists. When the union of declared components
+ * and edge endpoints exceeds `MERMAID_NODE_LIMIT`, the mermaid block is dropped
+ * and only the text list survives.
  *
  * Symbol-to-symbol call edges are deliberately excluded from the workspace-level
  * mermaid graph. A monorepo with many resolved calls would explode the node count
@@ -107,30 +109,42 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
  * detail. Symbol edges surface in the per-Symbol explain view and the diff view;
  * this section stays component-scoped so the workspace overview keeps its
  * architectural altitude.
+ *
+ * Isolated components (declared in `ir.components` but touched by no dependency)
+ * still render as standalone mermaid nodes so the L0 overview matches the "full
+ * monorepo view" contract of `docs/design/overview.md` §3.1.
  */
 function renderDependencies(ir: IR): string[] {
   const componentDeps = ir.dependencies.filter((d) => !isSymbolEdge(d))
-  if (componentDeps.length === 0) return ["_No inter-component dependencies._"]
-  const nodeSet = new Set<string>()
+  const sortedComponents = [...ir.components].sort((a, b) => compareStrings(a.id, b.id))
+  const edgeNodes = new Set<string>()
   for (const d of componentDeps) {
-    nodeSet.add(d.from)
-    nodeSet.add(d.to)
+    edgeNodes.add(d.from)
+    edgeNodes.add(d.to)
   }
+  const unionNodeCount = new Set<string>([...sortedComponents.map((c) => c.id), ...edgeNodes]).size
+  if (unionNodeCount === 0) return ["_No inter-component dependencies._"]
+
   const rows: string[] = []
-  if (nodeSet.size <= MERMAID_NODE_LIMIT) {
+  if (unionNodeCount <= MERMAID_NODE_LIMIT) {
     rows.push("```mermaid")
     rows.push("graph LR")
-    const seen = new Set<string>()
+    for (const c of sortedComponents) {
+      rows.push(`  ${sanitizeMermaidId(c.id)}["${escapeMermaidLabel(c.name)}"]`)
+    }
+    const seenEdge = new Set<string>()
     for (const d of sortedDeps(componentDeps)) {
       const key = `${d.from}->${d.to}`
-      if (seen.has(key)) continue
-      seen.add(key)
+      if (seenEdge.has(key)) continue
+      seenEdge.add(key)
       rows.push(`  ${sanitizeMermaidId(d.from)} --> ${sanitizeMermaidId(d.to)}`)
     }
     rows.push("```")
-    rows.push("")
-    rows.push("Fallback list:")
-    rows.push("")
+    if (componentDeps.length > 0) {
+      rows.push("")
+      rows.push("Fallback list:")
+      rows.push("")
+    }
   }
   for (const d of sortedDeps(componentDeps)) {
     rows.push(`- ${d.from} → ${d.to} (via \`${d.via}\`)`)
@@ -152,11 +166,24 @@ function isSymbolEdge(d: Dependency): boolean {
 
 /**
  * Mermaid ids reject `-` at the graph level so we swap in `_`. Component ids come from
- * `ir-schema §11` which allows only ASCII kebab-case, and no other characters need
- * escaping.
+ * `ir-schema §11`, which restricts them to ASCII kebab-case (`[a-z][a-z0-9-]*`) — no
+ * `_` is ever present in the input, so the `-` → `_` mapping is total and injective:
+ * distinct kebab-case ids always sanitize to distinct snake_case ids. If the schema
+ * ever admits `_` in ComponentId, the injectivity tripwire test in
+ * `test/dependency-rendering.test.ts` will fail first.
  */
 function sanitizeMermaidId(id: string): string {
   return id.replace(/-/g, "_")
+}
+
+/**
+ * `Component.name` is arbitrary user text that lands inside the mermaid label syntax
+ * `id["label"]`. Unescaped `"` would prematurely close the label and break the graph
+ * render. Mermaid accepts HTML entities inside labels, so `"` → `&quot;` is safe and
+ * reversible for reviewers scanning the rendered graph.
+ */
+function escapeMermaidLabel(label: string): string {
+  return label.replace(/"/g, "&quot;")
 }
 
 /**
