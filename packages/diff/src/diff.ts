@@ -1,4 +1,4 @@
-import { type SerializeOptions, serializeCanonical } from "@aburi/core"
+import { reconstructCallEdgesFromIR, type SerializeOptions, serializeCanonical } from "@aburi/core"
 import type { DiffResult, IR, IRRef, Summary, SymbolChange } from "@aburi/types"
 import { diffComponents, diffDependencies } from "./components"
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
@@ -12,6 +12,7 @@ import {
   matchStageNameSignature,
   type SymbolPair,
 } from "./match"
+import { computeSlices } from "./slice"
 import { classifyStatus, dropDirection } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.dev/schema/aburi.diff.v1.json"
@@ -155,6 +156,17 @@ export function buildDiff(input: DiffInput): DiffResult {
 
   symbols.sort(compareSymbolChange)
 
+  // Slice View clustering (docs/design/slice-view.md §2). Runs after status /
+  // delta computation and before Markdown projection. Consumes the resolved
+  // CallEdge[] reconstructed from each IR — §5.4 requires only resolved edges,
+  // never `Symbol.calls[]` directly. Emits `slices[]` unconditionally (§11.2);
+  // the Markdown side omits the section when the array is empty (§12.5).
+  const slices = computeSlices({
+    changes: symbols,
+    baseCallEdges: reconstructCallEdgesFromIR(input.baseIR),
+    headCallEdges: reconstructCallEdgesFromIR(input.headIR),
+  })
+
   return {
     $schema: DIFF_SCHEMA,
     generator: input.generator ?? DEFAULT_GENERATOR,
@@ -164,6 +176,7 @@ export function buildDiff(input: DiffInput): DiffResult {
     symbols,
     components,
     dependencies,
+    slices,
   }
 }
 

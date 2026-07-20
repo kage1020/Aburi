@@ -1,7 +1,7 @@
 import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { resolveCallGraph } from "../src/callgraph"
-import { makeSymbol } from "./fixtures/ir"
+import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
+import { makeSymbol, minimalIR } from "./fixtures/ir"
 
 function withCalls(
   id: string,
@@ -766,5 +766,113 @@ describe("resolveCallGraph", () => {
       expect(JSON.stringify(first.edges)).toBe(JSON.stringify(second.edges))
       expect(JSON.stringify(first.symbols)).toBe(JSON.stringify(second.symbols))
     })
+  })
+})
+
+describe("reconstructCallEdgesFromIR", () => {
+  it("returns [] for an IR with no symbols", () => {
+    expect(reconstructCallEdgesFromIR(minimalIR())).toEqual([])
+  })
+
+  it("returns [] for an IR whose symbols all have empty calls[]", () => {
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#a"), makeSymbol("ts:src/a.ts#b")]
+    expect(reconstructCallEdgesFromIR(ir)).toEqual([])
+  })
+
+  it("skips calls with resolved: null (unresolved calls emit no edge)", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "unknown", line: 3, resolved: null }],
+      }),
+    ]
+    expect(reconstructCallEdgesFromIR(ir)).toEqual([])
+  })
+
+  it("emits one edge per resolved call with the CallEdge shape from call-resolution.md §7.1", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        confidence: "high",
+        calls: [{ target: "helper", line: 5, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper"),
+    ]
+    expect(reconstructCallEdgesFromIR(ir)).toEqual([
+      {
+        from: "ts:src/a.ts#caller",
+        to: "ts:src/a.ts#helper",
+        via: "call",
+        confidence: "high",
+        line: 5,
+      },
+    ])
+  })
+
+  it("inherits confidence from the caller Symbol's own confidence field", () => {
+    // ir-schema.md does not model per-call confidence; the reconstructed edge
+    // uses the containing Symbol's confidence as a defensible floor.
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#weak", {
+        confidence: "low",
+        calls: [{ target: "helper", line: 1, resolved: "ts:src/a.ts#helper" }],
+      }),
+      makeSymbol("ts:src/a.ts#helper"),
+    ]
+    expect(reconstructCallEdgesFromIR(ir)[0]?.confidence).toBe("low")
+  })
+
+  it("emits one edge per call site when the same caller invokes the same callee on multiple lines", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [
+          { target: "helper", line: 3, resolved: "ts:src/a.ts#helper" },
+          { target: "helper", line: 7, resolved: "ts:src/a.ts#helper" },
+        ],
+      }),
+      makeSymbol("ts:src/a.ts#helper"),
+    ]
+    const edges = reconstructCallEdgesFromIR(ir)
+    expect(edges).toHaveLength(2)
+    expect(edges.map((e) => e.line)).toEqual([3, 7])
+  })
+
+  it("sorts edges by (from, to, line) ascending — matches resolveCallGraph's output order", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/z.ts#z", {
+        calls: [{ target: "b", line: 4, resolved: "ts:src/b.ts#b" }],
+      }),
+      makeSymbol("ts:src/a.ts#a", {
+        calls: [
+          { target: "c", line: 2, resolved: "ts:src/c.ts#c" },
+          { target: "b", line: 1, resolved: "ts:src/b.ts#b" },
+        ],
+      }),
+      makeSymbol("ts:src/b.ts#b"),
+      makeSymbol("ts:src/c.ts#c"),
+    ]
+    const edges = reconstructCallEdgesFromIR(ir)
+    expect(edges.map((e) => `${e.from}->${e.to}@${e.line}`)).toEqual([
+      "ts:src/a.ts#a->ts:src/b.ts#b@1",
+      "ts:src/a.ts#a->ts:src/c.ts#c@2",
+      "ts:src/z.ts#z->ts:src/b.ts#b@4",
+    ])
+  })
+
+  it("is deterministic — repeated invocations return byte-identical output", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#a", {
+        calls: [{ target: "b", line: 1, resolved: "ts:src/a.ts#b" }],
+      }),
+      makeSymbol("ts:src/a.ts#b"),
+    ]
+    const one = reconstructCallEdgesFromIR(ir)
+    const two = reconstructCallEdgesFromIR(ir)
+    expect(JSON.stringify(two)).toBe(JSON.stringify(one))
   })
 })

@@ -2,6 +2,7 @@ export {
   type CallEdge,
   type ResolveCallGraphInput,
   type ResolveCallGraphResult,
+  reconstructCallEdgesFromIR,
   resolveCallGraph,
 } from "./callgraph"
 export { type SerializeOptions, serializeCanonical } from "./canonical"
@@ -83,6 +84,7 @@ export {
   classifyWithTimeout,
   DEFAULT_CLASSIFY_TIMEOUT_MS,
 } from "./scan/timeout"
+export { computeWeaklyConnectedComponents } from "./wcc"
 export {
   type DetectManagersResult,
   type DetectWorkspaceRootOptions,

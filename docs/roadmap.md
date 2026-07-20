@@ -17,6 +17,9 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Symbol-to-symbol dependency edges**: file-scope and import-scope call
   resolution filling `Symbol.calls[].resolved`, projected as `via: "call"`
   entries in `dependencies[]`
+- **Slice View**: `aburi diff` clusters the changed-Symbol set into weakly
+  connected components over the call graph and renders vertical slices in
+  `out/diff.md` (Controller → Service → Repository grouped as one section)
 - **Extraction**: drop list (boilerplate removal) + Rules + Boundaries + local Effects
 - **Commands**: `aburi init` / `aburi scan` / `aburi diff <base>..<head>` / `aburi explain`
 - **Diff**: all 6 statuses — `added` / `removed` / `moved` / `changed` /
@@ -37,27 +40,22 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
   resolution tier is not
 - **No LSP enrichment** — extraction is purely syntactic; no type resolution
   (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
-- **No Slice View / graph visualization beyond the workspace overview**
-  (Slice View: design landed; implementation upcoming)
+- **No graph visualization beyond the workspace overview and the diff Slice
+  View section** (broader visualization: no design yet)
 - **No LLM integration** — Aburi is a deterministic static analyser by design;
   AI-assisted review on top of the IR is a separate concern
 
 ---
 
-## Next: effect propagation and the vertical axis
+## Next: LSP enrichment and additional plugins
 
-- **Effect propagation**: build on the symbol call graph and propagate `db.write`
-  to methods that call methods that call `prisma.invoice.create`
-- **Slice View**: cluster a PR's changed symbol set into connected components
-  over the call graph and render vertical slices in Markdown
 - **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
 - **Additional frameworks**: React function components / Express middleware
 - **Additional effect plugins**: `@aburi/effects-drizzle` / `@aburi/effects-trpc`
 
-All detailed designs for this phase have landed:
-`call-resolution.md`, `effect-propagation.md`, `slice-view.md`, and
-`lsp-enrichment.md` — see the Design documents table below.
+All detailed designs for this phase have landed — see the Design documents
+table below (`lsp-enrichment.md` is the primary open item).
 
 ## Later: multi-language
 

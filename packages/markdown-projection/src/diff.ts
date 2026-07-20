@@ -2,6 +2,7 @@ import type {
   Dependency,
   DiffResult,
   Symbol as IRSymbol,
+  SliceRecord,
   SymbolChange,
   SymbolChanged,
   SymbolDelta,
@@ -31,6 +32,7 @@ export function projectDiff(diff: DiffResult): string {
 
   appendSection(lines, "## ⚠ API changes", renderChangedList(buckets.apiChanged))
   appendSection(lines, "## 🔧 Logic changes", renderChangedList(buckets.logicOnly))
+  appendSection(lines, "## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols))
   appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
   appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
@@ -437,6 +439,171 @@ function renderSyntaxOnly(items: readonly (SymbolChanged | SymbolMovedChanged)[]
   return sortByAfterId(items).map(
     (i) => `- \`${i.after.name}\` (\`${i.after.source.file}:${i.after.source.startLine}\`)`,
   )
+}
+
+/**
+ * §12 — the Slice View section. Renders every non-singleton Slice as a `###`
+ * subsection followed by member bullets, then collapses singleton Slices into
+ * one `<details>` "Standalone changes" block. If the whole list is empty the
+ * whole section is skipped (empty body → `appendSection` no-op → §12.5 omit).
+ *
+ * The `symbols[]` array from the diff is used to look up each member's
+ * SymbolChange record for per-bullet detail (status label, file:line, delta /
+ * effect summary). Members that do not appear in `symbols[]` are still
+ * rendered with just the id so a rendering-side mistake never silently
+ * elides a member the pass emitted.
+ */
+function renderSliceView(
+  slices: readonly SliceRecord[],
+  symbols: readonly SymbolChange[],
+): string[] {
+  if (slices.length === 0) return []
+
+  const changeById = indexChangesById(symbols)
+  const nonSingleton = slices.filter((s) => s.members.length >= 2)
+  const singleton = slices.filter((s) => s.members.length === 1)
+
+  const rows: string[] = []
+  for (let i = 0; i < nonSingleton.length; i++) {
+    const slice = nonSingleton[i] as SliceRecord
+    rows.push(...renderSliceSection(slice, changeById))
+    rows.push("---")
+    rows.push("")
+  }
+
+  if (singleton.length > 0) {
+    rows.push("### Standalone changes")
+    rows.push("")
+    rows.push("<details>")
+    rows.push(
+      `<summary>${singleton.length} singleton slices (no in-Node call-graph neighbours)</summary>`,
+    )
+    rows.push("")
+    for (const slice of singleton) {
+      const memberId = slice.members[0] as string
+      const change = changeById.get(memberId)
+      const label = renderSingletonLabel(memberId, change)
+      rows.push(`- \`${slice.id}\` — ${label}`)
+    }
+    rows.push("")
+    rows.push("</details>")
+  }
+  return rows
+}
+
+/**
+ * §12.2 — render one non-singleton Slice. The heading uses the full sliceId
+ * (surrounded by backticks so Markdown viewers do not try to auto-link the
+ * `:` / `/` / `#` inside it) and the member count. Each member becomes a
+ * three-line bullet cluster: short qname + status italic, `**File**` line,
+ * and a `↳` follow-up summarising which delta axes tripped (or, for added /
+ * removed, a short "new symbol" / "removed symbol" marker).
+ */
+function renderSliceSection(
+  slice: SliceRecord,
+  changeById: ReadonlyMap<string, SymbolChange>,
+): string[] {
+  const rows: string[] = []
+  rows.push(`### \`${slice.id}\` (${slice.members.length} members)`)
+  rows.push("")
+  for (const memberId of slice.members) {
+    const change = changeById.get(memberId)
+    const symbol = symbolForMember(change)
+    const shortName = symbol?.name ?? lastQnameSegment(memberId)
+    const filePart =
+      symbol !== null ? `\`${symbol.source.file}:${symbol.source.startLine}\`` : `\`${memberId}\``
+    const statusLabel = change !== undefined ? `*(${change.status})*` : "*(unknown)*"
+    rows.push(`- \`${shortName}\` — ${statusLabel}`)
+    rows.push(`  **File**: ${filePart}`)
+    const followup = renderMemberFollowup(change)
+    if (followup !== null) rows.push(`  ↳ ${followup}`)
+  }
+  rows.push("")
+  return rows
+}
+
+function renderSingletonLabel(memberId: string, change: SymbolChange | undefined): string {
+  const symbol = symbolForMember(change)
+  const name = symbol?.name ?? lastQnameSegment(memberId)
+  const status = change?.status ?? "unknown"
+  return `\`${name}\` *(${status})*`
+}
+
+/**
+ * Pick the SymbolChange's IRSymbol side that best represents the member's
+ * head-visible identity (§4.1): `after` for changed / moved+changed /
+ * dropped-toggled, `symbol` for added / removed, `after` for pure moved
+ * (though moved never becomes a Node — defensive fallback only).
+ */
+function symbolForMember(change: SymbolChange | undefined): IRSymbol | null {
+  if (change === undefined) return null
+  switch (change.status) {
+    case "added":
+    case "removed":
+      return change.symbol
+    case "changed":
+    case "moved+changed":
+    case "dropped-toggled":
+      return change.after
+    case "moved":
+      return change.after
+  }
+}
+
+function renderMemberFollowup(change: SymbolChange | undefined): string | null {
+  if (change === undefined) return null
+  switch (change.status) {
+    case "added":
+      return "new symbol"
+    case "removed":
+      return "removed symbol"
+    case "moved":
+      return `moved: \`${change.before.source.file}\` → \`${change.after.source.file}\``
+    case "changed":
+    case "moved+changed":
+      return deltaAxisSummary(change.delta)
+    case "dropped-toggled":
+      return `dropped-toggled: ${change.direction}`
+    default:
+      return null
+  }
+}
+
+function deltaAxisSummary(delta: SymbolDelta): string {
+  const axes: string[] = []
+  if (delta.apiChanged) axes.push("delta.apiChanged")
+  if (delta.logicChanged) axes.push("delta.logicChanged")
+  if (delta.syntaxChanged) axes.push("delta.syntaxChanged")
+  if (delta.componentChanged) axes.push("delta.componentChanged")
+  if (delta.visibilityChanged) axes.push("delta.visibilityChanged")
+  return axes.length === 0 ? "no delta axes" : axes.join(", ")
+}
+
+function indexChangesById(symbols: readonly SymbolChange[]): Map<string, SymbolChange> {
+  const map = new Map<string, SymbolChange>()
+  for (const change of symbols) {
+    switch (change.status) {
+      case "added":
+      case "removed":
+        map.set(change.symbol.id, change)
+        break
+      case "changed":
+      case "moved+changed":
+      case "dropped-toggled":
+        map.set(change.after.id, change)
+        break
+      case "moved":
+        map.set(change.after.id, change)
+        break
+    }
+  }
+  return map
+}
+
+function lastQnameSegment(symbolId: string): string {
+  const hashIdx = symbolId.lastIndexOf("#")
+  if (hashIdx < 0) return symbolId
+  return symbolId.slice(hashIdx + 1)
 }
 
 function renderComponentChanges(diff: DiffResult): string[] {

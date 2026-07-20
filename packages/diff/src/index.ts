@@ -37,6 +37,7 @@ export {
   ownerSimilarity,
   tokenizeName,
 } from "./similarity"
+export { computeSlices, type SliceInput } from "./slice"
 export {
   classifyStatus,
   type DropDirection,

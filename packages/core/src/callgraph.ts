@@ -1,4 +1,4 @@
-import type { Confidence, ImportEdge, Symbol as IRSymbol, SymbolId } from "@aburi/types"
+import type { Confidence, ImportEdge, IR, Symbol as IRSymbol, SymbolId } from "@aburi/types"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -116,6 +116,47 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
 
   edges.sort(compareCallEdge)
   return { symbols: nextSymbols, edges }
+}
+
+/**
+ * Rebuild the resolved `CallEdge[]` for an already-scanned IR by walking every
+ * Symbol's `calls[].resolved` field. `resolveCallGraph` runs at scan time and
+ * writes its resolutions back into the IR, but the rich `CallEdge[]` array
+ * itself is not serialised (only a collapsed `Dependency[]` projection lands in
+ * `IR.dependencies`). Downstream passes — Slice View (docs/design/slice-view.md
+ * §3) most notably — need the edges again after loading the IR from disk, and
+ * reconstructing from `resolved` gives them the exact shape §7.1 of
+ * `call-resolution.md` specifies (via = "call", per-call `line`, per-call
+ * `confidence`). Unresolved calls (`resolved: null`) emit no edge — same rule
+ * as at scan time.
+ *
+ * Confidence is inherited from the containing Symbol's own `confidence` field,
+ * because the per-call confidence produced at scan time by `resolveCallGraph`
+ * is not persisted (`ir-schema.md` does not model it on `Call`). This is a
+ * conservative floor: a Symbol scanned with `high` confidence contributes edges
+ * at `high`, while a `low`-confidence Symbol contributes `low` edges. Slice
+ * View §5 does not read `confidence`, so this floor is invisible in practice —
+ * but it keeps the reconstructed edge shape structurally identical to what
+ * `resolveCallGraph` returned, so future consumers that DO care about
+ * confidence get a defensible answer.
+ */
+export function reconstructCallEdgesFromIR(ir: IR): CallEdge[] {
+  const edges: CallEdge[] = []
+  for (const symbol of ir.symbols) {
+    if (symbol.calls.length === 0) continue
+    for (const call of symbol.calls) {
+      if (call.resolved === null) continue
+      edges.push({
+        from: symbol.id,
+        to: call.resolved,
+        via: "call",
+        confidence: symbol.confidence,
+        line: call.line,
+      })
+    }
+  }
+  edges.sort(compareCallEdge)
+  return edges
 }
 
 /**
