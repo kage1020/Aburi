@@ -14,6 +14,7 @@ export type {
   Config,
   FrameworkHint,
   HintRule,
+  LspServerConfig,
   PluginRef as ConfigPluginRef,
 } from "./generated/config"
 // ---------- Diff output ----------
@@ -55,6 +56,7 @@ export type {
   Generator,
   IR,
   LanguageId,
+  LspEnrichmentStats,
   PluginRef,
   RelativePath,
   Rule,

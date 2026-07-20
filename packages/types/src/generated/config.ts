@@ -67,6 +67,21 @@ parseTimeoutMs?: number
  * Per-call timeout for effect plugin classify(). Exceeding calls fall through to next plugin and are recorded in stats.effectClassifyTimeouts[]. Default 50 ms; raise to 200-500 for SQL/regex-heavy effect plugins.
  */
 classifyTimeoutMs?: number
+/**
+ * Optional LSP enrichment (docs/design/lsp-enrichment.md). Opt-in per-language; default off. Refines SourceRange columns, this./super./interface call resolution, Signature.inferredThrows, and CallEdge.confidence.
+ */
+lsp?: {
+/**
+ * Master switch. When false the enrichment pass is a total no-op regardless of servers.
+ */
+enabled?: boolean
+/**
+ * Per-language server config. Keys are language short-form ids (typescript, python, go, …).
+ */
+servers?: {
+[k: string]: LspServerConfig | undefined
+}
+}
 }
 export interface ComponentOverride {
 id: string
@@ -115,4 +130,36 @@ derivedBy?: string
  * If true, drop matching symbol as Category B with dropReason set from name.
  */
 drop?: boolean
+}
+export interface LspServerConfig {
+/**
+ * Server binary. PATH-resolvable or absolute path. Missing binaries trigger per-language fallback (lsp-enrichment.md §6.1).
+ */
+command: string
+/**
+ * Arguments passed to the server binary (e.g., ['--stdio']).
+ */
+args?: string[]
+/**
+ * Handshake timeout (lsp-enrichment.md §4.4). Default 10 s absorbs cold-disk starts.
+ */
+initializeTimeoutMs?: number
+/**
+ * Per-request timeout. Exceeding requests fall back per-request (lsp-enrichment.md §6.1). Default 500 ms.
+ */
+requestTimeoutMs?: number
+/**
+ * Per-file budget across all requests for that file. Exceeding triggers per-file fallback. Default 2000 ms.
+ */
+fileBudgetMs?: number
+/**
+ * Max in-flight requests per file (lsp-enrichment.md §4.3).
+ */
+concurrency?: number
+/**
+ * Opaque object forwarded verbatim to the server's initialize.initializationOptions. Server-specific; outside Aburi's compatibility scope.
+ */
+initializationOptions?: {
+[k: string]: unknown | undefined
+}
 }

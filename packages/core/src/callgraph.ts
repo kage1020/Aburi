@@ -1,4 +1,6 @@
 import type { Confidence, ImportEdge, IR, Symbol as IRSymbol, SymbolId } from "@aburi/types"
+import type { ReceiverHint } from "./lsp/enrich"
+import { makeReceiverHintKey } from "./lsp/enrich"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -28,6 +30,20 @@ export interface ResolveCallGraphInput {
    * candidate file appears in `symbols[]` wins.
    */
   fileExtensions?: readonly string[]
+  /**
+   * LSP-derived per-call-site hints (call-resolution.md §5.2 / §5.3). Keys are
+   * `${file}:${line}`. Present only when the LSP enrichment pass ran; consulted
+   * as the LSP tier before the resolver would otherwise return `null`. Non-null
+   * `Call.resolved` values are still never overwritten (§5.4).
+   */
+  receiverHints?: ReadonlyMap<string, ReceiverHint>
+  /**
+   * LSP-derived interface implementers, keyed by interface Symbol id and
+   * lex-sorted so consumption order is deterministic. Used together
+   * with `receiverHints` to promote a single-implementer interface call to a
+   * `medium`-confidence edge.
+   */
+  implementerHints?: ReadonlyMap<SymbolId, readonly SymbolId[]>
 }
 
 export interface ResolveCallGraphResult {
@@ -65,6 +81,8 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
  */
 export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraphResult {
   const extensions = input.fileExtensions ?? DEFAULT_EXTENSIONS
+  const receiverHints = input.receiverHints ?? EMPTY_RECEIVER_HINTS
+  const implementerHints = input.implementerHints ?? EMPTY_IMPLEMENTER_HINTS
 
   // Every downstream lookup uses `keptSymbolIds` (i.e. `dropped: false`) so
   // the resolver never fabricates an edge into a Symbol body that was dropped
@@ -101,21 +119,64 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         extensions,
         parameterNames,
       })
-      if (resolved === null) return call
+      if (resolved !== null) {
+        edges.push({
+          from: symbol.id,
+          to: resolved.id,
+          via: "call",
+          confidence: resolved.confidence,
+          line: call.line,
+        })
+        return { target: call.target, line: call.line, resolved: resolved.id }
+      }
+      // Untyped tier missed — try LSP tier via receiverHints (§5.2 / §5.3).
+      const lspHit = resolveViaLspHint({
+        caller: symbol,
+        call,
+        receiverHints,
+        implementerHints,
+        keptSymbolIds,
+      })
+      if (lspHit === null) return call
       edges.push({
         from: symbol.id,
-        to: resolved.id,
+        to: lspHit.id,
         via: "call",
-        confidence: resolved.confidence,
+        confidence: lspHit.confidence,
         line: call.line,
       })
-      return { target: call.target, line: call.line, resolved: resolved.id }
+      return { target: call.target, line: call.line, resolved: lspHit.id }
     })
     nextSymbols.push({ ...symbol, calls: updatedCalls })
   }
 
   edges.sort(compareCallEdge)
   return { symbols: nextSymbols, edges }
+}
+
+const EMPTY_RECEIVER_HINTS: ReadonlyMap<string, ReceiverHint> = new Map()
+const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new Map()
+
+/**
+ * Resolve a call left null by the untyped tier using LSP-derived hints.
+ * `this.*` / `super.*` with a hint present resolve at `high` confidence. Never
+ * overwrites an already-resolved call (§5.4). Interface-tier resolution is
+ * out of scope until the IR carries `implements` edges — until then any
+ * `implementerHints` entries pass through untouched.
+ */
+function resolveViaLspHint(input: {
+  caller: IRSymbol
+  call: { target: string; line: number; resolved: SymbolId | null }
+  receiverHints: ReadonlyMap<string, ReceiverHint>
+  implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
+  keptSymbolIds: ReadonlySet<SymbolId>
+}): ResolutionHit | null {
+  const key = makeReceiverHintKey(input.caller.source.file, input.call.line)
+  const hint = input.receiverHints.get(key)
+  if (hint === undefined) return null
+  const target = hint.targetSymbolId
+  if (!input.keptSymbolIds.has(target)) return null
+  return { id: target, confidence: "high" }
 }
 
 /**

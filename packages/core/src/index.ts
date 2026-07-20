@@ -41,6 +41,19 @@ export {
 } from "./id"
 export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
 export {
+  type EnrichmentInput,
+  type EnrichmentResult,
+  enrichWithLsp,
+  isLspFailure,
+  type LspClient,
+  type LspError,
+  type LspFailure,
+  type LspTimeout,
+  makeReceiverHintKey,
+  type ReceiverHint,
+  type ServerFactory,
+} from "./lsp"
+export {
   type PropagateInput,
   type PropagateResult,
   type PropagationStats,

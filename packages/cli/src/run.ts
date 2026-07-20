@@ -46,7 +46,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     })
 
   let outcome: ExitCode = EXIT.SUCCESS
-  const wrap = (fn: () => Promise<ExitCode | void>): (() => Promise<void>) => {
+  const wrap = (fn: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
     return async () => {
       try {
         const result = await fn()
@@ -99,6 +99,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--compact", "compact JSON output")
     .option("--no-timestamp", "omit generatedAt from IR (default when running under CI env)")
     .option("--config <path>", "config file path")
+    .option("--lsp", "enable optional LSP enrichment (overrides config lsp.enabled=true)")
+    .option("--no-lsp", "disable LSP enrichment (overrides config lsp.enabled=false)")
     .action(
       (cmdOptions: {
         outputDir?: string
@@ -110,6 +112,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         compact?: boolean
         timestamp?: boolean
         config?: string
+        lsp?: boolean
       }) =>
         wrap(async () => {
           const format = deriveFormat(cmdOptions)
@@ -125,6 +128,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               : { respectGitignore: cmdOptions.respectGitignore }),
             ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
             ...(cmdOptions.timestamp === false || env.ci ? { suppressTimestamp: true } : {}),
+            ...(cmdOptions.lsp === undefined ? {} : { lsp: cmdOptions.lsp }),
             ...withConfigPath(cmdOptions.config, env),
           })
           stdout.write(
@@ -319,6 +323,22 @@ function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream):
     stderr.write(
       `⚠ ${report.skipped.length} file(s) were skipped during discovery: ${summariseSkipped(report.skipped)}\n`,
     )
+  }
+  const lsp = report.lspEnrichment
+  if (lsp !== undefined) {
+    if (lsp.filesFellBack > 0) {
+      stderr.write(
+        `⚠ LSP enrichment fell back for ${lsp.filesFellBack} file(s); IR field values in those files remain at the untyped tier.\n`,
+      )
+    }
+    if (lsp.languagesDisabled.length > 0) {
+      stderr.write(`⚠ LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.\n`)
+    }
+    if (lsp.requestsTimedOut > 0 || lsp.requestsFailed > 0) {
+      stderr.write(
+        `  LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.\n`,
+      )
+    }
   }
 }
 
