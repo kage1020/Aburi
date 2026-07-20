@@ -18,6 +18,10 @@ summary: Summary
 symbols: SymbolChange[]
 components: ComponentDiff
 dependencies: DependencyDiff
+/**
+ * Weakly-connected components of changed Symbols over the call graph (see docs/design/slice-view.md).
+ */
+slices: SliceRecord[]
 }
 export interface Generator {
 name: string
@@ -123,4 +127,16 @@ frameworksChanged: boolean
 export interface DependencyDiff {
 added: Dependency[]
 removed: Dependency[]
+}
+export interface SliceRecord {
+/**
+ * Cluster id: "slice:" + the lexicographically smallest member Symbol id.
+ */
+id: string
+/**
+ * Member Symbol ids in ascending lexicographic order.
+ * 
+ * @minItems 1
+ */
+members: string[]
 }

@@ -26,6 +26,7 @@ export type {
   IRRef,
   MatchRationale,
   SignatureDelta,
+  SliceRecord,
   Summary,
   SymbolAdded,
   SymbolChange,

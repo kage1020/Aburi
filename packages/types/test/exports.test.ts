@@ -25,6 +25,7 @@ import type {
   PluginContext,
   PluginManifest,
   PluginRef,
+  SliceRecord,
   SourceFile,
   Symbol,
   SymbolCandidate,
@@ -103,6 +104,15 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<VocabRegistry["findFramework"]>().toBeFunction()
     expectTypeOf<VocabRegistry["assertEffectDeclared"]>().toBeFunction()
     expectTypeOf<VocabRegistry["assertExtKindDeclared"]>().toBeFunction()
+  })
+
+  it("exposes SliceRecord as a top-level export and on DiffResult.slices", () => {
+    expectTypeOf<SliceRecord>().toHaveProperty("id")
+    expectTypeOf<SliceRecord>().toHaveProperty("members")
+    expectTypeOf<SliceRecord["id"]>().toEqualTypeOf<string>()
+    expectTypeOf<SliceRecord["members"]>().toEqualTypeOf<string[]>()
+    expectTypeOf<DiffResult>().toHaveProperty("slices")
+    expectTypeOf<DiffResult["slices"]>().toEqualTypeOf<SliceRecord[]>()
   })
 
   it("disambiguating aliases stay distinct from their non-aliased siblings", () => {

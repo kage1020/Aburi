@@ -31,6 +31,7 @@ function makeDiff(overrides: Partial<DiffResult> = {}): DiffResult {
     symbols: overrides.symbols ?? [],
     components: overrides.components ?? { added: [], removed: [], changed: [] },
     dependencies: overrides.dependencies ?? { added: [], removed: [] },
+    slices: overrides.slices ?? [],
   }
 }
 
