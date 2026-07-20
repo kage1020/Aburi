@@ -17,12 +17,22 @@ const TYPESCRIPT_WASM_PATH = nodeRequire.resolve(
 )
 const TSX_WASM_PATH = nodeRequire.resolve("@vscode/tree-sitter-wasm/wasm/tree-sitter-tsx.wasm")
 
-/** File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language. */
+/**
+ * File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language.
+ * `.jsx` routes to the tsx grammar (JSX-aware); `.js` / `.mjs` / `.cjs` fall back to the
+ * TypeScript grammar which permissively accepts modern JS without type annotations.
+ * The extended coverage exists so `@aburi/framework-react` can classify React sources in
+ * plain-JavaScript codebases (Vite / CRA / library authors who publish .js).
+ */
 const EXTENSION_GRAMMAR: ReadonlyMap<string, string> = new Map([
   [".ts", TYPESCRIPT_WASM_PATH],
   [".mts", TYPESCRIPT_WASM_PATH],
   [".cts", TYPESCRIPT_WASM_PATH],
   [".tsx", TSX_WASM_PATH],
+  [".js", TYPESCRIPT_WASM_PATH],
+  [".mjs", TYPESCRIPT_WASM_PATH],
+  [".cjs", TYPESCRIPT_WASM_PATH],
+  [".jsx", TSX_WASM_PATH],
 ])
 
 let runtimeInitPromise: Promise<void> | null = null

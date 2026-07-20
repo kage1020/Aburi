@@ -25,7 +25,7 @@ import { walkBody } from "./walk-body"
  */
 class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   readonly manifest = langTypescriptManifest
-  readonly fileExtensions: string[] = [".ts", ".mts", ".cts", ".tsx"]
+  readonly fileExtensions: string[] = [".ts", ".mts", ".cts", ".tsx", ".js", ".mjs", ".cjs", ".jsx"]
   readonly capabilities: LanguageCapabilities = {
     hasDecorators: true,
     hasGenerics: true,
