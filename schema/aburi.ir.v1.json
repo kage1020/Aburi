@@ -151,6 +151,55 @@
         "effectPropagation": {
           "$ref": "#/$defs/EffectPropagationStats",
           "description": "Counters produced by the effect-propagation pass (effect-propagation.md §10). Always present so a run with zero propagated effects still reports the SCC shape it observed."
+        },
+        "lspEnrichment": {
+          "$ref": "#/$defs/LspEnrichmentStats",
+          "description": "Optional bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Present when the pass ran regardless of whether it succeeded or fell back; absent when config.lsp is not configured."
+        }
+      }
+    },
+
+    "LspEnrichmentStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "filesEnriched",
+        "filesFellBack",
+        "languagesDisabled",
+        "requestsIssued",
+        "requestsTimedOut"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether config.lsp.enabled was true and any server was configured for a discovered language."
+        },
+        "filesEnriched": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files that completed the enrichment pass without hitting per-file fallback."
+        },
+        "filesFellBack": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files that triggered per-file fallback (lsp-enrichment.md §6.1)."
+        },
+        "requestsIssued": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total LSP requests issued across all files and languages."
+        },
+        "requestsTimedOut": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total LSP requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback)."
+        },
+        "languagesDisabled": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LanguageId" },
+          "uniqueItems": true,
+          "description": "Languages that were disabled mid-run via per-language fallback. Sorted ascending."
         }
       }
     },
@@ -370,6 +419,12 @@
         "throws": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "inferredThrows": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Optional AND omitted-when-empty: writers MUST omit the key entirely when nothing was inferred, never emit as []."
         },
         "async": { "type": "boolean" },
         "generator": { "type": "boolean" },

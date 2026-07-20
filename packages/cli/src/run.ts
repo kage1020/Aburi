@@ -46,7 +46,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     })
 
   let outcome: ExitCode = EXIT.SUCCESS
-  const wrap = (fn: () => Promise<ExitCode | void>): (() => Promise<void>) => {
+  const wrap = (fn: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
     return async () => {
       try {
         const result = await fn()
@@ -99,6 +99,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--compact", "compact JSON output")
     .option("--no-timestamp", "omit generatedAt from IR (default when running under CI env)")
     .option("--config <path>", "config file path")
+    .option("--lsp", "enable optional LSP enrichment (overrides config lsp.enabled=true)")
+    .option("--no-lsp", "disable LSP enrichment (overrides config lsp.enabled=false)")
     .action(
       (cmdOptions: {
         outputDir?: string
@@ -110,6 +112,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         compact?: boolean
         timestamp?: boolean
         config?: string
+        lsp?: boolean
       }) =>
         wrap(async () => {
           const format = deriveFormat(cmdOptions)
@@ -125,6 +128,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               : { respectGitignore: cmdOptions.respectGitignore }),
             ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
             ...(cmdOptions.timestamp === false || env.ci ? { suppressTimestamp: true } : {}),
+            ...(cmdOptions.lsp === undefined ? {} : { lsp: cmdOptions.lsp }),
             ...withConfigPath(cmdOptions.config, env),
           })
           stdout.write(

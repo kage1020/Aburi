@@ -11,6 +11,7 @@ import type {
   IR,
   LanguagePlugin,
   Logger,
+  LspEnrichmentStats,
   ParseError,
   PluginRef,
   SourceFile,
@@ -23,6 +24,7 @@ import { serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
+import { enrichWithLsp, type ServerFactory } from "../lsp"
 import { type PropagationStats, propagateEffects } from "../propagate"
 import { type DiscoveredFile, discoverFiles, type SkippedFile } from "./discover"
 import { buildDropCFilter } from "./drop-c"
@@ -44,6 +46,13 @@ export interface ScanInput {
   components?: readonly Component[]
   /** Generator metadata for `IR.generator`. Callers (the CLI) fill in name + version. */
   generator?: { name: string; version: string }
+  /**
+   * Optional injected LSP server factory. Real production always uses the
+   * default (spawn). Tests inject an in-memory mock so no child process is
+   * needed. When omitted the enrichment pass uses `spawnStdioServer` from the
+   * `lsp` module.
+   */
+  lspServerFactory?: ServerFactory
 }
 
 export interface ScanResult {
@@ -110,6 +119,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const timeoutEvents: ClassifyTimeoutEvent[] = []
   const additionalSkipped: SkippedFile[] = []
   const importsByFile = new Map<string, readonly ImportEdge[]>()
+  const fileContents = new Map<string, string>()
   // Discovery's `languageExtensions` filter already narrowed the file list to
   // extensions the router recognizes. If `route()` still returns null here it means
   // the extension filter and the router disagree — the discovered file survived the
@@ -129,6 +139,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     }
 
     const sourceFile = await loadSourceFile(input.workspaceRoot, discoveredFile)
+    fileContents.set(sourceFile.path, sourceFile.content)
 
     const result = await runFilePipeline({
       file: sourceFile,
@@ -155,13 +166,35 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
+  // Optional LSP enrichment pass (lsp-enrichment.md §2). Runs BEFORE call
+  // resolution so the LSP tier's receiver / implementer hints can feed the
+  // resolver. When `config.lsp?.enabled !== true` the pass is a total no-op
+  // and returns the input unchanged; determinism (§10) is preserved because
+  // the pass writes only to the strictly bounded set of fields in §5 and only
+  // when its cache is fully populated first.
+  const enrichmentInput: Parameters<typeof enrichWithLsp>[0] = {
+    symbols,
+    workspaceRoot: input.workspaceRoot,
+    fileContents,
+    lspConfig: input.config.lsp,
+    logger,
+  }
+  if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory
+  const enrichment = await enrichWithLsp(enrichmentInput)
+  const enrichedSymbols = enrichment.symbols
+  enrichedSymbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
   // Call-resolution + symbol → symbol edge projection (call-resolution.md §7,
   // ir-schema.md §11). The resolver rewrites `Symbol.calls[].resolved` in
   // place and returns per-call-site CallEdges; those are then collapsed into
   // `(from, to, via: "call")` Dependency triples with a stable `(from, to, via)`
-  // sort. Higher-tier resolution (component / workspace / LSP) will hook into
-  // the same seam without disturbing this projection.
-  const callGraph = resolveCallGraph({ symbols, importsByFile })
+  // sort. LSP hints (when present) supply the §5.2 / §5.3 tier.
+  const callGraph = resolveCallGraph({
+    symbols: enrichedSymbols,
+    importsByFile,
+    receiverHints: enrichment.receiverHints,
+    implementerHints: enrichment.implementerHints,
+  })
   const symbolEdges = projectSymbolEdges(callGraph.edges)
 
   // Transitive effect propagation over the resolved call graph
@@ -194,6 +227,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols: resolvedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
+    lspEnrichment: enrichment.stats,
   })
 
   const workspace: IR["workspace"] = {
@@ -281,6 +315,7 @@ interface BuildStatsInput {
   symbols: readonly IR["symbols"][number][]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
   propagation: PropagationStats
+  lspEnrichment?: LspEnrichmentStats | undefined
 }
 
 function buildStats(input: BuildStatsInput): Stats {
@@ -301,6 +336,9 @@ function buildStats(input: BuildStatsInput): Stats {
         timeoutMs: event.budgetMs,
       }),
     )
+  }
+  if (input.lspEnrichment !== undefined) {
+    stats.lspEnrichment = input.lspEnrichment
   }
   return stats
 }

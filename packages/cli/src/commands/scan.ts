@@ -25,6 +25,13 @@ export interface ScanOptions {
   compact?: boolean
   suppressTimestamp?: boolean
   strict?: boolean
+  /**
+   * Override for `Config.lsp.enabled`. `true` from `--lsp`, `false` from
+   * `--no-lsp`, `undefined` when neither flag was passed (falls through to the
+   * on-disk config value). Follows the CLI override precedence rule in
+   * `docs/design/config.md` §11.
+   */
+  lsp?: boolean
 }
 
 export interface ScanReport {
@@ -158,6 +165,9 @@ function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Confi
   }
   if (options.respectGitignore !== undefined) merged.respectGitignore = options.respectGitignore
   if (options.strict !== undefined) merged.strict = options.strict
+  if (options.lsp !== undefined) {
+    merged.lsp = { ...(merged.lsp ?? {}), enabled: options.lsp }
+  }
   return merged as Config
 }
 

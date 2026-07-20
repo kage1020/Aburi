@@ -112,6 +112,12 @@ importers:
       tinyglobby:
         specifier: ^0.2.17
         version: 0.2.17
+      vscode-jsonrpc:
+        specifier: ^9.0.1
+        version: 9.0.1
+      vscode-languageserver-protocol:
+        specifier: ^3.18.2
+        version: 3.18.2
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -125,6 +131,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      typescript-language-server:
+        specifier: ^5.3.0
+        version: 5.3.0
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
@@ -195,6 +204,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      typescript-language-server:
+        specifier: ^5.3.0
+        version: 5.3.0
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
@@ -2263,6 +2275,11 @@ packages:
     resolution: {integrity: sha512-o016H9PPtuH2deb3mh3Vci3Avfi9UYgM/RONQisY7HnloupP0IFSbFS3gFYJgFJP8nwBrByHWFQIDa8T2zIXPw==}
     hasBin: true
 
+  typescript-language-server@5.3.0:
+    resolution: {integrity: sha512-5puofxZHgFdAYtfNpmwCAvgtaYgg8wrUnH30m7Ze3QuguId5RNRadKASpOpyDxTyUdAF51FjhTdjntLw/EuWcQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   typescript@6.0.3:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
     engines: {node: '>=14.17'}
@@ -2425,6 +2442,20 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  vscode-jsonrpc@5.0.1:
+    resolution: {integrity: sha512-JvONPptw3GAQGXlVV2utDcHx0BiY34FupW/kI6mZ5x06ER5DdPG/tXWMVHjTNULF5uKPOUUD0SaXg5QaubJL0A==}
+    engines: {node: '>=8.0.0 || >=10.0.0'}
+
+  vscode-jsonrpc@9.0.1:
+    resolution: {integrity: sha512-rfuA6T75H6m5EkbhtEPzre9pT0HPcDI2MMy4+nPFIBks5J8JBAUHD4tRYSgaBOijIEC7SRkC1kKyXTLqbmh9jw==}
+    engines: {node: '>=14.0.0'}
+
+  vscode-languageserver-protocol@3.18.2:
+    resolution: {integrity: sha512-XRyDbT0Pp3sSNti3JmxVEUMySWCSi1hhM+/KUlCy1hV1zmrqpM1OwO12EAki8blhmLuIMpaJrYbo0OzGVfK2Qg==}
+
+  vscode-languageserver-types@3.18.0:
+    resolution: {integrity: sha512-8TsGPNMIMiiBdkORgRSvLjuiEIiAFtO+KssmYWxQ+uSVvlf7RjK8YKCOjPzZ+YA04jXEV7+7LvkSmHkhpNS99g==}
 
   vue@3.5.39:
     resolution: {integrity: sha512-xmZCYabFGcirU8r0fTuvl/LICc1OU620rnqepaJDL/a141ZigkG7AyaxQLdqJ02ZRYzWe6YPaDHeQx7MfknQfA==}
@@ -4170,6 +4201,11 @@ snapshots:
       '@turbo/windows-64': 2.10.0
       '@turbo/windows-arm64': 2.10.0
 
+  typescript-language-server@5.3.0:
+    dependencies:
+      vscode-jsonrpc: 5.0.1
+      vscode-languageserver-protocol: 3.18.2
+
   typescript@6.0.3: {}
 
   unconfig-core@7.5.0:
@@ -4314,6 +4350,17 @@ snapshots:
       '@types/node': 26.0.1
     transitivePeerDependencies:
       - msw
+
+  vscode-jsonrpc@5.0.1: {}
+
+  vscode-jsonrpc@9.0.1: {}
+
+  vscode-languageserver-protocol@3.18.2:
+    dependencies:
+      vscode-jsonrpc: 9.0.1
+      vscode-languageserver-types: 3.18.0
+
+  vscode-languageserver-types@3.18.0: {}
 
   vue@3.5.39(typescript@6.0.3):
     dependencies:

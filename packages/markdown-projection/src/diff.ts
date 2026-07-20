@@ -42,12 +42,10 @@ export function projectDiff(diff: DiffResult): string {
   appendFolded(lines, "## 💧 Dropped changes", renderDroppedToggled(buckets.droppedToggled))
   appendFolded(lines, "## 🎨 Syntax-only changes", renderSyntaxOnly(buckets.syntaxOnly))
 
-  return (
-    lines
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n"
-  )
+  return `${lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`
 }
 
 /** §6.3 — one-line CLI stdout summary. */

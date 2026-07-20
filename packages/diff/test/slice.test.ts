@@ -60,7 +60,7 @@ const movedChanged = (before: string, after: string): SymbolChange => ({
 
 const droppedToggled = (id: string, direction: "to-dropped" | "to-kept"): SymbolChange => ({
   status: "dropped-toggled",
-  before: makeSymbol({ id, name: id, dropped: direction === "to-dropped" ? false : true }),
+  before: makeSymbol({ id, name: id, dropped: direction !== "to-dropped" }),
   after: makeSymbol({
     id,
     name: id,

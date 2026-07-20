@@ -94,6 +94,24 @@
       "maximum": 5000,
       "default": 50,
       "description": "Per-call timeout for effect plugin classify(). Exceeding calls fall through to next plugin and are recorded in stats.effectClassifyTimeouts[]. Default 50 ms; raise to 200-500 for SQL/regex-heavy effect plugins."
+    },
+    "lsp": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional LSP enrichment (docs/design/lsp-enrichment.md). Opt-in per-language; default off. Refines SourceRange columns, this./super./interface call resolution, Signature.inferredThrows, and CallEdge.confidence.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Master switch. When false the enrichment pass is a total no-op regardless of servers."
+        },
+        "servers": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/LspServerConfig" },
+          "propertyNames": { "$ref": "#/$defs/LspLanguageKey" },
+          "description": "Per-language server config. Keys are language short-form ids (typescript, python, go, …)."
+        }
+      }
     }
   },
 
@@ -192,6 +210,61 @@
       "type": "string",
       "minLength": 1,
       "not": { "pattern": "\\\\" }
+    },
+
+    "LspLanguageKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*$",
+      "description": "Language short-form id (typescript, python, go, …). Matches ir-schema LanguageId."
+    },
+
+    "LspServerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Server binary. PATH-resolvable or absolute path. Missing binaries trigger per-language fallback (lsp-enrichment.md §6.1)."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments passed to the server binary (e.g., ['--stdio'])."
+        },
+        "initializeTimeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "default": 10000,
+          "description": "Handshake timeout (lsp-enrichment.md §4.4). Default 10 s absorbs cold-disk starts."
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 50,
+          "default": 500,
+          "description": "Per-request timeout. Exceeding requests fall back per-request (lsp-enrichment.md §6.1). Default 500 ms."
+        },
+        "fileBudgetMs": {
+          "type": "integer",
+          "minimum": 100,
+          "default": 2000,
+          "description": "Per-file budget across all requests for that file. Exceeding triggers per-file fallback. Default 2000 ms."
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 8,
+          "description": "Max in-flight requests per file (lsp-enrichment.md §4.3)."
+        },
+        "initializationOptions": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {},
+          "description": "Opaque object forwarded verbatim to the server's initialize.initializationOptions. Server-specific; outside Aburi's compatibility scope."
+        }
+      }
     }
   }
 }

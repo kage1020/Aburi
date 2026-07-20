@@ -51,12 +51,10 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
     lines.push("")
   }
 
-  return (
-    lines
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n"
-  )
+  return `${lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`
 }
 
 function renderManagers(ir: IR): string {

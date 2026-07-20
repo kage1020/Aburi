@@ -154,6 +154,12 @@ type: string
 }[]
 outputs: string[]
 throws: string[]
+/**
+ * Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Optional AND omitted-when-empty: writers MUST omit the key entirely when nothing was inferred, never emit as [].
+ * 
+ * @minItems 1
+ */
+inferredThrows?: string[]
 async: boolean
 generator: boolean
 typeParameters: string[]
@@ -192,6 +198,7 @@ droppedSymbols: number
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
+lspEnrichment?: LspEnrichmentStats
 }
 export interface EffectClassifyTimeout {
 /**
@@ -227,4 +234,33 @@ propagatedEffectCount: number
  * Number of Symbols that received at least one propagated Effect.
  */
 symbolsWithPropagatedEffects: number
+}
+/**
+ * Optional bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Present when the pass ran regardless of whether it succeeded or fell back; absent when config.lsp is not configured.
+ */
+export interface LspEnrichmentStats {
+/**
+ * Whether config.lsp.enabled was true and any server was configured for a discovered language.
+ */
+enabled: boolean
+/**
+ * Files that completed the enrichment pass without hitting per-file fallback.
+ */
+filesEnriched: number
+/**
+ * Files that triggered per-file fallback (lsp-enrichment.md §6.1).
+ */
+filesFellBack: number
+/**
+ * Total LSP requests issued across all files and languages.
+ */
+requestsIssued: number
+/**
+ * Total LSP requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback).
+ */
+requestsTimedOut: number
+/**
+ * Languages that were disabled mid-run via per-language fallback. Sorted ascending.
+ */
+languagesDisabled: LanguageId[]
 }

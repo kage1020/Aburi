@@ -28,6 +28,8 @@ export type CoreErrorCode =
   | "scan-workspace-not-absolute"
   /** The effect-propagation pass observed an internal-invariant violation (e.g. an edge referencing a Symbol not in the input, an unreachable branch executing). */
   | "propagation-invariant-violated"
+  /** LSP enrichment received a config the schema should have rejected (e.g. missing `command` after we already dereferenced it). Never reaches users when config-load validation is in place. */
+  | "lsp-config-invalid"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to ir-schema.md §14 numbering (1..11). */

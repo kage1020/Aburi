@@ -1,4 +1,4 @@
-import { type ScanInput, type ScanResult, scan } from "@aburi/core"
+import { type ScanInput, type ScanResult, type ServerFactory, scan } from "@aburi/core"
 import { nestEffectsPlugin } from "@aburi/effects-nest"
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
@@ -33,6 +33,7 @@ export async function scanFixture(
   config: Config = {},
   overlay: ScanFixturePluginOverlay = {},
   components: readonly Component[] = [],
+  lspServerFactory?: ServerFactory,
 ): Promise<ScanResult> {
   const languages: LanguagePlugin[] = [langTypescriptPlugin, ...(overlay.languages ?? [])]
   const frameworks: FrameworkPlugin[] = [nestjsFrameworkPlugin, ...(overlay.frameworks ?? [])]
@@ -52,5 +53,6 @@ export async function scanFixture(
     registry,
     components,
   }
+  if (lspServerFactory !== undefined) input.lspServerFactory = lspServerFactory
   return scan(input)
 }

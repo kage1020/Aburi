@@ -132,12 +132,10 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   lines.push(`- syntax: \`${symbol.fingerprint.syntax}\``)
   lines.push("")
 
-  return (
-    lines
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n"
-  )
+  return `${lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`
 }
 
 /**
@@ -170,5 +168,5 @@ function renderDroppedExplain(symbol: IRSymbol): string {
   lines.push("")
   lines.push("_(dropped symbols carry no rules / effects / calls / fingerprint by IR contract.)_")
   lines.push("")
-  return lines.join("\n").trimEnd() + "\n"
+  return `${lines.join("\n").trimEnd()}\n`
 }

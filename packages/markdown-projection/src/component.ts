@@ -102,12 +102,10 @@ export function projectComponent(input: ProjectComponentInput): string {
       ),
     )
   }
-  return (
-    lines
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n"
-  )
+  return `${lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd()}\n`
 }
 
 function joinCode(items: readonly string[]): string {
