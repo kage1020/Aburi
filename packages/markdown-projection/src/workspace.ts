@@ -113,6 +113,12 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
  * Isolated components (declared in `ir.components` but touched by no dependency)
  * still render as standalone mermaid nodes so the L0 overview matches the "full
  * monorepo view" contract of `docs/design/overview.md` §3.1.
+ *
+ * Assumes `ir-schema §14` invariant #2 (`Component.id` uniqueness across
+ * `ir.components`). Under that invariant the node-declaration loop is
+ * duplicate-free; a violation is a scan-side integrity bug and would silently
+ * overwrite one label with another, so `assertIRIntegrity` upstream is the
+ * intended gatekeeper — the projection layer trusts it and does not re-check.
  */
 function renderDependencies(ir: IR): string[] {
   const componentDeps = ir.dependencies.filter((d) => !isSymbolEdge(d))
@@ -140,14 +146,22 @@ function renderDependencies(ir: IR): string[] {
       rows.push(`  ${sanitizeMermaidId(d.from)} --> ${sanitizeMermaidId(d.to)}`)
     }
     rows.push("```")
-    if (componentDeps.length > 0) {
-      rows.push("")
-      rows.push("Fallback list:")
-      rows.push("")
-    }
+  } else {
+    // Explicit note so readers understand the diagram vanished on purpose (the
+    // 100-node cap was tripped) rather than blaming a broken renderer. Isolated
+    // components only ever surface inside the mermaid block, so this note is
+    // also the only signal that they exist above the cap.
+    rows.push(
+      `_Component graph omitted: ${unionNodeCount} nodes exceeds the render limit (${MERMAID_NODE_LIMIT}). See list below._`,
+    )
   }
-  for (const d of sortedDeps(componentDeps)) {
-    rows.push(`- ${d.from} → ${d.to} (via \`${d.via}\`)`)
+  if (componentDeps.length > 0) {
+    rows.push("")
+    rows.push("Fallback list:")
+    rows.push("")
+    for (const d of sortedDeps(componentDeps)) {
+      rows.push(`- ${d.from} → ${d.to} (via \`${d.via}\`)`)
+    }
   }
   return rows
 }
@@ -165,12 +179,9 @@ function isSymbolEdge(d: Dependency): boolean {
 }
 
 /**
- * Mermaid ids reject `-` at the graph level so we swap in `_`. Component ids come from
- * `ir-schema §11`, which restricts them to ASCII kebab-case (`[a-z][a-z0-9-]*`) — no
- * `_` is ever present in the input, so the `-` → `_` mapping is total and injective:
- * distinct kebab-case ids always sanitize to distinct snake_case ids. If the schema
- * ever admits `_` in ComponentId, the injectivity tripwire test in
- * `test/dependency-rendering.test.ts` will fail first.
+ * Mermaid ids reject `-` at the graph level so we swap in `_`. `ComponentId` is
+ * kebab-case with no `_`, so the mapping is total and injective — the injectivity
+ * tripwire test breaks first if the schema ever admits `_` in ComponentId.
  */
 function sanitizeMermaidId(id: string): string {
   return id.replace(/-/g, "_")
@@ -178,12 +189,23 @@ function sanitizeMermaidId(id: string): string {
 
 /**
  * `Component.name` is arbitrary user text that lands inside the mermaid label syntax
- * `id["label"]`. Unescaped `"` would prematurely close the label and break the graph
- * render. Mermaid accepts HTML entities inside labels, so `"` → `&quot;` is safe and
- * reversible for reviewers scanning the rendered graph.
+ * `id["label"]`. Several characters would silently break the graph render:
+ *   `"` closes the label prematurely
+ *   `]` closes the node early
+ *   `<` / `>` break out into raw HTML mode
+ *   `\n` splits the mermaid statement in two
+ * Mermaid accepts HTML entities inside labels, so the escape is safe and reversible
+ * for reviewers scanning the rendered graph; `\n` maps to `<br/>` (mermaid's native
+ * line-break inside a label).
  */
 function escapeMermaidLabel(label: string): string {
-  return label.replace(/"/g, "&quot;")
+  return label
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\]/g, "&rbrack;")
+    .replace(/\r?\n/g, "<br/>")
 }
 
 /**

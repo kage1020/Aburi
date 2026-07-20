@@ -164,15 +164,18 @@ isolated ones with no incident dependencies — so the L0 view matches the
 "full monorepo view" contract of [`overview.md`](./overview.md) §3.1
 (`docs` above is such a node). Node declarations are ordered ascending by
 `id`; edges are ordered lexicographically by `(from, to, via)`. Component
-ids are ASCII kebab-case per [`ir-schema.md`](./ir-schema.md) §11, sanitized
+ids are ASCII kebab-case per [`ir-schema.md`](./ir-schema.md) §4, sanitized
 to snake_case for mermaid (`billing-api` → `billing_api`) — the mapping is
 injective because ComponentId cannot contain `_`. Labels use `Component.name`
-with `"` escaped to `&quot;`.
+with mermaid-hostile characters (`"`, `<`, `>`, `]`, newline) escaped so the
+`id["label"]` syntax stays intact.
 
 If the union of declared components and edge endpoints exceeds 100 nodes,
-the mermaid block is omitted and only the text bullet list of edges is
-emitted (avoids unreadability). Disabling it entirely via config
-`output.mermaid: false` is planned — see the [roadmap](../roadmap.md).
+the mermaid block is replaced by an explicit `_Component graph omitted…_`
+note so a missing diagram is not mistaken for a broken renderer, and only
+the text bullet list of edges is emitted (avoids unreadability). Turning
+mermaid output off entirely via config (e.g. `output.mermaid: false`) is
+planned; the config-schema decision is pending.
 
 ### 4.3 generation metadata
 
@@ -562,7 +565,7 @@ Emitted in the L0 `workspace.md` `## Component dependencies` section (see §4.2)
 - omitted above 100 nodes measured against the union of declared components and edge endpoints (falls back to the text bullet list)
 - a text bullet list accompanies the mermaid whenever there is at least one edge, so reviewers still see the dependency inventory even when GitHub's mermaid fails to render
 
-Disabling mermaid output entirely via `config.output.mermaid: false` is planned (see the [roadmap](../roadmap.md)).
+Turning mermaid output off entirely via config (e.g. `output.mermaid: false`) is planned; the config-schema decision is pending.
 
 ## 10. Localization
 
