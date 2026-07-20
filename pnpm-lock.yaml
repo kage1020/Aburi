@@ -177,6 +177,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/markdown-projection':
+        specifier: workspace:*
+        version: link:../markdown-projection
       '@aburi/plugin-registry':
         specifier: workspace:*
         version: link:../plugin-registry

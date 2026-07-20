@@ -123,6 +123,7 @@ The monorepo overview.
 | id | roots | languages | frameworks | symbols |
 |---|---|---|---|---|
 | billing | `apps/billing`, `packages/billing-domain` | ts | nestjs | 89 |
+| docs    | `docs`                                    | ts | —      | 4  |
 | pricing | `packages/pricing` | ts | — | 42 |
 | shared  | `packages/shared`  | ts | — | 31 |
 
@@ -130,16 +131,20 @@ The monorepo overview.
 
 ```mermaid
 graph LR
+  billing["Billing"]
+  docs["Docs"]
+  pricing["Pricing"]
+  shared["Shared"]
   billing --> pricing
   billing --> shared
   pricing --> shared
 ```
 
-(fallback when mermaid is disabled)
+Fallback list:
 
-- billing → pricing (via import)
-- billing → shared (via import)
-- pricing → shared (via import)
+- billing → pricing (via `import`)
+- billing → shared (via `import`)
+- pricing → shared (via `import`)
 
 ## Effect surface (top 10 by count)
 
@@ -154,8 +159,23 @@ graph LR
 
 ### 4.2 mermaid
 
-If a mermaid graph exceeds 100 nodes it is omitted and only the text bullet list is emitted (avoids unreadability).
-Disabling it via config `output.mermaid: false` is planned — see the [roadmap](../roadmap.md).
+Every component declared in `ir.components` renders as a mermaid node — even
+isolated ones with no incident dependencies — so the L0 view matches the
+"full monorepo view" contract of [`overview.md`](./overview.md) §3.1
+(`docs` above is such a node). Node declarations are ordered ascending by
+`id`; edges are ordered lexicographically by `(from, to, via)`. Component
+ids are ASCII kebab-case per [`ir-schema.md`](./ir-schema.md) §4, sanitized
+to snake_case for mermaid (`billing-api` → `billing_api`) — the mapping is
+injective because ComponentId cannot contain `_`. Labels use `Component.name`
+with mermaid-hostile characters (`"`, `<`, `>`, `]`, newline) escaped so the
+`id["label"]` syntax stays intact.
+
+If the union of declared components and edge endpoints exceeds 100 nodes,
+the mermaid block is replaced by an explicit `_Component graph omitted…_`
+note so a missing diagram is not mistaken for a broken renderer, and only
+the text bullet list of edges is emitted (avoids unreadability). Turning
+mermaid output off entirely via config (e.g. `output.mermaid: false`) is
+planned; the config-schema decision is pending.
 
 ### 4.3 generation metadata
 
@@ -538,13 +558,14 @@ The hash algorithm is the same as for fingerprints:
 
 ## 9. Mermaid diagrams (optional)
 
-Planned for the L0 workspace.md (see the [roadmap](../roadmap.md)). Slice View has its own `## 🧵 Slice View` section within `out/diff.md`; see [`slice-view.md`](./slice-view.md) §12 for the rendering conventions.
+Emitted in the L0 `workspace.md` `## Component dependencies` section (see §4.2). Slice View has its own `## 🧵 Slice View` section within `out/diff.md`; see [`slice-view.md`](./slice-view.md) §12 for the rendering conventions.
 
 - `graph LR` (left → right) is used for Component dependencies
-- omitted above 100 nodes (falls back to the text bullet list)
-- a text version accompanies the mermaid even when it fails to render (guards the rare case where GitHub's mermaid breaks)
+- every component in `ir.components` renders as a node, including isolated ones with no incident edges
+- omitted above 100 nodes measured against the union of declared components and edge endpoints (falls back to the text bullet list)
+- a text bullet list accompanies the mermaid whenever there is at least one edge, so reviewers still see the dependency inventory even when GitHub's mermaid fails to render
 
-Disabling mermaid output entirely via `config.output.mermaid: false` is planned (see the [roadmap](../roadmap.md)).
+Turning mermaid output off entirely via config (e.g. `output.mermaid: false`) is planned; the config-schema decision is pending.
 
 ## 10. Localization
 

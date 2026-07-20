@@ -3,7 +3,7 @@ import { nestEffectsPlugin } from "@aburi/effects-nest"
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { VocabRegistry } from "@aburi/plugin-registry"
-import type { Config, EffectPlugin, FrameworkPlugin, LanguagePlugin } from "@aburi/types"
+import type { Component, Config, EffectPlugin, FrameworkPlugin, LanguagePlugin } from "@aburi/types"
 
 /**
  * Overlay lets a scenario add plugins on top of the default workspace lineup
@@ -32,6 +32,7 @@ export async function scanFixture(
   workspaceRoot: string,
   config: Config = {},
   overlay: ScanFixturePluginOverlay = {},
+  components: readonly Component[] = [],
 ): Promise<ScanResult> {
   const languages: LanguagePlugin[] = [langTypescriptPlugin, ...(overlay.languages ?? [])]
   const frameworks: FrameworkPlugin[] = [nestjsFrameworkPlugin, ...(overlay.frameworks ?? [])]
@@ -49,6 +50,7 @@ export async function scanFixture(
     frameworks,
     effects,
     registry,
+    components,
   }
   return scan(input)
 }
