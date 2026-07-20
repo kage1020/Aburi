@@ -167,6 +167,7 @@
         "filesEnriched",
         "filesFellBack",
         "languagesDisabled",
+        "requestsFailed",
         "requestsIssued",
         "requestsTimedOut"
       ],
@@ -193,7 +194,12 @@
         "requestsTimedOut": {
           "type": "integer",
           "minimum": 0,
-          "description": "Total LSP requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback)."
+          "description": "Requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback)."
+        },
+        "requestsFailed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requests that failed with a non-timeout error (server-error, server-disconnected, parse-error). Kept distinct from requestsTimedOut so operators can tell backpressure apart from broken servers."
         },
         "languagesDisabled": {
           "type": "array",

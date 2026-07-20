@@ -1,5 +1,3 @@
-export type { CacheKey, LspCache, RequestKind } from "./cache"
-export { createLspCache } from "./cache"
 export type { InitializeInput, LspClient, LspError, LspFailure, LspTimeout } from "./client"
 export { createLspClient, isLspFailure, LSP_TIMEOUT } from "./client"
 export type {

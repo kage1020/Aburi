@@ -6,11 +6,11 @@ import { scanFixture } from "../src/scan-helper"
 
 /**
  * Healthy in-memory LSP mock: satisfies initialize, returns [] for
- * documentSymbol, null for hover / typeDefinition / implementation. That is
- * "success with nothing to enrich" — the enrichment pass runs to completion
- * but produces no receiver hints or inferredThrows. Perfect for LE9 / LE12
- * parity where we prove that RUNNING enrichment with a working server does
- * not perturb api / syntax fingerprints.
+ * documentSymbol and null for hover. Enrichment runs to completion — issuing
+ * documentSymbol per file — but resolves no receivers and adds no inferred
+ * throws. That is exactly the shape the api / syntax fingerprint invariance
+ * needs to be proved against: enrichment ran, but the IR fields those hashes
+ * cover never changed.
  */
 function healthyMockFactory(): ServerFactory {
   return () => {
@@ -31,8 +31,7 @@ function healthyMockFactory(): ServerFactory {
 
 /**
  * Erroring LSP mock: initialize succeeds but every request returns an
- * `LspError`. That triggers per-request fallback on every call — enough to
- * exercise the fallback machinery under load without spawning a real process.
+ * `LspError`. Every request path exercises per-request fallback bookkeeping.
  */
 function erroringMockFactory(): ServerFactory {
   return () => {
@@ -52,21 +51,15 @@ function erroringMockFactory(): ServerFactory {
 }
 
 /**
- * LE9-LE12 parity: the same fixture scanned with `lsp.enabled: false` vs `true`
- * MUST produce byte-identical `api` and `syntax` fingerprints for every Symbol.
- * `logic` may legitimately differ when LSP resolves calls into an effect
- * closure (LE11), so the test asserts the invariance ONLY on `api` and
- * `syntax`.
- *
- * We use an injected `serverFactory` that returns a minimal mock (documentSymbol
- * returns []; hover / typeDefinition / implementation return null). The mock
- * server IS a "healthy" server — no fallback fires — but it also refuses to
- * resolve any receiver, so no LSP-only edges appear. That is enough to prove
- * the byte-identity theorem: enabling LSP with a working server produces the
- * SAME api/syntax fingerprints as running with LSP off (§8 Theorem).
+ * Fingerprint parity across LSP toggles. The theorem the LSP enrichment
+ * design commits to is: for every Symbol S, `S.fingerprint.api` and
+ * `S.fingerprint.syntax` are byte-identical between an LSP-off scan and an
+ * LSP-on scan of the same source tree. `S.fingerprint.logic` may differ when
+ * LSP resolves a call whose transitive closure carries a classified effect —
+ * but only then.
  */
-describe("LSP parity (LE9-LE12)", () => {
-  it("LE9/LE12: api + syntax fingerprints byte-identical under LSP off vs on (healthy server)", async () => {
+describe("LSP fingerprint parity across enablement", () => {
+  it("keeps api and syntax fingerprints byte-identical when a healthy LSP server runs", async () => {
     const { root, cleanup } = await checkoutFixture("lsp-parity")
     try {
       const off = await scanFixture(root, {})
@@ -77,6 +70,11 @@ describe("LSP parity (LE9-LE12)", () => {
         [],
         healthyMockFactory(),
       )
+      // Confirm the enrichment pass actually ran — otherwise this test would
+      // just be measuring "LSP off vs LSP off with an unused config".
+      expect(on.ir.stats.lspEnrichment).toBeDefined()
+      expect(on.ir.stats.lspEnrichment?.requestsIssued ?? 0).toBeGreaterThan(0)
+
       const offById = indexById(off.ir.symbols)
       const onById = indexById(on.ir.symbols)
       expect([...offById.keys()].sort()).toEqual([...onById.keys()].sort())
@@ -85,7 +83,7 @@ describe("LSP parity (LE9-LE12)", () => {
         const onS = onById.get(id) as IRSymbol
         expect(onS.fingerprint.api, `api mismatch for ${id}`).toBe(offS.fingerprint.api)
         expect(onS.fingerprint.syntax, `syntax mismatch for ${id}`).toBe(offS.fingerprint.syntax)
-        // signature.throws MUST NOT change; inferredThrows is a separate field.
+        // Signature.throws MUST NOT change; inferredThrows is a separate field.
         expect(onS.signature?.throws ?? []).toEqual(offS.signature?.throws ?? [])
       }
     } finally {
@@ -93,7 +91,7 @@ describe("LSP parity (LE9-LE12)", () => {
     }
   })
 
-  it("LE10: api + syntax fingerprints byte-identical when LSP requests all error out", async () => {
+  it("keeps api and syntax fingerprints byte-identical when every LSP request errors", async () => {
     const { root, cleanup } = await checkoutFixture("lsp-parity")
     try {
       const off = await scanFixture(root, {})
@@ -104,6 +102,7 @@ describe("LSP parity (LE9-LE12)", () => {
         [],
         erroringMockFactory(),
       )
+      expect(on.ir.stats.lspEnrichment?.requestsFailed ?? 0).toBeGreaterThan(0)
       const offById = indexById(off.ir.symbols)
       const onById = indexById(on.ir.symbols)
       for (const id of offById.keys()) {
@@ -117,12 +116,7 @@ describe("LSP parity (LE9-LE12)", () => {
     }
   })
 
-  it("LE11: logic fingerprint MAY differ for symbols in an LSP-newly-resolved effect closure", async () => {
-    // Sanity check: LSP-on scan without an actual effect closure must produce
-    // logic fingerprints equal to LSP-off, since no propagated effects change
-    // (fixture carries no db.write / event.publish yet). This is the boundary
-    // guarantee — where `logic` byte-identity holds because no effect touches
-    // the transitive closure.
+  it("keeps logic fingerprints identical when no LSP-newly-resolved edge reaches a classified effect", async () => {
     const { root, cleanup } = await checkoutFixture("lsp-parity")
     try {
       const off = await scanFixture(root, {})
@@ -138,7 +132,6 @@ describe("LSP parity (LE9-LE12)", () => {
       for (const id of offById.keys()) {
         const offS = offById.get(id) as IRSymbol
         const onS = onById.get(id) as IRSymbol
-        // No propagated effects in this fixture → logic MUST match too.
         expect(onS.fingerprint.logic, `logic differs unexpectedly for ${id}`).toBe(
           offS.fingerprint.logic,
         )

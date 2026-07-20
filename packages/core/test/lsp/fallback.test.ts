@@ -12,8 +12,8 @@ import { mockServerFactory } from "./fixtures/mock-server"
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 const HOVER_METHOD = "textDocument/hover"
 
-describe("LSP fallback (LE7, LE8, LE18)", () => {
-  it("LE7: per-request timeout increments stats.requestsTimedOut; siblings unaffected", async () => {
+describe("LSP fallback", () => {
+  it("counts per-request timeouts in stats without blocking sibling requests", async () => {
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const foo = makeMethodSymbol("src/a.ts", "C", "foo", 2)
     const bar = makeMethodSymbol("src/a.ts", "C", "bar", 3, [
@@ -45,7 +45,7 @@ describe("LSP fallback (LE7, LE8, LE18)", () => {
     expect(enrichment.receiverHints.size).toBeGreaterThanOrEqual(1)
   })
 
-  it("LE8: file exceeds fileBudgetMs → per-file fallback fires", async () => {
+  it("fires per-file fallback when the fileBudgetMs is exceeded", async () => {
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const foo = makeMethodSymbol("src/a.ts", "C", "foo", 2)
     const bar = makeMethodSymbol("src/a.ts", "C", "bar", 3, [
@@ -79,7 +79,7 @@ describe("LSP fallback (LE7, LE8, LE18)", () => {
     expect(enrichment.stats?.filesFellBack).toBe(1)
   })
 
-  it("LE18: no silent retries — a failed request stays failed within the same scan", async () => {
+  it("never silently retries a failed request within the same scan", async () => {
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const foo = makeMethodSymbol("src/a.ts", "C", "foo", 2)
     const bar = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
@@ -104,5 +104,30 @@ describe("LSP fallback (LE7, LE8, LE18)", () => {
     expect(enrichment.stats?.requestsTimedOut).toBe(1)
     // The unresolved this. call retains no hint.
     expect(enrichment.receiverHints.size).toBe(0)
+  })
+
+  it("counts non-timeout failures against requestsFailed, not requestsTimedOut", async () => {
+    const cls = makeClassSymbol("src/a.ts", "C", 1)
+    const foo = makeMethodSymbol("src/a.ts", "C", "foo", 2)
+    const bar = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
+    const factory = mockServerFactory((_lang, client) => {
+      client.installHandler(DOC_SYMBOL_METHOD, () => [])
+      client.installHandler(HOVER_METHOD, () => ({
+        kind: "error" as const,
+        reason: "server-error" as const,
+        message: "injected",
+      }))
+    })
+    const enrichment = await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: [cls, foo, bar],
+        fileContents: {
+          "src/a.ts": "class C {\n  foo() {}\n  bar() {\n    this.foo()\n  }\n}",
+        },
+        serverFactory: factory,
+      }),
+    )
+    expect(enrichment.stats?.requestsFailed).toBeGreaterThanOrEqual(1)
+    expect(enrichment.stats?.requestsTimedOut).toBe(0)
   })
 })

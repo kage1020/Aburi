@@ -39,7 +39,7 @@ export interface ResolveCallGraphInput {
   receiverHints?: ReadonlyMap<string, ReceiverHint>
   /**
    * LSP-derived interface implementers, keyed by interface Symbol id and
-   * lex-sorted so consumption order is deterministic (LE14). Used together
+   * lex-sorted so consumption order is deterministic. Used together
    * with `receiverHints` to promote a single-implementer interface call to a
    * `medium`-confidence edge.
    */
@@ -159,12 +159,10 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
 
 /**
  * Resolve a call left null by the untyped tier using LSP-derived hints.
- * Rules:
- *   - `this.*` / `super.*` with a direct-dispatch owner class → `high`
- *   - `this.*` / `super.*` where LSP had to walk a hierarchy      → `medium`
- *   - interface receiver with exactly one implementer            → `medium`
- * Any other shape (multi-implementer, hint absent, target not in kept set)
- * keeps the untyped tier's `null` — §5.4 forbids overwriting.
+ * `this.*` / `super.*` with a hint present resolve at `high` confidence. Never
+ * overwrites an already-resolved call (§5.4). Interface-tier resolution is
+ * out of scope until the IR carries `implements` edges — until then any
+ * `implementerHints` entries pass through untouched.
  */
 function resolveViaLspHint(input: {
   caller: IRSymbol
@@ -176,20 +174,9 @@ function resolveViaLspHint(input: {
   const key = makeReceiverHintKey(input.caller.source.file, input.call.line)
   const hint = input.receiverHints.get(key)
   if (hint === undefined) return null
-  const target = hint.ownerClassId
-  if (target === undefined) return null
+  const target = hint.targetSymbolId
   if (!input.keptSymbolIds.has(target)) return null
-  if (hint.kind === "this" || hint.kind === "super") {
-    return { id: target, confidence: hint.walkedHierarchy === true ? "medium" : "high" }
-  }
-  if (hint.kind === "interface") {
-    if (hint.interfaceId !== undefined) {
-      const impls = input.implementerHints.get(hint.interfaceId) ?? []
-      if (impls.length !== 1) return null
-    }
-    return { id: target, confidence: "medium" }
-  }
-  return null
+  return { id: target, confidence: "high" }
 }
 
 /**

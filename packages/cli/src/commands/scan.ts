@@ -9,7 +9,7 @@ import {
   writeCanonicalIR,
 } from "@aburi/core"
 import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
-import type { Component, Config, IR } from "@aburi/types"
+import type { Component, Config, IR, Logger, LspEnrichmentStats } from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
@@ -49,6 +49,11 @@ export interface ScanReport {
    * in `@aburi/core` — it belongs on the CLI report so `aburi scan` can warn on stderr.
    */
   skipped: readonly { path: string; reason: string; detail?: string }[]
+  /**
+   * Present when the LSP enrichment pass ran (config.lsp.enabled = true and at
+   * least one server was configured). Absent when LSP was skipped entirely.
+   */
+  lspEnrichment: LspEnrichmentStats | undefined
   exitCode: ExitCode
 }
 
@@ -88,6 +93,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     })),
     components,
     generator: await readGeneratorInfo(),
+    logger: stderrLogger(),
   }
   const scanResult = await scan(scanInput)
 
@@ -122,7 +128,20 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       if (s.detail !== undefined) entry.detail = s.detail
       return entry
     }),
+    lspEnrichment: scanResult.ir.stats.lspEnrichment,
     exitCode: EXIT.SUCCESS,
+  }
+}
+
+function stderrLogger(): Logger {
+  const write = (level: string, message: string): void => {
+    process.stderr.write(`${level}: ${message}\n`)
+  }
+  return {
+    debug: () => {},
+    info: () => {},
+    warn: (m) => write("warn", m),
+    error: (m) => write("error", m),
   }
 }
 

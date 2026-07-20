@@ -10,6 +10,7 @@ export interface LspStatsBuilder {
   filesFellBack: number
   requestsIssued: number
   requestsTimedOut: number
+  requestsFailed: number
   languagesDisabled: Set<LanguageId>
 }
 
@@ -20,6 +21,7 @@ export function createStatsBuilder(enabled: boolean): LspStatsBuilder {
     filesFellBack: 0,
     requestsIssued: 0,
     requestsTimedOut: 0,
+    requestsFailed: 0,
     languagesDisabled: new Set(),
   }
 }
@@ -31,6 +33,7 @@ export function finalizeStats(builder: LspStatsBuilder): LspEnrichmentStats {
     filesFellBack: builder.filesFellBack,
     requestsIssued: builder.requestsIssued,
     requestsTimedOut: builder.requestsTimedOut,
+    requestsFailed: builder.requestsFailed,
     languagesDisabled: [...builder.languagesDisabled].sort(),
   }
 }

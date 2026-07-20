@@ -324,6 +324,22 @@ function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream):
       `⚠ ${report.skipped.length} file(s) were skipped during discovery: ${summariseSkipped(report.skipped)}\n`,
     )
   }
+  const lsp = report.lspEnrichment
+  if (lsp !== undefined) {
+    if (lsp.filesFellBack > 0) {
+      stderr.write(
+        `⚠ LSP enrichment fell back for ${lsp.filesFellBack} file(s); IR field values in those files remain at the untyped tier.\n`,
+      )
+    }
+    if (lsp.languagesDisabled.length > 0) {
+      stderr.write(`⚠ LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.\n`)
+    }
+    if (lsp.requestsTimedOut > 0 || lsp.requestsFailed > 0) {
+      stderr.write(
+        `  LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.\n`,
+      )
+    }
+  }
 }
 
 function summariseSkipped(skipped: readonly { reason: string }[]): string {

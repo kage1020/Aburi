@@ -41,32 +41,17 @@ export {
 } from "./id"
 export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
 export {
-  createFallbackState,
-  createLspCache,
-  createLspClient,
-  createStatsBuilder,
-  DEFAULT_FALLBACK_CONFIG,
   type EnrichmentInput,
   type EnrichmentResult,
   enrichWithLsp,
-  finalizeStats,
   isLspFailure,
-  LSP_TIMEOUT,
-  type LspCache,
   type LspClient,
   type LspError,
   type LspFailure,
   type LspTimeout,
   makeReceiverHintKey,
   type ReceiverHint,
-  type ReceiverHintKey,
-  requestDocumentSymbols,
-  requestHover,
-  requestImplementation,
-  requestTypeDefinition,
   type ServerFactory,
-  type SpawnedServer,
-  spawnStdioServer,
 } from "./lsp"
 export {
   type PropagateInput,

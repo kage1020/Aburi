@@ -9,8 +9,8 @@ import {
 } from "./fixtures/enrichment-ctx"
 import { type MockLspClient, mockServerFactory, nullServerFactory } from "./fixtures/mock-server"
 
-describe("LSP protocol (LE1-LE3)", () => {
-  it("LE1: happy path — initialize, didOpen, documentSymbol, columns populated", async () => {
+describe("LSP protocol", () => {
+  it("initializes, opens the file, requests documentSymbol, and populates columns", async () => {
     const captured: { client: MockLspClient | null } = { client: null }
     const factory = mockServerFactory((_lang, client) => {
       captured.client = client
@@ -50,7 +50,7 @@ describe("LSP protocol (LE1-LE3)", () => {
     expect(enriched?.source.endColumn).toBe(21)
   })
 
-  it("LE2: per-language fallback fires when server is missing", async () => {
+  it("falls back per-language when the server binary cannot be spawned", async () => {
     const symbols = [makeSimple("helper", "src/a.ts", 1)]
     const result = await enrichWithLsp(
       makeEnrichmentInput({
@@ -64,7 +64,7 @@ describe("LSP protocol (LE1-LE3)", () => {
     expect(result.symbols[0]?.source.startColumn).toBeNull()
   })
 
-  it("LE3: mid-scan server failure triggers per-language fallback on next files", async () => {
+  it("disables the language when consecutive files hit per-file fallback", async () => {
     // Each file has 3 call sites; each hover call fails after file 1. Per-request
     // fallback fires 3× on a single file → per-file fallback → after 5 such files
     // → per-language fallback.

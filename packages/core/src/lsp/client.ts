@@ -12,7 +12,7 @@ import type { SpawnedServer } from "./transport"
 
 /**
  * LSP client contract used by the enrichment pass. Wraps `vscode-jsonrpc` and adds:
- *   - A single-shot `request` that never retries (LE18). Timeout resolves with an
+ *   - A single-shot `request` that never retries. Timeout resolves with an
  *     `LspTimeout` sentinel rather than throwing, so callers can bookkeep without
  *     try/catch churn.
  *   - `didOpen` / `didClose` per §4.3 discrete file boundaries.
@@ -80,10 +80,19 @@ export function createLspClient(server: SpawnedServer): LspClient {
         connection.listen()
         listening = true
       }
-      const result = await raceTimeout(
-        connection.sendRequest(InitializeRequest.type, params),
-        input.timeoutMs,
-      )
+      let result: unknown
+      try {
+        result = await raceTimeout(
+          connection.sendRequest(InitializeRequest.type, params),
+          input.timeoutMs,
+        )
+      } catch (error) {
+        return {
+          kind: "error",
+          reason: "server-error",
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
       if (isLspFailure(result)) return result
       await connection.sendNotification(InitializedNotification.type, {})
       return result as InitializeResult
@@ -142,12 +151,15 @@ export function createLspClient(server: SpawnedServer): LspClient {
 }
 
 /**
- * Race a promise against a timeout. On timeout resolves with `LSP_TIMEOUT`.
- * NEVER cancels the underlying LSP request (JSON-RPC has no cancellation semantics
- * cheap enough to matter here) — the response is simply ignored on arrival.
+ * Race a promise against a timeout. On timeout resolves with `LSP_TIMEOUT`; on
+ * rejection re-throws the original error so the caller can distinguish "the
+ * request timed out" from "the request failed for another reason" (parse
+ * error, server disconnected, etc.). Never cancels the underlying LSP request
+ * (JSON-RPC has no cancellation semantics cheap enough to matter here) — a
+ * late arrival is simply ignored.
  */
 async function raceTimeout<T>(promise: Promise<T>, ms: number): Promise<T | LspTimeout> {
-  return await new Promise<T | LspTimeout>((resolvePromise) => {
+  return await new Promise<T | LspTimeout>((resolvePromise, rejectPromise) => {
     let settled = false
     const timer = setTimeout(() => {
       if (settled) return
@@ -161,11 +173,11 @@ async function raceTimeout<T>(promise: Promise<T>, ms: number): Promise<T | LspT
         clearTimeout(timer)
         resolvePromise(value)
       },
-      () => {
+      (error) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        resolvePromise(LSP_TIMEOUT)
+        rejectPromise(error)
       },
     )
   })

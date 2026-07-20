@@ -256,9 +256,13 @@ filesFellBack: number
  */
 requestsIssued: number
 /**
- * Total LSP requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback).
+ * Requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback).
  */
 requestsTimedOut: number
+/**
+ * Requests that failed with a non-timeout error (server-error, server-disconnected, parse-error). Kept distinct from requestsTimedOut so operators can tell backpressure apart from broken servers.
+ */
+requestsFailed: number
 /**
  * Languages that were disabled mid-run via per-language fallback. Sorted ascending.
  */

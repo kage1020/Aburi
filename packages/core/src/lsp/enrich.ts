@@ -4,13 +4,17 @@
  * file once, and refines a strictly bounded set of IR fields (§5):
  *
  *   - SourceRange.startColumn / endColumn (from documentSymbol)
- *   - Signature.inferredThrows           (from hover @throws parsing)
- *   - receiverHints / implementerHints   (fed to callgraph — this / super / interface)
+ *   - Signature.inferredThrows            (from hover @throws parsing)
+ *   - receiverHints                       (this. / super. resolution, fed to callgraph)
  *
  * The pass is a no-op when `lsp.enabled !== true`, when no server is configured
  * for any language present in the symbol set, or when a server fails to start.
- * Determinism (§10) is guaranteed by writing to a per-request cache first, then
- * mutating IR fields in fixed order (file path asc → Symbol id asc → call line asc).
+ * Determinism is guaranteed by processing files in ascending path order and
+ * jobs by a fixed (Symbol id, call line) sort — LSP arrival order never affects
+ * output. Interface-typed receiver resolution (call-resolution.md §5.3) is
+ * deferred until `IRSymbol.implements` lands; the `implementerHints` output
+ * channel exists but is populated as an empty map today so downstream
+ * consumers can flip on interface resolution without an API change.
  */
 
 import { pathToFileURL } from "node:url"
@@ -26,7 +30,7 @@ import type {
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
 import { createLspClient, isLspFailure, type LspClient, type LspFailure } from "./client"
 import { createFallbackState, type FallbackState } from "./fallback"
-import { requestDocumentSymbols, requestHover, requestTypeDefinition } from "./requests"
+import { requestDocumentSymbols, requestHover } from "./requests"
 import { createStatsBuilder, finalizeStats, type LspStatsBuilder } from "./stats"
 import { type SpawnedServer, spawnStdioServer } from "./transport"
 
@@ -52,11 +56,18 @@ export interface EnrichmentResult {
   stats: LspEnrichmentStats | undefined
 }
 
+/**
+ * Per-call-site hint the resolver consults when the untyped tier gives up.
+ * `targetSymbolId` names the callee Symbol the LSP tier resolved to — that is,
+ * the id of the member function/method, not the containing class — so the
+ * resolver can emit an edge without an additional lookup. Interface-typed
+ * receiver hints are not produced today (see file header), so `kind` is
+ * currently always `"this"` or `"super"`; the union keeps room for the
+ * follow-up without another type break.
+ */
 export interface ReceiverHint {
-  kind: "this" | "super" | "interface"
-  ownerClassId?: SymbolId
-  walkedHierarchy?: boolean
-  interfaceId?: SymbolId
+  kind: "this" | "super"
+  targetSymbolId: SymbolId
 }
 
 /**
@@ -106,7 +117,6 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   for (const s of workingSymbols) workingById.set(s.id, s)
 
   const receiverHints = new Map<string, ReceiverHint>()
-  const implementerHints = new Map<SymbolId, SymbolId[]>()
 
   const factory = input.serverFactory ?? defaultServerFactory
 
@@ -159,23 +169,17 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       stats,
       fallback,
       receiverHints,
-      implementerHints,
       logger,
     })
 
     await safeShutdown(client)
   }
 
-  // Sort implementer hint arrays for determinism (LE14).
-  const implementerHintsSorted = new Map<string, SymbolId[]>()
-  for (const [interfaceId, impls] of implementerHints) {
-    implementerHintsSorted.set(interfaceId, [...impls].sort())
-  }
-
   return {
     symbols: workingSymbols,
     receiverHints,
-    implementerHints: implementerHintsSorted,
+    // Interface tier deferred (see file header) — always empty for now.
+    implementerHints: new Map(),
     stats: finalizeStats(stats),
   }
 }
@@ -191,7 +195,6 @@ interface ProcessLanguageInput {
   stats: LspStatsBuilder
   fallback: FallbackState
   receiverHints: Map<string, ReceiverHint>
-  implementerHints: Map<SymbolId, SymbolId[]>
   logger: Logger
 }
 
@@ -226,9 +229,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       input.stats.requestsIssued += 1
       const docSymbols = await requestDocumentSymbols(input.client, uri, requestTimeout)
       const requestOk = !isLspFailure(docSymbols)
-      if (!requestOk) {
-        input.stats.requestsTimedOut += isTimeout(docSymbols) ? 1 : 0
-      }
+      if (!requestOk) accountForFailure(input.stats, docSymbols)
       const requestOutcome = input.fallback.onRequest(file, requestOk)
       if (requestOutcome.escalate) fileFellBack = true
       if (requestOk) {
@@ -253,20 +254,11 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
         input.stats.requestsIssued += 1
         const result = await executeJob(job, input.client, uri, requestTimeout)
         const jobOk = !isLspFailure(result)
-        if (!jobOk) {
-          input.stats.requestsTimedOut += isTimeout(result) ? 1 : 0
-        }
+        if (!jobOk) accountForFailure(input.stats, result)
         const outcome = input.fallback.onRequest(file, jobOk)
         if (outcome.escalate) fileFellBack = true
         if (jobOk) {
-          applyJobResult(
-            job,
-            result,
-            input.receiverHints,
-            input.implementerHints,
-            input.workingById,
-            content,
-          )
+          applyJobResult(job, result, input.receiverHints, input.workingById)
         }
       })
     }
@@ -287,30 +279,30 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       input.fallback.onLanguageDisabled(input.language)
       input.stats.languagesDisabled.add(input.language)
       input.logger.warn?.(
-        `[aburi:lsp] disabling LSP for ${input.language} after ${closeOutcome ? "5 consecutive file fallbacks" : "language failure"}`,
+        `[aburi:lsp] disabling LSP for ${input.language} after 5 consecutive file fallbacks`,
       )
       break
     }
   }
 }
 
-type RequestJob =
-  | {
-      kind: "this-super-hover"
-      symbolId: SymbolId
-      callLine: number
-      column: number
-      calleeText: string
-      receiverKind: "this" | "super"
-    }
-  | {
-      kind: "interface-typedef"
-      symbolId: SymbolId
-      callLine: number
-      column: number
-      calleeText: string
-    }
+type RequestJob = {
+  kind: "this-super-hover"
+  symbolId: SymbolId
+  callLine: number
+  column: number
+  calleeText: string
+  receiverKind: "this" | "super"
+}
 
+/**
+ * Build the LSP request job list for a single file. Only `this.<method>` /
+ * `super.<method>` shapes emit a hover job today — interface-typed receiver
+ * resolution (call-resolution.md §5.3) needs an `IRSymbol.implements` seam
+ * that is not yet in the IR, so we do not spend budget on `typeDefinition`
+ * requests whose result we cannot act on. When that seam lands the interface
+ * job type returns here.
+ */
 function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): RequestJob[] {
   const jobs: RequestJob[] = []
   const lines = content.split(/\r?\n/)
@@ -323,26 +315,17 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
       if (segments.length < 2) continue
       const head = segments[0] as string
       const method = segments[segments.length - 1] as string
+      if (head !== "this" && head !== "super") continue
       const column = findMethodColumn(line, head, method)
       if (column === null) continue
-      if (head === "this" || head === "super") {
-        jobs.push({
-          kind: "this-super-hover",
-          symbolId: symbol.id,
-          callLine: call.line,
-          column,
-          calleeText: method,
-          receiverKind: head,
-        })
-      } else if (isIdentifier(head)) {
-        jobs.push({
-          kind: "interface-typedef",
-          symbolId: symbol.id,
-          callLine: call.line,
-          column: findReceiverColumn(line, head),
-          calleeText: method,
-        })
-      }
+      jobs.push({
+        kind: "this-super-hover",
+        symbolId: symbol.id,
+        callLine: call.line,
+        column,
+        calleeText: method,
+        receiverKind: head,
+      })
     }
   }
   return jobs
@@ -355,78 +338,37 @@ async function executeJob(
   timeoutMs: number,
 ): Promise<unknown | LspFailure> {
   const position: Position = { line: job.callLine - 1, character: job.column }
-  if (job.kind === "this-super-hover") {
-    return await requestHover(client, uri, position, timeoutMs)
-  }
-  return await requestTypeDefinition(client, uri, position, timeoutMs)
+  return await requestHover(client, uri, position, timeoutMs)
 }
 
 function applyJobResult(
   job: RequestJob,
   result: unknown,
   receiverHints: Map<string, ReceiverHint>,
-  implementerHints: Map<SymbolId, SymbolId[]>,
   workingById: Map<SymbolId, IRSymbol>,
-  content: string,
 ): void {
   const caller = workingById.get(job.symbolId)
   if (caller === undefined) return
-  if (job.kind === "this-super-hover") {
-    const text = extractHoverPayload(result)
-    if (text === null) return
-    const ownerClassName = extractOwnerClassName(text)
-    if (ownerClassName === null) return
-    const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
-    if (ownerClassId === null) return
-    const memberId = findMemberSymbolId(
-      caller.language,
-      caller.source.file,
-      ownerClassName,
-      job.calleeText,
-      workingById,
-    )
-    if (memberId === null) return
-    receiverHints.set(makeReceiverHintKey(caller.source.file, job.callLine), {
-      kind: job.receiverKind,
-      ownerClassId: memberId,
-      walkedHierarchy: false,
-    })
-    const throws = extractInferredThrowsFromHover(text)
-    if (throws.length > 0) appendInferredThrows(caller, throws)
-    return
-  }
-  const locations = Array.isArray(result)
-    ? (result as Array<{ uri?: string; range?: { start: Position } }>)
-    : []
-  if (locations.length === 0) return
-  const first = locations[0]
-  if (first?.uri === undefined || first.range === undefined) return
-  const interfaceFile = uriToFile(first.uri)
-  if (interfaceFile === null) return
-  // Match against known interface Symbols by (language, file, name at that line).
-  const iface = findInterfaceByPosition(
+  const text = extractHoverPayload(result)
+  if (text === null) return
+  const ownerClassName = extractOwnerClassName(text)
+  if (ownerClassName === null) return
+  const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
+  if (ownerClassId === null) return
+  const memberId = findMemberSymbolId(
     caller.language,
-    interfaceFile,
-    first.range.start.line + 1,
+    caller.source.file,
+    ownerClassName,
+    job.calleeText,
     workingById,
   )
-  if (iface === null) return
-  const impls = findImplementersOfInterface(iface, workingById)
-  if (impls.length === 0) return
-  const existing = implementerHints.get(iface.id) ?? []
-  const combined = [...new Set([...existing, ...impls])]
-  implementerHints.set(iface.id, combined)
-  if (combined.length !== 1) return
-  const [only] = combined
-  if (only === undefined) return
-  const implMember = findMemberSymbolIdByPath(only, job.calleeText, workingById)
-  if (implMember === null) return
+  if (memberId === null) return
   receiverHints.set(makeReceiverHintKey(caller.source.file, job.callLine), {
-    kind: "interface",
-    interfaceId: iface.id,
-    ownerClassId: implMember,
+    kind: job.receiverKind,
+    targetSymbolId: memberId,
   })
-  void content
+  const throws = extractInferredThrowsFromHover(text)
+  if (throws.length > 0) appendInferredThrows(caller, throws)
 }
 
 /**
@@ -582,11 +524,6 @@ function normalizeAbsolute(workspaceRoot: string, relativePath: string): string 
   return `${trimmedRoot}/${relativePath}`
 }
 
-function uriToFile(uri: string): string | null {
-  if (!uri.startsWith("file://")) return null
-  return decodeURIComponent(uri.slice("file://".length))
-}
-
 function languageIdForLspOpen(languageId: LanguageId): string {
   switch (languageId) {
     case "ts":
@@ -612,6 +549,14 @@ function isTimeout(value: unknown): boolean {
   )
 }
 
+function accountForFailure(stats: LspStatsBuilder, failure: unknown): void {
+  if (isTimeout(failure)) {
+    stats.requestsTimedOut += 1
+    return
+  }
+  stats.requestsFailed += 1
+}
+
 function failureReason(failure: LspFailure): string {
   if (failure.kind === "timeout") return "timeout"
   return `${failure.reason}: ${failure.message}`
@@ -630,23 +575,17 @@ async function safeShutdown(client: LspClient): Promise<void> {
   }
 }
 
+/**
+ * Column (0-based) of the method identifier inside `head.method` on the given
+ * source line. Returns `null` when the joined form isn't found — no fallback
+ * to a bare `method` substring search, since that would land on unrelated
+ * occurrences (e.g. `console.log(myLog.log)` matching the wrong receiver).
+ */
 function findMethodColumn(line: string, head: string, method: string): number | null {
   const needle = `${head}.${method}`
   const idx = line.indexOf(needle)
-  if (idx < 0) {
-    const methodIdx = line.indexOf(method)
-    return methodIdx < 0 ? null : methodIdx
-  }
+  if (idx < 0) return null
   return idx + head.length + 1
-}
-
-function findReceiverColumn(line: string, head: string): number {
-  const idx = line.indexOf(head)
-  return idx < 0 ? 0 : idx
-}
-
-function isIdentifier(text: string): boolean {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(text)
 }
 
 function extractHoverPayload(result: unknown): string | null {
@@ -713,47 +652,6 @@ function findMemberSymbolId(
   return null
 }
 
-function findMemberSymbolIdByPath(
-  classId: SymbolId,
-  methodName: string,
-  workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
-  const hashIdx = classId.lastIndexOf("#")
-  if (hashIdx < 0) return null
-  const prefix = classId.slice(0, hashIdx)
-  const className = classId.slice(hashIdx + 1)
-  const candidate = `${prefix}#${className}.${methodName}` as SymbolId
-  return workingById.has(candidate) ? candidate : null
-}
-
-function findInterfaceByPosition(
-  language: string,
-  file: string,
-  line: number,
-  workingById: Map<SymbolId, IRSymbol>,
-): IRSymbol | null {
-  for (const s of workingById.values()) {
-    if (s.language !== language) continue
-    if (!s.source.file.endsWith(file) && !file.endsWith(s.source.file)) continue
-    if (s.kind !== "interface") continue
-    if (s.source.startLine === line) return s
-  }
-  return null
-}
-
-function findImplementersOfInterface(
-  iface: IRSymbol,
-  workingById: Map<SymbolId, IRSymbol>,
-): SymbolId[] {
-  // Untyped tier does not track implements[] relationships. For now, return an
-  // empty list — a follow-up hook (framework plugin or expanded IR) will feed
-  // this. The pass still populates the interfaceId in receiverHints so callers
-  // can act on the same-name convention if they encode it.
-  void iface
-  void workingById
-  return []
-}
-
 function lastSegment(qualifiedName: string): string {
   const idx = qualifiedName.lastIndexOf(".")
   return idx < 0 ? qualifiedName : qualifiedName.slice(idx + 1)
@@ -777,5 +675,16 @@ async function defaultServerFactory(
   } catch {
     return null
   }
+  // The Node child_process 'error' event (ENOENT / EACCES / …) fires
+  // asynchronously; the sync try above never sees it. Race the spawn against a
+  // short window so the enrichment pass can distinguish "spawn failed" from
+  // "child came up healthy". The window is short so we do not delay the
+  // per-language `initialize` handshake for well-configured servers — a real
+  // spawn resolves the exit-or-error race well under 100 ms.
+  const spawnOutcome = await Promise.race([
+    server.spawnError,
+    new Promise<null>((resolvePromise) => setTimeout(() => resolvePromise(null), 100)),
+  ])
+  if (spawnOutcome !== null) return null
   return createLspClient(server)
 }
