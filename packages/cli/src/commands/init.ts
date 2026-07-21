@@ -134,6 +134,7 @@ const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
   ["nestjs", "@aburi/framework-nestjs"],
   ["next", "@aburi/framework-next"],
   ["nextjs", "@aburi/framework-next"],
+  ["react", "@aburi/framework-react"],
 ])
 
 function suggestPluginsFor(frameworks: ReadonlySet<string>): string[] {

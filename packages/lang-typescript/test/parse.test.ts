@@ -22,6 +22,37 @@ describe("parseTypescriptFile", () => {
     expect(result.tree?.rootNode).not.toBeNull()
   })
 
+  it("parses .jsx via the tsx grammar (JSX-aware, no TS syntax needed)", async () => {
+    const result = await parseTypescriptFile({
+      path: "src/a.jsx",
+      content: "export const Foo = () => <div />",
+    })
+    expect(result.errors).toEqual([])
+    expect(result.tree).not.toBeNull()
+    expect(result.tree?.rootNode).not.toBeNull()
+  })
+
+  it("parses plain .js via the TypeScript grammar (permissively accepts modern JS)", async () => {
+    const result = await parseTypescriptFile({
+      path: "src/a.js",
+      content: "export function add(a, b) { return a + b }",
+    })
+    expect(result.errors).toEqual([])
+    expect(result.tree).not.toBeNull()
+    expect(result.tree?.rootNode).not.toBeNull()
+  })
+
+  it("parses .mjs and .cjs via the TypeScript grammar", async () => {
+    for (const path of ["src/a.mjs", "src/a.cjs"]) {
+      const result = await parseTypescriptFile({
+        path,
+        content: "export const x = 1",
+      })
+      expect(result.errors).toEqual([])
+      expect(result.tree).not.toBeNull()
+    }
+  })
+
   it("LP27: reports recoverable errors for a source with a syntax mistake", async () => {
     const result = await parseTypescriptFile({
       path: "src/bad.ts",

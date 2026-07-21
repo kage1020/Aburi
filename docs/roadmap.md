@@ -8,10 +8,13 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 
 ## What works today
 
-- **Languages**: TypeScript (`.ts` / `.tsx`), parsed with Tree-sitter WASM
-  (`web-tree-sitter` + `@vscode/tree-sitter-wasm`) — no native build step
+- **Languages**: TypeScript (`.ts` / `.tsx`) and JavaScript (`.js` / `.mjs` /
+  `.cjs` / `.jsx`), parsed with Tree-sitter WASM (`web-tree-sitter` +
+  `@vscode/tree-sitter-wasm`) — no native build step
 - **Workspace detection**: pnpm workspaces / npm workspaces (autodetect)
-- **Framework classification**: NestJS and Next.js (App Router) plugins
+- **Framework classification**: NestJS, Next.js (App Router), and React
+  function components / hooks / contexts / providers / HOCs / forwardRef /
+  memo plugins
 - **Effect detection**: Prisma (`db.read` / `db.write` / `db.transaction`) and
   NestJS events (`event.publish`) — local detection at the call site
 - **Symbol-to-symbol dependency edges**: file-scope and import-scope call
@@ -51,7 +54,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 
 - **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
-- **Additional frameworks**: React function components / Express middleware
+- **Additional frameworks**: Express middleware
 - **Additional effect plugins**: `@aburi/effects-drizzle` / `@aburi/effects-trpc`
 
 All detailed designs for this phase have landed — see the Design documents

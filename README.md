@@ -31,7 +31,8 @@ that CI can gate on.
 
 ```bash
 pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
-# (or your framework: @aburi/framework-next; effects: @aburi/effects-prisma, @aburi/effects-nest)
+# (or your framework: @aburi/framework-next / @aburi/framework-react;
+#  effects: @aburi/effects-prisma, @aburi/effects-nest)
 ```
 
 ### Autodetect + config
@@ -79,7 +80,8 @@ hidden-marker PR comment (rewrites in place on every push, no comment spam).
 ```
 source files
   ↓ (@aburi/lang-typescript, @aburi/lang-*)          tree-sitter parseFile / extractSymbols
-  ↓ (@aburi/framework-nestjs, @aburi/framework-next) classifySymbol → extKind (framework:*)
+  ↓ (@aburi/framework-nestjs, @aburi/framework-next,
+     @aburi/framework-react)                          classifySymbol → extKind (framework:*)
   ↓ (@aburi/effects-prisma, @aburi/effects-nest)     classifyCall → Effect (db.read / event.publish / …)
   ↓ (@aburi/core scan)                               walkBody → Rules + Calls + Effects
   ↓                                                  drop rules (interfaces, empty bodies, re-exports)
@@ -107,6 +109,7 @@ Same IR in → same Markdown / same diff out.
 | [`@aburi/lang-typescript`](packages/lang-typescript) | Language | TS/TSX language plugin (tree-sitter WASM), JSDoc-aware signature + throws, drop-hint contract. |
 | [`@aburi/framework-nestjs`](packages/framework-nestjs) | Framework | `@Module` / `@Controller` / `@Injectable` / HTTP + WS + pattern decorators → `framework:nestjs:*` extKinds. |
 | [`@aburi/framework-next`](packages/framework-next) | Framework | App Router files (page / layout / route / …) → `framework:next:*` extKinds. |
+| [`@aburi/framework-react`](packages/framework-react) | Framework | React function components / hooks / contexts / forwardRef / memo / providers / HOCs → `framework:react:*` extKinds. |
 | [`@aburi/effects-prisma`](packages/effects-prisma) | Effects | `prisma.<model>.<verb>` / `$transaction` → `db.read` / `db.write` / `db.transaction`. |
 | [`@aburi/effects-nest`](packages/effects-nest) | Effects | `EventEmitter2` / `eventBus` `.emit(...)` → `event.publish`. |
 | [`@aburi/diff`](packages/diff) | Diff | 5-stage matcher (id / git-rename / logic-fingerprint / name+signature / dropped-weak) + status + delta. |

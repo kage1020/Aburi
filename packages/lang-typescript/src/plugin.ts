@@ -15,7 +15,7 @@ import { classifySymbolDropHint, TYPESCRIPT_FILE_DROP_PATTERNS } from "./drop-hi
 import { extractSymbols } from "./extract-symbols"
 import { langTypescriptManifest } from "./manifest"
 import { normalizeAst } from "./normalize-ast"
-import { parseTypescriptFile } from "./parser"
+import { parseTypescriptFile, TYPESCRIPT_FILE_EXTENSIONS } from "./parser"
 import { walkBody } from "./walk-body"
 
 /**
@@ -25,7 +25,9 @@ import { walkBody } from "./walk-body"
  */
 class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   readonly manifest = langTypescriptManifest
-  readonly fileExtensions: string[] = [".ts", ".mts", ".cts", ".tsx"]
+  // Derived from parser.ts's EXTENSION_GRAMMAR so this list cannot drift from the grammar
+  // dispatch table — adding an entry to the map is the only change needed.
+  readonly fileExtensions: string[] = [...TYPESCRIPT_FILE_EXTENSIONS]
   readonly capabilities: LanguageCapabilities = {
     hasDecorators: true,
     hasGenerics: true,

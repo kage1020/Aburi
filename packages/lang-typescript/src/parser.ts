@@ -17,13 +17,30 @@ const TYPESCRIPT_WASM_PATH = nodeRequire.resolve(
 )
 const TSX_WASM_PATH = nodeRequire.resolve("@vscode/tree-sitter-wasm/wasm/tree-sitter-tsx.wasm")
 
-/** File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language. */
+/**
+ * File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language.
+ * `.jsx` routes to the tsx grammar (JSX-aware); `.js` / `.mjs` / `.cjs` fall back to the
+ * TypeScript grammar which permissively accepts modern JS without type annotations.
+ * The extended coverage exists so `@aburi/framework-react` can classify React sources in
+ * plain-JavaScript codebases (Vite / CRA / library authors who publish .js).
+ */
 const EXTENSION_GRAMMAR: ReadonlyMap<string, string> = new Map([
   [".ts", TYPESCRIPT_WASM_PATH],
   [".mts", TYPESCRIPT_WASM_PATH],
   [".cts", TYPESCRIPT_WASM_PATH],
   [".tsx", TSX_WASM_PATH],
+  [".js", TYPESCRIPT_WASM_PATH],
+  [".mjs", TYPESCRIPT_WASM_PATH],
+  [".cjs", TYPESCRIPT_WASM_PATH],
+  [".jsx", TSX_WASM_PATH],
 ])
+
+/**
+ * Public list of extensions this parser accepts. Derived from `EXTENSION_GRAMMAR` so
+ * `LanguagePlugin.fileExtensions` and the grammar dispatch cannot drift apart — adding
+ * an entry to the map is the single change needed to extend coverage.
+ */
+export const TYPESCRIPT_FILE_EXTENSIONS: readonly string[] = [...EXTENSION_GRAMMAR.keys()]
 
 let runtimeInitPromise: Promise<void> | null = null
 const languageCache = new Map<string, Promise<Language>>()
@@ -128,15 +145,23 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
 }
 
 /**
- * The default grammar is TypeScript; only .tsx routes to the tsx grammar (JSX-aware).
- * Files with unknown extensions fall back to TypeScript because the pipeline should only
- * ever hand this plugin files whose extension already matched `fileExtensions`.
+ * Look up the grammar wasm path for `path`'s extension. Throws when the extension is not
+ * in `EXTENSION_GRAMMAR`: the pipeline should only ever hand this plugin files whose
+ * extension already matched `fileExtensions`, so an unknown extension here is a
+ * configuration bug (or a caller bypassing the pipeline) — silently falling back to the
+ * TypeScript grammar would misparse the input and hide the misconfiguration.
  */
 function pickGrammarForPath(path: string): string {
   const dot = path.lastIndexOf(".")
-  if (dot < 0) return TYPESCRIPT_WASM_PATH
-  const ext = path.slice(dot).toLowerCase()
-  return EXTENSION_GRAMMAR.get(ext) ?? TYPESCRIPT_WASM_PATH
+  const ext = dot < 0 ? "" : path.slice(dot).toLowerCase()
+  const grammar = EXTENSION_GRAMMAR.get(ext)
+  if (grammar === undefined) {
+    throw new Error(
+      `@aburi/lang-typescript: no grammar registered for extension "${ext}" (path: ${path}). ` +
+        `Accepted extensions: ${[...EXTENSION_GRAMMAR.keys()].join(", ")}.`,
+    )
+  }
+  return grammar
 }
 
 /**

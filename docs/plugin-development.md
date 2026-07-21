@@ -153,6 +153,12 @@ Contracts:
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
 
+Decorator-free classification (name / shape / body signals) is also supported:
+see [`packages/framework-react`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react)
+for a reference plugin that keys off PascalCase naming, `use[A-Z]` naming, JSX
+return detection, and `createContext(...)` / `forwardRef(...)` / `memo(...)`
+call-shape recognition — no decorators involved.
+
 ## Effects plugin
 
 Classifies a `CallCandidate` into a core effect vocabulary
@@ -233,7 +239,11 @@ any top-level export whose value has a `manifest` field. The first hit wins.
 
 - Unit-test your plugin in isolation — see
   [`packages/framework-nestjs/test`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/test)
-  for the pattern (fake `ExtractionContext`, hand-authored `SymbolCandidate`s).
+  and
+  [`packages/framework-react/test`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react/test)
+  for the pattern (fake `ExtractionContext`, hand-authored `SymbolCandidate`s;
+  the React tests additionally exercise the real `@aburi/lang-typescript`
+  parser for JSX-body walkers).
 - Snapshot-verify the manifest against `schema/aburi.plugin.v1.json` — reuse the
   existing schema validation helpers in `@aburi/plugin-registry`.
 - Wire the plugin into `packages/e2e-integration` for an integration pass

@@ -16,6 +16,7 @@
     "@aburi/effects-prisma": "workspace:*",
     "@aburi/framework-nestjs": "workspace:*",
     "@aburi/framework-next": "workspace:*",
+    "@aburi/framework-react": "workspace:*",
     "@aburi/lang-typescript": "workspace:*",
     "@aburi/markdown-projection": "workspace:*",
     "@aburi/plugin-registry": "workspace:*",
