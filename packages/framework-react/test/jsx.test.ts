@@ -1,17 +1,49 @@
 import { parseTypescriptFile } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
-import { findFirstJsxElementName, hasJsxReturn, isProviderElementName } from "../src/index"
+import { findReturnedJsxElementName, hasJsxReturn, isProviderElementName } from "../src/index"
 
 /**
- * Parse a TSX source and return the root node so tests can hand a real tree-sitter node
- * to the JSX walkers. Tests exercise the walkers against genuine grammar output rather
- * than fabricating node shapes — the walkers duck-type on the tree-sitter node surface,
- * so drifting from the actual shape would produce false-passing tests.
+ * Parse a TSX source and return the root node. Kept for `hasJsxReturn` tests where the
+ * walker is deliberately loose (any JSX descendant counts).
  */
 async function parseRoot(source: string): Promise<unknown> {
   const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
   if (result.tree === null) throw new Error("parse returned null")
   return result.tree.rootNode
+}
+
+/**
+ * Parse and return the body node of the first `function_declaration` / `arrow_function`
+ * found — matches how the plugin uses `symbol.bodyNode` in production (extractSymbols
+ * hands the statement_block, not the program root). Provider-detection walkers stop at
+ * nested function scopes, so we have to hand them the actual body.
+ */
+async function parseFunctionBody(source: string): Promise<unknown> {
+  const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
+  if (result.tree === null) throw new Error("parse returned null")
+  interface Node {
+    type: string
+    namedChildren: readonly (Node | null)[]
+    childForFieldName(name: string): Node | null
+  }
+  function find(node: Node): Node | null {
+    if (
+      node.type === "function_declaration" ||
+      node.type === "arrow_function" ||
+      node.type === "function_expression"
+    ) {
+      return node.childForFieldName("body")
+    }
+    for (const child of node.namedChildren) {
+      if (child === null) continue
+      const found = find(child)
+      if (found !== null) return found
+    }
+    return null
+  }
+  const body = find(result.tree.rootNode as unknown as Node)
+  if (body === null) throw new Error("no function body found in source")
+  return body
 }
 
 describe("hasJsxReturn", () => {
@@ -44,34 +76,51 @@ describe("hasJsxReturn", () => {
     expect(hasJsxReturn(root)).toBe(true)
   })
 
-  it("returns false for a body-less value (non-syntax-node input)", () => {
-    // Ducks a lang plugin that hands us a non-tree-sitter shape — the walker must not
-    // blow up, it must just return false.
-    expect(hasJsxReturn({ placeholder: true } as unknown as null)).toBe(false)
+  it("returns false for a non-tree-sitter input (duck-type mismatch guard)", () => {
+    expect(hasJsxReturn({ placeholder: true })).toBe(false)
   })
 })
 
-describe("findFirstJsxElementName", () => {
+describe("findReturnedJsxElementName", () => {
   it("returns null for a JSX-less body", async () => {
-    const root = await parseRoot("function f() { return 1 }")
-    expect(findFirstJsxElementName(root)).toBeNull()
+    const body = await parseFunctionBody("function f() { return 1 }")
+    expect(findReturnedJsxElementName(body)).toBeNull()
   })
 
-  it("returns the plain identifier name of a self-closing element", async () => {
-    const root = await parseRoot("function C() { return <Widget /> }")
-    expect(findFirstJsxElementName(root)).toBe("Widget")
+  it("returns the plain identifier name of a self-closing return", async () => {
+    const body = await parseFunctionBody("function C() { return <Widget /> }")
+    expect(findReturnedJsxElementName(body)).toBe("Widget")
   })
 
-  it("returns the member expression text for a namespaced element", async () => {
-    const root = await parseRoot(
+  it("returns the member expression text for a namespaced return element", async () => {
+    const body = await parseFunctionBody(
       "function C() { return <MyContext.Provider>x</MyContext.Provider> }",
     )
-    expect(findFirstJsxElementName(root)).toBe("MyContext.Provider")
+    expect(findReturnedJsxElementName(body)).toBe("MyContext.Provider")
   })
 
-  it("returns an empty string for a fragment", async () => {
-    const root = await parseRoot("function C() { return <>x</> }")
-    expect(findFirstJsxElementName(root)).toBe("")
+  it("returns null for a fragment return (fragments have no name)", async () => {
+    const body = await parseFunctionBody("function C() { return <>x</> }")
+    expect(findReturnedJsxElementName(body)).toBeNull()
+  })
+
+  it("ignores JSX helpers defined above the return and picks the returned element", async () => {
+    // Regression: pre-order walk would surface the helper's <div> before the
+    // <Ctx.Provider>, causing provider detection to miss real Providers. The returned-
+    // JSX walker must skip past helper JSX literals and pull the return statement's own.
+    const body = await parseFunctionBody(
+      "function Provider({ children }) { const badge = <div /> ; return <Ctx.Provider>{children}</Ctx.Provider> }",
+    )
+    expect(findReturnedJsxElementName(body)).toBe("Ctx.Provider")
+  })
+
+  it("does not descend into nested function scopes when finding the return", async () => {
+    // The outer function returns null; a nested arrow returns <div/>. The outer's
+    // returned JSX should be null, not "div".
+    const body = await parseFunctionBody(
+      "function Outer() { const cb = () => <div /> ; return null }",
+    )
+    expect(findReturnedJsxElementName(body)).toBeNull()
   })
 })
 
@@ -90,7 +139,11 @@ describe("isProviderElementName", () => {
     expect(isProviderElementName("div")).toBe(false)
   })
 
-  it("rejects the empty string (fragment shape)", () => {
+  it("rejects null (propagated from a JSX-less body)", () => {
+    expect(isProviderElementName(null)).toBe(false)
+  })
+
+  it("rejects the empty string", () => {
     expect(isProviderElementName("")).toBe(false)
   })
 })

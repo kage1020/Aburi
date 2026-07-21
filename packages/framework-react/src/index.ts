@@ -12,8 +12,14 @@ export {
   returnsContextProvider,
   returnsJsx,
 } from "./components"
+export {
+  isReactExtKind,
+  REACT_EXT_KIND_SET,
+  REACT_EXT_KINDS,
+  type ReactExtKind,
+} from "./ext-kinds"
 export { bodyCallsAnotherHook, matchesHookNaming } from "./hooks"
-export { findFirstJsxElementName, hasJsxReturn, isProviderElementName } from "./jsx"
+export { findReturnedJsxElementName, hasJsxReturn, isProviderElementName } from "./jsx"
 export { frameworkReactManifest } from "./manifest"
 export { ReactFrameworkPlugin, reactFrameworkPlugin } from "./plugin"
 export {

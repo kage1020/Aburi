@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { scan } from "@aburi/core"
 import { reactFrameworkPlugin } from "@aburi/framework-react"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
@@ -21,8 +21,7 @@ afterEach(async () => {
 
 async function writeSource(rel: string, content: string): Promise<void> {
   const abs = join(workRoot, rel)
-  const dir = abs.slice(0, Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\")))
-  await mkdir(dir, { recursive: true })
+  await mkdir(dirname(abs), { recursive: true })
   await writeFile(abs, content, "utf8")
 }
 

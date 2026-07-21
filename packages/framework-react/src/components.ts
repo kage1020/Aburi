@@ -1,4 +1,4 @@
-import { findFirstJsxElementName, hasJsxReturn, isProviderElementName } from "./jsx"
+import { findReturnedJsxElementName, hasJsxReturn, isProviderElementName } from "./jsx"
 
 /**
  * React function component naming convention: the leaf identifier begins with an
@@ -22,22 +22,20 @@ export function matchesHocNaming(leaf: string): boolean {
 }
 
 /**
- * True when `body` returns JSX whose first element is `X.Provider` — a member expression
- * whose final segment is `Provider`. A bare `<Provider>` is intentionally not matched:
- * without the namespace it could be any component named Provider, so treating it as a
- * context provider would over-classify.
+ * True when the function actually **returns** JSX whose element is `X.Provider`. Uses
+ * `findReturnedJsxElementName` (not any JSX descendant) so a helper JSX literal defined
+ * above the `return` statement does not shadow the returned Provider element.
  */
 export function returnsContextProvider(body: unknown): boolean {
-  const name = findFirstJsxElementName(body)
-  if (name === null) return false
-  return isProviderElementName(name)
+  return isProviderElementName(findReturnedJsxElementName(body))
 }
 
 /**
- * True when `body` returns JSX. Reuses `hasJsxReturn` from `./jsx` — kept here as a named
- * re-export so the components module reads as the component-classification surface without
- * callers needing to know that the JSX walker is a separate concern.
+ * True when `body` contains JSX anywhere. Deliberately permissive — a component whose
+ * top-level return is `null` but which produces JSX through an inline helper still counts
+ * as JSX-producing for the fallback component classification. Provider detection uses the
+ * stricter `returnsContextProvider` above instead.
  */
 export function returnsJsx(body: unknown): boolean {
-  return hasJsxReturn(body as never)
+  return hasJsxReturn(body)
 }

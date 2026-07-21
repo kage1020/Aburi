@@ -2,8 +2,8 @@ import { anyCallCalleeMatches, asSyntaxNode } from "./ast"
 
 /**
  * React custom hook naming convention: `use` followed immediately by a capital letter.
- * `use` alone or `useful` do NOT match — the capital-letter marker is the language-server
- * gate the React team documents.
+ * `use` alone or `useful` do NOT match — the capital-letter marker is the same rule
+ * `eslint-plugin-react-hooks` uses to enforce the Rules of Hooks.
  */
 export function matchesHookNaming(leaf: string): boolean {
   return /^use[A-Z]/.test(leaf)

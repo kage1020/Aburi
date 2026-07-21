@@ -6,24 +6,34 @@ import type {
   SymbolClassification,
 } from "@aburi/types"
 import { isPascalCase, matchesHocNaming, returnsContextProvider, returnsJsx } from "./components"
+import type { ReactExtKind } from "./ext-kinds"
 import { bodyCallsAnotherHook, matchesHookNaming } from "./hooks"
 import { extractWrapperCall, isContextCall, isForwardRefCall, isMemoCall } from "./wrappers"
+
+/**
+ * Local alias for a classification carrying a `ReactExtKind` literal so a typo in any
+ * `extKind` assignment below fails to compile against the shared union — the manifest's
+ * `EXT_KIND_ENTRIES` is pinned to the same union, so the two cannot drift.
+ */
+type ReactClassification = { extKind: ReactExtKind; derivedBy: string }
 
 /**
  * Classify a SymbolCandidate against React conventions in first-match-wins order:
  *
  *   1. hook         — `function` kind, leaf name matches /^use[A-Z]/
- *   2. context      — `const` kind, initializer is `createContext(...)`
- *   3. forward-ref  — `const` kind, initializer is `forwardRef(...)`
- *   4. memo         — `const` kind, initializer is `memo(...)`
- *   5. provider     — `function` kind, PascalCase, body returns `<X.Provider>` JSX
- *   6. hoc          — `function` kind, leaf name matches /^with[A-Z]/
+ *   2. hoc          — `function` kind, leaf name matches /^with[A-Z]/
+ *   3. context      — `const` kind, initializer is `createContext(...)`
+ *   4. forward-ref  — `const` kind, initializer is `forwardRef(...)`
+ *   5. memo         — `const` kind, initializer is `memo(...)`
+ *   6. provider     — `function` kind, PascalCase, returned JSX is `<X.Provider>`
  *   7. component    — `function` kind, PascalCase, body returns JSX
  *
- * Order matters: a `useMy` hook that also returns JSX (rare but possible) classifies as
- * hook, not component. A `withFoo` HOC that returns JSX classifies as hoc, not component.
- * Any Symbol whose kind is not `function` or `const` returns `null` and flows through
- * unclassified.
+ * Order rationale: hook / hoc are name-only signals with lowercase-first identifiers
+ * (`use[A-Z]` and `with[A-Z]`) so they cannot overlap the PascalCase-gated provider /
+ * component signals. Checking name-only signals first lets `useOverlay() { return <div/> }`
+ * classify as hook (naming beats body-shape), and `withAuth(C) { return <C/> }` classify
+ * as hoc even when its body returns JSX. Any Symbol whose kind is not `function` or
+ * `const` returns `null` and flows through unclassified.
  */
 export function classifyReactSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -36,9 +46,10 @@ export function classifyReactSymbol(
 
 function classifyFunctionSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-): SymbolClassification | null {
+): ReactClassification | null {
   const leaf = lastQnameSegment(symbol.name)
 
+  // 1. Hook — name-only signal wins over any body-shape check.
   if (matchesHookNaming(leaf)) {
     const signals: string[] = ["framework:react:hook:naming"]
     if (bodyCallsAnotherHook(symbol.bodyNode)) {
@@ -50,32 +61,8 @@ function classifyFunctionSymbol(
     }
   }
 
-  if (!isPascalCase(leaf)) {
-    // Non-PascalCase, non-hook function is a plain utility — nothing React-specific to
-    // classify. Leaves it unowned so no downstream tag pretends to know what it is.
-    if (matchesHocNaming(leaf)) {
-      // Belt-and-braces: `with*` is lowercase-first by construction, so this branch is
-      // technically unreachable (the isPascalCase gate above only trips on uppercase),
-      // but we keep the HOC classification here for symmetry with the naming table — if
-      // isPascalCase ever loosens its rule, HOC still classifies via its own signal.
-      return {
-        extKind: "framework:react:hoc",
-        derivedBy: "framework:react:hoc:naming",
-      }
-    }
-    return null
-  }
-
-  // PascalCase function: could be a provider, an HOC (with* is lowercase so it does not
-  // reach here in practice), or a plain component. Provider wins over component when the
-  // returned JSX is a namespaced Provider element.
-  if (returnsJsx(symbol.bodyNode) && returnsContextProvider(symbol.bodyNode)) {
-    return {
-      extKind: "framework:react:provider",
-      derivedBy: "framework:react:provider",
-    }
-  }
-
+  // 2. HOC — also name-only. `with[A-Z]` is lowercase-first so it never overlaps with
+  //    the PascalCase-gated provider / component branches below.
   if (matchesHocNaming(leaf)) {
     return {
       extKind: "framework:react:hoc",
@@ -83,6 +70,19 @@ function classifyFunctionSymbol(
     }
   }
 
+  // Everything below requires a PascalCase-named function. A lowercase function that is
+  // not a hook and not an HOC is a plain utility — nothing React-specific to classify.
+  if (!isPascalCase(leaf)) return null
+
+  // 6. Provider — a PascalCase function whose returned JSX is `<X.Provider>`.
+  if (returnsContextProvider(symbol.bodyNode)) {
+    return {
+      extKind: "framework:react:provider",
+      derivedBy: "framework:react:provider",
+    }
+  }
+
+  // 7. Component — the general fallback for PascalCase functions returning JSX.
   if (returnsJsx(symbol.bodyNode)) {
     return {
       extKind: "framework:react:component",
@@ -93,7 +93,7 @@ function classifyFunctionSymbol(
   return null
 }
 
-function classifyConstSymbol(symbol: SymbolCandidate<OpaqueAstNode>): SymbolClassification | null {
+function classifyConstSymbol(symbol: SymbolCandidate<OpaqueAstNode>): ReactClassification | null {
   const call = extractWrapperCall(symbol.fullNode)
   if (call === null) return null
   if (isContextCall(call)) {

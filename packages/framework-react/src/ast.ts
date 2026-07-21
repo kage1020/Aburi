@@ -28,8 +28,8 @@ export function asSyntaxNode(value: unknown): SyntaxNode | null {
 /**
  * Pre-order walk that returns the first descendant whose `type` matches `typeName`, or
  * `null` if none is found. Pre-order guarantees the outermost occurrence wins — important
- * for `findFirstCallExpression` where a wrapping `forwardRef(...)` must be returned
- * before any inner render-body call it contains.
+ * for `extractWrapperCall` (in `wrappers.ts`) where the wrapping `forwardRef(...)` must
+ * be returned before any inner render-body call it contains.
  */
 export function findFirstDescendantOfType(node: SyntaxNode, typeName: string): SyntaxNode | null {
   if (node.type === typeName) return node

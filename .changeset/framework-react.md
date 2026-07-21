@@ -36,5 +36,3 @@ permissively) and `.jsx` (tsx grammar, JSX-aware). This is what lets
 `@aburi/cli`: `aburi init --with-suggestions` now maps a detected `react`
 framework to `@aburi/framework-react` alongside the existing `nestjs` /
 `nextjs` entries.
-
-Closes #32.
