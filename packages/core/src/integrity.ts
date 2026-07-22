@@ -45,6 +45,7 @@ const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "variable",
   "enum",
   "constructor",
+  "call",
 ])
 
 /** Symbol.confidence enumeration (ir-schema.md §5.4). */

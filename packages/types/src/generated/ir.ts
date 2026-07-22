@@ -46,7 +46,7 @@ dropReason: (string | null)
  * Format: <language>:<posix-relative-path>#<qualified-name>. Backslash forbidden anywhere (POSIX path enforcement).
  */
 export type SymbolId = string
-export type SymbolKind = ("function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor")
+export type SymbolKind = ("function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor" | "call")
 export type ExtKind = (null | string)
 export type Visibility = ("public" | "private" | "protected" | "internal" | "package")
 export interface Rule {

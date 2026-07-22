@@ -608,7 +608,8 @@
         "namespace",
         "variable",
         "enum",
-        "constructor"
+        "constructor",
+        "call"
       ]
     },
 

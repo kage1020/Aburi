@@ -61,7 +61,7 @@ id: string
 /**
  * Nearest core SymbolKind that consumers without this extension can fall back to.
  */
-baseKind: ("function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor")
+baseKind: ("function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor" | "call")
 description: string
 }
 /**

@@ -14,6 +14,7 @@
     "@aburi/diff": "workspace:*",
     "@aburi/effects-nest": "workspace:*",
     "@aburi/effects-prisma": "workspace:*",
+    "@aburi/framework-express": "workspace:*",
     "@aburi/framework-nestjs": "workspace:*",
     "@aburi/framework-next": "workspace:*",
     "@aburi/framework-react": "workspace:*",

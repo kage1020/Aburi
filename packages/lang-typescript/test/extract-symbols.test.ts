@@ -146,3 +146,112 @@ describe("extractSymbols — Decorators (LP14-LP15)", () => {
     expect(first.line).toBeLessThan(second.line)
   })
 })
+
+describe("extractSymbols — Call promotion (module-level chained calls)", () => {
+  it("CS1: promotes app.get with a path literal into a kind=call symbol", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/users', (req, res) => { res.send('ok') })\n`,
+    )
+    const sym = byId(symbols, "#app__get__$users__d0")
+    expect(sym.kind).toBe("call")
+    expect(sym.bodyNode).toBeNull()
+    expect(sym.signature).toBeNull()
+    expect(sym.decorators).toEqual([])
+    expect(sym.derivedBy).toContain("call-statement:app.get")
+    expect(sym.derivedBy).toContain("path-literal:/users")
+  })
+
+  it("CS2: slugifies dynamic route parameters", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/users/:id', h)\n`,
+    )
+    byId(symbols, "#app__get__$users$Zid__d0")
+  })
+
+  it("CS3: no path literal ⇒ qname is receiver__method__d0", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.use(logger)\n`,
+    )
+    const sym = byId(symbols, "#app__use__d0")
+    expect(sym.derivedBy).not.toContain(
+      sym.derivedBy.find((tag) => tag.startsWith("path-literal:")) ?? "",
+    )
+  })
+
+  it("CS4: duplicate (receiver, method, pathSlug) triples get document-order suffixes", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/x', a)\napp.get('/x', b)\napp.get('/x', c)\n`,
+    )
+    byId(symbols, "#app__get__$x__d0")
+    byId(symbols, "#app__get__$x__d1")
+    byId(symbols, "#app__get__$x__d2")
+  })
+
+  it("CS5: chained receiver (app.route('/x').get(h)) records chained-call and roots on app", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.route('/thing').get(handler)\n`,
+    )
+    const sym = byId(symbols, "#app__get__d0")
+    expect(sym.derivedBy).toContain("chained-call")
+    expect(sym.derivedBy).toContain("call-statement:app.get")
+  })
+
+  it("CS6: non-whitelisted method names (e.g. Sentry.captureException) are not promoted", async () => {
+    const symbols = await symbolsOf(`Sentry.captureException(new Error('boom'))\nconst x = 1\n`)
+    expect(symbols.some((s) => s.kind === "call")).toBe(false)
+    byId(symbols, "#x")
+  })
+
+  it("CS7: bare-identifier calls (setup()) are not promoted — only member chains", async () => {
+    const symbols = await symbolsOf(`setup()\nconst y = 2\n`)
+    expect(symbols.some((s) => s.kind === "call")).toBe(false)
+  })
+
+  it("CS8: path literal ending in `__d1` does NOT collide with a duplicated `/x` (C2 regression)", async () => {
+    // Without the unconditional `__d0` suffix, both calls below collapsed to
+    // `#app__get__$x__d1` and integrity check #1 (Symbol id uniqueness) would fail.
+    const symbols = await symbolsOf(
+      [
+        `import express from "express"`,
+        `const app = express()`,
+        `app.get('/x', a)`,
+        `app.get('/x', b)`,
+        `app.get('/x__d1', c)`,
+      ].join("\n"),
+    )
+    byId(symbols, "#app__get__$x__d0")
+    byId(symbols, "#app__get__$x__d1")
+    byId(symbols, "#app__get__$x__d1__d0")
+    // All three ids must be unique — assert explicitly rather than relying on byId's
+    // failure mode masking a duplicate.
+    const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe("extractSymbols — Call promotion position independence (T2)", () => {
+  const registration = `import express from "express"\nconst app = express()\napp.get('/users', h)\n`
+
+  it("Symbol.id is unchanged when a leading import is added above the registration", async () => {
+    const before = await symbolsOf(registration)
+    const beforeSym = byId(before, "#app__get__$users__d0")
+
+    const after = await symbolsOf(`import { z } from "zod"\n${registration}`)
+    const afterSym = byId(after, "#app__get__$users__d0")
+
+    expect(afterSym.id).toBe(beforeSym.id)
+    // The line moved but the id did NOT — that's the whole point of the position-
+    // independent qname design.
+    expect(afterSym.source.startLine).not.toBe(beforeSym.source.startLine)
+  })
+
+  it("Symbol.id is unchanged when a leading comment block is added above the registration", async () => {
+    const before = await symbolsOf(registration)
+    const beforeSym = byId(before, "#app__get__$users__d0")
+
+    const after = await symbolsOf(`// hoisted note\n// another line\n${registration}`)
+    const afterSym = byId(after, "#app__get__$users__d0")
+
+    expect(afterSym.id).toBe(beforeSym.id)
+  })
+})

@@ -180,6 +180,9 @@ importers:
       '@aburi/effects-prisma':
         specifier: workspace:*
         version: link:../effects-prisma
+      '@aburi/framework-express':
+        specifier: workspace:*
+        version: link:../framework-express
       '@aburi/framework-nestjs':
         specifier: workspace:*
         version: link:../framework-nestjs
@@ -238,6 +241,31 @@ importers:
 
   packages/effects-prisma:
     dependencies:
+      '@aburi/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      '@aburi/lang-typescript':
+        specifier: workspace:*
+        version: link:../lang-typescript
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
+      tsdown:
+        specifier: ^0.22.3
+        version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@26.0.1)(vite@8.1.0(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/framework-express:
+    dependencies:
+      '@aburi/core':
+        specifier: workspace:*
+        version: link:../core
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
