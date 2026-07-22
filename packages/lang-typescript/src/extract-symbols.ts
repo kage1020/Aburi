@@ -8,6 +8,11 @@ import type {
 } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, nameFieldText } from "./ast-helpers"
+import {
+  type CallExtractionState,
+  makeCallExtractionState,
+  visitCallStatement,
+} from "./call-symbols"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
@@ -40,7 +45,8 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
   const out: SymbolCandidate<Node>[] = []
   const root = tree.rootNode
   if (root === null) return out
-  visitModuleLevel(root, ctx, [], out)
+  const callState = makeCallExtractionState()
+  visitModuleLevel(root, ctx, [], out, callState)
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return out
 }
@@ -50,10 +56,11 @@ function visitModuleLevel(
   ctx: ExtractionContext,
   namespacePath: readonly string[],
   out: SymbolCandidate<Node>[],
+  callState: CallExtractionState,
 ): void {
   for (const stmt of parent.namedChildren) {
     if (stmt === null) continue
-    visitStatement(stmt, ctx, namespacePath, out)
+    visitStatement(stmt, ctx, namespacePath, out, callState)
   }
 }
 
@@ -62,6 +69,7 @@ function visitStatement(
   ctx: ExtractionContext,
   namespacePath: readonly string[],
   out: SymbolCandidate<Node>[],
+  callState: CallExtractionState,
 ): void {
   if (node.type === "export_statement") {
     // Tree-sitter attaches decorators as `decorator:` children of the export wrapper. The
@@ -73,7 +81,7 @@ function visitStatement(
         (c): c is Node => c !== null && c.type !== "comment" && c.type !== "decorator",
       )
     if (declared === undefined || declared === null) return
-    visitStatement(declared, ctx, namespacePath, out)
+    visitStatement(declared, ctx, namespacePath, out, callState)
     return
   }
   switch (node.type) {
@@ -112,7 +120,7 @@ function visitStatement(
     case "internal_module":
     case "module":
     case "namespace_declaration":
-      addNamespaceAndBody(node, ctx, namespacePath, out)
+      addNamespaceAndBody(node, ctx, namespacePath, out, callState)
       return
     case "lexical_declaration":
     case "variable_declaration":
@@ -122,6 +130,17 @@ function visitStatement(
         if (candidate !== null) out.push(candidate)
       }
       return
+    case "expression_statement": {
+      // Namespace-scoped expression statements are extremely rare in TypeScript modules,
+      // and the extKind vocabulary that consumes call symbols (framework:express:*) is
+      // module-scoped by construction. Only promote calls at the true module top level to
+      // keep Symbol.id qnames free of namespace segments that could not have appeared
+      // pre-extension.
+      if (namespacePath.length !== 0) return
+      const candidate = visitCallStatement(node, ctx, callState)
+      if (candidate !== null) out.push(candidate)
+      return
+    }
     default:
       return
   }
@@ -328,6 +347,7 @@ function addNamespaceAndBody(
   ctx: ExtractionContext,
   namespacePath: readonly string[],
   out: SymbolCandidate<Node>[],
+  callState: CallExtractionState,
 ): void {
   const name = requireDeclarationName(node, "namespace", ctx.file.path)
   const qname = nestedQname([...namespacePath, name])
@@ -346,7 +366,7 @@ function addNamespaceAndBody(
   })
   const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
   if (body === null) return
-  visitModuleLevel(body, ctx, [...namespacePath, name], out)
+  visitModuleLevel(body, ctx, [...namespacePath, name], out, callState)
 }
 
 /**

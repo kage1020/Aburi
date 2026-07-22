@@ -1,6 +1,7 @@
 import type {
   BodyExtraction,
   Call,
+  Confidence,
   Config,
   DropHint,
   Effect,
@@ -104,11 +105,13 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const symbols: IRSymbol[] = []
 
   for (const raw of candidates) {
-    const candidate = mergeFrameworkClassification(raw, frameworks, extractCtx)
+    const { candidate, confidence } = mergeFrameworkClassification(raw, frameworks, extractCtx)
     const dropReason = decideDropReason(candidate, language, extractCtx)
 
     if (dropReason !== null) {
-      symbols.push(buildDroppedSymbol(candidate, dropReason, extractLanguageFromId(candidate.id)))
+      symbols.push(
+        buildDroppedSymbol(candidate, dropReason, extractLanguageFromId(candidate.id), confidence),
+      )
       continue
     }
 
@@ -140,6 +143,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         effects: classifiedEffects,
         calls: keptCalls,
         normalizedAstString: normalized,
+        confidence,
       }),
     )
   }
@@ -156,11 +160,18 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   }
 }
 
+interface FrameworkMergeResult {
+  candidate: SymbolCandidate<OpaqueAstNode>
+  /** Absent when no framework returned a non-null classification, or when the winning
+   * classification did not carry a `confidence` (implicit "high"). */
+  confidence: Confidence | null
+}
+
 function mergeFrameworkClassification(
   candidate: SymbolCandidate<OpaqueAstNode>,
   frameworks: readonly FrameworkPlugin[],
   ctx: ExtractionContext,
-): SymbolCandidate<OpaqueAstNode> {
+): FrameworkMergeResult {
   for (const framework of frameworks) {
     const result = framework.classifySymbol(candidate, ctx) as SymbolClassification | null
     if (result === null) continue
@@ -169,13 +180,16 @@ function mergeFrameworkClassification(
       return override === undefined ? d : { ...d, boundary: override }
     })
     return {
-      ...candidate,
-      extKind: (result.extKind ?? candidate.extKind) as ExtKind,
-      decorators,
-      derivedBy: mergeDerivedBy(candidate.derivedBy, result.derivedBy),
+      candidate: {
+        ...candidate,
+        extKind: (result.extKind ?? candidate.extKind) as ExtKind,
+        decorators,
+        derivedBy: mergeDerivedBy(candidate.derivedBy, result.derivedBy),
+      },
+      confidence: result.confidence ?? null,
     }
   }
-  return candidate
+  return { candidate, confidence: null }
 }
 
 function mergeDerivedBy(current: readonly string[], addition: string): string[] {
@@ -313,6 +327,7 @@ function buildDroppedSymbol(
   candidate: SymbolCandidate<OpaqueAstNode>,
   reason: string,
   language: string,
+  frameworkConfidence: Confidence | null,
 ): IRSymbol {
   return {
     id: candidate.id,
@@ -328,7 +343,7 @@ function buildDroppedSymbol(
     calls: [],
     source: candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
-    confidence: "high",
+    confidence: frameworkConfidence ?? "high",
     derivedBy: [...candidate.derivedBy],
     dropped: true,
     dropReason: reason,
@@ -342,6 +357,8 @@ interface BuildKeptSymbolInput {
   effects: Effect[]
   calls: Call[]
   normalizedAstString: string
+  /** Winning framework classifier's confidence, or null when no plugin matched. */
+  confidence: Confidence | null
 }
 
 function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
@@ -376,7 +393,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     calls: [...input.calls].sort((a, b) => a.line - b.line),
     source: input.candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
-    confidence: "high",
+    confidence: input.confidence ?? "high",
     derivedBy: [...input.candidate.derivedBy],
     dropped: false,
     dropReason: null,

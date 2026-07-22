@@ -232,7 +232,8 @@
             "namespace",
             "variable",
             "enum",
-            "constructor"
+            "constructor",
+            "call"
           ],
           "description": "Nearest core SymbolKind that consumers without this extension can fall back to."
         },

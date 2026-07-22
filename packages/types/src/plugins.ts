@@ -5,6 +5,7 @@
 
 import type { Config } from "./generated/config"
 import type {
+  Confidence,
   Decorator,
   EffectId,
   ExtKind,
@@ -219,6 +220,13 @@ export interface SymbolClassification {
   decoratorBoundaries?: Record<string, boolean>
   /** Plugin-defined rationale. */
   derivedBy: string
+  /**
+   * Optional signal strength. Omit ⇒ implicit "high" (the current behavior of
+   * decorator-based and syntactic wrapper-based classifiers). Framework plugins that
+   * pattern-match on ambiguous shapes (e.g. an Express `app.use(fn)` without a same-file
+   * `const app = express()` anchor) should downgrade to "medium".
+   */
+  confidence?: Confidence
 }
 
 // --- Language capabilities ---

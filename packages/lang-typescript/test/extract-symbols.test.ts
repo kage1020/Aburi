@@ -146,3 +146,64 @@ describe("extractSymbols — Decorators (LP14-LP15)", () => {
     expect(first.line).toBeLessThan(second.line)
   })
 })
+
+describe("extractSymbols — Call promotion (module-level chained calls)", () => {
+  it("CS1: promotes app.get with a path literal into a kind=call symbol", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/users', (req, res) => { res.send('ok') })\n`,
+    )
+    const sym = byId(symbols, "#app__get__$users")
+    expect(sym.kind).toBe("call")
+    expect(sym.bodyNode).toBeNull()
+    expect(sym.signature).toBeNull()
+    expect(sym.decorators).toEqual([])
+    expect(sym.derivedBy).toContain("call-statement:app.get")
+    expect(sym.derivedBy).toContain("path-literal:/users")
+  })
+
+  it("CS2: slugifies dynamic route parameters", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/users/:id', h)\n`,
+    )
+    byId(symbols, "#app__get__$users$Zid")
+  })
+
+  it("CS3: no path literal ⇒ qname is receiver__method only", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.use(logger)\n`,
+    )
+    const sym = byId(symbols, "#app__use")
+    expect(sym.derivedBy).not.toContain(
+      sym.derivedBy.find((tag) => tag.startsWith("path-literal:")) ?? "",
+    )
+  })
+
+  it("CS4: duplicate (receiver, method, pathSlug) triples get document-order suffixes", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/x', a)\napp.get('/x', b)\napp.get('/x', c)\n`,
+    )
+    byId(symbols, "#app__get__$x")
+    byId(symbols, "#app__get__$x__d1")
+    byId(symbols, "#app__get__$x__d2")
+  })
+
+  it("CS5: chained receiver (app.route('/x').get(h)) records chained-call and roots on app", async () => {
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.route('/thing').get(handler)\n`,
+    )
+    const sym = byId(symbols, "#app__get")
+    expect(sym.derivedBy).toContain("chained-call")
+    expect(sym.derivedBy).toContain("call-statement:app.get")
+  })
+
+  it("CS6: non-whitelisted method names (e.g. Sentry.captureException) are not promoted", async () => {
+    const symbols = await symbolsOf(`Sentry.captureException(new Error('boom'))\nconst x = 1\n`)
+    expect(symbols.some((s) => s.kind === "call")).toBe(false)
+    byId(symbols, "#x")
+  })
+
+  it("CS7: bare-identifier calls (setup()) are not promoted — only member chains", async () => {
+    const symbols = await symbolsOf(`setup()\nconst y = 2\n`)
+    expect(symbols.some((s) => s.kind === "call")).toBe(false)
+  })
+})
