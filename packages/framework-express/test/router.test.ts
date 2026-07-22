@@ -20,7 +20,6 @@ describe("extractRouterCall", () => {
   it("recognises `Router()` as a router construction", async () => {
     const sym = await firstConstSymbol(`import { Router } from "express"\nconst r = Router()\n`)
     const call = extractRouterCall(sym.fullNode)
-    expect(call?.leaf).toBe("Router")
     expect(call?.callee).toBe("Router")
   })
 
@@ -29,7 +28,6 @@ describe("extractRouterCall", () => {
       `import express from "express"\nconst r = express.Router()\n`,
     )
     const call = extractRouterCall(sym.fullNode)
-    expect(call?.leaf).toBe("Router")
     expect(call?.callee).toBe("express.Router")
   })
 
@@ -41,5 +39,24 @@ describe("extractRouterCall", () => {
   it("returns null when there is no call expression at all", async () => {
     const sym = await firstConstSymbol(`const r = 42\n`)
     expect(extractRouterCall(sym.fullNode)).toBeNull()
+  })
+
+  // C1 regression — the initializer must BE the Router() call, not merely contain one.
+  it("rejects `const r = [Router()]` (Router inside an array literal)", async () => {
+    const sym = await firstConstSymbol(`import { Router } from "express"\nconst r = [Router()]\n`)
+    expect(extractRouterCall(sym.fullNode)).toBeNull()
+  })
+
+  it("rejects `const r = withLogging(Router())` (Router wrapped in another call)", async () => {
+    const sym = await firstConstSymbol(
+      `import { Router } from "express"\nconst r = withLogging(Router())\n`,
+    )
+    expect(extractRouterCall(sym.fullNode)).toBeNull()
+  })
+
+  it("accepts `const r = (Router())` (parenthesized initializer is transparent)", async () => {
+    const sym = await firstConstSymbol(`import { Router } from "express"\nconst r = (Router())\n`)
+    const call = extractRouterCall(sym.fullNode)
+    expect(call?.callee).toBe("Router")
   })
 })

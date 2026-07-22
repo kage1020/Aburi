@@ -24,10 +24,5 @@ export {
   type UseArgumentShape,
 } from "./middleware"
 export { ExpressFrameworkPlugin, expressFrameworkPlugin } from "./plugin"
-export {
-  EXPRESS_ROUTER_FACTORIES,
-  extractRouterCall,
-  isRouterCall,
-  type RouterCall,
-} from "./router"
+export { EXPRESS_ROUTER_FACTORIES, extractRouterCall, type RouterCall } from "./router"
 export { EXPRESS_ROUTE_METHODS, isRouteMethod } from "./routes"

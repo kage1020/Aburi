@@ -26,10 +26,9 @@ const PROMOTABLE_METHOD_NAMES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * State object carried across `visitCallStatement` invocations for a single file.
- * Tracks how many identical (receiver, method, pathSlug) triples were already emitted so
- * document-order suffixes (`__d0`, `__d1`, …) can disambiguate them without leaking line
- * numbers into Symbol.id.
+ * The `__d<N>` suffix is emitted UNCONDITIONALLY (even for the first occurrence). Skipping
+ * it for `N=0` used to break Symbol.id uniqueness: `app.get('/x')` seen twice and
+ * `app.get('/x__d1')` seen once would both collapse to `app__get__$x__d1`.
  */
 export interface CallExtractionState {
   seen: Map<string, number>
@@ -59,11 +58,13 @@ export function visitCallStatement(
   if (parsed === null) return null
   if (!PROMOTABLE_METHOD_NAMES.has(parsed.method)) return null
 
+  const receiverSegment = mangleReceiver(parsed.receiver)
+  if (receiverSegment === null) return null
+
   const argsNode = call.childForFieldName("arguments") ?? findArgumentsChild(call)
   const literalPath = argsNode !== null ? firstStringLiteralArg(argsNode) : null
   const pathSlug = literalPath === null ? "" : slugifyPath(literalPath)
 
-  const receiverSegment = mangleReceiver(parsed.receiver)
   const baseQname =
     pathSlug === ""
       ? `${receiverSegment}__${parsed.method}`
@@ -71,7 +72,7 @@ export function visitCallStatement(
 
   const count = state.seen.get(baseQname) ?? 0
   state.seen.set(baseQname, count + 1)
-  const finalQname = count === 0 ? baseQname : `${baseQname}__d${count}`
+  const finalQname = `${baseQname}__d${count}`
 
   const qname = nestedQname([finalQname])
   return {
@@ -120,6 +121,9 @@ function rootReceiver(node: Node): { name: string; chained: boolean } | null {
   let chained = false
   while (true) {
     if (cursor.type === "identifier") {
+      // Reject empty identifier text (malformed AST). Manufacturing a placeholder here
+      // would silently collide with every other broken identifier in the workspace.
+      if (cursor.text.length === 0) return null
       return { name: cursor.text, chained }
     }
     if (cursor.type === "member_expression") {
@@ -205,12 +209,13 @@ function slugifyPath(path: string): string {
 }
 
 /**
- * Force the receiver token into a QNAME_SEGMENT_PATTERN-safe form. Bare identifiers pass
- * through unchanged; anything else (private-hash names, dollar-prefixed identifiers)
- * survives because `$` and `_` are both allowed by the segment pattern.
+ * Force the receiver token into a QNAME_SEGMENT_PATTERN-safe form. Returns null on empty
+ * input (should be unreachable — `rootReceiver` already rejects empty identifiers — but
+ * kept as a defensive gate so a future grammar change cannot silently fabricate a shared
+ * placeholder qname).
  */
-function mangleReceiver(name: string): string {
-  if (name.length === 0) return "unknown"
+function mangleReceiver(name: string): string | null {
+  if (name.length === 0) return null
   let out = ""
   for (const [i, ch] of Array.from(name).entries()) {
     if (i === 0) {

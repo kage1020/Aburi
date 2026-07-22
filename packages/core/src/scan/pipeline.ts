@@ -162,9 +162,10 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
 
 interface FrameworkMergeResult {
   candidate: SymbolCandidate<OpaqueAstNode>
-  /** Absent when no framework returned a non-null classification, or when the winning
-   * classification did not carry a `confidence` (implicit "high"). */
-  confidence: Confidence | null
+  /** Concrete Symbol.confidence. Resolved once, at this boundary: any classifier that
+   * omitted `confidence` (or no classifier matched at all) collapses to "high" here so
+   * downstream code only ever sees a single encoding. */
+  confidence: Confidence
 }
 
 function mergeFrameworkClassification(
@@ -186,10 +187,10 @@ function mergeFrameworkClassification(
         decorators,
         derivedBy: mergeDerivedBy(candidate.derivedBy, result.derivedBy),
       },
-      confidence: result.confidence ?? null,
+      confidence: result.confidence ?? "high",
     }
   }
-  return { candidate, confidence: null }
+  return { candidate, confidence: "high" }
 }
 
 function mergeDerivedBy(current: readonly string[], addition: string): string[] {
@@ -327,7 +328,7 @@ function buildDroppedSymbol(
   candidate: SymbolCandidate<OpaqueAstNode>,
   reason: string,
   language: string,
-  frameworkConfidence: Confidence | null,
+  frameworkConfidence: Confidence,
 ): IRSymbol {
   return {
     id: candidate.id,
@@ -343,7 +344,7 @@ function buildDroppedSymbol(
     calls: [],
     source: candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
-    confidence: frameworkConfidence ?? "high",
+    confidence: frameworkConfidence,
     derivedBy: [...candidate.derivedBy],
     dropped: true,
     dropReason: reason,
@@ -357,8 +358,8 @@ interface BuildKeptSymbolInput {
   effects: Effect[]
   calls: Call[]
   normalizedAstString: string
-  /** Winning framework classifier's confidence, or null when no plugin matched. */
-  confidence: Confidence | null
+  /** Resolved by mergeFrameworkClassification — always a concrete Confidence. */
+  confidence: Confidence
 }
 
 function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
@@ -393,7 +394,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     calls: [...input.calls].sort((a, b) => a.line - b.line),
     source: input.candidate.source,
     fingerprint: { api: ZERO_FINGERPRINT, logic: ZERO_FINGERPRINT, syntax: ZERO_FINGERPRINT },
-    confidence: input.confidence ?? "high",
+    confidence: input.confidence,
     derivedBy: [...input.candidate.derivedBy],
     dropped: false,
     dropReason: null,

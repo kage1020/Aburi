@@ -260,6 +260,40 @@ describe("runFilePipeline — framework classifySymbol dispatch", () => {
     expect(derivedBy).toContain("framework:next:page")
     expect(derivedBy).toContain("framework:next:client-component")
   })
+
+  it("propagates SymbolClassification.confidence to the emitted Symbol", async () => {
+    const fw: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-med"),
+      init: async () => {},
+      classifySymbol: (): SymbolClassification => ({
+        extKind: "framework:express:middleware",
+        derivedBy: "framework:express:middleware:app.use",
+        confidence: "medium",
+      }),
+    }
+
+    const result = await runPipelineWithStubs({ frameworks: [fw] })
+    expect(result.symbols[0]?.confidence).toBe("medium")
+  })
+
+  it("defaults Symbol.confidence to 'high' when no framework classifies", async () => {
+    const result = await runPipelineWithStubs({ frameworks: [] })
+    expect(result.symbols[0]?.confidence).toBe("high")
+  })
+
+  it("defaults Symbol.confidence to 'high' when the winning classifier omits confidence", async () => {
+    const fw: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-no-conf"),
+      init: async () => {},
+      classifySymbol: (): SymbolClassification => ({
+        extKind: "framework:nestjs:controller",
+        derivedBy: "framework:nestjs:controller:Controller",
+        // confidence intentionally omitted — pre-existing plugins (react/next/nestjs) don't set it
+      }),
+    }
+    const result = await runPipelineWithStubs({ frameworks: [fw] })
+    expect(result.symbols[0]?.confidence).toBe("high")
+  })
 })
 
 describe("runFilePipeline — effect classify dispatch", () => {
