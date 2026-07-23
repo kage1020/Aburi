@@ -149,7 +149,7 @@ Plugins not listed in the config are not loaded. Explicit opt-in.
 
 | Prefix | Ownable by `type` | Notes |
 |---|---|---|
-| `fp:*` | `lang` only | 1 ns = 1 language paradigm; sub-namespaces are individually owned by plugins |
+| `fp:*` | `lang` only | 1 ns = 1 language paradigm; sub-namespaces are individually owned by plugins. Concrete `fp:adt` / `fp:match` / `fp:effect` semantics are locked in [`fp-extension-impl.md`](./fp-extension-impl.md) |
 | `oop:*` | `lang` only | Same as above |
 | `meta:*` | `lang` only | Same as above |
 | `framework:*` | `framework` only | Sub-namespaces (`framework:nestjs:`) are individually owned by plugins |
