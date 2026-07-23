@@ -15,8 +15,9 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Framework classification**: NestJS, Next.js (App Router), and React
   function components / hooks / contexts / providers / HOCs / forwardRef /
   memo plugins
-- **Effect detection**: Prisma (`db.read` / `db.write` / `db.transaction`) and
-  NestJS events (`event.publish`) — local detection at the call site
+- **Effect detection**: Prisma and Drizzle (`db.read` / `db.write` /
+  `db.transaction`) and NestJS events (`event.publish`) — local detection at
+  the call site
 - **Symbol-to-symbol dependency edges**: file-scope and import-scope call
   resolution filling `Symbol.calls[].resolved`, projected as `via: "call"`
   entries in `dependencies[]`
@@ -55,7 +56,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
 - **Additional frameworks**: Express middleware
-- **Additional effect plugins**: `@aburi/effects-drizzle` / `@aburi/effects-trpc`
+- **Additional effect plugins**: `@aburi/effects-trpc`
 
 All detailed designs for this phase have landed — see the Design documents
 table below (`lsp-enrichment.md` is the primary open item).
