@@ -120,11 +120,11 @@ The main thread dispatches at most `2 × pool_size` pending files at any moment.
 
 ### 6.4 Parser lifecycle
 
-[lang-plugin.md](./lang-plugin.md) §8.1 says to create a fresh `Parser` per file and call `parser.delete()` afterward. This document refines that rule for the worker case:
+The plugin-side rule from [lang-plugin.md](./lang-plugin.md) §8.1 stands: `parseFile()` creates a fresh `Parser`, calls `parser.delete()` after obtaining the result, releases `tree` via `tree.delete()`, and confines node references to `parseFile()`'s scope. This document does NOT change that rule — the plugin API surface is unchanged by the worker pool.
 
-Rule PF-9 (parser reuse across files within one worker): each worker creates its `Parser` once at spawn time and reuses it across every file it processes. `parser.delete()` runs at worker shutdown, not per file. Rationale: constructing a tree-sitter `Parser` costs 5–15 ms (measured on the reference corpus); doing so per file inside a hot loop would consume >10% of the wall-time budget. The lang-plugin §8.1 warning is about the memory leak from retaining `tree` and node references, not about the `Parser` itself.
+Rule PF-9 (worker follows plugin lifecycle): each worker invokes the plugin's `parseFile()` per file, which owns the parser lifecycle end-to-end per [lang-plugin.md](./lang-plugin.md) §8.1. No parser handle is retained across `parseFile()` calls. Rationale: reusing a parser across files would require a new API surface between the worker runtime and the plugin (parser injection), which is a change to `lang-plugin.md` §4 out of scope for this document. Parser-construction cost is real (5–15 ms per file on the reference corpus) but sits within the 30 s budget with headroom given file count and per-file work.
 
-Rule PF-10 (tree and node cleanup per file): the worker MUST call `tree.delete()` at the end of each file and MUST NOT retain any node handles past the `parseFile` return. All extraction reads convert the necessary text out of the node into plain strings on the enclosing `Symbol` shape before `tree.delete()` runs. This is exactly what lang-plugin §8.1 already requires; performance.md just clarifies that these rules apply to the tree, not the parser.
+Rule PF-10 (parser-reuse is a future optimization): a future refinement of `lang-plugin.md` MAY introduce a `capabilities.parserInjection: true` opt-in through which the worker runtime supplies a long-lived parser. When and if that lands, this document will be revised to specify the injection contract. Until then the per-file lifecycle above is the only supported shape.
 
 ## 7. Determinism / canonical merge
 
@@ -223,19 +223,19 @@ Rule PF-20: when a native binding is in use, `capabilities.wasmHeapPerWorkerMB` 
 
 | ID | Input | Expected |
 | --- | --- | --- |
-| PF1 | Reference corpus (§2), `--concurrency 4`, cold cache, 4-core runner | Wall time ≤ 30 s; peak RSS ≤ 2 GiB |
+| PF1 | Reference corpus (§2), `--concurrency 4`, cold cache, 4-core runner | Wall time ≤ 30 s; peak RSS ≤ 2 GiB. **Pending corpus PR** — verifiable once `benchmarks/perf-1k/` lands (§2). |
 | PF2 | Reference corpus, `--concurrency N` for N ∈ {1, 2, 4, 8} | SHA-256 of IR JSON identical across all N |
 | PF3 | Any input, worker returns a `ParseResponse` containing a `bodyNode` | Structured-clone throws (or a test lint fails); pool aborts with diagnostic |
 | PF4 | Worker throws while parsing one file | That file marked skipped; other workers unaffected; main thread respawns worker |
 | PF5 | 3 successive crashes on the same worker slot | Scan aborts with exit code 2; last 3 failed files listed in error |
 | PF6 | `--concurrency 1` and `--concurrency 4` on same input | `parseFile` code path exercised is identical (single-thread mode does not diverge) |
-| PF7 | Pool size clamped by memory (small runner) | `--concurrency 8` on a 4 GiB runner with 512 MiB WASM heap declared → pool size = 8 (numerator) clamped to 8 (denominator floor(4096/512) = 8); on 2 GiB → clamped to 4 |
+| PF7 | Pool size clamped by available memory | On a runner reporting 4 GiB `availableMemoryMB` with 512 MiB `wasmHeapPerWorkerMB` declared, and `--concurrency 8` requested → pool size = `min(8, floor(4096 / 512)) = 8`. On 2 GiB available → `min(8, floor(2048 / 512)) = 4`. Note: `availableMemoryMB` is the free memory reported by the runtime (already net of OS overhead), not the runner's nominal RAM. |
 | PF8 | Enumerator produces 1,200 files, pool size = 4 | Queue depth never exceeds 8 (2 × pool_size) at any moment |
 | PF9 | `Date.now()` referenced inside worker parse loop or main-thread merge | Lint failure at CI |
 | PF10 | `Math.random()` referenced inside pool code | Lint failure at CI |
 | PF11 | LSP enabled | Parse phase completes fully before LSP phase starts; no worker calls LSP |
 | PF12 | Two lang plugins declare `wasmHeapPerWorkerMB` = 256 and 512 | Pool sizing uses 512 as the denominator |
-| PF13 | Worker completes file, calls `tree.delete()`, references any node handle after | Test detects use-after-delete via a wrapping stub |
+| PF13 | Plugin `parseFile()` implementation retains a node handle after `tree.delete()` (a plugin bug, not a runtime failure) | Plugin conformance tests SHOULD detect this via lang-plugin's own test harness (see [lang-plugin.md](./lang-plugin.md) §9); the pool itself makes no additional check. Listed here for completeness — this is a plugin-side invariant. |
 | PF14 | Under `CI=true` | Progress animation silenced; final summary still prints |
 
 ## 14. Design Decisions
@@ -248,9 +248,9 @@ Structured-clone `postMessage` is faster than piped stdout for the ~50 KB `Symbo
 
 Component sizes skew heavily in real monorepos. A component-level shard leaves N-1 workers idle for the tail of the largest component. File-level shards give each worker a stream of similarly-sized work units, and the deterministic hash assignment (PF-4) plus the merge algorithm (§7.2) preserve byte-identical output.
 
-### 14.3 Why parser reuse across files despite lang-plugin §8.1
+### 14.3 Why parser reuse is deferred, not adopted here
 
-Lang-plugin §8.1 is written for the single-threaded case where the extraction loop is expected to be memory-tight. Inside a long-lived worker, parser construction (5–15 ms) becomes >10% of the parse budget for small files. Reusing the parser is safe because the memory-leak risk lang-plugin §8.1 warns about is the `tree` and node handles, not the `Parser` itself; PF-10 keeps those handles bounded to one file at a time.
+An earlier draft of this document adopted parser reuse across files inside one worker (parser constructed once at worker startup, `parser.delete()` at shutdown) as an optimization. On review the trade-off was inverted: parser reuse requires a new API surface between the worker runtime and the plugin (parser injection), which would silently change [lang-plugin.md](./lang-plugin.md) §8.1's per-file lifecycle rule. Two design docs disagreeing about `Parser`'s lifetime is a worse outcome than 5–15 ms per file of construction cost. If the parse budget later proves tight, the fix is a `lang-plugin.md` refinement (`capabilities.parserInjection` opt-in), not a silent override in `performance.md`.
 
 ### 14.4 Why single-thread mode remains the reference implementation
 

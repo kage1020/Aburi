@@ -514,7 +514,7 @@ Passing `--cwd` changes the cwd and therefore the search origin.
   - When multiple lang plugins coexist in the same run, the **maximum** of the declared values is used
 - On memory-constrained CI, `--concurrency 1` is recommended (for debugging)
 
-A future release will switch to Node worker_threads instead of a worker pool (see the [roadmap](../roadmap.md)).
+A future release will switch to Node worker_threads instead of a worker pool (see the [roadmap](../roadmap.md)). Architecture details — pool sizing, work partitioning, serialization boundary, and byte-identical merge — are specified in [`performance.md`](./performance.md).
 
 ## 15. Planned Features
 

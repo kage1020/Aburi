@@ -41,7 +41,7 @@ The Symbol ID grammar in [ir-schema.md](./ir-schema.md) §3 is:
 
 The `<language>` token is the namespace boundary between languages. Two Symbols whose IDs differ only in `<language>` are two distinct Symbols with no implied relationship. The IR schema already treats them as such — `symbols[].id` is the primary key, and `dependencies[].from`/`to` are foreign keys into it.
 
-Rule L-1 (language token ownership): each `<language>` token is exclusively owned by exactly one language plugin. The token is declared in the plugin's manifest (short-form id: `ts`, `tsx`, `js`, `py`, `go`, `rs`, `scala`, ...). Two plugins declaring the same token is a startup error, resolved the same way [extension-vocab.md](./extension-vocab.md) §5.3 resolves sub-namespace collisions: the run aborts with a manifest-conflict diagnostic pointing at both plugins.
+Rule L-1 (language token ownership): each `<language>` token is exclusively owned by exactly one language plugin. The token is declared in the plugin's manifest (short-form id: `ts`, `tsx`, `js`, `py`, `go`, `rs`, `scala`, ...). Two plugins declaring the same token is a startup error, following the general duplicate-declaration behavior of [extension-vocab.md](./extension-vocab.md) §6.1: the run aborts with a manifest-conflict diagnostic pointing at both plugins. Ownership semantics reuse the exclusive sub-namespace framework of [extension-vocab.md](./extension-vocab.md) §5.3.
 
 Rule L-2 (well-known tokens): the following short-form tokens are centrally reserved to their conventional languages and MAY NOT be re-owned: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`, `java`, `kt`, `scala`, `hs`, `rb`, `php`, `cs`, `swift`. This list is additive; a new mainstream language may extend it in a follow-up PR.
 
@@ -74,7 +74,7 @@ Cross-language edges are always inferred from string-level or import-graph signa
 | --- | --- | --- | --- |
 | HTTP path literal | `fetch("/orders")`, `axios.post("/orders")` in TS | `@app.post("/orders")` (FastAPI), `mux.HandleFunc("/orders", ...)` (Go) | `http` |
 | Event topic string | `queue.publish("order.paid", ...)` in TS | `@consumer("order.paid")` in Python, `NATS.subscribe("order.paid")` in Go | `event` |
-| gRPC service + method | `client.OrderService.Create(...)` in any language | `service OrderService { rpc Create(...) }` in a `.proto`, implemented in the target language | `event` (see 4.2 note) |
+| gRPC service + method | `client.OrderService.Create(...)` in any language | `service OrderService { rpc Create(...) }` in a `.proto`, implemented in the target language | `http` (grouped with HTTP per §4.2) |
 | Shell exec of a script | `execFile("scripts/backfill.py")` in TS | The invoked file's top-level Symbol | `compose` |
 
 The signals above are the union of what today's `@aburi/effects-*` plugins already extract; this document does not add a new extractor category. It only says: **when both ends of one of these signals are discovered in different languages, an edge is emitted**.
@@ -99,7 +99,7 @@ The caller side always emits the edge with `direction: "outbound"`. The receiver
 
 Cross-language edges carry lower semantic confidence than an intra-language `via: "call"` — the match is string-level, not AST-level. Two downstream rules follow:
 
-- Cross-language edges MUST NOT contribute to Slice View's "changed logic" count. They surface in the `## Cross-language references` section of `diff.md` (see §8) but do not inflate the primary logic delta metric that slice-view.md §5 defines.
+- Cross-language edges do participate in Slice View's WCC clustering (see §8) exactly like any other Dependency edge — [slice-view.md](./slice-view.md) §14.13 already commits to that behavior — but they do not by themselves count as a "changed logic" delta on the endpoint Symbols, because the change is on the edge, not on the Symbol body. Rendering conventions for cross-language edges are captured in §8.
 - Effect propagation stops at the language boundary (see §6).
 
 ## 5. Cross-language calls
@@ -114,7 +114,7 @@ Rule L-6: emission of a cross-language `via: "call"` edge is an extraction error
 
 ## 6. Effect propagation across languages
 
-[effect-propagation.md](./effect-propagation.md) §11.4 defers this to the present document. The rule is:
+[effect-propagation.md](./effect-propagation.md) §3 defers this to the present document (see also §11.4 PR11, which describes the current pre-defer behavior). The rule is:
 
 Rule L-7 (unidirectional propagation): propagation walks the intra-language call graph only. A cross-language edge from §4 carries the **caller side's own effects** into the caller's `effects[]` (via the normal producer-side effect extractor); it does **not** inject the receiver's effects back into the caller.
 
@@ -144,45 +144,46 @@ The simple add+remove behavior is the correct one: it reflects that the two Symb
 
 ## 8. Slice View composition
 
-[slice-view.md](./slice-view.md) §14.13 defers this to the present document. The rule is:
+[slice-view.md](./slice-view.md) §14.13 defers cross-language slice composition to the present document with a specific commitment: once cross-language edges exist, "Slice View will then automatically produce cross-language clusters via the same WCC rule with no code change." This document honours that commitment.
 
-Rule L-8 (disjoint per-language slices): a PR that touches Symbols in multiple languages produces one Slice View section per language, in the same `diff.md`, headed by a divider:
+Rule L-8 (unified WCC clustering, no bespoke rule): cross-language edges from §4 participate in Slice View's Weakly-Connected-Components clustering exactly as intra-language edges do. There is no per-language partitioning, no special disjoint-slice mode, and no additional connectivity heuristic. A slice may contain Symbols from more than one language when cross-language edges tie them together; a slice contains one language only when the WCC subgraph happens to be single-language.
 
-```
-## ts
-<intra-ts slices, exactly as slice-view.md §5 defines>
+Rendering conventions in `diff.md`:
 
-## py
-<intra-py slices>
-
-## Cross-language references
-<summary table of cross-language edges added/removed in this PR>
-```
+- The slice header of a multi-language slice tags the languages present in it (e.g. `## slice: billing-order-flow (ts, py)`), so a reviewer sees the mixed shape at a glance.
+- Within a multi-language slice, Symbol entries are grouped by `<language>` in the same order as the workspace's `languages[]` array ([ir-schema.md](./ir-schema.md) §2). Grouping is a rendering choice; the slice's WCC identity is unchanged.
+- Each cross-language edge is rendered with a `↔ <lang>` glyph on the edge label so the language boundary is visible without loading the endpoints.
+- `diff.md` MAY include an optional final `## Cross-language references` summary block that indexes all cross-language edges added or removed in the PR. This block is a review aid; it never replaces the WCC-based slice listing above it.
 
 Rationale:
 
-- A single merged slice would need a cluster algorithm that spans language-specific graph structures — the two intra-language graphs are computed independently and have no shared vertex.
-- Reviewers navigate per-language sections faster than one merged section; the mental model matches how PRs are usually authored (frontend change + backend change in the same PR).
-- The final `## Cross-language references` block gives reviewers a compact index of the edges that cross the boundary — the review signal most likely to require both-side attention.
-
-Cross-language edges MUST appear in the `## Cross-language references` block; they MUST NOT appear inside a per-language slice's edge list. This preserves the invariant that a per-language slice can be read without loading the other language's IR.
+- [slice-view.md](./slice-view.md) §14.13 pre-committed to "same WCC rule, no code change". Introducing a per-language partition here would either force a slice-view rewrite or leave two spec docs in direct conflict.
+- The WCC rule already handles the disjoint case: when no cross-language edge exists, the graph naturally partitions by language and each slice is single-language. No special mode is needed.
+- Reviewers who work primarily in one language can still filter the mixed slice via the per-language grouping inside it; the `↔ <lang>` glyphs make the crossings scannable.
 
 ## 9. Public API globs across languages
 
-`components[].publicApi` MAY contain glob patterns or Symbol IDs. When a component has `languages: ["ts", "py"]`, its `publicApi[]` MAY mix entries owned by both languages:
+`components[].publicApi` MAY contain glob patterns or Symbol IDs, as defined by [ir-schema.md](./ir-schema.md) §4. This document does not change that rule. Under multi-language components, both entry forms coexist:
 
 ```jsonc
 {
   "id": "billing",
   "languages": ["ts", "py"],
   "publicApi": [
-    "ts:apps/billing/**#*",
-    "py:apps/billing_worker/**#*"
+    "apps/billing/src/routes/**",              // plain glob — canonical form per ir-schema §4
+    "apps/billing_worker/**/*.py",             // plain glob — resolves against the workspace root
+    "ts:packages/billing-domain/src/index.ts#Invoice",  // Symbol ID — carries the language prefix (ir-schema §3)
+    "py:apps/billing_worker/src/main.py#run"
   ]
 }
 ```
 
-Each entry's `<language>:` prefix routes glob expansion to the owning language plugin. There is no way to write a language-agnostic public-API entry; the prefix is mandatory. Rationale: a plugin knows how to resolve `#*` against its own file conventions; a language-agnostic entry would leak plugin internals into the config schema.
+Rule L-9 (interpretation, not a new constraint):
+
+- **Glob entries** resolve against workspace-relative file paths and are language-agnostic. A glob may legitimately match files owned by more than one language plugin; each match is then owned by whichever language plugin claims the file. This is unchanged from single-language use.
+- **Symbol ID entries** always carry a `<language>:` prefix per [ir-schema.md](./ir-schema.md) §3. Under multi-language components the prefix distinguishes which language's Symbol is being exported.
+
+Rationale: `ir-schema.md` §4 explicitly documents the glob form without a language prefix as canonical (`"apps/billing/src/routes/**"`). This document does not tighten that surface.
 
 ## 10. Configuration surface
 
@@ -202,7 +203,7 @@ Multi-language monorepos require exactly two new optional config knobs. Everythi
 - `crossLanguage.enabled` (default `true`): when `false`, the cross-language recognizer (§4.1) is skipped and no cross-language edges are emitted. Useful for large monorepos where only intra-language analysis is wanted (e.g. a monorepo containing three independent services).
 - `crossLanguage.httpMatch.headerFingerprint` (default `false`): opt-in for OpenAPI-schema-based HTTP matching. When both a producer and consumer expose a matching OpenAPI schema, the fingerprint of the schema is used to raise confidence on the edge. Implementation of this knob is deferred to a follow-up PR; the config key is reserved here so the surface is stable when it lands.
 
-Rule L-9: no per-language section of the config controls cross-language behavior. Cross-language settings live at the top level so that adding a new language plugin does not require touching cross-language config.
+Rule L-10 (config surface locality): no per-language section of the config controls cross-language behavior. Cross-language settings live at the top level so that adding a new language plugin does not require touching cross-language config.
 
 ## 11. Verifiable Properties
 
@@ -217,11 +218,12 @@ Rule L-9: no per-language section of the config controls cross-language behavior
 | ML7 | Cross-language edge produced with `via: "call"` (by a buggy plugin) | Extraction error, scan aborts, diagnostic names both endpoints |
 | ML8 | TS caller does `fetch("/pay")` where Python `/pay` handler internally does `db.query` | Caller's `effects[]` contains `network.http`; does NOT contain `db.query` |
 | ML9 | Symbol `ts:foo/bar.ts#Baz` removed; symbol `py:foo/bar.py#Baz` added in same PR | Diff surfaces one remove + one add; no `renamed` marker; no `movedFile` marker |
-| ML10 | PR touches symbols in both TS and Python | `diff.md` has `## ts` and `## py` slice sections plus `## Cross-language references` summary |
-| ML11 | Cross-language edge added in PR | Edge appears under `## Cross-language references`, NOT inside any per-language slice's edge list |
-| ML12 | Cross-language edge added in PR | Slice View "changed logic" count on either language slice is unaffected by the edge |
+| ML10 | PR touches Symbols in both TS and Python with a cross-language edge between them | Symbols land in ONE WCC-based slice; slice header tags `(ts, py)` per Rule L-8 |
+| ML11 | PR touches TS and Python Symbols but no cross-language edge between them | WCC partitions naturally by language; two single-language slices emitted; no bespoke rule needed |
+| ML12 | Cross-language edge added in PR | Edge participates in WCC clustering; the endpoint Symbols themselves do not gain a "changed logic" delta just from the edge (§4.4) |
 | ML13 | `crossLanguage.enabled: false` and both ends of an HTTP signal exist | No cross-language edge emitted; per-language analysis unchanged |
-| ML14 | `components[].publicApi` contains `"apps/billing/**#*"` (no language prefix) | Config rejected with "public-API entries must carry a `<language>:` prefix" |
+| ML14 | `components[].publicApi` contains `"apps/billing/src/routes/**"` (glob, no prefix) — the canonical form from [ir-schema.md](./ir-schema.md) §4 | Accepted; each matched file is owned by whichever language plugin claims it |
+| ML15 | `components[].publicApi` contains `"apps/billing/src/index.ts#Invoice"` (Symbol ID without `<language>:` prefix) | Rejected — Symbol IDs MUST carry the language prefix per [ir-schema.md](./ir-schema.md) §3 (unchanged from single-language) |
 
 ## 12. Design Decisions
 
@@ -237,9 +239,9 @@ The prefix is already the collision boundary in [ir-schema.md](./ir-schema.md) �
 
 Cross-language rename detection requires a heuristic that matches Symbol IDs that share nothing but a suffix. Every candidate heuristic (name equality, shape similarity, adjacent-in-imports) breaks on realistic corner cases and introduces non-determinism. The alternative — reporting a remove + add — is honest about the fact that two physically distinct Symbols exist, and PR reviewers already accept this framing in monolingual codebases (e.g. deleting a class in one file and adding a new one in another).
 
-### 12.4 Why disjoint slices instead of merged
+### 12.4 Why unified WCC clustering instead of disjoint per-language slices
 
-The intra-language call graphs used to build slices have no shared vertex. Merging them would require inventing pseudo-edges between per-language nodes (typically at HTTP/event boundaries), which is exactly the information the `## Cross-language references` block already conveys — with the added benefit that reviewers see it as a summary table rather than a cluster with mixed-language nodes. Disjoint slices also make per-language re-scan cheap: changing only Python does not require re-clustering TS.
+[slice-view.md](./slice-view.md) §14.13 pre-committed to "same WCC rule, no code change" once cross-language edges exist. This document honours that commitment. Introducing a bespoke per-language partitioning rule would either force a slice-view rewrite or leave two design docs in direct conflict. The WCC rule also degrades gracefully — when no cross-language edge exists the WCC naturally partitions by language, so there is no cost to reviewers of single-language PRs. Multi-language slices are labelled and grouped for scannability without changing their identity.
 
 ### 12.5 Why unidirectional effect propagation across languages
 

@@ -4,20 +4,21 @@ This document locks the concrete shape of the `fp:*` extension vocabulary — `f
 
 ## References:
 
-- [extension-vocab.md](./extension-vocab.md) §3 — plugin manifest format that declares these values.
-- [extension-vocab.md](./extension-vocab.md) §5.2 — the `lang`-only ownership rule that makes `fp:*` a language-plugin namespace.
+- [extension-vocab.md](./extension-vocab.md) §3 — plugin manifest format (`provides.extKinds` / `provides.effects`) that declares these values.
+- [extension-vocab.md](./extension-vocab.md) §5.2 — the `lang`-only ownership rule that makes `fp:*` an `extKind` namespace ownable by lang plugins.
 - [extension-vocab.md](./extension-vocab.md) §5.3 — sub-namespace exclusive ownership.
+- [extension-vocab.md](./extension-vocab.md) §6.1 — the duplicate-declaration behavior this document reuses for `fp:*` sub-namespace conflicts.
 - [extension-vocab.md](./extension-vocab.md) §7 — the `VocabRegistry` API.
-- [extension-vocab.md](./extension-vocab.md) §11.2 — the three-tier plugin support model (published / project / hint-only).
+- [extension-vocab.md](./extension-vocab.md) §11 — the three-tier plugin support model (published / project / hint-only).
 - [overview.md](./overview.md) §4 — the tag-propagation step where `fp:*` values are emitted; the pipeline already names `fp:match`, `fp:adt`, `fp:effect`.
-- [ir-schema.md](./ir-schema.md) §5 — the Symbol record.
-- [ir-schema.md](./ir-schema.md) §5.2 — `Symbol.extKind`, the primary carrier for `fp:adt` / `fp:match`.
-- [ir-schema.md](./ir-schema.md) §9 — the Effect record shape into which `fp:effect:*` slots.
+- [ir-schema.md](./ir-schema.md) §5 — the Symbol record; `derivedBy` is a string array.
+- [ir-schema.md](./ir-schema.md) §5.2 — `Symbol.extKind`, the primary carrier for every `fp:*` value in this document.
+- [ir-schema.md](./ir-schema.md) §9 — the Effect record shape and §9.1 core vocabulary; §9.2 restricts extension effect ids to the `x-<plugin>:` prefix, which is why `fp:effect` cannot be an effect id and MUST be an `extKind` namespace.
 - [fingerprint.md](./fingerprint.md) §3.1 — api input rules (relevant to variant addition).
 - [fingerprint.md](./fingerprint.md) §3.2 — logic input rules (relevant to match arms).
 - [lang-plugin.md](./lang-plugin.md) §2 — lang plugins own extraction and therefore vocab population.
 - [lang-plugin.md](./lang-plugin.md) §4 — where `extKind` and `rules[]` are populated.
-- [effect-plugin.md](./effect-plugin.md) — effect id shape for §5 interaction rules.
+- [effect-plugin.md](./effect-plugin.md) — the concrete `effects[]` entries in §5.3 come from effect plugins.
 - [multi-language-id.md](./multi-language-id.md) §6 — cross-language effect propagation, relevant to §5.
 - [roadmap.md](../roadmap.md) — Later: FP proof of concept.
 
@@ -31,19 +32,19 @@ This document locks the semantics so that (a) plugins target a stable contract a
 
 Slot placement in the vocabulary framework:
 
-- `fp:*` is a `lang`-plugin-only prefix ([extension-vocab.md](./extension-vocab.md) §5.2).
-- Sub-namespaces `fp:adt`, `fp:match`, `fp:effect` are individually ownable — this document declares them **pre-approved** (a plugin claiming one of them at startup does not conflict with a central reservation) but still requires the plugin to declare them in its `aburi-vocab.json`.
+- `fp:*` is a `lang`-plugin-only prefix, ownable exclusively through `provides.extKindPrefixes` and `provides.extKinds` ([extension-vocab.md](./extension-vocab.md) §5.2, §6.1).
+- Sub-namespaces `fp:adt`, `fp:match`, `fp:effect` are individually ownable. This document enumerates them as pre-approved slots — a plugin claiming one of them still MUST declare it in its plugin manifest, but the declaration will not conflict with a central reservation ([extension-vocab.md](./extension-vocab.md) §5.1).
 - Optional reserved sub-namespaces `fp:typeclass`, `fp:hkt` are also pre-approved but not required by any current plugin (§6).
+- Effect ids (`Symbol.effects[].id`) are constrained by [ir-schema.md](./ir-schema.md) §9.1/§9.2 to the core vocabulary or the `x-<plugin>:` prefix, and by [extension-vocab.md](./extension-vocab.md) §6.1 to `type: effects` plugins only. Consequently `fp:*` values MUST land on `Symbol.extKind`, never on `Symbol.effects[].id`.
 
 ## 2. Placement in the pipeline
 
-`fp:*` values are emitted during the tag-propagation step of [overview.md](./overview.md) §4. Concretely, they land in three IR slots:
+`fp:*` values are emitted during the tag-propagation step of [overview.md](./overview.md) §4. Concretely, they land in two IR slots:
 
-- `Symbol.extKind` — the primary carrier for `fp:adt:*` and `fp:match` (Symbol-level classification).
-- `Symbol.rules[]` — the existing `"match"` rule value is reused when the enclosing Symbol dispatches on an ADT or literal.
-- `Symbol.effects[]` — the effect id namespace `fp:effect:<kind>` slots in the same shape as any other effect id.
+- `Symbol.extKind` — the primary carrier for every `fp:*` value in this document (`fp:adt:*`, `fp:match(:exhaustive)`, `fp:effect:*`). Follows the `<namespace>(:<segment>)+` grammar of [ir-schema.md](./ir-schema.md) §5.2.
+- `Symbol.rules[]` — the existing `"match"` rule value ([ir-schema.md](./ir-schema.md) §8.1) is added when the enclosing Symbol contains a match expression.
 
-No new IR field is introduced. The `Rule` enum entry `"match"` already exists ([fingerprint.md](./fingerprint.md) §3.2 rules table).
+No new IR field is introduced. Concrete effect ids inside a Symbol carrying `extKind: "fp:effect:*"` (e.g. `db.write`, `network.http`, `x-prisma:query`) go in `Symbol.effects[]` under their existing shape — see §5.3 for the composition rule.
 
 ## 3. `fp:adt` — Algebraic data types
 
@@ -83,12 +84,12 @@ The Symbol's fields:
   "id": "scala:app/domain/Order.scala#Order",
   "kind": "type",
   "extKind": "fp:adt:sum",
-  "derivedBy": "@aburi/lang-scala",
+  "derivedBy": ["lang:scala:adt"],
   // ... other fields per ir-schema §5
 }
 ```
 
-Rule FP-A3: `derivedBy` MUST name the language plugin that emitted the tag. This is how the vocabulary registry attributes ownership when two plugins might disagree.
+Rule FP-A3: `derivedBy` is a string array ([ir-schema.md](./ir-schema.md) §5, §5.5). At least one entry MUST identify the emitting plugin under an owned prefix (per the plugin's `provides.derivedByPrefixes[]`), so the vocabulary registry can attribute ownership. Other entries (e.g. core extraction rules) MAY appear alongside.
 
 ### 3.4 Public API implication
 
@@ -150,35 +151,42 @@ Rule FP-M6 (arm reorder is not a logic change unless the language cares): if the
 | Haskell | `IO a`, `STM a` |
 | F# | `Async<A>`, `Task<A>` |
 
-### 5.2 Effect-id integration
+### 5.2 `extKind` integration
 
-An `fp:effect` value produces an entry in the enclosing Symbol's `effects[]` under the `fp:effect:<kind>` namespace:
+`fp:effect:<kind>` is an `extKind` sub-namespace, not an `Effect.id`. This is a hard constraint from the surrounding schema: [ir-schema.md](./ir-schema.md) §9.1/§9.2 restricts `Effect.id` to the core vocabulary or the `x-<plugin>:` prefix, and [extension-vocab.md](./extension-vocab.md) §6.1 says a `type: lang` plugin declaring `effects` / `effectPrefixes` is a manifest validation error. Modelling `fp:effect:*` as `extKind` respects both.
+
+A Symbol whose primary shape is an effect wrapper carries the wrapper in `extKind`, and its concrete side effects (if any) go in `effects[]` under the existing core vocabulary or an `x-<plugin>:` effect id:
 
 ```jsonc
-"effects": [
-  { "id": "fp:effect:io",       "source": "cats-effect", "derivedBy": "@aburi/effects-cats-effect" },
-  { "id": "fp:effect:future",   "source": "std",         "derivedBy": "@aburi/lang-scala" },
-  { "id": "fp:effect:async",    "source": "std",         "derivedBy": "@aburi/lang-rust" }
-]
+{
+  "id": "scala:app/service/OrderRepo.scala#OrderRepo.save",
+  "kind": "method",
+  "extKind": "fp:effect:io",
+  "derivedBy": ["lang:scala:effect-wrapper"],
+  "effects": [
+    { "id": "db.write",          "target": "doobie.update",       "line": 42, "plugin": "effects-doobie", "confidence": "high" },
+    { "id": "x-doobie:transact", "target": "IO.transact",         "line": 44, "plugin": "effects-doobie", "confidence": "high" }
+  ]
+}
 ```
 
-Rule FP-E1: `<kind>` is owned by the emitting plugin — either a lang plugin (`fp:effect:async` for Rust `async fn`) or an effect plugin (`fp:effect:io` for cats-effect). Ownership follows [extension-vocab.md](./extension-vocab.md) §5.3: two plugins claiming the same `<kind>` is a startup error.
+Rule FP-E1: `<kind>` in `fp:effect:<kind>` is a sub-namespace ownable exclusively by one `type: lang` plugin, via `provides.extKindPrefixes: ["fp:effect"]` or an individually-enumerated `provides.extKinds[]` entry. Two plugins claiming the same `<kind>` is a startup error per [extension-vocab.md](./extension-vocab.md) §6.1.
 
-Rule FP-E2: `<kind>` MUST be lowercase kebab-case, `[a-z][a-z0-9-]*`. This matches the effect id conventions in [effect-plugin.md](./effect-plugin.md).
+Rule FP-E2: `<kind>` MUST match `[a-z][a-z0-9-]*` (lowercase kebab-case). This aligns with the `extKind` segment grammar in [extension-vocab.md](./extension-vocab.md) §3.4 (`provides.extKinds[].id` pattern).
 
-### 5.3 Interaction with existing effects
+### 5.3 Interaction with concrete effects
 
-Rule FP-E3 (composition, not replacement): an `fp:effect:io` Symbol that internally does `db.query` emits BOTH `fp:effect:io` and `db.query` in `effects[]`. The FP wrapper does not hide the concrete effect; the two effect ids describe complementary facets — `fp:effect:io` says "this returns a deferred computation" and `db.query` says "the deferred computation touches the database when executed".
+Rule FP-E3 (composition, not replacement): a Symbol carrying `extKind: "fp:effect:io"` that internally calls `db.query` emits `db.query` in `effects[]` exactly as any non-FP Symbol would. The FP wrapper does not hide the concrete effect; the two facets describe complementary information — `extKind` says "this returns a deferred computation of the given shape" and `effects[]` says "the deferred computation touches these concrete side-effect targets when executed".
 
-Rationale: a downstream consumer that filters for `db.*` effects still finds this Symbol; a consumer that groups by effect model still sees the IO wrapping. Replacing the concrete effect with the wrapper would drop the more precise information.
+Rationale: a downstream consumer that filters for `db.*` effects still finds this Symbol; a consumer that groups Symbols by effect wrapper (via `extKind`) still sees the IO wrapping. Replacing the concrete effect list with an `extKind`-only representation would drop the more precise information.
 
 ### 5.4 Boundary detection
 
-Rule FP-E4: an `fp:effect` value crossing a public API boundary (a Symbol's return type, an exported field type) makes the enclosing Symbol carry the `Boundary` tag — same treatment as `Promise<T>` in TS. This is what makes cross-service calls that use `IO[A]` visible in Slice View's public-API diff.
+Rule FP-E4: an `fp:effect:*`-shaped value crossing a public API boundary (as a Symbol's return type, or as an exported field type) makes the enclosing Symbol Boundary-tagged — same treatment as `Promise<T>` in TypeScript. This is what surfaces cross-service handoffs that use `IO[A]` in Slice View's public-API diff.
 
 ### 5.5 Cross-language interaction
 
-An `fp:effect` value crossing a language boundary follows [multi-language-id.md](./multi-language-id.md) §6: the caller side's `fp:effect:*` effect is emitted on the caller Symbol; the receiver side's effects are NOT injected back. `fp:effect` does not change this rule.
+An `fp:effect:*` value on a Symbol whose call sites reach into another language follows [multi-language-id.md](./multi-language-id.md) §6: the caller Symbol's `extKind` and its own `effects[]` are emitted as usual; the receiver's `effects[]` is NOT injected back. This document adds no new cross-language rule.
 
 ## 6. Additional vocabulary reserved
 
@@ -189,35 +197,43 @@ Two sub-namespaces are pre-approved for future FP plugin use but are not require
 | `fp:typeclass` | A type class / trait constraint that provides ad-hoc polymorphism. Scala `implicit`/`given`, Rust `trait` bounds, Haskell `class`. | Reserved; plugin MAY emit; not required |
 | `fp:hkt` | A higher-kinded type parameter (`F[_]`, `Functor[F]`). Scala, Haskell, Kotlin (via Arrow) express these directly. | Reserved; plugin MAY emit; not required |
 
-Rule FP-R1: any use of these namespaces by a plugin MUST still be declared in the plugin's `aburi-vocab.json` per [extension-vocab.md](./extension-vocab.md) §3. Reservation here means "central table won't reject the declaration", not "plugin can skip declaring".
+Rule FP-R1: any use of these namespaces by a plugin MUST still be declared in the plugin's manifest per [extension-vocab.md](./extension-vocab.md) §3. Reservation here means "central table won't reject the declaration", not "plugin can skip declaring".
 
 Rule FP-R2: `fp:typeclass` and `fp:hkt` are NOT required by any conformance test for a first FP plugin. A plugin that emits only `fp:adt`, `fp:match`, `fp:effect` is a conformant FP language plugin.
 
 ## 7. Vocabulary registration
 
-Every `fp:*` value used by a plugin MUST appear in its `aburi-vocab.json` per [extension-vocab.md](./extension-vocab.md) §3. Example manifest fragment for a Scala plugin:
+Every `fp:*` value used by a plugin MUST appear in its plugin manifest ([extension-vocab.md](./extension-vocab.md) §3.1). The manifest carries the values under `provides.extKinds[]` (each entry `{ id, baseKind, description }`) and/or `provides.extKindPrefixes[]` when the plugin owns a whole sub-namespace.
+
+Example manifest fragment for a Scala plugin using individual enumeration for the closed set of well-known values and prefix ownership for the open `fp:effect` sub-namespace:
 
 ```jsonc
 {
-  "plugin": "@aburi/lang-scala",
-  "declares": {
-    "extKind": [
-      { "value": "fp:adt:sum",        "doc": "Sealed hierarchy with 2+ variants." },
-      { "value": "fp:adt:product",    "doc": "Record / case class of one." },
-      { "value": "fp:adt:enum",       "doc": "Payload-free variants." },
-      { "value": "fp:match",          "doc": "Match expression; exhaustiveness unknown." },
-      { "value": "fp:match:exhaustive","doc": "Match expression proven exhaustive." }
+  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "name": "lang-scala",
+  "version": "1.0.0",
+  "type": "lang",
+  "engines": { "aburi": "^1.0.0" },
+  "provides": {
+    "effects": [],
+    "effectPrefixes": [],
+    "extKinds": [
+      { "id": "fp:adt:sum",         "baseKind": "type",     "description": "Sealed hierarchy with 2+ variants." },
+      { "id": "fp:adt:product",     "baseKind": "type",     "description": "Single-variant record / case class treated as ADT-of-one." },
+      { "id": "fp:adt:enum",        "baseKind": "type",     "description": "Payload-free variants." },
+      { "id": "fp:match",           "baseKind": "function", "description": "Match expression; exhaustiveness unknown." },
+      { "id": "fp:match:exhaustive","baseKind": "function", "description": "Match expression proven exhaustive." }
     ],
-    "effects": [
-      { "value": "fp:effect:future",  "doc": "scala.concurrent.Future." }
-    ]
+    "extKindPrefixes": ["fp:effect"],
+    "derivedByPrefixes": ["lang:scala"],
+    "frameworks": []
   }
 }
 ```
 
-Rule FP-R3: an extractor emitting a `fp:*` value that is not present in `declares` is an extraction error, per [extension-vocab.md](./extension-vocab.md) §6.3 (undeclared values). This is what forces vocabulary to be visible in the plugin manifest at all times.
+Rule FP-R3: an extractor emitting an `fp:*` value not covered by either `provides.extKinds[]` (as an individual id) or `provides.extKindPrefixes[]` (as a prefix) is an extraction error per [extension-vocab.md](./extension-vocab.md) §6.3 (undeclared values). This is what forces vocabulary to be visible in the plugin manifest at all times.
 
-Rule FP-R4: the central reservation table in [extension-vocab.md](./extension-vocab.md) §5.1 lists `fp:*` as a `lang`-owned prefix. This document adds no new central reservation; §5.2 already permits language plugins to own `fp:*` sub-namespaces individually. The three sub-namespaces here (`fp:adt`, `fp:match`, `fp:effect`) are enumerated here as pre-approved so a first-mover plugin's declaration goes through without a discovery step.
+Rule FP-R4: this document adds no new central reservation ([extension-vocab.md](./extension-vocab.md) §5.1). §5.2 already permits `type: lang` plugins to own `fp:*` sub-namespaces individually via `extKindPrefixes` or `extKinds`; §6.1 already enforces exclusive sub-namespace ownership. The three sub-namespaces here (`fp:adt`, `fp:match`, `fp:effect`) are enumerated as pre-approved slots so the first FP language plugin's declaration goes through without discovery friction.
 
 ## 8. Fingerprint impact summary
 
@@ -229,8 +245,9 @@ Rule FP-R4: the central reservation table in [extension-vocab.md](./extension-vo
 | Add or remove a `match` arm | logic | [fingerprint.md](./fingerprint.md) §3.2 — `"match"` rule participates in logic |
 | Reorder match arms across distinct variants (no wildcards) | none | Rule FP-M6 — arms normalized before fingerprinting |
 | Transition `fp:match` ⇄ `fp:match:exhaustive` | logic | Rule FP-M5 |
-| Wrap / unwrap a return value in `fp:effect:io` (etc.) | logic + effects | The Symbol acquires or drops `fp:effect:*`; the change is a control-flow change (deferred vs. immediate) |
-| Change `<kind>` under `fp:effect:<kind>` (e.g. `future` → `io`) | logic | The Symbol's effect model changed |
+| Wrap / unwrap a return value in `fp:effect:io` (etc.) on a public Symbol | api | `extKind` participates in the api fingerprint of an exported Symbol — the wrapper changes what callers see; concrete `effects[]` entries typically move alongside it |
+| Wrap / unwrap on a private Symbol | logic | Not visible outside the file; the Symbol's rule/effect set may still change and drives the logic fingerprint |
+| Change `<kind>` under `fp:effect:<kind>` (e.g. `future` → `io`) on a public Symbol | api | `extKind` changed on an exported Symbol |
 | Adding a private (non-exported) ADT variant | logic | Not an api change; the variant is not visible outside the file |
 
 ## 9. Non-goals
@@ -255,20 +272,22 @@ A Scala plugin and a Rust plugin coexisting in one monorepo falls under [multi-l
 
 | ID | Input | Expected |
 | --- | --- | --- |
-| FP1 | Scala plugin emits `extKind: "fp:adt:sum"` and this value is present in `aburi-vocab.json` | Extraction succeeds; Symbol's `extKind` is `"fp:adt:sum"` |
-| FP2 | Plugin emits `extKind: "fp:adt:xyz"` NOT declared in `aburi-vocab.json` | Extraction error per [extension-vocab.md](./extension-vocab.md) §6.3 |
+| FP1 | Scala plugin emits `extKind: "fp:adt:sum"` and `fp:adt:sum` is declared in the plugin manifest's `provides.extKinds[]` | Extraction succeeds; Symbol's `extKind` is `"fp:adt:sum"` |
+| FP2 | Plugin emits `extKind: "fp:adt:xyz"` NOT covered by `provides.extKinds[]` or `provides.extKindPrefixes[]` | Extraction error per [extension-vocab.md](./extension-vocab.md) §6.3 |
 | FP3 | Same Symbol carries both `fp:adt:sum` and `fp:adt:product` | Extraction error per Rule FP-A1 |
 | FP4 | ADT declaration with 3 variants, plugin emits 1 Symbol for the ADT | `symbols[]` contains exactly 1 Symbol; no per-variant Symbols unless a variant has standalone logic |
 | FP5 | Add a variant to an exported `fp:adt` Symbol between two scans | api fingerprint on that Symbol changes |
 | FP6 | Add an arm to a match expression inside Symbol S | logic fingerprint of S changes |
 | FP7 | Reorder two match arms that match distinct variants, no wildcards | logic fingerprint of the enclosing Symbol is UNCHANGED (Rule FP-M6) |
-| FP8 | Transition `extKind: "fp:match"` → `"fp:match:exhaustive"` on the same Symbol | logic fingerprint changes; api fingerprint does NOT change (Rule FP-M5) |
-| FP9 | Scala Symbol returns `IO[Unit]` and calls `db.query` inside | `effects[]` contains both `"fp:effect:io"` and a `db.query` entry (Rule FP-E3) |
-| FP10 | Symbol's return type is `IO[User]` (exported) | Symbol carries the Boundary tag (Rule FP-E4) |
+| FP8 | Transition `extKind: "fp:match"` → `"fp:match:exhaustive"` on the same private Symbol | logic fingerprint changes; api fingerprint does NOT change (Rule FP-M5) |
+| FP9 | Scala Symbol has `extKind: "fp:effect:io"` and calls `db.query` inside | `extKind` is `"fp:effect:io"` and `effects[]` contains a `db.write` entry with the shape from [ir-schema.md](./ir-schema.md) §9 (Rule FP-E3) |
+| FP10 | Public Symbol's return type is `IO[User]` | Symbol carries the Boundary tag (Rule FP-E4) |
 | FP11 | TS `switch(x)` construct in a TS Symbol | `rules[]` contains `"switch"`; does NOT contain `"match"`; `extKind` does not become `fp:match` (Rule FP-M1) |
-| FP12 | Two lang plugins both declare `fp:effect:io` | Startup error per [extension-vocab.md](./extension-vocab.md) §5.3 |
-| FP13 | Plugin declares `fp:effect:IO` (uppercase) | Manifest rejected: `<kind>` must be lowercase kebab-case (Rule FP-E2) |
-| FP14 | Plugin emits `fp:typeclass` value declared in its manifest | Extraction succeeds; no central-reservation conflict (Rule FP-R2) |
+| FP12 | Two lang plugins both declare `provides.extKindPrefixes: ["fp:effect"]` | Startup error per [extension-vocab.md](./extension-vocab.md) §6.1 (duplicate `extKindPrefixes`) |
+| FP13 | Plugin declares `provides.extKinds[].id: "fp:effect:IO"` (uppercase) | Manifest validation error: id must match `[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+` per [extension-vocab.md](./extension-vocab.md) §3.4 |
+| FP14 | Plugin emits `fp:typeclass:trait` declared in its manifest | Extraction succeeds; no central-reservation conflict (Rule FP-R1) |
+| FP15 | Plugin A declares `provides.extKindPrefixes: ["fp:typeclass"]`; plugin B independently declares the same prefix | Startup error per [extension-vocab.md](./extension-vocab.md) §6.1 — reserved namespaces still enforce exclusive ownership at declaration time |
+| FP16 | `type: effects` plugin declares `provides.extKindPrefixes: ["fp:effect"]` | Manifest validation error per [extension-vocab.md](./extension-vocab.md) §6.1 — `type: effects` may not declare `extKindPrefixes` |
 
 ## 11. Design Decisions
 
@@ -284,9 +303,11 @@ Variants are structural, not behavioral: two ADTs with the same variant set are 
 
 An API contract describes what values callers can pass and what values they get back. Exhaustiveness describes what the Symbol does with those values internally — whether every case is handled or the compiler had to insert a fallthrough. That distinction is a control-flow property, exactly what the logic bucket in [fingerprint.md](./fingerprint.md) §3.2 exists to capture. Treating it as api would make an internal refactor (adding a missing case) appear as a signature change to every caller, which would be noisy and misleading.
 
-### 11.4 Why `fp:effect` composes with concrete effects instead of replacing them
+### 11.4 Why `fp:effect` lives on `extKind` and composes with concrete `effects[]` entries instead of replacing them
 
-Two audiences read `effects[]`: an infrastructure reviewer scanning for `db.*` or `network.*` to sanity-check that new code touches the right systems, and a program-model reviewer scanning for effect wrappers to reason about referential transparency. Replacing the concrete effect with `fp:effect:io` would blind the infrastructure reviewer; omitting `fp:effect:io` would blind the program-model reviewer. Emitting both preserves both signals and costs one extra entry per wrapped effect — a trivial size increase.
+Two constraints combine to fix this design. First, [ir-schema.md](./ir-schema.md) §9.2 restricts `Effect.id` to the core vocabulary or an `x-<plugin>:` prefix, and [extension-vocab.md](./extension-vocab.md) §6.1 forbids `type: lang` plugins from declaring `effects` at all — an `fp:effect:io` effect id would violate both. `extKind` on the other hand explicitly reserves `fp:*` for lang plugins ([ir-schema.md](./ir-schema.md) §5.2 line 160). Modelling `fp:effect:*` on `extKind` is the only shape all three docs agree on.
+
+Second, two audiences read a Symbol: an infrastructure reviewer scanning `effects[]` for `db.*` / `network.*` to sanity-check that new code touches the right systems, and a program-model reviewer scanning `extKind` for `fp:effect:*` to reason about referential transparency. Replacing the concrete `effects[]` entries with an `extKind`-only representation would blind the infrastructure reviewer; suppressing `extKind` would blind the program-model reviewer. Emitting both preserves both signals with no schema violation.
 
 ### 11.5 Why reserve `fp:typeclass` and `fp:hkt` now
 
