@@ -197,6 +197,32 @@ export async function listUsers(prisma: PrismaClient) {
     }
   })
 
+  it("classifies db.batch([...]) (Neon / D1 multi-statement API) as db.transaction", async () => {
+    // batch is the driver-side atomic multi-statement API on Neon and Cloudflare D1.
+    // Semantically a transaction. Statements passed inside the array are drizzle
+    // query-builder expressions; their fluent chains are inside a literal array so
+    // walkBody still emits per-link candidates that must chain-collapse to root.
+    const results = await classifyCalls(
+      "src/services/batch.ts",
+      `import { drizzle } from "drizzle-orm/neon-http"
+import { users } from "./schema"
+export async function bulk(db: ReturnType<typeof drizzle>) {
+  return await db.batch([
+    db.insert(users).values({ name: "a" }),
+    db.insert(users).values({ name: "b" }),
+  ])
+}`,
+      [{ source: "drizzle-orm/neon-http", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
+    const batchCall = results.find((r) => r.target === "db.batch")
+    expect(batchCall?.effectId).toBe("db.transaction")
+    // The two inner db.insert(...) roots each classify independently as db.write.
+    // Chain-collapse still applies: db.insert.values links are dropped.
+    const writes = results.filter((r) => r.effectId === "db.write")
+    expect(writes).toHaveLength(2)
+    for (const w of writes) expect(w.target).toBe("db.insert")
+  })
+
   it("emits derivedBy under the shared effects-plugin:drizzle prefix", async () => {
     const results = await classifyCalls(
       "src/services/prefix-check.ts",

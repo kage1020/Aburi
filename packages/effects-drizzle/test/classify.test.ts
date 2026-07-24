@@ -59,10 +59,33 @@ describe("classifyDrizzleCall — transaction terminals", () => {
     expect(result?.derivedBy).toBe("effects-plugin:drizzle:tx")
   })
 
-  it("returns null for db.transaction with argCount=0 (defensive — should not occur)", () => {
-    expect(
+  it("throws for db.transaction with argCount=0 — upstream signal, not silent null", () => {
+    // The transaction/batch APIs are required to take at least one argument. A
+    // shape-matched call with argCount=0 is an upstream bug (broken user code or a
+    // malformed CallCandidate from the language plugin); throwing surfaces it rather
+    // than silently returning null which would conflate this with "not a Drizzle call".
+    expect(() =>
       classifyDrizzleCall(makeCall({ target: "db.transaction", argumentCount: 0 }), ctx),
-    ).toBeNull()
+    ).toThrow(/argCount=0/)
+  })
+
+  it("throws for db.batch with argCount=0 for the same reason", () => {
+    expect(() =>
+      classifyDrizzleCall(makeCall({ target: "db.batch", argumentCount: 0 }), ctx),
+    ).toThrow(/argCount=0/)
+  })
+
+  it("throw message includes the file path and target for reproducibility", () => {
+    const ctxWithPath = makeCtx({
+      imports: [makeDrizzleImport()],
+      path: "src/services/tx.ts",
+    })
+    expect(() =>
+      classifyDrizzleCall(
+        makeCall({ target: "db.transaction", argumentCount: 0, line: 42 }),
+        ctxWithPath,
+      ),
+    ).toThrow(/src\/services\/tx\.ts.*db\.transaction/s)
   })
 
   it("classifies this.db.transaction as db.transaction", () => {
@@ -105,6 +128,13 @@ describe("classifyDrizzleCall — relational query API", () => {
     // `findMany` is not in the generic terminal vocab either, so returns null.
     expect(classifyDrizzleCall(makeCall({ target: "db.users.findMany" }), ctx)).toBeNull()
   })
+
+  it("requires the table segment — db.query.findMany (3 segments, missing table) is null", () => {
+    // 3-segment shape with `query` at index -2 does not match the length-4 gate.
+    // The relational query API requires an explicit table segment between `query`
+    // and the verb.
+    expect(classifyDrizzleCall(makeCall({ target: "db.query.findMany" }), ctx)).toBeNull()
+  })
 })
 
 describe("classifyDrizzleCall — chain-collapse (one classification per fluent chain)", () => {
@@ -115,6 +145,7 @@ describe("classifyDrizzleCall — chain-collapse (one classification per fluent 
     "db.select.from.where",
     "db.select.from.where.orderBy",
     "db.selectDistinct.from.groupBy",
+    "db.selectDistinctOn.from.where",
     "db.insert.values",
     "db.insert.values.returning",
     "db.insert.values.onConflictDoUpdate",
@@ -155,7 +186,9 @@ describe("classifyDrizzleCall — negative paths", () => {
   it("returns null for a bare identifier (no accessor chain)", () => {
     expect(classifyDrizzleCall(makeCall({ target: "select" }), ctxWithDrizzle)).toBeNull()
     expect(classifyDrizzleCall(makeCall({ target: "insert" }), ctxWithDrizzle)).toBeNull()
-    expect(classifyDrizzleCall(makeCall({ target: "transaction" }), ctxWithDrizzle)).toBeNull()
+    expect(
+      classifyDrizzleCall(makeCall({ target: "transaction", argumentCount: 1 }), ctxWithDrizzle),
+    ).toBeNull()
   })
 
   it("returns null for execute — raw SQL cannot be disambiguated statically", () => {
@@ -205,6 +238,16 @@ describe("classifyDrizzleCall — malformed input fail-fast", () => {
   it("throws for a target with adjacent dots — otherwise `db..insert` would false-classify as db.write", () => {
     expect(() => classifyDrizzleCall(makeCall({ target: "db..insert" }), ctxWithDrizzle)).toThrow(
       /empty segment/,
+    )
+  })
+
+  it("throw messages include the file path so caught exceptions point at the offending source", () => {
+    const ctxWithPath = makeCtx({ imports: [makeDrizzleImport()], path: "src/services/x.ts" })
+    expect(() => classifyDrizzleCall(makeCall({ target: "" }), ctxWithPath)).toThrow(
+      /src\/services\/x\.ts/,
+    )
+    expect(() => classifyDrizzleCall(makeCall({ target: "db..insert" }), ctxWithPath)).toThrow(
+      /src\/services\/x\.ts/,
     )
   })
 })

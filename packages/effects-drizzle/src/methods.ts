@@ -20,8 +20,10 @@ const DRIZZLE_WRITE_METHODS_LIST = ["insert", "update", "delete"] as const
 
 /**
  * `transaction` is the standard interactive-transaction API across every driver.
- * `batch` is the multi-statement batch API on Neon / Cloudflare D1 / drizzle-orm/batch;
- * it maps to `db.transaction` because it executes multiple statements atomically.
+ * `batch` is the multi-statement batch API on Neon (`drizzle-orm/neon-http` /
+ * `drizzle-orm/neon-serverless`) and Cloudflare D1 (`drizzle-orm/d1`); it maps to
+ * `db.transaction` because it executes multiple statements atomically. `batch` is a
+ * method on the driver-specific database instance, not a separate subpath import.
  */
 const DRIZZLE_TRANSACTION_METHODS_LIST = ["transaction", "batch"] as const
 
@@ -71,13 +73,13 @@ export function isDrizzleQueryMethod(name: string): name is DrizzleQueryMethod {
  * link of an already-classified chain and must be rejected to preserve the
  * one-classification-per-chain invariant.
  *
- * `transaction` / `batch` are NOT here — they take a callback, not a chain, so their
- * target never appears as an internal segment of another root call.
- * Query API verbs (`findMany` / `findFirst`) are NOT here — the relational query API
- * returns a Promise directly with no fluent chain, so no internal-segment collision is
- * possible.
+ * Internal helper — consumed only by `classifyDrizzleCall` — so it is deliberately kept
+ * out of the public barrel export. Widened to `ReadonlySet<string>` at the callsite via
+ * a cast because `Set.prototype.has` requires the element type and the callsite passes a
+ * generic `string` segment.
  */
-export const DRIZZLE_FLUENT_ROOT_METHODS: ReadonlySet<string> = new Set<string>([
-  ...DRIZZLE_READ_METHODS_LIST,
-  ...DRIZZLE_WRITE_METHODS_LIST,
-])
+export const DRIZZLE_FLUENT_ROOT_METHODS: ReadonlySet<DrizzleReadMethod | DrizzleWriteMethod> =
+  new Set<DrizzleReadMethod | DrizzleWriteMethod>([
+    ...DRIZZLE_READ_METHODS_LIST,
+    ...DRIZZLE_WRITE_METHODS_LIST,
+  ])

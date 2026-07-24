@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  DRIZZLE_FLUENT_ROOT_METHODS,
   DRIZZLE_QUERY_METHODS,
   DRIZZLE_READ_METHODS,
   DRIZZLE_TRANSACTION_METHODS,
@@ -10,6 +9,7 @@ import {
   isDrizzleTransactionMethod,
   isDrizzleWriteMethod,
 } from "../src/index"
+import { DRIZZLE_FLUENT_ROOT_METHODS } from "../src/methods"
 
 describe("Drizzle method vocabulary", () => {
   it("exposes every documented read terminal (select variants)", () => {
@@ -76,11 +76,14 @@ describe("Drizzle method vocabulary", () => {
     }
   })
 
-  it("collects every fluent-root verb into DRIZZLE_FLUENT_ROOT_METHODS", () => {
+  it("collects every fluent-root verb into DRIZZLE_FLUENT_ROOT_METHODS (internal helper)", () => {
     // The chain-collapse reject pass in classify.ts reads this set. It must be the
     // union of the read verbs (select variants) and the write verbs (insert/update/
     // delete). Transaction and query terminals are excluded — they do not appear as
-    // internal segments of another root's chain.
+    // internal segments of another root's chain. Deliberately NOT exported through the
+    // public barrel — imported from `../src/methods` directly to keep the invariant
+    // pinned without leaking an internal helper.
+    const untypedRoot = DRIZZLE_FLUENT_ROOT_METHODS as ReadonlySet<string>
     for (const m of [
       "select",
       "selectDistinct",
@@ -89,11 +92,11 @@ describe("Drizzle method vocabulary", () => {
       "update",
       "delete",
     ]) {
-      expect(DRIZZLE_FLUENT_ROOT_METHODS.has(m)).toBe(true)
+      expect(untypedRoot.has(m)).toBe(true)
     }
-    expect(DRIZZLE_FLUENT_ROOT_METHODS.has("transaction")).toBe(false)
-    expect(DRIZZLE_FLUENT_ROOT_METHODS.has("batch")).toBe(false)
-    expect(DRIZZLE_FLUENT_ROOT_METHODS.has("findMany")).toBe(false)
-    expect(DRIZZLE_FLUENT_ROOT_METHODS.has("findFirst")).toBe(false)
+    expect(untypedRoot.has("transaction")).toBe(false)
+    expect(untypedRoot.has("batch")).toBe(false)
+    expect(untypedRoot.has("findMany")).toBe(false)
+    expect(untypedRoot.has("findFirst")).toBe(false)
   })
 })

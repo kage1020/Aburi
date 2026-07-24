@@ -56,7 +56,7 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
 - **Additional frameworks**: Express middleware
-- **Additional effect plugins**: `@aburi/effects-trpc`
+- **Additional effect plugin**: `@aburi/effects-trpc`
 
 All detailed designs for this phase have landed — see the Design documents
 table below (`lsp-enrichment.md` is the primary open item).

@@ -24,12 +24,17 @@ internal segments contain a root verb (`select` / `selectDistinct` /
 `selectDistinctOn` / `insert` / `update` / `delete`). Only the 2-segment root
 survives and is anchored to the query origin line.
 
-### Raw SQL
+### Raw SQL and other unclassified surfaces
 
 `.execute()` is intentionally **not** classified — a raw SQL call can be
 either a read or a write, and statically distinguishing them would require SQL
 parsing (out of the current scope). This mirrors how `@aburi/effects-prisma`
 treats `$queryRaw` / `$executeRaw`.
+
+`.$count()` and CTE builders (`db.with(sq).select().from(...)`) are also not
+in the current vocab — the CTE case still works transparently because
+`db.with.select` is the natural root of a fluent chain, but `$count` returns
+null today. A future revision may add it as `db.read`.
 
 ### Layered gate
 

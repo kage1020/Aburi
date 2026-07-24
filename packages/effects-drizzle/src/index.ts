@@ -2,7 +2,6 @@ export { classifyDrizzleCall, EFFECTS_DRIZZLE_DERIVED_BY_PREFIX } from "./classi
 export { hasDrizzleImport } from "./imports"
 export { effectsDrizzleManifest } from "./manifest"
 export {
-  DRIZZLE_FLUENT_ROOT_METHODS,
   DRIZZLE_QUERY_METHODS,
   DRIZZLE_READ_METHODS,
   DRIZZLE_TRANSACTION_METHODS,

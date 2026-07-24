@@ -9,14 +9,16 @@ import { classifyDrizzleCall } from "./classify"
 import { effectsDrizzleManifest } from "./manifest"
 
 /**
- * Drizzle effect plugin. Sits behind the language plugin's `walkBody` output, mapping
- * Drizzle ORM call expressions into the core `db.read` / `db.write` / `db.transaction`
- * effect vocabulary.
+ * Drizzle effect plugin. Maps Drizzle ORM call expressions into the core `db.read` /
+ * `db.write` / `db.transaction` effect vocabulary. See `classifyDrizzleCall` for the
+ * detection strategy (chain-collapse + import-gate).
  *
- * `init` and `classify` are both pure with respect to plugin state — no lazy resources,
- * no per-run caches — so repeated invocations against the same CallCandidate produce
- * identical results. This matches the per-call timeout contract in
- * effect-plugin.md §5.1.1 and the "pure classifier" recommendation in §11.1.
+ * Pure with respect to plugin state — no lazy resources, no per-run caches — so
+ * repeated invocations against the same CallCandidate produce identical results. Note
+ * that `classify()` can throw when the language plugin emits a malformed CallCandidate
+ * (empty target, adjacent dots) or a shape-matched transaction/batch call with
+ * `argumentCount === 0`; both signal upstream contract violations and are surfaced
+ * rather than swallowed.
  */
 class DrizzleEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsDrizzleManifest
@@ -32,9 +34,8 @@ class DrizzleEffectsPlugin implements EffectPlugin {
  * Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan
  * pipeline. The type annotation is omitted deliberately: `class implements EffectPlugin`
  * already enforces the structural contract, and inferring the narrow class type keeps
- * the manifest literals (`readonly ["effects-plugin:drizzle"]`, `"effects-drizzle"`)
- * visible to consumers that want to compare against them without a separate manifest
- * import.
+ * the manifest literals visible to consumers that want to compare against them without
+ * a separate manifest import.
  */
 export const drizzleEffectsPlugin = new DrizzleEffectsPlugin()
 
