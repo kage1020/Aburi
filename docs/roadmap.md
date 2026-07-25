@@ -16,8 +16,8 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
   function components / hooks / contexts / providers / HOCs / forwardRef /
   memo plugins
 - **Effect detection**: Prisma and Drizzle (`db.read` / `db.write` /
-  `db.transaction`) and NestJS events (`event.publish`) — local detection at
-  the call site
+  `db.transaction`), tRPC client calls (`network.rpc`), and NestJS events
+  (`event.publish`) — local detection at the call site
 - **Symbol-to-symbol dependency edges**: file-scope and import-scope call
   resolution filling `Symbol.calls[].resolved`, projected as `via: "call"`
   entries in `dependencies[]`
@@ -56,7 +56,10 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
   resolution (including filling in `SourceRange.startColumn` / `endColumn`)
 - **Additional frameworks**: Express middleware
-- **Additional effect plugin**: `@aburi/effects-trpc`
+- **`@aburi/framework-trpc`**: Boundary classification for the server-side tRPC
+  surface (`t.router({...})` / `publicProcedure.query|mutation|subscription`) as
+  `framework:trpc:*` extKinds. `@aburi/effects-trpc` covers the client call side
+  only — an effects plugin may not declare extKinds (extension-vocab.md §6.1)
 
 All detailed designs for this phase have landed — see the Design documents
 table below (`lsp-enrichment.md` is the primary open item).
