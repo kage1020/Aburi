@@ -76,6 +76,17 @@ describe("classifyTrpcCall — recognized client shapes", () => {
     expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:user.byId`)
   })
 
+  it("over-qualifies the path when the client sits behind a multi-segment receiver", () => {
+    // Documented limitation rather than a goal: only the FIRST segment is treated as the
+    // client binding, so `api.trpc.user.byId.query()` records `trpc.user.byId`. The
+    // effect id and target stay correct; nothing in the target string marks where the
+    // binding ends and the router path begins. Pinned so the behaviour is a decision
+    // rather than an accident.
+    const result = classifyTrpcCall(makeCall({ target: "api.trpc.user.byId.query" }), clientCtx())
+    expect(result?.effectId).toBe("network.rpc")
+    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:trpc.user.byId`)
+  })
+
   it("keeps deeply nested router paths intact in derivedBy", () => {
     const result = classifyTrpcCall(
       makeCall({ target: "client.admin.billing.invoice.byId.query" }),

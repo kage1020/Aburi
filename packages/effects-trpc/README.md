@@ -66,6 +66,14 @@ scoped to `query` alone — the server spells its other verbs `mutation` /
 - **`subscribe` shares its name** with RxJS observables and EventEmitter-style
   APIs. The three-segment minimum and the client import gate filter almost all of
   it; a file that colocates RxJS with a tRPC vanilla client is the residual risk.
+- **Multi-segment receivers over-qualify the recorded path.** The path is taken as
+  everything between the first segment and the terminal, which is exact for
+  `client.user.byId.query()` and for `this.trpc.user.byId.query()` after the `this`
+  strip. A client reached through a longer chain — `api.trpc.user.byId.query()`, or
+  a `this` aliased to `self` — records `trpc.user.byId` instead of `user.byId`. The
+  effect and its `target` are still correct; only `derivedBy`'s path is
+  over-qualified. Nothing in the target string marks where the binding ends and the
+  router path begins, so this is a floor for any syntactic classifier.
 
 ### Deliberately unclassified surfaces
 

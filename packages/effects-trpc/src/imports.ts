@@ -22,7 +22,8 @@ const TRPC_CLIENT_MODULE_ROOTS = ["@trpc/client", "@trpc/react-query", "@trpc/ne
  *
  * This gate exists purely as a discriminator: `publicProcedure.input(schema).query(cb)`
  * normalizes to the same shape as a client `client.user.byId.query`, and the import list
- * is the only signal available to tell them apart. See `classifyTrpcCall`.
+ * is the only signal available to tell them apart. See design decision #2 on
+ * `classifyTrpcCall` for how the resulting suppression is scoped.
  */
 const TRPC_SERVER_MODULE_ROOTS = ["@trpc/server"] as const
 
@@ -47,6 +48,11 @@ export function hasTrpcClientImport(imports: readonly ImportEdge[], filePath: st
 /**
  * True when the file's import list contains `@trpc/server` or any of its subpaths. Same
  * validation and error-reporting contract as `hasTrpcClientImport`.
+ *
+ * Deliberately kept out of the public barrel: this is the classifier's internal
+ * discriminator, not a capability the plugin offers its consumers. A future
+ * `@aburi/framework-trpc` needs its own server-side detection anyway, scoped to what
+ * Boundary classification requires rather than to this suppression rule.
  */
 export function hasTrpcServerImport(imports: readonly ImportEdge[], filePath: string): boolean {
   return matchesAnyRoot(imports, filePath, TRPC_SERVER_MODULE_ROOTS)

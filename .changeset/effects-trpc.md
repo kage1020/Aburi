@@ -78,6 +78,11 @@ router and a client.
 - `subscribe` shares its name with RxJS and EventEmitter APIs. The three-segment
   minimum plus the client import gate filter almost all of it; a file colocating
   RxJS with a tRPC vanilla client is the residual risk.
+- Only the first segment is treated as the client binding, so a client behind a
+  longer receiver chain (`api.trpc.user.byId.query()`, or a `this` aliased to
+  `self`) records an over-qualified path — `trpc.user.byId` rather than
+  `user.byId`. The effect id and `target` stay correct; nothing in the target
+  string marks where the binding ends and the router path begins.
 
 ### Manifest
 
@@ -92,11 +97,16 @@ consumers can trace every effect back here.
 ### Public API
 
 `trpcEffectsPlugin` (ready-to-register instance), `TrpcEffectsPlugin` (class),
-`classifyTrpcCall`, `hasTrpcClientImport`, `hasTrpcServerImport`,
-`effectsTrpcManifest`, the terminal-vocabulary constants
-(`TRPC_QUERY_TERMINALS`, `TRPC_MUTATION_TERMINALS`,
-`TRPC_SUBSCRIPTION_TERMINALS`) with corresponding type guards, plus types
-`TrpcQueryTerminal`, `TrpcMutationTerminal`, `TrpcSubscriptionTerminal`.
+`classifyTrpcCall`, `hasTrpcClientImport`, `effectsTrpcManifest`, the
+terminal-vocabulary constants (`TRPC_QUERY_TERMINALS`,
+`TRPC_MUTATION_TERMINALS`, `TRPC_SUBSCRIPTION_TERMINALS`) with corresponding
+type guards, plus types `TrpcQueryTerminal`, `TrpcMutationTerminal`,
+`TrpcSubscriptionTerminal`.
+
+The server-import check that drives the `query` suppression is intentionally not
+exported — it is the classifier's internal discriminator, and a future
+`@aburi/framework-trpc` needs server-side detection scoped to what Boundary
+classification requires rather than to this suppression rule.
 
 ### Purity
 

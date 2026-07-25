@@ -1,5 +1,5 @@
 export { classifyTrpcCall, EFFECTS_TRPC_DERIVED_BY_PREFIX } from "./classify"
-export { hasTrpcClientImport, hasTrpcServerImport } from "./imports"
+export { hasTrpcClientImport } from "./imports"
 export { effectsTrpcManifest } from "./manifest"
 export {
   isTrpcMutationTerminal,

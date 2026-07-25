@@ -1,6 +1,11 @@
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
 import { hasTrpcClientImport, hasTrpcServerImport } from "./imports"
-import { isTrpcMutationTerminal, isTrpcQueryTerminal, isTrpcSubscriptionTerminal } from "./methods"
+import {
+  isTrpcMutationTerminal,
+  isTrpcQueryTerminal,
+  isTrpcSubscriptionTerminal,
+  type TrpcQueryTerminal,
+} from "./methods"
 
 /**
  * Shared derivedBy namespace. `manifest.ts` imports this same const for its
@@ -14,9 +19,14 @@ export const EFFECTS_TRPC_DERIVED_BY_PREFIX = "effects-plugin:trpc" as const
  * `client.user.byId.query(input)`; a router definition reads
  * `publicProcedure.input(schema).query(resolver)`, which `normalizeCallee` collapses to
  * `publicProcedure.input.query` — the same segment count with the same terminal. The
- * server import gate is the only signal that separates them. See `classifyTrpcCall`.
+ * server import gate is the only signal that separates them; see design decision #2 on
+ * `classifyTrpcCall` for why the suppression stops at this one terminal.
+ *
+ * Typed as `TrpcQueryTerminal` rather than `string` on purpose: if the vocabulary ever
+ * renames or drops this terminal, the annotation breaks the build instead of leaving a
+ * suppression rule that silently matches nothing.
  */
-const SERVER_AMBIGUOUS_TERMINAL = "query"
+const SERVER_AMBIGUOUS_TERMINAL: TrpcQueryTerminal = "query"
 
 /**
  * Minimum segment count for a client call. tRPC's proxy is always addressed as
@@ -84,8 +94,16 @@ export function classifyTrpcCall(
   const segments = parts[0] === "this" ? parts.slice(1) : parts
   if (segments.length < MIN_CLIENT_SEGMENTS) return null
 
+  // `segments.length >= MIN_CLIENT_SEGMENTS` (3) makes this index defined; the check only
+  // exists because `noUncheckedIndexedAccess` cannot see that. Throwing rather than
+  // returning null keeps a future edit to MIN_CLIENT_SEGMENTS from converting a broken
+  // invariant into a silently unclassified call.
   const terminal = segments[segments.length - 1]
-  if (terminal === undefined) return null
+  if (terminal === undefined) {
+    throw new Error(
+      `effects-trpc (${ctx.file.path}): internal invariant violated — "${call.target}" passed the ${MIN_CLIENT_SEGMENTS}-segment gate with no terminal segment`,
+    )
+  }
 
   if (
     terminal === SERVER_AMBIGUOUS_TERMINAL &&
@@ -97,7 +115,17 @@ export function classifyTrpcCall(
   if (family === null) return null
 
   // Everything between the client binding and the terminal is the router-relative path.
-  // Guaranteed non-empty by the MIN_CLIENT_SEGMENTS check above.
+  // Non-empty because `slice(1, -1)` on a run of at least MIN_CLIENT_SEGMENTS (3) elements
+  // leaves at least one.
+  //
+  // This assumes the binding occupies exactly one segment, which is what
+  // `client.user.byId.query()` and (after the `this` strip) `this.trpc.user.byId.query()`
+  // both give. A client reached through a longer receiver chain — `api.trpc.user.byId.query()`,
+  // or a `this` aliased to `self` — shifts the extra receiver segments into the recorded
+  // path (`trpc.user.byId` instead of `user.byId`). The classification itself is still
+  // correct; only the path in derivedBy is over-qualified. Nothing in the target string
+  // marks where the binding ends and the router path begins, so a syntactic classifier
+  // cannot do better here — see README "Known limitations".
   const procedurePath = segments.slice(1, -1).join(".")
 
   return {

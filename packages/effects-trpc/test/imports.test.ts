@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { hasTrpcClientImport, hasTrpcServerImport } from "../src/index"
+// `hasTrpcServerImport` is the classifier's internal discriminator and is deliberately
+// absent from the public barrel — imported from the module directly so its behaviour stays
+// pinned without leaking it to consumers.
+import { hasTrpcServerImport } from "../src/imports"
+import { hasTrpcClientImport } from "../src/index"
 
 const PATH = "src/client.ts"
 

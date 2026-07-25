@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import {
   isTrpcMutationTerminal,
   isTrpcQueryTerminal,
@@ -6,6 +6,9 @@ import {
   TRPC_MUTATION_TERMINALS,
   TRPC_QUERY_TERMINALS,
   TRPC_SUBSCRIPTION_TERMINALS,
+  type TrpcMutationTerminal,
+  type TrpcQueryTerminal,
+  type TrpcSubscriptionTerminal,
 } from "../src/index"
 
 const ALL_SETS: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
@@ -36,6 +39,16 @@ describe("tRPC terminal vocabulary", () => {
   it("recognizes useMutation and useSubscription on their families", () => {
     expect(isTrpcMutationTerminal("useMutation")).toBe(true)
     expect(isTrpcSubscriptionTerminal("useSubscription")).toBe(true)
+  })
+
+  it("keeps the three families pairwise disjoint at the type level", () => {
+    // Fails at `pnpm typecheck` rather than at test time, so a terminal added to two
+    // `_LIST`s is caught before the runtime pass below even runs. `terminalFamily`'s
+    // dispatch order in classify.ts is only meaningless while this holds — an overlap
+    // would make the emitted derivedBy suffix silently depend on branch order.
+    expectTypeOf<Extract<TrpcQueryTerminal, TrpcMutationTerminal>>().toBeNever()
+    expectTypeOf<Extract<TrpcQueryTerminal, TrpcSubscriptionTerminal>>().toBeNever()
+    expectTypeOf<Extract<TrpcMutationTerminal, TrpcSubscriptionTerminal>>().toBeNever()
   })
 
   it("keeps the three families pairwise disjoint", () => {
