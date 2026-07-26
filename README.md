@@ -110,7 +110,10 @@ Same IR in → same Markdown / same diff out.
 | [`@aburi/framework-nestjs`](packages/framework-nestjs) | Framework | `@Module` / `@Controller` / `@Injectable` / HTTP + WS + pattern decorators → `framework:nestjs:*` extKinds. |
 | [`@aburi/framework-next`](packages/framework-next) | Framework | App Router files (page / layout / route / …) → `framework:next:*` extKinds. |
 | [`@aburi/framework-react`](packages/framework-react) | Framework | React function components / hooks / contexts / forwardRef / memo / providers / HOCs → `framework:react:*` extKinds. |
+| [`@aburi/framework-express`](packages/framework-express) | Framework | Router instances, route handlers, middleware, error handlers, mount points → `framework:express:*` extKinds. |
 | [`@aburi/effects-prisma`](packages/effects-prisma) | Effects | `prisma.<model>.<verb>` / `$transaction` → `db.read` / `db.write` / `db.transaction`. |
+| [`@aburi/effects-drizzle`](packages/effects-drizzle) | Effects | `db.select() / insert() / query.<table>.findMany` / `transaction` → `db.read` / `db.write` / `db.transaction`. |
+| [`@aburi/effects-trpc`](packages/effects-trpc) | Effects | tRPC client `<client>.<path>.{query,mutate,subscribe}` and the React Query hooks → `network.rpc`. |
 | [`@aburi/effects-nest`](packages/effects-nest) | Effects | `EventEmitter2` / `eventBus` `.emit(...)` → `event.publish`. |
 | [`@aburi/diff`](packages/diff) | Diff | 5-stage matcher (id / git-rename / logic-fingerprint / name+signature / dropped-weak) + status + delta. |
 | [`@aburi/markdown-projection`](packages/markdown-projection) | Projection | Workspace / component / diff / explain Markdown views + `--fail-on` formatter. |
