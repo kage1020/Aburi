@@ -462,6 +462,7 @@ function renderSliceView(
   const singleton = slices.filter((s) => s.members.length === 1)
 
   const rows: string[] = []
+  rows.push(...renderUnresolvedCallNote(slices, changeById))
   for (let i = 0; i < nonSingleton.length; i++) {
     const slice = nonSingleton[i] as SliceRecord
     rows.push(...renderSliceSection(slice, changeById))
@@ -508,10 +509,63 @@ function renderSliceSection(
     const symbol = symbolForMember(change)
     rows.push(`- \`${symbol.name}\` — *(${change.status})*`)
     rows.push(`  **File**: \`${symbol.source.file}:${symbol.source.startLine}\``)
-    rows.push(`  ↳ ${renderMemberFollowup(change)}`)
+    rows.push(`  ↳ ${renderMemberFollowup(change)}${unresolvedCallMarker(symbol)}`)
   }
   rows.push("")
   return rows
+}
+
+/**
+ * §12.6 — the note that turns `slice-view.md` §5.4's silent drop into something
+ * a reviewer can act on. An unresolved call emits no `CallEdge`, so a Slice that
+ * "should" have bridged Controller → Service may show up as two singletons
+ * instead. The counts come straight from the members' own `calls[].resolved`,
+ * which the diff already embeds — no new schema field, no new pass.
+ *
+ * Only the members' own calls are counted, and that is sufficient: §5.1 draws an
+ * edge only when both endpoints are Nodes, so any edge that would have merged
+ * two Slices originates at one of the members shown here.
+ */
+function renderUnresolvedCallNote(
+  slices: readonly SliceRecord[],
+  changeById: ReadonlyMap<string, SymbolChange>,
+): string[] {
+  let affectedMembers = 0
+  let unresolvedCalls = 0
+  for (const slice of slices) {
+    for (const memberId of slice.members) {
+      const change = changeById.get(memberId)
+      if (change === undefined) continue
+      const count = countUnresolvedCalls(symbolForMember(change))
+      if (count === 0) continue
+      affectedMembers++
+      unresolvedCalls += count
+    }
+  }
+  if (unresolvedCalls === 0) return []
+  const verb = affectedMembers === 1 ? "makes" : "make"
+  const calls = unresolvedCalls === 1 ? "1 call" : `${unresolvedCalls} calls`
+  return [
+    `> ⚠ ${affectedMembers} of the changed symbols below ${verb} ${calls} the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md §8.1).`,
+    "",
+  ]
+}
+
+function countUnresolvedCalls(symbol: IRSymbol): number {
+  let count = 0
+  for (const call of symbol.calls) if (call.resolved === null) count++
+  return count
+}
+
+/** Trailing marker for one member. Empty when the member resolved cleanly. */
+function unresolvedCallMarker(symbol: IRSymbol): string {
+  const count = countUnresolvedCalls(symbol)
+  if (count === 0) return ""
+  return ` · ⚠ ${pluralizeCalls(count)}`
+}
+
+function pluralizeCalls(count: number): string {
+  return count === 1 ? "1 unresolved call" : `${count} unresolved calls`
 }
 
 function renderSingletonLabel(
@@ -521,7 +575,7 @@ function renderSingletonLabel(
 ): string {
   const change = requireChangeForMember(memberId, sliceId, changeById)
   const symbol = symbolForMember(change)
-  return `\`${symbol.name}\` *(${change.status})*`
+  return `\`${symbol.name}\` *(${change.status})*${unresolvedCallMarker(symbol)}`
 }
 
 /**

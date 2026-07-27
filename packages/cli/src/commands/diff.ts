@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
-import { projectDiff } from "@aburi/markdown-projection"
+import { formatCallResolutionLine, projectDiff } from "@aburi/markdown-projection"
 import type { DiffResult, IR, IRRef } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../artifact-paths"
 import { CliError } from "../errors"
@@ -43,6 +43,13 @@ export interface DiffReport {
   diffJsonPath: string | null
   diffMdPath: string | null
   summaryLine: string
+  /**
+   * Head-side call-resolution census (call-resolution.md §8.1), rendered for
+   * stdout. `null` when the head IR predates `stats.callResolution` — an older
+   * artifact cannot be back-filled, and printing zeroes would claim a clean
+   * graph the run never actually observed.
+   */
+  callResolutionLine: string | null
   triggered: { clause: FailOnClause; observed: number } | null
   exitCode: ExitCode
 }
@@ -113,10 +120,13 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const { firstTriggered } = evaluateFailOn(failOn, diff)
   const exitCode: ExitCode = firstTriggered === null ? EXIT.SUCCESS : EXIT.GATE
 
+  const callResolution = headIR.stats.callResolution
   return {
     diffJsonPath,
     diffMdPath,
     summaryLine,
+    callResolutionLine:
+      callResolution === undefined ? null : formatCallResolutionLine(callResolution),
     triggered: firstTriggered,
     exitCode,
   }

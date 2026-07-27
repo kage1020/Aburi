@@ -149,3 +149,39 @@ describe("runExplain — not-found", () => {
     expect(outcome.exitCode).toBe(EXIT.RUNTIME)
   })
 })
+
+describe("runExplain — --debug-resolution (call-resolution.md §8.1)", () => {
+  it("rejects --no-rescan because the buckets only exist in a live scan", async () => {
+    await expect(
+      runExplain({
+        cwd: scratch,
+        argument: "ts:src/a.ts#getUser",
+        debugResolution: true,
+        noRescan: true,
+      }),
+    ).rejects.toThrow(/--debug-resolution needs a fresh scan/)
+  })
+
+  it("rejects --ir because an IR file cannot carry per-call diagnostics", async () => {
+    await expect(
+      runExplain({
+        cwd: scratch,
+        argument: "ts:src/a.ts#getUser",
+        debugResolution: true,
+        irPath: resolve(scratch, "out/aburi.ir.json"),
+      }),
+    ).rejects.toThrow(/cannot read an existing --ir file/)
+  })
+
+  it("ignores the IR sitting on disk and rescans instead", async () => {
+    // The scratch workspace has no language plugin configured, so a rescan
+    // yields zero symbols. Getting `not-found` for an id that IS present in
+    // out/aburi.ir.json is exactly the proof that the file was bypassed.
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "ts:src/a.ts#getUser",
+      debugResolution: true,
+    })
+    expect(outcome.kind).toBe("not-found")
+  })
+})

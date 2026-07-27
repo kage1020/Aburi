@@ -8,8 +8,20 @@ import {
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
-import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
-import type { Component, Config, IR, Logger, LspEnrichmentStats } from "@aburi/types"
+import {
+  formatCallResolutionLine,
+  projectComponent,
+  projectWorkspace,
+} from "@aburi/markdown-projection"
+import type {
+  CallResolutionStats,
+  Component,
+  Config,
+  IR,
+  Logger,
+  LspEnrichmentStats,
+  UnresolvedCallDiagnostic,
+} from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
@@ -54,6 +66,16 @@ export interface ScanReport {
    * least one server was configured). Absent when LSP was skipped entirely.
    */
   lspEnrichment: LspEnrichmentStats | undefined
+  /**
+   * Head-side call-resolution census rendered for stdout (call-resolution.md
+   * §8.1). Always present — `scan` emits the counters unconditionally.
+   */
+  callResolutionLine: string
+  /**
+   * Per-call diagnostics behind that census. Kept out of the IR by design
+   * (§8.1) and consumed by `aburi explain --debug-resolution`.
+   */
+  unresolvedCalls: readonly UnresolvedCallDiagnostic[]
   exitCode: ExitCode
 }
 
@@ -129,8 +151,24 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       return entry
     }),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
+    callResolutionLine: formatCallResolutionLine(
+      scanResult.ir.stats.callResolution ?? EMPTY_CALL_RESOLUTION,
+    ),
+    unresolvedCalls: scanResult.unresolvedCalls,
     exitCode: EXIT.SUCCESS,
   }
+}
+
+/**
+ * `Stats.callResolution` is optional in the schema so pre-existing v1 documents
+ * stay valid, but `scan()` always fills it in. This fallback exists only to keep
+ * the type honest at the boundary; reaching it would mean the core stopped
+ * emitting the counters.
+ */
+const EMPTY_CALL_RESOLUTION: CallResolutionStats = {
+  totalCalls: 0,
+  resolvedCalls: 0,
+  unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 0 },
 }
 
 function stderrLogger(): Logger {

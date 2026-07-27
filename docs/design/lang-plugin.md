@@ -158,11 +158,20 @@ interface CallCandidate {
   inAwait: boolean                             // true when under an await
   inNew: boolean                               // true when a new expression
   literalArgs: (string | null)[]               // literal value of each argument (null if not a literal)
+  dynamicReceiver?: boolean                    // optional; true when the receiver was an expression
 }
 ```
 
 walkBody **must not emit trivial returns as rules** (drop-list §5.3-5.5).
 For call-only returns such as `return foo()`, the call goes into CallCandidate but not into a Rule.
+
+#### `dynamicReceiver`
+
+Set it to `true` when the callee's receiver was an **expression rather than a name** — `getRepo().save()`, `items[0].save()`, `(a ?? b).save()`. Leave it absent otherwise; absent means `false`, so existing plugins stay valid without a change.
+
+Normalization is lossy here in a way only the plugin can repair: `getRepo().save()` collapses to the target `getRepo.save`, which is spelled exactly like a genuine `Class.method` qname. Without the flag, [`call-resolution.md`](./call-resolution.md) §8.1 would have to file every such call under `no-match` and send reviewers hunting for a typo that does not exist; with it, the call is correctly reported as `dynamic`.
+
+Do **not** set it for `this.save()` / `super.save()` — §4.7 already keeps those unresolved through a separate rule, and the resolver buckets them itself. Be conservative: a receiver shape the plugin does not model (a non-null assertion, a type assertion) is not evidence of dynamic dispatch, and over-reporting would make the bucket useless. The flag never affects which calls resolve — it only decides which diagnostic bucket an already-unresolved call lands in.
 
 ### 4.5 `ExtractionContext` / `WalkContext`
 

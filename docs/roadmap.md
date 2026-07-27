@@ -24,6 +24,11 @@ Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schem
 - **Slice View**: `aburi diff` clusters the changed-Symbol set into weakly
   connected components over the call graph and renders vertical slices in
   `out/diff.md` (Controller → Service → Repository grouped as one section)
+- **Call-resolution diagnostics**: `IR.stats.callResolution` counts every call
+  site and buckets the unresolved ones (`local-scope` / `external` / `dynamic`
+  / `ambiguous` / `no-match`); `aburi scan` and `aburi diff` print the census on
+  stdout, Slice View marks the members affected, and
+  `aburi explain --debug-resolution` dumps the per-call detail
 - **Extraction**: drop list (boilerplate removal) + Rules + Boundaries + local Effects
 - **Commands**: `aburi init` / `aburi scan` / `aburi diff <base>..<head>` / `aburi explain`
 - **Diff**: all 6 statuses — `added` / `removed` / `moved` / `changed` /

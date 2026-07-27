@@ -36,7 +36,7 @@ function buildRegistry() {
 }
 
 describe("scan — integration through real plugins", () => {
-  it("produces an IR that survives the 14 integrity invariants", async () => {
+  it("produces an IR that survives the 15 integrity invariants", async () => {
     await writeSource(
       "app/dashboard/page.tsx",
       "export default function DashboardPage() {\n  return null\n}\n",
@@ -66,6 +66,41 @@ describe("scan — integration through real plugins", () => {
     expect(result.ir.symbols.length).toBeGreaterThan(0)
     expect(result.ir.stats.totalFiles).toBe(3)
     expect(result.ir.stats.parsedFiles).toBe(3)
+
+    // call-resolution.md §8.1 — the counters are emitted unconditionally, and
+    // integrity invariant #15 has already checked them against symbols[].
+    const callResolution = result.ir.stats.callResolution
+    expect(callResolution).toBeDefined()
+    expect(callResolution?.unresolved).toEqual({
+      localScope: expect.any(Number),
+      external: expect.any(Number),
+      dynamic: expect.any(Number),
+      ambiguous: expect.any(Number),
+      noMatch: expect.any(Number),
+    })
+    expect(result.unresolvedCalls.length).toBe(
+      (callResolution?.totalCalls ?? 0) - (callResolution?.resolvedCalls ?? 0),
+    )
+  })
+
+  it("buckets an expression-receiver call as `dynamic` (CR27, end to end)", async () => {
+    await writeSource(
+      "app/api/reports/route.ts",
+      `export function GET() {\n  return getRepo().save({})\n}\n`,
+    )
+
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: {},
+      languages: [langTypescriptPlugin],
+      frameworks: [nextFrameworkPlugin],
+      effects: [],
+      registry: buildRegistry(),
+    })
+
+    const dynamic = result.unresolvedCalls.filter((d) => d.bucket === "dynamic")
+    expect(dynamic.map((d) => d.target)).toContain("getRepo.save")
+    expect(result.ir.stats.callResolution?.unresolved.dynamic).toBeGreaterThan(0)
   })
 
   it("routes Next.js page.tsx defaults to framework:next:page extKind", async () => {

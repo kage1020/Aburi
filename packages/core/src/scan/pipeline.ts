@@ -21,6 +21,7 @@ import type {
   VocabRegistry,
   WalkContext,
 } from "@aburi/types"
+import { makeCallSiteKey } from "../callgraph"
 import { CoreError } from "../errors"
 import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { decideSymbolDrop } from "./drop-b"
@@ -45,6 +46,13 @@ export interface FilePipelineResult {
   terminalParseFailure: boolean
   /** POSIX-relative path of the file. */
   path: string
+  /**
+   * `makeCallSiteKey` keys for the surviving calls whose receiver the language
+   * plugin reported as an expression. `Call` is a schema type and cannot carry
+   * the flag, so it rides beside the Symbols until `resolveCallGraph` consumes
+   * it for the `dynamic` diagnostic bucket (call-resolution.md §8.1).
+   */
+  dynamicCallSites: readonly string[]
 }
 
 export interface FilePipelineInput {
@@ -94,6 +102,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       timeoutEvents,
       terminalParseFailure: true,
       path: file.path,
+      dynamicCallSites: [],
     }
   }
 
@@ -103,6 +112,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     extractCtx,
   ) as SymbolCandidate<OpaqueAstNode>[]
   const symbols: IRSymbol[] = []
+  const dynamicCallSites: string[] = []
 
   for (const raw of candidates) {
     const { candidate, confidence } = mergeFrameworkClassification(raw, frameworks, extractCtx)
@@ -132,7 +142,12 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     }
     if (input.classifyTimeoutMs !== undefined)
       classifyCallsInput.classifyTimeoutMs = input.classifyTimeoutMs
-    const { effects: classifiedEffects, calls: keptCalls } = classifyCalls(classifyCallsInput)
+    const {
+      effects: classifiedEffects,
+      calls: keptCalls,
+      dynamicCallSites: fileDynamicCallSites,
+    } = classifyCalls(classifyCallsInput)
+    dynamicCallSites.push(...fileDynamicCallSites)
 
     const normalized = language.normalizeAst(candidate)
     symbols.push(
@@ -157,6 +172,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     timeoutEvents,
     terminalParseFailure: false,
     path: file.path,
+    dynamicCallSites,
   }
 }
 
@@ -231,9 +247,11 @@ interface ClassifyCallsInput {
 function classifyCalls(input: ClassifyCallsInput): {
   effects: Effect[]
   calls: Call[]
+  dynamicCallSites: string[]
 } {
   const classifiedEffects: Effect[] = []
   const survivingCalls: Call[] = []
+  const dynamicCallSites: string[] = []
   const owner = {
     id: input.candidate.id,
     kind: input.candidate.kind,
@@ -283,12 +301,15 @@ function classifyCalls(input: ClassifyCallsInput): {
     }
     if (!classified) {
       survivingCalls.push({ target: call.target, line: call.line, resolved: null })
+      if (call.dynamicReceiver === true) {
+        dynamicCallSites.push(makeCallSiteKey(input.file.path, call.line, call.target))
+      }
     }
   }
 
   classifiedEffects.sort(byTargetThenLine)
   survivingCalls.sort(byTargetThenLine)
-  return { effects: classifiedEffects, calls: survivingCalls }
+  return { effects: classifiedEffects, calls: survivingCalls, dynamicCallSites }
 }
 
 function byTargetThenLine(

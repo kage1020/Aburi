@@ -40,6 +40,16 @@ describe("runScan — happy path with no plugins", () => {
     expect(report.workspaceMdPath).not.toBeNull()
   })
 
+  it("reports the call-resolution census even with nothing to resolve (§8.1)", async () => {
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.callResolutionLine).toBe("calls 0 · resolved 0 · unresolved 0")
+    expect(report.unresolvedCalls).toEqual([])
+  })
+
   it("--format json skips markdown", async () => {
     const report = await runScan({
       cwd: scratch,

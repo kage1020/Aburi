@@ -12,7 +12,7 @@ afterEach(async () => {
 })
 
 describe("e2e: scan on fixtures/nestjs-billing", () => {
-  it("passes all 14 integrity invariants and emits the schema-pinned IR", async () => {
+  it("passes all 15 integrity invariants and emits the schema-pinned IR", async () => {
     const fixture = await checkoutFixture()
     cleanup = fixture.cleanup
 

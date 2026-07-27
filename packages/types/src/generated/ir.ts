@@ -199,6 +199,7 @@ droppedSymbols: number
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
 lspEnrichment?: LspEnrichmentStats
+callResolution?: CallResolutionStats
 }
 export interface EffectClassifyTimeout {
 /**
@@ -267,4 +268,43 @@ requestsFailed: number
  * Languages that were disabled mid-run via per-language fallback. Sorted ascending.
  */
 languagesDisabled: LanguageId[]
+}
+/**
+ * Aggregate call-resolution outcome counters (call-resolution.md §8.1). Optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all.
+ */
+export interface CallResolutionStats {
+/**
+ * Call sites present in Symbol.calls[] across every kept Symbol. Calls promoted to Symbol.effects[] by an effect plugin and calls removed by Category C drop rules never reach calls[] and are therefore not counted.
+ */
+totalCalls: number
+/**
+ * Call sites the resolver identified a callee Symbol for (Call.resolved is non-null).
+ */
+resolvedCalls: number
+unresolved: UnresolvedCallBuckets
+}
+/**
+ * Why the remaining call sites stayed null, bucketed per call-resolution.md §8.1. The five counters sum to totalCalls - resolvedCalls.
+ */
+export interface UnresolvedCallBuckets {
+/**
+ * The callee identifier shadows a caller-local binding, so it names a runtime value rather than a Symbol (§4.2).
+ */
+localScope: number
+/**
+ * The callee is bound by an import whose specifier is not relative — a bare package specifier, a path alias, or a workspace package.
+ */
+external: number
+/**
+ * The receiver is not a name the untyped tier can follow: an expression receiver (`getRepo().save()`), or `this` / `super` with no LSP hint (§4.7).
+ */
+dynamic: number
+/**
+ * More than one candidate matched in some resolution tier, so the resolver declined to pick one (§7.1).
+ */
+ambiguous: number
+/**
+ * No candidate was found at all — a typo, or a callee that is neither imported nor present in the workspace.
+ */
+noMatch: number
 }

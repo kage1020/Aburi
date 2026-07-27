@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import type {
+  CallResolutionStats,
   Component,
   Config,
   Dependency,
@@ -16,6 +17,7 @@ import type {
   PluginRef,
   SourceFile,
   Stats,
+  UnresolvedCallDiagnostic,
   VocabRegistry,
   WorkspaceManager,
 } from "@aburi/types"
@@ -62,6 +64,14 @@ export interface ScanResult {
   skipped: readonly SkippedFile[]
   /** Rich timeout observations for logging / CI signals. Aggregated into `ir.stats` too. */
   timeoutEvents: readonly ClassifyTimeoutEvent[]
+  /**
+   * One record per call the resolver left `resolved: null`, with the §8.1
+   * bucket that explains why. Counts are aggregated into
+   * `ir.stats.callResolution`; the per-call detail deliberately stays out of
+   * the IR (call-resolution.md §8.1) and is surfaced by
+   * `aburi explain --debug-resolution`.
+   */
+  unresolvedCalls: readonly UnresolvedCallDiagnostic[]
 }
 
 export interface ParseErrorRecord {
@@ -82,7 +92,7 @@ export interface ParseErrorRecord {
  *      Category B/C drop → fingerprint.
  *   4. Assemble the IR (Symbols + Components + Dependencies + Stats), sort every array
  *      per the schema's ordering rules.
- *   5. `assertIRIntegrity` — the 14 invariants must pass before we hand the IR back.
+ *   5. `assertIRIntegrity` — the 15 invariants must pass before we hand the IR back.
  *
  * Serialization to disk is the caller's job (`writeCanonicalIR` handles the canonical
  * JSON write). Keeping serialization off the scan path lets tests assert on the IR
@@ -120,6 +130,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const additionalSkipped: SkippedFile[] = []
   const importsByFile = new Map<string, readonly ImportEdge[]>()
   const fileContents = new Map<string, string>()
+  const dynamicCallSites = new Set<string>()
   // Discovery's `languageExtensions` filter already narrowed the file list to
   // extensions the router recognizes. If `route()` still returns null here it means
   // the extension filter and the router disagree — the discovered file survived the
@@ -162,6 +173,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     timeoutEvents.push(...result.timeoutEvents)
     symbols.push(...result.symbols)
     importsByFile.set(result.path, result.imports)
+    for (const key of result.dynamicCallSites) dynamicCallSites.add(key)
   }
 
   symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -194,6 +206,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     importsByFile,
     receiverHints: enrichment.receiverHints,
     implementerHints: enrichment.implementerHints,
+    dynamicCallSites,
   })
   const symbolEdges = projectSymbolEdges(callGraph.edges)
 
@@ -228,6 +241,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     timeoutEvents,
     propagation: propagation.stats,
     lspEnrichment: enrichment.stats,
+    callResolution: callGraph.stats,
   })
 
   const workspace: IR["workspace"] = {
@@ -255,7 +269,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   )
-  return { ir, parseErrors, skipped, timeoutEvents }
+  return { ir, parseErrors, skipped, timeoutEvents, unresolvedCalls: callGraph.diagnostics }
 }
 
 /**
@@ -316,6 +330,7 @@ interface BuildStatsInput {
   timeoutEvents: readonly ClassifyTimeoutEvent[]
   propagation: PropagationStats
   lspEnrichment?: LspEnrichmentStats | undefined
+  callResolution: CallResolutionStats
 }
 
 function buildStats(input: BuildStatsInput): Stats {
@@ -327,6 +342,10 @@ function buildStats(input: BuildStatsInput): Stats {
     keptSymbols: kept,
     droppedSymbols: dropped,
     effectPropagation: input.propagation,
+    // Unconditional, like effectPropagation: a run with nothing to resolve
+    // still reports the shape it observed, so a reviewer can tell "no
+    // unresolved calls" apart from "this IR predates the counter".
+    callResolution: input.callResolution,
   }
   if (input.timeoutEvents.length > 0) {
     stats.effectClassifyTimeouts = input.timeoutEvents.map(
