@@ -274,7 +274,7 @@ languagesDisabled: LanguageId[]
  */
 export interface CallResolutionStats {
 /**
- * Call sites present in Symbol.calls[] across every kept Symbol. Calls promoted to Symbol.effects[] by an effect plugin and calls removed by Category C drop rules never reach calls[] and are therefore not counted.
+ * Call sites present in symbols[].calls[]. Calls promoted to Symbol.effects[] by an effect plugin and calls removed by Category C drop rules never reach calls[] and are therefore not counted; dropped Symbols carry an empty calls[] and so contribute nothing. Denormalized for display — it always equals resolvedCalls plus the five unresolved buckets, and integrity invariant #15 enforces that.
  */
 totalCalls: number
 /**
