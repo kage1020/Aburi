@@ -129,6 +129,16 @@ export interface CallCandidate {
   inNew: boolean
   /** Per-argument literal value, or null when the argument is not a literal. */
   literalArgs: (string | null)[]
+  /**
+   * True when the callee's receiver was an expression rather than a name —
+   * `getRepo().save()`, `items[0].save()`, `(a ?? b).save()`. Normalization
+   * collapses such a receiver to whatever name it can find (`getRepo.save`),
+   * which is indistinguishable from a genuine qualified name once the AST is
+   * gone. The flag preserves the distinction so call resolution can report the
+   * `dynamic` diagnostic bucket of `call-resolution.md` §8.1 instead of
+   * misfiling the call under `no-match`. Absent means false.
+   */
+  dynamicReceiver?: boolean
 }
 
 export interface BodyExtraction {

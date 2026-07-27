@@ -94,3 +94,86 @@ describe("walkBody — rules (LP16-LP20)", () => {
     expect(call?.literalArgs).toEqual(["users", "42", null])
   })
 })
+
+// The `dynamic` diagnostic bucket of call-resolution.md §8.1 cannot be recovered
+// from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
+// spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
+// the distinction alive across the AST boundary.
+describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucket)", () => {
+  it("flags a call-expression receiver", async () => {
+    const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")
+    const call = calls.find((c) => c.target === "getRepo.save")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("flags a subscript receiver", async () => {
+    const { calls } = await walkFirstSymbol("export function f(items: any[]) { items[0].save() }")
+    const call = calls.find((c) => c.target === "items.save")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("flags a parenthesized expression receiver", async () => {
+    const { calls } = await walkFirstSymbol("export function f(a: any, b: any) { (a ?? b).save() }")
+    const call = calls.find((c) => c.dynamicReceiver === true)
+    expect(call).toBeDefined()
+  })
+
+  it("does not flag a plain qualified receiver", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc: any) { svc.save() }")
+    const call = calls.find((c) => c.target === "svc.save")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("does not flag a bare identifier callee", async () => {
+    const { calls } = await walkFirstSymbol("export function f() { save() }")
+    const call = calls.find((c) => c.target === "save")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("does not flag `this` / `super` receivers — those carry their own §4.7 rule", async () => {
+    const { calls } = await walkFirstSymbol(
+      "export function f(this: any) { this.save(); super.save() }",
+    )
+    expect(calls.find((c) => c.target === "this.save")?.dynamicReceiver).toBeUndefined()
+    expect(calls.find((c) => c.target === "super.save")?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("flags a deep chain whose innermost receiver is an expression", async () => {
+    const { calls } = await walkFirstSymbol("export function f() { getRepo().users.save() }")
+    const call = calls.find((c) => c.target === "getRepo.users.save")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  // A receiver shape the normalizer does not model ("opaque") is NOT evidence of
+  // dynamic dispatch on its own — `svc!` still names a binding. It only counts
+  // once it appears inside explicit parentheses, which is how a real expression
+  // receiver has to be written. These two cases keep the `opaque` and
+  // `parenthesized` branches honest; without them either could collapse into the
+  // other and every test above would still pass.
+  it("does not flag a non-null assertion — it still names a binding", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc?: any) { svc!.save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("flags the same non-null assertion once it is parenthesized", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc?: any) { (svc!).save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("flags a parenthesized type assertion receiver", async () => {
+    const { calls } = await walkFirstSymbol("export function f(x: unknown) { (x as any).save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("does not flag a parenthesized plain identifier", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc: any) { (svc).save() }")
+    const call = calls.find((c) => c.target === "svc.save")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+})

@@ -197,3 +197,122 @@ describe("Slice View Markdown projection — §12", () => {
     expect(md).not.toContain("Standalone changes")
   })
 })
+
+// call-resolution.md §8.1 + slice-view.md §5.4 — the drop stays silent in the
+// data, but the projection tells the reviewer it happened.
+describe("Slice View — unresolved-call markers (§12.6)", () => {
+  const withUnresolved = (
+    id: string,
+    name: string,
+    file: string,
+    unresolved: number,
+  ): SymbolChange => {
+    const calls = Array.from({ length: unresolved }, (_, i) => ({
+      target: `mystery${i}`,
+      line: 20 + i,
+      resolved: null,
+    }))
+    return {
+      status: "changed",
+      before: makeSymbol({ id, name, source: baseSource(file, 10), calls }),
+      after: makeSymbol({ id, name, source: baseSource(file, 10), calls, fingerprint: fp(id) }),
+      delta: {
+        apiChanged: false,
+        logicChanged: true,
+        syntaxChanged: false,
+        componentChanged: false,
+        visibilityChanged: false,
+      },
+    }
+  }
+
+  it("notes the totals under the section heading when any member has unresolved calls", () => {
+    const ctlId = "ts:src/ctl.ts#Ctl.route"
+    const svcId = "ts:src/svc.ts#Svc.op"
+    const md = projectDiff(
+      makeDiff({
+        symbols: [
+          withUnresolved(ctlId, "Ctl.route", "src/ctl.ts", 3),
+          changedSym(svcId, "Svc.op", "src/svc.ts"),
+        ],
+        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
+      }),
+    )
+    expect(md).toContain("1 of the changed symbols below makes 3 calls the resolver could not")
+  })
+
+  it("pluralizes the note when several members are affected", () => {
+    const a = "ts:src/a.ts#a"
+    const b = "ts:src/b.ts#b"
+    const md = projectDiff(
+      makeDiff({
+        symbols: [withUnresolved(a, "a", "src/a.ts", 1), withUnresolved(b, "b", "src/b.ts", 2)],
+        slices: [slice(`slice:${a}`, [a, b])],
+      }),
+    )
+    expect(md).toContain("2 of the changed symbols below make 3 calls the resolver could not")
+  })
+
+  it("marks the affected member inside a multi-member slice", () => {
+    const ctlId = "ts:src/ctl.ts#Ctl.route"
+    const svcId = "ts:src/svc.ts#Svc.op"
+    const md = projectDiff(
+      makeDiff({
+        symbols: [
+          withUnresolved(ctlId, "Ctl.route", "src/ctl.ts", 3),
+          changedSym(svcId, "Svc.op", "src/svc.ts"),
+        ],
+        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
+      }),
+    )
+    expect(md).toContain("⚠ 3 unresolved calls")
+    expect(md).not.toContain("⚠ 0 unresolved")
+  })
+
+  it("marks an affected singleton — the case the reviewer actually needs", () => {
+    const solo = "ts:src/ctl.ts#Ctl.route"
+    const md = projectDiff(
+      makeDiff({
+        symbols: [withUnresolved(solo, "Ctl.route", "src/ctl.ts", 1)],
+        slices: [slice(`slice:${solo}`, [solo])],
+      }),
+    )
+    expect(md).toContain("### Standalone changes")
+    expect(md).toContain("⚠ 1 unresolved call")
+    expect(md).not.toContain("1 unresolved calls")
+  })
+
+  it("stays completely silent when every member resolved cleanly", () => {
+    const a = "ts:src/a.ts#a"
+    const b = "ts:src/b.ts#b"
+    const md = projectDiff(
+      makeDiff({
+        symbols: [changedSym(a, "a", "src/a.ts"), changedSym(b, "b", "src/b.ts")],
+        slices: [slice(`slice:${a}`, [a, b])],
+      }),
+    )
+    expect(md).not.toContain("unresolved call")
+    expect(md).not.toContain("⚠")
+  })
+
+  it("counts an added member's own calls", () => {
+    const addedId = "ts:src/add.ts#addedFn"
+    const md = projectDiff(
+      makeDiff({
+        symbols: [
+          {
+            status: "added",
+            symbol: makeSymbol({
+              id: addedId,
+              name: "addedFn",
+              source: baseSource("src/add.ts", 15),
+              calls: [{ target: "mystery", line: 16, resolved: null }],
+            }),
+          },
+        ],
+        slices: [slice(`slice:${addedId}`, [addedId])],
+      }),
+    )
+    expect(md).toContain("⚠ 1 unresolved call")
+  })
+})

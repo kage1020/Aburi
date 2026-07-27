@@ -1,4 +1,14 @@
-import type { Confidence, ImportEdge, IR, Symbol as IRSymbol, SymbolId } from "@aburi/types"
+import type {
+  CallResolutionStats,
+  Confidence,
+  ImportEdge,
+  IR,
+  Symbol as IRSymbol,
+  SymbolId,
+  UnresolvedCallBucket,
+  UnresolvedCallBuckets,
+  UnresolvedCallDiagnostic,
+} from "@aburi/types"
 import type { ReceiverHint } from "./lsp/enrich"
 import { makeReceiverHintKey } from "./lsp/enrich"
 
@@ -44,6 +54,25 @@ export interface ResolveCallGraphInput {
    * `medium`-confidence edge.
    */
   implementerHints?: ReadonlyMap<SymbolId, readonly SymbolId[]>
+  /**
+   * Call sites whose receiver was an expression rather than a name, keyed by
+   * `makeCallSiteKey`. Normalization collapses `getRepo().save()` to the target
+   * `getRepo.save`, which reads exactly like a qualified name, so only the
+   * language plugin can tell the two apart (`CallCandidate.dynamicReceiver`).
+   * The set feeds diagnostics only — it never changes which calls resolve.
+   */
+  dynamicCallSites?: ReadonlySet<string>
+}
+
+/**
+ * Identity of one call site for the side channels that cannot ride along in the
+ * IR. `line` alone would collide on `a().b(c().d())`; adding the normalized
+ * target separates the two. The key survives the `(target, line)` re-sort the
+ * extraction pipeline applies to `calls[]` because it depends on neither
+ * position nor order.
+ */
+export function makeCallSiteKey(file: string, line: number, target: string): string {
+  return `${file}\t${line}\t${target}`
 }
 
 export interface ResolveCallGraphResult {
@@ -59,6 +88,17 @@ export interface ResolveCallGraphResult {
    * line. Sorted by `(from, to, line)` ascending for byte-stability.
    */
   edges: CallEdge[]
+  /**
+   * Aggregate outcome counters for `IR.stats.callResolution`. Always populated,
+   * so a workspace with zero call sites still reports the shape it observed.
+   */
+  stats: CallResolutionStats
+  /**
+   * One entry per call left `resolved: null`, sorted by
+   * `(symbolId, line, target)` ascending. Not serialized into the IR — see
+   * `UnresolvedCallDiagnostic`.
+   */
+  diagnostics: UnresolvedCallDiagnostic[]
 }
 
 const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]
@@ -97,29 +137,42 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
 
   const nextSymbols: IRSymbol[] = []
   const edges: CallEdge[] = []
+  const diagnostics: UnresolvedCallDiagnostic[] = []
+  const dynamicCallSites = input.dynamicCallSites ?? EMPTY_CALL_SITE_KEYS
+  let totalCalls = 0
+  let resolvedCalls = 0
 
   for (const symbol of input.symbols) {
     if (symbol.calls.length === 0) {
       nextSymbols.push(symbol)
       continue
     }
+    totalCalls += symbol.calls.length
     const imports = input.importsByFile.get(symbol.source.file) ?? []
     const parameterNames = collectParameterNames(symbol)
     const updatedCalls = symbol.calls.map((call) => {
-      if (call.resolved !== null) return call
-      const resolved = resolveTarget({
-        caller: symbol,
-        target: call.target,
-        imports,
-        keptSymbolIds,
-        topLevelByFile,
-        filesByLanguage,
-        componentIndex,
-        workspaceIndex,
-        extensions,
-        parameterNames,
-      })
+      if (call.resolved !== null) {
+        resolvedCalls++
+        return call
+      }
+      const trace = newTrace()
+      const resolved = resolveTarget(
+        {
+          caller: symbol,
+          target: call.target,
+          imports,
+          keptSymbolIds,
+          topLevelByFile,
+          filesByLanguage,
+          componentIndex,
+          workspaceIndex,
+          extensions,
+          parameterNames,
+        },
+        trace,
+      )
       if (resolved !== null) {
+        resolvedCalls++
         edges.push({
           from: symbol.id,
           to: resolved.id,
@@ -137,7 +190,22 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         implementerHints,
         keptSymbolIds,
       })
-      if (lspHit === null) return call
+      if (lspHit === null) {
+        diagnostics.push(
+          classifyUnresolved({
+            caller: symbol,
+            target: call.target,
+            line: call.line,
+            imports,
+            trace,
+            dynamicReceiver: dynamicCallSites.has(
+              makeCallSiteKey(symbol.source.file, call.line, call.target),
+            ),
+          }),
+        )
+        return call
+      }
+      resolvedCalls++
       edges.push({
         from: symbol.id,
         to: lspHit.id,
@@ -151,7 +219,149 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   }
 
   edges.sort(compareCallEdge)
-  return { symbols: nextSymbols, edges }
+  diagnostics.sort(compareDiagnostic)
+  return {
+    symbols: nextSymbols,
+    edges,
+    stats: buildCallResolutionStats(totalCalls, resolvedCalls, diagnostics),
+    diagnostics,
+  }
+}
+
+const EMPTY_CALL_SITE_KEYS: ReadonlySet<string> = new Set()
+
+/**
+ * What the resolution attempt observed on its way to `null`. Populated as the
+ * §4.2–§4.6 tiers run so the miss can be bucketed afterwards without re-running
+ * any of them — and without any tier changing the answer it already gave.
+ */
+interface ResolutionTrace {
+  /** Candidates seen by a tier that found more than one match (§7.1). */
+  ambiguousCandidates: Set<SymbolId>
+  /** §4.2 — the callee identifier shadows a caller parameter. */
+  parameterShadow: boolean
+  /** §4.7 — `this` / `super`, or a target that carried no name at all. */
+  unnamedReceiver: boolean
+}
+
+function newTrace(): ResolutionTrace {
+  return { ambiguousCandidates: new Set(), parameterShadow: false, unnamedReceiver: false }
+}
+
+interface ClassifyUnresolvedInput {
+  caller: IRSymbol
+  target: string
+  line: number
+  imports: readonly ImportEdge[]
+  trace: ResolutionTrace
+  dynamicReceiver: boolean
+}
+
+/**
+ * Bucket one unresolved call per `call-resolution.md` §8.1. The order below is
+ * the tie-break: a call can satisfy several descriptions at once (a parameter
+ * named after an imported package, say) and the reviewer needs one stable
+ * answer, so the most specific cause wins.
+ *
+ *   1. `local-scope` — the resolver never even looked outward (§4.2).
+ *   2. `dynamic`     — the receiver is not a name, so no tier could have won.
+ *   3. `ambiguous`   — a tier found the callee but refused to choose (§7.1).
+ *   4. `external`    — the binding leaves the workspace through a bare import.
+ *   5. `no-match`    — nothing matched anywhere.
+ */
+function classifyUnresolved(input: ClassifyUnresolvedInput): UnresolvedCallDiagnostic {
+  const base = {
+    symbolId: input.caller.id,
+    target: input.target,
+    line: input.line,
+  }
+  if (input.trace.parameterShadow) {
+    return { ...base, bucket: "local-scope", candidates: [] }
+  }
+  if (input.dynamicReceiver || input.trace.unnamedReceiver) {
+    return { ...base, bucket: "dynamic", candidates: [] }
+  }
+  if (input.trace.ambiguousCandidates.size > 0) {
+    return {
+      ...base,
+      bucket: "ambiguous",
+      candidates: [...input.trace.ambiguousCandidates].sort(compareSymbolId),
+    }
+  }
+  if (bindsToExternalImport(input.target, input.imports)) {
+    return { ...base, bucket: "external", candidates: [] }
+  }
+  return { ...base, bucket: "no-match", candidates: [] }
+}
+
+/**
+ * True when the head of `target` is bound by an import whose specifier is not
+ * relative — a bare package, a path alias, or a workspace package. §4.4.1 only
+ * resolves relative specifiers today, so such a head is out of reach by
+ * construction rather than by accident, and calling it `no-match` would send a
+ * reviewer looking for a typo that does not exist.
+ */
+function bindsToExternalImport(target: string, imports: readonly ImportEdge[]): boolean {
+  const segments = splitTargetSegments(target)
+  const head = segments[0]
+  if (head === undefined) return false
+  for (const edge of imports) {
+    if (edge.dynamic) continue
+    if (isRelativeSpecifier(edge.source)) continue
+    if (edge.symbols === "*") {
+      if (edge.namespaceBinding === head) return true
+      continue
+    }
+    for (const raw of edge.symbols) {
+      if (splitAliasedImportName(raw).local === head) return true
+    }
+  }
+  return false
+}
+
+function buildCallResolutionStats(
+  totalCalls: number,
+  resolvedCalls: number,
+  diagnostics: readonly UnresolvedCallDiagnostic[],
+): CallResolutionStats {
+  const unresolved: UnresolvedCallBuckets = {
+    localScope: 0,
+    external: 0,
+    dynamic: 0,
+    ambiguous: 0,
+    noMatch: 0,
+  }
+  for (const diagnostic of diagnostics) {
+    unresolved[BUCKET_TO_STATS_KEY[diagnostic.bucket]]++
+  }
+  return { totalCalls, resolvedCalls, unresolved }
+}
+
+/**
+ * §8.1 spells the buckets kebab-case; the JSON Schema spells every property
+ * camelCase. This table is the single place the two conventions meet.
+ */
+const BUCKET_TO_STATS_KEY: Record<UnresolvedCallBucket, keyof UnresolvedCallBuckets> = {
+  "local-scope": "localScope",
+  external: "external",
+  dynamic: "dynamic",
+  ambiguous: "ambiguous",
+  "no-match": "noMatch",
+}
+
+function compareSymbolId(a: SymbolId, b: SymbolId): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
+function compareDiagnostic(a: UnresolvedCallDiagnostic, b: UnresolvedCallDiagnostic): number {
+  if (a.symbolId < b.symbolId) return -1
+  if (a.symbolId > b.symbolId) return 1
+  if (a.line !== b.line) return a.line - b.line
+  if (a.target < b.target) return -1
+  if (a.target > b.target) return 1
+  return 0
 }
 
 const EMPTY_RECEIVER_HINTS: ReadonlyMap<string, ReceiverHint> = new Map()
@@ -260,9 +470,12 @@ interface ResolveTargetContext {
   parameterNames: ReadonlySet<string>
 }
 
-function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
+function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): ResolutionHit | null {
   const segments = splitTargetSegments(ctx.target)
-  if (segments.length === 0) return null
+  if (segments.length === 0) {
+    trace.unnamedReceiver = true
+    return null
+  }
   const head = segments[0] as string
   const tail = segments.slice(1)
 
@@ -270,7 +483,10 @@ function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
   // named `helper` invoked as `helper(...)` — or as `helper.method(...)` —
   // is a runtime value, not a Symbol reference, so the correct outcome is a
   // null resolution and no edge.
-  if (ctx.parameterNames.has(head)) return null
+  if (ctx.parameterNames.has(head)) {
+    trace.parameterShadow = true
+    return null
+  }
 
   // §4.7 Special normalized targets: `this.<method>` / `super.<method>` MUST
   // stay unresolved in the untyped tier because the receiver identity depends
@@ -278,12 +494,22 @@ function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
   // a Symbol whose `name` happens to be `this.method` appeared in the table,
   // it would not be a legitimate call target — never fabricate a name for a
   // receiver that isn't a name.
-  if (head === "this" || head === "super") return null
+  if (head === "this" || head === "super") {
+    trace.unnamedReceiver = true
+    return null
+  }
 
-  const fileHit = resolveInFileScope(ctx.caller, head, tail, ctx.keptSymbolIds, ctx.topLevelByFile)
+  const fileHit = resolveInFileScope(
+    ctx.caller,
+    head,
+    tail,
+    ctx.keptSymbolIds,
+    ctx.topLevelByFile,
+    trace,
+  )
   if (fileHit !== null) return fileHit
 
-  const importHit = resolveInImportScope(ctx, head, tail)
+  const importHit = resolveInImportScope(ctx, head, tail, trace)
   if (importHit !== null) return importHit
 
   // §4.5 / §4.6 only apply to qualified names ("Cls.method",
@@ -293,10 +519,10 @@ function resolveTarget(ctx: ResolveTargetContext): ResolutionHit | null {
   // Symbols that happen to share the name.
   if (tail.length === 0) return null
 
-  const componentHit = resolveInComponentScope(ctx)
+  const componentHit = resolveInComponentScope(ctx, trace)
   if (componentHit !== null) return componentHit
 
-  const workspaceHit = resolveInWorkspaceScope(ctx)
+  const workspaceHit = resolveInWorkspaceScope(ctx, trace)
   if (workspaceHit !== null) return workspaceHit
 
   return null
@@ -314,12 +540,16 @@ function resolveInFileScope(
   tail: readonly string[],
   keptSymbolIds: ReadonlySet<SymbolId>,
   topLevelByFile: TopLevelIndex,
+  trace: ResolutionTrace,
 ): ResolutionHit | null {
   const perFile = topLevelByFile.get(caller.source.file)
   if (perFile === undefined) return null
   const bucket = perFile.get(head)
   if (bucket === undefined) return null
-  if (bucket.length !== 1) return null
+  if (bucket.length !== 1) {
+    recordAmbiguity(trace, bucket)
+    return null
+  }
   const anchor = bucket[0] as IRSymbol
 
   if (tail.length === 0) {
@@ -345,6 +575,7 @@ function resolveInImportScope(
   ctx: ResolveTargetContext,
   head: string,
   tail: readonly string[],
+  trace: ResolutionTrace,
 ): ResolutionHit | null {
   // Collect every candidate id that the imports of this file could bind `head`
   // to. Multiple hits (re-export barrel forwarding the same name from two
@@ -380,9 +611,22 @@ function resolveInImportScope(
       if (ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
     }
   }
-  if (candidates.size !== 1) return null
+  if (candidates.size !== 1) {
+    if (candidates.size > 1) for (const id of candidates) trace.ambiguousCandidates.add(id)
+    return null
+  }
   const [only] = candidates
   return { id: only as SymbolId, confidence: "high" }
+}
+
+/**
+ * Record the competing Symbols a tier refused to choose between. Only genuine
+ * ambiguity (two or more) counts — a single-entry bucket that failed a later
+ * check is a miss, not a conflict.
+ */
+function recordAmbiguity(trace: ResolutionTrace, bucket: readonly IRSymbol[]): void {
+  if (bucket.length < 2) return
+  for (const symbol of bucket) trace.ambiguousCandidates.add(symbol.id)
 }
 
 /**
@@ -394,14 +638,21 @@ function resolveInImportScope(
  * Component-scope search ignores `import` bindings — that is the whole point
  * of §4.5 (barrel re-exports, inheritance-style references).
  */
-function resolveInComponentScope(ctx: ResolveTargetContext): ResolutionHit | null {
+function resolveInComponentScope(
+  ctx: ResolveTargetContext,
+  trace: ResolutionTrace,
+): ResolutionHit | null {
   const perLang = ctx.componentIndex.get(ctx.caller.language)
   if (perLang === undefined) return null
   const componentKey = componentKeyOf(ctx.caller.component ?? null)
   const perComponent = perLang.get(componentKey)
   if (perComponent === undefined) return null
   const bucket = perComponent.get(ctx.target)
-  if (bucket === undefined || bucket.length !== 1) return null
+  if (bucket === undefined) return null
+  if (bucket.length !== 1) {
+    recordAmbiguity(trace, bucket)
+    return null
+  }
   const hit = bucket[0] as IRSymbol
   if (!ctx.keptSymbolIds.has(hit.id)) return null
   return { id: hit.id, confidence: "medium" }
@@ -412,11 +663,18 @@ function resolveInComponentScope(ctx: ResolveTargetContext): ResolutionHit | nul
  * single language (§7.3 — cross-language edges are not emitted by the untyped
  * tier). Unique match → low confidence; ambiguous → null; no match → null.
  */
-function resolveInWorkspaceScope(ctx: ResolveTargetContext): ResolutionHit | null {
+function resolveInWorkspaceScope(
+  ctx: ResolveTargetContext,
+  trace: ResolutionTrace,
+): ResolutionHit | null {
   const perLang = ctx.workspaceIndex.get(ctx.caller.language)
   if (perLang === undefined) return null
   const bucket = perLang.get(ctx.target)
-  if (bucket === undefined || bucket.length !== 1) return null
+  if (bucket === undefined) return null
+  if (bucket.length !== 1) {
+    recordAmbiguity(trace, bucket)
+    return null
+  }
   const hit = bucket[0] as IRSymbol
   if (!ctx.keptSymbolIds.has(hit.id)) return null
   return { id: hit.id, confidence: "low" }

@@ -1,8 +1,8 @@
 import { access, writeFile } from "node:fs/promises"
 import { relative, resolve } from "node:path"
 import { detectWorkspaceRoot } from "@aburi/core"
-import { projectSymbolExplain } from "@aburi/markdown-projection"
-import type { IR, Symbol as IRSymbol } from "@aburi/types"
+import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
+import type { IR, Symbol as IRSymbol, UnresolvedCallDiagnostic } from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
@@ -15,6 +15,13 @@ export interface ExplainOptions {
   irPath?: string
   outputPath?: string
   noRescan?: boolean
+  /**
+   * Append the per-call `## Call resolution` table of `call-resolution.md`
+   * §8.1. The buckets are per-run diagnostics that the IR deliberately does not
+   * persist, so this always rescans the workspace — an on-disk IR simply cannot
+   * answer the question.
+   */
+  debugResolution?: boolean
 }
 
 export type ExplainOutcome =
@@ -55,7 +62,13 @@ export type ExplainOutcome =
 export async function runExplain(options: ExplainOptions): Promise<ExplainOutcome> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
-  const ir = await resolveIR(cwd, workspaceRoot, options)
+  assertDebugResolutionCombination(options)
+  const resolved = await resolveIR(cwd, workspaceRoot, options)
+  const ir = resolved.ir
+  const explainContext: ProjectSymbolExplainContext = {
+    dependencies: ir.dependencies,
+    ...(resolved.unresolvedCalls === null ? {} : { unresolvedCalls: resolved.unresolvedCalls }),
+  }
 
   const arg = options.argument
   const outputPath = options.outputPath === undefined ? null : resolve(cwd, options.outputPath)
@@ -63,7 +76,7 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   if (arg.includes("#")) {
     const hit = ir.symbols.find((s) => s.id === arg)
     if (hit === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-    const markdown = projectSymbolExplain(hit, { dependencies: ir.dependencies })
+    const markdown = projectSymbolExplain(hit, explainContext)
     if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
     return {
       kind: "single",
@@ -78,9 +91,7 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
     const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/")
     const inFile = ir.symbols.filter((s) => s.source.file === relPath)
     if (inFile.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-    const markdown = inFile
-      .map((s) => projectSymbolExplain(s, { dependencies: ir.dependencies }))
-      .join("\n---\n\n")
+    const markdown = inFile.map((s) => projectSymbolExplain(s, explainContext)).join("\n---\n\n")
     if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
     return {
       kind: "file",
@@ -98,7 +109,7 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   }
   const only = matches[0]
   if (only === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-  const markdown = projectSymbolExplain(only, { dependencies: ir.dependencies })
+  const markdown = projectSymbolExplain(only, explainContext)
   if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
   return {
     kind: "single",
@@ -109,18 +120,60 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   }
 }
 
-async function resolveIR(cwd: string, workspaceRoot: string, options: ExplainOptions): Promise<IR> {
-  const explicit = options.irPath === undefined ? null : resolve(cwd, options.irPath)
-  if (explicit !== null) return readIR(explicit)
-
-  const defaultPath = resolve(workspaceRoot, "out/aburi.ir.json")
-  if (await pathExistsStrict(defaultPath)) return readIR(defaultPath)
-
+/**
+ * `--debug-resolution` needs diagnostics that only a live scan produces, so the
+ * two flags that pin `explain` to an existing artifact are incompatible with it.
+ * Failing loudly beats silently rescanning a workspace the user asked us not to
+ * touch, or emitting an empty table that reads like "nothing unresolved".
+ */
+function assertDebugResolutionCombination(options: ExplainOptions): void {
+  if (options.debugResolution !== true) return
   if (options.noRescan) {
     throw new CliError(
-      `No IR file at ${defaultPath} and --no-rescan was set. Run \`aburi scan\` first or pass --ir <path>.`,
+      "--debug-resolution needs a fresh scan (call-resolution.md §8.1 keeps the per-call buckets out of the IR), so it cannot be combined with --no-rescan.",
       "input-error",
     )
+  }
+  if (options.irPath !== undefined) {
+    throw new CliError(
+      "--debug-resolution needs a fresh scan (call-resolution.md §8.1 keeps the per-call buckets out of the IR), so it cannot read an existing --ir file.",
+      "input-error",
+    )
+  }
+}
+
+interface ResolvedIR {
+  ir: IR
+  /**
+   * Diagnostics from the scan that produced `ir`, or `null` when the IR was
+   * read from disk (the file cannot carry them) or `--debug-resolution` was not
+   * requested.
+   */
+  unresolvedCalls: readonly UnresolvedCallDiagnostic[] | null
+}
+
+async function resolveIR(
+  cwd: string,
+  workspaceRoot: string,
+  options: ExplainOptions,
+): Promise<ResolvedIR> {
+  const wantsDiagnostics = options.debugResolution === true
+
+  if (!wantsDiagnostics) {
+    const explicit = options.irPath === undefined ? null : resolve(cwd, options.irPath)
+    if (explicit !== null) return { ir: await readIR(explicit), unresolvedCalls: null }
+
+    const defaultPath = resolve(workspaceRoot, "out/aburi.ir.json")
+    if (await pathExistsStrict(defaultPath)) {
+      return { ir: await readIR(defaultPath), unresolvedCalls: null }
+    }
+
+    if (options.noRescan) {
+      throw new CliError(
+        `No IR file at ${defaultPath} and --no-rescan was set. Run \`aburi scan\` first or pass --ir <path>.`,
+        "input-error",
+      )
+    }
   }
 
   const scanOptions: Parameters<typeof runScan>[0] = {
@@ -132,7 +185,10 @@ async function resolveIR(cwd: string, workspaceRoot: string, options: ExplainOpt
   if (report.irPath === null) {
     throw new CliError("Scan produced no IR file for aburi explain.", "runtime-error")
   }
-  return readIR(report.irPath)
+  return {
+    ir: await readIR(report.irPath),
+    unresolvedCalls: wantsDiagnostics ? report.unresolvedCalls : null,
+  }
 }
 
 async function resolveWorkspaceRoot(cwd: string): Promise<string> {

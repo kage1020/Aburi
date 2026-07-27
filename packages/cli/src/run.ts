@@ -134,6 +134,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files\n`,
           )
+          stdout.write(`${report.callResolutionLine}\n`)
           if (report.irPath !== null) stdout.write(`→ ${report.irPath}\n`)
           if (report.workspaceMdPath !== null) stdout.write(`→ ${report.workspaceMdPath}\n`)
           warnOnScanIncidents(report, stderr)
@@ -181,6 +182,9 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             },
           })
           stdout.write(`${report.summaryLine}\n`)
+          if (report.callResolutionLine !== null) {
+            stdout.write(`${report.callResolutionLine}\n`)
+          }
           if (report.diffMdPath !== null) stdout.write(`→ ${report.diffMdPath}\n`)
           if (report.triggered !== null) {
             stderr.write(`${formatFailOnMessage(report.triggered)}\n`)
@@ -196,11 +200,21 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--ir <path>", "existing IR file (skip auto-scan)")
     .option("--output <path>", "write markdown to file instead of stdout")
     .option("--no-rescan", "fail if IR is missing rather than scanning")
+    .option(
+      "--debug-resolution",
+      "append the per-call resolution table (forces a rescan; incompatible with --ir / --no-rescan)",
+    )
     .option("--config <path>", "config file path")
     .action(
       (
         argument: string,
-        cmdOptions: { ir?: string; output?: string; rescan?: boolean; config?: string },
+        cmdOptions: {
+          ir?: string
+          output?: string
+          rescan?: boolean
+          debugResolution?: boolean
+          config?: string
+        },
       ) =>
         wrap(async () => {
           const outcome = await runExplain({
@@ -209,6 +223,9 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.ir === undefined ? {} : { irPath: cmdOptions.ir }),
             ...(cmdOptions.output === undefined ? {} : { outputPath: cmdOptions.output }),
             ...(cmdOptions.rescan === undefined ? {} : { noRescan: !cmdOptions.rescan }),
+            ...(cmdOptions.debugResolution === undefined
+              ? {}
+              : { debugResolution: cmdOptions.debugResolution }),
             ...withConfigPath(cmdOptions.config, env),
           })
           switch (outcome.kind) {

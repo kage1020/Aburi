@@ -155,6 +155,66 @@
         "lspEnrichment": {
           "$ref": "#/$defs/LspEnrichmentStats",
           "description": "Optional bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Present when the pass ran regardless of whether it succeeded or fell back; absent when config.lsp is not configured."
+        },
+        "callResolution": {
+          "$ref": "#/$defs/CallResolutionStats",
+          "description": "Aggregate call-resolution outcome counters (call-resolution.md §8.1). Optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all."
+        }
+      }
+    },
+
+    "CallResolutionStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolvedCalls", "totalCalls", "unresolved"],
+      "properties": {
+        "totalCalls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Call sites present in symbols[].calls[]. Calls promoted to Symbol.effects[] by an effect plugin and calls removed by Category C drop rules never reach calls[] and are therefore not counted; dropped Symbols carry an empty calls[] and so contribute nothing. Denormalized for display — it always equals resolvedCalls plus the five unresolved buckets, and integrity invariant #15 enforces that."
+        },
+        "resolvedCalls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Call sites the resolver identified a callee Symbol for (Call.resolved is non-null)."
+        },
+        "unresolved": {
+          "$ref": "#/$defs/UnresolvedCallBuckets",
+          "description": "Why the remaining call sites stayed null, bucketed per call-resolution.md §8.1. The five counters sum to totalCalls - resolvedCalls."
+        }
+      }
+    },
+
+    "UnresolvedCallBuckets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ambiguous", "dynamic", "external", "localScope", "noMatch"],
+      "description": "Counts per diagnostic bucket. Property names are the camelCase spelling of the kebab-case bucket ids used in call-resolution.md §8.1 (local-scope → localScope, no-match → noMatch).",
+      "properties": {
+        "localScope": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The callee identifier shadows a caller-local binding, so it names a runtime value rather than a Symbol (§4.2)."
+        },
+        "external": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The callee is bound by an import whose specifier is not relative — a bare package specifier, a path alias, or a workspace package."
+        },
+        "dynamic": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The receiver is not a name the untyped tier can follow: an expression receiver (`getRepo().save()`), or `this` / `super` with no LSP hint (§4.7)."
+        },
+        "ambiguous": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "More than one candidate matched in some resolution tier, so the resolver declined to pick one (§7.1)."
+        },
+        "noMatch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "No candidate was found at all — a typo, or a callee that is neither imported nor present in the workspace."
         }
       }
     },

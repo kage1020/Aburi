@@ -142,8 +142,8 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
   const isNew = node.type === "new_expression"
   const callee = node.childForFieldName(isNew ? "constructor" : "function") ?? node.namedChild(0)
   if (callee === null) return
-  const target = normalizeCallee(callee)
-  if (target === null) return
+  const shape = describeCallee(callee)
+  if (shape === null) return
   const argsNode = node.childForFieldName("arguments") ?? findChild(node, "arguments") ?? null
   const argChildren = argsNode !== null ? argsNode.namedChildren : []
   const literalArgs: (string | null)[] = argChildren.map((arg) =>
@@ -152,12 +152,15 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
   const inAwait = isUnderAwait(node)
   const line = node.startPosition.row + 1
   calls.push({
-    target,
+    target: shape.target,
     line,
     argumentCount: argChildren.length,
     inAwait,
     inNew: isNew,
     literalArgs,
+    // Only set when positively true so the field stays absent on the
+    // overwhelming majority of calls and existing IR bytes do not move.
+    ...(shape.dynamic ? { dynamicReceiver: true } : {}),
   })
 }
 
@@ -222,38 +225,81 @@ function containsEarlyExit(node: Node): boolean {
   return false
 }
 
-function normalizeCallee(node: Node): string | null {
+/**
+ * What `describeCallee` learned about one callee expression.
+ *
+ * `target` is the normalized string that lands in `CallCandidate.target` and
+ * eventually in `Symbol.calls[].target` — its computation is unchanged, so IR
+ * bytes and fingerprints are untouched by the two flags beside it.
+ */
+interface CalleeShape {
+  target: string
+  /**
+   * The receiver was positively identified as an expression rather than a name
+   * (`getRepo().save()`, `items[0].save()`, `(a ?? b).save()`). Such a call can
+   * never resolve in the untyped tier, and `call-resolution.md` §8.1 wants it
+   * reported as `dynamic` rather than lumped in with genuine typos.
+   */
+  dynamic: boolean
+  /**
+   * The node was not a shape this normalizer models, so its source text was
+   * taken verbatim (`svc!`, `x as Foo`). Opaque is deliberately NOT treated as
+   * dynamic on its own: a non-null assertion still names a binding. It only
+   * becomes evidence of an expression receiver when it sits inside explicit
+   * parentheses, which is how expression receivers have to be written.
+   */
+  opaque: boolean
+}
+
+function describeCallee(node: Node): CalleeShape | null {
   switch (node.type) {
     case "identifier":
     case "property_identifier":
-      return node.text
+      return { target: node.text, dynamic: false, opaque: false }
     case "this":
-      return "this"
+      return { target: "this", dynamic: false, opaque: false }
     case "super":
-      return "super"
+      return { target: "super", dynamic: false, opaque: false }
     case "member_expression": {
       const object = node.childForFieldName("object")
       const property = node.childForFieldName("property")
-      const objectStr = object !== null ? normalizeCallee(object) : null
+      const objectShape = object !== null ? describeCallee(object) : null
       const propertyStr = property !== null ? property.text : null
-      if (objectStr === null || propertyStr === null) return null
-      return `${objectStr}.${propertyStr}`
+      if (objectShape === null || propertyStr === null) return null
+      return {
+        target: `${objectShape.target}.${propertyStr}`,
+        dynamic: objectShape.dynamic,
+        opaque: objectShape.opaque,
+      }
     }
     case "subscript_expression": {
       const object = node.childForFieldName("object")
-      return object !== null ? normalizeCallee(object) : null
+      if (object === null) return null
+      const inner = describeCallee(object)
+      if (inner === null) return null
+      return { target: inner.target, dynamic: true, opaque: false }
     }
     case "parenthesized_expression": {
-      const inner = node.namedChild(0)
-      return inner !== null ? normalizeCallee(inner) : null
+      const innerNode = node.namedChild(0)
+      if (innerNode === null) return null
+      const inner = describeCallee(innerNode)
+      if (inner === null) return null
+      return { target: inner.target, dynamic: inner.dynamic || inner.opaque, opaque: false }
     }
     case "call_expression": {
-      const inner = node.childForFieldName("function")
-      return inner !== null ? normalizeCallee(inner) : null
+      const innerNode = node.childForFieldName("function")
+      if (innerNode === null) return null
+      const inner = describeCallee(innerNode)
+      if (inner === null) return null
+      return { target: inner.target, dynamic: true, opaque: false }
     }
     default:
-      return node.text.length > 0 ? node.text : null
+      return node.text.length > 0 ? { target: node.text, dynamic: false, opaque: true } : null
   }
+}
+
+function normalizeCallee(node: Node): string | null {
+  return describeCallee(node)?.target ?? null
 }
 
 function extractLiteral(node: Node): string | null {

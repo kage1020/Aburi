@@ -8,8 +8,20 @@ import {
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
-import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
-import type { Component, Config, IR, Logger, LspEnrichmentStats } from "@aburi/types"
+import {
+  formatCallResolutionLine,
+  projectComponent,
+  projectWorkspace,
+} from "@aburi/markdown-projection"
+import type {
+  CallResolutionStats,
+  Component,
+  Config,
+  IR,
+  Logger,
+  LspEnrichmentStats,
+  UnresolvedCallDiagnostic,
+} from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
@@ -54,6 +66,16 @@ export interface ScanReport {
    * least one server was configured). Absent when LSP was skipped entirely.
    */
   lspEnrichment: LspEnrichmentStats | undefined
+  /**
+   * Head-side call-resolution census rendered for stdout (call-resolution.md
+   * §8.1). Always present — `scan` emits the counters unconditionally.
+   */
+  callResolutionLine: string
+  /**
+   * Per-call diagnostics behind that census. Kept out of the IR by design
+   * (§8.1) and consumed by `aburi explain --debug-resolution`.
+   */
+  unresolvedCalls: readonly UnresolvedCallDiagnostic[]
   exitCode: ExitCode
 }
 
@@ -129,8 +151,29 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       return entry
     }),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
+    callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
+    unresolvedCalls: scanResult.unresolvedCalls,
     exitCode: EXIT.SUCCESS,
   }
+}
+
+/**
+ * `Stats.callResolution` is optional in the schema so v1 documents written
+ * before the field existed stay valid, but the IR we just produced came out of
+ * `scan()`, which always fills it in. Substituting zeroes here would print
+ * `calls 0 · resolved 0 · unresolved 0` — a clean bill of health for a run that
+ * measured nothing — so a missing field is reported as the contract breach it
+ * would be.
+ */
+function requireCallResolution(ir: IR): CallResolutionStats {
+  const stats = ir.stats.callResolution
+  if (stats === undefined) {
+    throw new CliError(
+      "scan() returned an IR without stats.callResolution; @aburi/core stopped emitting the call-resolution census (call-resolution.md §8.1).",
+      "runtime-error",
+    )
+  }
+  return stats
 }
 
 function stderrLogger(): Logger {

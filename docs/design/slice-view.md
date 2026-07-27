@@ -127,6 +127,8 @@ Formally: an edge `(u, v)` is included whenever `u` called `v` in base OR `u` ca
 
 If a call has `resolved: null` in one of the two IRs (call-resolution declined to identify the callee — see [`call-resolution.md`](./call-resolution.md) §4.5 / §4.6 / §4.7), it produces no `CallEdge` on that side and therefore no candidate edge in this pass. Slice View does NOT read `Symbol.calls[]` directly; it reads only the resolved `CallEdge[]`. This preserves the [`call-resolution.md`](./call-resolution.md) §2 promise that "enabling LSP MUST NOT change the shape or ordering" of what downstream consumers see — a slice does not silently split or merge based on whether LSP was available.
 
+The drop is silent in the **data** but not in the **output**. A reviewer who expects `Ctl.route → Svc.op` as one slice and gets two singletons cannot tell an architectural fact from a resolver miss, so the projection reports it: §12.6 marks the members that carry unresolved calls, and `aburi diff` prints the workspace-level census from [`call-resolution.md`](./call-resolution.md) §8.1 on stdout. This changes nothing about clustering — the pass still consumes resolved `CallEdge[]` only, and the `slices[]` output is byte-identical to what it was before the reporting existed.
+
 ### 5.5 Cross-language: no edges yet
 
 [`call-resolution.md`](./call-resolution.md) §7.3 states cross-language edges do not exist. Consequently, if a PR touches both TypeScript and Python files, they cluster into disjoint slices per language. This is documented as expected behaviour, not a failure mode — the composition rule for cross-language slicing is deferred to `multi-language-id.md` (planned). See §14.13.
@@ -358,6 +360,36 @@ Each member in the Slice View rendering IS the same Symbol that appears in the c
 
 Per §9.4, if `slices[]` is empty the entire `## 🧵 Slice View` section is omitted from `out/diff.md`. Emitting a heading with an empty body would be visual noise.
 
+### 12.6 Unresolved-call markers
+
+§5.4 explains why an unresolved call contributes no edge. The consequence a reviewer actually feels is a Slice that split — or a singleton that looks disconnected but is not. The projection surfaces that directly.
+
+Directly under the section heading, when any member carries at least one `resolved: null` call:
+
+```md
+## 🧵 Slice View
+
+> ⚠ 2 of the changed symbols below make 5 calls the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md §8.1).
+```
+
+And on the individual members — appended to the `↳` follow-up line of a §12.2 bullet, and to the label of a §12.3 singleton:
+
+```md
+- `Ctl.route` — *(changed)*
+  **File**: `apps/billing/src/RefundController.ts:42`
+  ↳ delta.logicChanged · ⚠ 3 unresolved calls
+```
+
+```md
+- `slice:ts:apps/billing/src/RefundController.ts#RefundController.refund` — `RefundController.refund` *(added)* · ⚠ 1 unresolved call
+```
+
+Members that resolved cleanly carry no marker, and a diff where nothing is unresolved renders exactly as it did before this section existed — the marker has to stay rare to stay meaningful.
+
+**Where the counts come from.** `diff.symbols[]` already embeds the full IR `Symbol` on each entry, `calls[].resolved` included, so the projection counts them directly. No field is added to `SliceRecord` and no new pass runs; this keeps §14.12's "a Slice is a derived view, not a new fact" intact.
+
+**Why counting only the members is enough.** §5.1 draws an edge only when *both* endpoints are Nodes, and the edge originates at the caller. Any edge that would have merged two Slices therefore starts at one of the members rendered here — an unresolved call on some unrelated unchanged Symbol could never have bridged them anyway.
+
 ## 13. Verifiable Properties (Test Criteria)
 
 Every implementation of the Slice View pass MUST pass the following. IDs are prefixed `SV` to avoid collision with existing prefixes (`CR`, `EP`, `DF`, `L`, `S`, `T`, `A`, `C`, `MP`, `PR`).
@@ -463,6 +495,12 @@ The private-helper-anchor cost is real (the id reads less nicely) but bounded (t
 [`overview.md`](./overview.md) §2 lists "Highly configurable" as an explicitly rejected design axis. Introducing per-cluster-count or per-slice-size CI gates would put reviewers in the position of tuning the gate on every large PR, and re-tuning on every mid-PR clustering shift caused by a rename. The existing gates (`changed`, `removed`, `dropped-toggled`, ...) already operate on stable per-Symbol counts and cover the "did this PR touch too much" question at a lower level.
 
 The `--fail-on` surface stays exactly as [`diff-algorithm.md`](./diff-algorithm.md) §10.1 declares it.
+
+### 14.7.1 No gate on the unresolved-call count either
+
+§12.6 reports unresolved calls; it does not gate on them. A `--fail-on unresolved-calls>N` selector would fail for the same reason as the cluster-size knob above, and worse: the count moves whenever an LSP server happens to be available, whenever a dependency starts or stops being resolvable, and whenever a plugin's `normalizeCallee` improves. A CI gate wired to that number would fire on runs where nothing about the code changed, which is precisely the time-series instability [`overview.md`](./overview.md) §2 rejects.
+
+`aburi explain --debug-resolution` is a reporting flag, not a knob: it changes what is printed, never what the IR or the diff contains.
 
 ### 14.8 Why not compute Slice View at `aburi scan` time
 

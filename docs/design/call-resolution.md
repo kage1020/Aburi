@@ -255,7 +255,37 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 | `ambiguous` | multiple candidates | two `User.save` in different components with no explicit import |
 | `no-match` | no candidate found | typo, or callee not in workspace and not imported |
 
-Diagnostic counts go to `stats` (extension planned — see [`roadmap.md`](../roadmap.md)); a per-Symbol dump is available via `aburi explain --debug-resolution`.
+#### Bucket precedence
+
+A single call can fit several descriptions at once — a parameter that happens to share a name with an imported package, an ambiguous qname reached through an expression receiver. The reviewer needs one stable answer per call site, so the resolver assigns the **most specific cause** in this fixed order:
+
+1. `local-scope` — the §4.2 shadow guard fired, so the resolver never looked outward at all.
+2. `dynamic` — the receiver is not a name: an expression receiver reported by the language plugin, or `this` / `super` with no LSP hint (§4.7). `this.save()` is filed here because in the untyped tier the receiver's identity is a runtime property of the class hierarchy, exactly like `getRepo().save()`; there is no name for the resolver to look up.
+3. `ambiguous` — some tier found the callee and refused to choose between candidates (§7.1). The competing Symbol ids are recorded, deduplicated and lex-sorted.
+4. `external` — the head of the target is bound in the caller's file by an import whose specifier is not relative. §4.4.1 resolves relative specifiers only, so such a callee is out of reach by construction rather than by accident.
+5. `no-match` — nothing matched anywhere.
+
+The order is part of the contract: changing it would move counts between buckets on an unchanged workspace.
+
+#### Where the counts and the detail live
+
+Aggregate counts go to `IR.stats.callResolution` ([`ir-schema.md`](./ir-schema.md) §12), an optional object added additively under §15.2:
+
+```jsonc
+"callResolution": {
+  "totalCalls": 1310,     // call sites in Symbol.calls[] across all kept Symbols
+  "resolvedCalls": 1203,  // Call.resolved != null
+  "unresolved": {         // sums to totalCalls - resolvedCalls
+    "localScope": 2, "external": 30, "dynamic": 60, "ambiguous": 3, "noMatch": 12
+  }
+}
+```
+
+Property names are the camelCase spelling of the kebab-case bucket ids above (`local-scope` → `localScope`, `no-match` → `noMatch`). Calls promoted to `Symbol.effects[]` by an effect plugin, and calls removed by Category C drop rules, never reach `calls[]` and are therefore not counted. Integrity invariant #15 ([`ir-schema.md`](./ir-schema.md) §14) re-derives all three numbers from `symbols[]` so the census cannot drift from the document it describes.
+
+`aburi scan` and `aburi diff` render the object as one stdout line ([`cli-spec.md`](./cli-spec.md) §6.6), and the Slice View projection marks the affected members ([`slice-view.md`](./slice-view.md) §12.6) so a reviewer can tell a legitimately disconnected singleton from a resolver miss without a second command.
+
+The per-call detail — which line, which bucket, which candidates — is **not** persisted. It travels in memory on `ScanResult.unresolvedCalls` and is rendered per Symbol by `aburi explain --debug-resolution`. Because the IR cannot carry it, that flag always rescans the workspace and refuses to combine with `--no-rescan` or `--ir`.
 
 ### 8.2 Determinism under partial failures
 

@@ -377,6 +377,66 @@ describe("checkIRIntegrity", () => {
   })
 })
 
+describe("invariant #15 — callResolution stats census (call-resolution.md §8.1)", () => {
+  function irWithOneUnresolvedCall(): ReturnType<typeof minimalIR> {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#caller", {
+        calls: [{ target: "typoed", line: 1, resolved: null }],
+      }),
+    ]
+    ir.stats.callResolution = {
+      totalCalls: 1,
+      resolvedCalls: 0,
+      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 1 },
+    }
+    return ir
+  }
+
+  it("accepts a census that matches symbols[]", () => {
+    expect(checkIRIntegrity(irWithOneUnresolvedCall())).toEqual([])
+  })
+
+  it("stays silent when the field is absent (IRs predating the counter)", () => {
+    const ir = irWithOneUnresolvedCall()
+    delete ir.stats.callResolution
+    expect(checkIRIntegrity(ir)).toEqual([])
+  })
+
+  it("flags a totalCalls that disagrees with symbols[]", () => {
+    const ir = irWithOneUnresolvedCall()
+    ir.stats.callResolution = {
+      totalCalls: 7,
+      resolvedCalls: 0,
+      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 7 },
+    }
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 15)).toBe(true)
+  })
+
+  it("flags a resolvedCalls that disagrees with symbols[]", () => {
+    const ir = irWithOneUnresolvedCall()
+    ir.stats.callResolution = {
+      totalCalls: 1,
+      resolvedCalls: 1,
+      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 0 },
+    }
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 15)).toBe(true)
+  })
+
+  it("flags buckets that do not sum to the unresolved remainder", () => {
+    const ir = irWithOneUnresolvedCall()
+    ir.stats.callResolution = {
+      totalCalls: 1,
+      resolvedCalls: 0,
+      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 0 },
+    }
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 15)).toBe(true)
+  })
+})
+
 describe("assertIRIntegrity", () => {
   it("does not throw on a clean IR", () => {
     expect(() => assertIRIntegrity(minimalIR())).not.toThrow()

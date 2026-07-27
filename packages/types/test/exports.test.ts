@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from "vitest"
 import type {
   CallCandidate,
+  CallResolutionStats,
   ClassifyContext,
   Config,
   ConfigPluginRef,
@@ -29,6 +30,7 @@ import type {
   SourceFile,
   Symbol,
   SymbolCandidate,
+  UnresolvedCallBuckets,
   VocabRegistry,
 } from "../src/index"
 
@@ -113,6 +115,23 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<SliceRecord["members"]>().toEqualTypeOf<string[]>()
     expectTypeOf<DiffResult>().toHaveProperty("slices")
     expectTypeOf<DiffResult["slices"]>().toEqualTypeOf<SliceRecord[]>()
+  })
+
+  it("exposes CallResolutionStats as an optional Stats member with five buckets", () => {
+    expectTypeOf<IR["stats"]>().toHaveProperty("callResolution")
+    expectTypeOf<CallResolutionStats["totalCalls"]>().toEqualTypeOf<number>()
+    expectTypeOf<CallResolutionStats["resolvedCalls"]>().toEqualTypeOf<number>()
+    expectTypeOf<CallResolutionStats["unresolved"]>().toEqualTypeOf<UnresolvedCallBuckets>()
+    expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("localScope")
+    expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("external")
+    expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("dynamic")
+    expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("ambiguous")
+    expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("noMatch")
+  })
+
+  it("marks CallCandidate.dynamicReceiver optional so existing plugins stay valid", () => {
+    expectTypeOf<CallCandidate>().toHaveProperty("dynamicReceiver")
+    expectTypeOf<CallCandidate["dynamicReceiver"]>().toEqualTypeOf<boolean | undefined>()
   })
 
   it("disambiguating aliases stay distinct from their non-aliased siblings", () => {

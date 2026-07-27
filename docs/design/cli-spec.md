@@ -173,6 +173,13 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 ✓ Wrote out/ir.json + out/workspace.md + 3 component files
 ```
 
+The kept/dropped line is followed by the call-resolution census in the same
+format `aburi diff` uses (§6.6):
+```
+542 kept · 87 dropped · 1234 files
+calls 1310 · resolved 1203 · unresolved 107 (external 30 · dynamic 60 · ambiguous 3 · no-match 14)
+```
+
 With `--quiet`, only the final line:
 ```
 542 kept · 87 dropped · 3 components
@@ -282,8 +289,13 @@ Or `fetch-depth: 50` or more, at a depth that includes the base ref. The default
 Normal:
 ```
 +5 -3 ~12 ↔2 ⤴1   (added · removed · changed · moved · moved+changed)
+calls 1310 · resolved 1203 · unresolved 107 (external 30 · dynamic 60 · ambiguous 3 · no-match 14)
 → out/diff.md
 ```
+
+The second line is the head IR's `stats.callResolution` ([`call-resolution.md`](./call-resolution.md) §8.1). It answers "is the Slice View below missing edges?" without a second command. Buckets with a count of zero are omitted; when nothing is unresolved the line reads `calls N · resolved N · unresolved 0`.
+
+A head IR produced before the counter existed cannot be back-filled, so the line is omitted rather than printed as zeroes — zeroes would assert a clean call graph the run never observed. Omitting it silently would be its own failure, though: the reviewer would read the Slice View without knowing the signal that explains a suspicious singleton is absent. A one-line note therefore goes to **stderr** (§18.2 — stdout carries result data only), naming the cause and pointing at a re-scan of the head revision.
 
 `--quiet`:
 ```
@@ -344,7 +356,7 @@ Shows details of a single Symbol / file / pattern match.
 ### 7.1 Signature
 
 ```
-aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan]
+aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--debug-resolution]
 ```
 
 ### 7.2 Arguments
@@ -368,6 +380,7 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan]
 | `--output <path>` | Write to a file (default: stdout) |
 | `--ir <path>` | Use an existing IR file (default: `out/ir.json`, or trigger a scan if missing) |
 | `--no-rescan` | Do not rescan even if the IR file is stale |
+| `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
 ### 7.4 Behavior
 

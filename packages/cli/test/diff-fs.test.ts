@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
-import type { IR } from "@aburi/types"
+import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runCli, runDiff } from "../src"
 
@@ -123,6 +123,130 @@ describe("runDiff — --base/--head (file mode)", () => {
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(report.triggered?.clause.token).toBe("added")
     expect(report.triggered?.observed).toBe(1)
+  })
+})
+
+describe("runDiff — call-resolution census on stdout (call-resolution.md §8.1)", () => {
+  async function writePair(head: IR): Promise<{ basePath: string; headPath: string }> {
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(headPath, JSON.stringify(head), "utf8")
+    return { basePath, headPath }
+  }
+
+  /**
+   * Integrity invariant #15 cross-checks the counters against `symbols[]`, so
+   * the fixture has to carry the call sites it claims. Every call here is left
+   * unresolved, which keeps `dependencies[]` empty and invariant #14 happy.
+   */
+  function headWithUnresolvedCalls(callResolution: CallResolutionStats): IR {
+    const head = makeIRWithAdded()
+    const count = callResolution.totalCalls - callResolution.resolvedCalls
+    const symbol = head.symbols[0]
+    if (symbol === undefined) throw new Error("fixture must carry one symbol")
+    symbol.calls = Array.from({ length: count }, (_, i) => ({
+      target: `mystery${i}`,
+      line: i + 2,
+      resolved: null,
+    }))
+    head.stats.callResolution = callResolution
+    return head
+  }
+
+  it("renders the head IR's counters", async () => {
+    const head = headWithUnresolvedCalls({
+      totalCalls: 3,
+      resolvedCalls: 0,
+      unresolved: { localScope: 0, external: 1, dynamic: 2, ambiguous: 0, noMatch: 0 },
+    })
+    const { basePath, headPath } = await writePair(head)
+    const report = await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
+    expect(report.callResolutionLine).toBe(
+      "calls 3 · resolved 0 · unresolved 3 (external 1 · dynamic 2)",
+    )
+  })
+
+  it("omits the bucket list when the head resolved everything", async () => {
+    const head = headWithUnresolvedCalls({
+      totalCalls: 0,
+      resolvedCalls: 0,
+      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 0 },
+    })
+    const { basePath, headPath } = await writePair(head)
+    const report = await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
+    expect(report.callResolutionLine).toBe("calls 0 · resolved 0 · unresolved 0")
+  })
+
+  it("is null for a head IR produced before the counters existed, and says why on stderr", async () => {
+    const { basePath, headPath } = await writePair(makeIRWithAdded())
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: (m) => warnings.push(m),
+    })
+    expect(report.callResolutionLine).toBeNull()
+    // Dropping the line without a word would leave the reviewer reading the
+    // Slice View unaware that the one signal explaining a suspicious singleton
+    // is absent.
+    expect(warnings.join("\n")).toContain("no stats.callResolution")
+  })
+
+  it("prints nothing but the summary when the census is unavailable", async () => {
+    const { basePath, headPath } = await writePair(makeIRWithAdded())
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: [
+        "diff",
+        "--base",
+        basePath,
+        "--head",
+        headPath,
+        "--output-dir",
+        resolve(scratch, "out"),
+        "--format",
+        "json",
+      ],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(stdout.text().trimEnd().split("\n")).toEqual(["+1 -0 ~0 ↔0 ⤴0"])
+    expect(stderr.text()).toContain("no stats.callResolution")
+  })
+
+  it("prints the line right after the summary", async () => {
+    const head = headWithUnresolvedCalls({
+      totalCalls: 1,
+      resolvedCalls: 0,
+      unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 1, noMatch: 0 },
+    })
+    const { basePath, headPath } = await writePair(head)
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: [
+        "diff",
+        "--base",
+        basePath,
+        "--head",
+        headPath,
+        "--output-dir",
+        resolve(scratch, "out"),
+      ],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    const lines = stdout.text().trimEnd().split("\n")
+    expect(lines[0]).toBe("+1 -0 ~0 ↔0 ⤴0")
+    expect(lines[1]).toBe("calls 1 · resolved 0 · unresolved 1 (ambiguous 1)")
   })
 })
 

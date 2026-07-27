@@ -47,7 +47,14 @@ The ordering convention is a **precondition for diff stability**. Spurious diffs
     "totalFiles": 18,
     "parsedFiles": 18,
     "keptSymbols": 27,
-    "droppedSymbols": 7
+    "droppedSymbols": 7,
+    "callResolution": {                       // optional; always emitted by the current pipeline
+      "totalCalls": 131,
+      "resolvedCalls": 120,
+      "unresolved": {
+        "localScope": 0, "external": 6, "dynamic": 4, "ambiguous": 0, "noMatch": 1
+      }
+    }
   }
 }
 ```
@@ -57,6 +64,7 @@ The ordering convention is a **precondition for diff stability**. Spurious diffs
 - `workspace.root`: always `"."`. Never write absolute paths (IR portability)
 - `workspace.managers[].tool`: runtime-independent string. Representative values: `pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`/`pip`/`cargo`/`go`/`mvn`/`gradle`/`hatch`/`pixi`. Unknown values are not rejected (so that adding a new tool never requires a schema revision)
 - `stats`: for human/CI logs. Excluded from fingerprint
+- `stats.callResolution`: the call-resolution census of [`call-resolution.md`](./call-resolution.md) §8.1 — how many call sites the resolver saw, how many it identified, and why the rest stayed `null`. Optional so documents produced before the field existed remain valid v1; the current scan pipeline always emits it, so absence means "this IR predates the counter", not "nothing was unresolved". The per-call reasons behind these counts are deliberately **not** persisted — see §8.1
 
 ## 3. Symbol ID Convention
 
@@ -419,6 +427,7 @@ Guaranteed by the schema validator plus Aburi internals:
 12. If `dependencies[].via` is `"call"`, both `from` and `to` are symbol ids present in `symbols[].id` (strengthens #4 for call edges — a call edge with a component-id endpoint or a dangling symbol id is rejected outright)
 13. Within `dependencies[]`, the triple `(from, to, via)` is unique — the same directed edge cannot be recorded twice
 14. For every `Symbol.calls[]` entry with a non-null `resolved`, there is a matching Dependency `{ from: caller.id, to: resolved, via: "call" }` in `dependencies[]`, and conversely every `via: "call"` Dependency corresponds to at least one such Call entry (the call-graph projection is total and lossless in both directions)
+15. When `stats.callResolution` is present, it is a faithful census of `symbols[].calls[]`: `totalCalls` equals the number of call sites, `resolvedCalls` equals the number with a non-null `resolved`, and the five `unresolved` buckets sum to the difference. A drift here would report unresolved calls the document does not contain, or hide ones it does
 
 An invariant violation is a **fatal error**, not a warning.
 

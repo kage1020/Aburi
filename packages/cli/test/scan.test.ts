@@ -1,8 +1,20 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
+import { Writable } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { runScan } from "../src"
+import { runCli, runScan } from "../src"
+
+class MemStream extends Writable {
+  chunks: string[] = []
+  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
+    this.chunks.push(chunk.toString())
+    cb()
+  }
+  text(): string {
+    return this.chunks.join("")
+  }
+}
 
 /**
  * runScan integration tests — use a minimal on-disk workspace so config resolution and
@@ -38,6 +50,31 @@ describe("runScan — happy path with no plugins", () => {
     expect(report.droppedSymbols).toBe(0)
     expect(report.irPath).not.toBeNull()
     expect(report.workspaceMdPath).not.toBeNull()
+  })
+
+  it("reports the call-resolution census even with nothing to resolve (§8.1)", async () => {
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.callResolutionLine).toBe("calls 0 · resolved 0 · unresolved 0")
+    expect(report.unresolvedCalls).toEqual([])
+  })
+
+  it("prints the census on stdout right after the kept/dropped line", async () => {
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    const lines = stdout.text().trimEnd().split("\n")
+    expect(lines[0]).toMatch(/^0 kept · 0 dropped · \d+ files$/)
+    expect(lines[1]).toBe("calls 0 · resolved 0 · unresolved 0")
   })
 
   it("--format json skips markdown", async () => {

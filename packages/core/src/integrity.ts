@@ -64,7 +64,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
  * empty); callers that want the throwing form use `assertIRIntegrity`.
  *
- * The 14 invariants checked here are:
+ * The 15 invariants checked here are:
  *   1. Symbol id uniqueness
  *   2. Component id uniqueness
  *   3. Symbol.component → Components[].id existence
@@ -79,6 +79,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *  12. via:"call" edges: both endpoints are Symbol ids present in Symbols[]
  *  13. dependencies[]: no duplicate (from, to, via) triples
  *  14. Symbol.calls[].resolved and via:"call" edges agree (call-graph projection is total)
+ *  15. stats.callResolution (when present) is a faithful census of Symbol.calls[]
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -97,6 +98,7 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkCallEdgeEndpoints(ir, violations)
   checkDependencyTupleUniqueness(ir, violations)
   checkCallGraphProjectionAgrees(ir, violations)
+  checkCallResolutionStatsCensus(ir, violations)
 
   return violations
 }
@@ -562,4 +564,54 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
 
 function dependencyKey(from: string, to: string): string {
   return `${from}\t${to}`
+}
+
+/**
+ * Invariant #15 (call-resolution.md §8.1): when `stats.callResolution` is
+ * present it must be a faithful census of `Symbol.calls[]`. `totalCalls` counts
+ * every call site, `resolvedCalls` counts the non-null ones, and the five
+ * buckets account for the remainder. A drift here means a counter was
+ * incremented on a path the IR does not reflect — which would send reviewers
+ * hunting for unresolved calls that are not there, or hide the ones that are.
+ */
+function checkCallResolutionStatsCensus(ir: IR, out: IntegrityViolation[]): void {
+  const stats = ir.stats.callResolution
+  if (stats === undefined) return
+
+  let totalCalls = 0
+  let resolvedCalls = 0
+  for (const symbol of ir.symbols) {
+    totalCalls += symbol.calls.length
+    for (const call of symbol.calls) if (call.resolved !== null) resolvedCalls++
+  }
+
+  if (stats.totalCalls !== totalCalls) {
+    out.push({
+      invariant: 15,
+      subject: "stats.callResolution.totalCalls",
+      message: `stats.callResolution.totalCalls is ${stats.totalCalls} but symbols[] carry ${totalCalls} call sites`,
+    })
+  }
+  if (stats.resolvedCalls !== resolvedCalls) {
+    out.push({
+      invariant: 15,
+      subject: "stats.callResolution.resolvedCalls",
+      message: `stats.callResolution.resolvedCalls is ${stats.resolvedCalls} but symbols[] carry ${resolvedCalls} resolved calls`,
+    })
+  }
+
+  const { unresolved } = stats
+  const bucketed =
+    unresolved.localScope +
+    unresolved.external +
+    unresolved.dynamic +
+    unresolved.ambiguous +
+    unresolved.noMatch
+  if (bucketed !== stats.totalCalls - stats.resolvedCalls) {
+    out.push({
+      invariant: 15,
+      subject: "stats.callResolution.unresolved",
+      message: `bucket counts sum to ${bucketed} but totalCalls - resolvedCalls is ${stats.totalCalls - stats.resolvedCalls}`,
+    })
+  }
 }

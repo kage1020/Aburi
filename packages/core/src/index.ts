@@ -1,5 +1,6 @@
 export {
   type CallEdge,
+  makeCallSiteKey,
   type ResolveCallGraphInput,
   type ResolveCallGraphResult,
   reconstructCallEdgesFromIR,

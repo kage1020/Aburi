@@ -1,4 +1,4 @@
-import type { Dependency, Symbol as IRSymbol } from "@aburi/types"
+import type { Dependency, Symbol as IRSymbol, UnresolvedCallDiagnostic } from "@aburi/types"
 import {
   callRow,
   compareStrings,
@@ -17,6 +17,15 @@ export interface ProjectSymbolExplainContext {
    * id. Absent → the section is silently omitted.
    */
   dependencies?: readonly Dependency[]
+  /**
+   * Per-call resolution diagnostics for THIS Symbol (call-resolution.md §8.1),
+   * as produced by the scan that is running right now. Supplying them adds a
+   * `## Call resolution` section; omitting them leaves the output byte-identical
+   * to what it was before the section existed. The IR cannot carry these — §8.1
+   * keeps the reason out of the document — so only a caller holding a live
+   * `ScanResult` can pass them.
+   */
+  unresolvedCalls?: readonly UnresolvedCallDiagnostic[]
 }
 
 /**
@@ -110,6 +119,8 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
     lines.push("")
   }
 
+  lines.push(...renderCallResolution(symbol, context.unresolvedCalls))
+
   const callers = collectCallers(symbol, context.dependencies ?? [])
   if (callers.length > 0) {
     lines.push("## Called by")
@@ -136,6 +147,50 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd()}\n`
+}
+
+/**
+ * `aburi explain --debug-resolution` — the per-Symbol view `call-resolution.md`
+ * §8.1 promises. One row per call site: the resolved callee, or the bucket that
+ * explains the `null`. Rows are ordered by line so they read alongside the
+ * source; `Calls` above shows the same sites without the verdict.
+ *
+ * Passing an empty array is meaningful — it says "the resolver ran and left
+ * nothing unresolved here" — so the section renders with an explicit note
+ * rather than disappearing. Passing `undefined` (the default) omits it.
+ */
+function renderCallResolution(
+  symbol: IRSymbol,
+  diagnostics: readonly UnresolvedCallDiagnostic[] | undefined,
+): string[] {
+  if (diagnostics === undefined) return []
+  const mine = diagnostics.filter((d) => d.symbolId === symbol.id)
+  const lines: string[] = ["## Call resolution", ""]
+  if (symbol.calls.length === 0) {
+    lines.push("_(no call sites)_", "")
+    return lines
+  }
+  // `(line, target)` is not a unique key — `a(); a()` on one source line yields
+  // two Call entries — but classification is a pure function of the caller, the
+  // target, and the call site, so colliding entries carry the identical verdict
+  // and last-write-wins is indistinguishable from first.
+  const bucketByKey = new Map<string, UnresolvedCallDiagnostic>()
+  for (const d of mine) bucketByKey.set(`${d.line}\t${d.target}`, d)
+
+  lines.push("| line | target | resolved | bucket | candidates |")
+  lines.push("|---|---|---|---|---|")
+  for (const call of [...symbol.calls].sort((a, b) => a.line - b.line)) {
+    const diagnostic = bucketByKey.get(`${call.line}\t${call.target}`)
+    const resolved = call.resolved === null ? "—" : `\`${call.resolved}\``
+    const bucket = diagnostic === undefined ? "—" : `\`${diagnostic.bucket}\``
+    const candidates =
+      diagnostic === undefined || diagnostic.candidates.length === 0
+        ? "—"
+        : diagnostic.candidates.map((c) => `\`${c}\``).join("<br>")
+    lines.push(`| ${call.line} | \`${call.target}\` | ${resolved} | ${bucket} | ${candidates} |`)
+  }
+  lines.push("")
+  return lines
 }
 
 /**
