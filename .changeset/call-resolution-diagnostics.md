@@ -26,8 +26,9 @@ Surfaces:
 
 - `aburi scan` and `aburi diff` print one stdout line, e.g.
   `calls 1310 · resolved 1203 · unresolved 107 (external 30 · dynamic 60 · no-match 17)`.
-  Zero-valued buckets are omitted. `aburi diff` omits the line entirely when the
-  head IR predates the counter rather than printing misleading zeroes.
+  Zero-valued buckets are omitted. When the head IR predates the counter,
+  `aburi diff` omits the line rather than printing misleading zeroes, and says so
+  on stderr so the absence is not itself silent.
 - The `## 🧵 Slice View` section of `out/diff.md` gains a note when any member
   carries unresolved calls, plus a `⚠ N unresolved calls` marker on the affected
   members and singletons. Computed from the IR Symbols the diff already embeds —

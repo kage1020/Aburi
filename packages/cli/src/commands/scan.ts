@@ -151,24 +151,29 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       return entry
     }),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
-    callResolutionLine: formatCallResolutionLine(
-      scanResult.ir.stats.callResolution ?? EMPTY_CALL_RESOLUTION,
-    ),
+    callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
     exitCode: EXIT.SUCCESS,
   }
 }
 
 /**
- * `Stats.callResolution` is optional in the schema so pre-existing v1 documents
- * stay valid, but `scan()` always fills it in. This fallback exists only to keep
- * the type honest at the boundary; reaching it would mean the core stopped
- * emitting the counters.
+ * `Stats.callResolution` is optional in the schema so v1 documents written
+ * before the field existed stay valid, but the IR we just produced came out of
+ * `scan()`, which always fills it in. Substituting zeroes here would print
+ * `calls 0 · resolved 0 · unresolved 0` — a clean bill of health for a run that
+ * measured nothing — so a missing field is reported as the contract breach it
+ * would be.
  */
-const EMPTY_CALL_RESOLUTION: CallResolutionStats = {
-  totalCalls: 0,
-  resolvedCalls: 0,
-  unresolved: { localScope: 0, external: 0, dynamic: 0, ambiguous: 0, noMatch: 0 },
+function requireCallResolution(ir: IR): CallResolutionStats {
+  const stats = ir.stats.callResolution
+  if (stats === undefined) {
+    throw new CliError(
+      "scan() returned an IR without stats.callResolution; @aburi/core stopped emitting the call-resolution census (call-resolution.md §8.1).",
+      "runtime-error",
+    )
+  }
+  return stats
 }
 
 function stderrLogger(): Logger {

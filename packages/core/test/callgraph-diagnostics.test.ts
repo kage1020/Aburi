@@ -232,15 +232,163 @@ describe("resolveCallGraph — unresolved-call diagnostics (§8.1)", () => {
     expect(plain.diagnostics).toEqual([])
   })
 
-  it("a dropped Symbol contributes no call sites at all", () => {
+  it("`dynamicCallSites` on an UNRESOLVED call moves only the bucket", () => {
+    // The resolved-call guard above proves the flag cannot manufacture an edge.
+    // This one proves the converse: on a call that stays null either way, the
+    // flag must not change `resolved`, the edges, or anything but the bucket.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "factory.save", line: 4 }])
+    const symbols = [caller]
+    const plain = resolveCallGraph({ symbols, importsByFile: new Map() })
+    const flagged = resolveCallGraph({
+      symbols,
+      importsByFile: new Map(),
+      dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 4, "factory.save")]),
+    })
+
+    expect(plain.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(flagged.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(plain.edges).toEqual([])
+    expect(flagged.edges).toEqual([])
+    expect(JSON.stringify(flagged.symbols)).toBe(JSON.stringify(plain.symbols))
+
+    expect(plain.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+    expect(flagged.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
+    expect(flagged.stats.totalCalls).toBe(plain.stats.totalCalls)
+    expect(flagged.stats.resolvedCalls).toBe(plain.stats.resolvedCalls)
+  })
+
+  it("an LSP hint pointing at a dropped Symbol keeps the call in `dynamic`", () => {
+    // Receiver hints are only ever built for `this.` / `super.` call sites, so
+    // when the hinted target turns out to be dropped the §4.7 guard has already
+    // marked the receiver unnamed and `dynamic` is the honest bucket. Pinning it
+    // here so the fallback can never quietly become `no-match`, which would send
+    // a reviewer hunting for a typo that does not exist.
+    const caller = withCalls("ts:src/a.ts#Svc.run", [{ target: "this.helper", line: 6 }])
+    const droppedTarget = makeSymbol("ts:src/a.ts#Svc.helper", {
+      kind: "method",
+      dropped: true,
+      dropReason: "cat-b:trivial",
+    })
+    const result = resolveCallGraph({
+      symbols: [caller, droppedTarget],
+      importsByFile: new Map(),
+      receiverHints: new Map([
+        ["src/a.ts:6", { kind: "this", targetSymbolId: "ts:src/a.ts#Svc.helper" }],
+      ]),
+    })
+    expect(result.edges).toEqual([])
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
+  })
+
+  // §8.1 fixes the tie-break order — `local-scope` → `dynamic` → `ambiguous` →
+  // `external` → `no-match` — because a call can honestly answer to several
+  // descriptions at once and the reviewer needs one stable verdict. Each case
+  // below constructs a genuine two-way tie; without them a reordering of
+  // `classifyUnresolved` would move counts between buckets on unchanged code
+  // and every single-cause test above would still pass.
+  describe("bucket precedence tie-breaks", () => {
+    it("`local-scope` beats `external` when a parameter shadows an imported name", () => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: sig("sortBy"),
+        calls: [{ target: "sortBy", line: 2, resolved: null }],
+      })
+      const result = resolveCallGraph({
+        symbols: [caller],
+        importsByFile: new Map([
+          ["src/a.ts", [importEdge({ source: "lodash", symbols: ["sortBy"] })]],
+        ]),
+      })
+      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["local-scope"])
+    })
+
+    it("`local-scope` beats `dynamic` when a parameter shadows an expression receiver", () => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: sig("factory"),
+        calls: [{ target: "factory.save", line: 3, resolved: null }],
+      })
+      const result = resolveCallGraph({
+        symbols: [caller],
+        importsByFile: new Map(),
+        dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 3, "factory.save")]),
+      })
+      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["local-scope"])
+    })
+
+    it("`dynamic` beats `ambiguous` — an expression receiver was never resolvable", () => {
+      const caller = withCalls("ts:src/a.ts#caller", [{ target: "User.save", line: 4 }], {
+        component: "billing",
+      })
+      const first = makeSymbol("ts:src/b.ts#User.save", {
+        name: "User.save",
+        kind: "method",
+        component: "billing",
+      })
+      const second = makeSymbol("ts:src/z.ts#User.save", {
+        name: "User.save",
+        kind: "method",
+        component: "billing",
+      })
+      const result = resolveCallGraph({
+        symbols: [caller, first, second],
+        importsByFile: new Map(),
+        dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 4, "User.save")]),
+      })
+      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
+      expect(result.diagnostics[0]?.candidates).toEqual([])
+    })
+
+    it("`dynamic` beats `external` when the head is also a bare-specifier import", () => {
+      const caller = withCalls("ts:src/a.ts#caller", [{ target: "repo.save", line: 5 }])
+      const result = resolveCallGraph({
+        symbols: [caller],
+        importsByFile: new Map([
+          ["src/a.ts", [importEdge({ source: "@acme/db", symbols: ["repo"] })]],
+        ]),
+        dynamicCallSites: new Set([makeCallSiteKey("src/a.ts", 5, "repo.save")]),
+      })
+      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
+    })
+
+    it("`ambiguous` beats `external` — a recorded conflict outranks an out-of-reach import", () => {
+      const caller = withCalls("ts:src/a.ts#caller", [{ target: "User.save", line: 6 }], {
+        component: "billing",
+      })
+      const first = makeSymbol("ts:src/b.ts#User.save", {
+        name: "User.save",
+        kind: "method",
+        component: "billing",
+      })
+      const second = makeSymbol("ts:src/z.ts#User.save", {
+        name: "User.save",
+        kind: "method",
+        component: "billing",
+      })
+      const result = resolveCallGraph({
+        symbols: [caller, first, second],
+        importsByFile: new Map([
+          ["src/a.ts", [importEdge({ source: "@acme/models", symbols: ["User"] })]],
+        ]),
+      })
+      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["ambiguous"])
+      expect(result.diagnostics[0]?.candidates).toEqual([
+        "ts:src/b.ts#User.save",
+        "ts:src/z.ts#User.save",
+      ])
+    })
+  })
+
+  it("counts by calls[], not by the `dropped` flag", () => {
+    // The extraction pipeline gives dropped Symbols an empty `calls[]`, so in
+    // practice they contribute nothing. This fixture violates that on purpose to
+    // pin down which rule the counters actually follow: a call site is counted
+    // because it is in `calls[]`, full stop. If the counters ever started
+    // skipping dropped Symbols, `totalCalls` would silently disagree with
+    // integrity invariant #15, which counts the same way.
     const dropped = withCalls("ts:src/a.ts#gone", [{ target: "typoed", line: 1 }], {
       dropped: true,
       dropReason: "cat-b:trivial",
     })
     const result = resolveCallGraph({ symbols: [dropped], importsByFile: new Map() })
-    // The resolver still walks the entry, but a dropped Symbol has `calls: []` in
-    // practice; the fixture keeps one to prove the counters follow calls[], not
-    // the `dropped` flag.
     expect(result.stats.totalCalls).toBe(1)
     expect(result.stats.unresolved.noMatch).toBe(1)
   })

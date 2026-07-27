@@ -170,6 +170,10 @@ function renderCallResolution(
     lines.push("_(no call sites)_", "")
     return lines
   }
+  // `(line, target)` is not a unique key — `a(); a()` on one source line yields
+  // two Call entries — but classification is a pure function of the caller, the
+  // target, and the call site, so colliding entries carry the identical verdict
+  // and last-write-wins is indistinguishable from first.
   const bucketByKey = new Map<string, UnresolvedCallDiagnostic>()
   for (const d of mine) bucketByKey.set(`${d.line}\t${d.target}`, d)
 

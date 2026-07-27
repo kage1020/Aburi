@@ -178,13 +178,49 @@ describe("runDiff — call-resolution census on stdout (call-resolution.md §8.1
     expect(report.callResolutionLine).toBe("calls 0 · resolved 0 · unresolved 0")
   })
 
-  it("is null for a head IR produced before the counters existed", async () => {
+  it("is null for a head IR produced before the counters existed, and says why on stderr", async () => {
     const { basePath, headPath } = await writePair(makeIRWithAdded())
-    const report = await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: (m) => warnings.push(m),
+    })
     expect(report.callResolutionLine).toBeNull()
+    // Dropping the line without a word would leave the reviewer reading the
+    // Slice View unaware that the one signal explaining a suspicious singleton
+    // is absent.
+    expect(warnings.join("\n")).toContain("no stats.callResolution")
   })
 
-  it("prints the line right after the summary, and nothing when it is null", async () => {
+  it("prints nothing but the summary when the census is unavailable", async () => {
+    const { basePath, headPath } = await writePair(makeIRWithAdded())
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: [
+        "diff",
+        "--base",
+        basePath,
+        "--head",
+        headPath,
+        "--output-dir",
+        resolve(scratch, "out"),
+        "--format",
+        "json",
+      ],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(stdout.text().trimEnd().split("\n")).toEqual(["+1 -0 ~0 ↔0 ⤴0"])
+    expect(stderr.text()).toContain("no stats.callResolution")
+  })
+
+  it("prints the line right after the summary", async () => {
     const head = headWithUnresolvedCalls({
       totalCalls: 1,
       resolvedCalls: 0,

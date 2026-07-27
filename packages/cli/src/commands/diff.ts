@@ -120,7 +120,18 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const { firstTriggered } = evaluateFailOn(failOn, diff)
   const exitCode: ExitCode = firstTriggered === null ? EXIT.SUCCESS : EXIT.GATE
 
+  // An IR written before `stats.callResolution` existed cannot be back-filled,
+  // and printing zeroes would claim a clean call graph the run never observed.
+  // Dropping the line silently is just as bad in the other direction: the
+  // reviewer would read the Slice View below without knowing the one signal
+  // that explains a suspicious singleton is missing. So: no stdout line, and
+  // one stderr note saying why and how to get it back.
   const callResolution = headIR.stats.callResolution
+  if (callResolution === undefined) {
+    warn(
+      `⚠ head IR has no stats.callResolution, so the call-resolution census is unavailable for this diff. Re-run \`aburi scan\` on the head revision to record it (call-resolution.md §8.1).`,
+    )
+  }
   return {
     diffJsonPath,
     diffMdPath,

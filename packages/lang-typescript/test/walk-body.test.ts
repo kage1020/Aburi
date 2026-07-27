@@ -143,4 +143,37 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
     const call = calls.find((c) => c.target === "getRepo.users.save")
     expect(call?.dynamicReceiver).toBe(true)
   })
+
+  // A receiver shape the normalizer does not model ("opaque") is NOT evidence of
+  // dynamic dispatch on its own — `svc!` still names a binding. It only counts
+  // once it appears inside explicit parentheses, which is how a real expression
+  // receiver has to be written. These two cases keep the `opaque` and
+  // `parenthesized` branches honest; without them either could collapse into the
+  // other and every test above would still pass.
+  it("does not flag a non-null assertion — it still names a binding", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc?: any) { svc!.save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("flags the same non-null assertion once it is parenthesized", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc?: any) { (svc!).save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("flags a parenthesized type assertion receiver", async () => {
+    const { calls } = await walkFirstSymbol("export function f(x: unknown) { (x as any).save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("does not flag a parenthesized plain identifier", async () => {
+    const { calls } = await walkFirstSymbol("export function f(svc: any) { (svc).save() }")
+    const call = calls.find((c) => c.target === "svc.save")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
 })

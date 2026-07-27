@@ -160,8 +160,9 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
       head: { ref: "head", irSchema: headScan.ir.$schema },
     })
 
-    // The controller is now its own Slice — exactly the "suspicious singleton"
-    // issue #48 is about.
+    // The controller is now its own Slice: the reviewer sees a singleton that
+    // looks architecturally disconnected but is not. slice-view.md §12.6 is the
+    // marker that tells the two apart.
     const ctlSlice = diff.slices.find(
       (s) => s.members.length === 1 && s.members[0]?.endsWith("ctl.ts#handleRequest") === true,
     )
