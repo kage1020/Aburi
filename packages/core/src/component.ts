@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
+import { CoreError } from "./errors"
 import { makeComponentId } from "./id"
 import {
   detectManagers,
@@ -165,22 +166,44 @@ async function buildSingleProjectComponent(workspaceRoot: string): Promise<Compo
 }
 
 /**
- * Pick the Component id, in the priority order of component-detect.md §5.
+ * Pick the Component id, in the priority order of component-detect.md §4.1. Only steps 1 and
+ * 5 of that list are implemented today — there is no Cargo / pyproject / go.mod branch yet.
  *
- * The result goes through `makeComponentId`, so a name that kebab-cases into something the
- * schema rejects (empty, or leading with a digit) aborts detection with a coded error rather
- * than reaching `components[].id` — where it would have produced an IR that fails its own
- * schema with no indication of where the bad id came from.
+ * The result goes through `makeComponentId`, so a name that kebab-cases into something
+ * `components[].id` cannot hold aborts detection instead of producing an IR that fails its
+ * own schema. In practice only the empty result can reach that throw: kebab-casing maps every
+ * other input into the pattern. The message carries where the name came from, because by the
+ * time an id is unusable the interesting question is which package or directory produced it.
  */
 function decideId(
   entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">,
   manifest: PackageJsonShape | null,
 ): ComponentId {
   const fromManifest = manifest?.name !== undefined ? toIdFromNpmName(manifest.name) : null
-  if (fromManifest !== null) return makeComponentId(fromManifest)
+  if (fromManifest !== null) {
+    return componentIdOrThrow(fromManifest, `package name "${manifest?.name}"`, entry.relativeRoot)
+  }
   const segments = entry.relativeRoot.split("/").filter((s) => s.length > 0 && s !== ".")
   const leaf = segments[segments.length - 1] ?? basename(entry.absoluteRoot)
-  return makeComponentId(toKebabCase(leaf))
+  return componentIdOrThrow(toKebabCase(leaf), `directory name "${leaf}"`, entry.relativeRoot)
+}
+
+/**
+ * `makeComponentId` with the derivation's provenance attached. The bare constructor message
+ * names only the offending id, which for the empty case is no information at all.
+ */
+function componentIdOrThrow(candidate: string, origin: string, root: string): ComponentId {
+  try {
+    return makeComponentId(candidate)
+  } catch (cause) {
+    throw new CoreError(
+      `Cannot derive a Component id from ${origin} at "${root}": kebab-casing it yields ` +
+        `"${candidate}", which is not ASCII kebab-case (ir-schema.md §4). Rename it, or ` +
+        `declare the component explicitly under components[] in aburi.json.`,
+      { code: "invalid-component-id", value: candidate },
+      { cause },
+    )
+  }
 }
 
 function decideName(
@@ -353,16 +376,21 @@ function applyParentSuffixPass(components: Component[]): void {
     for (const c of group) {
       const segments = c.roots[0]?.split("/").filter((s) => s.length > 0 && s !== ".") ?? []
       const parent = segments.length > 1 ? segments[segments.length - 2] : null
-      c.id =
-        parent !== undefined && parent !== null
-          ? makeComponentId(`${id}-${toKebabCase(parent)}`)
-          : id
+      // A parent that kebab-cases to nothing would produce a trailing-hyphen id. Leave the
+      // component unsuffixed instead and let the numeric pass separate it — the collision
+      // still gets resolved, and a component whose id was fine does not fail detection
+      // because of the segment above it.
+      const suffix = parent === undefined || parent === null ? "" : toKebabCase(parent)
+      c.id = suffix.length === 0 ? id : makeComponentId(`${id}-${suffix}`)
     }
   }
 }
 
 function applyNumericSuffixPass(components: Component[]): void {
-  const taken = new Set<ComponentId>()
+  // Keyed by `string` so the probe below can test a candidate suffix without minting an id
+  // for it. Appending `-2` to an id that is already valid cannot produce an invalid one, so
+  // the constructor runs once, on the value actually assigned.
+  const taken = new Set<string>()
   // Two collided components can survive the parent-suffix pass either because their parent
   // segments matched or because a rename collided with a third component. Walk in a stable
   // order (roots[0]) so the tail assignment is deterministic; the first occurrence keeps
@@ -376,7 +404,7 @@ function applyNumericSuffixPass(components: Component[]): void {
       continue
     }
     let n = 2
-    while (taken.has(makeComponentId(`${c.id}-${n}`))) n++
+    while (taken.has(`${c.id}-${n}`)) n++
     c.id = makeComponentId(`${c.id}-${n}`)
     taken.add(c.id)
   }

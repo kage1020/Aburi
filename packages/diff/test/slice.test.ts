@@ -617,3 +617,24 @@ describe("sliceRecordViolation — untyped input (SV24)", () => {
     }
   })
 })
+
+describe("SV29: a Slice id cannot be built on an anchor from a reserved namespace", () => {
+  it("rejects an anchor in the `slice:` namespace even though the derivation is self-consistent", () => {
+    // "slice:slice:…" satisfies every other clause: the prefix matches, members[] is a
+    // one-element ascending list, and the id IS "slice:" + members[0]. Only the namespace
+    // rule catches it. makeSymbolId refuses to build such a Symbol id and checkIRIntegrity
+    // #16 rejects one read from disk, but buildDiff is public API and runs neither.
+    const violation = sliceRecordViolation({
+      id: "slice:slice:src/a.ts#A",
+      members: ["slice:src/a.ts#A"],
+    })
+    expect(violation?.kind).toBe("anchor-in-reserved-namespace")
+    expect(violation?.message).toContain("slice")
+  })
+
+  it("leaves an anchor whose language token merely starts with the reserved one alone", () => {
+    expect(
+      sliceRecordViolation({ id: "slice:slicer:src/a.ts#A", members: ["slicer:src/a.ts#A"] }),
+    ).toBeNull()
+  })
+})

@@ -61,22 +61,46 @@ keyword in the schema: these are frozen v1 documents published for validators ou
 repository, and a non-standard keyword would make every strict-mode validator reject the
 schema itself. That is the same reasoning that kept the Slice anchor keyword out of the file.
 
+### Two new integrity invariants
+
+- **#16 — no reserved namespace.** Slice ids are `"slice:" + <anchor Symbol id>`, so a
+  language plugin claiming the token `slice` would mint Symbol ids indistinguishable from
+  Slice ids and make the derivation produce `slice:slice:…`. Branding cannot fix this — the
+  strings are genuinely the same shape — so `makeSymbolId` rejects the token, and
+  `checkIRIntegrity` rejects it in a Symbol id or a Dependency endpoint from a document it did
+  not build. Only the whole token is reserved; `slicer` is still legal. `@aburi/diff` reports
+  it as its own `SliceRecord` violation kind too, because `buildDiff` is public API and runs
+  no integrity check. No plugin uses `slice` today.
+- **#17 — ids satisfy their own grammars.** `readIR` brands a whole parsed document with one
+  `as unknown as IR`, which is the only way to type a JSON parse — so ids read from disk used
+  to acquire their brand without anything looking at them, while every other route ran a
+  constructor. #17 closes that: `symbols[].id` must satisfy `isSymbolId` and `components[].id`
+  must satisfy `isComponentId`. It is also what catches a language plugin that asserts the
+  brand instead of calling the constructor.
+
 ### Behaviour changes
 
-Two, both for input that was already invalid:
+- **`ComponentId` accepts a digit-leading segment.** The pattern was
+  `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` and is now `^[a-z0-9]+(-[a-z0-9]+)*$`, in both
+  `aburi.ir.v1.json` and `aburi.config.v1.json`. Component ids are derived by kebab-casing a
+  package or directory name, and `3d-force-graph` / `7zip-bin` are ordinary npm names — the
+  letter-first rule made the documented derivation partial for no benefit. Loosening a pattern
+  is additive: every document that validated before still does.
+- **Component detection fails loudly on a name that yields no id at all.** After the pattern
+  change only one case remains — a name that kebab-cases to the empty string. It now raises
+  `invalid-component-id` naming the package or directory it came from, instead of putting `""`
+  in `components[].id` and producing an IR that fails its own schema somewhere else entirely.
+  The CLI wraps it as a `config-error`, so it exits 2 (input) rather than 1 (runtime).
+- **A Symbol id file path may not contain `:` or `#`.** They are the id's own separators, so a
+  path holding either assembles into a string that still matches the schema pattern but splits
+  back into parts the producer never wrote. `makeSymbolId` now refuses them, which is what lets
+  `isSymbolId` recover the parts and re-run the constructor's own check.
 
-- **`slice` is now a reserved language token.** Slice ids are `"slice:" + <anchor Symbol id>`,
-  so a language plugin claiming `slice` would mint Symbol ids indistinguishable from Slice
-  ids and make the derivation produce `slice:slice:…`. Branding cannot fix this — the strings
-  are genuinely the same shape — so `makeSymbolId` rejects the token, and `checkIRIntegrity`
-  rejects it in a document it did not build (new invariant #16). Only the whole token is
-  reserved; `slicer` is still a legal language id. No plugin uses `slice` today.
-- **Component detection fails loudly on an unusable id.** `detectComponents` derives the id
-  by kebab-casing a package or directory name, and that transformation is not total: a name
-  of only separators collapses to `""`, and one starting with a digit has no valid first
-  character. Both are rejected by `aburi.ir.v1.json#/$defs/ComponentId`. They now raise
-  `invalid-component-id` at detection time instead of landing in `components[].id` and
-  producing an IR that fails its own schema with no indication of where the bad id came from.
+### Packages with no source change
+
+`@aburi/config` and `@aburi/plugin-registry` are bumped for the `ComponentId` pattern change
+in `aburi.config.v1.json` and for the `@aburi/types` dependency, respectively; neither has a
+source diff.
 
 ### For plugin authors
 

@@ -115,12 +115,22 @@ Aburi mints three kinds of identifier, and each owns a namespace the other two m
 
 Two rules keep the namespaces from overlapping:
 
-1. **`slice` is a reserved language token.** A language plugin claiming it would mint Symbol IDs shaped exactly like Slice IDs, and deriving a Slice ID from one of those would produce `slice:slice:…`. `makeSymbolId` rejects the token; see [multi-language-id.md](./multi-language-id.md) Rule L-6.
-2. **The three types are nominal, not structural.** On the wire all three are JSON strings, and JSON Schema has no way to say otherwise. `@aburi/types` layers a brand onto each generated alias so `SymbolId`, `ComponentId`, and `SliceId` are mutually non-assignable in TypeScript and a bare `string` satisfies none of them. A brand is minted only by the constructors above; assertions (`x as SymbolId`) live in four documented places and nowhere else: `packages/core/src/id.ts`, `sliceIdFor` and `sliceRecordViolation` in `packages/diff/src/slice.ts`, `readIR` in `packages/cli/src/ir-io.ts`, and per-package test fixtures. Test fixtures are on the list because a case that feeds a *malformed* id to the code that rejects it must be able to write one.
+1. **`slice` is a reserved language token.** A language plugin claiming it would mint Symbol IDs shaped exactly like Slice IDs, and deriving a Slice ID from one of those would produce `slice:slice:…`. `makeSymbolId` rejects the token; see [multi-language-id.md](./multi-language-id.md) Rule L-11.
+2. **The three types are nominal, not structural.** On the wire all three are JSON strings, and JSON Schema has no way to say otherwise. `@aburi/types` layers a brand onto each generated alias so `SymbolId`, `ComponentId`, and `SliceId` are mutually non-assignable in TypeScript and a bare `string` satisfies none of them.
+
+A brand is minted only by the constructors above. Assertions (`x as SymbolId`) live in four documented places and nowhere else, and a test in `@aburi/e2e-integration` fails if a fifth appears under `packages/*/src`:
+
+| Where | Why |
+|---|---|
+| `packages/core/src/id.ts` | The two id constructors. Both run the full grammar check first |
+| `sliceIdFor` in `packages/diff/src/slice.ts` | The only `SliceId` constructor |
+| `sliceRecordViolation` in `packages/diff/src/slice.ts` | Takes `unknown` by contract — it inspects records that have not been type-checked |
+| `readIR` in `packages/cli/src/ir-io.ts` | Brands a whole parsed document at once (`as unknown as IR`), which is the only way to type a JSON parse. Invariant #17 in §14 is what checks the ids inside it |
+| per-package test fixtures | A case that feeds a *malformed* id to the code that rejects it has to be able to write one |
 
 The brands are erased at runtime and are absent from the JSON. They constrain what the codebase can build, not what a document may contain — shape checking on the wire remains the job of the schema and of §14.
 
-`dependencies[].from` / `.to` are typed `SymbolId | ComponentId` because §11 lets a single array hold both endpoint kinds. Which one a given endpoint is gets recovered from its shape, by `isSymbolId` / `isComponentId` in `@aburi/core`.
+`dependencies[].from` / `.to` are typed `SymbolId | ComponentId` because §11 lets a single array hold both endpoint kinds. Which one a given endpoint *is* gets recovered from its shape. Two flavours of that test exist and they are not interchangeable: `isSymbolId` / `isComponentId` in `@aburi/core` answer "is this a well-formed id?" and narrow, while the integrity checker and the Markdown projection use deliberately looser silhouette tests that return a plain `boolean` — a malformed endpoint still has to be routed to the Symbol-id invariants so the breach is reported, and handing it the brand would break the property that holding a `SymbolId` means having gone through a constructor.
 
 ## 4. Component
 
@@ -141,7 +151,7 @@ A logical boundary of the monorepo. Independent of physical packages.
 }
 ```
 
-- `id` is fixed to ASCII kebab-case so it can be used in URLs and CLI arguments
+- `id` is fixed to ASCII kebab-case (`^[a-z0-9]+(-[a-z0-9]+)*$`) so it can be used in URLs and CLI arguments. A segment may start with a digit: the id is derived by kebab-casing a package or directory name ([component-detect.md](./component-detect.md) §4.1), and `3d-force-graph` is an ordinary npm package name
 - Each element of `publicApi` is either a **glob** or a **symbol id**
 - Physical Component boundary inference automatically reads package manager configuration (`pnpm-workspace.yaml`, `turbo.json`, `go.work`, `Cargo.toml` workspace, `pyproject.toml`/uv workspaces, etc.); see the separate document `component-detect.md` for details
 
@@ -447,7 +457,8 @@ Guaranteed by the schema validator plus Aburi internals:
 13. Within `dependencies[]`, the triple `(from, to, via)` is unique — the same directed edge cannot be recorded twice
 14. For every `Symbol.calls[]` entry with a non-null `resolved`, there is a matching Dependency `{ from: caller.id, to: resolved, via: "call" }` in `dependencies[]`, and conversely every `via: "call"` Dependency corresponds to at least one such Call entry (the call-graph projection is total and lossless in both directions)
 15. When `stats.callResolution` is present, it is a faithful census of `symbols[].calls[]`: `totalCalls` equals the number of call sites, `resolvedCalls` equals the number with a non-null `resolved`, and the five `unresolved` buckets sum to the difference. A drift here would report unresolved calls the document does not contain, or hide ones it does
-16. No `symbols[].id` uses a reserved language token (§3.5) — today that means no id begins `slice:`, which would be indistinguishable from a Slice id and would make the Slice-id derivation produce `slice:slice:…`
+16. No `symbols[].id` and no `dependencies[].from` / `.to` uses a reserved language token (§3.5) — today that means no id begins `slice:`, which would be indistinguishable from a Slice id and would make the Slice-id derivation produce `slice:slice:…`
+17. `symbols[].id` and `components[].id` satisfy the grammars of §3.1 and §4. Every other route to an id runs a constructor that enforces this; a document read from disk has its ids branded by a single whole-document assertion, and this is where they are actually checked
 
 An invariant violation is a **fatal error**, not a warning.
 

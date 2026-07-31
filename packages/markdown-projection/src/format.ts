@@ -8,7 +8,6 @@ import type {
   Symbol as IRSymbol,
   Rule,
   Signature,
-  SymbolId,
 } from "@aburi/types"
 
 /**
@@ -312,11 +311,14 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * through their dedicated Markdown sections while leaving component-to-component
  * edges in the existing sections.
  *
- * A type predicate rather than a plain boolean: `DependencyEndpoint` is the union of
- * both id kinds, and this is the shape test that decides which one a given endpoint is.
- * Callers get the narrowed `SymbolId` and can look it up in a Symbol-keyed set without
- * asserting anything.
+ * Takes a `DependencyEndpoint` — the union of both id kinds — but answers with a plain
+ * boolean rather than narrowing to `SymbolId`. The pattern here is deliberately looser than
+ * the `isSymbolId` constructor-equivalent in `@aburi/core` (no backslash exclusion), so
+ * narrowing would hand the brand to strings `makeSymbolId` refuses and break the property
+ * the brand exists to carry: that holding a `SymbolId` means having gone through a
+ * constructor. Callers use this to route an endpoint into a section, not to prove anything
+ * about it.
  */
-export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): endpoint is SymbolId {
+export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
 }

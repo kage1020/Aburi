@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { assertIRIntegrity, CoreError, checkIRIntegrity } from "../src/index"
-import { componentId, endpoint, makeSymbol, minimalIR, symbolId } from "./fixtures/ir"
+import {
+  componentId,
+  endpoint,
+  makeComponent,
+  makeDependency,
+  makeSymbol,
+  minimalIR,
+  symbolId,
+} from "./fixtures/ir"
 
 describe("checkIRIntegrity", () => {
   it("returns [] for an empty but well-formed IR", () => {
@@ -474,5 +482,44 @@ describe("checkIRIntegrity — id namespaces (#16)", () => {
     ir.symbols = [makeSymbol("slicer:src/a.ts#foo"), makeSymbol("ts:src/b.ts#bar")]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 16)).toBe(false)
+  })
+
+  it("#16: covers Dependency endpoints, not just symbols[]", () => {
+    // Without this, the endpoint is reported by #4 as a Symbol id with no matching Symbol —
+    // detected, but blamed on a missing Symbol that was never supposed to exist.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#foo")]
+    ir.dependencies = [
+      makeDependency({ from: "ts:src/a.ts#foo", to: "slice:src/b.ts#bar", via: "import" }),
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 16)).toBe(true)
+  })
+
+  it("#17: rejects a Symbol id that no constructor could have produced", () => {
+    // readIR brands a whole document in one assertion, so this is the only place the ids
+    // inside it are actually looked at.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:../../etc/passwd#foo")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
+  })
+
+  it("#17: rejects a Component id that is not kebab-case", () => {
+    const ir = minimalIR()
+    ir.components = [makeComponent("Billing")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
+  })
+
+  it("#17: accepts the ids the constructors produce, including digit-leading components", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#Cls::fromJson", { component: "3d-renderer" }),
+      makeSymbol("ts:src/b.ts#<default>", { component: "3d-renderer" }),
+    ]
+    ir.components = [makeComponent("3d-renderer")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.filter((v) => v.invariant === 17)).toEqual([])
   })
 })

@@ -63,6 +63,45 @@ describe("detectComponents", () => {
     expect(__testing_component.toIdFromNpmName("@scope/billing")).toBe("billing")
   })
 
+  it("accepts a digit-leading package name, which npm allows and detection must not reject", async () => {
+    await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8")
+    for (const name of ["3d-renderer", "7zip-bin"]) {
+      const pkg = await makeDir(tmp, "packages", name)
+      await writeJson(join(pkg, "package.json"), { name })
+      await seedTypescriptFiles(pkg, 12)
+    }
+    const components = await detectComponents({ workspaceRoot: tmp })
+    expect(components.map((c) => c.id)).toEqual(["3d-renderer", "7zip-bin"])
+  })
+
+  it("aborts with an origin-carrying error when a name cannot yield an id at all", async () => {
+    // A name that kebab-cases to the empty string has no id to fall back on. The message
+    // has to name the package it came from: "" alone tells the reader nothing.
+    await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8")
+    const pkg = await makeDir(tmp, "packages", "widgets")
+    await writeJson(join(pkg, "package.json"), { name: "---" })
+    await seedTypescriptFiles(pkg, 12)
+    await expect(detectComponents({ workspaceRoot: tmp })).rejects.toThrowError(
+      expect.objectContaining({ code: "invalid-component-id" }),
+    )
+    await expect(detectComponents({ workspaceRoot: tmp })).rejects.toThrowError(
+      /package name "---".*packages\/widgets/s,
+    )
+  })
+
+  it("resolves a collision numerically when the parent segment cannot form a suffix", async () => {
+    // The parent-suffix pass would otherwise build "app-", which is not a valid id — the
+    // collision is resolvable without failing detection for components whose own ids are fine.
+    await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - '**/app'\n", "utf8")
+    for (const parent of ["--", "---"]) {
+      const pkg = await makeDir(tmp, parent, "app")
+      await writeJson(join(pkg, "package.json"), {})
+      await seedTypescriptFiles(pkg, 12)
+    }
+    const components = await detectComponents({ workspaceRoot: tmp })
+    expect(components.map((c) => c.id)).toEqual(["app", "app-2"])
+  })
+
   it("CD9: dependency-driven framework detection (nestjs)", async () => {
     const manifest = {
       name: "billing",

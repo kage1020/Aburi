@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { ENTRIES, generateAll, OUT_DIR } from "../scripts/codegen-lib"
+import { ENTRIES, generateAll, OUT_DIR, readDefNames } from "../scripts/codegen-lib"
 
 describe("schema codegen", () => {
   it("committed generated files match what codegen would produce now", async () => {
@@ -143,6 +143,28 @@ describe("schema codegen", () => {
     expect(diff).toMatch(/export type \{[^}]*SymbolId[^}]*\} from "\.\/ir"/)
     expect(diff).toMatch(/^members: SymbolId\[\]$/m)
     expect(diff).toMatch(/^id: SliceId$/m)
+  })
+
+  it("every id-shaped $def is accounted for by the brand table", async () => {
+    // The equality check cannot see this one either: add `$defs.TenantId` to a schema,
+    // forget to touch ENTRIES, and codegen emits `export type TenantId = string` into a
+    // committed file that also says `= string`. Both sides agree and the drift test passes,
+    // while the new id silently joins the set of interchangeable strings.
+    for (const entry of ENTRIES) {
+      const defs = await readDefNames(entry.schema)
+      const accountedFor = new Set([
+        ...Object.keys(entry.aliasOverrides ?? {}),
+        ...Object.keys(entry.crossRefs ?? {}),
+        ...(entry.unbrandedIds ?? []),
+      ])
+      for (const name of defs.filter((d) => d.endsWith("Id"))) {
+        expect(
+          accountedFor.has(name),
+          `${entry.schema} declares $defs.${name}, which is not in aliasOverrides, crossRefs, ` +
+            `or unbrandedIds. Decide whether it owns a namespace and say so in ENTRIES.`,
+        ).toBe(true)
+      }
+    }
   })
 
   it("alias override fails loudly when its target is not found exactly once", async () => {

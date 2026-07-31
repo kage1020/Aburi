@@ -5,7 +5,7 @@ Language-agnostic foundation for every downstream Aburi package:
 - **Symbol id generation** — deterministic `<language>:<posix-path>#<qname>`.
 - **Canonical JSON serializer** — NFC normalisation + codepoint-sorted keys, so
   same IR → same bytes across OSes and Node versions.
-- **11 IR invariants** (`assertIRIntegrity`) — the contract every scan / diff
+- **IR invariants** (`assertIRIntegrity`) — the ir-schema.md §14 contract every scan / diff
   output must satisfy before it hits disk.
 - **Autodetect** — workspace root (marker files), package manager
   (`pnpm-lock.yaml` / `bun.lockb` / …), and JS/TS Components (package.json
@@ -60,6 +60,6 @@ await writeCanonicalIR(result.ir, "out/aburi.ir.json", { format: "compact" })
 
 ## See also
 
-- [`docs/design/ir-schema.md`](../../docs/design/ir-schema.md) — IR contract + 11 invariants.
+- [`docs/design/ir-schema.md`](../../docs/design/ir-schema.md) — IR contract + the §14 invariants.
 - [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) — the language-plugin contract the scan pipeline drives.
 - [`docs/design/drop-list.md`](../../docs/design/drop-list.md) — drop rules A / B / C.

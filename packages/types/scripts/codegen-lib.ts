@@ -25,6 +25,11 @@ export interface SchemaEntry {
   // keyword in a frozen v1 document would make strict-mode validators reject the schema
   // itself. Keys must NOT overlap with crossRefs: those aliases are gone by this point.
   aliasOverrides?: Record<string, string>
+  // `$defs` whose name ends in `Id` but which deliberately carry no brand. Listing them is
+  // what makes the brand table exhaustive: the drift test walks every `*Id` definition and
+  // requires it to appear in `aliasOverrides`, in `crossRefs`, or here — so adding a new id
+  // to a schema and forgetting to brand it fails the build instead of shipping a bare alias.
+  unbrandedIds?: readonly string[]
 }
 
 /** Nominal-type right-hand side for an id alias that owns its own namespace. */
@@ -44,6 +49,11 @@ export const ENTRIES: readonly SchemaEntry[] = [
       // shape. The union keeps a bare string out while admitting either id.
       DependencyEndpoint: "SymbolId | ComponentId",
     },
+    // `EffectId` is a vocabulary term, not an entity id — it names a kind of side effect,
+    // and `x-<plugin>:<action>` values are meant to be written as literals. `LanguageId` is
+    // a plugin-declared token that a Symbol id embeds rather than an identifier of its own.
+    // Neither can be confused with the ids above, so neither earns a namespace.
+    unbrandedIds: ["EffectId", "LanguageId"],
   },
   { schema: "aburi.config.v1.json", out: "config.ts", rootName: "Config" },
   {
@@ -204,7 +214,9 @@ function applyAliasOverrides(
           `output and update ENTRIES.aliasOverrides.`,
       )
     }
-    out = out.replace(pattern, `export type ${name} = ${replacement}`)
+    // Callback form: `String.replace` reads `$&`, `` $` ``, `$'` and `$1` in a string
+    // replacement, which would silently mangle a right-hand side containing one.
+    out = out.replace(pattern, () => `export type ${name} = ${replacement}`)
   }
   return out
 }
@@ -242,6 +254,13 @@ export const rewriteCrossRefsForTest = rewriteCrossRefs
 
 /** Test-only re-export of applyAliasOverrides. Not part of the public surface. */
 export const applyAliasOverridesForTest = applyAliasOverrides
+
+/** Every `$defs` key in one schema, for the drift test's brand-coverage assertion. */
+export async function readDefNames(schemaFile: string): Promise<string[]> {
+  const raw = await readFile(join(SCHEMA_DIR, schemaFile), "utf8")
+  const schema = JSON.parse(raw) as { $defs?: Record<string, unknown> }
+  return Object.keys(schema.$defs ?? {})
+}
 
 /** Generate every schema's TypeScript in-memory. Used by both the CLI and the drift test. */
 export async function generateAll(): Promise<Record<string, string>> {

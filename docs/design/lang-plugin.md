@@ -143,6 +143,8 @@ interface SymbolCandidate {
 
 `id` is a `SymbolId`, not a `string`: the type is nominal ([ir-schema.md](./ir-schema.md) §3.5), so a plugin cannot hand core an id it assembled by concatenation. Build it with `makeSymbolId` from `@aburi/core`, which enforces the §3.1 grammar — a lowercase-ASCII language token that is not reserved, a POSIX workspace-relative path, and an identifier-like qualified name — and throws a coded `CoreError` otherwise. `trySymbolId` is the non-throwing variant, for a plugin that assembles speculative ids and expects some of them not to be buildable.
 
+A brand can be asserted rather than constructed, so the type is a contract, not a lock. Do not take that route: a plugin whose qualified names the §3.2 grammar cannot express — Ruby's `save!` and `valid?` are the standing example — must **widen the grammar**, not cast around it. The call-graph resolver and the LSP enrichment tier build candidate ids through `trySymbolId` and treat a refusal as "no such callee", so an id the constructor would have rejected resolves against nothing while looking like an ordinary miss. `assertIRIntegrity` catches it at the end of the scan (§14 invariant #17) and names the offending id, so it surfaces as a failure rather than as silently thinner output — but the diagnostic bucket in [call-resolution.md](./call-resolution.md) §8.1 has no way to say "the grammar refused this candidate", so the reason will not appear in `stats.callResolution`.
+
 When the plugin chooses an `extKind` from its own declarations, the chosen value must fall under manifest.provides.extKinds or extKindPrefixes. The registry detects violations at startup.
 
 ### 4.4 `BodyExtraction`

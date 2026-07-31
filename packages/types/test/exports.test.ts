@@ -42,6 +42,10 @@ import type {
 // Pure type-level tests. They compile-time-assert that the public surface stays
 // importable and shaped roughly as designed. No runtime cost beyond Vitest's
 // per-test bookkeeping.
+//
+// `expectTypeOf` erases at runtime: `pnpm test` alone can never fail an assertion in this
+// file. `pnpm typecheck` is what enforces them, and CI runs both — a green vitest run here
+// means the file imported, not that the types hold.
 
 /**
  * Is a value of type `From` accepted where `To` is expected? Wrapping both sides in a tuple

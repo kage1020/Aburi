@@ -1,4 +1,4 @@
-import { type CallEdge, computeWeaklyConnectedComponents } from "@aburi/core"
+import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
 import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
 
@@ -123,6 +123,8 @@ export type SliceViolationKind =
   | "members-unordered"
   /** `id` is not `"slice:" + members[0]` (§7.1). */
   | "id-not-derived"
+  /** The anchor is itself in a reserved id namespace, so `id` would read as a doubled prefix (§7.5). */
+  | "anchor-in-reserved-namespace"
 
 export interface SliceRecordViolation {
   kind: SliceViolationKind
@@ -170,6 +172,21 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
 
   const anchor = members[0]
   if (anchor === undefined) return emptyMembersViolation(subject)
+  // A Symbol id in the `slice:` namespace derives to `slice:slice:…`, which is
+  // self-consistent — it passes the derivation clause below — but names an id no reader can
+  // tell from a Slice id. `makeSymbolId` refuses to build such a Symbol id and
+  // `checkIRIntegrity` #16 rejects one read from disk, but `buildDiff` is public API and
+  // runs no integrity check, so the doubled prefix is caught here too.
+  const reservedAnchor = reservedNamespaceOf(anchor)
+  if (reservedAnchor !== null) {
+    return {
+      kind: "anchor-in-reserved-namespace",
+      subject,
+      message:
+        `SliceRecord anchor "${anchor}" uses the reserved language token "${reservedAnchor}", ` +
+        `so its Slice id would repeat the prefix (ir-schema.md §3.5, slice-view.md §7.5).`,
+    }
+  }
   for (let i = 1; i < members.length; i++) {
     const previous = members[i - 1] as string
     const current = members[i] as string
@@ -198,6 +215,14 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
     }
   }
   return null
+}
+
+/** The reserved token an id opens with, or `null`. Shares the list `@aburi/core` enforces. */
+function reservedNamespaceOf(id: string): string | null {
+  const colon = id.indexOf(":")
+  if (colon < 0) return null
+  const token = id.slice(0, colon)
+  return RESERVED_LANGUAGE_IDS.has(token) ? token : null
 }
 
 /** Single source of the empty-`members[]` wording, shared with `sliceAnchor`. */

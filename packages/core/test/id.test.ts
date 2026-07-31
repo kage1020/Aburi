@@ -188,8 +188,17 @@ describe("makeComponentId", () => {
     expect(makeComponentId("billing-api-v2")).toBe("billing-api-v2")
   })
 
+  it("accepts a digit-leading segment, because npm package names have them", () => {
+    // Component ids are derived by kebab-casing a package or directory name
+    // (component-detect.md §4.1). `3d-force-graph` and `7zip-bin` are real packages; a
+    // letter-first rule would make that derivation partial for no benefit.
+    expect(makeComponentId("3d-force-graph")).toBe("3d-force-graph")
+    expect(makeComponentId("7zip-bin")).toBe("7zip-bin")
+    expect(makeComponentId("billing-2")).toBe("billing-2")
+  })
+
   it("rejects ids the schema would reject, at the point of construction", () => {
-    for (const bad of ["", "2fa", "Billing", "billing_api", "billing-", "-billing"]) {
+    for (const bad of ["", "Billing", "billing_api", "billing-", "-billing", "billing--api"]) {
       expect(() => makeComponentId(bad), `expected "${bad}" to be rejected`).toThrowError(
         expect.objectContaining({ code: "invalid-component-id" }),
       )
@@ -197,13 +206,45 @@ describe("makeComponentId", () => {
   })
 })
 
+/** Mirror of the module-private split, so the two directions can be compared in one test. */
+function splitForTest(value: string): { language: string; file: string; qualifiedName: string } {
+  const colon = value.indexOf(":")
+  const hash = value.indexOf("#", colon + 1)
+  return {
+    language: value.slice(0, colon),
+    file: value.slice(colon + 1, hash),
+    qualifiedName: value.slice(hash + 1),
+  }
+}
+
 describe("id guards", () => {
-  it("isSymbolId accepts the <language>:<path>#<qname> shape and nothing else", () => {
+  it("isSymbolId accepts exactly what makeSymbolId would have built", () => {
     expect(isSymbolId("ts:src/a.ts#foo")).toBe(true)
     expect(isSymbolId("ts:src/a.ts#Cls.method")).toBe(true)
+    expect(isSymbolId("ts:src/a.ts#Cls::fromJson")).toBe(true)
+    expect(isSymbolId("ts:src/index.ts#<default>")).toBe(true)
     expect(isSymbolId("billing")).toBe(false)
     expect(isSymbolId("ts:src/a.ts")).toBe(false)
     expect(isSymbolId("ts:src\\a.ts#foo")).toBe(false)
+  })
+
+  it("isSymbolId refuses everything makeSymbolId refuses", () => {
+    // The predicate and the constructor have to answer the same question, or a string the
+    // constructor would never produce narrows to `SymbolId` anyway. A silhouette-matching
+    // regex accepted all five of these.
+    const rejected = [
+      // A well-formed SliceId. `SliceId` is assignable to `string`, so this call compiles;
+      // narrowing it would forge a SymbolId out of an id from another namespace.
+      "slice:ts:src/a.ts#foo",
+      "ts:/abs/path.ts#foo",
+      "ts:../../etc/passwd#foo",
+      "ts:src/a.ts#foo bar baz",
+      "ts:src/a#b.ts#foo",
+    ]
+    for (const value of rejected) {
+      expect(isSymbolId(value), value).toBe(false)
+      expect(() => makeSymbolId(splitForTest(value)), value).toThrowError(CoreError)
+    }
   })
 
   it("isComponentId and isSymbolId never both accept the same string", () => {

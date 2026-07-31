@@ -214,7 +214,9 @@ Cluster identity is NOT a stable name across PRs. Two PRs that both touch "the r
 
 The brand is a TypeScript-only construct and is erased at runtime; the emitted JSON is unchanged, and the schema still constrains the id with `pattern: "^slice:"` alone. Two escapes remain by design: `sliceIdFor` itself asserts the brand once, and `sliceRecordViolation` asserts it on the untyped input it exists to inspect (§7.4 layer 2).
 
-What the brands do **not** solve is the underlying namespace collision — a language plugin claiming the token `slice` would mint Symbol ids that already look like Slice ids, and no amount of typing changes what those strings are. That is closed separately, by reserving the token: see [`multi-language-id.md`](./multi-language-id.md) Rule L-6.
+What the brands do **not** solve is the underlying namespace collision — a language plugin claiming the token `slice` would mint Symbol ids that already look like Slice ids, and no amount of typing changes what those strings are. That is closed separately, by reserving the token: see [`multi-language-id.md`](./multi-language-id.md) Rule L-11.
+
+An anchor drawn from that namespace is also its own §7.4 violation kind (`anchor-in-reserved-namespace`). It has to be: `{ id: "slice:slice:a#b", members: ["slice:a#b"] }` satisfies every other clause — right prefix, ascending single-element `members[]`, and `id` genuinely equal to `"slice:" + members[0]`. `makeSymbolId` refuses to build such a Symbol id and invariant #16 rejects one read from disk, but `buildDiff` is public API and runs neither check, so the producer post-condition covers it too.
 
 ## 8. Ordering
 
@@ -487,6 +489,7 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV26 | `SliceRecord.id` assigned a value built as `` `slice:${anchor}` `` anywhere other than `sliceIdFor` | Compile error: the template literal is a `string`, which `SliceId` does not accept (§7.5) |
 | SV27 | A `SliceId` used where a `SymbolId` is expected, or vice versa | Compile error in both directions; a bare `string` satisfies neither (§7.5) |
 | SV28 | Any run | The emitted `slices[]` bytes and the `aburi.diff.v1.json` validation verdict are unchanged by the branding — it exists only in TypeScript (§7.5) |
+| SV29 | `{ id: "slice:slice:a#b", members: ["slice:a#b"] }` | Reported as `anchor-in-reserved-namespace`, even though the prefix, the ordering and the derivation clauses all pass. An anchor whose token merely starts with the reserved one (`slicer:`) is accepted (§7.5) |
 
 ## 14. Design Decisions
 

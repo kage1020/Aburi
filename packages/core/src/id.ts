@@ -35,11 +35,15 @@ const QNAME_SEGMENT_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 /** Path that contains the workspace-relative POSIX shape expected by Symbol.id. */
 const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:[\\/])/
 
-/** ASCII kebab-case, matching `aburi.ir.v1.json#/$defs/ComponentId`. */
-const COMPONENT_ID_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
-
-/** Whole Symbol id shape, matching `aburi.ir.v1.json#/$defs/SymbolId`. */
-const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#\\]+#[^\\]+$/
+/**
+ * ASCII kebab-case, matching `aburi.ir.v1.json#/$defs/ComponentId`.
+ *
+ * A segment may start with a digit. Component ids are derived by kebab-casing a package or
+ * directory name (component-detect.md §4.1), and `3d-force-graph` / `7zip-bin` are ordinary
+ * npm package names — a letter-first rule would make the documented derivation partial for
+ * no gain, since nothing distinguishes a Component id by its first character.
+ */
+const COMPONENT_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 export interface SymbolIdParts {
   language: string
@@ -73,10 +77,15 @@ export function makeSymbolId(parts: SymbolIdParts): SymbolId {
 
 /**
  * Non-throwing counterpart of `makeSymbolId`, for call sites that assemble a *candidate* id
- * and then test it for existence — the call-graph resolver and the LSP enrichment pass both
- * do this. An id they cannot build is a candidate that cannot match any Symbol, which is the
- * same outcome as building it and finding it absent from the known-id set, so returning
- * `null` keeps the resolver's behaviour identical to concatenating the parts by hand.
+ * and then test it against a set of known ids — resolvers guessing at a callee, and the diff
+ * matcher predicting an id across a file rename. An id that cannot be built is a candidate
+ * that cannot match any Symbol, which is the same outcome as building it and finding it
+ * absent, so returning `null` keeps those call sites behaving as they did when they
+ * concatenated the parts by hand.
+ *
+ * A refusal is therefore never silently lossy *provided* every id in the set went through
+ * `makeSymbolId` too — which invariant #17 (ir-schema.md §14) is what guarantees, including
+ * for a document read off disk.
  */
 export function trySymbolId(parts: SymbolIdParts): SymbolId | null {
   if (symbolIdViolation(parts) !== null) return null
@@ -99,11 +108,24 @@ export function makeComponentId(raw: string): ComponentId {
 }
 
 /**
- * Narrow an arbitrary string to a `SymbolId`. Used on `dependencies[].from` / `.to`, which
- * hold either id kind and are told apart by shape alone.
+ * Narrow an arbitrary string to a `SymbolId`: does it satisfy everything `makeSymbolId`
+ * would have enforced had it built the id?
+ *
+ * Answers by splitting the string back into its three parts and running the same check the
+ * constructor runs, rather than by a whole-string regex. A regex tight enough to be
+ * equivalent would have to re-encode the reserved-token list, the `..` rule and the
+ * qualified-name grammar, and the two would drift the first time one of them changed. The
+ * split is unambiguous because the parts are separated by the first `:` and the first `#`,
+ * and neither the language token nor the file path may contain either character.
+ *
+ * A predicate that only tested the id's silhouette would be worse than none: `SliceId` is
+ * assignable to `string`, so `isSymbolId(someSliceId)` compiles, and a loose predicate would
+ * hand back a `SymbolId` for it — forging the exact namespace crossing the brand exists to
+ * prevent.
  */
 export function isSymbolId(value: string): value is SymbolId {
-  return SYMBOL_ID_PATTERN.test(value)
+  const parts = splitSymbolId(value)
+  return parts !== null && symbolIdViolation(parts) === null
 }
 
 /** Narrow an arbitrary string to a `ComponentId`. Counterpart of `isSymbolId`. */
@@ -179,11 +201,29 @@ export function toPosixRelative(rawPath: string): string {
 }
 
 /**
- * The only unchecked construction of a branded id in the workspace. Both public
- * constructors run the full check first and share this so the format lives in one place.
+ * Assemble the id from parts already known to be valid. Both public constructors run the
+ * full check first and share this, so the format lives in one place.
  */
 function composeSymbolId(parts: SymbolIdParts): SymbolId {
   return `${parts.language}:${parts.file}#${parts.qualifiedName}` as SymbolId
+}
+
+/**
+ * Inverse of `composeSymbolId`: recover the three parts from an assembled id, or `null` when
+ * the string has no `:` / `#` structure at all. Neither the language token nor the file path
+ * may contain `:` or `#`, so the first occurrence of each is the separator — which is why
+ * `posixWorkspaceRelativeViolation` rejects both characters in a path.
+ */
+function splitSymbolId(value: string): SymbolIdParts | null {
+  const colon = value.indexOf(":")
+  if (colon < 0) return null
+  const hash = value.indexOf("#", colon + 1)
+  if (hash < 0) return null
+  return {
+    language: value.slice(0, colon),
+    file: value.slice(colon + 1, hash),
+    qualifiedName: value.slice(hash + 1),
+  }
 }
 
 /** Full validation of a candidate Symbol id, in the order the assertions used to run. */
@@ -237,6 +277,17 @@ function posixWorkspaceRelativeViolation(path: string): IdViolation | null {
     return {
       code: "non-posix-path",
       message: `Symbol id file path "${path}" escapes the workspace via "..", which would leak the host layout into the IR`,
+      value: path,
+    }
+  }
+  // `:` and `#` are the id's own separators, so a path holding either assembles into a
+  // string whose first `:` / `#` fall in the wrong place: it still satisfies the schema
+  // pattern, but splitting it back yields parts the producer never wrote. Checked last so a
+  // Windows drive path still reports the more useful "is absolute".
+  if (path.includes(":") || path.includes("#")) {
+    return {
+      code: "non-posix-path",
+      message: `Symbol id file path "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,
       value: path,
     }
   }

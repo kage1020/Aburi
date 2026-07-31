@@ -47,7 +47,7 @@ Rule L-2 (well-known tokens): the following short-form tokens are centrally rese
 
 Rule L-3 (case sensitivity): language tokens are lowercase ASCII, `[a-z][a-z0-9]*`. `TS`, `TypeScript`, `ts_next` are not valid tokens.
 
-Rule L-6 (reserved namespaces): a language token MUST NOT collide with a token Aburi already uses to prefix a different kind of identifier. Today the reserved list is exactly `slice`, because a Slice id is `"slice:" + <anchor Symbol id>` ([slice-view.md](./slice-view.md) §7.1): a `slice` language plugin would mint Symbol ids indistinguishable from Slice ids, and deriving a Slice id from one of them would produce `slice:slice:…`. `makeSymbolId` in `@aburi/core` rejects the token at construction, and `checkIRIntegrity` rejects it in a document it did not build (invariant #16 in [ir-schema.md](./ir-schema.md) §14). The list is additive: a future id kind that takes a `<prefix>:` of its own extends it in the same PR that introduces the prefix.
+Rule L-11 (reserved namespaces): a language token MUST NOT collide with a token Aburi already uses to prefix a different kind of identifier. Today the reserved list is exactly `slice`, because a Slice id is `"slice:" + <anchor Symbol id>` ([slice-view.md](./slice-view.md) §7.1): a `slice` language plugin would mint Symbol ids indistinguishable from Slice ids, and deriving a Slice id from one of them would produce `slice:slice:…`. `makeSymbolId` in `@aburi/core` rejects the token at construction, and `checkIRIntegrity` rejects it in a document it did not build (invariant #16 in [ir-schema.md](./ir-schema.md) §14). The list is additive: a future id kind that takes a `<prefix>:` of its own extends it in the same PR that introduces the prefix.
 
 Prefix collisions do not count — `slicer` is a legal token. Only the whole token is reserved.
 
@@ -64,7 +64,7 @@ These are distinct Symbols. No implicit link is formed between them. If they rep
 
 Rule L-4 (component languages): `components[].languages` is already `required: true` in [ir-schema.md](./ir-schema.md) §4. When it contains two or more tokens, the component's `roots[]` MAY hold files owned by any of them. Nothing about the component record changes; the array simply enumerates which language plugins participated.
 
-Rule L-5 (unowned files): a file whose extension is not claimed by any registered language plugin (`.proto`, `.md`, `.sql`, `.yaml`, ...) is skipped during extraction. It is never given a Symbol ID under a synthetic language token. Downstream tools that need to reference such a file (e.g. a build config that consumes a `.proto`) do so via a bare path string in `dependencies[]`, not a Symbol ID.
+Rule L-5 (unowned files): a file whose extension is not claimed by any registered language plugin (`.proto`, `.md`, `.sql`, `.yaml`, ...) is skipped during extraction. It is never given a Symbol ID under a synthetic language token. Downstream tools that need to reference such a file (e.g. a build config that consumes a `.proto`) do so via a bare path string in `dependencies[]`, not a Symbol ID. Nothing emits such an endpoint today, and the `DependencyEndpoint` type is correspondingly `SymbolId | ComponentId` ([ir-schema.md](./ir-schema.md) §3.5); the first producer of a path-shaped endpoint extends that union in the same PR, so the type keeps naming exactly what the array can hold.
 
 ## 4. Cross-language dependency edges
 
@@ -228,8 +228,8 @@ Rule L-10 (config surface locality): no per-language section of the config contr
 | ML13 | `crossLanguage.enabled: false` and both ends of an HTTP signal exist | No cross-language edge emitted; per-language analysis unchanged |
 | ML14 | `components[].publicApi` contains `"apps/billing/src/routes/**"` (glob, no prefix) — the canonical form from [ir-schema.md](./ir-schema.md) §4 | Accepted; each matched file is owned by whichever language plugin claims it |
 | ML15 | `components[].publicApi` contains `"apps/billing/src/index.ts#Invoice"` (Symbol ID without `<language>:` prefix) | Rejected — Symbol IDs MUST carry the language prefix per [ir-schema.md](./ir-schema.md) §3 (unchanged from single-language) |
-| ML16 | `makeSymbolId({ language: "slice", … })` | Rejected with `invalid-language-id`; the message names the reservation rather than the pattern (Rule L-6) |
-| ML17 | `makeSymbolId({ language: "slicer", … })` | Accepted — only the whole token is reserved, not the prefix (Rule L-6) |
+| ML16 | `makeSymbolId({ language: "slice", … })` | Rejected with `invalid-language-id`; the message names the reservation rather than the pattern (Rule L-11) |
+| ML17 | `makeSymbolId({ language: "slicer", … })` | Accepted — only the whole token is reserved, not the prefix (Rule L-11) |
 | ML18 | An IR read from disk contains `symbols[].id` of `"slice:src/a.ts#foo"` | `checkIRIntegrity` reports invariant #16; the run aborts rather than deriving `slice:slice:src/a.ts#foo` in Slice View |
 
 ## 12. Design Decisions

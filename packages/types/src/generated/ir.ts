@@ -80,7 +80,7 @@ derivedFrom?: SymbolId[]
 export type EffectId = (("db.read" | "db.write" | "db.transaction" | "db.migration" | "network.http" | "network.ws" | "network.rpc" | "queue.publish" | "queue.consume" | "event.publish" | "event.subscribe" | "fs.read" | "fs.write" | "state.mutate" | "collection.mutate" | "time.now" | "time.timer" | "random" | "env.read" | "env.write" | "process.exit" | "process.signal") | string)
 export type Confidence = ("high" | "medium" | "low")
 /**
- * Either a Symbol id or a Component id; which one is recovered from the id shape (§11). Deliberately looser than SymbolId and ComponentId so both fit, and so a cross-language endpoint that is neither (a bare path or route string) still validates.
+ * Either a Symbol id or a Component id; which one is recovered from the id shape (§11). Deliberately looser than SymbolId and ComponentId so that both fit and so a malformed endpoint is reported by the integrity checker rather than by the schema, which cannot say which of the two kinds was intended.
  */
 export type DependencyEndpoint = SymbolId | ComponentId
 

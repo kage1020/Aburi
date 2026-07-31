@@ -729,7 +729,7 @@
 
     "ComponentId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
       "description": "ASCII kebab-case."
     },
 
@@ -742,7 +742,7 @@
     "DependencyEndpoint": {
       "type": "string",
       "minLength": 1,
-      "description": "Either a Symbol id or a Component id; which one is recovered from the id shape (§11). Deliberately looser than SymbolId and ComponentId so both fit, and so a cross-language endpoint that is neither (a bare path or route string) still validates."
+      "description": "Either a Symbol id or a Component id; which one is recovered from the id shape (§11). Deliberately looser than SymbolId and ComponentId so that both fit and so a malformed endpoint is reported by the integrity checker rather than by the schema, which cannot say which of the two kinds was intended."
     },
 
     "RelativePath": {

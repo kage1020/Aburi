@@ -133,7 +133,9 @@ Priority order:
 4. Trailing segment of the module name in `go.mod` (Go)
 5. Kebab-case the trailing segment of the workspace directory's full path
 
-On collision (multiple workspaces yielding the same id) → append the parent directory name as a suffix (`billing` → `billing-apps` / `billing-packages`).
+On collision (multiple workspaces yielding the same id) → append the parent directory name as a suffix (`billing` → `billing-apps` / `billing-packages`). When the parent segment kebab-cases to nothing, the id is left unsuffixed and the numeric-suffix pass (`billing-2`, `billing-3`) resolves the collision instead.
+
+The result must satisfy `aburi.ir.v1.json#/$defs/ComponentId`. Names that kebab-case to the empty string — a directory whose name is entirely non-ASCII, say — cannot yield an id, and detection aborts with `invalid-component-id` naming the manifest or directory it came from. Declare the component explicitly in `aburi.json` `components[]` to override the derivation.
 
 ### 4.2 `name`
 

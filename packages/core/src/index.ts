@@ -41,6 +41,7 @@ export {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  RESERVED_LANGUAGE_IDS,
   type SymbolIdParts,
   toPosixRelative,
   trySymbolId,
