@@ -8,11 +8,13 @@ export type CoreErrorCode =
   | "anonymous-symbol-id-attempted"
   /** A path was passed that contains a backslash, an absolute prefix, or `..` ascent. */
   | "non-posix-path"
-  /** A language id failed the lowercase ASCII pattern required by the IR schema. */
+  /** A language id failed the lowercase ASCII pattern required by the IR schema, or named a reserved namespace. */
   | "invalid-language-id"
+  /** A Component id failed the ASCII kebab-case pattern required by the IR schema. */
+  | "invalid-component-id"
   /** serializeCanonical encountered a value JSON cannot represent (function, symbol, bigint, …). */
   | "non-plain-json"
-  /** One or more of the 11 IR invariants were violated; `details` carries each violation. */
+  /** One or more of the IR invariants in ir-schema.md §14 were violated; `details` carries each violation. */
   | "integrity-violation"
   /** Workspace root detection failed (no marker found between cwd and filesystem root). */
   | "workspace-root-not-found"
@@ -32,7 +34,7 @@ export type CoreErrorCode =
   | "lsp-config-invalid"
 
 export interface IntegrityViolation {
-  /** Stable invariant id corresponding to ir-schema.md §14 numbering (1..11). */
+  /** Stable invariant id corresponding to the ir-schema.md §14 numbering, which is the single source of the list. */
   invariant: number
   /** Identifier (Symbol id, Component id, file path, etc.) the violation is attributed to. */
   subject: string

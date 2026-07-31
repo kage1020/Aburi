@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { assertIRIntegrity, CoreError, checkIRIntegrity } from "../src/index"
-import { makeSymbol, minimalIR } from "./fixtures/ir"
+import {
+  componentId,
+  endpoint,
+  makeComponent,
+  makeDependency,
+  makeSymbol,
+  minimalIR,
+  symbolId,
+} from "./fixtures/ir"
 
 describe("checkIRIntegrity", () => {
   it("returns [] for an empty but well-formed IR", () => {
@@ -17,8 +25,8 @@ describe("checkIRIntegrity", () => {
   it("#2: detects duplicate Component ids", () => {
     const ir = minimalIR()
     ir.components = [
-      { id: "a", name: "A", roots: ["apps/a"], languages: ["ts"] },
-      { id: "a", name: "A2", roots: ["apps/a2"], languages: ["ts"] },
+      { id: componentId("a"), name: "A", roots: ["apps/a"], languages: ["ts"] },
+      { id: componentId("a"), name: "A2", roots: ["apps/a2"], languages: ["ts"] },
     ]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 2)).toBe(true)
@@ -26,7 +34,9 @@ describe("checkIRIntegrity", () => {
 
   it("#3: detects unknown Symbol.component reference", () => {
     const ir = minimalIR()
-    ir.components = [{ id: "billing", name: "B", roots: ["apps/billing"], languages: ["ts"] }]
+    ir.components = [
+      { id: componentId("billing"), name: "B", roots: ["apps/billing"], languages: ["ts"] },
+    ]
     ir.symbols = [makeSymbol("ts:src/a.ts#foo", { component: "missing" })]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 3)).toBe(true)
@@ -37,8 +47,8 @@ describe("checkIRIntegrity", () => {
     ir.symbols = [makeSymbol("ts:src/a.ts#foo")]
     ir.dependencies = [
       {
-        from: "ts:src/a.ts#foo",
-        to: "ts:src/b.ts#missing",
+        from: endpoint("ts:src/a.ts#foo"),
+        to: endpoint("ts:src/b.ts#missing"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -145,7 +155,7 @@ describe("checkIRIntegrity", () => {
 
   it("#10: detects absolute paths in component roots", () => {
     const ir = minimalIR()
-    ir.components = [{ id: "a", name: "A", roots: ["/abs/path"], languages: ["ts"] }]
+    ir.components = [{ id: componentId("a"), name: "A", roots: ["/abs/path"], languages: ["ts"] }]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 10)).toBe(true)
   })
@@ -169,7 +179,7 @@ describe("checkIRIntegrity", () => {
             confidence: "high",
             derivedBy: "convention:test",
             propagated: true,
-            derivedFrom: ["ts:src/a.ts#other"],
+            derivedFrom: [symbolId("ts:src/a.ts#other")],
           },
           {
             id: "db.read",
@@ -199,7 +209,7 @@ describe("checkIRIntegrity", () => {
             confidence: "high",
             derivedBy: "convention:test",
             propagated: true,
-            derivedFrom: ["ts:src/a.ts#other"],
+            derivedFrom: [symbolId("ts:src/a.ts#other")],
           },
         ],
       }),
@@ -247,8 +257,8 @@ describe("checkIRIntegrity", () => {
     ir.symbols = [makeSymbol("ts:src/a.ts#foo")]
     ir.dependencies = [
       {
-        from: "billing",
-        to: "ts:src/a.ts#foo",
+        from: endpoint("billing"),
+        to: endpoint("ts:src/a.ts#foo"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -267,8 +277,8 @@ describe("checkIRIntegrity", () => {
     ]
     ir.dependencies = [
       {
-        from: "ts:src/a.ts#foo",
-        to: "ts:src/missing.ts#gone",
+        from: endpoint("ts:src/a.ts#foo"),
+        to: endpoint("ts:src/missing.ts#gone"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -288,8 +298,8 @@ describe("checkIRIntegrity", () => {
     ]
     ir.dependencies = [
       {
-        from: "ts:src/a.ts#caller",
-        to: "ts:src/a.ts#helper",
+        from: endpoint("ts:src/a.ts#caller"),
+        to: endpoint("ts:src/a.ts#helper"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -309,8 +319,8 @@ describe("checkIRIntegrity", () => {
     ]
     ir.dependencies = [
       {
-        from: "ts:src/a.ts#caller",
-        to: "ts:src/a.ts#helper",
+        from: endpoint("ts:src/a.ts#caller"),
+        to: endpoint("ts:src/a.ts#helper"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -329,15 +339,15 @@ describe("checkIRIntegrity", () => {
     ]
     ir.dependencies = [
       {
-        from: "ts:src/a.ts#caller",
-        to: "ts:src/a.ts#helper",
+        from: endpoint("ts:src/a.ts#caller"),
+        to: endpoint("ts:src/a.ts#helper"),
         via: "call",
         direction: "outbound",
         effect: null,
       },
       {
-        from: "ts:src/a.ts#caller",
-        to: "ts:src/a.ts#helper",
+        from: endpoint("ts:src/a.ts#caller"),
+        to: endpoint("ts:src/a.ts#helper"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -365,8 +375,8 @@ describe("checkIRIntegrity", () => {
     ir.symbols = [makeSymbol("ts:src/a.ts#caller"), makeSymbol("ts:src/a.ts#helper")]
     ir.dependencies = [
       {
-        from: "ts:src/a.ts#caller",
-        to: "ts:src/a.ts#helper",
+        from: endpoint("ts:src/a.ts#caller"),
+        to: endpoint("ts:src/a.ts#helper"),
         via: "call",
         direction: "outbound",
         effect: null,
@@ -454,5 +464,62 @@ describe("assertIRIntegrity", () => {
     expect(caught).toBeInstanceOf(CoreError)
     expect((caught as CoreError).code).toBe("integrity-violation")
     expect((caught as CoreError).violations?.length ?? 0).toBeGreaterThan(0)
+  })
+})
+
+describe("checkIRIntegrity — id namespaces (#16)", () => {
+  it("#16: rejects a Symbol id in the reserved `slice:` namespace", () => {
+    // makeSymbolId refuses to build one, so this can only arrive from a document Aburi did
+    // not produce. Left unchecked, computeSlices would derive "slice:slice:src/a.ts#foo".
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("slice:src/a.ts#foo")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 16)).toBe(true)
+  })
+
+  it("#16: leaves ordinary language tokens alone, including ones with the reserved prefix", () => {
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("slicer:src/a.ts#foo"), makeSymbol("ts:src/b.ts#bar")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 16)).toBe(false)
+  })
+
+  it("#16: covers Dependency endpoints, not just symbols[]", () => {
+    // Without this, the endpoint is reported by #4 as a Symbol id with no matching Symbol —
+    // detected, but blamed on a missing Symbol that was never supposed to exist.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#foo")]
+    ir.dependencies = [
+      makeDependency({ from: "ts:src/a.ts#foo", to: "slice:src/b.ts#bar", via: "import" }),
+    ]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 16)).toBe(true)
+  })
+
+  it("#17: rejects a Symbol id that no constructor could have produced", () => {
+    // readIR brands a whole document in one assertion, so this is the only place the ids
+    // inside it are actually looked at.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:../../etc/passwd#foo")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
+  })
+
+  it("#17: rejects a Component id that is not kebab-case", () => {
+    const ir = minimalIR()
+    ir.components = [makeComponent("Billing")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
+  })
+
+  it("#17: accepts the ids the constructors produce, including digit-leading components", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#Cls::fromJson", { component: "3d-renderer" }),
+      makeSymbol("ts:src/b.ts#<default>", { component: "3d-renderer" }),
+    ]
+    ir.components = [makeComponent("3d-renderer")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.filter((v) => v.invariant === 17)).toEqual([])
   })
 })

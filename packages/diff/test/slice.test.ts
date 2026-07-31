@@ -9,7 +9,7 @@ import {
   sliceAnchor,
   sliceRecordViolation,
 } from "../src/slice"
-import { fp, makeSymbol, zeroFp } from "./fixtures"
+import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "./fixtures"
 
 /**
  * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
@@ -79,7 +79,7 @@ const droppedToggled = (id: string, direction: "to-dropped" | "to-kept"): Symbol
 })
 
 function edge(from: string, to: string, line = 1, confidence: Confidence = "high"): CallEdge {
-  return { from, to, via: "call", confidence, line }
+  return { from: symbolId(from), to: symbolId(to), via: "call", confidence, line }
 }
 
 describe("computeSlices — Node selection (SV1–SV5)", () => {
@@ -159,7 +159,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
       confidence: "high",
       derivedBy: "propagation:svc.op",
       propagated: true,
-      derivedFrom: [Svc],
+      derivedFrom: [symbolId(Svc)],
     }
     const ctlPropagatedOnly: SymbolChange = {
       status: "changed",
@@ -528,7 +528,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
 
     // A record whose id disagrees with its members is malformed, but the helper
     // still answers from members[0] — proof it never strips the `slice:` prefix.
-    expect(sliceAnchor({ id: `slice:${B}`, members: [A, B] })).toBe(A)
+    expect(sliceAnchor({ id: sliceId(`slice:${B}`), members: [symbolId(A), symbolId(B)] })).toBe(A)
   })
 
   it("SV23: rejects a correct `slice:` prefix whose id is not the anchor", () => {
@@ -572,7 +572,9 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
   })
 
   it("SV25: sliceAnchor throws rather than returning undefined for an empty members[]", () => {
-    expect(() => sliceAnchor({ id: "slice:ts:src/a.ts#A", members: [] })).toThrow(DiffError)
+    expect(() => sliceAnchor({ id: sliceId("slice:ts:src/a.ts#A"), members: [] })).toThrow(
+      DiffError,
+    )
   })
 })
 
@@ -613,5 +615,26 @@ describe("sliceRecordViolation — untyped input (SV24)", () => {
     for (const value of [null, undefined, 42, "slice:a", []]) {
       expect(sliceRecordViolation(value)?.kind).toBe("malformed-shape")
     }
+  })
+})
+
+describe("SV29: a Slice id cannot be built on an anchor from a reserved namespace", () => {
+  it("rejects an anchor in the `slice:` namespace even though the derivation is self-consistent", () => {
+    // "slice:slice:…" satisfies every other clause: the prefix matches, members[] is a
+    // one-element ascending list, and the id IS "slice:" + members[0]. Only the namespace
+    // rule catches it. makeSymbolId refuses to build such a Symbol id and checkIRIntegrity
+    // #16 rejects one read from disk, but buildDiff is public API and runs neither.
+    const violation = sliceRecordViolation({
+      id: "slice:slice:src/a.ts#A",
+      members: ["slice:src/a.ts#A"],
+    })
+    expect(violation?.kind).toBe("anchor-in-reserved-namespace")
+    expect(violation?.message).toContain("slice")
+  })
+
+  it("leaves an anchor whose language token merely starts with the reserved one alone", () => {
+    expect(
+      sliceRecordViolation({ id: "slice:slicer:src/a.ts#A", members: ["slicer:src/a.ts#A"] }),
+    ).toBeNull()
   })
 })

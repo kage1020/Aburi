@@ -1,4 +1,5 @@
-import type { Symbol as IRSymbol, MatchRationale } from "@aburi/types"
+import { trySymbolId } from "@aburi/core"
+import type { Symbol as IRSymbol, MatchRationale, SymbolId } from "@aburi/types"
 import { signatureSimilarity } from "./signature"
 import { lastSegment, nameSimilarity, ownerSimilarity, tokenizeName } from "./similarity"
 
@@ -31,11 +32,11 @@ export function matchStageId(
   remainingBase: IRSymbol[]
   remainingHead: IRSymbol[]
 } {
-  const headById = new Map<string, IRSymbol>()
+  const headById = new Map<SymbolId, IRSymbol>()
   for (const s of head) headById.set(s.id, s)
   const matched: SymbolPair[] = []
   const remainingBase: IRSymbol[] = []
-  const usedHead = new Set<string>()
+  const usedHead = new Set<SymbolId>()
   for (const b of base) {
     const h = headById.get(b.id)
     if (h !== undefined) {
@@ -70,10 +71,10 @@ export function matchStageGitRename(
   if (renameMap === null || renameMap.size === 0) {
     return { matched: [], remainingBase: [...remainingBase], remainingHead: [...remainingHead] }
   }
-  const headById = new Map<string, IRSymbol>()
+  const headById = new Map<SymbolId, IRSymbol>()
   for (const h of remainingHead) headById.set(h.id, h)
   const matched: SymbolPair[] = []
-  const usedHead = new Set<string>()
+  const usedHead = new Set<SymbolId>()
   const remaining: IRSymbol[] = []
   for (const b of remainingBase) {
     const newPath = renameMap.get(b.source.file)
@@ -82,7 +83,7 @@ export function matchStageGitRename(
       continue
     }
     const expectedId = rewriteIdFile(b.id, b.source.file, newPath)
-    const h = headById.get(expectedId)
+    const h = expectedId === null ? undefined : headById.get(expectedId)
     if (h === undefined || usedHead.has(h.id)) {
       remaining.push(b)
       continue
@@ -94,15 +95,27 @@ export function matchStageGitRename(
   return { matched, remainingBase: remaining, remainingHead: remainingHeadOut }
 }
 
-function rewriteIdFile(id: string, oldPath: string, newPath: string): string {
+/**
+ * Predict the id a base Symbol would carry after git moved its file. The second Symbol-id
+ * derivation in the codebase after `makeSymbolId` itself, so it goes back through the same
+ * constructor rather than re-concatenating the parts: `trySymbolId` rejects a rename target
+ * the id grammar cannot express (a backslash path, say) instead of minting an id no head
+ * Symbol can ever equal.
+ *
+ * Returns `null` for that case, and the unchanged id when no rename applies — the caller
+ * treats a null the same way it treats a lookup miss, leaving the pair for stage 3.
+ */
+function rewriteIdFile(id: SymbolId, oldPath: string, newPath: string): SymbolId | null {
   const colon = id.indexOf(":")
   const hash = id.indexOf("#")
   if (colon < 0 || hash < 0 || hash < colon) return id
-  const language = id.slice(0, colon)
   const filePart = id.slice(colon + 1, hash)
   if (filePart !== oldPath) return id
-  const rest = id.slice(hash)
-  return `${language}:${newPath}${rest}`
+  return trySymbolId({
+    language: id.slice(0, colon),
+    file: newPath,
+    qualifiedName: id.slice(hash + 1),
+  })
 }
 
 /**
@@ -137,7 +150,7 @@ export function matchStageLogicFingerprint(
   }
   const matched: SymbolPair[] = []
   const carryHead: IRSymbol[] = []
-  const usedBaseIds = new Set<string>()
+  const usedBaseIds = new Set<SymbolId>()
   for (const h of remainingHead) {
     if (h.dropped || h.fingerprint.logic === ZERO_LOGIC_FP) {
       carryHead.push(h)
@@ -220,7 +233,7 @@ export function matchStageNameSignature(
   }
   const matched: SymbolPair[] = []
   const remainingHeadOut: IRSymbol[] = []
-  const usedBaseIds = new Set<string>()
+  const usedBaseIds = new Set<SymbolId>()
   for (const h of remainingHead) {
     if (h.dropped) {
       remainingHeadOut.push(h)
@@ -302,7 +315,7 @@ export function matchStageDroppedWeak(
   const droppedHead = remainingHead.filter((s) => s.dropped)
   const nonDroppedHead = remainingHead.filter((s) => !s.dropped)
   const matched: SymbolPair[] = []
-  const usedBaseIds = new Set<string>()
+  const usedBaseIds = new Set<SymbolId>()
   const carryHead: IRSymbol[] = []
   for (const h of droppedHead) {
     let best: { symbol: IRSymbol; score: number } | null = null

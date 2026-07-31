@@ -28,6 +28,7 @@ import type {
   SymbolId,
 } from "@aburi/types"
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
+import { trySymbolId } from "../id"
 import { createLspClient, isLspFailure, type LspClient, type LspFailure } from "./client"
 import { createFallbackState, type FallbackState } from "./fallback"
 import { requestDocumentSymbols, requestHover } from "./requests"
@@ -52,7 +53,7 @@ export interface EnrichmentInput {
 export interface EnrichmentResult {
   symbols: IRSymbol[]
   receiverHints: ReadonlyMap<string, ReceiverHint>
-  implementerHints: ReadonlyMap<string, SymbolId[]>
+  implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   stats: LspEnrichmentStats | undefined
 }
 
@@ -627,8 +628,12 @@ function findClassSymbolId(
   className: string,
   workingById: Map<SymbolId, IRSymbol>,
 ): SymbolId | null {
-  const expectedId: SymbolId = `${caller.language}:${caller.source.file}#${className}`
-  if (workingById.has(expectedId)) return expectedId
+  const expectedId = trySymbolId({
+    language: caller.language,
+    file: caller.source.file,
+    qualifiedName: className,
+  })
+  if (expectedId !== null && workingById.has(expectedId)) return expectedId
   for (const s of workingById.values()) {
     if (s.language === caller.language && s.name === className && s.kind === "class") {
       return s.id
@@ -644,8 +649,12 @@ function findMemberSymbolId(
   methodName: string,
   workingById: Map<SymbolId, IRSymbol>,
 ): SymbolId | null {
-  const idInSameFile: SymbolId = `${language}:${callerFile}#${className}.${methodName}`
-  if (workingById.has(idInSameFile)) return idInSameFile
+  const idInSameFile = trySymbolId({
+    language,
+    file: callerFile,
+    qualifiedName: `${className}.${methodName}`,
+  })
+  if (idInSameFile !== null && workingById.has(idInSameFile)) return idInSameFile
   for (const s of workingById.values()) {
     if (s.language === language && s.name === `${className}.${methodName}`) return s.id
   }

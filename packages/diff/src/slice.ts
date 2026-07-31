@@ -1,5 +1,5 @@
-import { type CallEdge, computeWeaklyConnectedComponents } from "@aburi/core"
-import type { SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
+import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
+import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
 
 /** The three inputs of the Slice View pass — docs/design/slice-view.md §3. */
@@ -54,9 +54,14 @@ const SLICE_ID_PREFIX = "slice:"
  * in `src/` either receives an id or renders one. (Tests spell the prefix out
  * literally on purpose: an expectation written in terms of the function under
  * test would agree with it no matter what it produced.)
+ *
+ * The cast is the one place a `SliceId` comes into existence. `SliceId` and
+ * `SymbolId` are separate brands precisely so this concatenation cannot be
+ * open-coded anywhere else: a bare `"slice:" + x` evaluates to `string`, which
+ * `SliceRecord.id` no longer accepts.
  */
-function sliceIdFor(anchor: SymbolId): string {
-  return `${SLICE_ID_PREFIX}${anchor}`
+function sliceIdFor(anchor: SymbolId): SliceId {
+  return `${SLICE_ID_PREFIX}${anchor}` as SliceId
 }
 
 /**
@@ -118,6 +123,8 @@ export type SliceViolationKind =
   | "members-unordered"
   /** `id` is not `"slice:" + members[0]` (§7.1). */
   | "id-not-derived"
+  /** The anchor is itself in a reserved id namespace, so `id` would read as a doubled prefix (§7.5). */
+  | "anchor-in-reserved-namespace"
 
 export interface SliceRecordViolation {
   kind: SliceViolationKind
@@ -165,6 +172,21 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
 
   const anchor = members[0]
   if (anchor === undefined) return emptyMembersViolation(subject)
+  // A Symbol id in the `slice:` namespace derives to `slice:slice:…`, which is
+  // self-consistent — it passes the derivation clause below — but names an id no reader can
+  // tell from a Slice id. `makeSymbolId` refuses to build such a Symbol id and
+  // `checkIRIntegrity` #16 rejects one read from disk, but `buildDiff` is public API and
+  // runs no integrity check, so the doubled prefix is caught here too.
+  const reservedAnchor = reservedNamespaceOf(anchor)
+  if (reservedAnchor !== null) {
+    return {
+      kind: "anchor-in-reserved-namespace",
+      subject,
+      message:
+        `SliceRecord anchor "${anchor}" uses the reserved language token "${reservedAnchor}", ` +
+        `so its Slice id would repeat the prefix (ir-schema.md §3.5, slice-view.md §7.5).`,
+    }
+  }
   for (let i = 1; i < members.length; i++) {
     const previous = members[i - 1] as string
     const current = members[i] as string
@@ -178,6 +200,10 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
         `(slice-view.md §8.2 for the order, §11.1 for uniqueness).`,
     }
   }
+  // The one place outside `sliceIdFor` that asserts an id brand, and the reason this
+  // function takes `unknown`: the anchor has been checked to be a string and nothing more.
+  // Whether it is a well-formed Symbol id is not this check's question — a record whose
+  // members are gibberish still has to be told apart from one whose id disagrees with them.
   const expected = sliceIdFor(anchor as SymbolId)
   if (id !== expected) {
     return {
@@ -189,6 +215,14 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
     }
   }
   return null
+}
+
+/** The reserved token an id opens with, or `null`. Shares the list `@aburi/core` enforces. */
+function reservedNamespaceOf(id: string): string | null {
+  const colon = id.indexOf(":")
+  if (colon < 0) return null
+  const token = id.slice(0, colon)
+  return RESERVED_LANGUAGE_IDS.has(token) ? token : null
 }
 
 /** Single source of the empty-`members[]` wording, shared with `sliceAnchor`. */

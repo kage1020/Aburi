@@ -10,10 +10,11 @@ import {
   makeSymbolId,
   makeTopLevelQname,
 } from "@aburi/core"
+import type { SymbolId } from "@aburi/types"
 
 const LANGUAGE_ID = "ts"
 
-export function makeTsSymbolId(file: string, qname: string): string {
+export function makeTsSymbolId(file: string, qname: string): SymbolId {
   return makeSymbolId({ language: LANGUAGE_ID, file, qualifiedName: qname })
 }
 

@@ -5,12 +5,14 @@
 
 import type { Config } from "./generated/config"
 import type {
+  ComponentId,
   Confidence,
   Decorator,
   EffectId,
   ExtKind,
   Signature,
   SourceRange,
+  SymbolId,
   SymbolKind,
   Visibility,
 } from "./generated/ir"
@@ -96,8 +98,8 @@ export interface ParseResult<TTree = ParsedTree> {
  * plugin B's walkBody.
  */
 export interface SymbolCandidate<TNode = OpaqueAstNode> {
-  /** Format: `<language>:<file>#<qname>`. */
-  id: string
+  /** Format: `<language>:<file>#<qname>`. Build it with `makeSymbolId` from `@aburi/core`. */
+  id: SymbolId
   kind: SymbolKind
   extKind: ExtKind
   /** Qualified name. */
@@ -187,13 +189,13 @@ export interface WalkContext<TNode = OpaqueAstNode> extends ExtractionContext {
 // --- Effect classification context ---
 
 export interface OwnerSummary {
-  id: string
+  id: SymbolId
   kind: SymbolKind
   name: string
   /** Already populated by framework plugin (lang-plugin.md §5.3). */
   extKind: ExtKind
   decorators: { name: string; boundary: boolean }[]
-  component: string | null
+  component: ComponentId | null
 }
 
 export interface FileSummary {

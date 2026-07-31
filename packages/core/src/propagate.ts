@@ -242,7 +242,12 @@ function buildAdjacency(
 ): Map<SymbolId, Array<{ to: SymbolId; confidence: Confidence }>> {
   const adj = new Map<SymbolId, Array<{ to: SymbolId; confidence: Confidence }>>()
   for (const id of nodeIds) adj.set(id, [])
-  const seen = new Map<string, Confidence>()
+  // Keyed by the `(from, to)` pair for dedup, but the endpoints are carried in the value
+  // rather than recovered by splitting the key: a Symbol id may contain any character the
+  // path and qname allow, so re-deriving the pair from the joined string means asserting a
+  // brand back onto a slice of it. Holding the typed pair keeps the ids the resolver
+  // produced.
+  const seen = new Map<string, { from: SymbolId; to: SymbolId; confidence: Confidence }>()
   for (const e of edges) {
     // Every CallEdge must reference Symbols in the input set — resolveCallGraph
     // filters against `keptSymbolIds`. A dangling endpoint here means the caller
@@ -256,12 +261,14 @@ function buildAdjacency(
     }
     const key = `${e.from}\t${e.to}`
     const prior = seen.get(key)
-    seen.set(key, prior === undefined ? e.confidence : maxConfidence(prior, e.confidence))
+    seen.set(key, {
+      from: e.from,
+      to: e.to,
+      confidence:
+        prior === undefined ? e.confidence : maxConfidence(prior.confidence, e.confidence),
+    })
   }
-  for (const [key, confidence] of seen) {
-    const tab = key.indexOf("\t")
-    const from = key.slice(0, tab) as SymbolId
-    const to = key.slice(tab + 1) as SymbolId
+  for (const { from, to, confidence } of seen.values()) {
     const bucket = adj.get(from)
     if (bucket !== undefined) bucket.push({ to, confidence })
   }
@@ -327,8 +334,8 @@ function tarjanSCC(
             const popped = stack.pop()
             // Tarjan's contract: the stack must contain at least frame.node when
             // we detect a root (idx === low), so this can only trigger if the
-            // recursion has a bug. Convert the silent `as SymbolId` cast into an
-            // observable failure so a future refactor cannot loop forever here.
+            // recursion has a bug. Fail observably rather than treating the
+            // undefined pop as a node, so a future refactor cannot loop forever here.
             if (popped === undefined) {
               invariantFailure(`SCC stack drained before reaching root ${frame.node}`)
             }

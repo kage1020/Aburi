@@ -5,6 +5,7 @@ import {
   detectComponents,
   detectManagers,
   detectWorkspaceRoot,
+  makeComponentId,
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -233,22 +234,40 @@ function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Confi
   return merged as Config
 }
 
+/**
+ * Both branches can fail on a Component id the schema cannot hold: the config branch if a
+ * config reached us without ajv validation, the detection branch if a package or directory
+ * name kebab-cases to nothing. Either way it is a problem with the project being scanned,
+ * not a bug in Aburi, so it is wrapped as `config-error` — the exit-code table in
+ * `../exit-codes` maps that to 2, and an unwrapped `CoreError` would fall through to the
+ * generic handler and report 1 with no command context.
+ */
 async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
 ): Promise<Component[]> {
-  if (config.components !== undefined && config.components.length > 0) {
-    return config.components.map((entry) => ({
-      id: entry.id,
-      name: entry.name ?? entry.id,
-      roots: [...entry.roots],
-      publicApi: entry.publicApi ?? [],
-      languages: [...(entry.languages ?? [])],
-      frameworks: [...(entry.frameworks ?? [])],
-      description: entry.description ?? null,
-    }))
+  try {
+    if (config.components !== undefined && config.components.length > 0) {
+      // The config schema already constrains `id` to the kebab shape, but the value arrives
+      // here as a plain string. Re-asserting it through the constructor is what turns it into
+      // a Component id, and keeps a config loaded by some other path from smuggling in a
+      // shape `components[].id` cannot hold.
+      return config.components.map((entry) => ({
+        id: makeComponentId(entry.id),
+        name: entry.name ?? entry.id,
+        roots: [...entry.roots],
+        publicApi: entry.publicApi ?? [],
+        languages: [...(entry.languages ?? [])],
+        frameworks: [...(entry.frameworks ?? [])],
+        description: entry.description ?? null,
+      }))
+    }
+    return await detectComponents({ workspaceRoot })
+  } catch (error) {
+    throw new CliError(`Failed to resolve components: ${errorMessage(error)}`, "config-error", {
+      cause: error,
+    })
   }
-  return detectComponents({ workspaceRoot })
 }
 
 async function maybeWriteWorkspaceMd(

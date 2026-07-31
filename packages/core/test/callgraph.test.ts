@@ -1,12 +1,12 @@
 import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
-import { makeSymbol, minimalIR } from "./fixtures/ir"
+import { makeSymbol, minimalIR, type SymbolOverrides } from "./fixtures/ir"
 
 function withCalls(
   id: string,
   calls: Array<{ target: string; line: number }>,
-  overrides: Partial<IRSymbol> = {},
+  overrides: SymbolOverrides = {},
 ): IRSymbol {
   return makeSymbol(id, {
     calls: calls.map((c) => ({ target: c.target, line: c.line, resolved: null })),
@@ -57,6 +57,18 @@ describe("resolveCallGraph", () => {
       importsByFile: new Map(),
     })
     expect(result.edges[0]?.to).toBe("ts:src/a.ts#Cls.method")
+  })
+
+  it("file scope: a dotted target that cannot form a Symbol id stays unresolved, not fatal", () => {
+    // The candidate id here is built from a qname the id grammar rejects. Resolution asks
+    // "does this callee exist?", and the answer for an unbuildable id is no — the same
+    // answer a well-formed id absent from the Symbol set would get. Aborting the scan
+    // instead would make one odd call expression fail the whole run.
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "Cls.not an identifier", line: 3 }])
+    const cls = makeSymbol("ts:src/a.ts#Cls", { kind: "class" })
+    const result = resolveCallGraph({ symbols: [caller, cls], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
   })
 
   it("file scope: dotted target with missing method Symbol stays unresolved", () => {

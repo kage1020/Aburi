@@ -33,12 +33,18 @@ export {
 } from "./fingerprint"
 export {
   DEFAULT_EXPORT_QNAME,
+  isComponentId,
   isDefaultExportQname,
+  isSymbolId,
+  makeComponentId,
   makeMemberQname,
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  RESERVED_LANGUAGE_IDS,
+  type SymbolIdParts,
   toPosixRelative,
+  trySymbolId,
 } from "./id"
 export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
 export {

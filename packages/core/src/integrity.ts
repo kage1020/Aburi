@@ -1,5 +1,6 @@
-import type { IR } from "@aburi/types"
+import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
 import { CoreError, type IntegrityViolation } from "./errors"
+import { isComponentId, isSymbolId, RESERVED_LANGUAGE_IDS } from "./id"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -64,7 +65,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
  * empty); callers that want the throwing form use `assertIRIntegrity`.
  *
- * The 15 invariants checked here are:
+ * The 17 invariants checked here are:
  *   1. Symbol id uniqueness
  *   2. Component id uniqueness
  *   3. Symbol.component → Components[].id existence
@@ -80,6 +81,8 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *  13. dependencies[]: no duplicate (from, to, via) triples
  *  14. Symbol.calls[].resolved and via:"call" edges agree (call-graph projection is total)
  *  15. stats.callResolution (when present) is a faithful census of Symbol.calls[]
+ *  16. No Symbol id or Dependency endpoint uses a reserved language token (today: `slice`)
+ *  17. Symbol and Component ids satisfy their own grammars
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -99,6 +102,8 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkDependencyTupleUniqueness(ir, violations)
   checkCallGraphProjectionAgrees(ir, violations)
   checkCallResolutionStatsCensus(ir, violations)
+  checkSymbolIdNamespace(ir, violations)
+  checkIdGrammar(ir, violations)
 
   return violations
 }
@@ -112,6 +117,74 @@ export function assertIRIntegrity(ir: IR): void {
     code: "integrity-violation",
     violations,
   })
+}
+
+/**
+ * Invariant #16 (ir-schema.md §14, §3.5): no Symbol id and no Dependency endpoint uses a
+ * language token reserved to a different id namespace.
+ *
+ * `makeSymbolId` already refuses these, so a document Aburi produced cannot break this. The
+ * check is here for the ones it did not produce — an IR read off disk, or written by an
+ * older or third-party generator. A `slice:`-prefixed Symbol id would be indistinguishable
+ * from a Slice id, and the Slice View pass would derive `slice:slice:…` from it.
+ */
+function checkSymbolIdNamespace(ir: IR, out: IntegrityViolation[]): void {
+  for (const symbol of ir.symbols) {
+    reportReservedNamespace(symbol.id, symbol.id, out)
+  }
+  // Endpoints too, not just `symbols[]`. A `slice:`-namespaced endpoint would otherwise be
+  // reported by #4 as a Symbol id with no matching Symbol — detected, but blamed on the
+  // wrong cause, and the reader would go looking for a missing Symbol that never existed.
+  for (const dep of ir.dependencies) {
+    for (const role of ["from", "to"] as const) {
+      reportReservedNamespace(dep[role], `dependencies[${role}=${dep[role]}]`, out)
+    }
+  }
+}
+
+function reportReservedNamespace(id: string, subject: string, out: IntegrityViolation[]): void {
+  const colon = id.indexOf(":")
+  if (colon < 0) return
+  const language = id.slice(0, colon)
+  if (!RESERVED_LANGUAGE_IDS.has(language)) return
+  out.push({
+    invariant: 16,
+    subject,
+    message: `id uses the reserved language token "${language}"; ids in that namespace collide with another id kind (ir-schema.md §3.5)`,
+  })
+}
+
+/**
+ * Invariant #17 (ir-schema.md §14, §3.5): ids satisfy the grammars their own types claim.
+ *
+ * The reason this is worth a check of its own: `readIR` brands a whole parsed document in
+ * one `as unknown as IR`, which is the only way to type a JSON parse, but it means every
+ * `symbols[].id` and `components[].id` acquires its brand without anything having looked at
+ * it. Every other route to a branded id runs a constructor first. This is what closes the
+ * gap, so "holds a `SymbolId`" means the same thing for a document read off disk as for one
+ * this process just built.
+ *
+ * Subsumes #16 for Symbols — a reserved language token also fails `isSymbolId` — but both
+ * are reported, because "you used a reserved namespace" is a far more useful sentence than
+ * "this is not a well-formed Symbol id".
+ */
+function checkIdGrammar(ir: IR, out: IntegrityViolation[]): void {
+  for (const symbol of ir.symbols) {
+    if (isSymbolId(symbol.id)) continue
+    out.push({
+      invariant: 17,
+      subject: symbol.id,
+      message: `Symbol id does not satisfy the <language>:<posix-path>#<qualified-name> grammar (ir-schema.md §3.1)`,
+    })
+  }
+  for (const component of ir.components) {
+    if (isComponentId(component.id)) continue
+    out.push({
+      invariant: 17,
+      subject: component.id,
+      message: `Component id does not satisfy the ASCII kebab-case grammar (ir-schema.md §4)`,
+    })
+  }
 }
 
 function checkSymbolIdUniqueness(ir: IR, out: IntegrityViolation[]): void {
@@ -157,7 +230,7 @@ function checkSymbolComponentRef(ir: IR, out: IntegrityViolation[]): void {
 }
 
 function checkDependencyEndpoints(ir: IR, out: IntegrityViolation[]): void {
-  const symbolIds = new Set(ir.symbols.map((s) => s.id))
+  const symbolIds = new Set<string>(ir.symbols.map((s) => s.id))
   for (const dep of ir.dependencies) {
     for (const role of ["from", "to"] as const) {
       const endpoint = dep[role]
@@ -367,7 +440,23 @@ function compareCodeUnit(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-function looksLikeSymbolId(endpoint: string): boolean {
+/**
+ * Endpoint discrimination (§11): does this endpoint carry the `<language>:<path>#<qname>`
+ * silhouette, i.e. is it *meant* to be a Symbol id rather than a Component id?
+ *
+ * Deliberately looser than `isSymbolId` from ./id, which answers the different question of
+ * whether a string is a well-formed Symbol id. An endpoint that was meant to be one but is
+ * malformed — a backslash in the path, say — must still be routed to the Symbol-id
+ * invariants so the breach is reported, instead of being waved through as a Component id
+ * that happens not to be declared.
+ *
+ * Returns a plain boolean rather than narrowing to `SymbolId`, precisely because it is the
+ * looser test: a predicate here would hand out the brand to strings `makeSymbolId` refuses,
+ * and "holds a `SymbolId` ⇒ passed the constructor" would stop being true. The lookups this
+ * feeds are keyed by `string` for the same reason — they are membership tests over ids read
+ * from a document, not proofs about them.
+ */
+function looksLikeSymbolId(endpoint: DependencyEndpoint): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
 }
 
@@ -460,7 +549,7 @@ function assertEffectSegmentation(symbol: IR["symbols"][number], out: IntegrityV
  * silently corrupt effect propagation.
  */
 function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
-  const symbolsById = new Map(ir.symbols.map((s) => [s.id, s]))
+  const symbolsById = new Map<string, IRSymbol>(ir.symbols.map((s) => [s.id, s]))
   for (const dep of ir.dependencies) {
     if (dep.via !== "call") continue
     for (const role of ["from", "to"] as const) {

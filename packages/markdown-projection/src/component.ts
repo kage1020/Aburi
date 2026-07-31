@@ -61,7 +61,9 @@ export function projectComponent(input: ProjectComponentInput): string {
       !isSymbolIdEndpoint(d.from) &&
       !isSymbolIdEndpoint(d.to),
   )
-  const symbolIdsInComponent = new Set(symbols.filter((s) => !s.dropped).map((s) => s.id))
+  // Keyed by `string`: `isSymbolIdEndpoint` answers about an endpoint's silhouette, not
+  // its well-formedness, so the membership test must accept whatever the document holds.
+  const symbolIdsInComponent = new Set<string>(symbols.filter((s) => !s.dropped).map((s) => s.id))
   const symbolLevelDeps = dependencies.filter(
     (d) =>
       (isSymbolIdEndpoint(d.from) && symbolIdsInComponent.has(d.from)) ||

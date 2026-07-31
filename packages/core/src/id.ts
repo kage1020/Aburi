@@ -1,10 +1,33 @@
-import { CoreError } from "./errors"
+/**
+ * Symbol and Component id construction.
+ *
+ * This module is the single place in the workspace that mints a branded `SymbolId` or
+ * `ComponentId` (ir-schema.md §3.5). Every other package reaches one through the
+ * constructors here or through the `isSymbolId` / `isComponentId` guards, so "is this string
+ * a well-formed id?" has one implementation rather than one per call site — and an id that
+ * reaches the IR has necessarily passed it.
+ */
+import type { ComponentId, SymbolId } from "@aburi/types"
+import { CoreError, type CoreErrorCode } from "./errors"
 
 /** Sentinel qualified name reserved for the lone default export of a module. */
 export const DEFAULT_EXPORT_QNAME = "<default>"
 
 /** Lowercase-ASCII kebab-ish language id (e.g. "ts", "tsx", "py", "go", "rs"). */
 const LANGUAGE_ID_PATTERN = /^[a-z][a-z0-9]*$/
+
+/**
+ * Language tokens no plugin may claim, because a Symbol id built from them would collide
+ * with an id minted in a different namespace. Today that is `slice`: Slice ids are
+ * `"slice:" + <anchor Symbol id>` (slice-view.md §7.1), so a `slice` language plugin would
+ * produce Symbol ids indistinguishable from Slice ids, and deriving a Slice id from one of
+ * them would yield `slice:slice:...`. The brand on `SymbolId` / `SliceId` keeps the two
+ * apart inside typed code; this keeps them apart on the wire.
+ *
+ * Exported so `checkIRIntegrity` can enforce the same list on a document it did not build
+ * (ir-schema.md §14 invariant #16) without a second copy of it.
+ */
+export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 
 /** Identifier-like segment that may appear in a qualified name (no separators, no spaces). */
 const QNAME_SEGMENT_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
@@ -13,19 +36,101 @@ const QNAME_SEGMENT_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:[\\/])/
 
 /**
- * Build a Symbol id from its three deterministic components. Refuses anything that would
- * make the id position-dependent (anonymous qualified names, backslash paths, absolute
- * paths, ascending `..` paths), so position-dependent ids cannot leak into the IR.
+ * ASCII kebab-case, matching `aburi.ir.v1.json#/$defs/ComponentId`.
+ *
+ * A segment may start with a digit. Component ids are derived by kebab-casing a package or
+ * directory name (component-detect.md §4.1), and `3d-force-graph` / `7zip-bin` are ordinary
+ * npm package names — a letter-first rule would make the documented derivation partial for
+ * no gain, since nothing distinguishes a Component id by its first character.
  */
-export function makeSymbolId(parts: {
+const COMPONENT_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
+
+export interface SymbolIdParts {
   language: string
   file: string
   qualifiedName: string
-}): string {
-  assertLanguageId(parts.language)
-  const file = assertPosixWorkspaceRelative(parts.file)
-  assertQualifiedName(parts.qualifiedName)
-  return `${parts.language}:${file}#${parts.qualifiedName}`
+}
+
+/** A reason a candidate Symbol id was rejected, in the shape `CoreError` wants. */
+interface IdViolation {
+  code: CoreErrorCode
+  message: string
+  value: string
+}
+
+/**
+ * Build a Symbol id from its three deterministic components. Refuses anything that would
+ * make the id position-dependent (anonymous qualified names, backslash paths, absolute
+ * paths, ascending `..` paths), so position-dependent ids cannot leak into the IR.
+ *
+ * Use this wherever a failed id is a bug. Where a candidate id is speculative — a resolver
+ * guessing at a callee that may not exist — use `trySymbolId` instead, which reports the
+ * same rejections as `null`.
+ */
+export function makeSymbolId(parts: SymbolIdParts): SymbolId {
+  const violation = symbolIdViolation(parts)
+  if (violation !== null) {
+    throw new CoreError(violation.message, { code: violation.code, value: violation.value })
+  }
+  return composeSymbolId(parts)
+}
+
+/**
+ * Non-throwing counterpart of `makeSymbolId`, for call sites that assemble a *candidate* id
+ * and then test it against a set of known ids — resolvers guessing at a callee, and the diff
+ * matcher predicting an id across a file rename. An id that cannot be built is a candidate
+ * that cannot match any Symbol, which is the same outcome as building it and finding it
+ * absent, so returning `null` keeps those call sites behaving as they did when they
+ * concatenated the parts by hand.
+ *
+ * A refusal is therefore never silently lossy *provided* every id in the set went through
+ * `makeSymbolId` too — which invariant #17 (ir-schema.md §14) is what guarantees, including
+ * for a document read off disk.
+ */
+export function trySymbolId(parts: SymbolIdParts): SymbolId | null {
+  if (symbolIdViolation(parts) !== null) return null
+  return composeSymbolId(parts)
+}
+
+/**
+ * Build a Component id. The kebab-case shape is what `components[].id` is validated against
+ * on the wire, and what tells a Component endpoint apart from a Symbol endpoint in
+ * `dependencies[]` (ir-schema.md §11).
+ */
+export function makeComponentId(raw: string): ComponentId {
+  if (!COMPONENT_ID_PATTERN.test(raw)) {
+    throw new CoreError(
+      `Component id "${raw}" violates the ASCII kebab-case pattern required by ir-schema.md §4`,
+      { code: "invalid-component-id", value: raw },
+    )
+  }
+  return raw as ComponentId
+}
+
+/**
+ * Narrow an arbitrary string to a `SymbolId`: does it satisfy everything `makeSymbolId`
+ * would have enforced had it built the id?
+ *
+ * Answers by splitting the string back into its three parts and running the same check the
+ * constructor runs, rather than by a whole-string regex. A regex tight enough to be
+ * equivalent would have to re-encode the reserved-token list, the `..` rule and the
+ * qualified-name grammar, and the two would drift the first time one of them changed. The
+ * split is unambiguous because the parts are separated by the first `:` and the first `#`,
+ * and neither the language token nor the file path may contain either character.
+ *
+ * A predicate that only tested the id's silhouette would be worse than none: `SliceId` is
+ * assignable to `string`, so `isSymbolId(someSliceId)` compiles, and a loose predicate would
+ * hand back a `SymbolId` for it — forging the exact namespace crossing the brand exists to
+ * prevent.
+ */
+export function isSymbolId(value: string): value is SymbolId {
+  const parts = splitSymbolId(value)
+  return parts !== null && symbolIdViolation(parts) === null
+}
+
+/** Narrow an arbitrary string to a `ComponentId`. Counterpart of `isSymbolId`. */
+export function isComponentId(value: string): value is ComponentId {
+  return COMPONENT_ID_PATTERN.test(value)
 }
 
 /**
@@ -88,64 +193,133 @@ export function isDefaultExportQname(qname: string): boolean {
  */
 export function toPosixRelative(rawPath: string): string {
   const normalized = rawPath.replace(/\\/g, "/")
-  return assertPosixWorkspaceRelative(normalized)
+  const violation = posixWorkspaceRelativeViolation(normalized)
+  if (violation !== null) {
+    throw new CoreError(violation.message, { code: violation.code, value: violation.value })
+  }
+  return normalized
 }
 
-function assertLanguageId(language: string): void {
-  if (!LANGUAGE_ID_PATTERN.test(language)) {
-    throw new CoreError(
-      `Symbol id language "${language}" violates the lowercase-ASCII identifier pattern`,
-      { code: "invalid-language-id", value: language },
-    )
+/**
+ * Assemble the id from parts already known to be valid. Both public constructors run the
+ * full check first and share this, so the format lives in one place.
+ */
+function composeSymbolId(parts: SymbolIdParts): SymbolId {
+  return `${parts.language}:${parts.file}#${parts.qualifiedName}` as SymbolId
+}
+
+/**
+ * Inverse of `composeSymbolId`: recover the three parts from an assembled id, or `null` when
+ * the string has no `:` / `#` structure at all. Neither the language token nor the file path
+ * may contain `:` or `#`, so the first occurrence of each is the separator — which is why
+ * `posixWorkspaceRelativeViolation` rejects both characters in a path.
+ */
+function splitSymbolId(value: string): SymbolIdParts | null {
+  const colon = value.indexOf(":")
+  if (colon < 0) return null
+  const hash = value.indexOf("#", colon + 1)
+  if (hash < 0) return null
+  return {
+    language: value.slice(0, colon),
+    file: value.slice(colon + 1, hash),
+    qualifiedName: value.slice(hash + 1),
   }
 }
 
-function assertPosixWorkspaceRelative(path: string): string {
+/** Full validation of a candidate Symbol id, in the order the assertions used to run. */
+function symbolIdViolation(parts: SymbolIdParts): IdViolation | null {
+  return (
+    languageIdViolation(parts.language) ??
+    posixWorkspaceRelativeViolation(parts.file) ??
+    qualifiedNameViolation(parts.qualifiedName)
+  )
+}
+
+function languageIdViolation(language: string): IdViolation | null {
+  if (!LANGUAGE_ID_PATTERN.test(language)) {
+    return {
+      code: "invalid-language-id",
+      message: `Symbol id language "${language}" violates the lowercase-ASCII identifier pattern`,
+      value: language,
+    }
+  }
+  if (RESERVED_LANGUAGE_IDS.has(language)) {
+    return {
+      code: "invalid-language-id",
+      message:
+        `Symbol id language "${language}" is reserved and cannot be claimed by a language ` +
+        `plugin; an id in this namespace would be indistinguishable from a Slice id`,
+      value: language,
+    }
+  }
+  return null
+}
+
+function posixWorkspaceRelativeViolation(path: string): IdViolation | null {
   if (path.length === 0) {
-    throw new CoreError("Symbol id file path is empty", {
-      code: "non-posix-path",
-      value: path,
-    })
+    return { code: "non-posix-path", message: "Symbol id file path is empty", value: path }
   }
   if (path.includes("\\")) {
-    throw new CoreError(
-      `Symbol id file path "${path}" contains a backslash; pass it through toPosixRelative() first`,
-      { code: "non-posix-path", value: path },
-    )
+    return {
+      code: "non-posix-path",
+      message: `Symbol id file path "${path}" contains a backslash; pass it through toPosixRelative() first`,
+      value: path,
+    }
   }
   if (ABSOLUTE_PATH_PATTERN.test(path)) {
-    throw new CoreError(
-      `Symbol id file path "${path}" is absolute; rebase it onto the workspace root`,
-      { code: "non-posix-path", value: path },
-    )
+    return {
+      code: "non-posix-path",
+      message: `Symbol id file path "${path}" is absolute; rebase it onto the workspace root`,
+      value: path,
+    }
   }
-  const segments = path.split("/")
-  if (segments.some((s) => s === "..")) {
-    throw new CoreError(
-      `Symbol id file path "${path}" escapes the workspace via "..", which would leak the host layout into the IR`,
-      { code: "non-posix-path", value: path },
-    )
+  if (path.split("/").some((s) => s === "..")) {
+    return {
+      code: "non-posix-path",
+      message: `Symbol id file path "${path}" escapes the workspace via "..", which would leak the host layout into the IR`,
+      value: path,
+    }
   }
-  return path
+  // `:` and `#` are the id's own separators, so a path holding either assembles into a
+  // string whose first `:` / `#` fall in the wrong place: it still satisfies the schema
+  // pattern, but splitting it back yields parts the producer never wrote. Checked last so a
+  // Windows drive path still reports the more useful "is absolute".
+  if (path.includes(":") || path.includes("#")) {
+    return {
+      code: "non-posix-path",
+      message: `Symbol id file path "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,
+      value: path,
+    }
+  }
+  return null
 }
 
-function assertQualifiedName(qname: string): void {
+function qualifiedNameViolation(qname: string): IdViolation | null {
   if (qname.length === 0) {
-    throw new CoreError("Symbol id qualified name is empty", {
+    return {
       code: "anonymous-symbol-id-attempted",
+      message: "Symbol id qualified name is empty",
       value: qname,
-    })
+    }
   }
-  if (qname === DEFAULT_EXPORT_QNAME) return
+  if (qname === DEFAULT_EXPORT_QNAME) return null
   if (containsAnonymousMarker(qname)) {
-    throw new CoreError(
-      `Symbol id qualified name "${qname}" looks anonymous (position-dependent markers like <anon@L42> are forbidden); attach the construct to its parent Symbol instead`,
-      { code: "anonymous-symbol-id-attempted", value: qname },
-    )
+    return {
+      code: "anonymous-symbol-id-attempted",
+      message: `Symbol id qualified name "${qname}" looks anonymous (position-dependent markers like <anon@L42> are forbidden); attach the construct to its parent Symbol instead`,
+      value: qname,
+    }
   }
   for (const segment of splitQnameSegments(qname)) {
-    assertQnameSegment(segment, qname)
+    if (!QNAME_SEGMENT_PATTERN.test(segment)) {
+      return {
+        code: "anonymous-symbol-id-attempted",
+        message: `Symbol id qualified name "${qname}" contains the non-identifier segment "${segment}"`,
+        value: qname,
+      }
+    }
   }
+  return null
 }
 
 /**

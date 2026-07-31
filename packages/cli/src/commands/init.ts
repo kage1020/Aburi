@@ -49,7 +49,18 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   }
 
   const managers = await detectManagers(workspaceRoot)
-  const components = await detectComponents({ workspaceRoot })
+  // Same wrapping rationale as `resolveComponents` in scan.ts: an id the detection cannot
+  // derive is a property of the project, and belongs in the input-error exit code.
+  let components: Awaited<ReturnType<typeof detectComponents>>
+  try {
+    components = await detectComponents({ workspaceRoot })
+  } catch (error) {
+    throw new CliError(
+      `Failed to detect components: ${error instanceof Error ? error.message : String(error)}`,
+      "config-error",
+      { cause: error },
+    )
+  }
 
   const languageSet = new Set<string>()
   for (const c of components) for (const l of c.languages) languageSet.add(l)

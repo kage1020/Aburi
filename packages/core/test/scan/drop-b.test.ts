@@ -1,12 +1,13 @@
 import type { OpaqueAstNode, SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { decideSymbolDrop } from "../../src"
+import { symbolId } from "../fixtures/ir"
 
 function makeCandidate(
   overrides: Partial<SymbolCandidate<OpaqueAstNode>> = {},
 ): SymbolCandidate<OpaqueAstNode> {
   return {
-    id: "ts:test.ts#Foo",
+    id: symbolId("ts:test.ts#Foo"),
     kind: "function",
     extKind: null,
     name: "Foo",

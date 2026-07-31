@@ -208,6 +208,16 @@ Cluster identity is NOT a stable name across PRs. Two PRs that both touch "the r
 
    The helper lives in `@aburi/diff` because that is where the derivation lives. Consumers that already depend on the diff engine use it; a consumer that deliberately does not — the Markdown projection depends only on `@aburi/types`, so that rendering a diff never pulls in the engine that produced it — reads `members[0]` directly rather than acquiring a dependency for one accessor. What the layer guarantees repository-wide is the negative: no code path reconstructs the anchor from `id`.
 
+### 7.5 The id namespace
+
+`SliceRecord.id` is typed `SliceId` and `SliceRecord.members[]` is typed `SymbolId[]`. The two are distinct nominal types ([`ir-schema.md`](./ir-schema.md) §3.5): a Symbol id is not accepted where a Slice id is wanted, and neither accepts a bare `string`. That makes §7.1 mechanically enforceable in a way §7.4 layer 1 cannot be on its own — `"slice:" + anchor` evaluates to `string`, so `sliceIdFor` is the only expression in the codebase that can produce a value `SliceRecord.id` will accept. Writing the concatenation out by hand at a second site is a compile error, not a second derivation to keep in sync.
+
+The brand is a TypeScript-only construct and is erased at runtime; the emitted JSON is unchanged, and the schema still constrains the id with `pattern: "^slice:"` alone. Two escapes remain by design: `sliceIdFor` itself asserts the brand once, and `sliceRecordViolation` asserts it on the untyped input it exists to inspect (§7.4 layer 2).
+
+What the brands do **not** solve is the underlying namespace collision — a language plugin claiming the token `slice` would mint Symbol ids that already look like Slice ids, and no amount of typing changes what those strings are. That is closed separately, by reserving the token: see [`multi-language-id.md`](./multi-language-id.md) Rule L-11.
+
+An anchor drawn from that namespace is also its own §7.4 violation kind (`anchor-in-reserved-namespace`). It has to be: `{ id: "slice:slice:a#b", members: ["slice:a#b"] }` satisfies every other clause — right prefix, ascending single-element `members[]`, and `id` genuinely equal to `"slice:" + members[0]`. `makeSymbolId` refuses to build such a Symbol id and invariant #16 rejects one read from disk, but `buildDiff` is public API and runs neither check, so the producer post-condition covers it too.
+
 ## 8. Ordering
 
 ### 8.1 Between Slices
@@ -471,6 +481,15 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV23 | Any `SliceRecord` the pass emits | `members[]` is non-empty and strictly ascending, and `id === "slice:" + members[0]`. The pass validates each record before returning it and fails with a coded error otherwise. The fixture MUST feed the pass in descending id order, or the check passes whether or not §6 still sorts each component (§7.4) |
 | SV24 | A `SliceRecord` with a correct `^slice:` prefix but an `id` not derived from `members[0]`, or with `members[]` out of ascending order, fed to a validator with the derivation keyword registered | Rejected the same way a malformed prefix is, even though the standard-JSON-Schema part of the check passes. Untyped input (missing `members`, `members` not an array, missing `id`) yields a violation verdict, never a thrown `TypeError` (§7.4, §11.1) |
 | SV25 | A consumer that needs the anchor | No code path reconstructs the anchor by stripping the `slice:` prefix from `id`. Consumers that depend on `@aburi/diff` read it through `sliceAnchor`, which answers from `members[0]` even for a record whose `id` disagrees (§7.4) |
+
+### 13.8 Id namespace
+
+| ID | Input | Expected |
+|---|---|---|
+| SV26 | `SliceRecord.id` assigned a value built as `` `slice:${anchor}` `` anywhere other than `sliceIdFor` | Compile error: the template literal is a `string`, which `SliceId` does not accept (§7.5) |
+| SV27 | A `SliceId` used where a `SymbolId` is expected, or vice versa | Compile error in both directions; a bare `string` satisfies neither (§7.5) |
+| SV28 | Any run | The emitted `slices[]` bytes and the `aburi.diff.v1.json` validation verdict are unchanged by the branding — it exists only in TypeScript (§7.5) |
+| SV29 | `{ id: "slice:slice:a#b", members: ["slice:a#b"] }` | Reported as `anchor-in-reserved-namespace`, even though the prefix, the ordering and the derivation clauses all pass. An anchor whose token merely starts with the reserved one (`slicer:`) is accepted (§7.5) |
 
 ## 14. Design Decisions
 

@@ -2,6 +2,7 @@ import type {
   Call,
   Confidence,
   Decorator,
+  DependencyEndpoint,
   Effect,
   Fingerprint,
   Symbol as IRSymbol,
@@ -309,7 +310,15 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * than the Component id shape. Used to route symbol-to-symbol call edges
  * through their dedicated Markdown sections while leaving component-to-component
  * edges in the existing sections.
+ *
+ * Takes a `DependencyEndpoint` — the union of both id kinds — but answers with a plain
+ * boolean rather than narrowing to `SymbolId`. The pattern here is deliberately looser than
+ * the `isSymbolId` constructor-equivalent in `@aburi/core` (no backslash exclusion), so
+ * narrowing would hand the brand to strings `makeSymbolId` refuses and break the property
+ * the brand exists to carry: that holding a `SymbolId` means having gone through a
+ * constructor. Callers use this to route an endpoint into a section, not to prove anything
+ * about it.
  */
-export function isSymbolIdEndpoint(endpoint: string): boolean {
+export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
   return SYMBOL_ID_PATTERN.test(endpoint)
 }

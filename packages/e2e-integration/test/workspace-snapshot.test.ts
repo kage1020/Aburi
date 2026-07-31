@@ -1,3 +1,4 @@
+import { makeComponentId } from "@aburi/core"
 import { projectWorkspace } from "@aburi/markdown-projection"
 import type { Component } from "@aburi/types"
 import { afterEach, describe, expect, it } from "vitest"
@@ -25,7 +26,7 @@ afterEach(async () => {
  * that mirrors what `runInit` would autodetect.
  */
 const NESTJS_BILLING_COMPONENT: Component = {
-  id: "nestjs-billing",
+  id: makeComponentId("nestjs-billing"),
   name: "nestjs-billing",
   roots: ["."],
   publicApi: [],

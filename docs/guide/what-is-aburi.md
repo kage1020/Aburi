@@ -51,7 +51,7 @@ source files
   ↓ (@aburi/core scan)                               walkBody → Rules + Calls + Effects
   ↓                                                  drop rules (interfaces, empty bodies, re-exports)
   ↓                                                  fingerprint per Symbol (api / logic / syntax)
-  ↓                                                  IR integrity check (11 invariants)
+  ↓                                                  IR integrity check (ir-schema.md §14)
   ↓
 aburi.ir.v1.json  ───────────────────────────────────  Source of Truth (L3)
   │
@@ -70,7 +70,7 @@ it. The full design rationale lives in the [design overview](/design/overview).
 | `@aburi/types` | Foundation | Schema-generated IR / config / diff / plugin types + hand-written plugin interfaces. |
 | `@aburi/plugin-registry` | Foundation | Plugin manifest validator + vocab registry (owned extKinds / effect ids / namespaces). |
 | `@aburi/config` | Foundation | JSONC + ajv-validated `aburi.json` loader with framework-hint normalisation. |
-| `@aburi/core` | Foundation | Symbol ID generation, canonical JSON, 11 IR invariants, autodetect, scan orchestration. |
+| `@aburi/core` | Foundation | Symbol ID generation, canonical JSON, the IR invariants, autodetect, scan orchestration. |
 | `@aburi/lang-typescript` | Language | TS/TSX language plugin (tree-sitter WASM), JSDoc-aware signature + throws, drop-hint contract. |
 | `@aburi/framework-nestjs` | Framework | `@Module` / `@Controller` / `@Injectable` / HTTP + WS + pattern decorators → `framework:nestjs:*` extKinds. |
 | `@aburi/framework-next` | Framework | App Router files (page / layout / route / …) → `framework:next:*` extKinds. |
