@@ -13,6 +13,15 @@
  *   output.
  * - Locality: adding a disjoint node/component elsewhere never permutes
  *   existing components.
+ * - Each returned component is sorted by ascending `keyOf`, so `component[0]`
+ *   is always its smallest key.
+ * - The components themselves are sorted by ascending `keyOf(component[0])`.
+ *
+ * The two ordering guarantees are part of the contract, not an accident of the
+ * implementation: Slice View derives a cluster's identity from `component[0]`
+ * (slice-view.md §7.1) and asserts that derivation on every record it emits,
+ * so weakening either sort turns into a loud failure there rather than a
+ * silently mislabelled Slice.
  *
  * Edges are treated as undirected. Edges whose endpoints are not both in
  * `nodes` are silently dropped — the caller is responsible for building the

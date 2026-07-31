@@ -1,13 +1,21 @@
 import type { CallEdge } from "@aburi/core"
-import type { Confidence, Effect, SymbolChange } from "@aburi/types"
+import type { Confidence, Effect, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { computeSlices } from "../src/slice"
+import { DiffError } from "../src/errors"
+import {
+  assertSliceRecordInvariant,
+  computeSlices,
+  type SliceViolationKind,
+  sliceAnchor,
+  sliceRecordViolation,
+} from "../src/slice"
 import { fp, makeSymbol, zeroFp } from "./fixtures"
 
 /**
- * Slice View pass acceptance tests. These map to SV1–SV20 in
- * docs/design/slice-view.md §13; SV21 (cross-language) and SV22 (schema) are
- * covered elsewhere (e2e-integration and packages/types respectively).
+ * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
+ * docs/design/slice-view.md §13; SV22 and SV24 (schema validation) live in
+ * schema.test.ts, and the cross-package SV21 shape is additionally exercised
+ * end-to-end in @aburi/e2e-integration.
  *
  * Helpers below build the three pass inputs — a `SymbolChange[]`, plus base
  * and head `CallEdge[]` — as compactly as possible so each test spells out
@@ -447,5 +455,163 @@ describe("computeSlices — SV21: cross-language partition", () => {
       headCallEdges: [edge(tsA, pyB)],
     })
     expect(slices).toEqual([{ id: `slice:${pyB}`, members: [pyB, tsA] }])
+  })
+})
+
+/**
+ * §7.4 — the strictly-ascending `members[]` order and the derivation
+ * `id === "slice:" + members[0]` compare one property against another, which no
+ * JSON Schema can express (§11.1). The pass validates them itself and consumers
+ * read the anchor through a helper that answers from `members[0]`.
+ */
+describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
+  /** Assert the non-throwing and the throwing form agree on which clause broke. */
+  function expectViolation(record: unknown, kind: SliceViolationKind, subject: string): void {
+    const violation = sliceRecordViolation(record)
+    expect(violation?.kind).toBe(kind)
+    expect(violation?.subject).toBe(subject)
+
+    // `assertSliceRecordInvariant` takes a well-typed record; the shape cases
+    // below are only reachable through the validator entry point.
+    if (violation?.kind === "malformed-shape") return
+    expect(() => assertSliceRecordInvariant(record as SliceRecord)).toThrow(DiffError)
+    try {
+      assertSliceRecordInvariant(record as SliceRecord)
+    } catch (e) {
+      expect(e).toBeInstanceOf(DiffError)
+      if (e instanceof DiffError) {
+        expect(e.code).toBe("slice-invariant-violated")
+        expect(e.value).toBe(subject)
+        expect(e.message).toBe(violation?.message)
+      }
+    }
+  }
+
+  it("SV23: every SliceRecord the pass emits satisfies the invariant", () => {
+    const A = "ts:src/a.ts#A"
+    const B = "ts:src/b.ts#B"
+    const C = "ts:src/c.ts#C"
+    const Z = "ts:src/z.ts#Z"
+    // The changes are listed in DESCENDING id order on purpose. `collectNodeIds`
+    // preserves input order and the WCC utility buckets nodes in first-seen
+    // order, so an ascending input would still come out ascending even if the
+    // utility stopped sorting each component — this test would then pass while
+    // the very guarantee it exists to pin was gone. Descending input makes the
+    // sort load-bearing here.
+    const slices = computeSlices({
+      changes: [droppedToggled(Z, "to-dropped"), removed(C), added(B), changed(A)],
+      baseCallEdges: [edge(C, A)],
+      headCallEdges: [edge(A, B)],
+    })
+    expect(slices.length).toBeGreaterThan(1)
+    for (const slice of slices) {
+      expect(sliceRecordViolation(slice)).toBeNull()
+      expect(() => assertSliceRecordInvariant(slice)).not.toThrow()
+      expect(slice.id).toBe(`slice:${slice.members[0]}`)
+      for (let i = 1; i < slice.members.length; i++) {
+        // Strictly ascending — `[...members].sort()` would also accept duplicates.
+        expect((slice.members[i - 1] as string) < (slice.members[i] as string)).toBe(true)
+      }
+    }
+  })
+
+  it("SV25: sliceAnchor returns members[0] without deriving it from the id", () => {
+    const A = "ts:src/a.ts#A"
+    const B = "ts:src/b.ts#B"
+    const [slice] = computeSlices({
+      changes: [changed(A), changed(B)],
+      baseCallEdges: [],
+      headCallEdges: [edge(A, B)],
+    })
+    if (slice === undefined) throw new Error("unreachable: one Slice expected")
+    expect(sliceAnchor(slice)).toBe(A)
+
+    // A record whose id disagrees with its members is malformed, but the helper
+    // still answers from members[0] — proof it never strips the `slice:` prefix.
+    expect(sliceAnchor({ id: `slice:${B}`, members: [A, B] })).toBe(A)
+  })
+
+  it("SV23: rejects a correct `slice:` prefix whose id is not the anchor", () => {
+    expectViolation(
+      { id: "slice:ts:src/foo.ts#foo", members: ["ts:src/bar.ts#bar", "ts:src/baz.ts#baz"] },
+      "id-not-derived",
+      "slice:ts:src/foo.ts#foo",
+    )
+  })
+
+  it("SV23: rejects members[] that are not in strictly ascending order", () => {
+    expectViolation(
+      { id: "slice:ts:src/b.ts#B", members: ["ts:src/b.ts#B", "ts:src/a.ts#A"] },
+      "members-unordered",
+      "slice:ts:src/b.ts#B",
+    )
+  })
+
+  it("SV23: rejects duplicated members (a non-strict ascending run)", () => {
+    expectViolation(
+      { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A", "ts:src/a.ts#A"] },
+      "members-unordered",
+      "slice:ts:src/a.ts#A",
+    )
+  })
+
+  it("SV23: rejects an empty members[]", () => {
+    expectViolation(
+      { id: "slice:ts:src/a.ts#A", members: [] },
+      "members-empty",
+      "slice:ts:src/a.ts#A",
+    )
+  })
+
+  it("SV23: rejects a missing `slice:` prefix through the same derivation check", () => {
+    expectViolation(
+      { id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
+      "id-not-derived",
+      "ts:src/a.ts#A",
+    )
+  })
+
+  it("SV25: sliceAnchor throws rather than returning undefined for an empty members[]", () => {
+    expect(() => sliceAnchor({ id: "slice:ts:src/a.ts#A", members: [] })).toThrow(DiffError)
+  })
+})
+
+/**
+ * §7.4 layer 2 points `sliceRecordViolation` at documents written by
+ * third-party or older producers, so its input is untyped by definition. Every
+ * case here reaches it through a shape TypeScript would have rejected, which is
+ * exactly what a validator receives.
+ */
+describe("sliceRecordViolation — untyped input (SV24)", () => {
+  it("reports a missing members[] instead of throwing", () => {
+    const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A" })
+    expect(violation?.kind).toBe("malformed-shape")
+    expect(violation?.subject).toBe("slice:ts:src/a.ts#A")
+  })
+
+  it("reports a members[] that is not an array instead of scanning its characters", () => {
+    // A string is indexable and iterable, so a naive scan would happily compare
+    // its characters and report a bogus "unordered at index 3".
+    const violation = sliceRecordViolation({ id: "slice:ts:src/a.ts#A", members: "nope" })
+    expect(violation?.kind).toBe("malformed-shape")
+    expect(violation?.message).toMatch(/array of strings/)
+  })
+
+  it("reports a members[] holding non-strings", () => {
+    expect(sliceRecordViolation({ id: "slice:a", members: ["a", 7] })?.kind).toBe("malformed-shape")
+    expect(sliceRecordViolation({ id: "slice:a", members: 5 })?.kind).toBe("malformed-shape")
+  })
+
+  it("reports a missing or non-string id instead of stringifying `undefined` into the message", () => {
+    const violation = sliceRecordViolation({ members: ["ts:src/a.ts#A"] })
+    expect(violation?.kind).toBe("malformed-shape")
+    expect(violation?.subject).toBe("<missing id>")
+    expect(violation?.message).not.toMatch(/"undefined"/)
+  })
+
+  it("reports non-objects", () => {
+    for (const value of [null, undefined, 42, "slice:a", []]) {
+      expect(sliceRecordViolation(value)?.kind).toBe("malformed-shape")
+    }
   })
 })

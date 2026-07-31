@@ -479,7 +479,20 @@ function renderSliceView(
     )
     rows.push("")
     for (const slice of singleton) {
-      const memberId = slice.members[0] as string
+      // members[0] is the Slice anchor (slice-view.md §7.1). Read from members,
+      // never by stripping the `slice:` prefix off `id` — for a record that
+      // broke the derivation that would name a Symbol outside the Slice. This
+      // package renders diffs without depending on the engine that produces
+      // them, so it does not use `sliceAnchor` from @aburi/diff.
+      const memberId = slice.members[0]
+      if (memberId === undefined) {
+        // Same discipline as `requireChangeForMember` below: a broken producer
+        // invariant surfaces here rather than being papered over with a cast.
+        throw new Error(
+          `projectDiff: slice ${slice.id} has an empty members[]; every Slice has at least one ` +
+            "member and members[0] is its anchor (slice-view.md §11.1).",
+        )
+      }
       const label = renderSingletonLabel(memberId, slice.id, changeById)
       rows.push(`- \`${slice.id}\` — ${label}`)
     }

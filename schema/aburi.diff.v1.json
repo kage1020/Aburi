@@ -305,14 +305,14 @@
         "id": {
           "type": "string",
           "pattern": "^slice:",
-          "description": "Cluster id: \"slice:\" + the lexicographically smallest member Symbol id."
+          "description": "Cluster id: \"slice:\" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer."
         },
         "members": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 },
-          "description": "Member Symbol ids in ascending lexicographic order."
+          "description": "Member Symbol ids in strictly ascending lexicographic order. members[0] is the Slice anchor."
         }
       }
     },

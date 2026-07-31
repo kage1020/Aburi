@@ -15,6 +15,15 @@ export type DiffErrorCode =
    * cryptic `TypeError: undefined is not iterable` deep in a matching stage.
    */
   | "ir-shape-invalid"
+  /**
+   * A `SliceRecord` broke the derivation invariant of slice-view.md §7.1 / §8.2:
+   * `members[]` empty, `members[]` not in strictly ascending order, or `id` not
+   * equal to `"slice:" + members[0]`. The last two compare one property against
+   * another and so have no JSON Schema equivalent; the pass checks them itself
+   * (§7.4). Raised only by an Aburi bug, never by user input — see
+   * `SliceRecordViolation.kind` for which clause broke.
+   */
+  | "slice-invariant-violated"
 
 export interface DiffErrorDetail {
   code: DiffErrorCode
