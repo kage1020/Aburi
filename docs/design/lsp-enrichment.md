@@ -110,6 +110,15 @@ Requests explicitly NOT used by this pass:
 
 These numeric defaults are empirical starting points, measured against `typescript-language-server` on a medium (~500-file) monorepo at design time. Actual performance shifts with server version, language version, and workspace shape, so the defaults are exposed as named `lsp.servers.<lang>.*` core config fields (§12.1) that can be tuned per project. Revising the defaults themselves is non-breaking under [`config.md`](./config.md) §14.1 (only removing or type-changing a field would be).
 
+Notifications (`didOpen`, `didClose`, `initialized`, `exit`) are bounded by these same three knobs — the table above is the complete set, and there is deliberately no fourth knob for notifications. JSON-RPC treats a notification as fire-and-forget, but the *write* still awaits the transport, so a clogged stdio pipe stalls it exactly the way it stalls a request. An unbounded `didOpen` is the load-bearing case: it precedes the file's first request and therefore precedes every `fileBudgetMs` check, so the per-file budget below could never fire. The mapping:
+
+- `didOpen` draws on `fileBudgetMs`. A notification that spends the whole budget has left nothing for the enrichment it exists to enable, so the budget is already the correct ceiling. Exceeding it is a per-file fallback (§6.1), the same as any other way of spending the budget.
+- `didClose` draws on `requestTimeoutMs`. It is a single small write with no enrichment riding on it, and the sooner a stalled one gives up the sooner the next file starts. Its outcome cannot change what the file produced, so it is recorded but never escalated: a pipe stuck for good takes the next file's `didOpen` with it, and §6.1 escalation proceeds from there.
+- `initialized` draws on `initializeTimeoutMs`. The handshake is not complete until it is on the wire, so a write that never lands is an `initialize` failure and takes the per-language fallback. It gets the full knob rather than what the `initialize` request left over — one operation, one budget, the same way `requestTimeoutMs` applies to each request individually.
+- `exit` draws on the §4.1 1 s shutdown grace period. A stalled `exit` is ignored; the SIGKILL that follows is what actually guarantees the process goes away.
+
+None of these are counted as requests in §7.2 — `requestsIssued` / `requestsTimedOut` / `requestsFailed` describe requests only. A `didOpen` that times out shows up as `filesFellBack`.
+
 ## 5. What Gets Enriched
 
 Viewed from the IR side, the pass writes to exactly the following fields. Nothing else is touched.
@@ -135,7 +144,7 @@ The pass degrades gracefully at three progressively larger granularities.
 ### 6.1 Fallback tiers
 
 - **Per-request fallback**: a single LSP request errors or exceeds `requestTimeoutMs`. The specific enrichment for that request is skipped; the affected IR field retains its untyped-tier value. Sibling requests for the same file are unaffected.
-- **Per-file fallback**: `didOpen` fails, or `fileBudgetMs` is exceeded for the file, or three consecutive requests hit per-request fallback. The pass sends `didClose`, marks the file `lsp-degraded` in stats, keeps every untyped-tier value in that file, and moves to the next file.
+- **Per-file fallback**: `didOpen` fails — including a write that exceeds its §4.4 bound — or `fileBudgetMs` is exceeded for the file, or three consecutive requests hit per-request fallback. The pass sends `didClose`, marks the file `lsp-degraded` in stats, keeps every untyped-tier value in that file, and moves to the next file.
 - **Per-language fallback**: `initialize` fails, or five consecutive files hit per-file fallback for the same language. The pass sends `shutdown` / `exit` to that language's server, disables LSP for that language for the remainder of the run, and emits one CLI warning.
 
 ### 6.2 IR degradation rules
@@ -274,10 +283,13 @@ Concrete rules:
 - LE5: interface-typed receiver with exactly one implementer → `Call.resolved` = implementer's method Symbol id, `CallEdge.confidence = medium`. Matches [`call-resolution.md`](./call-resolution.md) test CR19.
 - LE6: file with no `this.*`, no interface-typed receivers, and all calls already resolved by the untyped tier → LSP pass is a no-op on every IR value in that file (only `SourceRange` columns change).
 
-### 11.3 Fallback — LE7..LE8
+### 11.3 Fallback — LE7..LE8, LE19..LE21
 
 - LE7: force per-request timeout for one specific call site's `hover` → that call site's `Call.resolved` stays at the untyped value; sibling call sites in the same file are unaffected; `stats.lspEnrichment.requestsTimedOut` increases by 1.
 - LE8: file exceeds `fileBudgetMs` after half its call sites are enriched → the enriched half keeps LSP values, the unenriched half keeps untyped values, `stats.lspEnrichment.filesFellBack += 1`; the next file proceeds normally.
+- LE19 (notification writes are bounded): a transport whose notification write never settles → `didOpen` and `didClose` return within their §4.4 bounds rather than parking the pass, `initialize` returns a failure when `initialized` cannot be written, and `shutdown` still reaches SIGKILL when `exit` cannot be written.
+- LE20 (a stalled `didOpen` is a per-file fallback): the `didOpen` write for one file exceeds `fileBudgetMs` → that file counts in `filesFellBack`, no request is issued against it, `didClose` is still sent, and the next file is enriched normally. Holds both when the write fails and when it merely returns having spent the budget.
+- LE21 (a stalled `didClose` is not): the `didClose` write for an otherwise healthy file fails → the file still counts in `filesEnriched`, `filesFellBack` does not increase, and no IR value changes.
 
 ### 11.4 Partial fingerprint invariance (load-bearing) — LE9..LE12
 

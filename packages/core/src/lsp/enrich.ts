@@ -171,6 +171,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       fallback,
       receiverHints,
       logger,
+      now: input.now ?? Date.now,
     })
 
     await safeShutdown(client)
@@ -197,6 +198,7 @@ interface ProcessLanguageInput {
   fallback: FallbackState
   receiverHints: Map<string, ReceiverHint>
   logger: Logger
+  now: () => number
 }
 
 async function processLanguage(input: ProcessLanguageInput): Promise<void> {
@@ -216,15 +218,29 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
     const languageIdForOpen = languageIdForLspOpen(input.language)
     const fileSymbols = symbolsByFile.get(file) ?? []
 
-    const fileStart = Date.now()
+    const fileStart = input.now()
     let fileFellBack = false
 
+    // `didOpen` is bounded by the whole file budget: a notification that spends
+    // it has left nothing for the enrichment it was supposed to enable, so the
+    // budget is exactly the right ceiling and no separate knob is needed. A
+    // stalled write therefore surfaces as the §6.1 per-file fallback rather
+    // than parking the pass. The try/catch stays for injected `ServerFactory`
+    // clients, which are free to throw where `createLspClient` returns.
     try {
-      await input.client.didOpen(uri, languageIdForOpen, content)
+      const opened = await input.client.didOpen(uri, languageIdForOpen, content, fileBudget)
+      if (isLspFailure(opened)) {
+        input.logger.warn?.(`[aburi:lsp] didOpen failed for ${file} (${failureReason(opened)})`)
+        fileFellBack = true
+      }
     } catch (error) {
       input.logger.warn?.(`[aburi:lsp] didOpen failed for ${file}: ${errorMessage(error)}`)
       fileFellBack = true
     }
+
+    // Checked here as well as after `documentSymbol` (below): a `didOpen` that
+    // came back healthy may still have consumed the budget on the way.
+    if (!fileFellBack && overBudget(input.now, fileStart, fileBudget)) fileFellBack = true
 
     if (!fileFellBack) {
       input.stats.requestsIssued += 1
@@ -242,13 +258,13 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       }
     }
 
-    if (!fileFellBack && overBudget(fileStart, fileBudget)) fileFellBack = true
+    if (!fileFellBack && overBudget(input.now, fileStart, fileBudget)) fileFellBack = true
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
       await runJobsWithConcurrency(jobs, concurrency, async (job) => {
         if (fileFellBack) return
-        if (overBudget(fileStart, fileBudget)) {
+        if (overBudget(input.now, fileStart, fileBudget)) {
           fileFellBack = true
           return
         }
@@ -264,10 +280,19 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       })
     }
 
+    // `didClose` is bounded by the per-request budget instead of the file
+    // budget: it is a single small write with no enrichment riding on it, and
+    // the sooner a stalled one gives up the sooner the next file starts. The
+    // outcome cannot change what this file produced, so it is recorded rather
+    // than escalated — a pipe stuck for good takes the next file's `didOpen`
+    // with it, and §6.1 escalation proceeds from there.
     try {
-      await input.client.didClose(uri)
-    } catch {
-      // ignore
+      const closed = await input.client.didClose(uri, requestTimeout)
+      if (isLspFailure(closed)) {
+        input.logger.debug?.(`[aburi:lsp] didClose failed for ${file} (${failureReason(closed)})`)
+      }
+    } catch (error) {
+      input.logger.debug?.(`[aburi:lsp] didClose failed for ${file}: ${errorMessage(error)}`)
     }
 
     if (fileFellBack) {
@@ -540,8 +565,8 @@ function languageIdForLspOpen(languageId: LanguageId): string {
   }
 }
 
-function overBudget(startMs: number, budgetMs: number): boolean {
-  return Date.now() - startMs > budgetMs
+function overBudget(now: () => number, startMs: number, budgetMs: number): boolean {
+  return now() - startMs > budgetMs
 }
 
 function isTimeout(value: unknown): boolean {

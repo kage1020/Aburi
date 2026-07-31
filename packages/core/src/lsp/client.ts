@@ -18,11 +18,25 @@ import type { SpawnedServer } from "./transport"
  *   - `didOpen` / `didClose` per §4.3 discrete file boundaries.
  *   - A `shutdown` that mirrors §4.1 (`shutdown` request → `exit` notification →
  *     1 s → SIGKILL).
+ *
+ * Every write is bounded, notifications included. JSON-RPC notifications are
+ * fire-and-forget by convention, but the write itself still awaits the transport:
+ * a clogged stdio pipe parks `sendNotification` indefinitely. An unbounded
+ * `didOpen` is the worst case, because it sits ahead of the first request of the
+ * file and therefore ahead of every `fileBudgetMs` check the pass makes — the
+ * per-file budget could never fire. Notification bounds reuse the caller's
+ * existing budgets rather than introducing a knob of their own; see the call
+ * sites in `enrich.ts` for which budget each one draws on.
  */
 export interface LspClient {
   initialize(input: InitializeInput): Promise<InitializeResult | LspFailure>
-  didOpen(uri: string, languageId: string, text: string): Promise<void>
-  didClose(uri: string): Promise<void>
+  didOpen(
+    uri: string,
+    languageId: string,
+    text: string,
+    timeoutMs: number,
+  ): Promise<undefined | LspFailure>
+  didClose(uri: string, timeoutMs: number): Promise<undefined | LspFailure>
   request<T>(method: string, params: unknown, timeoutMs: number): Promise<T | LspFailure>
   shutdown(): Promise<void>
 }
@@ -45,6 +59,9 @@ export interface LspError {
 }
 
 export const LSP_TIMEOUT: LspTimeout = Object.freeze({ kind: "timeout" })
+
+/** Graceful-shutdown grace period (lsp-enrichment.md §4.1: 1 s → SIGKILL). */
+const SHUTDOWN_GRACE_MS = 1000
 
 export function isLspFailure(value: unknown): value is LspFailure {
   return (
@@ -94,22 +111,39 @@ export function createLspClient(server: SpawnedServer): LspClient {
         }
       }
       if (isLspFailure(result)) return result
-      await connection.sendNotification(InitializedNotification.type, {})
+      // The handshake is not complete until `initialized` is on the wire, so a
+      // write that never lands is an initialize failure and gets the same
+      // per-language fallback. It draws on `timeoutMs` again rather than on
+      // what the request left over: one operation, one budget, matching how
+      // `requestTimeoutMs` applies to each request individually.
+      const ack = await sendNotificationBounded(
+        () => connection.sendNotification(InitializedNotification.type, {}),
+        input.timeoutMs,
+      )
+      if (isLspFailure(ack)) return ack
       return result as InitializeResult
     },
 
-    async didOpen(uri, languageId, text) {
+    async didOpen(uri, languageId, text, timeoutMs) {
       if (disposed) return
-      await connection.sendNotification(DidOpenTextDocumentNotification.type, {
-        textDocument: { uri, languageId, version: 1, text },
-      })
+      return await sendNotificationBounded(
+        () =>
+          connection.sendNotification(DidOpenTextDocumentNotification.type, {
+            textDocument: { uri, languageId, version: 1, text },
+          }),
+        timeoutMs,
+      )
     },
 
-    async didClose(uri) {
+    async didClose(uri, timeoutMs) {
       if (disposed) return
-      await connection.sendNotification(DidCloseTextDocumentNotification.type, {
-        textDocument: { uri },
-      })
+      return await sendNotificationBounded(
+        () =>
+          connection.sendNotification(DidCloseTextDocumentNotification.type, {
+            textDocument: { uri },
+          }),
+        timeoutMs,
+      )
     },
 
     async request<T>(method: string, params: unknown, timeoutMs: number): Promise<T | LspFailure> {
@@ -130,16 +164,20 @@ export function createLspClient(server: SpawnedServer): LspClient {
     async shutdown() {
       if (disposed) return
       try {
-        await raceTimeout(connection.sendRequest(ShutdownRequest.type, undefined), 1000)
+        await raceTimeout(
+          connection.sendRequest(ShutdownRequest.type, undefined),
+          SHUTDOWN_GRACE_MS,
+        )
       } catch {
         // ignore — we still fire exit + kill below
       }
-      try {
-        await connection.sendNotification(ExitNotification.type)
-      } catch {
-        // ignore
-      }
-      await server.killAfter(1000)
+      // A stuck `exit` write is ignored the same way a rejected one always was:
+      // `killAfter` below is what actually guarantees the process goes away.
+      await sendNotificationBounded(
+        () => connection.sendNotification(ExitNotification.type),
+        SHUTDOWN_GRACE_MS,
+      )
+      await server.killAfter(SHUTDOWN_GRACE_MS)
       try {
         connection.dispose()
       } catch {
@@ -147,6 +185,29 @@ export function createLspClient(server: SpawnedServer): LspClient {
       }
       disposed = true
     },
+  }
+}
+
+/**
+ * Send one notification under a deadline. Mirrors `request`'s contract — never
+ * throws, resolves with `LSP_TIMEOUT` when the write does not land in time and
+ * with an `LspError` when it rejects — so a caller can treat a stalled pipe and
+ * a broken one the same way it already treats a stalled or broken request.
+ * Like `raceTimeout`, it does not cancel the write; a late one is ignored.
+ */
+async function sendNotificationBounded(
+  send: () => Promise<void>,
+  timeoutMs: number,
+): Promise<undefined | LspFailure> {
+  try {
+    const outcome = await raceTimeout(send(), timeoutMs)
+    return isLspFailure(outcome) ? outcome : undefined
+  } catch (error) {
+    return {
+      kind: "error",
+      reason: "server-error",
+      message: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 
