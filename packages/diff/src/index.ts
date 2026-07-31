@@ -37,7 +37,13 @@ export {
   ownerSimilarity,
   tokenizeName,
 } from "./similarity"
-export { computeSlices, type SliceInput } from "./slice"
+export {
+  assertSliceRecordInvariant,
+  computeSlices,
+  type SliceInput,
+  sliceAnchor,
+  sliceRecordViolation,
+} from "./slice"
 export {
   classifyStatus,
   type DropDirection,

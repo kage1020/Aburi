@@ -1,5 +1,6 @@
 import { type CallEdge, computeWeaklyConnectedComponents } from "@aburi/core"
 import type { SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
+import { DiffError } from "./errors"
 
 /**
  * Slice View clustering pass — docs/design/slice-view.md §2, §4–§8.
@@ -12,6 +13,10 @@ import type { SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
  * Pure function: `(changes, baseCallEdges, headCallEdges)` → `SliceRecord[]`.
  * Determinism, idempotence, input-order insensitivity, and locality are all
  * guaranteed — see `computeWeaklyConnectedComponents` in `@aburi/core`.
+ *
+ * Every emitted record passes `assertSliceRecordInvariant` first, so the
+ * anchor derivation §7.1 states — and the schema cannot check (§11.1) — holds
+ * for anything that leaves this module (§7.4).
  */
 export interface SliceInput {
   /** SymbolChange records produced by `buildDiff` (pre-sort is not required). */
@@ -42,10 +47,98 @@ export function computeSlices(input: SliceInput): SliceRecord[] {
 
   const components = computeWeaklyConnectedComponents<SymbolId>(nodeIds, edges, (id) => id)
 
-  return components.map((members) => ({
-    id: `slice:${members[0] as SymbolId}`,
+  return components.map(makeSliceRecord)
+}
+
+const SLICE_ID_PREFIX = "slice:"
+
+/**
+ * §7.1 — the single place a Slice id is derived. Every other reference to a
+ * Slice id in the codebase either receives one or renders one; none builds one.
+ */
+function sliceIdFor(anchor: SymbolId): string {
+  return `${SLICE_ID_PREFIX}${anchor}`
+}
+
+/**
+ * Build one SliceRecord from an ascending-sorted component and check its own
+ * post-condition before letting it out (§7.4 layer 1).
+ *
+ * The check is not defending against untrusted input — this function builds
+ * the id itself. It is defending against the ordering guarantee one layer down
+ * silently going away: `members[0]` is the anchor only because
+ * `computeWeaklyConnectedComponents` returns each component sorted ascending.
+ * If that ever stops holding, the diff would keep emitting well-formed-looking
+ * SliceRecords with the wrong anchor. Here it fails instead.
+ */
+function makeSliceRecord(members: readonly SymbolId[]): SliceRecord {
+  const record: SliceRecord = {
+    id: sliceIdFor(members[0] as SymbolId),
     members: [...members],
-  }))
+  }
+  assertSliceRecordInvariant(record)
+  return record
+}
+
+/**
+ * §7.1 — the anchor of a Slice: its lexicographically smallest member.
+ *
+ * Reads `members[0]` and never touches `id`. `id` is derived from the anchor,
+ * so reconstructing the anchor by stripping the `"slice:"` prefix is circular
+ * at best and, for a record that broke the derivation, silently wrong: it
+ * would name a Symbol that is not in the Slice. Consumers that need the anchor
+ * call this; consumers that need a label keep using `id` directly.
+ */
+export function sliceAnchor(record: SliceRecord): SymbolId {
+  const anchor = record.members[0]
+  if (anchor === undefined) {
+    throw new DiffError(
+      `SliceRecord ${record.id} has an empty members[]; every Slice has at least one member ` +
+        `and members[0] is its anchor (slice-view.md §7.1, §11.1).`,
+      { code: "slice-invariant-violated", value: record.id },
+    )
+  }
+  return anchor
+}
+
+/**
+ * Report why a SliceRecord breaks the §7.1 / §8.2 invariant, or `null` when it
+ * holds. Non-throwing counterpart of `assertSliceRecordInvariant`, mirroring
+ * the `checkIRIntegrity` / `assertIRIntegrity` pair in `@aburi/core` — schema
+ * validators need a predicate, the pass itself wants an exception.
+ */
+export function sliceRecordViolation(record: SliceRecord): string | null {
+  const anchor = record.members[0]
+  if (anchor === undefined) {
+    return `SliceRecord ${record.id}: members[] is empty (slice-view.md §11.1 requires at least one member).`
+  }
+  for (let i = 1; i < record.members.length; i++) {
+    const previous = record.members[i - 1] as string
+    const current = record.members[i] as string
+    if (previous < current) continue
+    return (
+      `SliceRecord ${record.id}: members[] is not in strictly ascending order at index ${i} ` +
+      `("${current}" follows "${previous}"), so members[0] is not necessarily the anchor (slice-view.md §8.2).`
+    )
+  }
+  const expected = sliceIdFor(anchor)
+  if (record.id !== expected) {
+    return (
+      `SliceRecord id "${record.id}" is not derived from the anchor "${anchor}"; ` +
+      `expected "${expected}" (slice-view.md §7.1).`
+    )
+  }
+  return null
+}
+
+/**
+ * Throwing form of `sliceRecordViolation`. Raised as a coded `DiffError` so
+ * callers branch on `code` rather than parsing the message.
+ */
+export function assertSliceRecordInvariant(record: SliceRecord): void {
+  const violation = sliceRecordViolation(record)
+  if (violation === null) return
+  throw new DiffError(violation, { code: "slice-invariant-violated", value: record.id })
 }
 
 /**

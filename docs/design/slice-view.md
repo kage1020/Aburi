@@ -192,6 +192,14 @@ An anchor may be a private helper rather than a Boundary Symbol (a Controller or
 
 Cluster identity is NOT a stable name across PRs. Two PRs that both touch "the refund flow" but change different subsets of the flow will produce different Slices with different anchors and different `sliceId`s. Cross-PR stable naming is out of scope, per [`roadmap.md`](../roadmap.md) "Under consideration" ("Automatic naming of Slice View clusters"). This document specifies stability **within one run** only.
 
+### 7.4 Enforcement of the derivation
+
+`sliceId` is **derived**, not independent: it carries no information that `members[0]` does not already carry. A `SliceRecord` whose `id` does not equal `"slice:" + members[0]` is not a Slice with an unusual name — it is a malformed record, and any reader that trusts the id reads the wrong Symbol. Three layers keep the derivation honest, in decreasing order of importance:
+
+1. **Producer post-condition.** The pass validates every `SliceRecord` it constructs before returning it: `members[]` non-empty and strictly ascending, and `id` equal to `"slice:" + members[0]`. A violation is a coded error, not a warning — the record never leaves the pass. The check costs `O(|members|)` per Slice, which disappears inside the `O((V + E)·α(V))` clustering itself. Its purpose is not to defend against malicious input (the pass builds the id itself) but to fail loudly the moment the member ordering the anchor rule depends on stops holding — the ordering is produced by the shared weakly-connected-components utility (§6), one layer below this pass.
+2. **Validator keyword.** Schema validation of a `SliceRecord` that arrives from outside the process checks the derivation alongside the `^slice:` prefix (§11.1), so a document produced by a third-party or older writer is rejected at the same boundary as a malformed prefix rather than flowing into a consumer. This lives in the validating consumer, not in `aburi.diff.v1.json`: the schema is a frozen v1 artifact and MUST stay expressible in standard JSON Schema 2020-12, which has no cross-property comparison. A non-standard keyword written into the schema file would fail every strict-mode validator that reads it — including validators outside this repository, which is exactly the audience the published schema exists for.
+3. **Reader helper.** Consumers that need the anchor read `members[0]`, never `id`. `@aburi/diff` exports `sliceAnchor(record)` for this, so "get the anchor" has an implementation that cannot be written wrong, and stripping the `slice:` prefix from `id` never becomes the obvious way to do it. Reading `id` as a display string or a map key remains correct and is unaffected.
+
 ## 8. Ordering
 
 ### 8.1 Between Slices
@@ -263,6 +271,8 @@ The pass matches [`effect-propagation.md`](./effect-propagation.md) §10's rigor
 ```
 
 `SliceRecord` carries no confidence, no rationale, no derivedBy — a Slice is a **derived view** over `pairedSymbols` and `CallEdge[]`, not a first-class fact. Consumers that need per-member confidence or delta information read those from the existing `pairedSymbols` entries by joining on Symbol id.
+
+The schema constrains `id` with `pattern: "^slice:"`, which catches a malformed prefix and nothing else. Neither the §7.1 derivation (`id === "slice:" + members[0]`) nor the §8.2 ascending `members[]` order is expressible in standard JSON Schema 2020-12 — both compare one property against another. The schema is therefore a **necessary but not sufficient** check on a `SliceRecord`; the two remaining invariants are carried by §7.4.
 
 ### 11.2 Emission rules
 
@@ -445,6 +455,14 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV20 | Some singleton and some multi-member Slices | Multi-member Slices rendered first, then the "Standalone changes" fold (§12.3) |
 | SV21 | Cross-language PR (TS + Python nodes) | Two disjoint singleton-or-multi Slices per language; no cross-language edges attempted (§5.5, §14.13) |
 | SV22 | Any output | `aburi.diff.v1.json` validates unchanged against the schema (§11.3) |
+
+### 13.7 Anchor derivation enforcement
+
+| ID | Input | Expected |
+|---|---|---|
+| SV23 | Any `SliceRecord` the pass emits | `members[]` is non-empty and strictly ascending, and `id === "slice:" + members[0]`. The pass validates each record before returning it and fails with a coded error if the derivation does not hold (§7.4) |
+| SV24 | A `SliceRecord` with a correct `^slice:` prefix but an `id` not derived from `members[0]`, or with `members[]` out of ascending order | Rejected by schema validation the same way a malformed prefix is — even though the standard-JSON-Schema part of the check passes (§7.4, §11.1) |
+| SV25 | A consumer that needs the anchor | Reads `members[0]` through the `sliceAnchor` helper; no code path reconstructs the anchor by stripping the `slice:` prefix from `id` (§7.4) |
 
 ## 14. Design Decisions
 

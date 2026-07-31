@@ -15,6 +15,13 @@ export type DiffErrorCode =
    * cryptic `TypeError: undefined is not iterable` deep in a matching stage.
    */
   | "ir-shape-invalid"
+  /**
+   * A `SliceRecord` broke the derivation invariant of slice-view.md §7.1 / §8.2 —
+   * `members[]` empty or not strictly ascending, or `id` not equal to
+   * `"slice:" + members[0]`. The schema's `^slice:` pattern cannot express either
+   * clause (§11.1), so the pass checks them itself before emitting a record.
+   */
+  | "slice-invariant-violated"
 
 export interface DiffErrorDetail {
   code: DiffErrorCode

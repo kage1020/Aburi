@@ -130,11 +130,11 @@ removed: Dependency[]
 }
 export interface SliceRecord {
 /**
- * Cluster id: "slice:" + the lexicographically smallest member Symbol id.
+ * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent — consumers that need the anchor read members[0] and never strip this prefix. The pattern checks the prefix only; the derivation itself is not expressible in JSON Schema and is enforced by the producer (docs/design/slice-view.md §7.4).
  */
 id: string
 /**
- * Member Symbol ids in ascending lexicographic order.
+ * Member Symbol ids in strictly ascending lexicographic order. members[0] is the Slice anchor.
  * 
  * @minItems 1
  */
