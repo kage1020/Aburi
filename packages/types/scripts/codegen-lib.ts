@@ -14,20 +14,44 @@ export interface SchemaEntry {
   schema: string
   out: string
   rootName: string
-  // Loose `interface X {}` placeholders to rewrite as re-exports from another generated
-  // module. Used for cross-schema $ref-by-description patterns (e.g., diff schema's
-  // Symbol/Component/Dependency are deliberately loose and point back to ir schema).
+  // Loose placeholders to rewrite as re-exports from another generated module. Used for
+  // cross-schema $ref-by-description patterns (e.g., diff schema's Symbol/Component/
+  // Dependency/SymbolId are deliberately loose and point back to ir schema). Object $defs
+  // land as `interface X {}`, string $defs as `type X = string`; both forms are stripped.
   crossRefs?: Record<string, string>
+  // Generated `export type X = string` aliases whose right-hand side is replaced. JSON
+  // Schema cannot express a nominal type, so the ids that carry a namespace (SymbolId,
+  // ComponentId, SliceId) get their brand here rather than in the schema — a `tsType`-style
+  // keyword in a frozen v1 document would make strict-mode validators reject the schema
+  // itself. Keys must NOT overlap with crossRefs: those aliases are gone by this point.
+  aliasOverrides?: Record<string, string>
+}
+
+/** Nominal-type right-hand side for an id alias that owns its own namespace. */
+function brand(name: string): string {
+  return `string & { readonly __brand: "${name}" }`
 }
 
 export const ENTRIES: readonly SchemaEntry[] = [
-  { schema: "aburi.ir.v1.json", out: "ir.ts", rootName: "IR" },
+  {
+    schema: "aburi.ir.v1.json",
+    out: "ir.ts",
+    rootName: "IR",
+    aliasOverrides: {
+      SymbolId: brand("SymbolId"),
+      ComponentId: brand("ComponentId"),
+      // §11: one array holds both endpoint kinds and the kind is recovered from the id
+      // shape. The union keeps a bare string out while admitting either id.
+      DependencyEndpoint: "SymbolId | ComponentId",
+    },
+  },
   { schema: "aburi.config.v1.json", out: "config.ts", rootName: "Config" },
   {
     schema: "aburi.diff.v1.json",
     out: "diff.ts",
     rootName: "DiffResult",
-    crossRefs: { Symbol: "./ir", Component: "./ir", Dependency: "./ir" },
+    crossRefs: { Symbol: "./ir", SymbolId: "./ir", Component: "./ir", Dependency: "./ir" },
+    aliasOverrides: { SliceId: brand("SliceId") },
   },
   { schema: "aburi.plugin.v1.json", out: "plugin.ts", rootName: "PluginManifest" },
 ] as const
@@ -66,7 +90,8 @@ function rewriteCrossRefs(
 ): string {
   let out = body
 
-  // 1. Strip empty placeholders. Match optional `/** ... */` JSDoc + `export interface X {\n}`.
+  // 1. Strip loose placeholders. Match optional `/** ... */` JSDoc + either
+  //    `export interface X {\n}` (object $def) or `export type X = string` (string $def).
   //    JSDoc inner uses `(?:[^*]|\*(?!\/))*` so it cannot cross `*/` boundaries, otherwise the
   //    non-greedy variant `[\s\S]*?` would backtrack across earlier definitions (e.g. DiffResult's
   //    own JSDoc → Symbol's JSDoc) and delete everything between.
@@ -77,15 +102,16 @@ function rewriteCrossRefs(
   //    re-exported one — that would slip past the drift test.
   for (const name of Object.keys(crossRefs)) {
     const pattern = new RegExp(
-      String.raw`(?:\/\*\*(?:[^*]|\*(?!\/))*\*\/\s*)?export interface ${name}\s*\{\s*\}\s*\n`,
+      String.raw`(?:\/\*\*(?:[^*]|\*(?!\/))*\*\/\s*)?export (?:interface ${name}\s*\{\s*\}|type ${name} = string)\s*\n`,
       "g",
     )
     const hits = [...out.matchAll(pattern)]
     if (hits.length !== 1) {
       throw new CodegenError(
-        `crossRef rewrite expected exactly 1 empty placeholder \`interface ${name} {}\` in ` +
-          `${schemaFile}, found ${hits.length}. json-schema-to-typescript output format may ` +
-          `have changed; inspect raw output and update rewriteCrossRefs().`,
+        `crossRef rewrite expected exactly 1 loose placeholder (\`interface ${name} {}\` or ` +
+          `\`type ${name} = string\`) in ${schemaFile}, found ${hits.length}. ` +
+          `json-schema-to-typescript output format may have changed; inspect raw output and ` +
+          `update rewriteCrossRefs().`,
       )
     }
     out = out.replace(pattern, "")
@@ -148,6 +174,41 @@ function stripPermissiveIntersection(schemaFile: string, source: string): string
   return out
 }
 
+/**
+ * Replace the right-hand side of generated `export type X = string` aliases.
+ *
+ * An id that owns a namespace — a Symbol id, a Component id, a Slice id — is not
+ * interchangeable with an arbitrary string, but JSON Schema has no way to say so: every one
+ * of them is `{"type": "string"}` on the wire and json-schema-to-typescript faithfully emits
+ * a structural alias that any string satisfies. The nominal part is layered on here, after
+ * generation, so the schema files stay expressible in standard JSON Schema 2020-12.
+ *
+ * Each name MUST match exactly once, for the same reason `rewriteCrossRefs` insists on it: a
+ * silently-missed alias leaves the plain `= string` in place, and the drift test would then
+ * happily compare one unbranded file against another.
+ */
+function applyAliasOverrides(
+  schemaFile: string,
+  body: string,
+  aliasOverrides: Record<string, string>,
+): string {
+  let out = body
+  for (const [name, replacement] of Object.entries(aliasOverrides)) {
+    const pattern = new RegExp(`^export type ${name} = string$`, "gm")
+    const hits = [...out.matchAll(pattern)]
+    if (hits.length !== 1) {
+      throw new CodegenError(
+        `alias override expected exactly 1 \`export type ${name} = string\` in ${schemaFile}, ` +
+          `found ${hits.length}. Either the $def was renamed / dropped, or ` +
+          `json-schema-to-typescript stopped emitting a bare string alias for it; inspect raw ` +
+          `output and update ENTRIES.aliasOverrides.`,
+      )
+    }
+    out = out.replace(pattern, `export type ${name} = ${replacement}`)
+  }
+  return out
+}
+
 async function generateContent(entry: SchemaEntry): Promise<string> {
   const schemaPath = join(SCHEMA_DIR, entry.schema)
   const raw = await readFile(schemaPath, "utf8")
@@ -163,8 +224,13 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd()
   let body = stripPermissiveIntersection(entry.schema, `${normalized}\n`)
+  // crossRefs must run first: it removes the loose local aliases that point at another
+  // module (diff's `SymbolId`), which would otherwise be branded here and never re-exported.
   if (entry.crossRefs) {
     body = rewriteCrossRefs(entry.schema, body, entry.crossRefs)
+  }
+  if (entry.aliasOverrides) {
+    body = applyAliasOverrides(entry.schema, body, entry.aliasOverrides)
   }
 
   const banner = HEADER.replace("<file>", entry.schema.replace(/\.json$/, ""))
@@ -173,6 +239,9 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
 
 /** Test-only re-export of rewriteCrossRefs. Not part of the public surface. */
 export const rewriteCrossRefsForTest = rewriteCrossRefs
+
+/** Test-only re-export of applyAliasOverrides. Not part of the public surface. */
+export const applyAliasOverridesForTest = applyAliasOverrides
 
 /** Generate every schema's TypeScript in-memory. Used by both the CLI and the drift test. */
 export async function generateAll(): Promise<Record<string, string>> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { projectComponent } from "../src"
-import { component, decorator, effect, makeSymbol } from "./fixtures"
+import { component, decorator, effect, makeSymbol, symbolId } from "./fixtures"
 
 /**
  * The `## Boundary effect surface` section renders on the per-component page for
@@ -43,7 +43,9 @@ describe("projectComponent — Boundary effect surface", () => {
               confidence: "medium",
               derivedBy: "effects-plugin:prisma:write",
               propagated: true,
-              derivedFrom: ["ts:src/billing.service.ts#BillingService.persistInvoice"],
+              derivedFrom: ["ts:src/billing.service.ts#BillingService.persistInvoice"].map(
+                symbolId,
+              ),
             },
           ],
         }),
@@ -79,7 +81,9 @@ describe("projectComponent — Boundary effect surface", () => {
               confidence: "medium",
               derivedBy: "effects-plugin:prisma:write",
               propagated: true,
-              derivedFrom: ["ts:src/svc.ts#Svc.persist", "ts:src/other.ts#Other.helper"],
+              derivedFrom: ["ts:src/svc.ts#Svc.persist", "ts:src/other.ts#Other.helper"].map(
+                symbolId,
+              ),
             },
           ],
         }),

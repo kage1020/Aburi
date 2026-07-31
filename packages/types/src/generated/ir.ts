@@ -21,7 +21,7 @@ export type LanguageId = string
 /**
  * ASCII kebab-case.
  */
-export type ComponentId = string
+export type ComponentId = string & { readonly __brand: "ComponentId" }
 export interface Symbol {
 id: SymbolId
 kind: SymbolKind
@@ -45,7 +45,7 @@ dropReason: (string | null)
 /**
  * Format: <language>:<posix-relative-path>#<qualified-name>. Backslash forbidden anywhere (POSIX path enforcement).
  */
-export type SymbolId = string
+export type SymbolId = string & { readonly __brand: "SymbolId" }
 export type SymbolKind = ("function" | "method" | "class" | "interface" | "type" | "const" | "module" | "namespace" | "variable" | "enum" | "constructor" | "call")
 export type ExtKind = (null | string)
 export type Visibility = ("public" | "private" | "protected" | "internal" | "package")
@@ -79,6 +79,10 @@ derivedFrom?: SymbolId[]
 }
 export type EffectId = (("db.read" | "db.write" | "db.transaction" | "db.migration" | "network.http" | "network.ws" | "network.rpc" | "queue.publish" | "queue.consume" | "event.publish" | "event.subscribe" | "fs.read" | "fs.write" | "state.mutate" | "collection.mutate" | "time.now" | "time.timer" | "random" | "env.read" | "env.write" | "process.exit" | "process.signal") | string)
 export type Confidence = ("high" | "medium" | "low")
+/**
+ * Either a Symbol id or a Component id; which one is recovered from the id shape (§11). Deliberately looser than SymbolId and ComponentId so both fit, and so a cross-language endpoint that is neither (a bare path or route string) still validates.
+ */
+export type DependencyEndpoint = SymbolId | ComponentId
 
 /**
  * Aburi intermediate representation (aburi.ir.v1). Source of truth for L3; L0-L2 Markdown views are derived deterministically from this.
@@ -182,8 +186,8 @@ logic: string
 syntax: string
 }
 export interface Dependency {
-from: string
-to: string
+from: DependencyEndpoint
+to: DependencyEndpoint
 via: ("import" | "call" | "inherit" | "implement" | "compose" | "http" | "event" | "sql")
 direction: ("outbound" | "inbound" | "bidirectional")
 effect: (EffectId | null)

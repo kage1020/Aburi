@@ -3,6 +3,7 @@ import type {
   ClassifyContext,
   ImportEdge,
   OwnerSummary,
+  SymbolId,
   VocabRegistry,
 } from "@aburi/types"
 
@@ -42,7 +43,7 @@ export function makeCall(
 
 export function makeOwner(overrides: Partial<OwnerSummary> = {}): OwnerSummary {
   return {
-    id: "ts:test.ts#Owner",
+    id: symbolId("ts:test.ts#Owner"),
     kind: "function",
     name: "Owner",
     extKind: null,
@@ -74,4 +75,13 @@ export function makeCtx({
 
 export function makeDrizzleImport(source = "drizzle-orm"): ImportEdge {
   return { source, symbols: ["sql"], line: 1, dynamic: false }
+}
+
+/**
+ * Brand a literal as a Symbol id. Fixtures are a documented boundary layer where an id is
+ * asserted rather than constructed (ir-schema.md §3.5); production code reaches a `SymbolId`
+ * only through `makeSymbolId` / `trySymbolId` in `@aburi/core`, which check the grammar.
+ */
+function symbolId(raw: string): SymbolId {
+  return raw as SymbolId
 }

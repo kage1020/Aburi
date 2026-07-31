@@ -103,6 +103,25 @@ The only exceptions are `<default>` and "function expressions assigned to a vari
 - Renaming parameters or local variables does not change the ID
 - Moving a file changes the ID (the `<file-path>` part changes) → the Diff algorithm assigns the `moved` status via git rename + fingerprint matching
 
+### 3.5 ID namespaces
+
+Aburi mints three kinds of identifier, and each owns a namespace the other two must not reach into:
+
+| Identifier | Shape | Minted by |
+|---|---|---|
+| Symbol ID | `<language>:<file>#<qname>` (§3.1) | `makeSymbolId` / `trySymbolId` in `@aburi/core` |
+| Component ID | ASCII kebab-case (§4) | `makeComponentId` in `@aburi/core` |
+| Slice ID | `"slice:" + <anchor Symbol ID>` ([slice-view.md](./slice-view.md) §7.1) | `sliceIdFor` in `@aburi/diff` |
+
+Two rules keep the namespaces from overlapping:
+
+1. **`slice` is a reserved language token.** A language plugin claiming it would mint Symbol IDs shaped exactly like Slice IDs, and deriving a Slice ID from one of those would produce `slice:slice:…`. `makeSymbolId` rejects the token; see [multi-language-id.md](./multi-language-id.md) Rule L-6.
+2. **The three types are nominal, not structural.** On the wire all three are JSON strings, and JSON Schema has no way to say otherwise. `@aburi/types` layers a brand onto each generated alias so `SymbolId`, `ComponentId`, and `SliceId` are mutually non-assignable in TypeScript and a bare `string` satisfies none of them. A brand is minted only by the constructors above; assertions (`x as SymbolId`) live in four documented places and nowhere else: `packages/core/src/id.ts`, `sliceIdFor` and `sliceRecordViolation` in `packages/diff/src/slice.ts`, `readIR` in `packages/cli/src/ir-io.ts`, and per-package test fixtures. Test fixtures are on the list because a case that feeds a *malformed* id to the code that rejects it must be able to write one.
+
+The brands are erased at runtime and are absent from the JSON. They constrain what the codebase can build, not what a document may contain — shape checking on the wire remains the job of the schema and of §14.
+
+`dependencies[].from` / `.to` are typed `SymbolId | ComponentId` because §11 lets a single array hold both endpoint kinds. Which one a given endpoint is gets recovered from its shape, by `isSymbolId` / `isComponentId` in `@aburi/core`.
+
 ## 4. Component
 
 A logical boundary of the monorepo. Independent of physical packages.
@@ -428,6 +447,7 @@ Guaranteed by the schema validator plus Aburi internals:
 13. Within `dependencies[]`, the triple `(from, to, via)` is unique — the same directed edge cannot be recorded twice
 14. For every `Symbol.calls[]` entry with a non-null `resolved`, there is a matching Dependency `{ from: caller.id, to: resolved, via: "call" }` in `dependencies[]`, and conversely every `via: "call"` Dependency corresponds to at least one such Call entry (the call-graph projection is total and lossless in both directions)
 15. When `stats.callResolution` is present, it is a faithful census of `symbols[].calls[]`: `totalCalls` equals the number of call sites, `resolvedCalls` equals the number with a non-null `resolved`, and the five `unresolved` buckets sum to the difference. A drift here would report unresolved calls the document does not contain, or hide ones it does
+16. No `symbols[].id` uses a reserved language token (§3.5) — today that means no id begins `slice:`, which would be indistinguishable from a Slice id and would make the Slice-id derivation produce `slice:slice:…`
 
 An invariant violation is a **fatal error**, not a warning.
 

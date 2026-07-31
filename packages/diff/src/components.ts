@@ -1,4 +1,10 @@
-import type { Component, ComponentDiff, Dependency, DependencyDiff } from "@aburi/types"
+import type {
+  Component,
+  ComponentDiff,
+  ComponentId,
+  Dependency,
+  DependencyDiff,
+} from "@aburi/types"
 
 /**
  * §6.1 — Component diff. Component identity is `id`; when a Component is present in both
@@ -12,9 +18,9 @@ export function diffComponents(
   base: readonly Component[],
   head: readonly Component[],
 ): ComponentDiff {
-  const baseById = new Map<string, Component>()
+  const baseById = new Map<ComponentId, Component>()
   for (const c of base) baseById.set(c.id, c)
-  const headById = new Map<string, Component>()
+  const headById = new Map<ComponentId, Component>()
   for (const c of head) headById.set(c.id, c)
 
   const added: Component[] = []

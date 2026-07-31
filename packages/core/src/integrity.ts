@@ -1,5 +1,6 @@
-import type { IR } from "@aburi/types"
+import type { DependencyEndpoint, IR, SymbolId } from "@aburi/types"
 import { CoreError, type IntegrityViolation } from "./errors"
+import { RESERVED_LANGUAGE_IDS } from "./id"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -64,7 +65,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
  * empty); callers that want the throwing form use `assertIRIntegrity`.
  *
- * The 15 invariants checked here are:
+ * The 16 invariants checked here are:
  *   1. Symbol id uniqueness
  *   2. Component id uniqueness
  *   3. Symbol.component → Components[].id existence
@@ -80,6 +81,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *  13. dependencies[]: no duplicate (from, to, via) triples
  *  14. Symbol.calls[].resolved and via:"call" edges agree (call-graph projection is total)
  *  15. stats.callResolution (when present) is a faithful census of Symbol.calls[]
+ *  16. No Symbol id uses a reserved language token (today: `slice`)
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -99,6 +101,7 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkDependencyTupleUniqueness(ir, violations)
   checkCallGraphProjectionAgrees(ir, violations)
   checkCallResolutionStatsCensus(ir, violations)
+  checkSymbolIdNamespace(ir, violations)
 
   return violations
 }
@@ -112,6 +115,29 @@ export function assertIRIntegrity(ir: IR): void {
     code: "integrity-violation",
     violations,
   })
+}
+
+/**
+ * Invariant #16 (ir-schema.md §14, §3.5): no Symbol id uses a language token reserved to a
+ * different id namespace.
+ *
+ * `makeSymbolId` already refuses these, so a document Aburi produced cannot break this. The
+ * check is here for the ones it did not produce — an IR read off disk, or written by an
+ * older or third-party generator. A `slice:`-prefixed Symbol id would be indistinguishable
+ * from a Slice id, and the Slice View pass would derive `slice:slice:…` from it.
+ */
+function checkSymbolIdNamespace(ir: IR, out: IntegrityViolation[]): void {
+  for (const symbol of ir.symbols) {
+    const colon = symbol.id.indexOf(":")
+    if (colon < 0) continue
+    const language = symbol.id.slice(0, colon)
+    if (!RESERVED_LANGUAGE_IDS.has(language)) continue
+    out.push({
+      invariant: 16,
+      subject: symbol.id,
+      message: `Symbol id uses the reserved language token "${language}"; ids in that namespace collide with another id kind (ir-schema.md §3.5)`,
+    })
+  }
 }
 
 function checkSymbolIdUniqueness(ir: IR, out: IntegrityViolation[]): void {
@@ -367,7 +393,17 @@ function compareCodeUnit(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-function looksLikeSymbolId(endpoint: string): boolean {
+/**
+ * Endpoint discrimination (§11): does this endpoint carry the `<language>:<path>#<qname>`
+ * shape, i.e. is it meant to be a Symbol id rather than a Component id?
+ *
+ * Deliberately looser than `isSymbolId` from ./id, which answers the different question of
+ * whether a string is a *well-formed* Symbol id. An endpoint that was meant to be one but is
+ * malformed — a backslash in the path, say — must still be routed to the Symbol-id
+ * invariants so the breach is reported, instead of being waved through as a Component id
+ * that happens not to be declared.
+ */
+function looksLikeSymbolId(endpoint: DependencyEndpoint): endpoint is SymbolId {
   return SYMBOL_ID_PATTERN.test(endpoint)
 }
 

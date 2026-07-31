@@ -6,6 +6,7 @@ import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
+import { symbolId } from "./fixtures"
 
 class MemStream extends Writable {
   chunks: string[] = []
@@ -49,7 +50,7 @@ function makeIRWithAdded(): IR {
     ...ir,
     symbols: [
       {
-        id: "ts:src/a.ts#Foo",
+        id: symbolId("ts:src/a.ts#Foo"),
         kind: "function",
         extKind: null,
         name: "Foo",

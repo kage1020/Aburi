@@ -1,20 +1,20 @@
 import type { UnresolvedCallDiagnostic } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectSymbolExplain } from "../src/explain"
-import { makeSymbol } from "./fixtures"
+import { makeSymbol, symbolId } from "./fixtures"
 
 // call-resolution.md §8.1 — `aburi explain --debug-resolution` renders the
 // per-Symbol dump the doc promises. The buckets never enter the IR, so they
 // arrive through the projection context instead.
 
-const CALLER_ID = "ts:src/ctl.ts#Ctl.route"
+const CALLER_ID = symbolId("ts:src/ctl.ts#Ctl.route")
 
 function caller() {
   return makeSymbol({
     id: CALLER_ID,
     name: "Ctl.route",
     calls: [
-      { target: "svc.refund", line: 12, resolved: "ts:src/svc.ts#Svc.refund" },
+      { target: "svc.refund", line: 12, resolved: symbolId("ts:src/svc.ts#Svc.refund") },
       { target: "factory.save", line: 14, resolved: null },
       { target: "User.save", line: 16, resolved: null },
     ],
@@ -28,7 +28,7 @@ const diagnostics: UnresolvedCallDiagnostic[] = [
     target: "User.save",
     line: 16,
     bucket: "ambiguous",
-    candidates: ["ts:src/a.ts#User.save", "ts:src/b.ts#User.save"],
+    candidates: ["ts:src/a.ts#User.save", "ts:src/b.ts#User.save"].map(symbolId),
   },
 ]
 
@@ -54,7 +54,7 @@ describe("projectSymbolExplain — ## Call resolution", () => {
     const md = projectSymbolExplain(caller(), {
       unresolvedCalls: [
         {
-          symbolId: "ts:src/other.ts#other",
+          symbolId: symbolId("ts:src/other.ts#other"),
           target: "factory.save",
           line: 14,
           bucket: "no-match",

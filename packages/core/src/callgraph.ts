@@ -9,6 +9,7 @@ import type {
   UnresolvedCallBuckets,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
+import { trySymbolId } from "./id"
 import type { ReceiverHint } from "./lsp/enrich"
 import { makeReceiverHintKey } from "./lsp/enrich"
 
@@ -555,9 +556,12 @@ function resolveInFileScope(
   if (tail.length === 0) {
     return { id: anchor.id, confidence: "high" }
   }
-  const compositeQname = `${head}.${tail.join(".")}`
-  const compositeId: SymbolId = `${caller.language}:${caller.source.file}#${compositeQname}`
-  if (keptSymbolIds.has(compositeId)) {
+  const compositeId = trySymbolId({
+    language: caller.language,
+    file: caller.source.file,
+    qualifiedName: `${head}.${tail.join(".")}`,
+  })
+  if (compositeId !== null && keptSymbolIds.has(compositeId)) {
     return { id: compositeId, confidence: "high" }
   }
   return null
@@ -597,18 +601,24 @@ function resolveInImportScope(
     if (edge.symbols === "*") {
       if (tail.length === 0) continue
       if (edge.namespaceBinding !== head) continue
-      const qname = tail.join(".")
-      const candidateId: SymbolId = `${ctx.caller.language}:${targetFile}#${qname}`
-      if (ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
+      const candidateId = trySymbolId({
+        language: ctx.caller.language,
+        file: targetFile,
+        qualifiedName: tail.join("."),
+      })
+      if (candidateId !== null && ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
       continue
     }
 
     for (const raw of edge.symbols) {
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
-      const qname = tail.length === 0 ? imported : `${imported}.${tail.join(".")}`
-      const candidateId: SymbolId = `${ctx.caller.language}:${targetFile}#${qname}`
-      if (ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
+      const candidateId = trySymbolId({
+        language: ctx.caller.language,
+        file: targetFile,
+        qualifiedName: tail.length === 0 ? imported : `${imported}.${tail.join(".")}`,
+      })
+      if (candidateId !== null && ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
     }
   }
   if (candidates.size !== 1) {
@@ -616,7 +626,8 @@ function resolveInImportScope(
     return null
   }
   const [only] = candidates
-  return { id: only as SymbolId, confidence: "high" }
+  if (only === undefined) return null
+  return { id: only, confidence: "high" }
 }
 
 /**

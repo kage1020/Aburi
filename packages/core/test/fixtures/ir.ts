@@ -1,6 +1,66 @@
-import type { IR, Symbol as IRSymbol } from "@aburi/types"
+import type {
+  Component,
+  ComponentId,
+  Dependency,
+  DependencyEndpoint,
+  IR,
+  Symbol as IRSymbol,
+  SymbolId,
+} from "@aburi/types"
 
 const SCHEMA = "https://aburi.dev/schema/aburi.ir.v1.json"
+
+/**
+ * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is
+ * asserted rather than constructed: a case that wants a *malformed* id has to be able to
+ * write one, so routing these through `makeSymbolId` would make the negative tests
+ * unwritable. Production code never has this option — it goes through `makeSymbolId` /
+ * `trySymbolId`, which check.
+ */
+export function symbolId(raw: string): SymbolId {
+  return raw as SymbolId
+}
+
+/** Component-id counterpart of `symbolId`, with the same rationale. */
+export function componentId(raw: string): ComponentId {
+  return raw as ComponentId
+}
+
+/**
+ * Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md §11).
+ * Fixtures deliberately feed malformed endpoints to the invariants that exist to catch them,
+ * so this brands whatever the case wrote rather than discriminating.
+ */
+export function endpoint(raw: string): DependencyEndpoint {
+  return raw as DependencyEndpoint
+}
+
+export function makeComponent(
+  id: string,
+  overrides: Omit<Partial<Component>, "id"> = {},
+): Component {
+  return {
+    id: componentId(id),
+    name: id,
+    roots: [`apps/${id}`],
+    languages: ["ts"],
+    ...overrides,
+  }
+}
+
+export function makeDependency(
+  over: Omit<Partial<Dependency>, "from" | "to"> & { from: string; to: string },
+): Dependency {
+  const { from, to, ...rest } = over
+  return {
+    from: endpoint(from),
+    to: endpoint(to),
+    via: "call",
+    direction: "outbound",
+    effect: null,
+    ...rest,
+  }
+}
 
 export function minimalIR(): IR {
   return {
@@ -33,20 +93,35 @@ export function minimalIR(): IR {
   }
 }
 
-export function makeSymbol(id: string, overrides: Partial<IRSymbol> = {}): IRSymbol {
+/**
+ * Overrides accepted by `makeSymbol`. The id-shaped fields are widened back to `string` so a
+ * case can keep writing `component: "billing"` or `resolved: "ts:src/x.ts#f"` inline; the
+ * builder brands them in one place, which is the whole point of a fixture boundary.
+ */
+export type SymbolOverrides = Omit<Partial<IRSymbol>, "id" | "component" | "calls"> & {
+  component?: string | null
+  calls?: Array<{ target: string; line: number; resolved: string | null }>
+}
+
+export function makeSymbol(id: string, overrides: SymbolOverrides = {}): IRSymbol {
+  const { component, calls, ...rest } = overrides
   return {
-    id,
+    id: symbolId(id),
     kind: "function",
     extKind: null,
     name: id.split("#")[1] ?? "anonymous",
     language: "ts",
-    component: null,
+    component: component === undefined || component === null ? null : componentId(component),
     visibility: "public",
     decorators: [],
     signature: null,
     rules: [],
     effects: [],
-    calls: [],
+    calls: (calls ?? []).map((c) => ({
+      target: c.target,
+      line: c.line,
+      resolved: c.resolved === null ? null : symbolId(c.resolved),
+    })),
     source: {
       file: id.split(":")[1]?.split("#")[0] ?? "src/a.ts",
       startLine: 1,
@@ -59,6 +134,6 @@ export function makeSymbol(id: string, overrides: Partial<IRSymbol> = {}): IRSym
     derivedBy: [],
     dropped: false,
     dropReason: null,
-    ...overrides,
+    ...rest,
   }
 }

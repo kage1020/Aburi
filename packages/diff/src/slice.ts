@@ -1,5 +1,5 @@
 import { type CallEdge, computeWeaklyConnectedComponents } from "@aburi/core"
-import type { SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
+import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
 
 /** The three inputs of the Slice View pass — docs/design/slice-view.md §3. */
@@ -54,9 +54,14 @@ const SLICE_ID_PREFIX = "slice:"
  * in `src/` either receives an id or renders one. (Tests spell the prefix out
  * literally on purpose: an expectation written in terms of the function under
  * test would agree with it no matter what it produced.)
+ *
+ * The cast is the one place a `SliceId` comes into existence. `SliceId` and
+ * `SymbolId` are separate brands precisely so this concatenation cannot be
+ * open-coded anywhere else: a bare `"slice:" + x` evaluates to `string`, which
+ * `SliceRecord.id` no longer accepts.
  */
-function sliceIdFor(anchor: SymbolId): string {
-  return `${SLICE_ID_PREFIX}${anchor}`
+function sliceIdFor(anchor: SymbolId): SliceId {
+  return `${SLICE_ID_PREFIX}${anchor}` as SliceId
 }
 
 /**
@@ -178,6 +183,10 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
         `(slice-view.md §8.2 for the order, §11.1 for uniqueness).`,
     }
   }
+  // The one place outside `sliceIdFor` that asserts an id brand, and the reason this
+  // function takes `unknown`: the anchor has been checked to be a string and nothing more.
+  // Whether it is a well-formed Symbol id is not this check's question — a record whose
+  // members are gibberish still has to be told apart from one whose id disagrees with them.
   const expected = sliceIdFor(anchor as SymbolId)
   if (id !== expected) {
     return {

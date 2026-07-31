@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { enrichWithLsp, LSP_TIMEOUT } from "../../src/lsp"
+import { symbolId } from "../fixtures/ir"
 import {
   makeClassSymbol,
   makeEnrichmentInput,
@@ -84,7 +85,7 @@ describe("LSP protocol", () => {
       ...makeClassSymbolLike(file, "M", 1),
       kind: "method" as const,
       name: "M.caller",
-      id: `ts:${file}#M.caller`,
+      id: symbolId(`ts:${file}#M.caller`),
       calls: [
         { target: "this.helper", line: 2, resolved: null },
         { target: "this.helper", line: 3, resolved: null },
@@ -96,13 +97,13 @@ describe("LSP protocol", () => {
       ...makeClassSymbolLike(file, "M", 5),
       kind: "method" as const,
       name: "M.helper",
-      id: `ts:${file}#M.helper`,
+      id: symbolId(`ts:${file}#M.helper`),
     })
     const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts", "src/f.ts"]
     const symbols = files.flatMap((f) => [
       {
         ...cls,
-        id: `ts:${f}#M`,
+        id: symbolId(`ts:${f}#M`),
         source: { file: f, startLine: 1, endLine: 5, startColumn: null, endColumn: null },
       },
       makeCaller(f),

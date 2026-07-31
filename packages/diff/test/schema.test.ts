@@ -1,4 +1,4 @@
-import type { DiffResult, IR, SliceRecord } from "@aburi/types"
+import type { DiffResult, IR } from "@aburi/types"
 import Ajv2020, { type ErrorObject, type SchemaObject } from "ajv/dist/2020.js"
 import { describe, expect, it } from "vitest"
 import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" }
@@ -215,7 +215,9 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
 })
 
 describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
-  function diffWithSlices(slices: SliceRecord[]): unknown {
+  // Deliberately looser than `SliceRecord[]`: these cases exist to feed the validator
+  // records the producer could never build, so the ids stay plain strings here.
+  function diffWithSlices(slices: Array<{ id: string; members: string[] }>): unknown {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),

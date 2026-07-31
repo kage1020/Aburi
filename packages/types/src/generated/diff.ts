@@ -1,11 +1,14 @@
 // AUTO-GENERATED — DO NOT EDIT.
 // Source: schema/aburi.diff.v1.json
 // Run `pnpm --filter @aburi/types codegen` to regenerate.
-import type { Component, Dependency, Symbol } from "./ir"
-export type { Component, Dependency, Symbol } from "./ir"
+import type { Component, Dependency, Symbol, SymbolId } from "./ir"
+export type { Component, Dependency, Symbol, SymbolId } from "./ir"
 export type SymbolChange = (SymbolAdded | SymbolRemoved | SymbolMoved | SymbolChanged | SymbolMovedChanged | SymbolDroppedToggled)
 export type MatchRationale = ("id-match" | "git-rename" | "logic-fingerprint" | "logic-fingerprint+name-disambiguation" | "name-signature" | "dropped-weak-match")
-
+/**
+ * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer.
+ */
+export type SliceId = string & { readonly __brand: "SliceId" }
 /**
  * Result of aburi diff <base>..<head>. JSON projection of the matched/added/removed/moved/changed symbol pairs.
  */
@@ -129,14 +132,11 @@ added: Dependency[]
 removed: Dependency[]
 }
 export interface SliceRecord {
-/**
- * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer.
- */
-id: string
+id: SliceId
 /**
  * Member Symbol ids in strictly ascending lexicographic order. members[0] is the Slice anchor.
  * 
  * @minItems 1
  */
-members: string[]
+members: SymbolId[]
 }

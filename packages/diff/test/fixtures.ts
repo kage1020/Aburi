@@ -1,8 +1,10 @@
 import type {
   Call,
   Component,
+  ComponentId,
   Decorator,
   Dependency,
+  DependencyEndpoint,
   Effect,
   EffectId,
   Fingerprint,
@@ -10,20 +12,56 @@ import type {
   Symbol as IRSymbol,
   Rule,
   Signature,
+  SliceId,
+  SymbolId,
 } from "@aburi/types"
 
 /**
- * Compact IR builder for diff tests. Every field carries a schema-satisfying default so
- * cases only spell out what they intend to change.
+ * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is
+ * asserted rather than constructed: several cases here feed *malformed* ids to the code
+ * that exists to reject them, which routing through `makeSymbolId` would make unwritable.
  */
-export function makeSymbol(overrides: Partial<IRSymbol> & { id: string; name: string }): IRSymbol {
+export function symbolId(raw: string): SymbolId {
+  return raw as SymbolId
+}
+
+/** Component-id counterpart of `symbolId`, same rationale. */
+export function componentId(raw: string): ComponentId {
+  return raw as ComponentId
+}
+
+/** Slice-id counterpart of `symbolId`, same rationale. */
+export function sliceId(raw: string): SliceId {
+  return raw as SliceId
+}
+
+/** Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md §11). */
+export function endpoint(raw: string): DependencyEndpoint {
+  return raw as DependencyEndpoint
+}
+
+/**
+ * Compact IR builder for diff tests. Every field carries a schema-satisfying default so
+ * cases only spell out what they intend to change. The id-shaped fields are widened back to
+ * `string` so cases keep writing literals; the branding happens here, once.
+ */
+export function makeSymbol(
+  overrides: Omit<Partial<IRSymbol>, "id" | "component"> & {
+    id: string
+    name: string
+    component?: string | null
+  },
+): IRSymbol {
   return {
-    id: overrides.id,
+    id: symbolId(overrides.id),
     kind: overrides.kind ?? "function",
     extKind: overrides.extKind ?? null,
     name: overrides.name,
     language: overrides.language ?? "ts",
-    component: overrides.component ?? null,
+    component:
+      overrides.component === undefined || overrides.component === null
+        ? null
+        : componentId(overrides.component),
     visibility: overrides.visibility ?? "public",
     decorators: overrides.decorators ?? [],
     signature: overrides.signature ?? null,
@@ -80,9 +118,14 @@ export function decorator(overrides: Partial<Decorator> & { name: string }): Dec
 }
 
 export function effect(
-  overrides: Partial<Effect> & { id: EffectId; target: string; plugin: string },
+  overrides: Omit<Partial<Effect>, "derivedFrom"> & {
+    id: EffectId
+    target: string
+    plugin: string
+    derivedFrom?: string[]
+  },
 ): Effect {
-  return {
+  const base: Effect = {
     id: overrides.id,
     target: overrides.target,
     line: overrides.line ?? 1,
@@ -90,13 +133,21 @@ export function effect(
     confidence: overrides.confidence ?? "high",
     derivedBy: overrides.derivedBy ?? "convention:test",
   }
+  if (overrides.propagated !== undefined) base.propagated = overrides.propagated
+  if (overrides.derivedFrom !== undefined) base.derivedFrom = overrides.derivedFrom.map(symbolId)
+  return base
 }
 
-export function call(overrides: Partial<Call> & { target: string }): Call {
+export function call(
+  overrides: Omit<Partial<Call>, "resolved"> & { target: string; resolved?: string | null },
+): Call {
   return {
     target: overrides.target,
     line: overrides.line ?? 1,
-    resolved: overrides.resolved ?? null,
+    resolved:
+      overrides.resolved === undefined || overrides.resolved === null
+        ? null
+        : symbolId(overrides.resolved),
   }
 }
 
@@ -111,9 +162,11 @@ export function rule(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
   }
 }
 
-export function component(overrides: Partial<Component> & { id: string; name: string }): Component {
+export function component(
+  overrides: Omit<Partial<Component>, "id"> & { id: string; name: string },
+): Component {
   return {
-    id: overrides.id,
+    id: componentId(overrides.id),
     name: overrides.name,
     roots: overrides.roots ?? [`apps/${overrides.id}`],
     publicApi: overrides.publicApi ?? [],
@@ -124,11 +177,11 @@ export function component(overrides: Partial<Component> & { id: string; name: st
 }
 
 export function dependency(
-  overrides: Partial<Dependency> & { from: string; to: string },
+  overrides: Omit<Partial<Dependency>, "from" | "to"> & { from: string; to: string },
 ): Dependency {
   return {
-    from: overrides.from,
-    to: overrides.to,
+    from: endpoint(overrides.from),
+    to: endpoint(overrides.to),
     via: overrides.via ?? "import",
     direction: overrides.direction ?? "outbound",
     effect: overrides.effect ?? null,
@@ -166,9 +219,9 @@ export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): 
   }
 }
 
-function filePartOf(symbolId: string): string {
-  const colon = symbolId.indexOf(":")
-  const hash = symbolId.indexOf("#")
+function filePartOf(raw: string): string {
+  const colon = raw.indexOf(":")
+  const hash = raw.indexOf("#")
   if (colon < 0 || hash < 0) return "src/index.ts"
-  return symbolId.slice(colon + 1, hash)
+  return raw.slice(colon + 1, hash)
 }

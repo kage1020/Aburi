@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
-import type { Component, LanguageId } from "@aburi/types"
+import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
+import { makeComponentId } from "./id"
 import {
   detectManagers,
   isDirectory,
@@ -163,15 +164,23 @@ async function buildSingleProjectComponent(workspaceRoot: string): Promise<Compo
   return component
 }
 
+/**
+ * Pick the Component id, in the priority order of component-detect.md §5.
+ *
+ * The result goes through `makeComponentId`, so a name that kebab-cases into something the
+ * schema rejects (empty, or leading with a digit) aborts detection with a coded error rather
+ * than reaching `components[].id` — where it would have produced an IR that fails its own
+ * schema with no indication of where the bad id came from.
+ */
 function decideId(
   entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">,
   manifest: PackageJsonShape | null,
-): string {
+): ComponentId {
   const fromManifest = manifest?.name !== undefined ? toIdFromNpmName(manifest.name) : null
-  if (fromManifest !== null) return fromManifest
+  if (fromManifest !== null) return makeComponentId(fromManifest)
   const segments = entry.relativeRoot.split("/").filter((s) => s.length > 0 && s !== ".")
   const leaf = segments[segments.length - 1] ?? basename(entry.absoluteRoot)
-  return toKebabCase(leaf)
+  return makeComponentId(toKebabCase(leaf))
 }
 
 function decideName(
@@ -333,7 +342,7 @@ function resolveIdCollisions(components: Component[]): Component[] {
 }
 
 function applyParentSuffixPass(components: Component[]): void {
-  const byId = new Map<string, Component[]>()
+  const byId = new Map<ComponentId, Component[]>()
   for (const c of components) {
     const list = byId.get(c.id)
     if (list === undefined) byId.set(c.id, [c])
@@ -344,13 +353,16 @@ function applyParentSuffixPass(components: Component[]): void {
     for (const c of group) {
       const segments = c.roots[0]?.split("/").filter((s) => s.length > 0 && s !== ".") ?? []
       const parent = segments.length > 1 ? segments[segments.length - 2] : null
-      c.id = parent !== undefined && parent !== null ? `${id}-${toKebabCase(parent)}` : id
+      c.id =
+        parent !== undefined && parent !== null
+          ? makeComponentId(`${id}-${toKebabCase(parent)}`)
+          : id
     }
   }
 }
 
 function applyNumericSuffixPass(components: Component[]): void {
-  const taken = new Set<string>()
+  const taken = new Set<ComponentId>()
   // Two collided components can survive the parent-suffix pass either because their parent
   // segments matched or because a rename collided with a third component. Walk in a stable
   // order (roots[0]) so the tail assignment is deterministic; the first occurrence keeps
@@ -364,8 +376,8 @@ function applyNumericSuffixPass(components: Component[]): void {
       continue
     }
     let n = 2
-    while (taken.has(`${c.id}-${n}`)) n++
-    c.id = `${c.id}-${n}`
+    while (taken.has(makeComponentId(`${c.id}-${n}`))) n++
+    c.id = makeComponentId(`${c.id}-${n}`)
     taken.add(c.id)
   }
 }

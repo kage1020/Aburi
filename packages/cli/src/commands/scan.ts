@@ -5,6 +5,7 @@ import {
   detectComponents,
   detectManagers,
   detectWorkspaceRoot,
+  makeComponentId,
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -238,8 +239,12 @@ async function resolveComponents(
   workspaceRoot: string,
 ): Promise<Component[]> {
   if (config.components !== undefined && config.components.length > 0) {
+    // The config schema already constrains `id` to the kebab shape, but the value arrives
+    // here as a plain string. Re-asserting it through the constructor is what turns it into
+    // a Component id, and keeps a config loaded by some other path from smuggling in a shape
+    // `components[].id` cannot hold.
     return config.components.map((entry) => ({
-      id: entry.id,
+      id: makeComponentId(entry.id),
       name: entry.name ?? entry.id,
       roots: [...entry.roots],
       publicApi: entry.publicApi ?? [],

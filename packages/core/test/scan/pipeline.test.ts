@@ -20,6 +20,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDropCFilter, runFilePipeline } from "../../src"
+import { symbolId } from "../fixtures/ir"
 
 const noopRegistry: VocabRegistry = {
   findEffect: () => null,
@@ -139,7 +140,7 @@ function stubLanguagePlugin(options: {
 
 function baseCandidate(): SymbolCandidate<OpaqueAstNode> {
   return {
-    id: "stub:test.stub#Fn",
+    id: symbolId("stub:test.stub#Fn"),
     kind: "function",
     extKind: null,
     name: "Fn",
@@ -440,7 +441,7 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
 
 describe("runFilePipeline — Symbol id contract", () => {
   it("throws when the language plugin emits a Symbol id without a language prefix", async () => {
-    const bogusCandidate = { ...baseCandidate(), id: "no-colon-here" }
+    const bogusCandidate = { ...baseCandidate(), id: symbolId("no-colon-here") }
     await expect(runPipelineWithStubs({ candidate: bogusCandidate })).rejects.toThrow(
       /language prefix/,
     )

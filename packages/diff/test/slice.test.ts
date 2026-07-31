@@ -9,7 +9,7 @@ import {
   sliceAnchor,
   sliceRecordViolation,
 } from "../src/slice"
-import { fp, makeSymbol, zeroFp } from "./fixtures"
+import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "./fixtures"
 
 /**
  * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
@@ -79,7 +79,7 @@ const droppedToggled = (id: string, direction: "to-dropped" | "to-kept"): Symbol
 })
 
 function edge(from: string, to: string, line = 1, confidence: Confidence = "high"): CallEdge {
-  return { from, to, via: "call", confidence, line }
+  return { from: symbolId(from), to: symbolId(to), via: "call", confidence, line }
 }
 
 describe("computeSlices — Node selection (SV1–SV5)", () => {
@@ -159,7 +159,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
       confidence: "high",
       derivedBy: "propagation:svc.op",
       propagated: true,
-      derivedFrom: [Svc],
+      derivedFrom: [symbolId(Svc)],
     }
     const ctlPropagatedOnly: SymbolChange = {
       status: "changed",
@@ -528,7 +528,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
 
     // A record whose id disagrees with its members is malformed, but the helper
     // still answers from members[0] — proof it never strips the `slice:` prefix.
-    expect(sliceAnchor({ id: `slice:${B}`, members: [A, B] })).toBe(A)
+    expect(sliceAnchor({ id: sliceId(`slice:${B}`), members: [symbolId(A), symbolId(B)] })).toBe(A)
   })
 
   it("SV23: rejects a correct `slice:` prefix whose id is not the anchor", () => {
@@ -572,7 +572,9 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
   })
 
   it("SV25: sliceAnchor throws rather than returning undefined for an empty members[]", () => {
-    expect(() => sliceAnchor({ id: "slice:ts:src/a.ts#A", members: [] })).toThrow(DiffError)
+    expect(() => sliceAnchor({ id: sliceId("slice:ts:src/a.ts#A"), members: [] })).toThrow(
+      DiffError,
+    )
   })
 })
 

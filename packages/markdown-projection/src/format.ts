@@ -2,11 +2,13 @@ import type {
   Call,
   Confidence,
   Decorator,
+  DependencyEndpoint,
   Effect,
   Fingerprint,
   Symbol as IRSymbol,
   Rule,
   Signature,
+  SymbolId,
 } from "@aburi/types"
 
 /**
@@ -309,7 +311,12 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * than the Component id shape. Used to route symbol-to-symbol call edges
  * through their dedicated Markdown sections while leaving component-to-component
  * edges in the existing sections.
+ *
+ * A type predicate rather than a plain boolean: `DependencyEndpoint` is the union of
+ * both id kinds, and this is the shape test that decides which one a given endpoint is.
+ * Callers get the narrowed `SymbolId` and can look it up in a Symbol-keyed set without
+ * asserting anything.
  */
-export function isSymbolIdEndpoint(endpoint: string): boolean {
+export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): endpoint is SymbolId {
   return SYMBOL_ID_PATTERN.test(endpoint)
 }

@@ -3,8 +3,11 @@ import type {
   CallCandidate,
   CallResolutionStats,
   ClassifyContext,
+  ComponentId,
   Config,
   ConfigPluginRef,
+  Dependency,
+  DependencyEndpoint,
   DiffGenerator,
   DiffResult,
   EffectClassification,
@@ -26,10 +29,12 @@ import type {
   PluginContext,
   PluginManifest,
   PluginRef,
+  SliceId,
   SliceRecord,
   SourceFile,
   Symbol,
   SymbolCandidate,
+  SymbolId,
   UnresolvedCallBuckets,
   VocabRegistry,
 } from "../src/index"
@@ -37,6 +42,13 @@ import type {
 // Pure type-level tests. They compile-time-assert that the public surface stays
 // importable and shaped roughly as designed. No runtime cost beyond Vitest's
 // per-test bookkeeping.
+
+/**
+ * Is a value of type `From` accepted where `To` is expected? Wrapping both sides in a tuple
+ * stops the conditional from distributing over unions, so `Assignable<SymbolId | ComponentId,
+ * SymbolId>` answers about the union as a whole rather than member by member.
+ */
+type Assignable<From, To> = [From] extends [To] ? true : false
 
 describe("@aburi/types public surface", () => {
   it("re-exports the five AC-required root types", () => {
@@ -111,8 +123,8 @@ describe("@aburi/types public surface", () => {
   it("exposes SliceRecord as a top-level export and on DiffResult.slices", () => {
     expectTypeOf<SliceRecord>().toHaveProperty("id")
     expectTypeOf<SliceRecord>().toHaveProperty("members")
-    expectTypeOf<SliceRecord["id"]>().toEqualTypeOf<string>()
-    expectTypeOf<SliceRecord["members"]>().toEqualTypeOf<string[]>()
+    expectTypeOf<SliceRecord["id"]>().toEqualTypeOf<SliceId>()
+    expectTypeOf<SliceRecord["members"]>().toEqualTypeOf<SymbolId[]>()
     expectTypeOf<DiffResult>().toHaveProperty("slices")
     expectTypeOf<DiffResult["slices"]>().toEqualTypeOf<SliceRecord[]>()
   })
@@ -230,6 +242,54 @@ describe("@aburi/types public surface", () => {
       },
     }
     expectTypeOf(noName).toEqualTypeOf<PluginManifest>()
+  })
+
+  // The three id types own separate namespaces (ir-schema.md §3.5). JSON Schema cannot say
+  // so — all three are `{"type": "string"}` on the wire — so the distinction is layered on by
+  // the codegen brand pass, and these assertions are what proves it survived regeneration.
+  //
+  // `Assignable` is spelled out rather than reached through `expectTypeOf().toExtend()`
+  // because the negative direction is the interesting one: a structural alias would make
+  // every one of these pass.
+  it("SymbolId / ComponentId / SliceId are mutually distinct nominal types", () => {
+    expectTypeOf<Assignable<SymbolId, ComponentId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<ComponentId, SymbolId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<SymbolId, SliceId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<SliceId, SymbolId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<ComponentId, SliceId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<SliceId, ComponentId>>().toEqualTypeOf<false>()
+  })
+
+  it("a bare string is not an id, but every id is a string", () => {
+    expectTypeOf<Assignable<string, SymbolId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<string, ComponentId>>().toEqualTypeOf<false>()
+    expectTypeOf<Assignable<string, SliceId>>().toEqualTypeOf<false>()
+    // The other direction must keep working: ids are passed to `startsWith`, `localeCompare`,
+    // template literals and every `(s: string) => ...` helper in the projection layer.
+    expectTypeOf<Assignable<SymbolId, string>>().toEqualTypeOf<true>()
+    expectTypeOf<Assignable<ComponentId, string>>().toEqualTypeOf<true>()
+    expectTypeOf<Assignable<SliceId, string>>().toEqualTypeOf<true>()
+  })
+
+  it("a slice id cannot be produced by concatenation", () => {
+    // What `sliceIdFor` in @aburi/diff exists to prevent: the template literal evaluates to
+    // `string`, which the brand rejects, so the derivation has to go through the one helper.
+    expectTypeOf<Assignable<`slice:${string}`, SliceId>>().toEqualTypeOf<false>()
+  })
+
+  it("Dependency endpoints admit either id kind but not a bare string", () => {
+    expectTypeOf<Dependency["from"]>().toEqualTypeOf<DependencyEndpoint>()
+    expectTypeOf<Dependency["to"]>().toEqualTypeOf<DependencyEndpoint>()
+    expectTypeOf<Assignable<SymbolId, DependencyEndpoint>>().toEqualTypeOf<true>()
+    expectTypeOf<Assignable<ComponentId, DependencyEndpoint>>().toEqualTypeOf<true>()
+    expectTypeOf<Assignable<string, DependencyEndpoint>>().toEqualTypeOf<false>()
+  })
+
+  it("the plugin contract hands core an already-validated Symbol id", () => {
+    expectTypeOf<SymbolCandidate["id"]>().toEqualTypeOf<SymbolId>()
+    expectTypeOf<Assignable<string, SymbolCandidate["id"]>>().toEqualTypeOf<false>()
+    expectTypeOf<Symbol["id"]>().toEqualTypeOf<SymbolId>()
+    expectTypeOf<Symbol["component"]>().toEqualTypeOf<ComponentId | null | undefined>()
   })
 
   it("ParseResult and SymbolCandidate are generic in the parser's tree/node types", () => {

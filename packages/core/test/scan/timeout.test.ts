@@ -7,6 +7,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { type ClassifyTimeoutEvent, classifyWithTimeout } from "../../src"
+import { symbolId } from "../fixtures/ir"
 
 const noopRegistry: VocabRegistry = {
   findEffect: () => null,
@@ -46,7 +47,7 @@ function makeCall(target: string): CallCandidate {
 function makeCtx(): ClassifyContext {
   return {
     owner: {
-      id: "ts:test.ts#Fn",
+      id: symbolId("ts:test.ts#Fn"),
       kind: "function",
       name: "Fn",
       extKind: null,

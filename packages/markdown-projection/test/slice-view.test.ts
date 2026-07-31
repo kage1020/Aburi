@@ -1,7 +1,7 @@
 import type { SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
-import { fp, makeDiff, makeSymbol } from "./fixtures"
+import { fp, makeDiff, makeSymbol, sliceId, symbolId } from "./fixtures"
 
 /**
  * Slice View rendering acceptance tests. Backs docs/design/slice-view.md §12
@@ -42,7 +42,10 @@ const baseSource = (file: string, startLine: number) => ({
   endColumn: null,
 })
 
-const slice = (id: string, members: string[]): SliceRecord => ({ id, members })
+const slice = (id: string, members: string[]): SliceRecord => ({
+  id: sliceId(id),
+  members: members.map(symbolId),
+})
 
 describe("Slice View Markdown projection — §12", () => {
   it("§12.5 / SV19: an empty slices[] omits the entire section from diff.md", () => {

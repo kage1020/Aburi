@@ -125,7 +125,7 @@ interface ImportEdge {
 ```ts
 interface SymbolCandidate {
   // precursor of an IR Symbol; the full set before drop determination
-  id: string                                   // <language>:<file>#<qname>
+  id: SymbolId                                 // <language>:<file>#<qname>, from makeSymbolId
   kind: SymbolKind                             // ir-schema §5.1 enum
   extKind: string | null                       // §5.2 (chosen from what the plugin itself declared)
   name: string                                 // qualified name
@@ -140,6 +140,8 @@ interface SymbolCandidate {
   fullNode: OpaqueAstNode                      // signature + body
 }
 ```
+
+`id` is a `SymbolId`, not a `string`: the type is nominal ([ir-schema.md](./ir-schema.md) §3.5), so a plugin cannot hand core an id it assembled by concatenation. Build it with `makeSymbolId` from `@aburi/core`, which enforces the §3.1 grammar — a lowercase-ASCII language token that is not reserved, a POSIX workspace-relative path, and an identifier-like qualified name — and throws a coded `CoreError` otherwise. `trySymbolId` is the non-throwing variant, for a plugin that assembles speculative ids and expects some of them not to be buildable.
 
 When the plugin chooses an `extKind` from its own declarations, the chosen value must fall under manifest.provides.extKinds or extKindPrefixes. The registry detects violations at startup.
 
@@ -432,6 +434,13 @@ Every language plugin must pass the following tests.
 |---|---|---|
 | LP27 | file containing a syntax error | returns a recoverable error, extracts Symbols where possible |
 | LP28 | completely broken file | returns a non-recoverable error, the core skips it |
+
+### 9.8 Symbol id construction
+
+| ID | Input | Expected |
+|---|---|---|
+| LP29 | Any extracted Symbol | `SymbolCandidate.id` came from `makeSymbolId`; a hand-assembled `` `${lang}:${file}#${qname}` `` does not type-check against `SymbolId` (§4.3) |
+| LP30 | A qualified name the §3.2 grammar rejects (empty, anonymous marker, non-identifier segment) | `makeSymbolId` throws a coded `CoreError`; the id never reaches the IR |
 
 ## 10. Design Decisions
 

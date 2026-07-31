@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import type { IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runExplain } from "../src"
+import { symbolId } from "./fixtures"
 
 let scratch = ""
 
@@ -15,7 +16,7 @@ function makeIRWithTwoNamed(): IR {
     components: [],
     symbols: [
       {
-        id: "ts:src/a.ts#getUser",
+        id: symbolId("ts:src/a.ts#getUser"),
         kind: "function",
         extKind: null,
         name: "getUser",
@@ -41,7 +42,7 @@ function makeIRWithTwoNamed(): IR {
         dropReason: null,
       },
       {
-        id: "ts:src/b.ts#getUsers",
+        id: symbolId("ts:src/b.ts#getUsers"),
         kind: "function",
         extKind: null,
         name: "getUsers",

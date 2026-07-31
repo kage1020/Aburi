@@ -2,11 +2,13 @@ import type {
   Dependency,
   DiffResult,
   Symbol as IRSymbol,
+  SliceId,
   SliceRecord,
   SymbolChange,
   SymbolChanged,
   SymbolDelta,
   SymbolDroppedToggled,
+  SymbolId,
   SymbolMoved,
   SymbolMovedChanged,
 } from "@aburi/types"
@@ -512,7 +514,7 @@ function renderSliceView(
  */
 function renderSliceSection(
   slice: SliceRecord,
-  changeById: ReadonlyMap<string, SymbolChange>,
+  changeById: ReadonlyMap<SymbolId, SymbolChange>,
 ): string[] {
   const rows: string[] = []
   rows.push(`### \`${slice.id}\` (${slice.members.length} members)`)
@@ -541,7 +543,7 @@ function renderSliceSection(
  */
 function renderUnresolvedCallNote(
   slices: readonly SliceRecord[],
-  changeById: ReadonlyMap<string, SymbolChange>,
+  changeById: ReadonlyMap<SymbolId, SymbolChange>,
 ): string[] {
   let affectedMembers = 0
   let unresolvedCalls = 0
@@ -582,9 +584,9 @@ function pluralizeCalls(count: number): string {
 }
 
 function renderSingletonLabel(
-  memberId: string,
-  sliceId: string,
-  changeById: ReadonlyMap<string, SymbolChange>,
+  memberId: SymbolId,
+  sliceId: SliceId,
+  changeById: ReadonlyMap<SymbolId, SymbolChange>,
 ): string {
   const change = requireChangeForMember(memberId, sliceId, changeById)
   const symbol = symbolForMember(change)
@@ -600,9 +602,9 @@ function renderSingletonLabel(
  * an "unknown" label the reviewer cannot interpret.
  */
 function requireChangeForMember(
-  memberId: string,
-  sliceId: string,
-  changeById: ReadonlyMap<string, SymbolChange>,
+  memberId: SymbolId,
+  sliceId: SliceId,
+  changeById: ReadonlyMap<SymbolId, SymbolChange>,
 ): SymbolChange {
   const change = changeById.get(memberId)
   if (change === undefined) {
@@ -662,8 +664,8 @@ function deltaAxisSummary(delta: SymbolDelta): string {
   return axes.length === 0 ? "no delta axes" : axes.join(", ")
 }
 
-function indexChangesById(symbols: readonly SymbolChange[]): Map<string, SymbolChange> {
-  const map = new Map<string, SymbolChange>()
+function indexChangesById(symbols: readonly SymbolChange[]): Map<SymbolId, SymbolChange> {
+  const map = new Map<SymbolId, SymbolChange>()
   for (const change of symbols) {
     switch (change.status) {
       case "added":

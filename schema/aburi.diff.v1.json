@@ -302,24 +302,32 @@
       "additionalProperties": false,
       "required": ["id", "members"],
       "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^slice:",
-          "description": "Cluster id: \"slice:\" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer."
-        },
+        "id": { "$ref": "#/$defs/SliceId" },
         "members": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 },
+          "items": { "$ref": "#/$defs/SymbolId" },
           "description": "Member Symbol ids in strictly ascending lexicographic order. members[0] is the Slice anchor."
         }
       }
     },
 
+    "SliceId": {
+      "type": "string",
+      "pattern": "^slice:",
+      "description": "Cluster id: \"slice:\" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer."
+    },
+
     "Symbol": {
       "type": "object",
       "description": "Reference to a Symbol from aburi.ir.v1. Structurally validated as object only here; consumers should validate against aburi.ir.v1.json#/$defs/Symbol for stricter checking."
+    },
+
+    "SymbolId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reference to a Symbol id from aburi.ir.v1. Structurally validated as a non-empty string only here; consumers should validate against aburi.ir.v1.json#/$defs/SymbolId for stricter checking."
     },
 
     "Component": {
