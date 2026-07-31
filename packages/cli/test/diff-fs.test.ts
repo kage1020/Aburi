@@ -2,9 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
+import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, runCli, runDiff } from "../src"
+import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
 
 class MemStream extends Writable {
   chunks: string[] = []
@@ -277,5 +278,29 @@ describe("CL9 — argv routing for --fail-on", () => {
     })
     expect(code).toBe(EXIT.GATE)
     expect(stderr.text()).toContain("--fail-on added tripped")
+  })
+})
+
+describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md §9)", () => {
+  it("maps user-fixable diff failures to config-error", () => {
+    for (const code of ["schema-mismatch", "invalid-line-fuzz", "ir-shape-invalid"] as const) {
+      const cliError = classifyDiffError(new DiffError(`boom: ${code}`, { code }))
+      expect(cliError.code).toBe("config-error")
+      expect(cliError.message).toBe(`boom: ${code}`)
+    }
+  })
+
+  it("maps slice-invariant-violated to runtime-error and says it is an Aburi bug", () => {
+    // slice-view.md §7.4: this code fires only on a producer bug, so reporting
+    // it as a config error would send the reader to aburi.json for nothing.
+    const cause = new DiffError("SliceRecord slice:a: members[] is empty.", {
+      code: "slice-invariant-violated",
+      value: "slice:a",
+    })
+    const cliError = classifyDiffError(cause)
+    expect(cliError.code).toBe("runtime-error")
+    expect(cliError.message).toContain("bug in Aburi, not in your configuration")
+    expect(cliError.message).toContain("members[] is empty")
+    expect(cliError.cause).toBe(cause)
   })
 })

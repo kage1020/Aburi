@@ -41,6 +41,8 @@ export {
   assertSliceRecordInvariant,
   computeSlices,
   type SliceInput,
+  type SliceRecordViolation,
+  type SliceViolationKind,
   sliceAnchor,
   sliceRecordViolation,
 } from "./slice"

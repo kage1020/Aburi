@@ -1,5 +1,6 @@
 export { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "./artifact-paths"
 export {
+  classifyDiffError,
   type DiffOptions,
   type DiffReport,
   formatFailOnMessage,

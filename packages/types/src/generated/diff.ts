@@ -130,7 +130,7 @@ removed: Dependency[]
 }
 export interface SliceRecord {
 /**
- * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent — consumers that need the anchor read members[0] and never strip this prefix. The pattern checks the prefix only; the derivation itself is not expressible in JSON Schema and is enforced by the producer (docs/design/slice-view.md §7.4).
+ * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer.
  */
 id: string
 /**

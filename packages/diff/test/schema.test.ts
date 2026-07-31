@@ -23,20 +23,19 @@ const ajv = new Ajv2020({
 })
 
 /**
- * §7.4 layer 2 — the anchor derivation and the ascending `members[]` order
- * compare one property against another, which standard JSON Schema 2020-12
- * cannot express. The keyword lives here, in the validating consumer, and NOT
- * in `schema/aburi.diff.v1.json`: that file is a frozen v1 artifact published
- * for readers outside this repository, and a non-standard keyword inside it
- * would make every strict-mode validator reject the schema itself.
+ * §7.4 layer 2 — the derivation check a JSON Schema cannot carry, registered by
+ * the validating consumer rather than written into `schema/aburi.diff.v1.json`
+ * (see `docs/design/slice-view.md` §7.4 for why the schema file stays standard).
  *
- * `errors` on the function is how Ajv keywords report a custom message — it is
- * read right after `validate` returns false, so the reason from
- * `sliceRecordViolation` reaches the caller instead of Ajv's generic
- * "must pass keyword validation".
+ * `errors` on the function is how Ajv keywords report a custom message, so the
+ * reason from `sliceRecordViolation` reaches the caller instead of Ajv's
+ * generic "must pass keyword validation". Writing it to a module-level binding
+ * is safe here because Ajv's generated code clears `errors` immediately before
+ * every synchronous keyword call — that pre-clear only happens on the sync
+ * path, so this must not become an `async: true` keyword without revisiting it.
  */
 interface AnchorKeywordValidator {
-  (enabled: boolean, record: SliceRecord): boolean
+  (enabled: boolean, record: unknown): boolean
   errors?: Partial<ErrorObject>[]
 }
 
@@ -44,7 +43,9 @@ const validateAnchorDerived: AnchorKeywordValidator = (enabled, record) => {
   if (!enabled) return true
   const violation = sliceRecordViolation(record)
   if (violation === null) return true
-  validateAnchorDerived.errors = [{ keyword: "sliceAnchorDerived", message: violation, params: {} }]
+  validateAnchorDerived.errors = [
+    { keyword: "sliceAnchorDerived", message: violation.message, params: { kind: violation.kind } },
+  ]
   return false
 }
 
@@ -239,6 +240,16 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
       )
     }
     expect(ok).toBe(true)
+
+    // Checked again without going through `sliceRecordViolation`. The keyword
+    // above delegates to that function, so a bug inside it would make the
+    // producer-side and validator-side tests agree on the same wrong answer.
+    for (const slice of diff.slices) {
+      expect(slice.id).toBe(`slice:${slice.members[0]}`)
+      for (let i = 1; i < slice.members.length; i++) {
+        expect((slice.members[i - 1] as string) < (slice.members[i] as string)).toBe(true)
+      }
+    }
   })
 
   it("rejects a correct `slice:` prefix whose id is not the anchor", () => {
@@ -274,5 +285,33 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
     const malformed = diffWithSlices([{ id: "ts:src/a.ts#A", members: ["ts:src/a.ts#A"] }])
     expect(validate(malformed)).toBe(false)
     expect(validateWithAnchorInvariant(malformed)).toBe(false)
+  })
+
+  it("points at the offending entry rather than always at slices[0]", () => {
+    const malformed = diffWithSlices([
+      { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
+      { id: "slice:ts:src/c.ts#C", members: ["ts:src/b.ts#B", "ts:src/c.ts#C"] },
+      { id: "slice:ts:src/d.ts#D", members: ["ts:src/d.ts#D"] },
+    ])
+    expect(validateWithAnchorInvariant(malformed)).toBe(false)
+    const paths = (validateWithAnchorInvariant.errors ?? [])
+      .filter((e) => e.keyword === "sliceAnchorDerived")
+      .map((e) => e.instancePath)
+    expect(paths).toEqual(["/slices/1"])
+  })
+
+  it("reports every offending entry under allErrors, each with its own reason", () => {
+    const malformed = diffWithSlices([
+      { id: "slice:ts:src/a.ts#A", members: ["ts:src/a.ts#A"] },
+      { id: "slice:ts:src/z.ts#Z", members: ["ts:src/b.ts#B", "ts:src/c.ts#C"] },
+      { id: "slice:ts:src/e.ts#E", members: ["ts:src/f.ts#F", "ts:src/e.ts#E"] },
+    ])
+    expect(validateWithAnchorInvariant(malformed)).toBe(false)
+    const reported = (validateWithAnchorInvariant.errors ?? [])
+      .filter((e) => e.keyword === "sliceAnchorDerived")
+      .map((e) => `${e.instancePath}: ${e.message}`)
+    expect(reported).toHaveLength(2)
+    expect(reported[0]).toMatch(/^\/slices\/1: .*not derived from the anchor/)
+    expect(reported[1]).toMatch(/^\/slices\/2: .*strictly ascending/)
   })
 })

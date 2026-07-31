@@ -16,6 +16,30 @@ import { runScan, type ScanReport } from "./scan"
 /** Warning emitter for non-fatal diff-time observations (git errors, cleanup issues). */
 export type WarnFn = (message: string) => void
 
+/**
+ * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md §9).
+ *
+ * Most codes describe something the reader can fix — IR schemas that disagree,
+ * an out-of-range `lineFuzz`, a malformed IR — so they surface as
+ * `config-error` (exit 2). `slice-invariant-violated` is the one code that
+ * cannot: it fires only when Aburi produced a Slice breaking its own
+ * derivation rule (slice-view.md §7.4). Reporting that as a config error would
+ * send a reader looking through `aburi.json` for a bug that is not there, the
+ * same misdirection `assertRefResolvable` avoids by separating "git is
+ * missing" from "that ref does not resolve".
+ */
+export function classifyDiffError(error: DiffError): CliError {
+  if (error.code === "slice-invariant-violated") {
+    return new CliError(
+      `Internal error: ${error.message} This is a bug in Aburi, not in your configuration — ` +
+        "please report it at https://github.com/kage1020/Aburi/issues.",
+      "runtime-error",
+      { cause: error },
+    )
+  }
+  return new CliError(error.message, "config-error", { cause: error })
+}
+
 export interface DiffOptions {
   cwd?: string
   refSpec?: string | null
@@ -92,9 +116,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       ...(gitRenames === null ? {} : { gitRenames }),
     })
   } catch (error) {
-    if (error instanceof DiffError) {
-      throw new CliError(error.message, "config-error", { cause: error })
-    }
+    if (error instanceof DiffError) throw classifyDiffError(error)
     throw error
   }
 
