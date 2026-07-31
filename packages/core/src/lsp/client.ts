@@ -19,14 +19,17 @@ import type { SpawnedServer } from "./transport"
  *   - A `shutdown` that mirrors §4.1 (`shutdown` request → `exit` notification →
  *     1 s → SIGKILL).
  *
- * Every write is bounded, notifications included. JSON-RPC notifications are
- * fire-and-forget by convention, but the write itself still awaits the transport:
- * a clogged stdio pipe parks `sendNotification` indefinitely. An unbounded
- * `didOpen` is the worst case, because it sits ahead of the first request of the
- * file and therefore ahead of every `fileBudgetMs` check the pass makes — the
- * per-file budget could never fire. Notification bounds reuse the caller's
- * existing budgets rather than introducing a knob of their own; see the call
- * sites in `enrich.ts` for which budget each one draws on.
+ * Every write is bounded, notifications included: a JSON-RPC notification is
+ * fire-and-forget, but the write still awaits the transport, so a clogged pipe
+ * parks it exactly the way it parks a request. Which budget bounds which
+ * notification, and why, is specified in lsp-enrichment.md §4.4 — that table is
+ * the single source of truth and the call sites here only name their argument.
+ *
+ * Notifications report their outcome the way `request` does: `null` for a write
+ * that landed, an `LspFailure` for one that timed out, was rejected, or was
+ * addressed to a server already known to be gone. Nothing throws, and there is
+ * no third state — an implementation cannot accidentally claim success by
+ * falling off the end.
  */
 export interface LspClient {
   initialize(input: InitializeInput): Promise<InitializeResult | LspFailure>
@@ -35,8 +38,8 @@ export interface LspClient {
     languageId: string,
     text: string,
     timeoutMs: number,
-  ): Promise<undefined | LspFailure>
-  didClose(uri: string, timeoutMs: number): Promise<undefined | LspFailure>
+  ): Promise<LspFailure | null>
+  didClose(uri: string, timeoutMs: number): Promise<LspFailure | null>
   request<T>(method: string, params: unknown, timeoutMs: number): Promise<T | LspFailure>
   shutdown(): Promise<void>
 }
@@ -60,8 +63,13 @@ export interface LspError {
 
 export const LSP_TIMEOUT: LspTimeout = Object.freeze({ kind: "timeout" })
 
-/** Graceful-shutdown grace period (lsp-enrichment.md §4.1: 1 s → SIGKILL). */
-const SHUTDOWN_GRACE_MS = 1000
+/**
+ * The one grace period `shutdown` is built from (lsp-enrichment.md §4.1). It
+ * bounds three steps that run in sequence — the `shutdown` request, the `exit`
+ * notification, and the wait before SIGKILL — so a server that answers none of
+ * them delays the pass by at most three of these, not indefinitely.
+ */
+export const SHUTDOWN_GRACE_MS = 1000
 
 export function isLspFailure(value: unknown): value is LspFailure {
   return (
@@ -72,6 +80,18 @@ export function isLspFailure(value: unknown): value is LspFailure {
       (value as { kind: unknown }).kind === "error")
   )
 }
+
+/**
+ * Every operation addressed to a server that has already exited fails this way
+ * — request and notification alike. A notification is the case worth stating:
+ * the write would resolve against a dead pipe and look like a success, and the
+ * pass would go on treating files as opened on a server that is not there.
+ */
+const SERVER_DISCONNECTED: LspError = Object.freeze({
+  kind: "error",
+  reason: "server-disconnected",
+  message: "server exited",
+})
 
 export function createLspClient(server: SpawnedServer): LspClient {
   const connection = server.connection
@@ -112,10 +132,9 @@ export function createLspClient(server: SpawnedServer): LspClient {
       }
       if (isLspFailure(result)) return result
       // The handshake is not complete until `initialized` is on the wire, so a
-      // write that never lands is an initialize failure and gets the same
-      // per-language fallback. It draws on `timeoutMs` again rather than on
-      // what the request left over: one operation, one budget, matching how
-      // `requestTimeoutMs` applies to each request individually.
+      // write that never lands is an initialize failure. It gets the full
+      // `timeoutMs` rather than what the request left over (§4.4), which is why
+      // a wholly unresponsive server can cost two of them here.
       const ack = await sendNotificationBounded(
         () => connection.sendNotification(InitializedNotification.type, {}),
         input.timeoutMs,
@@ -124,8 +143,11 @@ export function createLspClient(server: SpawnedServer): LspClient {
       return result as InitializeResult
     },
 
+    // `timeoutMs` is the caller's per-file budget (lsp-enrichment.md §4.4): an
+    // open that spends it has left nothing for the enrichment it exists to
+    // enable.
     async didOpen(uri, languageId, text, timeoutMs) {
-      if (disposed) return
+      if (disposed) return SERVER_DISCONNECTED
       return await sendNotificationBounded(
         () =>
           connection.sendNotification(DidOpenTextDocumentNotification.type, {
@@ -135,8 +157,10 @@ export function createLspClient(server: SpawnedServer): LspClient {
       )
     },
 
+    // `timeoutMs` is the caller's per-request budget (§4.4): closing carries no
+    // enrichment, so giving up sooner starts the next file sooner.
     async didClose(uri, timeoutMs) {
-      if (disposed) return
+      if (disposed) return SERVER_DISCONNECTED
       return await sendNotificationBounded(
         () =>
           connection.sendNotification(DidCloseTextDocumentNotification.type, {
@@ -147,8 +171,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
     },
 
     async request<T>(method: string, params: unknown, timeoutMs: number): Promise<T | LspFailure> {
-      if (disposed)
-        return { kind: "error", reason: "server-disconnected", message: "server exited" }
+      if (disposed) return SERVER_DISCONNECTED
       try {
         const raw = await raceTimeout(connection.sendRequest<T>(method, params), timeoutMs)
         return raw
@@ -171,8 +194,9 @@ export function createLspClient(server: SpawnedServer): LspClient {
       } catch {
         // ignore — we still fire exit + kill below
       }
-      // A stuck `exit` write is ignored the same way a rejected one always was:
-      // `killAfter` below is what actually guarantees the process goes away.
+      // The outcome of `exit` is deliberately discarded: `killAfter` below is
+      // what actually guarantees the process goes away, so there is nothing a
+      // caller could do with the news that the courtesy notice failed.
       await sendNotificationBounded(
         () => connection.sendNotification(ExitNotification.type),
         SHUTDOWN_GRACE_MS,
@@ -193,15 +217,25 @@ export function createLspClient(server: SpawnedServer): LspClient {
  * throws, resolves with `LSP_TIMEOUT` when the write does not land in time and
  * with an `LspError` when it rejects — so a caller can treat a stalled pipe and
  * a broken one the same way it already treats a stalled or broken request.
- * Like `raceTimeout`, it does not cancel the write; a late one is ignored.
+ *
+ * The write is not cancelled, and for a notification that is a stronger caveat
+ * than it is for a request: abandoning a request discards a result, abandoning
+ * a `didOpen` leaves a document the server may still open later, after the
+ * `didClose` that followed it. The pass therefore treats a timed-out `didOpen`
+ * as a per-file fallback and touches nothing else in that file — it cannot know
+ * what state the server ended up in.
+ *
+ * `send` is a thunk rather than a promise so that a transport which throws
+ * synchronously — `vscode-jsonrpc` does exactly that once the connection is
+ * closed or disposed — is caught here instead of escaping to the caller.
  */
 async function sendNotificationBounded(
   send: () => Promise<void>,
   timeoutMs: number,
-): Promise<undefined | LspFailure> {
+): Promise<LspFailure | null> {
   try {
     const outcome = await raceTimeout(send(), timeoutMs)
-    return isLspFailure(outcome) ? outcome : undefined
+    return isLspFailure(outcome) ? outcome : null
   } catch (error) {
     return {
       kind: "error",

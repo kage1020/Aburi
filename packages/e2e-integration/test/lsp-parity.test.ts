@@ -18,8 +18,12 @@ function healthyMockFactory(): ServerFactory {
       async initialize() {
         return { capabilities: {} }
       },
-      async didOpen() {},
-      async didClose() {},
+      async didOpen() {
+        return null
+      },
+      async didClose() {
+        return null
+      },
       async request(): Promise<never | LspFailure> {
         return null as never
       },
@@ -39,8 +43,12 @@ function erroringMockFactory(): ServerFactory {
       async initialize() {
         return { capabilities: {} }
       },
-      async didOpen() {},
-      async didClose() {},
+      async didOpen() {
+        return null
+      },
+      async didClose() {
+        return null
+      },
       async request(): Promise<never | LspFailure> {
         return { kind: "error", reason: "server-error", message: "injected" }
       },

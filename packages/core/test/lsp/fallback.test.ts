@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { type EnrichmentResult, enrichWithLsp, LSP_TIMEOUT } from "../../src/lsp"
 import {
   makeClassSymbol,
@@ -136,25 +136,15 @@ describe("LSP fallback", () => {
     const captured: { client: MockLspClient | null } = { client: null }
     const factory = mockServerFactory((_lang, client) => {
       captured.client = client
-      client.installDidOpenOutcome((uri) => (uri.endsWith("src/a.ts") ? LSP_TIMEOUT : undefined))
-      client.installHandler(DOC_SYMBOL_METHOD, () => [
-        {
-          name: "foo",
-          kind: 6,
-          range: { start: { line: 1, character: 2 }, end: { line: 1, character: 12 } },
-          selectionRange: { start: { line: 1, character: 2 }, end: { line: 1, character: 5 } },
-        },
-      ])
+      client.installDidOpenOutcome((uri) => (uri.endsWith("src/a.ts") ? LSP_TIMEOUT : null))
+      client.installHandler(DOC_SYMBOL_METHOD, () => [FOO_DOC_SYMBOL])
     })
     const enrichment = await enrichWithLsp(
       makeEnrichmentInput({
-        symbols: ["src/a.ts", "src/b.ts"].flatMap((file) => [
-          makeClassSymbol(file, "C", 1),
-          makeMethodSymbol(file, "C", "foo", 2),
-        ]),
+        symbols: ["src/a.ts", "src/b.ts"].flatMap(classWithMethod),
         fileContents: {
-          "src/a.ts": "class C {\n  foo() {}\n}",
-          "src/b.ts": "class C {\n  foo() {}\n}",
+          "src/a.ts": FILE_SOURCE,
+          "src/b.ts": FILE_SOURCE,
         },
         serverFactory: factory,
       }),
@@ -167,6 +157,37 @@ describe("LSP fallback", () => {
     expect(captured.client?.closedFiles.length).toBe(2)
     expect(columnsOf(enrichment, "src/a.ts")).toEqual([null, null])
     expect(columnsOf(enrichment, "src/b.ts")).toEqual([null, 3])
+    // A notification is not a request: a failed one moves no request counter.
+    expect(enrichment.stats?.requestsTimedOut).toBe(0)
+    expect(enrichment.stats?.requestsFailed).toBe(0)
+    expect(enrichment.stats?.requestsIssued).toBe(1)
+  })
+
+  it("disables the language when didOpen keeps reporting the server is gone", async () => {
+    // The escalation path the per-file design leans on: a transport broken for
+    // good fails every subsequent didOpen, and five such files disable the
+    // language rather than letting the pass talk to a dead server all run.
+    const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"]
+    const captured: { client: MockLspClient | null } = { client: null }
+    const factory = mockServerFactory((_lang, client) => {
+      captured.client = client
+      client.installDidOpenOutcome(() => ({
+        kind: "error",
+        reason: "server-disconnected",
+        message: "server exited",
+      }))
+    })
+    const enrichment = await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: files.flatMap(classWithMethod),
+        fileContents: Object.fromEntries(files.map((file) => [file, FILE_SOURCE])),
+        serverFactory: factory,
+      }),
+    )
+    expect(enrichment.stats?.filesFellBack).toBe(5)
+    expect(enrichment.stats?.filesEnriched).toBe(0)
+    expect(enrichment.stats?.languagesDisabled).toContain("ts")
+    expect(captured.client?.requests).toEqual([])
   })
 
   it("fires per-file fallback when didOpen alone consumes the file budget", async () => {
@@ -174,23 +195,49 @@ describe("LSP fallback", () => {
     const clock = makeManualClock()
     const factory = mockServerFactory((_lang, client) => {
       captured.client = client
+      // fileBudgetMs is 500 in makeServerConfig — didOpen overspends it by 100.
       client.installDidOpenOutcome(() => {
         clock.advance(600)
+        return null
       })
-      client.installHandler(DOC_SYMBOL_METHOD, () => [])
+      client.installHandler(DOC_SYMBOL_METHOD, () => [FOO_DOC_SYMBOL])
     })
     const enrichment = await enrichWithLsp(
       makeEnrichmentInput({
-        symbols: [makeClassSymbol("src/a.ts", "C", 1), makeMethodSymbol("src/a.ts", "C", "foo", 2)],
-        fileContents: { "src/a.ts": "class C {\n  foo() {}\n}" },
+        symbols: classWithMethod("src/a.ts"),
+        fileContents: { "src/a.ts": FILE_SOURCE },
         serverFactory: factory,
-        // fileBudgetMs is 500 in makeServerConfig — didOpen overspends it by 100.
         now: clock.now,
       }),
     )
     expect(enrichment.stats?.filesFellBack).toBe(1)
     expect(enrichment.stats?.requestsIssued).toBe(0)
     expect(captured.client?.requests).toEqual([])
+    expect(columnsOf(enrichment, "src/a.ts")).toEqual([null, null])
+  })
+
+  it("spends the file budget without exceeding it when didOpen lands exactly on it", async () => {
+    const clock = makeManualClock()
+    const factory = mockServerFactory((_lang, client) => {
+      // Exactly fileBudgetMs: the budget is spent, not exceeded, so the file
+      // still gets its documentSymbol round-trip.
+      client.installDidOpenOutcome(() => {
+        clock.advance(500)
+        return null
+      })
+      client.installHandler(DOC_SYMBOL_METHOD, () => [FOO_DOC_SYMBOL])
+    })
+    const enrichment = await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: classWithMethod("src/a.ts"),
+        fileContents: { "src/a.ts": FILE_SOURCE },
+        serverFactory: factory,
+        now: clock.now,
+      }),
+    )
+    expect(enrichment.stats?.filesFellBack).toBe(0)
+    expect(enrichment.stats?.filesEnriched).toBe(1)
+    expect(columnsOf(enrichment, "src/a.ts")).toEqual([null, 3])
   })
 
   it("keeps a file enriched when only its didClose notification fails", async () => {
@@ -198,23 +245,59 @@ describe("LSP fallback", () => {
     const factory = mockServerFactory((_lang, client) => {
       captured.client = client
       client.installDidCloseOutcome(() => LSP_TIMEOUT)
-      client.installHandler(DOC_SYMBOL_METHOD, () => [])
+      client.installHandler(DOC_SYMBOL_METHOD, () => [FOO_DOC_SYMBOL])
     })
     const enrichment = await enrichWithLsp(
       makeEnrichmentInput({
-        symbols: [makeClassSymbol("src/a.ts", "C", 1), makeMethodSymbol("src/a.ts", "C", "foo", 2)],
-        fileContents: { "src/a.ts": "class C {\n  foo() {}\n}" },
+        symbols: classWithMethod("src/a.ts"),
+        fileContents: { "src/a.ts": FILE_SOURCE },
         serverFactory: factory,
       }),
     )
     expect(enrichment.stats?.filesEnriched).toBe(1)
     expect(enrichment.stats?.filesFellBack).toBe(0)
+    // The enrichment the file did earn is kept, not rolled back.
+    expect(columnsOf(enrichment, "src/a.ts")).toEqual([null, 3])
     // Notification bounds come from the existing knobs, not a new one:
     // didOpen gets the whole file budget, didClose the per-request budget.
     expect(captured.client?.openTimeouts).toEqual([500])
     expect(captured.client?.closeTimeouts).toEqual([100])
   })
+
+  it("warns about a failed didOpen and only debug-logs a failed didClose", async () => {
+    const warn = vi.fn()
+    const debug = vi.fn()
+    const factory = mockServerFactory((_lang, client) => {
+      client.installDidOpenOutcome((uri) => (uri.endsWith("src/a.ts") ? LSP_TIMEOUT : null))
+      client.installDidCloseOutcome((uri) => (uri.endsWith("src/b.ts") ? LSP_TIMEOUT : null))
+      client.installHandler(DOC_SYMBOL_METHOD, () => [])
+    })
+    const input = makeEnrichmentInput({
+      symbols: ["src/a.ts", "src/b.ts"].flatMap(classWithMethod),
+      fileContents: { "src/a.ts": FILE_SOURCE, "src/b.ts": FILE_SOURCE },
+      serverFactory: factory,
+    })
+    await enrichWithLsp({ ...input, logger: { debug, info: () => {}, warn, error: () => {} } })
+    expect(warn.mock.calls.flat()).toEqual([expect.stringContaining("didOpen failed for src/a.ts")])
+    expect(debug.mock.calls.flat()).toEqual([
+      expect.stringContaining("didClose failed for src/b.ts"),
+    ])
+  })
 })
+
+const FILE_SOURCE = "class C {\n  foo() {}\n}"
+
+/** `foo` at line 2, columns 3..13 — what `columnsOf` reads back as `3`. */
+const FOO_DOC_SYMBOL = {
+  name: "foo",
+  kind: 6,
+  range: { start: { line: 1, character: 2 }, end: { line: 1, character: 12 } },
+  selectionRange: { start: { line: 1, character: 2 }, end: { line: 1, character: 5 } },
+}
+
+function classWithMethod(file: string) {
+  return [makeClassSymbol(file, "C", 1), makeMethodSymbol(file, "C", "foo", 2)]
+}
 
 function requestedUris(client: MockLspClient | null): string[] {
   return (client?.requests ?? []).map((request) => {

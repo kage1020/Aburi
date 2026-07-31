@@ -1,5 +1,5 @@
 export type { InitializeInput, LspClient, LspError, LspFailure, LspTimeout } from "./client"
-export { createLspClient, isLspFailure, LSP_TIMEOUT } from "./client"
+export { createLspClient, isLspFailure, LSP_TIMEOUT, SHUTDOWN_GRACE_MS } from "./client"
 export type {
   EnrichmentInput,
   EnrichmentResult,

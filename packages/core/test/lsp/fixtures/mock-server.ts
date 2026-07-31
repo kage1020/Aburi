@@ -12,7 +12,7 @@ export type MockHandler = (
  * doubles as the place to spend an injected clock (`EnrichmentInput.now`) the
  * way a slow real notification would spend wall time, without sleeping.
  */
-export type MockNotificationOutcome = (uri: string) => undefined | LspFailure
+export type MockNotificationOutcome = (uri: string) => LspFailure | null
 
 /**
  * In-memory `LspClient` mock. Tests register handlers per LSP method and the
@@ -73,16 +73,16 @@ export class MockLspClient implements LspClient {
     _languageId: string,
     _text: string,
     timeoutMs: number,
-  ): Promise<undefined | LspFailure> {
+  ): Promise<LspFailure | null> {
     this.openFiles.push(uri)
     this.openTimeouts.push(timeoutMs)
-    return this.didOpenOutcome?.(uri)
+    return this.didOpenOutcome?.(uri) ?? null
   }
 
-  async didClose(uri: string, timeoutMs: number): Promise<undefined | LspFailure> {
+  async didClose(uri: string, timeoutMs: number): Promise<LspFailure | null> {
     this.closedFiles.push(uri)
     this.closeTimeouts.push(timeoutMs)
-    return this.didCloseOutcome?.(uri)
+    return this.didCloseOutcome?.(uri) ?? null
   }
 
   async request<T>(method: string, params: unknown): Promise<T | LspFailure> {

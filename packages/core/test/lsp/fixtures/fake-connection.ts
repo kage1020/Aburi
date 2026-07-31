@@ -13,7 +13,7 @@ import type { SpawnedServer } from "../../../src/lsp"
  * below it. `"pending"` is the interesting behavior — it models a clogged pipe,
  * where the write promise simply never settles.
  */
-export type SendBehavior = "resolve" | "pending" | "reject"
+export type SendBehavior = "resolve" | "pending" | "reject" | "throw-sync"
 
 export interface FakeConnectionOptions {
   /** How `sendNotification` settles. Defaults to `"resolve"`. */
@@ -34,27 +34,35 @@ export interface RecordedMessage {
 export class FakeConnection {
   readonly notifications: RecordedMessage[] = []
   readonly requests: RecordedMessage[] = []
-  listenCalled = false
+  /** `createLspClient` latches `listen()` to the first `initialize`; count pins that. */
+  listenCount = 0
   disposeCalled = false
 
   constructor(private readonly options: FakeConnectionOptions = {}) {}
 
   listen(): void {
-    this.listenCalled = true
+    this.listenCount += 1
   }
 
-  async sendRequest(type: unknown, params?: unknown): Promise<unknown> {
+  sendRequest(type: unknown, params?: unknown): Promise<unknown> {
     this.requests.push({ method: methodNameOf(type), params })
-    return await settle(
+    return settle(
       this.options.request ?? "resolve",
       this.options.requestResult,
       this.options.rejectMessage,
     )
   }
 
-  async sendNotification(type: unknown, params?: unknown): Promise<void> {
+  // Not `async`: `vscode-jsonrpc` throws synchronously once the connection is
+  // closed or disposed, and an `async` wrapper would quietly convert that into
+  // a rejection, hiding the path the client has to survive.
+  sendNotification(type: unknown, params?: unknown): Promise<void> {
     this.notifications.push({ method: methodNameOf(type), params })
-    await settle(this.options.notification ?? "resolve", undefined, this.options.rejectMessage)
+    return settle(
+      this.options.notification ?? "resolve",
+      undefined,
+      this.options.rejectMessage,
+    ) as Promise<void>
   }
 
   dispose(): void {
@@ -67,27 +75,44 @@ export interface FakeServer {
   connection: FakeConnection
   /** Grace periods `killAfter` was called with, in call order. */
   killAfterCalls: number[]
+  /** Settle `exited`, which is how the client learns the server is gone. */
+  exit: (code: number | null) => Promise<void>
 }
 
 /**
- * A `SpawnedServer` whose child process never exits and whose connection is a
- * `FakeConnection`. `exited` stays pending on purpose: `createLspClient` flips
- * its internal `disposed` flag when that promise settles, and a client that
- * believes its server is gone short-circuits every method under test.
+ * A `SpawnedServer` whose child process is still running and whose connection
+ * is a `FakeConnection`. `exited` starts pending on purpose — `createLspClient`
+ * flips its internal `disposed` flag when that promise settles, and a client
+ * that believes its server is gone short-circuits every method under test.
+ * Call `exit()` to reach the other side of that branch.
  */
 export function createFakeServer(options: FakeConnectionOptions = {}): FakeServer {
   const connection = new FakeConnection(options)
   const killAfterCalls: number[] = []
+  let signalExit: (code: number | null) => void = () => {}
+  const exited = new Promise<number | null>((resolvePromise) => {
+    signalExit = resolvePromise
+  })
   const server: SpawnedServer = {
     process: {} as ChildProcess,
     connection: connection as unknown as MessageConnection,
-    exited: new Promise<number | null>(() => {}),
+    exited,
     spawnError: Promise.resolve(null),
     async killAfter(graceMs) {
       killAfterCalls.push(graceMs)
     },
   }
-  return { server, connection, killAfterCalls }
+  return {
+    server,
+    connection,
+    killAfterCalls,
+    // The client sets `disposed` in a `.then` on `exited`, so the await here
+    // lets that continuation run before the caller asserts on the next call.
+    exit: async (code) => {
+      signalExit(code)
+      await exited
+    },
+  }
 }
 
 /**
@@ -104,12 +129,14 @@ function methodNameOf(type: unknown): string {
   return "<unknown>"
 }
 
-async function settle(
+function settle(
   behavior: SendBehavior,
   value: unknown,
   rejectMessage: string | undefined,
 ): Promise<unknown> {
-  if (behavior === "pending") return await new Promise<never>(() => {})
-  if (behavior === "reject") throw new Error(rejectMessage ?? "fake connection write failed")
-  return value
+  const message = rejectMessage ?? "fake connection write failed"
+  if (behavior === "pending") return new Promise<never>(() => {})
+  if (behavior === "throw-sync") throw new Error(message)
+  if (behavior === "reject") return Promise.reject(new Error(message))
+  return Promise.resolve(value)
 }

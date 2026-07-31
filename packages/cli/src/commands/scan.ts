@@ -19,13 +19,14 @@ import type {
   Component,
   Config,
   IR,
-  Logger,
   LspEnrichmentStats,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
+import type { LogLevel } from "../env"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
+import { createLogger } from "../logger"
 import { loadPlugins } from "../plugin-loader"
 
 export interface ScanOptions {
@@ -45,6 +46,11 @@ export interface ScanOptions {
    * `docs/design/config.md` §11.
    */
   lsp?: boolean
+  /**
+   * Lowest level the run's `Logger` emits, from `ABURI_LOG_LEVEL` (§11).
+   * Defaults to `"warn"`, which is what the CLI has always printed.
+   */
+  logLevel?: LogLevel
 }
 
 export interface ScanReport {
@@ -116,7 +122,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     })),
     components,
     generator: await readGeneratorInfo(),
-    logger: stderrLogger(),
+    logger: createLogger(options.logLevel === undefined ? {} : { minimum: options.logLevel }),
   }
   const scanResult = await scan(scanInput)
 
@@ -175,18 +181,6 @@ function requireCallResolution(ir: IR): CallResolutionStats {
     )
   }
   return stats
-}
-
-function stderrLogger(): Logger {
-  const write = (level: string, message: string): void => {
-    process.stderr.write(`${level}: ${message}\n`)
-  }
-  return {
-    debug: () => {},
-    info: () => {},
-    warn: (m) => write("warn", m),
-    error: (m) => write("error", m),
-  }
 }
 
 async function resolveWorkspaceRoot(cwd: string): Promise<string> {
