@@ -253,11 +253,16 @@ async function resolveComponents(
         // `[]` here would contradict `detectComponents`, which omits them — the same
         // Component would then have two shapes depending on whether it was configured or
         // detected.
+        // `languages` is optional in the config schema but `minItems: 1` in the IR schema,
+        // so an entry that omits it would otherwise produce a document that fails its own
+        // schema. Fall back to the same `["ts"]` that `detectComponents` uses when frequency
+        // counting finds nothing, rather than inventing a second answer to the same question.
+        const languages = entry.languages ?? []
         const component: Component = {
           id: makeComponentId(entry.id),
           name: entry.name ?? entry.id,
           roots: [...entry.roots],
-          languages: [...(entry.languages ?? [])],
+          languages: languages.length > 0 ? [...languages] : ["ts"],
           description: entry.description ?? null,
         }
         if (entry.publicApi !== undefined && entry.publicApi.length > 0) {

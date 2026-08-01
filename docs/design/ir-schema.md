@@ -40,7 +40,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 
 | Field | Type admits `null` | Class | Writer rule |
 |---|---|---|---|
-| `generatedAt` | no | B | omitted with `--no-timestamp` |
+| `generatedAt` | no | B | reserved for the producer's clock; **no writer emits it today**, so the key is always absent. `--no-timestamp` currently suppresses only the Markdown projection's "Generated" line |
 | `stats.effectClassifyTimeouts` | no | B | omitted when no classification timed out |
 | `stats.lspEnrichment` | no | B | omitted when the LSP pass did not run |
 | `stats.callResolution` | no | B | always emitted by the current pipeline; absence means the document predates the counter |
@@ -50,13 +50,15 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `Symbol.component` | **yes** | **A** | always emitted; `null` when the Symbol lies outside every Component |
 | `Symbol.signature` | **yes** | **A** | always emitted; `null` for Symbols with no callable signature |
 | `Signature.inferredThrows` | no | B | omitted when nothing was inferred; never `[]` (§7) |
-| `Effect.line` | no | B | present iff the entry is locally detected (schema-enforced, §9.4) |
-| `Effect.propagated` | no | B | present iff `true` (schema-enforced, §9.4) |
-| `Effect.derivedFrom` | no | B | present iff `propagated` is `true` (schema-enforced, §9.4) |
+| `Effect.line` | no | B | present iff the entry is locally detected (schema-enforced by the `allOf`'s required/forbidden flip, §9.4) |
+| `Effect.propagated` | no | B | present iff `true`. Convention only — the schema's `if` treats `false` and absent alike, so `propagated: false` validates while violating this rule (§9.4) |
+| `Effect.derivedFrom` | no | B | present iff `propagated` is `true` (schema-enforced by the same flip, §9.4) |
 | `SourceRange.startColumn` | **yes** | **A** | always emitted; `null` until LSP enrichment fills it (§12) |
 | `SourceRange.endColumn` | **yes** | **A** | always emitted; `null` until LSP enrichment fills it (§12) |
 
 None of the Class A fields appear in `required`. That is a consequence of the v1 freeze (§15.2 makes optional → required breaking), not a statement about their meaning; §15.4 records the promotion as a v2 candidate.
+
+Most of the table is convention that the schema cannot express, and the two rows marked schema-enforced are the exception rather than the rule: JSON Schema can say "this key is forbidden here and required there", which is what pins `Effect.line` and `Effect.derivedFrom`, but it cannot say "prefer absence over a `null` that validates". A document that breaks a Class A or Class B rule is therefore usually still a valid `aburi.ir.v1` document — the rules exist so that consumers do not have to handle both spellings, not so that validators reject one.
 
 **How this reaches the JSON.** The canonical serializer drops object properties whose value is `undefined` and preserves `null` verbatim. A TypeScript `undefined` therefore *is* the Class B omission — which means assigning `undefined` to a Class A field is a convention violation that changes the emitted bytes while still type-checking. Nothing else in the pipeline rewrites key presence, so what a writer assigns is exactly what lands on disk.
 
@@ -78,7 +80,7 @@ None of the Class A fields appear in `required`. That is a consequence of the v1
       { "name": "effects-prisma",   "type": "effects",   "version": "1.0.0", "grammarRevision": null }
     ]
   },
-  "generatedAt": "2026-06-19T15:30:00Z",      // optional (may be omitted with --no-timestamp)
+  "generatedAt": "2026-06-19T15:30:00Z",      // Class B (§1.1); no writer emits it today
   "workspace": {                              // required
     "root": ".",
     "managers": [                             // required (empty array allowed)
@@ -94,7 +96,10 @@ None of the Class A fields appear in `required`. That is a consequence of the v1
     "parsedFiles": 18,
     "keptSymbols": 27,
     "droppedSymbols": 7,
-    "callResolution": {                       // optional; always emitted by the current pipeline
+    "effectPropagation": {                    // required — emitted even when nothing propagated
+      "sccCount": 27, "maxSccSize": 1, "propagatedEffectCount": 4, "symbolsWithPropagatedEffects": 2
+    },
+    "callResolution": {                       // Class B (§1.1); always emitted by the current pipeline
       "totalCalls": 131,
       "resolvedCalls": 120,
       "unresolved": {
@@ -106,7 +111,7 @@ None of the Class A fields appear in `required`. That is a consequence of the v1
 ```
 
 - `$schema`: canonical URL. Used for IDE JSON Schema resolution and integrated validation
-- `generatedAt`: operational metadata of the producer. **Excluded from fingerprint computation**. When committing the IR and diffing it, omit it with `--no-timestamp`
+- `generatedAt`: operational metadata of the producer. **Excluded from fingerprint computation**. Class B per §1.1 — the key is omitted rather than nulled when there is no timestamp to record. No writer emits it today: the scan pipeline never sets it, and `--no-timestamp` currently reaches only the Markdown projection, where it suppresses the "Generated" line. A producer that does record a clock must drop the key when committing the IR, so that re-scanning an unchanged workspace produces an unchanged file
 - `workspace.root`: always `"."`. Never write absolute paths (IR portability)
 - `workspace.managers[].tool`: runtime-independent string. Representative values: `pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`/`pip`/`cargo`/`go`/`mvn`/`gradle`/`hatch`/`pixi`. Unknown values are not rejected (so that adding a new tool never requires a schema revision)
 - `stats`: for human/CI logs. Excluded from fingerprint
@@ -197,6 +202,7 @@ A logical boundary of the monorepo. Independent of physical packages.
 }
 ```
 
+- `description` is Class A per §1.1 — always written, `null` when nothing supplied it. Only the config path (`components[].description`) can supply one today; automatic detection has no source for it and always writes `null`
 - `id` is fixed to ASCII kebab-case (`^[a-z0-9]+(-[a-z0-9]+)*$`) so it can be used in URLs and CLI arguments. A segment may start with a digit: the id is derived by kebab-casing a package or directory name ([component-detect.md](./component-detect.md) §4.1), and `3d-force-graph` is an ordinary npm package name
 - Each element of `publicApi` is either a **glob** or a **symbol id**
 - Physical Component boundary inference automatically reads package manager configuration (`pnpm-workspace.yaml`, `turbo.json`, `go.work`, `Cargo.toml` workspace, `pyproject.toml`/uv workspaces, etc.); see the separate document `component-detect.md` for details
@@ -227,6 +233,8 @@ The core entity of the review unit.
   "dropReason": null                          // required, non-null when dropped=true
 }
 ```
+
+`component` is Class A per §1.1, so the key is on every Symbol and `null` means "outside every declared Component". Read the sample above as the shape the field is designed for, not as output you will see today: **the scan pipeline does not assign Symbols to Components yet**, so every Symbol it emits carries `null`. Consumers that group by Component — the per-component Markdown pages, the workspace overview's per-Component counts — therefore see empty groups on a real scan.
 
 ### 5.1 `kind` (core enum)
 
@@ -411,6 +419,8 @@ If a call_expression is recognized by an effect plugin, it is recorded in `effec
 
 `Effect` records may carry the optional fields `propagated: boolean` and `derivedFrom: SymbolId[]` when produced by the effect-propagation pass; see [`effect-propagation.md`](./effect-propagation.md) §5. On entries with `propagated: true`, the `line` field is **omitted from the JSON output** — not set to `null`, not set to a placeholder — because the effect originates N hops away and has no line in the containing Symbol's body. The JSON Schema (`aburi.ir.v1.json`) narrows `line` accordingly: required when `propagated` is absent or `false`; forbidden when `propagated` is `true`. These extensions are non-breaking under §15.2.
 
+`propagated` is itself Class B per §1.1, so a writer records a locally-detected entry by **omitting** the key, never by writing `propagated: false`. The schema's condition is `propagated` present *and* `true`, which puts absent and `false` on the same branch — so a `false` validates and is read correctly by every consumer, but it spends a key to say what absence already says. The distinction matters when reading these rules together: the schema pins where `line` and `derivedFrom` may appear, while the choice between absent and `false` is convention only.
+
 ## 10. Call
 
 A call that does not qualify as an effect.
@@ -463,7 +473,9 @@ The direction as seen from `from`. `bidirectional` is limited to cases such as b
 }
 ```
 
-`startColumn` / `endColumn` are filled in during LSP enrichment ([lsp-enrichment.md](./lsp-enrichment.md) §4.2). Until then — and under any LSP fallback ([lsp-enrichment.md](./lsp-enrichment.md) §6.2) — they are `null`, not absent: the Tree-sitter tier cannot determine a column, and "we did not find out" is a value, not a missing field.
+`startColumn` / `endColumn` are filled in during LSP enrichment ([lsp-enrichment.md](./lsp-enrichment.md) §4.2). Until then — and under any LSP fallback ([lsp-enrichment.md](./lsp-enrichment.md) §6.2) — they are `null`, not absent: "no column recorded" is a value, not a missing field.
+
+The Tree-sitter tier is not *unable* to produce a column — the parse tree carries one — but the in-tree TypeScript plugin deliberately does not publish it, so that every column in an Aburi IR comes from `textDocument/documentSymbol` and one convention about what a column counts. A plugin that has a column and wants to publish it may ([lang-plugin.md](./lang-plugin.md) §4.3); a successful LSP pass overwrites it either way.
 
 They are **Class A** per §1.1. A writer MUST emit both keys on every `SourceRange`; a reader MUST read an absent key as `null`. They stay out of `required` only because promoting an optional field is breaking under §15.2 — see §15.4.
 

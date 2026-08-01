@@ -508,14 +508,16 @@ function byLanguage(a: [string, unknown], b: [string, unknown]): number {
 }
 
 function cloneSymbol(symbol: IRSymbol): IRSymbol {
-  const clonedSig =
-    symbol.signature === null || symbol.signature === undefined
-      ? symbol.signature
-      : cloneSignature(symbol.signature)
+  // `signature` and `component` are Class A (ir-schema.md §1.1), so the clone writes both
+  // keys unconditionally and normalizes a missing one to `null`. The clone used to preserve
+  // an absent `signature` key verbatim, which made this the one place on a writer path that
+  // still distinguished absence from `null` — reachable only through an input Symbol this
+  // pipeline did not build, and invisible until the IR was serialized.
   const cloned: IRSymbol = {
     ...symbol,
     source: { ...symbol.source },
-    ...(clonedSig === undefined ? {} : { signature: clonedSig }),
+    component: symbol.component ?? null,
+    signature: symbol.signature == null ? null : cloneSignature(symbol.signature),
     calls: symbol.calls.map((c) => ({ ...c })),
     decorators: symbol.decorators.map((d) => ({ ...d })),
     rules: symbol.rules.map((r) => ({ ...r })),

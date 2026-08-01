@@ -317,9 +317,9 @@ Concrete rules:
 
 ## 12. Config Surface
 
-### 12.1 Proposed JSON
+### 12.1 JSON
 
-> **Status**: this section proposes new config schema. The `lsp` object is NOT yet present in `schema/aburi.config.v1.json` or documented in [`config.md`](./config.md); landing it is tracked as a follow-up implementation issue.
+> **Status**: shipped. The `lsp` object is present in `schema/aburi.config.v1.json`, so this section documents the landed shape rather than proposing one. [`config.md`](./config.md) does not yet carry it — until it does, this section is the config reference for `lsp`.
 
 ```jsonc
 {

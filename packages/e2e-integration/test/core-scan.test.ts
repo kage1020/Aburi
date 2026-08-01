@@ -1,12 +1,23 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { detectComponents, scan, serializeCanonical, writeCanonicalIR } from "@aburi/core"
+import {
+  apiFingerprint,
+  assertIRIntegrity,
+  detectComponents,
+  scan,
+  serializeCanonical,
+  writeCanonicalIR,
+} from "@aburi/core"
+import { buildDiff } from "@aburi/diff"
 import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 import { nextFrameworkPlugin } from "@aburi/framework-next"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { VocabRegistry } from "@aburi/plugin-registry"
+import type { IR, IRSymbol } from "@aburi/types"
+import Ajv2020 from "ajv/dist/2020.js"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import irSchema from "../../../schema/aburi.ir.v1.json" with { type: "json" }
 
 let workRoot: string
 
@@ -25,6 +36,33 @@ async function writeSource(rel: string, content: string): Promise<void> {
   const dir = abs.slice(0, Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\")))
   await mkdir(dir, { recursive: true })
   await writeFile(abs, content, "utf8")
+}
+
+const ajv = new Ajv2020({ strict: false, allErrors: true })
+const validateIR = ajv.compile(irSchema)
+
+/**
+ * Nothing in the repository validated a *generated* IR against `schema/aburi.ir.v1.json`
+ * before this — the diff, config and plugin-manifest schemas each had a test, the IR schema
+ * did not — so the conditional `Effect` constraints and `inferredThrows`' `minItems` had
+ * never run against a real document.
+ *
+ * Turning it on surfaced a pre-existing defect at `workspace.languages`, which is fed from
+ * `plugin.manifest.name` (`"lang-typescript"`) where the schema wants short language ids
+ * (`"ts"`, matching what every `Symbol.language` already carries), and which is `[]` against
+ * `minItems: 1` when no language plugin is loaded. Fixing that means deciding where a lang
+ * plugin declares its ids, which is a plugin-contract change and not this document's
+ * subject. It is excluded by path rather than by weakening the check, so the rest of the
+ * document — every Symbol, Component, Effect and Signature — stays fully validated and a
+ * new violation anywhere else still fails.
+ */
+const KNOWN_UNRELATED_VIOLATION = "/workspace/languages"
+
+function schemaViolations(document: unknown): string[] {
+  if (validateIR(document)) return []
+  return (validateIR.errors ?? [])
+    .filter((e) => !e.instancePath.startsWith(KNOWN_UNRELATED_VIOLATION))
+    .map((e) => `${e.instancePath} ${e.message ?? ""}`)
 }
 
 function buildRegistry() {
@@ -336,10 +374,79 @@ describe("scan — integration through real plugins", () => {
       expect(Object.hasOwn(component, "description"), `components[].description`).toBe(true)
       // Class B on the same record: the empty case is an absent key, not `[]`. Keeping both
       // directions in one test is what stops a future "normalize every optional field"
-      // cleanup from collapsing the distinction.
-      expect(Object.hasOwn(component, "publicApi")).toBe(false)
-      expect(Object.hasOwn(component, "frameworks")).toBe(false)
+      // cleanup from collapsing the distinction. Phrased as "present implies non-empty"
+      // rather than "always absent" so that a fixture gaining a detectable framework does
+      // not fail a test about key presence.
+      for (const key of ["publicApi", "frameworks"]) {
+        if (!Object.hasOwn(component, key)) continue
+        expect(
+          (component[key] as unknown[]).length,
+          `components[].${key} present but empty`,
+        ).toBeGreaterThan(0)
+      }
     }
+
+    expect(schemaViolations(parsed)).toEqual([])
+  })
+
+  it("reads an IR whose Class A keys were never written (ir-schema.md §1.1 reader rule)", async () => {
+    // §1.1 calls the reader rule the load-bearing half: a committed IR cannot be rewritten,
+    // and `aburi diff` reads one as its base, so consumers must read an absent Class A key
+    // as `null`. That makes the `?? null` normalizations in fingerprint/api.ts and
+    // diff/delta.ts part of the contract rather than clutter -- and this is what fails if
+    // someone "cleans them up": every repository that committed an IR before the writers
+    // started emitting the keys would report phantom changes on an unchanged workspace.
+    await writeSource("src/InvoiceService.ts", "export class InvoiceService {\n  create() {}\n}\n")
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: {},
+      languages: [langTypescriptPlugin],
+      frameworks: [],
+      effects: [],
+      registry: buildRegistry(),
+    })
+
+    // Reconstruct a pre-convention document. A legacy writer dropped the key exactly where
+    // the current one writes `null` -- it never discarded a real value -- so the strip is
+    // conditional on the value being `null`. Deleting unconditionally would test something
+    // else: that a Symbol reads the same with and without its signature, which is false and
+    // should be.
+    const legacy = JSON.parse(serializeCanonical(result.ir)) as IR
+    const dropIfNull = <T extends object>(record: T, key: keyof T): void => {
+      if (record[key] === null) delete record[key]
+    }
+    for (const symbol of legacy.symbols) {
+      dropIfNull(symbol, "component")
+      dropIfNull(symbol, "signature")
+      dropIfNull(symbol.source, "startColumn")
+      dropIfNull(symbol.source, "endColumn")
+    }
+    const first = legacy.symbols[0] as IRSymbol
+    expect(Object.hasOwn(first, "component")).toBe(false)
+    expect(Object.hasOwn(first.source, "startColumn")).toBe(false)
+
+    // Still a valid v1 document -- absence is exactly why the keys stay out of `required`.
+    expect(schemaViolations(legacy)).toEqual([])
+    // ...and still integral: no invariant may key off Class A presence, or reading a
+    // committed IR at diff time would become a fatal error.
+    expect(() => assertIRIntegrity(legacy)).not.toThrow()
+
+    // The two readers that normalize. `apiFingerprint` folds a missing `signature` to null,
+    // so the axis it computes is the same on both documents. Comparing recomputed against
+    // recomputed rather than against the stored value keeps dropped Symbols in scope --
+    // those carry the all-zero fingerprint of §5.6, which no recomputation reproduces.
+    for (const [i, symbol] of legacy.symbols.entries()) {
+      const emitted = result.ir.symbols[i] as IRSymbol
+      expect(apiFingerprint(symbol), `api fingerprint drift on ${symbol.id}`).toBe(
+        apiFingerprint(emitted),
+      )
+    }
+    // ...and `computeSymbolDelta` folds a missing `component`, so diffing the stripped base
+    // against the emitted head finds nothing changed. Every Symbol lands in `unchanged`.
+    const ref = { ref: "aburi.ir.json", irSchema: result.ir.$schema }
+    const diff = buildDiff({ baseIR: legacy, headIR: result.ir, base: ref, head: ref })
+    expect(diff.summary.unchanged).toBe(result.ir.symbols.length)
+    expect(diff.symbols, "a Class A key going missing must not read as a change").toEqual([])
   })
 
   it("writes a canonical JSON IR to disk via writeCanonicalIR", async () => {

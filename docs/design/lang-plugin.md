@@ -147,7 +147,7 @@ A brand can be asserted rather than constructed, so the type is a contract, not 
 
 `source` is a `WrittenSourceRange`, not the IR's `SourceRange`: `startColumn` and `endColumn` are **required** on the write side, carrying `null` when the plugin cannot determine a column. This is the Class A rule of [ir-schema.md](./ir-schema.md) §1.1 expressed as a type. The narrowing matters because the canonical serializer drops properties whose value is `undefined` — a plugin that left the keys off would type-check against the wider `SourceRange` and then emit a document missing them, with nothing between the two to notice. The IR's own `SourceRange` stays optional so that a document written before the rule remains representable when it is read back off disk.
 
-A plugin that has real column information may write it; nothing forbids that. The in-tree TypeScript plugin deliberately does not, so that every column in an Aburi IR comes from one source — see [lsp-enrichment.md](./lsp-enrichment.md) §4.2.
+A plugin that has real column information may write it; nothing forbids that. The in-tree TypeScript plugin deliberately does not, so that every column in an Aburi IR comes from `textDocument/documentSymbol` ([lsp-enrichment.md](./lsp-enrichment.md) §4.2) and one convention about what a column counts. Be aware that a published column is not durable: the enrichment pass overwrites both keys on every Symbol it matches (§5), so a plugin-written column survives only where the LSP tier produced nothing — which is where it is least likely to be checked.
 
 When the plugin chooses an `extKind` from its own declarations, the chosen value must fall under manifest.provides.extKinds or extKindPrefixes. The registry detects violations at startup.
 

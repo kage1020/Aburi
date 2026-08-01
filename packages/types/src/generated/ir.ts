@@ -193,7 +193,7 @@ file: RelativePath
 startLine: number
 endLine: number
 /**
- * 1-based start column, populated by the LSP enrichment pass (lsp-enrichment.md §4.2). Class A per ir-schema.md §1.1: writers MUST emit the key on every SourceRange, carrying null while the position is unknown — the Tree-sitter tier cannot determine a column, and any LSP fallback leaves it null. Readers MUST treat an absent key as null; absence only occurs on documents that predate the rule. Out of `required` solely because the promotion is breaking under §15.2 (see §15.4).
+ * 1-based start column, populated by the LSP enrichment pass (lsp-enrichment.md §4.2). Class A per ir-schema.md §1.1: writers MUST emit the key on every SourceRange, carrying null while no column has been recorded — the in-tree TypeScript plugin deliberately leaves it null so that every column comes from one source, and any LSP fallback leaves it null too. Readers MUST treat an absent key as null; absence only occurs on documents that predate the rule. Out of `required` solely because the promotion is breaking under §15.2 (see §15.4).
  */
 startColumn?: (number | null)
 /**

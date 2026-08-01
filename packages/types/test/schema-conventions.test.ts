@@ -8,7 +8,7 @@ import { SCHEMA_DIR } from "../scripts/codegen-lib"
  * (nullable — the key is always written, carrying `null` when there is no value) and
  * Class B (non-nullable — the key's presence is itself the signal). The split follows
  * mechanically from the declared type, but which one a property means only reaches a
- * writer through its `description`.
+ * writer through its `description`, which codegen lifts into JSDoc on the generated types.
  *
  * The failure this guards against is the one that produced the mixed conventions in the
  * first place: an optional property lands with no stated rule, two writers pick opposite
@@ -17,56 +17,79 @@ import { SCHEMA_DIR } from "../scripts/codegen-lib"
  * was never declared".
  */
 
-interface SchemaProperty {
+interface SchemaNode {
+  $ref?: string
   description?: string
   type?: string | string[]
-  oneOf?: Array<{ type?: string }>
-}
-
-interface SchemaObject {
+  oneOf?: SchemaNode[]
+  anyOf?: SchemaNode[]
+  allOf?: SchemaNode[]
   required?: string[]
-  properties?: Record<string, SchemaProperty>
-  $defs?: Record<string, SchemaObject>
+  properties?: Record<string, SchemaNode>
+  items?: SchemaNode
+  $defs?: Record<string, SchemaNode>
 }
 
 interface OptionalProperty {
-  owner: string
-  name: string
-  property: SchemaProperty
+  /** Dotted path from the document root, e.g. `SourceRange.startColumn`. */
+  path: string
+  property: SchemaNode
 }
 
-async function readIrSchema(): Promise<SchemaObject> {
+async function readIrSchema(): Promise<SchemaNode> {
   const raw = await readFile(join(SCHEMA_DIR, "aburi.ir.v1.json"), "utf8")
-  return JSON.parse(raw) as SchemaObject
+  return JSON.parse(raw) as SchemaNode
 }
 
-/** Every (owner, property) pair the IR schema declares as optional, in declaration order. */
-function optionalProperties(schema: SchemaObject): OptionalProperty[] {
+/**
+ * Walk every object node reachable from the root, not just the root and `$defs` — an
+ * optional property declared on an inline nested object is exactly as capable of landing
+ * without a stated class as a top-level one.
+ */
+function optionalProperties(schema: SchemaNode): OptionalProperty[] {
   const out: OptionalProperty[] = []
-  const collect = (owner: string, node: SchemaObject): void => {
+  const seen = new Set<SchemaNode>()
+
+  const visit = (owner: string, node: SchemaNode | undefined): void => {
+    if (node === undefined || seen.has(node)) return
+    seen.add(node)
     const required = new Set(node.required ?? [])
     for (const [name, property] of Object.entries(node.properties ?? {})) {
-      if (!required.has(name)) out.push({ owner, name, property })
+      const path = `${owner}.${name}`
+      if (!required.has(name)) out.push({ path, property })
+      visit(path, property)
+    }
+    visit(`${owner}[]`, node.items)
+    for (const branch of [...(node.oneOf ?? []), ...(node.anyOf ?? []), ...(node.allOf ?? [])]) {
+      visit(owner, branch)
     }
   }
-  collect("(root)", schema)
-  for (const [defName, def] of Object.entries(schema.$defs ?? {})) {
-    if (def.properties !== undefined) collect(defName, def)
-  }
+
+  visit("(root)", schema)
+  for (const [defName, def] of Object.entries(schema.$defs ?? {})) visit(defName, def)
   return out
 }
 
-/** True when the property admits `null`, either inline or through a `oneOf` branch. */
-function admitsNull(property: SchemaProperty): boolean {
-  if (Array.isArray(property.type)) return property.type.includes("null")
-  return (property.oneOf ?? []).some((branch) => branch.type === "null")
+/**
+ * True when the property admits `null` — inline, through a composition branch, or through a
+ * `$ref` to a definition that does. Following the `$ref` matters: `ExtKind` is a nullable
+ * `$def`, so a future optional written as a bare `{"$ref": "#/$defs/ExtKind"}` would look
+ * non-nullable to a shallow check and get told to declare itself Class B, the opposite of
+ * what §1.1 says. Resolution is one hop deep, which covers every `$ref` shape in v1.
+ */
+function admitsNull(node: SchemaNode, defs: Record<string, SchemaNode>): boolean {
+  const resolved = node.$ref !== undefined ? defs[node.$ref.replace("#/$defs/", "")] : undefined
+  if (resolved !== undefined && admitsNull(resolved, {})) return true
+  if (node.type === "null") return true
+  if (Array.isArray(node.type) && node.type.includes("null")) return true
+  return [...(node.oneOf ?? []), ...(node.anyOf ?? [])].some((branch) => admitsNull(branch, defs))
 }
 
 describe("aburi.ir.v1 optional-property conventions (ir-schema.md §1.1)", () => {
   it("every optional property declares its absent-vs-null convention in `description`", async () => {
     const undeclared = optionalProperties(await readIrSchema())
       .filter(({ property }) => (property.description ?? "").trim() === "")
-      .map(({ owner, name }) => `${owner}.${name}`)
+      .map(({ path }) => path)
 
     expect(
       undeclared,
@@ -81,21 +104,31 @@ describe("aburi.ir.v1 optional-property conventions (ir-schema.md §1.1)", () =>
     // The two classes are mutually exclusive by construction: a nullable optional is
     // Class A, a non-nullable optional is Class B. Checking the prose against the type
     // is what stops a copy-pasted description from claiming the opposite of what the
-    // schema says -- the description is the only copy of the rule a plugin author sees,
-    // via the JSDoc that codegen lifts into `src/generated/`.
-    const mismatches = optionalProperties(await readIrSchema()).flatMap(
-      ({ owner, name, property }) => {
-        const description = property.description ?? ""
-        const nullable = admitsNull(property)
-        const claimsA = description.includes("Class A")
-        const claimsB = description.includes("Class B")
-        if (claimsA && claimsB) return [`${owner}.${name}: claims both classes`]
-        if (nullable && !claimsA) return [`${owner}.${name}: nullable, so it must be Class A`]
-        if (!nullable && !claimsB) return [`${owner}.${name}: non-nullable, so it must be Class B`]
-        return []
-      },
-    )
+    // schema says -- the description is the only copy of the rule a plugin author sees.
+    const schema = await readIrSchema()
+    const defs = schema.$defs ?? {}
+    const mismatches = optionalProperties(schema).flatMap(({ path, property }) => {
+      const description = property.description ?? ""
+      const nullable = admitsNull(property, defs)
+      const claimsA = description.includes("Class A")
+      const claimsB = description.includes("Class B")
+      if (claimsA && claimsB) return [`${path}: claims both classes`]
+      if (nullable && !claimsA) return [`${path}: nullable, so it must be Class A`]
+      if (!nullable && !claimsB) return [`${path}: non-nullable, so it must be Class B`]
+      return []
+    })
 
     expect(mismatches).toEqual([])
+  })
+
+  it("resolves a nullable `$def` reached through `$ref`", async () => {
+    // Guards the check above rather than the schema: without `$ref` resolution the helper
+    // silently reclassifies, and a reclassification is worse than no check at all because
+    // the resulting message tells the author to write the wrong class.
+    const schema = await readIrSchema()
+    const defs = schema.$defs ?? {}
+    expect(defs.ExtKind, "ExtKind is the standing nullable $def this relies on").toBeDefined()
+    expect(admitsNull({ $ref: "#/$defs/ExtKind" }, defs)).toBe(true)
+    expect(admitsNull({ $ref: "#/$defs/SymbolId" }, defs)).toBe(false)
   })
 })

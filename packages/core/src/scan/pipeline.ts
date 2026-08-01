@@ -415,7 +415,8 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     //     entries whose target-alpha order is inverted from their source line.
     // A stable line sort here restores invariant #11 without disturbing the
     // relative order of same-line entries — same-line entries keep whatever
-    // order the producer gave them (schema §17 says "appearance order").
+    // order the producer gave them (ir-schema.md §1: "ascending by `line`
+    // (source order within the same line)").
     decorators: [...input.candidate.decorators].sort((a, b) => a.line - b.line),
     signature: input.candidate.signature,
     rules: [...input.rules].sort((a, b) => a.line - b.line),

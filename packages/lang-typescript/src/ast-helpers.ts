@@ -5,14 +5,16 @@ import type { Node } from "web-tree-sitter"
  * The single writer of `SourceRange` in this plugin — both the declaration extractor and
  * the promoted-call extractor go through here.
  *
- * Both column keys are emitted unconditionally as `null`. The Tree-sitter tier has the
- * columns in hand (`node.startPosition.column`) but deliberately does not publish them:
- * `docs/design/lsp-enrichment.md` §4.2 makes `textDocument/documentSymbol` the sole
- * source of columns, so that a scan's column values either come from the language server
- * or are absent — never a mix of two tiers' conventions about what a column counts.
- * `null` rather than an omitted key is the Class A rule of `ir-schema.md` §1.1;
- * `packages/core/src/lsp/enrich.ts` overwrites both with 1-based integers when the LSP
- * pass succeeds.
+ * Both column keys are emitted unconditionally as `null`. The tree has the columns in hand
+ * (`node.startPosition.column`), and nothing in the plugin contract forbids publishing them
+ * (`docs/design/lang-plugin.md` §4.3) — this plugin withholds them by choice, so that every
+ * column in an Aburi IR comes from `textDocument/documentSymbol` and one convention about
+ * what a column counts, rather than from two tiers that may disagree. The choice costs
+ * nothing today: `applyDocumentSymbols` in `packages/core/src/lsp/enrich.ts` overwrites both
+ * keys whenever the LSP pass matches the Symbol, so a column written here would survive only
+ * on the runs where no column is available anyway.
+ *
+ * `null` rather than an omitted key is the Class A rule of `ir-schema.md` §1.1.
  */
 export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSourceRange {
   return {
