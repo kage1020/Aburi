@@ -59,6 +59,34 @@ describe("detectComponents", () => {
     expect(components[0]?.roots).toEqual(["."])
   })
 
+  it("writes description as an explicit null on both detection paths (ir-schema.md §1.1)", async () => {
+    // Class A: the key is present carrying `null`, never omitted. Detection has no source
+    // for a description, but the config path in @aburi/cli writes the same key from
+    // `components[].description`, and a Component must not change shape depending on which
+    // producer made it. `Object.hasOwn` rather than a value check -- `undefined` and `null`
+    // both read as falsy, and only the former disappears from the serialized JSON.
+    await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8")
+    const pkg = await makeDir(tmp, "packages", "alpha")
+    await writeJson(join(pkg, "package.json"), { name: "alpha" })
+    await seedTypescriptFiles(pkg, 12)
+    const workspaceComponents = await detectComponents({ workspaceRoot: tmp })
+    expect(workspaceComponents).toHaveLength(1)
+    expect(Object.hasOwn(workspaceComponents[0] ?? {}, "description")).toBe(true)
+    expect(workspaceComponents[0]?.description).toBeNull()
+
+    const solo = await mkdtemp(join(tmpdir(), "aburi-core-component-solo-"))
+    try {
+      await writeJson(join(solo, "package.json"), { name: "solo" })
+      await seedTypescriptFiles(solo, 12)
+      const singleProject = await detectComponents({ workspaceRoot: solo })
+      expect(singleProject).toHaveLength(1)
+      expect(Object.hasOwn(singleProject[0] ?? {}, "description")).toBe(true)
+      expect(singleProject[0]?.description).toBeNull()
+    } finally {
+      await rm(solo, { recursive: true, force: true })
+    }
+  })
+
   it("CD7: scoped npm names strip the scope and become the id", async () => {
     expect(__testing_component.toIdFromNpmName("@scope/billing")).toBe("billing")
   })

@@ -28,9 +28,15 @@ kind: SymbolKind
 extKind: ExtKind
 name: string
 language: LanguageId
+/**
+ * Component this Symbol belongs to. Class A per ir-schema.md §1.1: writers MUST emit the key on every Symbol, carrying null when the Symbol lies outside every declared Component. Readers MUST treat an absent key as null.
+ */
 component?: (ComponentId | null)
 visibility: Visibility
 decorators: Decorator[]
+/**
+ * Callable signature. Class A per ir-schema.md §1.1: writers MUST emit the key on every Symbol, carrying null for Symbols that have no callable signature (class bodies, whole interfaces). Readers MUST treat an absent key as null.
+ */
 signature?: (Signature | null)
 rules: Rule[]
 effects: Effect[]
@@ -61,6 +67,9 @@ export type RuleType = ("guard" | "throw" | "return" | "loop" | "try" | "switch"
 export interface Effect {
 id: EffectId
 target: string
+/**
+ * Source line of the call that produced this effect. Class B per ir-schema.md §1.1: meaningless on a propagated entry, whose origin is N hops away, so writers MUST omit the key there rather than emit null or a placeholder (effect-propagation.md §5.1). The allOf below turns that rule into a validation error.
+ */
 line?: number
 plugin: string
 confidence: Confidence
@@ -69,11 +78,11 @@ confidence: Confidence
  */
 derivedBy: string
 /**
- * True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Absent or false for locally-detected entries.
+ * True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Class B per ir-schema.md §1.1: absent on locally-detected entries. The allOf below reads presence, so a writer that emitted false where it means absent would still validate but would misreport intent.
  */
 propagated?: boolean
 /**
- * Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Present only when propagated=true.
+ * Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Class B per ir-schema.md §1.1: present only when propagated=true, never emitted as [] on a locally-detected entry. The allOf below turns that into a validation error.
  */
 derivedFrom?: SymbolId[]
 }
@@ -91,7 +100,7 @@ export interface IR {
 $schema: "https://aburi.dev/schema/aburi.ir.v1.json"
 generator: Generator
 /**
- * ISO 8601 UTC. Excluded from fingerprint. Omit with --no-timestamp when committing IR.
+ * ISO 8601 UTC. Excluded from fingerprint. Class B per ir-schema.md §1.1: --no-timestamp omits the key entirely rather than emitting null, so a committed IR carries no producer clock at all.
  */
 generatedAt?: string
 workspace: Workspace
@@ -134,14 +143,20 @@ name: string
  */
 roots: RelativePath[]
 /**
- * Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash).
+ * Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash). Class B per ir-schema.md §1.1: writers MUST omit the key when the component declares no public surface, never emit as [].
  */
 publicApi?: string[]
 /**
  * @minItems 1
  */
 languages: LanguageId[]
+/**
+ * Framework plugin names that claimed this component. Class B per ir-schema.md §1.1: writers MUST omit the key when no framework matched, never emit as [].
+ */
 frameworks?: string[]
+/**
+ * Human-facing blurb for the component, supplied through config. Class A per ir-schema.md §1.1: writers MUST emit the key on every Component, carrying null when no description was supplied. Readers MUST treat an absent key as null.
+ */
 description?: (string | null)
 }
 export interface Decorator {
@@ -159,7 +174,7 @@ type: string
 outputs: string[]
 throws: string[]
 /**
- * Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Optional AND omitted-when-empty: writers MUST omit the key entirely when nothing was inferred, never emit as [].
+ * Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Class B per ir-schema.md §1.1: writers MUST omit the key entirely when nothing was inferred, never emit as [].
  * 
  * @minItems 1
  */
@@ -177,7 +192,13 @@ export interface SourceRange {
 file: RelativePath
 startLine: number
 endLine: number
+/**
+ * 1-based start column, populated by the LSP enrichment pass (lsp-enrichment.md §4.2). Class A per ir-schema.md §1.1: writers MUST emit the key on every SourceRange, carrying null while the position is unknown — the Tree-sitter tier cannot determine a column, and any LSP fallback leaves it null. Readers MUST treat an absent key as null; absence only occurs on documents that predate the rule. Out of `required` solely because the promotion is breaking under §15.2 (see §15.4).
+ */
 startColumn?: (number | null)
+/**
+ * 1-based end column. Same Class A contract as startColumn (ir-schema.md §1.1).
+ */
 endColumn?: (number | null)
 }
 export interface Fingerprint {
@@ -198,7 +219,7 @@ parsedFiles: number
 keptSymbols: number
 droppedSymbols: number
 /**
- * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Empty in the normal case; non-empty entries are kept as a determinism log.
+ * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Class B per ir-schema.md §1.1: writers omit the key when nothing timed out rather than emitting []; non-empty entries are kept as a determinism log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
@@ -241,7 +262,7 @@ propagatedEffectCount: number
 symbolsWithPropagatedEffects: number
 }
 /**
- * Optional bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Present when the pass ran regardless of whether it succeeded or fell back; absent when config.lsp is not configured.
+ * Bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Class B per ir-schema.md §1.1: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured. Presence is how a reader tells "ran and enriched nothing" apart from "never ran".
  */
 export interface LspEnrichmentStats {
 /**
@@ -274,7 +295,7 @@ requestsFailed: number
 languagesDisabled: LanguageId[]
 }
 /**
- * Aggregate call-resolution outcome counters (call-resolution.md §8.1). Optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all.
+ * Aggregate call-resolution outcome counters (call-resolution.md §8.1). Class B per ir-schema.md §1.1, optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all, so absence means "this document predates the counter" rather than "nothing was unresolved".
  */
 export interface CallResolutionStats {
 /**

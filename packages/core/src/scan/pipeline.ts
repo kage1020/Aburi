@@ -357,6 +357,11 @@ function buildDroppedSymbol(
     extKind: candidate.extKind,
     name: candidate.name,
     language,
+    // Class A per ir-schema.md §1.1: the key is written on every Symbol, carrying `null`
+    // for "outside every Component". Symbol-to-Component attribution is not implemented,
+    // so `null` is the honest value rather than a placeholder -- but omitting the key
+    // would make this Symbol's shape differ from one that is attributed later.
+    component: null,
     visibility: candidate.visibility,
     decorators: [...candidate.decorators],
     signature: candidate.signature,
@@ -390,6 +395,9 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     extKind: input.candidate.extKind,
     name: input.candidate.name,
     language: input.language,
+    // Class A per ir-schema.md §1.1 -- see buildDroppedSymbol for why `null` is written
+    // rather than the key omitted.
+    component: null,
     visibility: input.candidate.visibility,
     // Sort every list-field by `.line` before it enters the IR. Integrity invariant
     // #11 (`integrity.ts:284-311`) demands monotonic `.line` on `decorators` /

@@ -1,4 +1,28 @@
+import type { ExtractionContext, WrittenSourceRange } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+
+/**
+ * The single writer of `SourceRange` in this plugin — both the declaration extractor and
+ * the promoted-call extractor go through here.
+ *
+ * Both column keys are emitted unconditionally as `null`. The Tree-sitter tier has the
+ * columns in hand (`node.startPosition.column`) but deliberately does not publish them:
+ * `docs/design/lsp-enrichment.md` §4.2 makes `textDocument/documentSymbol` the sole
+ * source of columns, so that a scan's column values either come from the language server
+ * or are absent — never a mix of two tiers' conventions about what a column counts.
+ * `null` rather than an omitted key is the Class A rule of `ir-schema.md` §1.1;
+ * `packages/core/src/lsp/enrich.ts` overwrites both with 1-based integers when the LSP
+ * pass succeeds.
+ */
+export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSourceRange {
+  return {
+    file: ctx.file.path,
+    startLine: node.startPosition.row + 1,
+    endLine: node.endPosition.row + 1,
+    startColumn: null,
+    endColumn: null,
+  }
+}
 
 /** Type guard: true when the given node is NOT null. Tree-sitter APIs return `Node | null` everywhere. */
 export function isPresent(node: Node | null): node is Node {

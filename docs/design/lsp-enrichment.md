@@ -7,7 +7,7 @@ References:
 - [`call-resolution.md`](./call-resolution.md) §2 — the Two-Tier Resolution Model whose LSP tier this pass supplies inputs for; §5 — the LSP-enriched resolution rules; §7.2 — the per-edge confidence table this pass populates the `high` / `medium` rows of; §11.4 — the `@aburi/core` placement rationale mirrored here
 - [`effect-propagation.md`](./effect-propagation.md) §3 — the `CallEdge[]` input that this pass indirectly enlarges; §5.3 — the confidence combination that consumes lifted `CallEdge.confidence`
 - [`slice-view.md`](./slice-view.md) §5.1 — the Edge set that clusters over the enriched `CallEdge` graph
-- [`ir-schema.md`](./ir-schema.md) §7 — `Signature` (extended here with an optional `inferredThrows` field); §12 — `SourceRange` (existing optional `startColumn` / `endColumn` populated here); §15.2 — the non-breaking optional-field policy this pass relies on
+- [`ir-schema.md`](./ir-schema.md) §1.1 — the absent-key vs explicit-`null` convention both fields below are classified under; §7 — `Signature` (extended here with an optional `inferredThrows` field); §12 — `SourceRange` (existing optional `startColumn` / `endColumn` populated here); §15.2 — the non-breaking optional-field policy this pass relies on
 - [`fingerprint.md`](./fingerprint.md) §3.1 — the `api` fingerprint input this pass MUST NOT perturb; §4.1 — the `logic` fingerprint input likewise; §5.1 — the `syntax` fingerprint input likewise
 - [`lang-plugin.md`](./lang-plugin.md) §2.1 — Symbol existence and call sites are the plugin's authority, never LSP's; §2.2 — call resolution (and by extension LSP-tier resolution) is out of scope for the plugin; §4.7 — `PluginContext.workspaceRoot` supplies the LSP `rootUri`
 - [`config.md`](./config.md) §5.4 — `pluginOptions` scope hosts opaque per-plugin options (used only for `initializationOptions` here, not for timeouts); §11 — CLI override convention followed by `--lsp` / `--no-lsp`; §14.1 — the Config Schema Compatibility Policy that timeout-default revisions live under
@@ -131,7 +131,7 @@ Viewed from the IR side, the pass writes to exactly the following fields. Nothin
 | `Call.resolved` for `this.*` / `super.*` | `null` | Symbol id when class hierarchy is resolvable | `null` → `high` (direct) or `medium` (walked hierarchy) |
 | `Call.resolved` for interface-typed receivers | `null` | single implementer's Symbol id | `null` → `medium` |
 | `CallEdge.confidence` for calls already resolved by the untyped tier | untyped-tier value ([`call-resolution.md`](./call-resolution.md) §7.2) | may be lifted per [`call-resolution.md`](./call-resolution.md) §7.2 | monotone upward only |
-| `Signature.inferredThrows` (new optional field, §7.1) | absent from the JSON | array of throws inferred from called signatures' declared throws | recorded on the `Signature`; MUST NOT be merged into `Signature.throws` |
+| `Signature.inferredThrows` (optional field, §7.1) | absent from the JSON | array of throws inferred from called signatures' declared throws | recorded on the `Signature`; MUST NOT be merged into `Signature.throws` |
 
 Invariants across the table:
 
@@ -153,10 +153,10 @@ The pass degrades gracefully at three progressively larger granularities.
 
 Under any fallback:
 
-- `SourceRange.startColumn` / `endColumn` remain `null`. Already schema-optional per [`ir-schema.md`](./ir-schema.md) §12.
+- `SourceRange.startColumn` / `endColumn` remain `null` — the value the Tree-sitter tier wrote, not an absent key. They are Class A per [`ir-schema.md`](./ir-schema.md) §1.1, so a consumer cannot tell a fallback apart from a scan that never ran this pass by looking at key presence; `stats.lspEnrichment` (§7.2) is where that distinction lives.
 - `Call.resolved` remains at whatever the untyped tier produced ([`call-resolution.md`](./call-resolution.md) §4). LSP fallback MUST NOT lower a resolved value back to `null`.
 - `CallEdge.confidence` remains at the untyped tier's value.
-- `Signature.inferredThrows` is **omitted entirely from the JSON** when this pass could not compute it. It is never emitted as an empty array to signal "we tried and found none".
+- `Signature.inferredThrows` is **omitted entirely from the JSON** when this pass could not compute it. It is never emitted as an empty array to signal "we tried and found none". Class B per [`ir-schema.md`](./ir-schema.md) §1.1 — the contrasting case to the columns above, on the same Symbol.
 - No error appears in the IR document itself; degradation is bookkept in `stats.lspEnrichment` (§7.2).
 
 ### 6.3 Numbered rules (RFC 2119)
@@ -171,11 +171,11 @@ Under any fallback:
 
 ### 7.1 Schema extensions (non-breaking per [`ir-schema.md`](./ir-schema.md) §15.2)
 
-> **Status**: this section proposes schema extensions. `Signature.inferredThrows` is NOT yet present in `schema/aburi.ir.v1.json` or in `packages/types/src/generated/ir.ts`; landing it is tracked as a follow-up implementation issue. Only the `SourceRange` column population uses fields that already exist in schema today.
+> **Status**: shipped. Both `Signature.inferredThrows` and the `SourceRange` column population are present in `schema/aburi.ir.v1.json` and `packages/types/src/generated/ir.ts`; this section documents the landed shape rather than proposing one.
 
-`SourceRange.startColumn` / `SourceRange.endColumn`: no schema change. Both fields already exist in `aburi.ir.v1.json` as optional `["integer", "null"]`. This pass simply populates them.
+`SourceRange.startColumn` / `SourceRange.endColumn`: no schema change. Both fields already exist in `aburi.ir.v1.json` as `["integer", "null"]`, Class A per [`ir-schema.md`](./ir-schema.md) §1.1 — the Tree-sitter tier writes them as `null` and this pass overwrites them with 1-based integers. Neither tier ever removes the keys.
 
-`Signature.inferredThrows: string[]`: a new optional field.
+`Signature.inferredThrows: string[]`: an optional field, Class B per [`ir-schema.md`](./ir-schema.md) §1.1 — absent unless this pass inferred at least one throw.
 
 ```jsonc
 {
@@ -202,6 +202,7 @@ Under any fallback:
       "filesFellBack": 3,
       "requestsIssued": 5170,
       "requestsTimedOut": 12,
+      "requestsFailed": 4,
       "languagesDisabled": []
     }
   }

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { scan, writeCanonicalIR } from "@aburi/core"
+import { detectComponents, scan, serializeCanonical, writeCanonicalIR } from "@aburi/core"
 import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 import { nextFrameworkPlugin } from "@aburi/framework-next"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
@@ -290,6 +290,56 @@ describe("scan — integration through real plugins", () => {
         d.via === "call" && d.from.endsWith("main.ts#main") && d.to.endsWith("util.ts#stringify"),
     )
     expect(callEdge).toBeDefined()
+  })
+
+  it("emits every Class A key in the serialized IR (ir-schema.md §1.1)", async () => {
+    // The assertion has to run on parsed JSON rather than on `result.ir`: serializeCanonical
+    // drops properties whose value is `undefined`, so a writer that left a Class A key off
+    // its object literal produces an in-memory tree that satisfies every value-based check
+    // and a document on disk that is missing the key. Reading the key back out of the JSON
+    // is the only place the two can be told apart.
+    await writeFile(join(workRoot, "package.json"), JSON.stringify({ name: "billing-app" }), "utf8")
+    await writeSource("src/InvoiceService.ts", "export class InvoiceService {\n  create() {}\n}\n")
+    await writeSource("src/types.ts", "export interface Invoice {\n  id: string\n}\n")
+
+    const components = await detectComponents({ workspaceRoot: workRoot })
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: {},
+      components,
+      languages: [langTypescriptPlugin],
+      frameworks: [],
+      effects: [],
+      registry: buildRegistry(),
+    })
+
+    const parsed = JSON.parse(serializeCanonical(result.ir)) as {
+      symbols: Array<Record<string, unknown> & { source: Record<string, unknown> }>
+      components: Array<Record<string, unknown>>
+    }
+
+    expect(parsed.symbols.length).toBeGreaterThan(0)
+    for (const symbol of parsed.symbols) {
+      for (const key of ["component", "signature"]) {
+        expect(Object.hasOwn(symbol, key), `symbols[].${key} on ${String(symbol.id)}`).toBe(true)
+      }
+      for (const key of ["startColumn", "endColumn"]) {
+        expect(
+          Object.hasOwn(symbol.source, key),
+          `symbols[].source.${key} on ${String(symbol.id)}`,
+        ).toBe(true)
+      }
+    }
+
+    expect(parsed.components.length).toBeGreaterThan(0)
+    for (const component of parsed.components) {
+      expect(Object.hasOwn(component, "description"), `components[].description`).toBe(true)
+      // Class B on the same record: the empty case is an absent key, not `[]`. Keeping both
+      // directions in one test is what stops a future "normalize every optional field"
+      // cleanup from collapsing the distinction.
+      expect(Object.hasOwn(component, "publicApi")).toBe(false)
+      expect(Object.hasOwn(component, "frameworks")).toBe(false)
+    }
   })
 
   it("writes a canonical JSON IR to disk via writeCanonicalIR", async () => {

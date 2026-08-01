@@ -246,15 +246,28 @@ async function resolveComponents(
       // here as a plain string. Re-asserting it through the constructor is what turns it into
       // a Component id, and keeps a config loaded by some other path from smuggling in a
       // shape `components[].id` cannot hold.
-      return config.components.map((entry) => ({
-        id: makeComponentId(entry.id),
-        name: entry.name ?? entry.id,
-        roots: [...entry.roots],
-        publicApi: entry.publicApi ?? [],
-        languages: [...(entry.languages ?? [])],
-        frameworks: [...(entry.frameworks ?? [])],
-        description: entry.description ?? null,
-      }))
+      return config.components.map((entry) => {
+        // `publicApi` / `frameworks` are Class B and `description` is Class A
+        // (`ir-schema.md` §1.1), so the empty cases are spelled differently on purpose:
+        // the two array keys disappear, the scalar stays as an explicit `null`. Emitting
+        // `[]` here would contradict `detectComponents`, which omits them — the same
+        // Component would then have two shapes depending on whether it was configured or
+        // detected.
+        const component: Component = {
+          id: makeComponentId(entry.id),
+          name: entry.name ?? entry.id,
+          roots: [...entry.roots],
+          languages: [...(entry.languages ?? [])],
+          description: entry.description ?? null,
+        }
+        if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
+          component.publicApi = [...entry.publicApi]
+        }
+        if (entry.frameworks !== undefined && entry.frameworks.length > 0) {
+          component.frameworks = [...entry.frameworks]
+        }
+        return component
+      })
     }
     return await detectComponents({ workspaceRoot })
   } catch (error) {

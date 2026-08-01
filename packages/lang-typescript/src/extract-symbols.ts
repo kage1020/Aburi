@@ -1,13 +1,7 @@
 import { CoreError } from "@aburi/core"
-import type {
-  ExtractionContext,
-  Symbol as IRSymbol,
-  SymbolCandidate,
-  SymbolKind,
-  Visibility,
-} from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate, SymbolKind, Visibility } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
-import { findChild, nameFieldText } from "./ast-helpers"
+import { findChild, makeSourceRange, nameFieldText } from "./ast-helpers"
 import {
   type CallExtractionState,
   makeCallExtractionState,
@@ -475,16 +469,6 @@ function hasExportKeywordAncestor(node: Node): boolean {
 
 function currentFile(ctx: ExtractionContext): string {
   return ctx.file.path
-}
-
-function makeSourceRange(node: Node, ctx: ExtractionContext): IRSymbol["source"] {
-  return {
-    file: ctx.file.path,
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    startColumn: null,
-    endColumn: null,
-  }
 }
 
 /**

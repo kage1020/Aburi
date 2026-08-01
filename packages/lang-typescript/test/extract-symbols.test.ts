@@ -229,6 +229,56 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 })
 
+describe("extractSymbols — SourceRange key presence (ir-schema.md §1.1 Class A)", () => {
+  /**
+   * Both column keys must be own properties carrying `null`, not absent. Asserting the
+   * value alone would not catch the regression this locks: `expect(x).toBeNull()` fails on
+   * `undefined`, but `serializeCanonical` drops `undefined` properties, so a writer that
+   * built the range without the keys would produce JSON missing them while every
+   * value-based assertion elsewhere still passed.
+   */
+  function expectColumnKeys(symbols: SymbolCandidate<Node>[]): void {
+    expect(symbols.length).toBeGreaterThan(0)
+    for (const symbol of symbols) {
+      expect(Object.hasOwn(symbol.source, "startColumn"), `${symbol.id}.source.startColumn`).toBe(
+        true,
+      )
+      expect(Object.hasOwn(symbol.source, "endColumn"), `${symbol.id}.source.endColumn`).toBe(true)
+      expect(symbol.source.startColumn).toBeNull()
+      expect(symbol.source.endColumn).toBeNull()
+    }
+  }
+
+  it("declaration extraction writes both column keys as null", async () => {
+    expectColumnKeys(
+      await symbolsOf(
+        [
+          "export function createInvoice() {}",
+          "export class InvoiceService {",
+          "  createInvoice() {}",
+          "  static fromJson() {}",
+          "}",
+          "export interface Invoice { id: string }",
+          "export type Money = number",
+          "export enum Status { Draft }",
+        ].join("\n"),
+      ),
+    )
+  })
+
+  it("promoted call Symbols write both column keys as null", async () => {
+    // Call promotion runs through a second extractor (`call-symbols.ts`); this is the only
+    // path that reaches it, so without this case the shared writer could regress on one
+    // side unnoticed.
+    const symbols = await symbolsOf(
+      `import express from "express"\nconst app = express()\napp.get('/users', h)\napp.use(mw)\n`,
+    )
+    const promoted = symbols.filter((s) => s.kind === "call")
+    expect(promoted.length).toBeGreaterThan(0)
+    expectColumnKeys(promoted)
+  })
+})
+
 describe("extractSymbols — Call promotion position independence (T2)", () => {
   const registration = `import express from "express"\nconst app = express()\napp.get('/users', h)\n`
 
