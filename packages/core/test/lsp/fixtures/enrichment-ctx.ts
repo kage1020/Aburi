@@ -30,6 +30,7 @@ export function makeEnrichmentInput(input: {
   fileContents: Record<string, string>
   serverFactory: ServerFactory
   lspConfig?: Config["lsp"]
+  now?: () => number
 }): EnrichmentInput {
   const base: EnrichmentInput = {
     symbols: input.symbols,
@@ -38,7 +39,23 @@ export function makeEnrichmentInput(input: {
     lspConfig: input.lspConfig ?? makeLspConfig(),
     serverFactory: input.serverFactory,
   }
+  if (input.now !== undefined) base.now = input.now
   return base
+}
+
+/**
+ * Manually advanced clock for `EnrichmentInput.now`. Budget tests spend it in a
+ * mock's side effect instead of sleeping, so the per-file budget assertions are
+ * exact rather than timing-dependent.
+ */
+export function makeManualClock(): { now: () => number; advance: (ms: number) => void } {
+  let current = 0
+  return {
+    now: () => current,
+    advance: (ms) => {
+      current += ms
+    },
+  }
 }
 
 export function makeMethodSymbol(

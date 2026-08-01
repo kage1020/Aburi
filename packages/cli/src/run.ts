@@ -129,6 +129,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
             ...(cmdOptions.timestamp === false || env.ci ? { suppressTimestamp: true } : {}),
             ...(cmdOptions.lsp === undefined ? {} : { lsp: cmdOptions.lsp }),
+            ...(env.logLevel === null ? {} : { logLevel: env.logLevel }),
             ...withConfigPath(cmdOptions.config, env),
           })
           stdout.write(

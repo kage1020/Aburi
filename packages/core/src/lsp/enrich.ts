@@ -46,7 +46,12 @@ export interface EnrichmentInput {
    * Tests inject an in-memory server + client pair so no child process is needed.
    */
   serverFactory?: ServerFactory
-  /** Injected clock for deterministic tests. Defaults to `Date.now`. */
+  /**
+   * Injected clock for deterministic tests. Defaults to `performance.now`,
+   * which is monotonic — the per-file budget measures elapsed time, and a
+   * wall clock stepped backwards by NTP would make `now() - start` negative
+   * and the budget unable to fire, which is the hang it exists to prevent.
+   */
   now?: () => number
 }
 
@@ -171,6 +176,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       fallback,
       receiverHints,
       logger,
+      now: input.now ?? monotonicNow,
     })
 
     await safeShutdown(client)
@@ -197,6 +203,7 @@ interface ProcessLanguageInput {
   fallback: FallbackState
   receiverHints: Map<string, ReceiverHint>
   logger: Logger
+  now: () => number
 }
 
 async function processLanguage(input: ProcessLanguageInput): Promise<void> {
@@ -216,15 +223,30 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
     const languageIdForOpen = languageIdForLspOpen(input.language)
     const fileSymbols = symbolsByFile.get(file) ?? []
 
-    const fileStart = Date.now()
+    const fileStart = input.now()
     let fileFellBack = false
 
+    // Notification bounds come from the §4.4 table; `didOpen` draws on the file
+    // budget. A write that stalls, is rejected, or is addressed to a server
+    // that has already exited is a §6.1 per-file fallback. The try/catch covers
+    // injected `ServerFactory` clients, which are free to throw where
+    // `createLspClient` reports.
     try {
-      await input.client.didOpen(uri, languageIdForOpen, content)
+      const opened = await input.client.didOpen(uri, languageIdForOpen, content, fileBudget)
+      if (isLspFailure(opened)) {
+        input.logger.warn?.(`[aburi:lsp] didOpen failed for ${file} (${failureReason(opened)})`)
+        fileFellBack = true
+      }
     } catch (error) {
       input.logger.warn?.(`[aburi:lsp] didOpen failed for ${file}: ${errorMessage(error)}`)
       fileFellBack = true
     }
+
+    // A `didOpen` that came back healthy may still have consumed the budget on
+    // the way. Without this check the pass would issue a `documentSymbol`
+    // request the file can no longer pay for — the budget is re-read after that
+    // request and before each job, but never before the first one.
+    if (!fileFellBack && overBudget(input.now, fileStart, fileBudget)) fileFellBack = true
 
     if (!fileFellBack) {
       input.stats.requestsIssued += 1
@@ -242,13 +264,13 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       }
     }
 
-    if (!fileFellBack && overBudget(fileStart, fileBudget)) fileFellBack = true
+    if (!fileFellBack && overBudget(input.now, fileStart, fileBudget)) fileFellBack = true
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
       await runJobsWithConcurrency(jobs, concurrency, async (job) => {
         if (fileFellBack) return
-        if (overBudget(fileStart, fileBudget)) {
+        if (overBudget(input.now, fileStart, fileBudget)) {
           fileFellBack = true
           return
         }
@@ -264,10 +286,18 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       })
     }
 
+    // `didClose` draws on the per-request budget (§4.4). Its outcome cannot
+    // change what this file produced, so it is logged and nothing more — it
+    // moves no counter and escalates nothing. A transport broken for good
+    // fails the next file's `didOpen` instead, which is where §6.1 escalation
+    // starts.
     try {
-      await input.client.didClose(uri)
-    } catch {
-      // ignore
+      const closed = await input.client.didClose(uri, requestTimeout)
+      if (isLspFailure(closed)) {
+        input.logger.debug?.(`[aburi:lsp] didClose failed for ${file} (${failureReason(closed)})`)
+      }
+    } catch (error) {
+      input.logger.debug?.(`[aburi:lsp] didClose failed for ${file}: ${errorMessage(error)}`)
     }
 
     if (fileFellBack) {
@@ -540,8 +570,12 @@ function languageIdForLspOpen(languageId: LanguageId): string {
   }
 }
 
-function overBudget(startMs: number, budgetMs: number): boolean {
-  return Date.now() - startMs > budgetMs
+function monotonicNow(): number {
+  return performance.now()
+}
+
+function overBudget(now: () => number, startMs: number, budgetMs: number): boolean {
+  return now() - startMs > budgetMs
 }
 
 function isTimeout(value: unknown): boolean {

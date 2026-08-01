@@ -110,6 +110,17 @@ Requests explicitly NOT used by this pass:
 
 These numeric defaults are empirical starting points, measured against `typescript-language-server` on a medium (~500-file) monorepo at design time. Actual performance shifts with server version, language version, and workspace shape, so the defaults are exposed as named `lsp.servers.<lang>.*` core config fields (§12.1) that can be tuned per project. Revising the defaults themselves is non-breaking under [`config.md`](./config.md) §14.1 (only removing or type-changing a field would be).
 
+Notifications (`didOpen`, `didClose`, `initialized`, `exit`) are bounded too. They introduce no knob of their own: three of them reuse the configurable budgets above, and `exit` uses the fixed §4.1 shutdown grace period, which is not configurable and deliberately absent from the table. JSON-RPC treats a notification as fire-and-forget, but the *write* still awaits the transport, so a clogged stdio pipe stalls it exactly the way it stalls a request. An unbounded `didOpen` is the load-bearing case: it precedes the file's first request and therefore precedes every `fileBudgetMs` check, so the per-file budget below could never fire. The mapping:
+
+- `didOpen` draws on `fileBudgetMs`. A notification that spends the whole budget has left nothing for the enrichment it exists to enable, so the budget is already the correct ceiling. Exceeding it is a per-file fallback (§6.1), the same as any other way of spending the budget.
+- `didClose` draws on `requestTimeoutMs`. It is a single small write with no enrichment riding on it, and the sooner a stalled one gives up the sooner the next file starts. Its outcome cannot change what the file produced, so it is logged and nothing more — it moves no counter and escalates nothing. A transport broken for good fails the next file's `didOpen` instead, which is where §6.1 escalation starts.
+- `initialized` draws on `initializeTimeoutMs`. The handshake is not complete until it is on the wire, so a write that never lands is an `initialize` failure and takes the per-language fallback. It gets the full knob rather than what the `initialize` request left over — one operation, one budget, the same way `requestTimeoutMs` applies to each request individually. A wholly unresponsive server can therefore cost two `initializeTimeoutMs` before its language is disabled.
+- `exit` draws on the §4.1 1 s shutdown grace period, as do the `shutdown` request that precedes it and the wait before SIGKILL that follows — three sequential steps, so a server that answers none of them delays the pass by at most three grace periods. A stalled `exit` is ignored; the SIGKILL is what actually guarantees the process goes away, and it too gives up after one further grace period rather than waiting on a process that may never be reapable.
+
+A write addressed to a server already known to have exited fails immediately with `server-disconnected` instead of being attempted — for notifications as much as for requests. A write onto a dead pipe can resolve and look like success, which would leave the pass treating files as opened on a server that is not there and, because §6.1 escalation counts *files*, silently reporting them as enriched.
+
+None of these are counted as requests in §7.2 — `requestsIssued` / `requestsTimedOut` / `requestsFailed` describe requests only. A `didOpen` that fails shows up as `filesFellBack`.
+
 ## 5. What Gets Enriched
 
 Viewed from the IR side, the pass writes to exactly the following fields. Nothing else is touched.
@@ -135,7 +146,7 @@ The pass degrades gracefully at three progressively larger granularities.
 ### 6.1 Fallback tiers
 
 - **Per-request fallback**: a single LSP request errors or exceeds `requestTimeoutMs`. The specific enrichment for that request is skipped; the affected IR field retains its untyped-tier value. Sibling requests for the same file are unaffected.
-- **Per-file fallback**: `didOpen` fails, or `fileBudgetMs` is exceeded for the file, or three consecutive requests hit per-request fallback. The pass sends `didClose`, marks the file `lsp-degraded` in stats, keeps every untyped-tier value in that file, and moves to the next file.
+- **Per-file fallback**: `didOpen` fails — including a write that exceeds its §4.4 bound or is addressed to a server already known to have exited — or `fileBudgetMs` is exceeded for the file, or three consecutive requests hit per-request fallback. The pass sends `didClose`, counts the file in `stats.lspEnrichment.filesFellBack` (§7.2), keeps every untyped-tier value in that file, and moves to the next file.
 - **Per-language fallback**: `initialize` fails, or five consecutive files hit per-file fallback for the same language. The pass sends `shutdown` / `exit` to that language's server, disables LSP for that language for the remainder of the run, and emits one CLI warning.
 
 ### 6.2 IR degradation rules
@@ -274,10 +285,15 @@ Concrete rules:
 - LE5: interface-typed receiver with exactly one implementer → `Call.resolved` = implementer's method Symbol id, `CallEdge.confidence = medium`. Matches [`call-resolution.md`](./call-resolution.md) test CR19.
 - LE6: file with no `this.*`, no interface-typed receivers, and all calls already resolved by the untyped tier → LSP pass is a no-op on every IR value in that file (only `SourceRange` columns change).
 
-### 11.3 Fallback — LE7..LE8
+### 11.3 Fallback — LE7..LE8, LE19..LE23
 
 - LE7: force per-request timeout for one specific call site's `hover` → that call site's `Call.resolved` stays at the untyped value; sibling call sites in the same file are unaffected; `stats.lspEnrichment.requestsTimedOut` increases by 1.
 - LE8: file exceeds `fileBudgetMs` after half its call sites are enriched → the enriched half keeps LSP values, the unenriched half keeps untyped values, `stats.lspEnrichment.filesFellBack += 1`; the next file proceeds normally.
+- LE19 (notification writes are bounded, on both sides): a transport whose notification write never settles → `didOpen` and `didClose` are still unresolved at one tick before their §4.4 bound and resolve with the timeout sentinel at it, `initialize` returns a failure when `initialized` cannot be written, and `shutdown` completes within one grace period when `exit` cannot be written. A write that rejects — or that throws synchronously, as `vscode-jsonrpc` does on a closed connection — is reported, not raised.
+- LE20 (a stalled `didOpen` is a per-file fallback): the `didOpen` write for one file exceeds `fileBudgetMs` → that file counts in `filesFellBack`, no request is issued against it, `didClose` is still sent, and the next file is enriched normally. Holds both when the write fails and when it merely returns having spent the budget; a write that lands exactly on the budget is spending it, not exceeding it, and the file proceeds.
+- LE21 (a stalled `didClose` is not): the `didClose` write for an otherwise healthy file fails → the file still counts in `filesEnriched`, `filesFellBack` does not increase, and the enrichment it earned is kept.
+- LE22 (a dead server is never written to): once the server process has exited, `didOpen` / `didClose` / any request report `server-disconnected` without touching the transport. Five consecutive files failing that way disable the language, so a crash mid-scan is reported rather than absorbed as five silently "enriched" files.
+- LE23 (notifications do not move request counters): a `didOpen` or `didClose` that fails leaves `requestsIssued` / `requestsTimedOut` / `requestsFailed` unchanged.
 
 ### 11.4 Partial fingerprint invariance (load-bearing) — LE9..LE12
 
