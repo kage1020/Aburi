@@ -109,9 +109,11 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
  * untyped resolution tiers from `call-resolution.md`: §4.2 local shadow (parameter
  * subset), §4.3 file scope, §4.4 import scope, §4.5 component scope, §4.6 workspace
  * scope. Each tier is tried in order and the first hit wins; the confidence of the
- * emitted edge reflects the tier that produced it (§7.2). The LSP-enriched tier
- * (§5) is intentionally deferred to a follow-up implementation; unresolved calls
- * stay `resolved: null`, exactly as §7.1 requires.
+ * emitted edge reflects the tier that produced it (§7.2). A call the untyped
+ * tiers all miss gets one last attempt at the LSP tier (§5) through
+ * `receiverHints` — see `resolveViaLspHint` for why that attempt can only ever
+ * add an edge. Whatever still fails stays `resolved: null`, exactly as §7.1
+ * requires, and is bucketed into `diagnostics`.
  *
  * Determinism: the resolver reads `symbols` and `importsByFile` and no filesystem
  * state, so the same inputs always produce the same outputs. Ambiguous matches
@@ -370,10 +372,32 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
 
 /**
  * Resolve a call left null by the untyped tier using LSP-derived hints.
- * `this.*` / `super.*` with a hint present resolve at `high` confidence. Never
- * overwrites an already-resolved call (§5.4). Interface-tier resolution is
- * out of scope until the IR carries `implements` edges — until then any
- * `implementerHints` entries pass through untouched.
+ * `this.*` / `super.*` with a hint present resolve at `high` confidence, which
+ * is what §7.2 rates direct dispatch at.
+ *
+ * Two invariants of the LSP tier are load-bearing, and both hold by the shape of
+ * the surrounding pass rather than by a check inside this function:
+ *
+ * - **An already-resolved call is never overwritten (§5.4).** `resolveCallGraph`
+ *   returns early on every call whose `resolved` is already non-null, so this
+ *   function is only ever reached for `resolved: null` entries. The untyped
+ *   answer stays authoritative for the cases the type layer cannot see — a
+ *   barrel re-export pointing at a different declaration file, say.
+ * - **Confidence only ever rises (lsp-enrichment.md LE16).** Because the LSP
+ *   tier fires solely where the untyped tier produced no edge at all, there is
+ *   no untyped confidence available for it to lower: an LSP hit contributes an
+ *   edge the LSP-off run did not have, never a re-rated one. Turning LSP on can
+ *   add edges to the graph but cannot downgrade any edge already in it.
+ *
+ * A hint whose `targetSymbolId` is not in `keptSymbolIds` returns null instead
+ * of an edge. A dropped Symbol carries an empty body and zeroed fingerprints, so
+ * an edge into it would be a silent lie about what the caller actually reaches;
+ * the call falls through to `classifyUnresolved` and is reported like any other
+ * miss.
+ *
+ * Interface-tier resolution (§5.3) is out of scope until the IR carries
+ * `implements` edges — until then any `implementerHints` entries pass through
+ * untouched.
  */
 function resolveViaLspHint(input: {
   caller: IRSymbol
