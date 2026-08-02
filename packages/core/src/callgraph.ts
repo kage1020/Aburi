@@ -109,9 +109,11 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
  * untyped resolution tiers from `call-resolution.md`: §4.2 local shadow (parameter
  * subset), §4.3 file scope, §4.4 import scope, §4.5 component scope, §4.6 workspace
  * scope. Each tier is tried in order and the first hit wins; the confidence of the
- * emitted edge reflects the tier that produced it (§7.2). The LSP-enriched tier
- * (§5) is intentionally deferred to a follow-up implementation; unresolved calls
- * stay `resolved: null`, exactly as §7.1 requires.
+ * emitted edge reflects the tier that produced it (§7.2). A call the untyped
+ * tiers all miss gets one last attempt at the LSP tier (§5) through
+ * `receiverHints` — see `resolveViaLspHint` for why that attempt can only ever
+ * add an edge. Whatever still fails stays `resolved: null`, exactly as §7.1
+ * requires, and is bucketed into `diagnostics`.
  *
  * Determinism: the resolver reads `symbols` and `importsByFile` and no filesystem
  * state, so the same inputs always produce the same outputs. Ambiguous matches
@@ -370,10 +372,46 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
 
 /**
  * Resolve a call left null by the untyped tier using LSP-derived hints.
- * `this.*` / `super.*` with a hint present resolve at `high` confidence. Never
- * overwrites an already-resolved call (§5.4). Interface-tier resolution is
- * out of scope until the IR carries `implements` edges — until then any
- * `implementerHints` entries pass through untouched.
+ * `this.*` / `super.*` with a hint present resolve at `high` confidence.
+ *
+ * That flat `high` is a known simplification of §7.2, which rates direct
+ * dispatch on the receiver's own class `high` but a hit found by walking up the
+ * class hierarchy `medium`. `ReceiverHint` carries only the callee id and
+ * `"this" | "super"`, not how far the lookup travelled, so the two cases are
+ * indistinguishable here — and the hint producer reads the *declaring* class out
+ * of the hover text, which for an inherited method is an ancestor. Inherited
+ * dispatch therefore lands at `high` today. Splitting it needs a walk-depth
+ * field on the hint, not a change in this function.
+ *
+ * Two invariants of the LSP tier are load-bearing, and both hold by the shape of
+ * the surrounding pass rather than by a check inside this function:
+ *
+ * - **An already-resolved call is never overwritten (§5.4).** Two guards in
+ *   `resolveCallGraph` stand between a resolved call and this function, and both
+ *   are needed: the loop returns early on any call that arrived with `resolved`
+ *   already non-null, and a call the untyped tiers resolve during this pass
+ *   returns with its edge before the LSP tier is consulted. The untyped answer
+ *   stays authoritative for the cases the type layer cannot see — a barrel
+ *   re-export pointing at a different declaration file, say. Note that §5.4's
+ *   defensive exception — the LSP tier *may* replace a resolution whose target
+ *   is no longer in the Symbol table — is not implemented: an incoming
+ *   `resolved` is kept verbatim even when it names an id no Symbol carries, so
+ *   the preservation rule is currently unconditional.
+ * - **Confidence only ever rises (lsp-enrichment.md LE16).** Because the LSP
+ *   tier fires solely where the untyped tier produced no edge at all, there is
+ *   no untyped confidence available for it to lower: an LSP hit contributes an
+ *   edge the LSP-off run did not have, never a re-rated one. Turning LSP on can
+ *   add edges to the graph but cannot downgrade any edge already in it.
+ *
+ * A hint whose `targetSymbolId` is not in `keptSymbolIds` returns null instead
+ * of an edge. A dropped Symbol carries an empty body and zeroed fingerprints, so
+ * an edge into it would be a silent lie about what the caller actually reaches;
+ * the call falls through to `classifyUnresolved` and is reported like any other
+ * miss.
+ *
+ * Interface-tier resolution (§5.3) is out of scope until the IR carries
+ * `implements` edges — until then any `implementerHints` entries pass through
+ * untouched.
  */
 function resolveViaLspHint(input: {
   caller: IRSymbol

@@ -1,7 +1,7 @@
 import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
-import { makeSymbol, minimalIR, type SymbolOverrides } from "./fixtures/ir"
+import { makeSymbol, minimalIR, type SymbolOverrides, symbolId } from "./fixtures/ir"
 
 function withCalls(
   id: string,
@@ -203,6 +203,30 @@ describe("resolveCallGraph", () => {
     // resolver leaves the pre-existing resolution alone (LSP tier behaviour §5.4)
     expect(result.symbols[0]?.calls[0]?.resolved).toBe("ts:src/x.ts#weird")
     expect(result.edges).toEqual([])
+  })
+
+  it("keeps the untyped resolution when a receiver hint names a different target", () => {
+    // §5.4 — the untyped answer is authoritative and the LSP tier only fills
+    // holes. The test above pins that against an empty LSP tier, which passes
+    // just as well if the tier is never reached at all; this one hands the
+    // resolver a hint that actively disagrees, so a refactor that consults
+    // `receiverHints` before checking `resolved` fails here instead of silently
+    // re-pointing edges the untyped tier already justified.
+    const caller: IRSymbol = makeSymbol("ts:src/a.ts#Svc.run", {
+      calls: [{ target: "this.helper", line: 7, resolved: symbolId("ts:src/a.ts#Svc.helper") }],
+    })
+    const helper = makeSymbol("ts:src/a.ts#Svc.helper", { kind: "method" })
+    const other = makeSymbol("ts:src/a.ts#Svc.other", { kind: "method" })
+    const result = resolveCallGraph({
+      symbols: [caller, helper, other],
+      importsByFile: new Map(),
+      receiverHints: new Map([
+        ["src/a.ts:7", { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.other") }],
+      ]),
+    })
+    expect(result.symbols[0]?.calls[0]?.resolved).toBe("ts:src/a.ts#Svc.helper")
+    expect(result.edges).toEqual([])
+    expect(result.diagnostics).toEqual([])
   })
 
   it("skips dropped Symbols as call targets and does not fabricate edges into them", () => {
