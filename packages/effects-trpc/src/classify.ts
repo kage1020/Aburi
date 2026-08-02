@@ -1,4 +1,6 @@
+import { assertNonEmptySegments } from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import { EFFECTS_TRPC_DERIVED_BY_PREFIX, EFFECTS_TRPC_PLUGIN_NAME } from "./constants"
 import { hasTrpcClientImport, hasTrpcServerImport } from "./imports"
 import {
   isTrpcMutationTerminal,
@@ -6,13 +8,6 @@ import {
   isTrpcSubscriptionTerminal,
   type TrpcQueryTerminal,
 } from "./methods"
-
-/**
- * Shared derivedBy namespace. `manifest.ts` imports this same const for its
- * `derivedByPrefixes` entry, so the classifier's tag builder and the registry declaration
- * cannot drift.
- */
-export const EFFECTS_TRPC_DERIVED_BY_PREFIX = "effects-plugin:trpc" as const
 
 /**
  * The one terminal the client and the server share. A client call reads
@@ -80,11 +75,16 @@ export function classifyTrpcCall(
   call: CallCandidate,
   ctx: ClassifyContext,
 ): EffectClassification | null {
+  const origin = { plugin: EFFECTS_TRPC_PLUGIN_NAME, filePath: ctx.file.path }
+
   // Fail-fast runs BEFORE the import gate so a malformed target throws on every file, not
   // just the small share that import tRPC. Ordering the other way lets the same bug
   // surface only in tRPC-consuming files and stay silent everywhere else — catastrophic
   // for reproducing upstream language-plugin bugs.
-  const parts = assertNonEmptySegments(call.target, ctx.file.path)
+  //
+  // `terminal` comes straight off the validated target: stripping a leading `this` below
+  // never removes the last segment, so the two always agree.
+  const { segments: parts, last: terminal } = assertNonEmptySegments(call.target, origin)
 
   if (!hasTrpcClientImport(ctx.file.imports, ctx.file.path)) return null
 
@@ -93,17 +93,6 @@ export function classifyTrpcCall(
   // produces through a module-level binding, so `derivedBy` stays comparable across both.
   const segments = parts[0] === "this" ? parts.slice(1) : parts
   if (segments.length < MIN_CLIENT_SEGMENTS) return null
-
-  // `segments.length >= MIN_CLIENT_SEGMENTS` (3) makes this index defined; the check only
-  // exists because `noUncheckedIndexedAccess` cannot see that. Throwing rather than
-  // returning null keeps a future edit to MIN_CLIENT_SEGMENTS from converting a broken
-  // invariant into a silently unclassified call.
-  const terminal = segments[segments.length - 1]
-  if (terminal === undefined) {
-    throw new Error(
-      `effects-trpc (${ctx.file.path}): internal invariant violated — "${call.target}" passed the ${MIN_CLIENT_SEGMENTS}-segment gate with no terminal segment`,
-    )
-  }
 
   if (
     terminal === SERVER_AMBIGUOUS_TERMINAL &&
@@ -145,29 +134,4 @@ function terminalFamily(terminal: string): "query" | "mutation" | "subscription"
   if (isTrpcMutationTerminal(terminal)) return "mutation"
   if (isTrpcSubscriptionTerminal(terminal)) return "subscription"
   return null
-}
-
-/**
- * Split `target` on `.` and reject any shape a well-formed language plugin would never
- * emit: an empty target, or one with an empty segment (leading, trailing, or adjacent
- * dots). A malformed target would otherwise slip through the length gate and
- * false-classify — `"client..user.query"` has four segments and would match the query
- * terminal. `filePath` is threaded into the error message so caught exceptions in
- * production point at the offending source file.
- */
-function assertNonEmptySegments(target: string, filePath: string): readonly string[] {
-  if (target.length === 0) {
-    throw new Error(
-      `effects-trpc (${filePath}): CallCandidate.target is empty — language plugin emitted an unnormalized callee`,
-    )
-  }
-  const parts = target.split(".")
-  for (const segment of parts) {
-    if (segment.length === 0) {
-      throw new Error(
-        `effects-trpc (${filePath}): CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`,
-      )
-    }
-  }
-  return parts
 }

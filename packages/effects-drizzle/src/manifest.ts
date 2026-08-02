@@ -1,5 +1,5 @@
 import type { EffectsManifest } from "@aburi/types"
-import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX } from "./classify"
+import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, EFFECTS_DRIZZLE_PLUGIN_NAME } from "./constants"
 
 /**
  * Manifest for `@aburi/effects-drizzle`. `as const satisfies EffectsManifest` keeps
@@ -17,7 +17,7 @@ import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX } from "./classify"
  */
 export const effectsDrizzleManifest = {
   $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
-  name: "effects-drizzle",
+  name: EFFECTS_DRIZZLE_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",
   engines: { aburi: "*" },
