@@ -78,6 +78,8 @@ interface EffectPlugin {
 Normatively defined in [`lang-plugin.md`](./lang-plugin.md) §4.4. This document only references the same type.
 Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArgs }`. `literalArgs` covers cases such as wanting to inspect the contents of an SQL string (non-literals are `null`).
 
+`target` is contract-guaranteed non-empty with no empty segments (lang-plugin.md §4.4, "Normalized-callee contract"). Effect plugins enforce that contract instead of coding around it: `assertNonEmptySegments` from `@aburi/plugin-registry/plugin-input` splits the target and throws on a violation, and `hasMatchingImport` does the same for `ImportEdge.source`. Both live in the registry rather than in each plugin so a fifth effect plugin inherits identical messages and identical fail-fast ordering. The guards ship as a dedicated subpath so importing them does not pull the registry's manifest validator (and its schema compilation) into a classifier's startup path.
+
 ### 4.3 `ClassifyContext`
 
 ```ts
@@ -233,7 +235,11 @@ export const plugin: EffectPlugin = {
 
   classify(call, ctx) {
     // decompose the identifier chain: "prisma.invoice.create" → ["prisma", "invoice", "create"]
-    const parts = call.target.split('.')
+    // The shared guard rejects an unnormalized callee instead of splitting it silently.
+    const { segments: parts } = assertNonEmptySegments(call.target, {
+      plugin: 'effects-prisma',
+      filePath: ctx.file.path,
+    })
     if (parts.length < 3) return null
 
     const [root, model, method] = parts.slice(-3) // take the last 3 (handles this.prisma.invoice.create)
@@ -296,11 +302,12 @@ const ACTIONS = {
 export const plugin: EffectPlugin = {
   manifest: { /* see plugin-effects-stripe.json */ },
   classify(call, ctx) {
-    const parts = call.target.split('.')
+    const origin = { plugin: 'effects-stripe', filePath: ctx.file.path }
+    const { segments: parts } = assertNonEmptySegments(call.target, origin)
     if (parts.length < 3) return null
     const [root, resource, method] = parts.slice(-3)
 
-    if (!ctx.file.imports.some(i => i.source === 'stripe')) return null
+    if (!hasMatchingImport(ctx.file.imports, origin, source => source === 'stripe')) return null
 
     if (resource === 'charges' && method === 'create') {
       return { effectId: 'x-stripe:charge', confidence: 'high', derivedBy: 'effects-plugin:stripe:charge' }
