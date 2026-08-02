@@ -28,7 +28,7 @@ This enables:
 2. Component extraction
    - Run each detector in parallel from the root
    - Merge and dedupe detection results
-   - Fill in id / name / languages / frameworks / publicApi via inference rules
+   - Fill in id / name / languages / frameworks / publicApi / description via inference rules
 ```
 
 ### 2.1 Workspace root detection
@@ -236,7 +236,7 @@ Resolve `exports` / `main` / `module` / `types` from `package.json`:
 ```
 
 If there is no `exports`, take the file path from `main` / `module` / `types`.
-If none exist, `publicApi: []` (empty).
+If none exist, the `publicApi` key is **omitted** — it is Class B under [`ir-schema.md`](./ir-schema.md) §1.1, so "no public surface declared" is spelled as an absent key, never as `[]`. `frameworks` follows the same rule; `description` is Class A and is written as an explicit `null` when detection has nothing to put there.
 
 For Python / Go / Rust, each language plugin will provide "public API file" inference logic in a future release (see the [roadmap](../roadmap.md)). Today only JS/TS is covered.
 

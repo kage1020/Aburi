@@ -5,7 +5,7 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
 
 ---
 
-## 1. File Format and Ordering
+## 1. File Format, Ordering, and Key Presence
 
 - Format: JSON (UTF-8, LF)
 - Indentation: 2 spaces (default), single line with `--compact`
@@ -17,6 +17,54 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
   - `decorators[]` / `rules[]` / `effects[]` / `calls[]` within a Symbol: ascending by `line` (source order within the same line)
 
 The ordering convention is a **precondition for diff stability**. Spurious diffs caused by array order must never occur.
+
+### 1.1 Absent key vs explicit `null`
+
+An absent key and an explicit `null` are **not** interchangeable. Every optional property fixes one of the two as its way of saying "no value", and which one it is follows mechanically from the property's type:
+
+> A property whose type admits `null` is **Class A (always-written)**.
+> A property whose type does not admit `null` is **Class B (presence-carrying)**.
+> No property may be both. A field that could be absent, `null`, *and* value-carrying would spend three states on two meanings; v1 contains none, and none may be added.
+
+**Class A** — the value is unknown or does not apply, but the field itself always belongs on the record.
+
+- A writer MUST emit the key on every record, carrying `null` when there is no value. It MUST NOT omit the key and MUST NOT substitute a placeholder (`0`, `""`, `[]`).
+- A reader MUST treat an absent key exactly as `null`. It MUST NOT read absence as a state distinct from `null`.
+
+The reader rule is what carries backward compatibility, and it is the more important of the two. A writer rule only governs code not yet written; documents already committed to a user's repository cannot be rewritten, and `aburi diff` reads a committed IR as its base ([cli-spec.md](./cli-spec.md) §6.3). Because absence and `null` are indistinguishable to a conforming reader, an older document that omits a Class A key stays correct rather than becoming a special case. The `?? null` normalizations throughout the core, diff, and projection packages are this rule's implementation, not defensive clutter.
+
+**Class B** — the *presence* of the key is itself the information: "this pass ran", "this entry was propagated", "this document is new enough to carry the field".
+
+- A writer MUST omit the key entirely when the condition does not hold. It MUST NOT substitute `[]`, `false`, or `null`, all of which would erase the distinction the field exists to draw.
+- A reader MAY branch on `Object.hasOwn`. "Absent" and "empty" are different facts here.
+
+| Field | Type admits `null` | Class | Writer rule |
+|---|---|---|---|
+| `generatedAt` | no | B | reserved for the producer's clock; **no writer emits it today**, so the key is always absent. `--no-timestamp` currently suppresses only the Markdown projection's "Generated" line |
+| `stats.effectClassifyTimeouts` | no | B | omitted when no classification timed out |
+| `stats.lspEnrichment` | no | B | omitted when the LSP pass did not run |
+| `stats.callResolution` | no | B | always emitted by the current pipeline; absence means the document predates the counter |
+| `Component.publicApi` | no | B | omitted when empty |
+| `Component.frameworks` | no | B | omitted when empty |
+| `Component.description` | **yes** | **A** | always emitted; `null` when the component carries no description |
+| `Symbol.component` | **yes** | **A** | always emitted; `null` when the Symbol lies outside every Component |
+| `Symbol.signature` | **yes** | **A** | always emitted; `null` for Symbols with no callable signature |
+| `Signature.inferredThrows` | no | B | omitted when nothing was inferred; never `[]` (§7) |
+| `Effect.line` | no | B | present iff the entry is locally detected (schema-enforced by the `allOf`'s required/forbidden flip, §9.4) |
+| `Effect.propagated` | no | B | present iff `true`. Convention only — the schema's `if` treats `false` and absent alike, so `propagated: false` validates while violating this rule (§9.4) |
+| `Effect.derivedFrom` | no | B | present iff `propagated` is `true` (schema-enforced by the same flip, §9.4) |
+| `SourceRange.startColumn` | **yes** | **A** | always emitted; `null` until LSP enrichment fills it (§12) |
+| `SourceRange.endColumn` | **yes** | **A** | always emitted; `null` until LSP enrichment fills it (§12) |
+
+None of the Class A fields appear in `required`. That is a consequence of the v1 freeze (§15.2 makes optional → required breaking), not a statement about their meaning; §15.4 records the promotion as a v2 candidate.
+
+Most of the table is convention that the schema cannot express, and the two rows marked schema-enforced are the exception rather than the rule: JSON Schema can say "this key is forbidden here and required there", which is what pins `Effect.line` and `Effect.derivedFrom`, but it cannot say "prefer absence over a `null` that validates". A document that breaks a Class A or Class B rule is therefore usually still a valid `aburi.ir.v1` document — the rules exist so that consumers do not have to handle both spellings, not so that validators reject one.
+
+**How this reaches the JSON.** The canonical serializer drops object properties whose value is `undefined` and preserves `null` verbatim. A TypeScript `undefined` therefore *is* the Class B omission — which means assigning `undefined` to a Class A field is a convention violation that changes the emitted bytes while still type-checking. Nothing else in the pipeline rewrites key presence, so what a writer assigns is exactly what lands on disk.
+
+**Why the schema does not use `"default": null`.** JSON Schema's `default` is an annotation; it does not participate in validation. Writing it would look like a declaration that absence means `null` while no validator treats it that way. The rule lives here and in each property's `description` instead.
+
+**Adding an optional field to v1** means adding a row to the table above and stating the class in the property's `description` in `schema/aburi.ir.v1.json`. An optional property with no `description` has not declared its class, and `packages/types/test/schema-conventions.test.ts` fails on it.
 
 ## 2. Top-Level Structure (Document)
 
@@ -32,7 +80,7 @@ The ordering convention is a **precondition for diff stability**. Spurious diffs
       { "name": "effects-prisma",   "type": "effects",   "version": "1.0.0", "grammarRevision": null }
     ]
   },
-  "generatedAt": "2026-06-19T15:30:00Z",      // optional (may be omitted with --no-timestamp)
+  "generatedAt": "2026-06-19T15:30:00Z",      // Class B (§1.1); no writer emits it today
   "workspace": {                              // required
     "root": ".",
     "managers": [                             // required (empty array allowed)
@@ -48,7 +96,10 @@ The ordering convention is a **precondition for diff stability**. Spurious diffs
     "parsedFiles": 18,
     "keptSymbols": 27,
     "droppedSymbols": 7,
-    "callResolution": {                       // optional; always emitted by the current pipeline
+    "effectPropagation": {                    // required — emitted even when nothing propagated
+      "sccCount": 27, "maxSccSize": 1, "propagatedEffectCount": 4, "symbolsWithPropagatedEffects": 2
+    },
+    "callResolution": {                       // Class B (§1.1); always emitted by the current pipeline
       "totalCalls": 131,
       "resolvedCalls": 120,
       "unresolved": {
@@ -60,7 +111,7 @@ The ordering convention is a **precondition for diff stability**. Spurious diffs
 ```
 
 - `$schema`: canonical URL. Used for IDE JSON Schema resolution and integrated validation
-- `generatedAt`: operational metadata of the producer. **Excluded from fingerprint computation**. When committing the IR and diffing it, omit it with `--no-timestamp`
+- `generatedAt`: operational metadata of the producer. **Excluded from fingerprint computation**. Class B per §1.1 — the key is omitted rather than nulled when there is no timestamp to record. No writer emits it today: the scan pipeline never sets it, and `--no-timestamp` currently reaches only the Markdown projection, where it suppresses the "Generated" line. A producer that does record a clock must drop the key when committing the IR, so that re-scanning an unchanged workspace produces an unchanged file
 - `workspace.root`: always `"."`. Never write absolute paths (IR portability)
 - `workspace.managers[].tool`: runtime-independent string. Representative values: `pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`/`pip`/`cargo`/`go`/`mvn`/`gradle`/`hatch`/`pixi`. Unknown values are not rejected (so that adding a new tool never requires a schema revision)
 - `stats`: for human/CI logs. Excluded from fingerprint
@@ -141,16 +192,17 @@ A logical boundary of the monorepo. Independent of physical packages.
   "id": "billing",                            // required, unique, ASCII kebab-case
   "name": "Billing",                          // required, human-facing label
   "roots": ["apps/billing", "packages/billing-domain"],  // required, POSIX relative
-  "publicApi": [                              // optional
+  "publicApi": [                              // optional, Class B (§1.1) — omitted when empty
     "apps/billing/src/routes/**",
     "ts:packages/billing-domain/src/index.ts#Invoice"
   ],
   "languages": ["ts"],                        // required, short-form lang ids
-  "frameworks": ["nestjs"],                   // optional
-  "description": null                         // optional
+  "frameworks": ["nestjs"],                   // optional, Class B (§1.1) — omitted when empty
+  "description": null                         // Class A (§1.1) — always present, null when unset
 }
 ```
 
+- `description` is Class A per §1.1 — always written, `null` when nothing supplied it. Only the config path (`components[].description`) can supply one today; automatic detection has no source for it and always writes `null`
 - `id` is fixed to ASCII kebab-case (`^[a-z0-9]+(-[a-z0-9]+)*$`) so it can be used in URLs and CLI arguments. A segment may start with a digit: the id is derived by kebab-casing a package or directory name ([component-detect.md](./component-detect.md) §4.1), and `3d-force-graph` is an ordinary npm package name
 - Each element of `publicApi` is either a **glob** or a **symbol id**
 - Physical Component boundary inference automatically reads package manager configuration (`pnpm-workspace.yaml`, `turbo.json`, `go.work`, `Cargo.toml` workspace, `pyproject.toml`/uv workspaces, etc.); see the separate document `component-detect.md` for details
@@ -163,13 +215,13 @@ The core entity of the review unit.
 {
   "id": "ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice",  // required
   "kind": "method",                           // required, enum §5.1
-  "extKind": null,                            // optional, language extension §5.2
+  "extKind": null,                            // required, nullable; language extension §5.2
   "name": "InvoiceService.createInvoice",     // required, qualified name
   "language": "ts",                           // required, short-form lang id (e.g. ts / tsx / py / go / rs)
-  "component": "billing",                     // optional (null = outside any component)
+  "component": "billing",                     // Class A (§1.1) — always present, null = outside any component
   "visibility": "public",                     // required, enum §5.3
   "decorators": [ /* Decorator[] */ ],        // required
-  "signature": { /* Signature */ },           // optional (null = no signature)
+  "signature": { /* Signature */ },           // Class A (§1.1) — always present, null = no signature
   "rules": [ /* Rule[] */ ],                  // required
   "effects": [ /* Effect[] */ ],              // required
   "calls": [ /* Call[] */ ],                  // required
@@ -181,6 +233,8 @@ The core entity of the review unit.
   "dropReason": null                          // required, non-null when dropped=true
 }
 ```
+
+`component` is Class A per §1.1, so the key is on every Symbol and `null` means "outside every declared Component". Read the sample above as the shape the field is designed for, not as output you will see today: **the scan pipeline does not assign Symbols to Components yet**, so every Symbol it emits carries `null`. Consumers that group by Component — the per-component Markdown pages, the workspace overview's per-Component counts — therefore see empty groups on a real scan.
 
 ### 5.1 `kind` (core enum)
 
@@ -265,6 +319,7 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
   ],
   "outputs": ["Promise<Invoice>"],
   "throws": ["CreditLimitExceeded"],
+  "inferredThrows": ["NetworkError"],         // Class B (§1.1): absent unless LSP enrichment inferred something
   "async": true,
   "generator": false,
   "typeParameters": []
@@ -273,7 +328,9 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
 
 - `type` is the string representation as read from the AST. No type resolution is performed (LSP enrichment may optionally normalize it)
 - `throws` combines explicit throw statements and JSDoc `@throws`
-- A Symbol's entire `signature` may be `null` (class bodies, whole interfaces)
+- `inferredThrows` holds throws the LSP enrichment pass read off the *callees'* declared signatures ([lsp-enrichment.md](./lsp-enrichment.md) §7.1). It is a field of its own rather than an addition to `throws` precisely so that turning LSP on never perturbs the `api` fingerprint, whose input list names `throws` and not `inferredThrows` ([fingerprint.md](./fingerprint.md) §3.1)
+- `inferredThrows` is **Class B** per §1.1: when the pass inferred nothing — because no callee declared a throw, or because it fell back — the key is omitted outright. It is never emitted as `[]`, and the schema enforces `minItems: 1` so that an empty array cannot be written by accident
+- A Symbol's entire `signature` may be `null` (class bodies, whole interfaces). It is **Class A** per §1.1, so the key is present on every Symbol
 
 ## 8. Rule
 
@@ -362,6 +419,8 @@ If a call_expression is recognized by an effect plugin, it is recorded in `effec
 
 `Effect` records may carry the optional fields `propagated: boolean` and `derivedFrom: SymbolId[]` when produced by the effect-propagation pass; see [`effect-propagation.md`](./effect-propagation.md) §5. On entries with `propagated: true`, the `line` field is **omitted from the JSON output** — not set to `null`, not set to a placeholder — because the effect originates N hops away and has no line in the containing Symbol's body. The JSON Schema (`aburi.ir.v1.json`) narrows `line` accordingly: required when `propagated` is absent or `false`; forbidden when `propagated` is `true`. These extensions are non-breaking under §15.2.
 
+`propagated` is itself Class B per §1.1, so a writer records a locally-detected entry by **omitting** the key, never by writing `propagated: false`. The schema's condition is `propagated` present *and* `true`, which puts absent and `false` on the same branch — so a `false` validates and is read correctly by every consumer, but it spends a key to say what absence already says. The distinction matters when reading these rules together: the schema pins where `line` and `derivedFrom` may appear, while the choice between absent and `false` is convention only.
+
 ## 10. Call
 
 A call that does not qualify as an effect.
@@ -409,12 +468,16 @@ The direction as seen from `from`. `bidirectional` is limited to cases such as b
   "file": "apps/billing/src/InvoiceService.ts",  // required, POSIX relative
   "startLine": 42,                            // required, 1-based
   "endLine": 91,                              // required
-  "startColumn": null,                        // optional, 1-based
-  "endColumn": null                           // optional
+  "startColumn": null,                        // Class A (§1.1), 1-based; null until LSP enrichment
+  "endColumn": null                           // Class A (§1.1), 1-based; null until LSP enrichment
 }
 ```
 
-`startColumn` / `endColumn` are filled in during LSP enrichment.
+`startColumn` / `endColumn` are filled in during LSP enrichment ([lsp-enrichment.md](./lsp-enrichment.md) §4.2). Until then — and under any LSP fallback ([lsp-enrichment.md](./lsp-enrichment.md) §6.2) — they are `null`, not absent: "no column recorded" is a value, not a missing field.
+
+The Tree-sitter tier is not *unable* to produce a column — the parse tree carries one — but the in-tree TypeScript plugin deliberately does not publish it, so that every column in an Aburi IR comes from `textDocument/documentSymbol` and one convention about what a column counts. A plugin that has a column and wants to publish it may ([lang-plugin.md](./lang-plugin.md) §4.3); a successful LSP pass overwrites it either way.
+
+They are **Class A** per §1.1. A writer MUST emit both keys on every `SourceRange`; a reader MUST read an absent key as `null`. They stay out of `required` only because promoting an optional field is breaking under §15.2 — see §15.4.
 
 ## 13. Fingerprint
 
@@ -488,6 +551,14 @@ Because consumers may treat unknown `kind` values as errors, additions to the `k
 ### 15.3 Freezing the core effect vocabulary
 
 The core effect vocabulary of §9.1 is **additive-only** within version v1. Deletion and semantic change are forbidden. Plugin extensions are fully separated by the `x-` prefix, so freezing the core does not hinder plugin evolution.
+
+### 15.4 Deferred to v2
+
+Shapes the schema would have if v1 were not frozen, recorded here so the reasoning is not rediscovered:
+
+- **Promote the five Class A fields of §1.1 — `Symbol.component`, `Symbol.signature`, `Component.description`, `SourceRange.startColumn`, `SourceRange.endColumn` — into `required`.** Breaking per §15.2, and the breakage is concrete rather than theoretical: every document generated before the promotion becomes invalid, and `aburi diff` reads a committed IR as its base, so a repository that commits its IR would see a green CI turn red without anyone touching the repository. That every writer in this codebase already satisfies the constraint does not change that.
+
+Whether the promotion is worth doing in v2 at all is open. The §1.1 reader rule already makes an absent key and `null` indistinguishable to every conforming consumer, so promoting buys stricter validation of third-party producers and nothing else.
 
 ## 16. Extension Points
 

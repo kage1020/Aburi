@@ -362,8 +362,21 @@ function buildStats(input: BuildStatsInput): Stats {
   return stats
 }
 
+/**
+ * Sort by id, and normalize the one Class A field on `Component` (`description`, per
+ * `ir-schema.md` §1.1) to an explicit `null`.
+ *
+ * `ScanInput.components` is a public boundary: the in-tree CLI writes the key, but any other
+ * `@aburi/core` caller can hand over a `Component` built against the read-side type, where
+ * `description` is optional. Without this the scan would emit a document that breaks its own
+ * convention, and — because `serializeCanonical` drops `undefined` properties — the omission
+ * would be visible only in the written bytes. This is the same failure `WrittenSourceRange`
+ * closes on the plugin boundary, on the one other Class A field that crosses a public API.
+ */
 function sortComponents(components: readonly Component[]): Component[] {
-  return [...components].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  return [...components]
+    .map((c) => ({ ...c, description: c.description ?? null }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 }
 
 /**

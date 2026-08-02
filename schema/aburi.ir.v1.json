@@ -22,7 +22,7 @@
     "generatedAt": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO 8601 UTC. Excluded from fingerprint. Omit with --no-timestamp when committing IR."
+      "description": "ISO 8601 UTC. Excluded from fingerprint. Class B per ir-schema.md §1.1: --no-timestamp omits the key entirely rather than emitting null, so a committed IR carries no producer clock at all."
     },
     "workspace": { "$ref": "#/$defs/Workspace" },
     "components": {
@@ -146,7 +146,7 @@
         "effectClassifyTimeouts": {
           "type": "array",
           "items": { "$ref": "#/$defs/EffectClassifyTimeout" },
-          "description": "Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Empty in the normal case; non-empty entries are kept as a determinism log."
+          "description": "Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Class B per ir-schema.md §1.1: writers omit the key when nothing timed out rather than emitting []; non-empty entries are kept as a determinism log."
         },
         "effectPropagation": {
           "$ref": "#/$defs/EffectPropagationStats",
@@ -154,11 +154,11 @@
         },
         "lspEnrichment": {
           "$ref": "#/$defs/LspEnrichmentStats",
-          "description": "Optional bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Present when the pass ran regardless of whether it succeeded or fell back; absent when config.lsp is not configured."
+          "description": "Bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Class B per ir-schema.md §1.1: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured. Presence is how a reader tells \"ran and enriched nothing\" apart from \"never ran\"."
         },
         "callResolution": {
           "$ref": "#/$defs/CallResolutionStats",
-          "description": "Aggregate call-resolution outcome counters (call-resolution.md §8.1). Optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all."
+          "description": "Aggregate call-resolution outcome counters (call-resolution.md §8.1). Class B per ir-schema.md §1.1, optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all, so absence means \"this document predates the counter\" rather than \"nothing was unresolved\"."
         }
       }
     },
@@ -336,7 +336,7 @@
         "publicApi": {
           "type": "array",
           "items": { "type": "string", "minLength": 1, "not": { "pattern": "\\\\" } },
-          "description": "Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash)."
+          "description": "Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash). Class B per ir-schema.md §1.1: writers MUST omit the key when the component declares no public surface, never emit as []."
         },
         "languages": {
           "type": "array",
@@ -345,9 +345,13 @@
         },
         "frameworks": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "description": "Framework plugin names that claimed this component. Class B per ir-schema.md §1.1: writers MUST omit the key when no framework matched, never emit as []."
         },
-        "description": { "type": ["string", "null"] }
+        "description": {
+          "type": ["string", "null"],
+          "description": "Human-facing blurb for the component, supplied through config. Class A per ir-schema.md §1.1: writers MUST emit the key on every Component, carrying null when no description was supplied. Readers MUST treat an absent key as null."
+        }
       }
     },
 
@@ -379,6 +383,7 @@
         "name": { "type": "string", "minLength": 1 },
         "language": { "$ref": "#/$defs/LanguageId" },
         "component": {
+          "description": "Component this Symbol belongs to. Class A per ir-schema.md §1.1: writers MUST emit the key on every Symbol, carrying null when the Symbol lies outside every declared Component. Readers MUST treat an absent key as null.",
           "oneOf": [
             { "$ref": "#/$defs/ComponentId" },
             { "type": "null" }
@@ -390,6 +395,7 @@
           "items": { "$ref": "#/$defs/Decorator" }
         },
         "signature": {
+          "description": "Callable signature. Class A per ir-schema.md §1.1: writers MUST emit the key on every Symbol, carrying null for Symbols that have no callable signature (class bodies, whole interfaces). Readers MUST treat an absent key as null.",
           "oneOf": [
             { "$ref": "#/$defs/Signature" },
             { "type": "null" }
@@ -490,7 +496,7 @@
           "type": "array",
           "items": { "type": "string" },
           "minItems": 1,
-          "description": "Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Optional AND omitted-when-empty: writers MUST omit the key entirely when nothing was inferred, never emit as []."
+          "description": "Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Class B per ir-schema.md §1.1: writers MUST omit the key entirely when nothing was inferred, never emit as []."
         },
         "async": { "type": "boolean" },
         "generator": { "type": "boolean" },
@@ -553,7 +559,11 @@
       "properties": {
         "id": { "$ref": "#/$defs/EffectId" },
         "target": { "type": "string", "minLength": 1 },
-        "line": { "type": "integer", "minimum": 1 },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Source line of the call that produced this effect. Class B per ir-schema.md §1.1: meaningless on a propagated entry, whose origin is N hops away, so writers MUST omit the key there rather than emit null or a placeholder (effect-propagation.md §5.1). The allOf below turns that rule into a validation error."
+        },
         "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
         "confidence": { "$ref": "#/$defs/Confidence" },
         "derivedBy": {
@@ -563,13 +573,13 @@
         },
         "propagated": {
           "type": "boolean",
-          "description": "True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Absent or false for locally-detected entries."
+          "description": "True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Class B per ir-schema.md §1.1: absent on locally-detected entries. The allOf below reads presence, so a writer that emitted false where it means absent would still validate but would misreport intent."
         },
         "derivedFrom": {
           "type": "array",
           "items": { "$ref": "#/$defs/SymbolId" },
           "uniqueItems": true,
-          "description": "Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Present only when propagated=true."
+          "description": "Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Class B per ir-schema.md §1.1: present only when propagated=true, never emitted as [] on a locally-detected entry. The allOf below turns that into a validation error."
         }
       },
       "allOf": [
@@ -640,8 +650,16 @@
         "file": { "$ref": "#/$defs/RelativePath" },
         "startLine": { "type": "integer", "minimum": 1 },
         "endLine":   { "type": "integer", "minimum": 1 },
-        "startColumn": { "type": ["integer", "null"], "minimum": 1 },
-        "endColumn":   { "type": ["integer", "null"], "minimum": 1 }
+        "startColumn": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "1-based start column, populated by the LSP enrichment pass (lsp-enrichment.md §4.2). Class A per ir-schema.md §1.1: writers MUST emit the key on every SourceRange, carrying null while no column has been recorded — the in-tree TypeScript plugin deliberately leaves it null so that every column comes from one source, and any LSP fallback leaves it null too. Readers MUST treat an absent key as null; absence only occurs on documents that predate the rule. Out of `required` solely because the promotion is breaking under §15.2 (see §15.4)."
+        },
+        "endColumn": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "1-based end column. Same Class A contract as startColumn (ir-schema.md §1.1)."
+        }
       }
     },
 

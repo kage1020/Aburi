@@ -1,5 +1,6 @@
-import type { ExtractionContext, Symbol as IRSymbol, SymbolCandidate } from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+import { makeSourceRange } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
 
 /**
@@ -232,14 +233,4 @@ function makeDerivedBy(parsed: MemberCall, literalPath: string | null): string[]
   if (parsed.chained) tags.push("chained-call")
   if (literalPath !== null) tags.push(`path-literal:${literalPath}`)
   return tags
-}
-
-function makeSourceRange(node: Node, ctx: ExtractionContext): IRSymbol["source"] {
-  return {
-    file: ctx.file.path,
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    startColumn: null,
-    endColumn: null,
-  }
 }

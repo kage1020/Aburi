@@ -120,4 +120,5 @@ export type {
   SymbolClassification,
   VocabRegistry,
   WalkContext,
+  WrittenSourceRange,
 } from "./plugins"

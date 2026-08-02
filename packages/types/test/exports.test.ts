@@ -32,11 +32,13 @@ import type {
   SliceId,
   SliceRecord,
   SourceFile,
+  SourceRange,
   Symbol,
   SymbolCandidate,
   SymbolId,
   UnresolvedCallBuckets,
   VocabRegistry,
+  WrittenSourceRange,
 } from "../src/index"
 
 // Pure type-level tests. They compile-time-assert that the public surface stays
@@ -294,6 +296,25 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<Assignable<string, SymbolCandidate["id"]>>().toEqualTypeOf<false>()
     expectTypeOf<Symbol["id"]>().toEqualTypeOf<SymbolId>()
     expectTypeOf<Symbol["component"]>().toEqualTypeOf<ComponentId | null | undefined>()
+  })
+
+  it("the write side of SourceRange is stricter than the read side (ir-schema.md §1.1)", () => {
+    // Class A says a writer always emits both column keys, carrying `null` when the
+    // position is unknown. `WrittenSourceRange` is that rule as a type, so a plugin that
+    // omits a column fails to compile instead of quietly emitting a shape the convention
+    // forbids -- `serializeCanonical` drops `undefined` properties, so the omission would
+    // otherwise be invisible in TypeScript and visible only in the emitted bytes.
+    expectTypeOf<SymbolCandidate["source"]>().toEqualTypeOf<WrittenSourceRange>()
+    expectTypeOf<WrittenSourceRange["startColumn"]>().toEqualTypeOf<number | null>()
+    expectTypeOf<WrittenSourceRange["endColumn"]>().toEqualTypeOf<number | null>()
+    expectTypeOf<Assignable<SourceRange, WrittenSourceRange>>().toEqualTypeOf<false>()
+
+    // The read side stays tolerant: an IR loaded off disk may predate the rule and omit the
+    // keys, so narrowing `Symbol["source"]` would make a valid v1 document unrepresentable.
+    expectTypeOf<Symbol["source"]>().toEqualTypeOf<SourceRange>()
+    expectTypeOf<SourceRange["startColumn"]>().toEqualTypeOf<number | null | undefined>()
+    // ...and a writer's range is still a range, so nothing downstream needs the narrow type.
+    expectTypeOf<Assignable<WrittenSourceRange, SourceRange>>().toEqualTypeOf<true>()
   })
 
   it("ParseResult and SymbolCandidate are generic in the parser's tree/node types", () => {

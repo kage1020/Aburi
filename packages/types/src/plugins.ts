@@ -93,6 +93,25 @@ export interface ParseResult<TTree = ParsedTree> {
 // --- Symbol candidate (lang plugin output, pre-drop) ---
 
 /**
+ * A `SourceRange` as a writer must produce it: both column keys are always present,
+ * carrying `null` when the position is unknown (`ir-schema.md` §1.1 Class A, §12).
+ *
+ * The read-side `SourceRange` keeps them optional on purpose, and the asymmetry is the
+ * point — writers are held to the convention, readers stay tolerant of documents that
+ * predate it. An IR loaded off disk may legitimately omit the keys, so narrowing the
+ * generated type would make a valid v1 document unrepresentable; narrowing only the
+ * plugin's output type costs nothing, because a plugin builds every `SourceRange` it
+ * emits from scratch.
+ *
+ * The narrowed type is assignable to `SourceRange`, so nothing downstream of the plugin
+ * boundary has to know about it.
+ */
+export type WrittenSourceRange = Omit<SourceRange, "startColumn" | "endColumn"> & {
+  startColumn: number | null
+  endColumn: number | null
+}
+
+/**
  * `TNode` defaults to the opaque `OpaqueAstNode`. Lang plugins should specialize it
  * to their own AST node type so a SymbolCandidate from plugin A cannot be fed into
  * plugin B's walkBody.
@@ -107,7 +126,7 @@ export interface SymbolCandidate<TNode = OpaqueAstNode> {
   visibility: Visibility
   decorators: Decorator[]
   signature: Signature | null
-  source: SourceRange
+  source: WrittenSourceRange
   /** Language-level rationale, e.g. `["export-keyword"]`. */
   derivedBy: string[]
   bodyNode: TNode | null

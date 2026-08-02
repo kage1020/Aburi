@@ -136,6 +136,10 @@ async function buildComponent(entry: MergedCandidate): Promise<Component> {
     name,
     roots: [entry.relativeRoot],
     languages: languages.length > 0 ? languages : ["ts"],
+    // Class A per ir-schema.md §1.1: always written, `null` when unset. Detection has no
+    // source for a description; the config path (`resolveComponents` in @aburi/cli) writes
+    // the same key from `components[].description`, so both producers agree on the shape.
+    description: null,
   }
   if (publicApi.length > 0) component.publicApi = publicApi
   if (frameworks.length > 0) component.frameworks = frameworks
@@ -159,6 +163,8 @@ async function buildSingleProjectComponent(workspaceRoot: string): Promise<Compo
     name,
     roots: ["."],
     languages: languages.length > 0 ? languages : ["ts"],
+    // Class A per ir-schema.md §1.1 -- see buildComponent.
+    description: null,
   }
   if (publicApi.length > 0) component.publicApi = publicApi
   if (frameworks.length > 0) component.frameworks = frameworks
