@@ -182,6 +182,29 @@ describe("classifyPrismaCall — malformed input fail-fast", () => {
       /empty segment/,
     )
   })
+
+  it("throw messages include the file path so caught exceptions point at the offending source", () => {
+    const ctxWithPath = makeCtx({ imports: [makePrismaImport()], path: "src/services/x.ts" })
+    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPath)).toThrow(
+      /src\/services\/x\.ts/,
+    )
+    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxWithPath)).toThrow(
+      /src\/services\/x\.ts/,
+    )
+  })
+
+  it("throw messages for a broken ImportEdge name the file and the offending line", () => {
+    const ctxBrokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["PrismaClient"], line: 4, dynamic: false }],
+      path: "src/services/x.ts",
+    })
+    expect(() =>
+      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), ctxBrokenEdge),
+    ).toThrow(/ImportEdge\.source is empty/)
+    expect(() =>
+      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), ctxBrokenEdge),
+    ).toThrow(/src\/services\/x\.ts, line 4/)
+  })
 })
 
 describe("classifyPrismaCall — purity", () => {

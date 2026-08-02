@@ -1,4 +1,5 @@
-export { classifyPrismaCall, EFFECTS_PRISMA_DERIVED_BY_PREFIX } from "./classify"
+export { classifyPrismaCall } from "./classify"
+export { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 export { hasPrismaImport } from "./imports"
 export { effectsPrismaManifest } from "./manifest"
 export {

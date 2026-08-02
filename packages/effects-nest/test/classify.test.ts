@@ -125,6 +125,29 @@ describe("classifyNestCall — malformed input fail-fast", () => {
       /empty segment/,
     )
   })
+
+  it("throw messages include the file path so caught exceptions point at the offending source", () => {
+    const ctxWithPath = makeCtx({ imports: [makeNestEmitterImport()], path: "src/orders/x.ts" })
+    expect(() => classifyNestCall(makeCall({ target: "" }), ctxWithPath)).toThrow(
+      /src\/orders\/x\.ts/,
+    )
+    expect(() => classifyNestCall(makeCall({ target: "eventBus..emit" }), ctxWithPath)).toThrow(
+      /src\/orders\/x\.ts/,
+    )
+  })
+
+  it("throw messages for a broken ImportEdge name the file and the offending line", () => {
+    const ctxBrokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["EventEmitter2"], line: 4, dynamic: false }],
+      path: "src/orders/x.ts",
+    })
+    expect(() => classifyNestCall(makeCall({ target: "eventBus.emit" }), ctxBrokenEdge)).toThrow(
+      /ImportEdge\.source is empty/,
+    )
+    expect(() => classifyNestCall(makeCall({ target: "eventBus.emit" }), ctxBrokenEdge)).toThrow(
+      /src\/orders\/x\.ts, line 4/,
+    )
+  })
 })
 
 describe("classifyNestCall — purity", () => {

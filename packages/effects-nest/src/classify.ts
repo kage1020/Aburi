@@ -1,12 +1,7 @@
+import { assertNonEmptySegments } from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import { EFFECTS_NEST_DERIVED_BY_PREFIX, EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 import { hasNestEmitterImport, isNestEmitMethod, isNestEventEmitterIdentifier } from "./emitters"
-
-/**
- * Shared derivedBy namespace. `manifest.ts` imports this same const for its
- * `derivedByPrefixes` entry, so the classifier's tag builder and the registry
- * declaration cannot drift.
- */
-export const EFFECTS_NEST_DERIVED_BY_PREFIX = "effects-plugin:nest" as const
 
 /**
  * Classify a CallCandidate against NestJS event-emitter conventions.
@@ -35,61 +30,28 @@ export function classifyNestCall(
   call: CallCandidate,
   ctx: ClassifyContext,
 ): EffectClassification | null {
+  const origin = { plugin: EFFECTS_NEST_PLUGIN_NAME, filePath: ctx.file.path }
+
   // Fail-fast runs BEFORE the import gate so a malformed target throws on every file,
   // not just the ~1% that import a Nest emitter. Ordering the other way lets the same
   // bug surface only in Nest-consuming files and stay silent everywhere else —
   // catastrophic for reproducing upstream language-plugin bugs.
-  const parts = assertNonEmptySegments(call.target)
+  const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
 
-  if (!hasNestEmitterImport(ctx.file.imports)) return null
+  if (!hasNestEmitterImport(ctx.file.imports, ctx.file.path)) return null
 
-  // `parts` is a NonEmptySegments tuple by contract, but `at()`'s general signature
-  // still widens to `string | undefined`. `.at(-1) as string` records the intent
-  // without a non-null assertion (Biome disallows `!` under noNonNullAssertion).
-  const method = parts.at(-1) as string
   if (!isNestEmitMethod(method)) return null
 
   // `<name>.emit` needs at least two segments. A naked `emit()` is not a Nest event
-  // publisher — it would be a locally-scoped helper — and stays unclassified.
-  if (parts.length < 2) return null
-  const nameSegment = parts.at(-2) as string
-  if (!isNestEventEmitterIdentifier(nameSegment)) return null
+  // publisher — it would be a locally-scoped helper — and stays unclassified. The
+  // `undefined` arm is unreachable after that gate, but folding it into the identifier
+  // check keeps the receiver read cast-free under noUncheckedIndexedAccess.
+  const nameSegment = parts[parts.length - 2]
+  if (nameSegment === undefined || !isNestEventEmitterIdentifier(nameSegment)) return null
 
   return {
     effectId: "event.publish",
     confidence: "high",
     derivedBy: `${EFFECTS_NEST_DERIVED_BY_PREFIX}:${nameSegment}.${method}`,
   }
-}
-
-/**
- * A non-empty split — after `assertNonEmptySegments` runs there is guaranteed to be at
- * least one segment, so the tuple type reflects that and the classifier can index
- * without a non-null assertion.
- */
-type NonEmptySegments = readonly [string, ...string[]]
-
-/**
- * Split `target` on `.` and reject any shape a well-formed language plugin would never
- * emit: an empty target, or one with an empty segment. A malformed target would
- * otherwise slip through the length gate and miscategorize — same fail-fast the
- * sibling classifier applies at its entry point.
- */
-function assertNonEmptySegments(target: string): NonEmptySegments {
-  if (target.length === 0) {
-    throw new Error(
-      "effects-nest: CallCandidate.target is empty — language plugin emitted an unnormalized callee",
-    )
-  }
-  const parts = target.split(".")
-  for (const segment of parts) {
-    if (segment.length === 0) {
-      throw new Error(
-        `effects-nest: CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`,
-      )
-    }
-  }
-  // Split of a non-empty string yields at least one segment, and the loop above ruled
-  // out empty segments — the tuple assertion here reflects a proven invariant.
-  return parts as unknown as NonEmptySegments
 }

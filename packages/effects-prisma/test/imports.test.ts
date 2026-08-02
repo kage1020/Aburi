@@ -1,33 +1,40 @@
 import { describe, expect, it } from "vitest"
 import { hasPrismaImport } from "../src/index"
 
+const PATH = "src/service.ts"
+
 describe("hasPrismaImport", () => {
   it("returns true when the file imports @prisma/client", () => {
     expect(
-      hasPrismaImport([
-        { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
-      ]),
+      hasPrismaImport(
+        [{ source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toBe(true)
   })
 
   it("returns true when the file imports @prisma/client/edge (Vercel Edge / Cloudflare Workers)", () => {
     expect(
-      hasPrismaImport([
-        { source: "@prisma/client/edge", symbols: ["PrismaClient"], line: 1, dynamic: false },
-      ]),
+      hasPrismaImport(
+        [{ source: "@prisma/client/edge", symbols: ["PrismaClient"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toBe(true)
   })
 
   it("returns false when the import list is empty", () => {
-    expect(hasPrismaImport([])).toBe(false)
+    expect(hasPrismaImport([], PATH)).toBe(false)
   })
 
   it("returns false when the file imports an unrelated ORM", () => {
     expect(
-      hasPrismaImport([
-        { source: "drizzle-orm", symbols: ["*"], line: 1, dynamic: false },
-        { source: "typeorm", symbols: ["DataSource"], line: 2, dynamic: false },
-      ]),
+      hasPrismaImport(
+        [
+          { source: "drizzle-orm", symbols: ["*"], line: 1, dynamic: false },
+          { source: "typeorm", symbols: ["DataSource"], line: 2, dynamic: false },
+        ],
+        PATH,
+      ),
     ).toBe(false)
   })
 
@@ -36,20 +43,26 @@ describe("hasPrismaImport", () => {
     // A different-organization fork under `@my-org/prisma-client` is a third-party
     // package we cannot assume is Prisma-shaped, so it stays unmatched.
     expect(
-      hasPrismaImport([
-        { source: "@prisma/client-edge", symbols: ["*"], line: 1, dynamic: false },
-        { source: "@my-org/prisma-client", symbols: ["*"], line: 2, dynamic: false },
-      ]),
+      hasPrismaImport(
+        [
+          { source: "@prisma/client-edge", symbols: ["*"], line: 1, dynamic: false },
+          { source: "@my-org/prisma-client", symbols: ["*"], line: 2, dynamic: false },
+        ],
+        PATH,
+      ),
     ).toBe(false)
   })
 
   it("returns true when @prisma/client sits alongside other imports", () => {
     expect(
-      hasPrismaImport([
-        { source: "react", symbols: ["useState"], line: 1, dynamic: false },
-        { source: "@prisma/client", symbols: ["PrismaClient"], line: 2, dynamic: false },
-        { source: "zod", symbols: ["z"], line: 3, dynamic: false },
-      ]),
+      hasPrismaImport(
+        [
+          { source: "react", symbols: ["useState"], line: 1, dynamic: false },
+          { source: "@prisma/client", symbols: ["PrismaClient"], line: 2, dynamic: false },
+          { source: "zod", symbols: ["z"], line: 3, dynamic: false },
+        ],
+        PATH,
+      ),
     ).toBe(true)
   })
 
@@ -58,7 +71,7 @@ describe("hasPrismaImport", () => {
     // `""` here means the upstream language plugin failed to normalize — silently
     // returning false would mask the bug.
     expect(() =>
-      hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 1, dynamic: false }]),
+      hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 1, dynamic: false }], PATH),
     ).toThrow(/ImportEdge\.source is empty/)
   })
 
@@ -66,10 +79,13 @@ describe("hasPrismaImport", () => {
     // Order-independence pin — using `.some()` alone would short-circuit on the first
     // match and silently accept a broken edge later in the list.
     expect(() =>
-      hasPrismaImport([
-        { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
-        { source: "", symbols: ["x"], line: 2, dynamic: false },
-      ]),
+      hasPrismaImport(
+        [
+          { source: "@prisma/client", symbols: ["PrismaClient"], line: 1, dynamic: false },
+          { source: "", symbols: ["x"], line: 2, dynamic: false },
+        ],
+        PATH,
+      ),
     ).toThrow(/ImportEdge\.source is empty/)
   })
 })
