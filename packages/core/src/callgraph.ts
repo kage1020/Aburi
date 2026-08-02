@@ -372,17 +372,31 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
 
 /**
  * Resolve a call left null by the untyped tier using LSP-derived hints.
- * `this.*` / `super.*` with a hint present resolve at `high` confidence, which
- * is what §7.2 rates direct dispatch at.
+ * `this.*` / `super.*` with a hint present resolve at `high` confidence.
+ *
+ * That flat `high` is a known simplification of §7.2, which rates direct
+ * dispatch on the receiver's own class `high` but a hit found by walking up the
+ * class hierarchy `medium`. `ReceiverHint` carries only the callee id and
+ * `"this" | "super"`, not how far the lookup travelled, so the two cases are
+ * indistinguishable here — and the hint producer reads the *declaring* class out
+ * of the hover text, which for an inherited method is an ancestor. Inherited
+ * dispatch therefore lands at `high` today. Splitting it needs a walk-depth
+ * field on the hint, not a change in this function.
  *
  * Two invariants of the LSP tier are load-bearing, and both hold by the shape of
  * the surrounding pass rather than by a check inside this function:
  *
- * - **An already-resolved call is never overwritten (§5.4).** `resolveCallGraph`
- *   returns early on every call whose `resolved` is already non-null, so this
- *   function is only ever reached for `resolved: null` entries. The untyped
- *   answer stays authoritative for the cases the type layer cannot see — a
- *   barrel re-export pointing at a different declaration file, say.
+ * - **An already-resolved call is never overwritten (§5.4).** Two guards in
+ *   `resolveCallGraph` stand between a resolved call and this function, and both
+ *   are needed: the loop returns early on any call that arrived with `resolved`
+ *   already non-null, and a call the untyped tiers resolve during this pass
+ *   returns with its edge before the LSP tier is consulted. The untyped answer
+ *   stays authoritative for the cases the type layer cannot see — a barrel
+ *   re-export pointing at a different declaration file, say. Note that §5.4's
+ *   defensive exception — the LSP tier *may* replace a resolution whose target
+ *   is no longer in the Symbol table — is not implemented: an incoming
+ *   `resolved` is kept verbatim even when it names an id no Symbol carries, so
+ *   the preservation rule is currently unconditional.
  * - **Confidence only ever rises (lsp-enrichment.md LE16).** Because the LSP
  *   tier fires solely where the untyped tier produced no edge at all, there is
  *   no untyped confidence available for it to lower: an LSP hit contributes an
