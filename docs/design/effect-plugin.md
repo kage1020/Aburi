@@ -78,7 +78,9 @@ interface EffectPlugin {
 Normatively defined in [`lang-plugin.md`](./lang-plugin.md) §4.4. This document only references the same type.
 Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArgs }`. `literalArgs` covers cases such as wanting to inspect the contents of an SQL string (non-literals are `null`).
 
-`target` is contract-guaranteed non-empty with no empty segments (lang-plugin.md §4.4, "Normalized-callee contract"). Effect plugins enforce that contract instead of coding around it: `assertNonEmptySegments` from `@aburi/plugin-registry/plugin-input` splits the target and throws on a violation, and `hasMatchingImport` does the same for `ImportEdge.source`. Both live in the registry rather than in each plugin so a fifth effect plugin inherits identical messages and identical fail-fast ordering. The guards ship as a dedicated subpath so importing them does not pull the registry's manifest validator (and its schema compilation) into a classifier's startup path.
+`target` is contract-guaranteed non-empty with no empty segments (lang-plugin.md §4.4, "Normalized-callee contract"). Effect plugins enforce that contract instead of coding around it: `assertNonEmptySegments` from `@aburi/plugin-registry/plugin-input` splits the target and throws on a violation, and `hasMatchingImport` does the same for `ImportEdge.source`. Both live in the registry rather than in each plugin so the next effect plugin inherits identical messages and identical fail-fast ordering. The guards ship as a dedicated subpath so importing them does not pull the registry's manifest validator (and its schema compilation) into a classifier's startup path.
+
+A violation raised by these guards is **not** a classification outcome, so it is exempt from the EP3 degradation in §10: a classifier that throws while deciding is a plugin bug the run can absorb by treating the call as unclassified, whereas an unnormalized callee means every downstream classification of that file was computed from a value the pipeline promised could not exist. Degrading it to `null` would turn an upstream parser bug into a quietly under-populated IR — the one outcome the guards exist to prevent. See EP3a.
 
 ### 4.3 `ClassifyContext`
 
@@ -153,6 +155,8 @@ The core sets a **per-call timeout** on each plugin's `classify(call, ctx)` invo
 
 This prevents a slow plugin from stalling the whole double loop of thousands of AST symbols × dozens of calls × number of plugins.
 
+A timeout degrades to `null` while an input-contract violation (§4.2) fails the run, and the split is deliberate: a slow classifier still received a well-formed callee, so the worst case is one call left unclassified in a run that is otherwise sound — and `stats.effectClassifyTimeouts[]` records exactly which. A violated input contract has no such record and no such bound: the value was never one the pipeline could produce, so nothing downstream of it is trustworthy. Degrade what you can account for; fail on what you cannot.
+
 ### 5.2 Why multiple classification is disallowed
 
 There is a temptation to record `prisma.invoice.create` as both `db.write` (core) and `x-prisma:invoice.create` (Prisma detail), but currently:
@@ -222,6 +226,8 @@ Implementation details of each plugin live in their respective READMEs. Today Ne
 ### 9.1 Prisma effect plugin (pseudocode)
 
 ```ts
+import { assertNonEmptySegments } from '@aburi/plugin-registry/plugin-input'
+
 const READ_METHODS = /^(findUnique|findFirst|findMany|count|aggregate|groupBy)$/
 const WRITE_METHODS = /^(create|createMany|update|updateMany|upsert|delete|deleteMany)$/
 const TX_METHODS = /^\$transaction$/
@@ -236,13 +242,16 @@ export const plugin: EffectPlugin = {
   classify(call, ctx) {
     // decompose the identifier chain: "prisma.invoice.create" → ["prisma", "invoice", "create"]
     // The shared guard rejects an unnormalized callee instead of splitting it silently.
-    const { segments: parts } = assertNonEmptySegments(call.target, {
+    const { segments: parts, last: method } = assertNonEmptySegments(call.target, {
       plugin: 'effects-prisma',
       filePath: ctx.file.path,
     })
     if (parts.length < 3) return null
 
-    const [root, model, method] = parts.slice(-3) // take the last 3 (handles this.prisma.invoice.create)
+    // `method` comes from the guard already typed as `string`. The receiver segments still
+    // need an index, so read them defensively — `slice(-3)` alone would hand back
+    // `string | undefined` under noUncheckedIndexedAccess.
+    const root = parts[parts.length - 3]
 
     // check whether root looks like prisma
     if (!isPrismaIdentifier(root, ctx.file.imports)) return null
@@ -293,6 +302,8 @@ export const plugin: EffectPlugin = {
 ### 9.3 Stripe effect plugin (pseudocode)
 
 ```ts
+import { assertNonEmptySegments, hasMatchingImport } from '@aburi/plugin-registry/plugin-input'
+
 const ACTIONS = {
   charges: 'x-stripe:charge',
   customers: 'x-stripe:customer.create',  // when method is create
@@ -303,9 +314,9 @@ export const plugin: EffectPlugin = {
   manifest: { /* see plugin-effects-stripe.json */ },
   classify(call, ctx) {
     const origin = { plugin: 'effects-stripe', filePath: ctx.file.path }
-    const { segments: parts } = assertNonEmptySegments(call.target, origin)
+    const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
     if (parts.length < 3) return null
-    const [root, resource, method] = parts.slice(-3)
+    const resource = parts[parts.length - 2]
 
     if (!hasMatchingImport(ctx.file.imports, origin, source => source === 'stripe')) return null
 
@@ -324,7 +335,8 @@ export const plugin: EffectPlugin = {
 |---|---|---|
 | EP1 | returning an effectId not in the manifest | extraction-time error (detected by the registry) |
 | EP2 | classify returns the same output for the same input | purity (no side effects, no held state) |
-| EP3 | classify throws | warning log, treated as null |
+| EP3 | classify throws from its own classification logic | warning log, treated as null |
+| EP3a | classify throws an input-contract violation (§4.2) | propagates; the scan fails rather than degrading to an unclassified call |
 | EP4 | 2 plugins classify the same call | the first in config order wins (first-match-wins) |
 | EP5 | classify returns null | the call stays in `Symbol.calls[]` |
 | EP6 | classify returns an EffectClassification | the call moves to `Symbol.effects[]` and does not stay in `Symbol.calls[]` |

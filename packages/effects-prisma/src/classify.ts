@@ -1,4 +1,4 @@
-import { assertNonEmptySegments } from "@aburi/plugin-registry/plugin-input"
+import { assertNonEmptySegments, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
 import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 import { hasPrismaImport } from "./imports"
@@ -28,12 +28,10 @@ export function classifyPrismaCall(
   call: CallCandidate,
   ctx: ClassifyContext,
 ): EffectClassification | null {
-  const origin = { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath: ctx.file.path }
+  const origin: PluginInputOrigin = { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath: ctx.file.path }
 
-  // Fail-fast runs BEFORE the import gate so a malformed target throws on every file,
-  // not just the ~1% that import Prisma. Ordering the other way lets the same bug
-  // surface only in Prisma-consuming files and stay silent everywhere else —
-  // catastrophic for reproducing upstream language-plugin bugs.
+  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why the
+  // order is load-bearing.
   const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
 
   if (!hasPrismaImport(ctx.file.imports, ctx.file.path)) return null

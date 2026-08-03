@@ -1,8 +1,6 @@
-/**
- * Plugin identity, kept in a leaf module so `classify.ts`, `emitters.ts`, and `manifest.ts`
- * can all reach it without importing each other. Putting these next to the classifier
- * instead would make `emitters.ts → classify.ts → emitters.ts` a cycle.
- */
+// Plugin identity, kept in a leaf module so `classify.ts`, `emitters.ts`, and `manifest.ts`
+// can all reach it without importing each other. Putting these next to the classifier
+// instead would make `emitters.ts → classify.ts → emitters.ts` a cycle.
 
 /**
  * Package-relative plugin name. Doubles as the prefix of every thrown message, so a caught

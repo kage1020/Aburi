@@ -220,7 +220,9 @@ Contracts:
     // silent everywhere else.
     const { segments, last } = assertNonEmptySegments(call.target, origin)
     if (!hasMatchingImport(ctx.file.imports, origin, (source) => source === "mytool")) return null
-    // ...
+
+    if (segments.length < 2 || !MY_VERBS.has(last)) return null
+    return { effectId: "net.fetch", confidence: "high", derivedBy: `effects-plugin:mytool:${last}` }
   }
   ```
 

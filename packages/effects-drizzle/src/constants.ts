@@ -1,13 +1,11 @@
-/**
- * Plugin identity, kept in a leaf module so `classify.ts`, `imports.ts`, and `manifest.ts`
- * can all reach it without importing each other. Putting these next to the classifier
- * instead would make `imports.ts → classify.ts → imports.ts` a cycle.
- */
+// Plugin identity, kept in a leaf module so `classify.ts`, `imports.ts`, and `manifest.ts`
+// can all reach it without importing each other. Putting these next to the classifier
+// instead would make `imports.ts → classify.ts → imports.ts` a cycle.
 
 /**
  * Package-relative plugin name. Doubles as the prefix of every thrown message, so a caught
  * exception names the plugin that rejected the input. `manifest.ts` declares the same
- * string as `name`, and a test pins the two together.
+ * string as `name`.
  */
 export const EFFECTS_DRIZZLE_PLUGIN_NAME = "effects-drizzle" as const
 

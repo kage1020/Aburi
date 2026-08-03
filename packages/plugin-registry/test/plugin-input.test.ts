@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -103,5 +105,21 @@ describe("hasMatchingImport", () => {
       return false
     })
     expect(seen).toEqual(["react", "example-orm"])
+  })
+})
+
+describe("plugin-input module", () => {
+  it("has no value imports, so the subpath stays free of the barrel's ajv setup", () => {
+    // The whole reason this module is a separate tsdown entry is that importing the
+    // package root evaluates `manifest.ts`, which compiles the plugin JSON Schema at
+    // module scope. A value import added here would fold this chunk back into that graph
+    // — silently, since nothing else in the build would fail. Asserted against the source
+    // rather than `dist/` so the check does not depend on a build having run.
+    const source = readFileSync(
+      fileURLToPath(new URL("../src/plugin-input.ts", import.meta.url)),
+      "utf8",
+    )
+    const importLines = source.split("\n").filter((line) => line.startsWith("import "))
+    expect(importLines).toEqual(['import type { ImportEdge } from "@aburi/types"'])
   })
 })

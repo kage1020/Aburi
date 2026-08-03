@@ -241,6 +241,20 @@ describe("classifyDrizzleCall — malformed input fail-fast", () => {
     )
   })
 
+  it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
+    // The name is now an importable const shared by four packages rather than a literal in
+    // this file, so nothing but this assertion catches `EFFECTS_TRPC_PLUGIN_NAME` here.
+    expect(() => classifyDrizzleCall(makeCall({ target: "" }), ctxWithDrizzle)).toThrow(
+      /^effects-drizzle \(/,
+    )
+    const brokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["drizzle"], line: 2, dynamic: false }],
+    })
+    expect(() => classifyDrizzleCall(makeCall({ target: "db.select" }), brokenEdge)).toThrow(
+      /^effects-drizzle \(/,
+    )
+  })
+
   it("throw messages include the file path so caught exceptions point at the offending source", () => {
     const ctxWithPath = makeCtx({ imports: [makeDrizzleImport()], path: "src/services/x.ts" })
     expect(() => classifyDrizzleCall(makeCall({ target: "" }), ctxWithPath)).toThrow(

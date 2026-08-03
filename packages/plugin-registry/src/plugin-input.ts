@@ -47,9 +47,17 @@ export interface CallTargetSegments {
  * dots). A malformed target would otherwise slip through a classifier's length gate and
  * false-classify — `"prisma..create"` has three segments and would match a write verb.
  *
- * Callers should treat a thrown error as an upstream contract violation, not a
- * classification decision. `@aburi/core` does not catch it, so it surfaces to the user
- * rather than silently miscategorizing a call.
+ * **Call this before the plugin's import gate, not after.** Both orders detect the same
+ * violations, but gating first narrows detection to the files that import the plugin's
+ * library — so an upstream normalization bug reproduces only in that slice and looks
+ * library-specific instead of what it is. Checking first does not reach every file either
+ * (a dropped symbol or a category-C call never gets classified at all), but it removes the
+ * one bias that would actively mislead whoever debugs it.
+ *
+ * A thrown error is an upstream contract violation, not a classification decision, and
+ * effect-plugin.md §10 EP3a exempts it from the "a throwing classifier is treated as
+ * `null`" rule: it propagates and fails the scan. Degrading it would convert a language
+ * plugin bug into a quietly under-populated IR.
  */
 export function assertNonEmptySegments(
   target: string,
@@ -62,15 +70,10 @@ export function assertNonEmptySegments(
     )
   }
 
-  const [first, ...rest] = target.split(".")
-  if (first === undefined) {
-    // Unreachable: `String.prototype.split` never returns an empty array, and the empty
-    // target is already rejected above. The branch exists only so `first` narrows to
-    // `string` without a cast, which is what makes the tuple below provable.
-    throw new Error(
-      `${where}: internal invariant violated — String.split returned no segments for "${target}"`,
-    )
-  }
+  // The `= ""` default is what narrows `first` to `string` without a cast, and it needs no
+  // branch of its own: `String.prototype.split` never returns an empty array, and if it
+  // somehow did, the empty default falls straight into the empty-segment rejection below.
+  const [first = "", ...rest] = target.split(".")
 
   const emptySegment = `${where}: CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`
   if (first.length === 0) throw new Error(emptySegment)
@@ -97,8 +100,11 @@ export function assertNonEmptySegments(
  * Bundling the two passes into one function is what makes that ordering unforgeable:
  * there is no way to ask "does this file import X?" while skipping the validation.
  *
- * `matches` receives the specifier string alone rather than the whole `ImportEdge` for the
- * same reason — a predicate that could reach other fields would be a way around the check.
+ * `matches` receives the specifier string alone rather than the whole `ImportEdge`. Not
+ * for safety — validation has already run over every edge by the time the predicate is
+ * called, so a wider argument could not skip it. It is the smaller surface: every current
+ * caller matches on the specifier, and widening the argument later stays compatible while
+ * narrowing it would not.
  */
 export function hasMatchingImport(
   imports: readonly ImportEdge[],

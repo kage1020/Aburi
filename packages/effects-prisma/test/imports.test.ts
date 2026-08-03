@@ -75,6 +75,14 @@ describe("hasPrismaImport", () => {
     ).toThrow(/ImportEdge\.source is empty/)
   })
 
+  it("names the plugin, the file, and the offending line in the thrown message", () => {
+    // `filePath` is the whole reason the parameter exists — an assertion on the
+    // "is empty" text alone would pass against an implementation that ignored it.
+    expect(() =>
+      hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 9, dynamic: false }], PATH),
+    ).toThrow(`effects-prisma (${PATH}, line 9): ImportEdge.source is empty`)
+  })
+
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
     // Order-independence pin — using `.some()` alone would short-circuit on the first
     // match and silently accept a broken edge later in the list.

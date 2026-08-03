@@ -190,6 +190,13 @@ describe("classifyTrpcCall — shapes outside the vocabulary", () => {
     expect(classifyTrpcCall(makeCall({ target: "this.client.query" }), clientCtx())).toBeNull()
   })
 
+  it("returns null for a lone `this` — the strip leaves nothing to address", () => {
+    // Degenerate edge of the strip: `segments` becomes empty while `terminal` still holds
+    // the pre-strip last segment. The length gate is what keeps the two from disagreeing,
+    // so pin the shortest input that exercises it. It must return null, not throw.
+    expect(classifyTrpcCall(makeCall({ target: "this" }), clientCtx())).toBeNull()
+  })
+
   it.each([
     "utils.user.byId.invalidate",
     "utils.user.byId.fetch",
@@ -254,6 +261,19 @@ describe("classifyTrpcCall — upstream contract violations", () => {
     expect(() => classifyTrpcCall(makeCall({ target: "" }), makeCtx({ imports: [] }))).toThrow(
       /CallCandidate\.target is empty/,
     )
+  })
+
+  it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
+    // The name is now an importable const shared by four packages rather than a literal in
+    // this file, so nothing but this assertion catches `EFFECTS_NEST_PLUGIN_NAME` here.
+    const ctx = makeCtx({ imports: [makeTrpcClientImport()] })
+    expect(() => classifyTrpcCall(makeCall({ target: "" }), ctx)).toThrow(/^effects-trpc \(/)
+    const brokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["createTRPCClient"], line: 2, dynamic: false }],
+    })
+    expect(() =>
+      classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), brokenEdge),
+    ).toThrow(/^effects-trpc \(/)
   })
 
   it("throws when an ImportEdge carries an empty source", () => {

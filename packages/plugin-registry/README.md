@@ -73,9 +73,13 @@ They live here rather than in each effect plugin so every plugin throws the same
 message, naming the plugin and the file that produced the bad value.
 
 **Import them from the `/plugin-input` subpath, not the package root.** The root
-barrel compiles the plugin JSON Schema with ajv at module scope; the subpath is a
-separate, dependency-free chunk, which is what keeps that compilation out of a
-classifier's startup path.
+barrel compiles the plugin JSON Schema with ajv at module scope. The subpath is a
+separate chunk whose only import is a type, so evaluating it runs none of that —
+which is what keeps a schema compilation off a classifier's startup path.
+
+The subpath bounds what gets *evaluated*, not what gets *installed*: depending on
+this package still puts `ajv` and `jsonc-parser` in the dependency tree. That was
+the accepted trade for not publishing a separate package for two functions.
 
 ## See also
 
