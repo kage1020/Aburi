@@ -10,12 +10,18 @@ import {
   makeSymbolId,
   makeTopLevelQname,
 } from "@aburi/core"
-import type { SymbolId } from "@aburi/types"
+import type { LanguageId, SymbolId } from "@aburi/types"
 
-const LANGUAGE_ID = "ts"
+/**
+ * The `LanguageId` this plugin stamps before the colon of every Symbol id. It is also
+ * what `LanguagePlugin.languageId` reports to `@aburi/core`, so the id prefix and the
+ * value that lands in `IR.workspace.languages` cannot drift. Note this is a different
+ * vocabulary from the manifest name (`lang-typescript`), which is a plugin ref.
+ */
+export const TYPESCRIPT_LANGUAGE_ID: LanguageId = "ts"
 
 export function makeTsSymbolId(file: string, qname: string): SymbolId {
-  return makeSymbolId({ language: LANGUAGE_ID, file, qualifiedName: qname })
+  return makeSymbolId({ language: TYPESCRIPT_LANGUAGE_ID, file, qualifiedName: qname })
 }
 
 export function topLevelQname(name: string): string {

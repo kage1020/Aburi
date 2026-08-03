@@ -247,7 +247,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const workspace: IR["workspace"] = {
     root: ".",
     managers: [...(input.workspaceManagers ?? [])],
-    languages: uniqueSorted(input.languages.map((l) => l.manifest.name)),
+    // `languageId`, not `manifest.name`: the former is the `LanguageId` vocabulary this
+    // field is typed with (and the prefix on every Symbol id), the latter is a plugin ref.
+    languages: uniqueSorted(input.languages.map((l) => l.languageId)),
   }
 
   const ir: IR = {

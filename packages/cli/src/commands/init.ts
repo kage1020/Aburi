@@ -69,8 +69,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
 
   const suggestions = options.withSuggestions ? suggestPluginsFor(frameworkSet) : []
   const contents = renderConfig({
-    languages: [...languageSet].sort(),
-    frameworks: [...frameworkSet].sort(),
+    languages: pluginRefsFor(languageSet, LANGUAGE_TO_PLUGIN),
+    frameworks: pluginRefsFor(frameworkSet, FRAMEWORK_TO_PLUGIN),
     components: components.map((c) => ({
       id: c.id,
       name: c.name,
@@ -137,24 +137,49 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * §4.6 tail — suggestion mapping. Kept tiny on purpose; a large plugin catalog belongs
- * outside the CLI so autodetect stays language-agnostic. Only the plugins that ship in
- * this monorepo are hard-coded.
+ * Detector vocabulary → plugin manifest name. The detectors speak `LanguageId` /
+ * framework ids (`ts`, `tsx`, `nestjs`); the top-level `languages` / `frameworks` fields
+ * of `aburi.json` are `PluginRef`s that the plugin loader resolves as module specifiers.
+ * Writing a detector id into those fields makes the loader look for `@aburi/ts`.
+ *
+ * Kept tiny on purpose; a large plugin catalog belongs outside the CLI so autodetect
+ * stays language-agnostic. Only the plugins that ship in this monorepo are listed, and a
+ * detected id with no entry is omitted rather than guessed at — an unresolvable ref would
+ * fail the very next `aburi scan`.
  */
-const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
-  ["nestjs", "@aburi/framework-nestjs"],
-  ["next", "@aburi/framework-next"],
-  ["nextjs", "@aburi/framework-next"],
-  ["react", "@aburi/framework-react"],
+const LANGUAGE_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
+  ["ts", "lang-typescript"],
+  ["tsx", "lang-typescript"],
+  ["js", "lang-typescript"],
+  ["jsx", "lang-typescript"],
 ])
 
-function suggestPluginsFor(frameworks: ReadonlySet<string>): string[] {
+const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
+  ["nestjs", "framework-nestjs"],
+  ["next", "framework-next"],
+  ["nextjs", "framework-next"],
+  ["react", "framework-react"],
+  ["express", "framework-express"],
+])
+
+function pluginRefsFor(
+  detected: ReadonlySet<string>,
+  table: ReadonlyMap<string, string>,
+): string[] {
   const out = new Set<string>()
-  for (const f of frameworks) {
-    const plugin = FRAMEWORK_TO_PLUGIN.get(f)
-    if (plugin !== undefined) out.add(plugin)
+  for (const id of detected) {
+    const ref = table.get(id)
+    if (ref !== undefined) out.add(ref)
   }
   return [...out].sort()
+}
+
+/**
+ * §4.6 tail — the `--with-suggestions` banner. Install instructions name the npm package,
+ * so these carry the `@aburi/` scope that `PluginRef` leaves implicit.
+ */
+function suggestPluginsFor(frameworks: ReadonlySet<string>): string[] {
+  return pluginRefsFor(frameworks, FRAMEWORK_TO_PLUGIN).map((name) => `@aburi/${name}`)
 }
 
 interface RenderedConfigInput {

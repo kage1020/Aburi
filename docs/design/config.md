@@ -366,8 +366,8 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
   "frameworks": [],
   "effects": [],
   "components": [
-    { "id": "billing", "name": "Billing", "roots": ["apps/billing"], "languages": ["typescript"] },
-    { "id": "shared",  "name": "Shared",  "roots": ["packages/shared"], "languages": ["typescript"] }
+    { "id": "billing", "name": "Billing", "roots": ["apps/billing"], "languages": ["ts"] },
+    { "id": "shared",  "name": "Shared",  "roots": ["packages/shared"], "languages": ["ts"] }
   ]
 }
 ```

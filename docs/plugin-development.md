@@ -75,6 +75,10 @@ import type { LanguagePlugin, ParseResult, BodyExtraction } from "@aburi/types"
 
 class MyLangPlugin implements LanguagePlugin {
   readonly manifest = myLangManifest
+  // The LanguageId you stamp on every Symbol id, and what lands in
+  // IR.workspace.languages. Must match `^[a-z][a-z0-9]*$` — the manifest name
+  // ("lang-mylang") is a plugin ref and cannot be used here.
+  readonly languageId = "my"
   readonly fileExtensions = [".my"] as const
   readonly capabilities = { /* boolean matrix */ }
 
@@ -238,7 +242,7 @@ discovers them by package name from `aburi.json`:
 ```jsonc
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
-  "languages": ["typescript"],
+  "languages": ["lang-typescript"],
   "frameworks": ["mytool"],
   "effects": ["mytool"]
 }

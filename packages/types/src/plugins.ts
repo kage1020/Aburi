@@ -10,6 +10,7 @@ import type {
   Decorator,
   EffectId,
   ExtKind,
+  LanguageId,
   Signature,
   SourceRange,
   SymbolId,
@@ -301,6 +302,17 @@ export type FrameworkManifest = PluginManifest & { type: "framework" }
  */
 export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
   manifest: LangManifest
+  /**
+   * The `LanguageId` this plugin owns — the segment before the colon in every Symbol id
+   * it produces (`ts:src/a.ts#alpha` ⇒ `"ts"`), and the value `@aburi/core` projects into
+   * `IR.workspace.languages`.
+   *
+   * This is deliberately *not* `manifest.name`: the manifest name is a plugin ref
+   * (`lang-typescript`, kebab-case, resolved as a module specifier) while `LanguageId` is
+   * constrained to `^[a-z][a-z0-9]*$` by `aburi.ir.v1`. A plugin whose manifest name were
+   * used here would emit an IR that fails its own frozen schema.
+   */
+  languageId: LanguageId
   /** Extension list (not glob), e.g. [".ts", ".tsx"]. */
   fileExtensions: string[]
   capabilities: LanguageCapabilities
