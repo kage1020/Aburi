@@ -173,6 +173,25 @@ interface CallCandidate {
 walkBody **must not emit trivial returns as rules** (drop-list §5.3-5.5).
 For call-only returns such as `return foo()`, the call goes into CallCandidate but not into a Rule.
 
+#### Normalized-callee contract
+
+`target` is **non-empty**, and every `.`-separated segment of it is non-empty. A leading,
+trailing, or adjacent dot (`".create"`, `"prisma.user."`, `"prisma..create"`) is a
+contract violation, not an input an effect plugin has to tolerate: `"prisma..create"`
+splits into three segments and would match a delegate-call shape that never existed in
+the source. The same holds for the `ImportEdge` of §4.2 — `source` is a normalized,
+non-empty module specifier.
+
+Whitespace is not part of the rule: a segment or specifier is rejected when it is empty,
+not when it is blank. `"prisma. .create"` satisfies the contract as written — plugins are
+free to be stricter, but the shared guards are not.
+
+Consumers enforce this rather than work around it. `assertNonEmptySegments` and
+`hasMatchingImport` in `@aburi/plugin-registry/plugin-input` are the shared guards. They
+throw, and a violation propagates rather than degrading to an unclassified call
+([`effect-plugin.md`](./effect-plugin.md) §10, EP3a), so an unnormalized callee surfaces
+as a failed scan instead of a silently miscategorized effect.
+
 #### `dynamicReceiver`
 
 Set it to `true` when the callee's receiver was an **expression rather than a name** — `getRepo().save()`, `items[0].save()`, `(a ?? b).save()`. Leave it absent otherwise; absent means `false`, so existing plugins stay valid without a change.

@@ -200,6 +200,35 @@ Contracts:
   `packages/effects-prisma` for the reference pattern — a random `foo.findMany()`
   in a file that never imports `@prisma/client` should return `null`, and so
   should `prisma.foo.bar()` in a file that never uses Prisma's method vocabulary.
+- **Use the shared input guards, do not re-implement them.**
+  `@aburi/plugin-registry/plugin-input` exports `assertNonEmptySegments` (splits
+  a `CallCandidate.target` and rejects an empty target or empty segment) and
+  `hasMatchingImport` (matches a module specifier after checking every
+  `ImportEdge.source`). Both enforce the language plugin's normalized-output
+  contract from [`design/lang-plugin.md`](design/lang-plugin.md) §4.4, and both
+  take a `{ plugin, filePath }` record so the thrown message names your plugin
+  and the offending file:
+
+  ```ts
+  import { assertNonEmptySegments, hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
+
+  classify(call, ctx) {
+    const origin = { plugin: "effects-mytool", filePath: ctx.file.path }
+
+    // Run the fail-fast BEFORE the import gate. The other order lets an upstream
+    // normalization bug surface only in files that import your library and stay
+    // silent everywhere else.
+    const { segments, last } = assertNonEmptySegments(call.target, origin)
+    if (!hasMatchingImport(ctx.file.imports, origin, (source) => source === "mytool")) return null
+
+    if (segments.length < 2 || !MY_VERBS.has(last)) return null
+    return { effectId: "net.fetch", confidence: "high", derivedBy: `effects-plugin:mytool:${last}` }
+  }
+  ```
+
+  It is the dedicated `/plugin-input` subpath on purpose — importing the package
+  root would pull the manifest validator and its schema compilation into your
+  classifier's startup path.
 
 ## Registering with the CLI
 

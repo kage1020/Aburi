@@ -1,5 +1,5 @@
 import type { EffectsManifest } from "@aburi/types"
-import { EFFECTS_TRPC_DERIVED_BY_PREFIX } from "./classify"
+import { EFFECTS_TRPC_DERIVED_BY_PREFIX, EFFECTS_TRPC_PLUGIN_NAME } from "./constants"
 
 /**
  * Manifest for `@aburi/effects-trpc`. `as const satisfies EffectsManifest` keeps every
@@ -25,7 +25,7 @@ import { EFFECTS_TRPC_DERIVED_BY_PREFIX } from "./classify"
  */
 export const effectsTrpcManifest = {
   $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
-  name: "effects-trpc",
+  name: EFFECTS_TRPC_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",
   engines: { aburi: "*" },

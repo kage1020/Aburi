@@ -1,5 +1,5 @@
 import type { EffectsManifest } from "@aburi/types"
-import { EFFECTS_NEST_DERIVED_BY_PREFIX } from "./classify"
+import { EFFECTS_NEST_DERIVED_BY_PREFIX, EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 
 /**
  * Manifest for `@aburi/effects-nest`. `as const satisfies EffectsManifest` keeps every
@@ -17,7 +17,7 @@ import { EFFECTS_NEST_DERIVED_BY_PREFIX } from "./classify"
  */
 export const effectsNestManifest = {
   $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
-  name: "effects-nest",
+  name: EFFECTS_NEST_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",
   engines: { aburi: "*" },

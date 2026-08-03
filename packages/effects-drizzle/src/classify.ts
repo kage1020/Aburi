@@ -1,4 +1,6 @@
+import { assertNonEmptySegments, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, EFFECTS_DRIZZLE_PLUGIN_NAME } from "./constants"
 import { hasDrizzleImport } from "./imports"
 import {
   DRIZZLE_FLUENT_ROOT_METHODS,
@@ -7,13 +9,6 @@ import {
   isDrizzleTransactionMethod,
   isDrizzleWriteMethod,
 } from "./methods"
-
-/**
- * Shared derivedBy namespace. `manifest.ts` imports this same const for its
- * `derivedByPrefixes` entry, so the classifier's tag builder and the registry
- * declaration cannot drift.
- */
-export const EFFECTS_DRIZZLE_DERIVED_BY_PREFIX = "effects-plugin:drizzle" as const
 
 /**
  * Classify a CallCandidate against Drizzle ORM conventions.
@@ -46,11 +41,11 @@ export function classifyDrizzleCall(
   call: CallCandidate,
   ctx: ClassifyContext,
 ): EffectClassification | null {
-  // Fail-fast runs BEFORE the import gate so a malformed target throws on every file,
-  // not just the ~1% that import Drizzle. Ordering the other way lets the same bug
-  // surface only in Drizzle-consuming files and stay silent everywhere else —
-  // catastrophic for reproducing upstream language-plugin bugs.
-  const parts = assertNonEmptySegments(call.target, ctx.file.path)
+  const origin: PluginInputOrigin = { plugin: EFFECTS_DRIZZLE_PLUGIN_NAME, filePath: ctx.file.path }
+
+  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why the
+  // order is load-bearing.
+  const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
 
   if (!hasDrizzleImport(ctx.file.imports, ctx.file.path)) return null
 
@@ -66,9 +61,6 @@ export function classifyDrizzleCall(
   for (const segment of parts.slice(1, -1)) {
     if (fluentRoots.has(segment)) return null
   }
-
-  const method = parts[parts.length - 1]
-  if (method === undefined) return null
 
   // Relational query API: `<client>.query.<table>.findMany|findFirst` (4+ segments).
   // Checked BEFORE the generic terminal dispatch because the query API's terminal
@@ -111,7 +103,7 @@ export function classifyDrizzleCall(
     // code never reaches this branch with argCount=0.
     if (call.argumentCount < 1) {
       throw new Error(
-        `effects-drizzle (${ctx.file.path}, line ${call.line}): "${call.target}" call has argCount=0 but Drizzle's transaction/batch API requires at least one argument (callback or statement array)`,
+        `${EFFECTS_DRIZZLE_PLUGIN_NAME} (${ctx.file.path}, line ${call.line}): "${call.target}" call has argCount=0 but Drizzle's transaction/batch API requires at least one argument (callback or statement array)`,
       )
     }
     return {
@@ -122,29 +114,4 @@ export function classifyDrizzleCall(
   }
 
   return null
-}
-
-/**
- * Split `target` on `.` and reject any shape a well-formed language plugin would never
- * emit: an empty target, or one with an empty segment (leading, trailing, or adjacent
- * dots). A malformed target here would otherwise slip through the length gate and
- * false-classify — e.g. `"db..insert"` has three segments and would match a write
- * verb. `filePath` is threaded into the error message so caught exceptions in
- * production point at the offending source file.
- */
-function assertNonEmptySegments(target: string, filePath: string): readonly string[] {
-  if (target.length === 0) {
-    throw new Error(
-      `effects-drizzle (${filePath}): CallCandidate.target is empty — language plugin emitted an unnormalized callee`,
-    )
-  }
-  const parts = target.split(".")
-  for (const segment of parts) {
-    if (segment.length === 0) {
-      throw new Error(
-        `effects-drizzle (${filePath}): CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`,
-      )
-    }
-  }
-  return parts
 }

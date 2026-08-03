@@ -1,4 +1,5 @@
-export { classifyDrizzleCall, EFFECTS_DRIZZLE_DERIVED_BY_PREFIX } from "./classify"
+export { classifyDrizzleCall } from "./classify"
+export { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, EFFECTS_DRIZZLE_PLUGIN_NAME } from "./constants"
 export { hasDrizzleImport } from "./imports"
 export { effectsDrizzleManifest } from "./manifest"
 export {

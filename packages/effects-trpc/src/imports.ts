@@ -1,4 +1,6 @@
+import { hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
 import type { ImportEdge } from "@aburi/types"
+import { EFFECTS_TRPC_PLUGIN_NAME } from "./constants"
 
 /**
  * Module roots that mark a file as a tRPC **client** consumer. Each entry matches either
@@ -27,22 +29,27 @@ const TRPC_CLIENT_MODULE_ROOTS = ["@trpc/client", "@trpc/react-query", "@trpc/ne
  */
 const TRPC_SERVER_MODULE_ROOTS = ["@trpc/server"] as const
 
+/** Exact-or-subpath match against a set of module roots. */
+function matchesAnyRoot(source: string, roots: readonly string[]): boolean {
+  return roots.some((root) => source === root || source.startsWith(`${root}/`))
+}
+
 /**
  * True when the file's import list contains any tRPC client module. See
  * `TRPC_CLIENT_MODULE_ROOTS` for what counts.
  *
- * An empty source string on an ImportEdge is rejected: the language plugin's contract is
- * to emit normalized non-empty specifiers, and treating `""` as unmatched would silently
- * hide upstream bugs. Validation runs across every edge before the match check so
- * ImportEdge order does not make throw behavior non-deterministic — `.some()` alone would
- * short-circuit on the first match and never notice a broken edge sitting later.
+ * An empty source string on an ImportEdge is rejected by the shared guard: the language
+ * plugin's contract is to emit normalized non-empty specifiers, and treating `""` as
+ * unmatched would silently hide upstream bugs.
  *
  * `filePath` is required and threaded into any thrown error message so a caught exception
  * in production tooling (CI logs, error reporters) points directly at the offending source
  * file rather than a bare "empty source" string.
  */
 export function hasTrpcClientImport(imports: readonly ImportEdge[], filePath: string): boolean {
-  return matchesAnyRoot(imports, filePath, TRPC_CLIENT_MODULE_ROOTS)
+  return hasMatchingImport(imports, { plugin: EFFECTS_TRPC_PLUGIN_NAME, filePath }, (source) =>
+    matchesAnyRoot(source, TRPC_CLIENT_MODULE_ROOTS),
+  )
 }
 
 /**
@@ -55,22 +62,7 @@ export function hasTrpcClientImport(imports: readonly ImportEdge[], filePath: st
  * Boundary classification requires rather than to this suppression rule.
  */
 export function hasTrpcServerImport(imports: readonly ImportEdge[], filePath: string): boolean {
-  return matchesAnyRoot(imports, filePath, TRPC_SERVER_MODULE_ROOTS)
-}
-
-function matchesAnyRoot(
-  imports: readonly ImportEdge[],
-  filePath: string,
-  roots: readonly string[],
-): boolean {
-  for (const edge of imports) {
-    if (edge.source.length === 0) {
-      throw new Error(
-        `effects-trpc (${filePath}, line ${edge.line}): ImportEdge.source is empty — language plugin emitted an unnormalized import edge`,
-      )
-    }
-  }
-  return imports.some((edge) =>
-    roots.some((root) => edge.source === root || edge.source.startsWith(`${root}/`)),
+  return hasMatchingImport(imports, { plugin: EFFECTS_TRPC_PLUGIN_NAME, filePath }, (source) =>
+    matchesAnyRoot(source, TRPC_SERVER_MODULE_ROOTS),
   )
 }

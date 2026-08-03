@@ -1,4 +1,6 @@
+import { hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
 import type { ImportEdge } from "@aburi/types"
+import { EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 
 /**
  * npm module specifiers that supply an `EventEmitter2` — the `.emit(...)` publisher the
@@ -23,24 +25,26 @@ export const NEST_EMITTER_MODULES: ReadonlySet<NestEmitterModule> = new Set(
   NEST_EMITTER_MODULES_LIST,
 )
 
+/** Membership test against the closed set of recognized emitter modules. */
+function isNestEmitterModule(source: string): boolean {
+  return (NEST_EMITTER_MODULES as ReadonlySet<string>).has(source)
+}
+
 /**
  * True when the file's import list contains a recognized event-emitter module. An
- * empty `edge.source` throws — the language plugin's contract is a normalized non-empty
- * specifier, and silently returning false would hide upstream bugs.
+ * empty `edge.source` throws via the shared guard — the language plugin's contract is a
+ * normalized non-empty specifier, and silently returning false would hide upstream bugs.
  *
- * Validation runs across every edge before the match check so ImportEdge order does
- * not make throw behavior non-deterministic. Using `.some()` alone would short-circuit
- * on the first match and never notice a broken edge that happens to sit later.
+ * `filePath` is required and threaded into any thrown error message so a caught
+ * exception in production tooling (CI logs, error reporters) points directly at the
+ * offending source file rather than a bare "empty source" string.
  */
-export function hasNestEmitterImport(imports: readonly ImportEdge[]): boolean {
-  for (const edge of imports) {
-    if (edge.source.length === 0) {
-      throw new Error(
-        "effects-nest: ImportEdge.source is empty — language plugin emitted an unnormalized import edge",
-      )
-    }
-  }
-  return imports.some((edge) => (NEST_EMITTER_MODULES as ReadonlySet<string>).has(edge.source))
+export function hasNestEmitterImport(imports: readonly ImportEdge[], filePath: string): boolean {
+  return hasMatchingImport(
+    imports,
+    { plugin: EFFECTS_NEST_PLUGIN_NAME, filePath },
+    isNestEmitterModule,
+  )
 }
 
 /**

@@ -1,4 +1,6 @@
+import { hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
 import type { ImportEdge } from "@aburi/types"
+import { EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 
 /**
  * npm module specifiers that expose a `PrismaClient`. Any file that pulls in one of
@@ -21,23 +23,25 @@ export const PRISMA_CLIENT_MODULES: ReadonlySet<PrismaClientModule> = new Set(
   PRISMA_CLIENT_MODULES_LIST,
 )
 
+/** Membership test against the closed set of Prisma Client entry points. */
+function isPrismaClientModule(source: string): boolean {
+  return (PRISMA_CLIENT_MODULES as ReadonlySet<string>).has(source)
+}
+
 /**
  * True when the file's import list contains any recognized Prisma Client module. An
- * empty source string on an ImportEdge is rejected: the language plugin's contract is
- * to emit normalized non-empty specifiers, and treating `""` as unmatched would silently
- * hide upstream bugs.
+ * empty source string on an ImportEdge is rejected by the shared guard: the language
+ * plugin's contract is to emit normalized non-empty specifiers, and treating `""` as
+ * unmatched would silently hide upstream bugs.
  *
- * Validation runs across every edge before the match check so ImportEdge order does
- * not make throw behavior non-deterministic. Using `.some()` alone would short-circuit
- * on the first match and never notice a broken edge that happens to sit later.
+ * `filePath` is required and threaded into any thrown error message so a caught
+ * exception in production tooling (CI logs, error reporters) points directly at the
+ * offending source file rather than a bare "empty source" string.
  */
-export function hasPrismaImport(imports: readonly ImportEdge[]): boolean {
-  for (const edge of imports) {
-    if (edge.source.length === 0) {
-      throw new Error(
-        "effects-prisma: ImportEdge.source is empty — language plugin emitted an unnormalized import edge",
-      )
-    }
-  }
-  return imports.some((edge) => (PRISMA_CLIENT_MODULES as ReadonlySet<string>).has(edge.source))
+export function hasPrismaImport(imports: readonly ImportEdge[], filePath: string): boolean {
+  return hasMatchingImport(
+    imports,
+    { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath },
+    isPrismaClientModule,
+  )
 }

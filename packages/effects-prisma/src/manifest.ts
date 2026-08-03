@@ -1,5 +1,5 @@
 import type { EffectsManifest } from "@aburi/types"
-import { EFFECTS_PRISMA_DERIVED_BY_PREFIX } from "./classify"
+import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 
 /**
  * Manifest for `@aburi/effects-prisma`. `as const satisfies EffectsManifest` keeps
@@ -14,7 +14,7 @@ import { EFFECTS_PRISMA_DERIVED_BY_PREFIX } from "./classify"
  */
 export const effectsPrismaManifest = {
   $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
-  name: "effects-prisma",
+  name: EFFECTS_PRISMA_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",
   engines: { aburi: "*" },

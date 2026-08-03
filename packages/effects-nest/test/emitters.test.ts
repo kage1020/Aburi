@@ -7,68 +7,94 @@ import {
   NEST_EVENT_EMITTER_IDENTIFIERS,
 } from "../src/index"
 
+const PATH = "src/orders/service.ts"
+
 describe("hasNestEmitterImport", () => {
   it("returns true when the file imports @nestjs/event-emitter", () => {
     expect(
-      hasNestEmitterImport([
-        { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false },
-      ]),
+      hasNestEmitterImport(
+        [{ source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toBe(true)
   })
 
   it("returns true when the file imports eventemitter2 directly", () => {
     expect(
-      hasNestEmitterImport([
-        { source: "eventemitter2", symbols: ["EventEmitter2"], line: 1, dynamic: false },
-      ]),
+      hasNestEmitterImport(
+        [{ source: "eventemitter2", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toBe(true)
   })
 
   it("returns false when the import list is empty", () => {
-    expect(hasNestEmitterImport([])).toBe(false)
+    expect(hasNestEmitterImport([], PATH)).toBe(false)
   })
 
   it("returns false for Node's built-in `events` module (intentional exclusion)", () => {
     // Node's EventEmitter has different semantics (per-instance state, not DI'd
     // application-wide bus) — classifying stream emitters would drown the report.
     expect(
-      hasNestEmitterImport([
-        { source: "events", symbols: ["EventEmitter"], line: 1, dynamic: false },
-      ]),
+      hasNestEmitterImport(
+        [{ source: "events", symbols: ["EventEmitter"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toBe(false)
   })
 
   it("returns false for the @nestjs/websockets `.emit` — different API surface", () => {
     expect(
-      hasNestEmitterImport([
-        { source: "@nestjs/websockets", symbols: ["WebSocketGateway"], line: 1, dynamic: false },
-      ]),
+      hasNestEmitterImport(
+        [{ source: "@nestjs/websockets", symbols: ["WebSocketGateway"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toBe(false)
   })
 
   it("returns true when a recognized module sits alongside other imports", () => {
     expect(
-      hasNestEmitterImport([
-        { source: "@nestjs/common", symbols: ["Injectable"], line: 1, dynamic: false },
-        { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 2, dynamic: false },
-      ]),
+      hasNestEmitterImport(
+        [
+          { source: "@nestjs/common", symbols: ["Injectable"], line: 1, dynamic: false },
+          { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 2, dynamic: false },
+        ],
+        PATH,
+      ),
     ).toBe(true)
   })
 
   it("throws when the language plugin emits an empty ImportEdge.source", () => {
     expect(() =>
-      hasNestEmitterImport([{ source: "", symbols: ["EventEmitter2"], line: 1, dynamic: false }]),
+      hasNestEmitterImport(
+        [{ source: "", symbols: ["EventEmitter2"], line: 1, dynamic: false }],
+        PATH,
+      ),
     ).toThrow(/ImportEdge\.source is empty/)
+  })
+
+  it("names the plugin, the file, and the offending line in the thrown message", () => {
+    // `filePath` is the whole reason the parameter exists — an assertion on the
+    // "is empty" text alone would pass against an implementation that ignored it.
+    expect(() =>
+      hasNestEmitterImport(
+        [{ source: "", symbols: ["EventEmitter2"], line: 9, dynamic: false }],
+        PATH,
+      ),
+    ).toThrow(`effects-nest (${PATH}, line 9): ImportEdge.source is empty`)
   })
 
   it("throws even when a broken ImportEdge sits after a legitimate match", () => {
     // Order-independence pin — using `.some()` alone would short-circuit on the first
     // match and silently accept a broken edge later in the list.
     expect(() =>
-      hasNestEmitterImport([
-        { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false },
-        { source: "", symbols: ["x"], line: 2, dynamic: false },
-      ]),
+      hasNestEmitterImport(
+        [
+          { source: "@nestjs/event-emitter", symbols: ["EventEmitter2"], line: 1, dynamic: false },
+          { source: "", symbols: ["x"], line: 2, dynamic: false },
+        ],
+        PATH,
+      ),
     ).toThrow(/ImportEdge\.source is empty/)
   })
 })

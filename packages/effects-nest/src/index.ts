@@ -1,4 +1,5 @@
-export { classifyNestCall, EFFECTS_NEST_DERIVED_BY_PREFIX } from "./classify"
+export { classifyNestCall } from "./classify"
+export { EFFECTS_NEST_DERIVED_BY_PREFIX, EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 export {
   hasNestEmitterImport,
   isNestEmitMethod,

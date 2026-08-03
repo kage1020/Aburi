@@ -125,6 +125,43 @@ describe("classifyNestCall — malformed input fail-fast", () => {
       /empty segment/,
     )
   })
+
+  it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
+    // The name is now an importable const shared by four packages rather than a literal in
+    // this file, so nothing but this assertion catches `EFFECTS_PRISMA_PLUGIN_NAME` here.
+    expect(() => classifyNestCall(makeCall({ target: "" }), ctxWithNest)).toThrow(
+      /^effects-nest \(/,
+    )
+    const brokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["EventEmitter2"], line: 2, dynamic: false }],
+    })
+    expect(() => classifyNestCall(makeCall({ target: "eventBus.emit" }), brokenEdge)).toThrow(
+      /^effects-nest \(/,
+    )
+  })
+
+  it("throw messages include the file path so caught exceptions point at the offending source", () => {
+    const ctxWithPath = makeCtx({ imports: [makeNestEmitterImport()], path: "src/orders/x.ts" })
+    expect(() => classifyNestCall(makeCall({ target: "" }), ctxWithPath)).toThrow(
+      /src\/orders\/x\.ts/,
+    )
+    expect(() => classifyNestCall(makeCall({ target: "eventBus..emit" }), ctxWithPath)).toThrow(
+      /src\/orders\/x\.ts/,
+    )
+  })
+
+  it("throw messages for a broken ImportEdge name the file and the offending line", () => {
+    const ctxBrokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["EventEmitter2"], line: 4, dynamic: false }],
+      path: "src/orders/x.ts",
+    })
+    expect(() => classifyNestCall(makeCall({ target: "eventBus.emit" }), ctxBrokenEdge)).toThrow(
+      /ImportEdge\.source is empty/,
+    )
+    expect(() => classifyNestCall(makeCall({ target: "eventBus.emit" }), ctxBrokenEdge)).toThrow(
+      /src\/orders\/x\.ts, line 4/,
+    )
+  })
 })
 
 describe("classifyNestCall — purity", () => {

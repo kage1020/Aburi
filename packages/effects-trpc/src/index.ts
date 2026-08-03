@@ -1,4 +1,5 @@
-export { classifyTrpcCall, EFFECTS_TRPC_DERIVED_BY_PREFIX } from "./classify"
+export { classifyTrpcCall } from "./classify"
+export { EFFECTS_TRPC_DERIVED_BY_PREFIX, EFFECTS_TRPC_PLUGIN_NAME } from "./constants"
 export { hasTrpcClientImport } from "./imports"
 export { effectsTrpcManifest } from "./manifest"
 export {

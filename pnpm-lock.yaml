@@ -228,6 +228,9 @@ importers:
 
   packages/effects-drizzle:
     dependencies:
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
@@ -250,6 +253,9 @@ importers:
 
   packages/effects-nest:
     dependencies:
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
@@ -272,6 +278,9 @@ importers:
 
   packages/effects-prisma:
     dependencies:
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
@@ -294,6 +303,9 @@ importers:
 
   packages/effects-trpc:
     dependencies:
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@aburi/types':
         specifier: workspace:*
         version: link:../types

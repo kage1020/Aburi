@@ -182,6 +182,43 @@ describe("classifyPrismaCall — malformed input fail-fast", () => {
       /empty segment/,
     )
   })
+
+  it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
+    // The name is now an importable const shared by four packages rather than a literal in
+    // this file, so nothing but this assertion catches `EFFECTS_DRIZZLE_PLUGIN_NAME` here.
+    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPrisma)).toThrow(
+      /^effects-prisma \(/,
+    )
+    const brokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["PrismaClient"], line: 2, dynamic: false }],
+    })
+    expect(() =>
+      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), brokenEdge),
+    ).toThrow(/^effects-prisma \(/)
+  })
+
+  it("throw messages include the file path so caught exceptions point at the offending source", () => {
+    const ctxWithPath = makeCtx({ imports: [makePrismaImport()], path: "src/services/x.ts" })
+    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPath)).toThrow(
+      /src\/services\/x\.ts/,
+    )
+    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxWithPath)).toThrow(
+      /src\/services\/x\.ts/,
+    )
+  })
+
+  it("throw messages for a broken ImportEdge name the file and the offending line", () => {
+    const ctxBrokenEdge = makeCtx({
+      imports: [{ source: "", symbols: ["PrismaClient"], line: 4, dynamic: false }],
+      path: "src/services/x.ts",
+    })
+    expect(() =>
+      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), ctxBrokenEdge),
+    ).toThrow(/ImportEdge\.source is empty/)
+    expect(() =>
+      classifyPrismaCall(makeCall({ target: "prisma.user.create" }), ctxBrokenEdge),
+    ).toThrow(/src\/services\/x\.ts, line 4/)
+  })
 })
 
 describe("classifyPrismaCall — purity", () => {

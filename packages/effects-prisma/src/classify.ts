@@ -1,13 +1,8 @@
+import { assertNonEmptySegments, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 import { hasPrismaImport } from "./imports"
 import { isPrismaReadMethod, isPrismaTransactionMethod, isPrismaWriteMethod } from "./methods"
-
-/**
- * Shared derivedBy namespace. `manifest.ts` imports this same const for its
- * `derivedByPrefixes` entry, so the classifier's tag builder and the registry
- * declaration cannot drift.
- */
-export const EFFECTS_PRISMA_DERIVED_BY_PREFIX = "effects-plugin:prisma" as const
 
 /**
  * Classify a CallCandidate against Prisma Client conventions.
@@ -33,18 +28,13 @@ export function classifyPrismaCall(
   call: CallCandidate,
   ctx: ClassifyContext,
 ): EffectClassification | null {
-  // Fail-fast runs BEFORE the import gate so a malformed target throws on every file,
-  // not just the ~1% that import Prisma. Ordering the other way lets the same bug
-  // surface only in Prisma-consuming files and stay silent everywhere else —
-  // catastrophic for reproducing upstream language-plugin bugs.
-  const parts = assertNonEmptySegments(call.target)
+  const origin: PluginInputOrigin = { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath: ctx.file.path }
 
-  if (!hasPrismaImport(ctx.file.imports)) return null
+  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why the
+  // order is load-bearing.
+  const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
 
-  // `parts` is guaranteed non-empty by `assertNonEmptySegments`, but `at()`'s general
-  // signature still widens to `string | undefined`. `.at(-1) as string` records the
-  // intent without a non-null assertion (Biome disallows `!` under noNonNullAssertion).
-  const method = parts.at(-1) as string
+  if (!hasPrismaImport(ctx.file.imports, ctx.file.path)) return null
 
   if (isPrismaTransactionMethod(method)) {
     // Bare `$transaction()` (single segment) is not a Prisma call — the transaction
@@ -80,36 +70,4 @@ export function classifyPrismaCall(
   }
 
   return null
-}
-
-/**
- * A non-empty split — after `assertNonEmptySegments` runs there is guaranteed to be at
- * least one segment, so the tuple type reflects that.
- */
-type NonEmptySegments = readonly [string, ...string[]]
-
-/**
- * Split `target` on `.` and reject any shape a well-formed language plugin would never
- * emit: an empty target, or one with an empty segment (leading, trailing, or adjacent
- * dots). A malformed target here would otherwise slip through the length gate and
- * false-classify — e.g. `"prisma..create"` has three segments and would match a write
- * verb — so this is the fail-fast the sibling classifiers apply at their entry points.
- */
-function assertNonEmptySegments(target: string): NonEmptySegments {
-  if (target.length === 0) {
-    throw new Error(
-      "effects-prisma: CallCandidate.target is empty — language plugin emitted an unnormalized callee",
-    )
-  }
-  const parts = target.split(".")
-  for (const segment of parts) {
-    if (segment.length === 0) {
-      throw new Error(
-        `effects-prisma: CallCandidate.target "${target}" has empty segment(s) — language plugin emitted an unnormalized callee`,
-      )
-    }
-  }
-  // Split of a non-empty string yields at least one segment, and the loop above ruled
-  // out empty segments — the tuple assertion here reflects a proven invariant.
-  return parts as unknown as NonEmptySegments
 }
