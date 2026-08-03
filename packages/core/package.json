@@ -1,6 +1,6 @@
 {
   "name": "@aburi/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Aburi core foundation: deterministic Symbol ID generation, canonical JSON serializer (NFC + codepoint-sorted keys), 11 IR invariants checker, workspace root + JS/TS manager autodetect, and JS/TS Component autodetect (package.json#name / exports / dependency-driven framework discovery)",
   "license": "MIT",
   "author": "kage1020",
