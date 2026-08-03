@@ -98,7 +98,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
 
-  const loaded = await resolveConfig(workspaceRoot, options.configPath)
+  const loaded = await resolveConfig(cwd, options.configPath)
   const config = mergeCliOverrides(loaded.config, options)
 
   const plugins = await loadPlugins({
@@ -215,13 +215,20 @@ function requireLanguagePlugin(count: number, configSource: string | null): void
   )
 }
 
-async function resolveConfig(
-  workspaceRoot: string,
-  overridePath: string | undefined,
-): Promise<LoadedConfig> {
+/**
+ * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the process `cwd`,
+ * per the §11 precedence table. A config in the current package therefore wins over one in
+ * an ancestor.
+ *
+ * The marker-detected workspace root plays no part here. It is the base for Symbol id
+ * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for
+ * relative plugin specifiers — but not for locating the config, which is why a
+ * package-local config can name paths that resolve against a directory above it.
+ */
+async function resolveConfig(cwd: string, overridePath: string | undefined): Promise<LoadedConfig> {
   try {
     if (overridePath !== undefined) {
-      const absolute = resolve(workspaceRoot, overridePath)
+      const absolute = resolve(cwd, overridePath)
       const config = await readConfigFile(absolute)
       const { normalizeFrameworkHints } = await import("@aburi/config")
       return {
@@ -231,7 +238,7 @@ async function resolveConfig(
         syntheticPlugins: normalizeFrameworkHints(config),
       }
     }
-    return await loadConfig({ cwd: workspaceRoot })
+    return await loadConfig({ cwd })
   } catch (error) {
     throw new CliError(`Failed to load Aburi config: ${errorMessage(error)}`, "config-error", {
       cause: error,
