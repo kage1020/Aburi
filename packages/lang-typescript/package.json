@@ -1,6 +1,6 @@
 {
   "name": "@aburi/lang-typescript",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Aburi TypeScript / TSX language plugin: tree-sitter WASM-based parseFile / extractSymbols / walkBody / normalizeAst, JSDoc-aware Signature + throws extraction, decorator + drop-hint contract, Category B / C drop rules per the drop-list design",
   "license": "MIT",
   "author": "kage1020",
