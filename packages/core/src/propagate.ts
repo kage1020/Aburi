@@ -405,30 +405,87 @@ function condense(
   return nodes
 }
 
+/**
+ * Kahn's algorithm over the condensed DAG, run backwards so a callee is emitted before
+ * every caller that reaches it. Among SCCs that are ready at the same time the smallest
+ * index wins, which is what keeps the sweep — and therefore `derivedFrom`, the effect
+ * ordering, and every fingerprint downstream of them — independent of edge insertion order.
+ *
+ * The ready set is a binary min-heap rather than a re-sorted array. Most symbols call
+ * nothing, so in a real workspace nearly every SCC is ready at the start: the ready set
+ * grows to O(V), and sorting it on each of the V dequeues is quadratic. Measured on
+ * out-degree-zero symbols, which is that shape exactly: 20k took ~3.9s and 40k ~14.2s,
+ * against ~8ms and ~14ms here. The emitted order is unchanged — the heap answers the same
+ * question the sort did, "smallest ready index", just without re-deriving it each time.
+ */
 function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
   const remainingOut = condensed.map((n) => n.outSccs.length)
   const reverseAdj: number[][] = condensed.map(() => [])
   condensed.forEach((node, idx) => {
     for (const toScc of node.outSccs) reverseAdj[toScc]?.push(idx)
   })
-  const queue: number[] = []
+
+  const ready = new MinHeap()
   condensed.forEach((_, idx) => {
-    if (remainingOut[idx] === 0) queue.push(idx)
+    if (remainingOut[idx] === 0) ready.push(idx)
   })
-  queue.sort((a, b) => a - b)
+
   const order: number[] = []
-  while (queue.length > 0) {
-    queue.sort((a, b) => a - b)
-    const next = queue.shift() as number
+  for (let next = ready.pop(); next !== undefined; next = ready.pop()) {
     order.push(next)
     for (const upstream of reverseAdj[next] ?? []) {
       const rem = remainingOut[upstream]
       if (rem === undefined) continue
       remainingOut[upstream] = rem - 1
-      if (remainingOut[upstream] === 0) queue.push(upstream)
+      if (remainingOut[upstream] === 0) ready.push(upstream)
     }
   }
   return order
+}
+
+/**
+ * Binary min-heap over SCC indices. Small and local on purpose: the only ordering this
+ * needs is numeric ascending, and the only operations are push and pop-min.
+ */
+class MinHeap {
+  private readonly items: number[] = []
+
+  push(value: number): void {
+    const items = this.items
+    items.push(value)
+    let child = items.length - 1
+    while (child > 0) {
+      const parent = (child - 1) >> 1
+      if ((items[parent] as number) <= (items[child] as number)) break
+      ;[items[parent], items[child]] = [items[child] as number, items[parent] as number]
+      child = parent
+    }
+  }
+
+  pop(): number | undefined {
+    const items = this.items
+    const top = items[0]
+    if (top === undefined) return undefined
+    const last = items.pop() as number
+    if (items.length === 0) return top
+    items[0] = last
+    let parent = 0
+    for (;;) {
+      const left = parent * 2 + 1
+      const right = left + 1
+      let smallest = parent
+      if (left < items.length && (items[left] as number) < (items[smallest] as number)) {
+        smallest = left
+      }
+      if (right < items.length && (items[right] as number) < (items[smallest] as number)) {
+        smallest = right
+      }
+      if (smallest === parent) break
+      ;[items[parent], items[smallest]] = [items[smallest] as number, items[parent] as number]
+      parent = smallest
+    }
+    return top
+  }
 }
 
 function compareCodeUnit(a: string, b: string): number {
