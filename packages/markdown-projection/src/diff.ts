@@ -180,7 +180,26 @@ function renderDeltaBody(delta: SymbolDelta): string[] {
   appendCallDelta(rows, delta.calls)
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
+  appendUnexplainedChangeNote(delta, rows)
   return rows
+}
+
+/**
+ * Never leave a heading with an empty body. A symbol listed as changed with nothing under
+ * it reads as "no reason was found", when it means one of two things the reviewer cannot
+ * distinguish: the delta carries no field-level detail, or a bucket went unrendered.
+ *
+ * This is a note rather than a thrown invariant because the first case is legitimately
+ * reachable. `apiChanged` comes from comparing API fingerprints (`delta.ts:41`), and the
+ * fingerprint covers inputs the structured delta does not model — so a real document can
+ * set the flag with every `ArrayDelta` empty. Failing the render would turn a gap in the
+ * projection into a failed CI job; saying so in one line does not.
+ */
+function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
+  if (rows.length > 0) return
+  if (!delta.apiChanged && !delta.logicChanged) return
+  const which = delta.apiChanged ? "API" : "logic"
+  rows.push(`- ${which} fingerprint changed; no field-level detail was recorded`)
 }
 
 function appendSignatureDelta(
@@ -193,17 +212,29 @@ function appendSignatureDelta(
     const after = renderStringList(sig.outputs.added)
     rows.push(`- signature.outputs: \`${before}\` → \`${after}\``)
   }
+  if (sig.outputs.modified.length > 0) {
+    rows.push(`- signature.outputs modified: ${renderInlineList(sig.outputs.modified)}`)
+  }
   if (sig.throws.added.length > 0) {
     rows.push(`- signature.throws added: ${renderInlineList(sig.throws.added)}`)
   }
   if (sig.throws.removed.length > 0) {
     rows.push(`- signature.throws removed: ${renderInlineList(sig.throws.removed)}`)
   }
+  if (sig.throws.modified.length > 0) {
+    rows.push(`- signature.throws modified: ${renderInlineList(sig.throws.modified)}`)
+  }
   if (sig.inputs.added.length > 0) {
-    rows.push(`- signature.inputs added: ${sig.inputs.added.length} item(s)`)
+    rows.push(`- signature.inputs added: ${describeInputs(sig.inputs.added)}`)
   }
   if (sig.inputs.removed.length > 0) {
-    rows.push(`- signature.inputs removed: ${sig.inputs.removed.length} item(s)`)
+    rows.push(`- signature.inputs removed: ${describeInputs(sig.inputs.removed)}`)
+  }
+  // `inputs` keys on `${index}:${name}`, so a parameter whose type changed while its name
+  // and position held lands here and only here — the single most common breaking API
+  // change. Rendering a count, as added/removed once did, would say nothing about it.
+  if (sig.inputs.modified.length > 0) {
+    rows.push(`- signature.inputs modified: ${describeInputs(sig.inputs.modified)}`)
   }
   if (sig.asyncChanged) rows.push(`- signature.async: toggled`)
   if (sig.generatorChanged) rows.push(`- signature.generator: toggled`)
@@ -239,40 +270,47 @@ function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]):
 
 function appendRuleDelta(rows: string[], delta: SymbolDelta["rules"]): void {
   if (delta === undefined) return
-  appendArrayGroup(rows, "rules", delta.added, delta.removed, describeRuleLike)
+  appendArrayGroup(rows, "rules", delta, describeRuleLike)
 }
 
 function appendEffectDelta(rows: string[], delta: SymbolDelta["effects"]): void {
   if (delta === undefined) return
-  appendArrayGroup(rows, "effects", delta.added, delta.removed, describeEffectLike)
+  appendArrayGroup(rows, "effects", delta, describeEffectLike)
 }
 
 function appendCallDelta(rows: string[], delta: SymbolDelta["calls"]): void {
   if (delta === undefined) return
-  appendArrayGroup(rows, "calls", delta.added, delta.removed, describeCallLike)
+  appendArrayGroup(rows, "calls", delta, describeCallLike)
 }
 
+/**
+ * All three `ArrayDelta` buckets, not just added / removed. `differentiate` in
+ * `@aburi/diff` routes an element whose identity key matched but whose content changed
+ * into `modified`, so a rewritten guard condition, a downgraded effect confidence and a
+ * call that stopped resolving all arrive there and nowhere else.
+ */
 function appendArrayGroup(
   rows: string[],
   label: string,
-  added: readonly unknown[],
-  removed: readonly unknown[],
+  delta: { added: readonly unknown[]; removed: readonly unknown[]; modified: readonly unknown[] },
   describe: (item: unknown) => string | null,
 ): void {
-  if (added.length > 0) {
-    const lines = added.map(describe).filter((line): line is string => line !== null)
-    if (lines.length > 0) {
-      rows.push(`- ${label} added:`)
-      for (const line of lines) rows.push(`  - ${line}`)
-    }
-  }
-  if (removed.length > 0) {
-    const lines = removed.map(describe).filter((line): line is string => line !== null)
-    if (lines.length > 0) {
-      rows.push(`- ${label} removed:`)
-      for (const line of lines) rows.push(`  - ${line}`)
-    }
-  }
+  appendBucket(rows, `${label} added`, delta.added, describe)
+  appendBucket(rows, `${label} removed`, delta.removed, describe)
+  appendBucket(rows, `${label} modified`, delta.modified, describe)
+}
+
+function appendBucket(
+  rows: string[],
+  label: string,
+  items: readonly unknown[],
+  describe: (item: unknown) => string | null,
+): void {
+  if (items.length === 0) return
+  const lines = items.map(describe).filter((line): line is string => line !== null)
+  if (lines.length === 0) return
+  rows.push(`- ${label}:`)
+  for (const line of lines) rows.push(`  - ${line}`)
 }
 
 // -----------------------------------------------------------------------------
@@ -362,6 +400,24 @@ function describeCallLike(value: unknown): string | null {
   const c = asCallLike(value)
   if (c === null) return null
   return `\`${c.target}\` (L${c.line})`
+}
+
+/**
+ * `Signature.inputs` entries are `{ name, type }`. Both are needed: the name identifies
+ * which parameter moved, and the type is the change itself for the `modified` bucket.
+ * Entries that do not match the shape are dropped rather than rendered as placeholders,
+ * matching how the other `describe*Like` helpers handle a surprise.
+ */
+function describeInputs(items: readonly unknown[]): string {
+  const rendered = items
+    .map((value) => {
+      if (!isRecord(value)) return null
+      const { name, type } = value
+      if (typeof name !== "string" || typeof type !== "string") return null
+      return `\`${name}: ${type}\``
+    })
+    .filter((line): line is string => line !== null)
+  return rendered.length > 0 ? rendered.join(", ") : `${items.length} item(s)`
 }
 
 function renderStringList(values: readonly unknown[]): string {
