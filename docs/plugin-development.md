@@ -75,6 +75,10 @@ import type { LanguagePlugin, ParseResult, BodyExtraction } from "@aburi/types"
 
 class MyLangPlugin implements LanguagePlugin {
   readonly manifest = myLangManifest
+  // The LanguageId you stamp on every Symbol id, and what lands in
+  // IR.workspace.languages. Must match `^[a-z][a-z0-9]*$` — the manifest name
+  // ("lang-mylang") is a plugin ref and cannot be used here.
+  readonly languageId = "my"
   readonly fileExtensions = [".my"] as const
   readonly capabilities = { /* boolean matrix */ }
 
@@ -238,16 +242,16 @@ discovers them by package name from `aburi.json`:
 ```jsonc
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
-  "languages": ["typescript"],
-  "frameworks": ["mytool"],
-  "effects": ["mytool"]
+  "languages": ["lang-typescript"],
+  "frameworks": ["framework-mytool"],
+  "effects": ["effects-mytool"]
 }
 ```
 
 The loader resolves each ref as follows (`packages/cli/src/plugin-loader.ts:84-90`):
 
 - Bare name with no `@` and no `/` → prefixed with `@aburi/` verbatim.
-  `"typescript"` → `@aburi/typescript`, `"framework-mytool"` → `@aburi/framework-mytool`.
+  `"lang-typescript"` → `@aburi/lang-typescript`, `"framework-mytool"` → `@aburi/framework-mytool`.
   The loader does **not** infer a bucket prefix — a config entry `frameworks: ["mytool"]`
   resolves to `@aburi/mytool`, NOT `@aburi/framework-mytool`. Third-party plugin
   authors should write the full package name (`framework-mytool` for a first-party

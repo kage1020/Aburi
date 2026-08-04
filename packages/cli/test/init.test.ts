@@ -67,11 +67,20 @@ describe("CL5 — --force overwrites", () => {
 })
 
 describe("--with-suggestions", () => {
-  it("emits install comments for detected frameworks (none = no comments)", async () => {
+  it("names the language plugin even when no framework is detected", async () => {
     await makeMinimalPnpmWorkspace()
     const report = await runInit({ cwd: scratch, withSuggestions: true })
     const contents = await readFile(report.outputPath, "utf8")
-    // No framework detected in the minimal workspace, so no suggestion comments.
+    // The language plugin is what the next `aburi scan` refuses to run without, so it is
+    // suggested unconditionally; the minimal workspace pulls in no framework.
+    expect(contents).toContain("Suggested install: pnpm add -D @aburi/lang-typescript")
+    expect(contents).not.toContain("framework-")
+  })
+
+  it("emits no banner when the flag is absent", async () => {
+    await makeMinimalPnpmWorkspace()
+    const report = await runInit({ cwd: scratch })
+    const contents = await readFile(report.outputPath, "utf8")
     expect(contents).not.toContain("Suggested install:")
   })
 })

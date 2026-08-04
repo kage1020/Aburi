@@ -5,17 +5,31 @@
  */
 import {
   DEFAULT_EXPORT_QNAME,
+  makeLanguageId,
   makeMemberQname,
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
 } from "@aburi/core"
-import type { SymbolId } from "@aburi/types"
+import type { LanguageId, SymbolId } from "@aburi/types"
 
-const LANGUAGE_ID = "ts"
+/**
+ * The `LanguageId` this plugin stamps before the colon of every Symbol id. It is also
+ * what `LanguagePlugin.languageId` reports to `@aburi/core`, so the id prefix and the
+ * value that lands in `IR.workspace.languages` cannot drift. Note this is a different
+ * vocabulary from the manifest name (`lang-typescript`), which is a plugin ref.
+ *
+ * One token covers all four extensions this plugin claims — `.ts`, `.tsx`, `.js`, `.jsx`
+ * all produce `ts:`-prefixed ids. That is deliberate: the id namespace is per plugin, and
+ * one plugin parsing a family of dialects should not fragment it. The component detector
+ * keeps a finer vocabulary (`tsx`, `js`, `jsx` are separate tokens there), so a JavaScript
+ * project reports `components[].languages: ["js"]` alongside `workspace.languages: ["ts"]`
+ * in the same document. Both are accurate about their own subject.
+ */
+export const TYPESCRIPT_LANGUAGE_ID: LanguageId = makeLanguageId("ts")
 
 export function makeTsSymbolId(file: string, qname: string): SymbolId {
-  return makeSymbolId({ language: LANGUAGE_ID, file, qualifiedName: qname })
+  return makeSymbolId({ language: TYPESCRIPT_LANGUAGE_ID, file, qualifiedName: qname })
 }
 
 export function topLevelQname(name: string): string {

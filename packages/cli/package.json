@@ -50,6 +50,8 @@
     "commander": "^15.0.0"
   },
   "devDependencies": {
+    "@aburi/framework-nestjs": "workspace:*",
+    "@aburi/lang-typescript": "workspace:*",
     "@types/node": "^26.0.1",
     "ajv": "^8.20.0",
     "tsdown": "^0.22.3",

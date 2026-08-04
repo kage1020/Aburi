@@ -16,6 +16,7 @@ import { extractSymbols } from "./extract-symbols"
 import { langTypescriptManifest } from "./manifest"
 import { normalizeAst } from "./normalize-ast"
 import { parseTypescriptFile, TYPESCRIPT_FILE_EXTENSIONS } from "./parser"
+import { TYPESCRIPT_LANGUAGE_ID } from "./qname"
 import { walkBody } from "./walk-body"
 
 /**
@@ -25,6 +26,9 @@ import { walkBody } from "./walk-body"
  */
 class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   readonly manifest = langTypescriptManifest
+  // Shared with the qname builder so the id prefix this plugin writes and the LanguageId
+  // it reports to core are the same string by construction.
+  readonly languageId = TYPESCRIPT_LANGUAGE_ID
   // Derived from parser.ts's EXTENSION_GRAMMAR so this list cannot drift from the grammar
   // dispatch table — adding an entry to the map is the only change needed.
   readonly fileExtensions: string[] = [...TYPESCRIPT_FILE_EXTENSIONS]

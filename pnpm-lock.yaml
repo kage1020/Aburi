@@ -66,6 +66,12 @@ importers:
         specifier: ^15.0.0
         version: 15.0.0
     devDependencies:
+      '@aburi/framework-nestjs':
+        specifier: workspace:*
+        version: link:../framework-nestjs
+      '@aburi/lang-typescript':
+        specifier: workspace:*
+        version: link:../lang-typescript
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1

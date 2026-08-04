@@ -1,6 +1,6 @@
 import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
 import { CoreError, type IntegrityViolation } from "./errors"
-import { isComponentId, isSymbolId, RESERVED_LANGUAGE_IDS } from "./id"
+import { isComponentId, isLanguageId, isSymbolId, RESERVED_LANGUAGE_IDS } from "./id"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -65,7 +65,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
  * empty); callers that want the throwing form use `assertIRIntegrity`.
  *
- * The 17 invariants checked here are:
+ * The 18 invariants checked here are:
  *   1. Symbol id uniqueness
  *   2. Component id uniqueness
  *   3. Symbol.component → Components[].id existence
@@ -83,6 +83,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *  15. stats.callResolution (when present) is a faithful census of Symbol.calls[]
  *  16. No Symbol id or Dependency endpoint uses a reserved language token (today: `slice`)
  *  17. Symbol and Component ids satisfy their own grammars
+ *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -104,6 +105,7 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkCallResolutionStatsCensus(ir, violations)
   checkSymbolIdNamespace(ir, violations)
   checkIdGrammar(ir, violations)
+  checkWorkspaceLanguages(ir, violations)
 
   return violations
 }
@@ -183,6 +185,56 @@ function checkIdGrammar(ir: IR, out: IntegrityViolation[]): void {
       invariant: 17,
       subject: component.id,
       message: `Component id does not satisfy the ASCII kebab-case grammar (ir-schema.md §4)`,
+    })
+  }
+}
+
+/**
+ * Invariant #18 (ir-schema.md §14): `workspace.languages` is non-empty, every entry
+ * satisfies the `LanguageId` grammar, and every `Symbol.language` appears in it.
+ *
+ * Three vocabularies sit close enough to this field to be mistaken for it — a plugin
+ * manifest name (`lang-typescript`), the component detector's per-extension token, and an
+ * npm package id — and the first was in fact projected straight into it, so every document
+ * produced failed the schema's `LanguageId` pattern. The schema alone does not close this:
+ * `readIR` brands a parsed document without validating it, so a document read off disk
+ * reaches `buildDiff` and the projections unchecked.
+ *
+ * The non-emptiness clause matters for a second reason. `minItems: 1` makes an empty list
+ * invalid on the wire, and it is reachable whenever no language plugin resolves — a state
+ * that otherwise produces a symbol-free IR at exit 0 and, downstream, a diff of `+0 -0 ~0`
+ * that passes every `--fail-on` gate.
+ *
+ * The subset clause is deliberately one-directional: a configured language that contributed
+ * no Symbol is normal (an empty package, or every file dropped), so `workspace.languages`
+ * may be a strict superset of the languages actually observed.
+ */
+function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
+  const declared = ir.workspace.languages
+  if (declared.length === 0) {
+    out.push({
+      invariant: 18,
+      subject: "workspace.languages",
+      message:
+        "workspace.languages is empty; the IR schema requires at least one entry, and an " +
+        "empty list means no language plugin was resolved so nothing could be extracted",
+    })
+  }
+  for (const language of declared) {
+    if (isLanguageId(language)) continue
+    out.push({
+      invariant: 18,
+      subject: "workspace.languages",
+      message: `"${language}" does not satisfy the LanguageId grammar (ir-schema.md §3.1); a plugin manifest name is not a LanguageId`,
+    })
+  }
+  const known = new Set<string>(declared)
+  for (const symbol of ir.symbols) {
+    if (known.has(symbol.language)) continue
+    out.push({
+      invariant: 18,
+      subject: symbol.id,
+      message: `Symbol.language "${symbol.language}" is not listed in workspace.languages`,
     })
   }
 }

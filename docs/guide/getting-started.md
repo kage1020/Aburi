@@ -28,8 +28,8 @@ frameworks, and components, and writes `aburi.json`:
 ```jsonc
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
-  "languages": ["typescript"],
-  "frameworks": ["nestjs"]
+  "languages": ["lang-typescript"],
+  "frameworks": ["framework-nestjs"]
 }
 ```
 

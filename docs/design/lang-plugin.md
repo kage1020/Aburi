@@ -69,6 +69,11 @@ The actual types are defined in the `types` package of `@aburi/core`. This docum
 interface LanguagePlugin {
   manifest: PluginManifest                     // type: "lang"
 
+  // the LanguageId this plugin owns — the prefix on every Symbol id it produces, and
+  // what core projects into IR.workspace.languages. Constrained to ^[a-z][a-z0-9]*$ by
+  // aburi.ir.v1, so it is NOT the manifest name ("lang-typescript" is a plugin ref).
+  languageId: LanguageId                       // e.g. "ts"
+
   // file matching (extensions only, not globs)
   fileExtensions: string[]                     // e.g. [".ts", ".tsx", ".mts", ".cts"]
 

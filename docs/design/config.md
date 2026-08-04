@@ -112,7 +112,7 @@ Setting it to `false` makes git-ignored files (build artifacts, etc.) extraction
 ```jsonc
 {
   "languages": ["lang-typescript"],
-  "frameworks": ["framework-nestjs", "framework-nextjs"],
+  "frameworks": ["framework-nestjs", "framework-next"],
   "effects": ["effects-prisma", "effects-pino", "effects-fetch"]
 }
 ```
@@ -121,15 +121,19 @@ Each array element is a **plugin manifest name** (the `name` field).
 
 ### 5.2 Resolution Order
 
-For a string `<id>`, Aburi resolves in the following order:
+For a string `<id>`, Aburi resolves to exactly one specifier — there is no fallback chain:
 
-1. `<id>` is a path (starts with `./` or `../`) → relative-path resolution
-2. Resolve `<id>` as an npm package name
-3. Resolve `@aburi/<id>` as an npm package name (fallback resolution for official plugins)
+1. `<id>` starts with `./` or `../` → resolved against the workspace root as a `file:` URL
+2. `<id>` is scoped or contains `/` (`@myorg/pkg`, `some-pkg/subpath`) → used verbatim
+3. Otherwise → prefixed, becoming `@aburi/<id>`
 
 Examples:
-- `"effects-prisma"` → try `effects-prisma` first, then `@aburi/effects-prisma`
+- `"effects-prisma"` → `@aburi/effects-prisma`
+- `"@myorg/aburi-effects"` → `@myorg/aburi-effects`
 - `"./aburi-plugins/internal-framework.mjs"` → direct relative path
+
+A bare name is therefore *only* resolvable under the `@aburi` scope. Third-party plugins
+must be listed by their full package name.
 
 ### 5.3 Meaning of Array Order
 
@@ -366,13 +370,13 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
   "frameworks": [],
   "effects": [],
   "components": [
-    { "id": "billing", "name": "Billing", "roots": ["apps/billing"], "languages": ["typescript"] },
-    { "id": "shared",  "name": "Shared",  "roots": ["packages/shared"], "languages": ["typescript"] }
+    { "id": "billing", "name": "Billing", "roots": ["apps/billing"], "languages": ["ts"] },
+    { "id": "shared",  "name": "Shared",  "roots": ["packages/shared"], "languages": ["ts"] }
   ]
 }
 ```
 
-Users are expected to add framework / effects plugins afterwards.
+`init` fills in the language and framework plugin refs it has a mapping for; effects plugins are outside its scope and are added by hand.
 
 ## 14. Verifiable Properties
 

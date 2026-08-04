@@ -41,7 +41,7 @@ The Symbol ID grammar in [ir-schema.md](./ir-schema.md) §3 is:
 
 The `<language>` token is the namespace boundary between languages. Two Symbols whose IDs differ only in `<language>` are two distinct Symbols with no implied relationship. The IR schema already treats them as such — `symbols[].id` is the primary key, and `dependencies[].from`/`to` are foreign keys into it.
 
-Rule L-1 (language token ownership): each `<language>` token is exclusively owned by exactly one language plugin. The token is declared in the plugin's manifest (short-form id: `ts`, `tsx`, `js`, `py`, `go`, `rs`, `scala`, ...). Two plugins declaring the same token is a startup error, following the general duplicate-declaration behavior of [extension-vocab.md](./extension-vocab.md) §6.1: the run aborts with a manifest-conflict diagnostic pointing at both plugins. Ownership semantics reuse the exclusive sub-namespace framework of [extension-vocab.md](./extension-vocab.md) §5.3.
+Rule L-1 (language token ownership): each `<language>` token is exclusively owned by exactly one language plugin. The token is declared as `LanguagePlugin.languageId` (short-form id: `ts`, `tsx`, `js`, `py`, `go`, `rs`, `scala`, ...) — deliberately not the manifest `name`, which is a plugin ref (`lang-typescript`) resolved as a module specifier and outside the `LanguageId` grammar of Rule L-3. Two plugins declaring the same token is a startup error, following the general duplicate-declaration behavior of [extension-vocab.md](./extension-vocab.md) §6.1: the run aborts with a manifest-conflict diagnostic pointing at both plugins. Ownership semantics reuse the exclusive sub-namespace framework of [extension-vocab.md](./extension-vocab.md) §5.3.
 
 Rule L-2 (well-known tokens): the following short-form tokens are centrally reserved to their conventional languages and MAY NOT be re-owned: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`, `java`, `kt`, `scala`, `hs`, `rb`, `php`, `cs`, `swift`. This list is additive; a new mainstream language may extend it in a follow-up PR.
 
@@ -213,7 +213,7 @@ Rule L-10 (config surface locality): no per-language section of the config contr
 
 | ID | Input | Expected |
 | --- | --- | --- |
-| ML1 | Two plugins both declare `language: "py"` in their manifests | Startup aborts with manifest-conflict diagnostic naming both plugins |
+| ML1 | Two plugins both declare `languageId: "py"` | Startup aborts with manifest-conflict diagnostic naming both plugins |
 | ML2 | Plugin declares `language: "TS"` (uppercase) | Manifest rejected with "language token must match `[a-z][a-z0-9]*`" |
 | ML3 | Files `foo/bar.ts` and `foo/bar.py` both define a symbol `Baz` | Two Symbols emitted: `ts:foo/bar.ts#Baz` and `py:foo/bar.py#Baz`, both present in `symbols[]` |
 | ML4 | Component with `languages: ["ts", "py"]`, roots contain both languages | Component record emitted with `languages: ["ts", "py"]`; both language plugins participate in extraction |

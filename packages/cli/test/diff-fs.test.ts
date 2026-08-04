@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
+import { makeLanguageId } from "@aburi/core"
 import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -25,7 +26,7 @@ function makeEmptyIR(): IR {
   return {
     $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
-    workspace: { root: ".", managers: [], languages: ["ts"] },
+    workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
     components: [],
     symbols: [],
     dependencies: [],
@@ -54,7 +55,7 @@ function makeIRWithAdded(): IR {
         kind: "function",
         extKind: null,
         name: "Foo",
-        language: "ts",
+        language: makeLanguageId("ts"),
         component: null,
         visibility: "public",
         decorators: [],

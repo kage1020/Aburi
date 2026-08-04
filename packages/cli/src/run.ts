@@ -83,6 +83,21 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         if (report.suggestedPlugins.length > 0) {
           stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
         }
+        // An unmapped language leaves `languages` empty, and `aburi scan` refuses to run
+        // without a language plugin — so this is the difference between the next command
+        // working and it stopping, not a nicety.
+        if (report.unmappedLanguages.length > 0) {
+          stderr.write(
+            `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
+              `"languages" is empty, so \`aburi scan\` has nothing to parse with — add a plugin ref to aburi.json.\n`,
+          )
+        }
+        if (report.unmappedFrameworks.length > 0) {
+          stderr.write(
+            `⚠ No framework plugin ships for: ${report.unmappedFrameworks.join(", ")}. ` +
+              `Those components will be scanned without framework classification.\n`,
+          )
+        }
         return report.exitCode
       })(),
     )

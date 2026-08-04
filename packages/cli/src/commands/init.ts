@@ -22,6 +22,13 @@ export interface InitReport {
   detectedFrameworks: string[]
   componentCount: number
   suggestedPlugins: readonly string[]
+  /**
+   * Detected language ids with no first-party plugin. Non-empty means the written config
+   * names no language plugin, so `aburi scan` cannot parse anything and will say so.
+   */
+  unmappedLanguages: readonly string[]
+  /** Detected framework ids with no first-party plugin; classification is simply narrower. */
+  unmappedFrameworks: readonly string[]
   overwrote: boolean
   exitCode: ExitCode
 }
@@ -67,10 +74,10 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const frameworkSet = new Set<string>()
   for (const c of components) for (const f of c.frameworks ?? []) frameworkSet.add(f)
 
-  const suggestions = options.withSuggestions ? suggestPluginsFor(frameworkSet) : []
+  const suggestions = options.withSuggestions ? suggestPluginsFor(languageSet, frameworkSet) : []
   const contents = renderConfig({
-    languages: [...languageSet].sort(),
-    frameworks: [...frameworkSet].sort(),
+    languages: pluginRefsFor(languageSet, LANGUAGE_TO_PLUGIN),
+    frameworks: pluginRefsFor(frameworkSet, FRAMEWORK_TO_PLUGIN),
     components: components.map((c) => ({
       id: c.id,
       name: c.name,
@@ -91,6 +98,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     detectedFrameworks: [...frameworkSet].sort(),
     componentCount: components.length,
     suggestedPlugins: suggestions,
+    unmappedLanguages: unmappedIds(languageSet, LANGUAGE_TO_PLUGIN),
+    unmappedFrameworks: unmappedIds(frameworkSet, FRAMEWORK_TO_PLUGIN),
     overwrote: existed,
     exitCode: EXIT.SUCCESS,
   }
@@ -137,24 +146,71 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * §4.6 tail — suggestion mapping. Kept tiny on purpose; a large plugin catalog belongs
- * outside the CLI so autodetect stays language-agnostic. Only the plugins that ship in
- * this monorepo are hard-coded.
+ * Detector vocabulary → plugin manifest name. The detectors speak `LanguageId` /
+ * framework ids (`ts`, `tsx`, `nestjs`); the top-level `languages` / `frameworks` fields
+ * of `aburi.json` are `PluginRef`s that the plugin loader resolves as module specifiers.
+ * Writing a detector id into those fields makes the loader look for `@aburi/ts`.
+ *
+ * Kept tiny on purpose; a large plugin catalog belongs outside the CLI so autodetect
+ * stays language-agnostic. Only the plugins that ship in this monorepo are listed, and a
+ * detected id with no entry is omitted rather than guessed at — an unresolvable ref would
+ * fail the very next `aburi scan`.
  */
-const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
-  ["nestjs", "@aburi/framework-nestjs"],
-  ["next", "@aburi/framework-next"],
-  ["nextjs", "@aburi/framework-next"],
-  ["react", "@aburi/framework-react"],
+const LANGUAGE_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
+  ["ts", "lang-typescript"],
+  ["tsx", "lang-typescript"],
+  ["js", "lang-typescript"],
+  ["jsx", "lang-typescript"],
 ])
 
-function suggestPluginsFor(frameworks: ReadonlySet<string>): string[] {
+const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
+  ["nestjs", "framework-nestjs"],
+  // `nextjs`, not `next`: the npm dependency `next` is normalised to the framework id
+  // `nextjs` by the detector, and this table's left column is the detector's vocabulary.
+  ["nextjs", "framework-next"],
+  ["react", "framework-react"],
+  ["express", "framework-express"],
+])
+
+function pluginRefsFor(
+  detected: ReadonlySet<string>,
+  table: ReadonlyMap<string, string>,
+): string[] {
   const out = new Set<string>()
-  for (const f of frameworks) {
-    const plugin = FRAMEWORK_TO_PLUGIN.get(f)
-    if (plugin !== undefined) out.add(plugin)
+  for (const id of detected) {
+    const ref = table.get(id)
+    if (ref !== undefined) out.add(ref)
   }
   return [...out].sort()
+}
+
+/**
+ * §4.6 tail — the `--with-suggestions` banner. Install instructions name the npm package,
+ * so these carry the `@aburi/` scope that `PluginRef` leaves implicit.
+ *
+ * Languages come first and are included unconditionally, per `cli-spec.md` §4.6: the
+ * language plugin `init` just wrote into `languages` is a hard requirement for the next
+ * `aburi scan`, where a framework plugin only adds classification.
+ */
+function suggestPluginsFor(
+  languages: ReadonlySet<string>,
+  frameworks: ReadonlySet<string>,
+): string[] {
+  return [
+    ...pluginRefsFor(languages, LANGUAGE_TO_PLUGIN),
+    ...pluginRefsFor(frameworks, FRAMEWORK_TO_PLUGIN),
+  ].map((name) => `@aburi/${name}`)
+}
+
+/**
+ * Detected ids this CLI has no plugin for. They stay in `components[].languages` /
+ * `components[].frameworks` — that is the detector's own vocabulary and remains accurate —
+ * but they cannot appear in the top-level plugin-ref arrays, so the caller surfaces them:
+ * an unmapped *language* means the generated config resolves no language plugin at all, and
+ * `aburi scan` will refuse to run until one is added.
+ */
+function unmappedIds(detected: ReadonlySet<string>, table: ReadonlyMap<string, string>): string[] {
+  return [...detected].filter((id) => !table.has(id)).sort()
 }
 
 interface RenderedConfigInput {

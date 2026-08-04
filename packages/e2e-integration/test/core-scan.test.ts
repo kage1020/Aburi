@@ -42,27 +42,17 @@ const ajv = new Ajv2020({ strict: false, allErrors: true })
 const validateIR = ajv.compile(irSchema)
 
 /**
- * Nothing in the repository validated a *generated* IR against `schema/aburi.ir.v1.json`
- * before this — the diff, config and plugin-manifest schemas each had a test, the IR schema
- * did not — so the conditional `Effect` constraints and `inferredThrows`' `minItems` had
- * never run against a real document.
+ * Validates a generated IR against `schema/aburi.ir.v1.json`, which is what puts the
+ * conditional `Effect` constraints and `inferredThrows`' `minItems` in front of a real
+ * document rather than a hand-built fixture.
  *
- * Turning it on surfaced a pre-existing defect at `workspace.languages`, which is fed from
- * `plugin.manifest.name` (`"lang-typescript"`) where the schema wants short language ids
- * (`"ts"`, matching what every `Symbol.language` already carries), and which is `[]` against
- * `minItems: 1` when no language plugin is loaded. Fixing that means deciding where a lang
- * plugin declares its ids, which is a plugin-contract change and not this document's
- * subject. It is excluded by path rather than by weakening the check, so the rest of the
- * document — every Symbol, Component, Effect and Signature — stays fully validated and a
- * new violation anywhere else still fails.
+ * No path is excluded, `workspace.languages` included: it is declared by
+ * `LanguagePlugin.languageId` and enforced by integrity invariant #18, so a regression
+ * there fails here like any other.
  */
-const KNOWN_UNRELATED_VIOLATION = "/workspace/languages"
-
 function schemaViolations(document: unknown): string[] {
   if (validateIR(document)) return []
-  return (validateIR.errors ?? [])
-    .filter((e) => !e.instancePath.startsWith(KNOWN_UNRELATED_VIOLATION))
-    .map((e) => `${e.instancePath} ${e.message ?? ""}`)
+  return (validateIR.errors ?? []).map((e) => `${e.instancePath} ${e.message ?? ""}`)
 }
 
 function buildRegistry() {

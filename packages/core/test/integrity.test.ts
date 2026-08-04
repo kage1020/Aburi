@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { makeLanguageId } from "../src/id"
 import { assertIRIntegrity, CoreError, checkIRIntegrity } from "../src/index"
 import {
   componentId,
@@ -25,8 +26,8 @@ describe("checkIRIntegrity", () => {
   it("#2: detects duplicate Component ids", () => {
     const ir = minimalIR()
     ir.components = [
-      { id: componentId("a"), name: "A", roots: ["apps/a"], languages: ["ts"] },
-      { id: componentId("a"), name: "A2", roots: ["apps/a2"], languages: ["ts"] },
+      { id: componentId("a"), name: "A", roots: ["apps/a"], languages: [makeLanguageId("ts")] },
+      { id: componentId("a"), name: "A2", roots: ["apps/a2"], languages: [makeLanguageId("ts")] },
     ]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 2)).toBe(true)
@@ -35,7 +36,12 @@ describe("checkIRIntegrity", () => {
   it("#3: detects unknown Symbol.component reference", () => {
     const ir = minimalIR()
     ir.components = [
-      { id: componentId("billing"), name: "B", roots: ["apps/billing"], languages: ["ts"] },
+      {
+        id: componentId("billing"),
+        name: "B",
+        roots: ["apps/billing"],
+        languages: [makeLanguageId("ts")],
+      },
     ]
     ir.symbols = [makeSymbol("ts:src/a.ts#foo", { component: "missing" })]
     const violations = checkIRIntegrity(ir)
@@ -155,7 +161,9 @@ describe("checkIRIntegrity", () => {
 
   it("#10: detects absolute paths in component roots", () => {
     const ir = minimalIR()
-    ir.components = [{ id: componentId("a"), name: "A", roots: ["/abs/path"], languages: ["ts"] }]
+    ir.components = [
+      { id: componentId("a"), name: "A", roots: ["/abs/path"], languages: [makeLanguageId("ts")] },
+    ]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 10)).toBe(true)
   })
@@ -521,5 +529,39 @@ describe("checkIRIntegrity — id namespaces (#16)", () => {
     ir.components = [makeComponent("3d-renderer")]
     const violations = checkIRIntegrity(ir)
     expect(violations.filter((v) => v.invariant === 17)).toEqual([])
+  })
+})
+
+describe("invariant #18 — workspace.languages", () => {
+  it("rejects an empty list", () => {
+    const ir = minimalIR()
+    ir.workspace.languages = []
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 18)).toBe(true)
+  })
+
+  it("rejects a plugin manifest name in place of a LanguageId", () => {
+    const ir = minimalIR()
+    // The exact value `scan` used to project here: hyphenated, so it fails the
+    // `^[a-z][a-z0-9]*$` grammar the field is typed with.
+    ir.workspace.languages = ["lang-typescript" as unknown as (typeof ir.workspace.languages)[0]]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 18)).toBe(true)
+  })
+
+  it("rejects a Symbol whose language is absent from the declared list", () => {
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("py:src/a.py#alpha", { language: makeLanguageId("py") })]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 18 && v.subject === "py:src/a.py#alpha")).toBe(
+      true,
+    )
+  })
+
+  it("accepts a declared language that produced no Symbol", () => {
+    const ir = minimalIR()
+    ir.workspace.languages = [makeLanguageId("ts"), makeLanguageId("py")]
+    ir.symbols = [makeSymbol("ts:src/a.ts#alpha")]
+    expect(checkIRIntegrity(ir).filter((v) => v.invariant === 18)).toEqual([])
   })
 })

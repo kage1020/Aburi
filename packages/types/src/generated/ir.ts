@@ -17,7 +17,7 @@ export type RelativePath = string
 /**
  * Language plugin id. Examples: ts, tsx, js, py, go, rs, java, kt, scala, rb, php, cs.
  */
-export type LanguageId = string
+export type LanguageId = string & { readonly __brand: "LanguageId" }
 /**
  * ASCII kebab-case.
  */

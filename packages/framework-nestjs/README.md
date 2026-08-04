@@ -33,15 +33,13 @@ pnpm add @aburi/framework-nestjs
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 ```
 
-Currently, `aburi init` writes the short framework name `"nestjs"` into
-`aburi.json` under `frameworks` (matching the component-autodetect vocabulary
-in `@aburi/core`). The plugin loader currently resolves that short name to
-`@aburi/nestjs` (bare-name prefix, no bucket segment inferred — see
-[`docs/plugin-development.md`](../../docs/plugin-development.md)), so the
-generated `aburi.json` needs a one-time edit from `"nestjs"` → `"framework-nestjs"`
-for the loader to pick this package up. A follow-up will close the gap by
-teaching either `init` to emit `framework-nestjs` or the loader to widen its
-resolution table.
+`aburi init` writes `"framework-nestjs"` into `aburi.json` under `frameworks`,
+which is the plugin manifest name the loader resolves (to `@aburi/framework-nestjs`
+via the bare-name prefix — see
+[`docs/plugin-development.md`](../../docs/plugin-development.md)). The short
+framework id `"nestjs"` that component autodetect uses stays inside
+`components[].frameworks`; the two fields carry different vocabularies and no
+hand-editing is needed.
 
 ## See also
 

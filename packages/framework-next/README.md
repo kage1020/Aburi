@@ -42,13 +42,13 @@ pnpm add @aburi/framework-next
 import { nextFrameworkPlugin } from "@aburi/framework-next"
 ```
 
-Currently, `aburi init` writes the short framework name `"nextjs"` into
-`aburi.json` under `frameworks` (matching the component-autodetect vocabulary
-in `@aburi/core`). The plugin loader currently resolves that short name to
-`@aburi/nextjs` (bare-name prefix, no bucket segment inferred — see
-[`docs/plugin-development.md`](../../docs/plugin-development.md)), so the
-generated `aburi.json` needs a one-time edit from `"nextjs"` → `"framework-next"`
-for the loader to pick this package up. A follow-up will close the gap.
+`aburi init` writes `"framework-next"` into `aburi.json` under `frameworks`,
+which is the plugin manifest name the loader resolves (to `@aburi/framework-next`
+via the bare-name prefix — see
+[`docs/plugin-development.md`](../../docs/plugin-development.md)). The short
+framework id `"nextjs"` that component autodetect uses stays inside
+`components[].frameworks`; the two fields carry different vocabularies and no
+hand-editing is needed.
 
 ## See also
 
