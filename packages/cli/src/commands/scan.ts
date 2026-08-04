@@ -84,6 +84,15 @@ export interface ScanReport {
    * (§8.1) and consumed by `aburi explain --debug-resolution`.
    */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
+  /**
+   * Absolute path of the config that was read, or `null` when discovery found none and the
+   * run fell through to autodetect. Discovery starts at `cwd` while everything inside the
+   * config resolves against `workspaceRoot`, so which file won is not deducible from the
+   * arguments and belongs on the report.
+   */
+  configSource: string | null
+  /** Marker-detected root; the base for Symbol id paths and the config's relative globs. */
+  workspaceRoot: string
   exitCode: ExitCode
 }
 
@@ -162,6 +171,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
     callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
+    configSource: loaded.source,
+    workspaceRoot,
     exitCode: EXIT.SUCCESS,
   }
 }

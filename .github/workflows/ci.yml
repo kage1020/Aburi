@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every pull request, not only those targeting `main`. A stacked PR — one whose base is
+  # another open branch — otherwise runs no test job at all, so the first time its code is
+  # verified is after the branch below it merges and the base flips to `main`.
   pull_request:
-    branches: [main]
 
 # Only cancel superseded runs on PR branches. On `main` we let every push finish
 # so the release workflow (which gates on the exact same commands from CI)

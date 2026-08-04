@@ -19,7 +19,7 @@ document is the operator-facing reference.
 
 | Variable | Purpose |
 |---|---|
-| `ABURI_CONFIG` | Alternate config file path. Overridden by the `--config` flag when present. |
+| `ABURI_CONFIG` | Alternate config file path; a relative value resolves against `cwd`. Overridden by the `--config` flag when present. |
 | `ABURI_LOG_LEVEL` | Reserved for future logger wiring. The CLI currently reads the variable into `env.logLevel` but no code consumes it yet, so setting it has no runtime effect. |
 | `NO_COLOR` | Suppress ANSI colour output. |
 | `CI` | When set, `aburi scan` implicitly enables `--no-timestamp` for reproducible IR bytes. |
@@ -28,7 +28,11 @@ document is the operator-facing reference.
 
 1. `--config <path>` if given.
 2. `ABURI_CONFIG` env variable if set.
-3. `aburi.jsonc` / `aburi.json` walking up from `cwd`.
+3. `aburi.jsonc` / `aburi.json` walking up from `cwd`, nearest first.
+
+Relative paths given to `--config` / `ABURI_CONFIG` resolve against `cwd`. Relative paths
+*inside* the config resolve against the detected workspace root, which is not necessarily
+the directory the config sits in; `aburi scan` warns on stderr when they differ.
 4. On-disk defaults.
 
 ---
