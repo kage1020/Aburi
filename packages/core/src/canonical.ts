@@ -14,7 +14,11 @@ export interface SerializeOptions {
  * Three rules together guarantee bit-identical output for equal inputs:
  * 1. Every string is normalized to Unicode NFC before encoding. Composing characters from
  *    NFD ("é" written as "é") would otherwise change byte length even though the
- *    rendered text is identical.
+ *    rendered text is identical. Keys are normalized *before* rule 2 orders them:
+ *    ordering the input spelling and writing the normalized one yields a document whose
+ *    key order does not match the bytes it contains. Two keys that are distinct strings
+ *    but identical once normalized are rejected rather than both written, since a parser
+ *    reading the result back would keep only one of them.
  * 2. Object keys are sorted by UTF-16 code unit (not locale-aware). Within the Basic
  *    Multilingual Plane the ordering coincides with Unicode codepoint order; astral-plane
  *    strings differ, but this serializer, the integrity checker's sort-order invariant,
@@ -67,15 +71,16 @@ function write(
   }
   if (typeof value === "object") {
     assertPlainObject(value, path)
-    const entries = Object.entries(value as Record<string, unknown>).filter(
-      ([, v]) => v !== undefined,
-    )
+    const entries = normalizedEntries(value as Record<string, unknown>, path)
     if (entries.length === 0) return "{}"
+    // Normalize first, then order. Ordering the input spelling and writing the normalized
+    // one produces a document whose key order is wrong for the bytes it contains, and makes
+    // the output depend on which Unicode form the caller happened to hold.
     entries.sort(([a], [b]) => compareByCodeUnit(a, b))
     const childIndent = indent.repeat(depth + 1)
     const closeIndent = indent.repeat(depth)
     const rendered = entries.map(([k, v]) => {
-      const keyJson = JSON.stringify(k.normalize("NFC"))
+      const keyJson = JSON.stringify(k)
       const valueJson = write(v, `${path}.${k}`, depth + 1, indent, newline, colon)
       return `${childIndent}${keyJson}${colon}${valueJson}`
     })
@@ -114,4 +119,32 @@ function rejectNonJson(type: string, path: string): CoreError {
 /** Lexicographic compare by UTF-16 code unit (matches Array.prototype.sort default for strings). */
 function compareByCodeUnit(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * Own enumerable entries with `undefined` values dropped and every key normalized to NFC.
+ *
+ * Two keys can be distinct in JavaScript and identical once normalized — `"é"` written as
+ * one code point versus `e` plus a combining acute. Emitting both yields
+ * `{"é":1,"é":2}`: JSON a parser accepts and silently collapses, losing an entry. That is
+ * the same class of lossy coercion the non-JSON-value rejection exists to prevent, so it
+ * fails the same way rather than quietly.
+ */
+function normalizedEntries(value: Record<string, unknown>, path: string): [string, unknown][] {
+  const out: [string, unknown][] = []
+  const seen = new Map<string, string>()
+  for (const [rawKey, entry] of Object.entries(value)) {
+    if (entry === undefined) continue
+    const key = rawKey.normalize("NFC")
+    const prior = seen.get(key)
+    if (prior !== undefined) {
+      throw new CoreError(
+        `serializeCanonical at ${path}: keys ${JSON.stringify(prior)} and ${JSON.stringify(rawKey)} are distinct strings but identical after Unicode NFC normalization, so one would be lost on write`,
+        { code: "non-plain-json", value: `${path}.${key}` },
+      )
+    }
+    seen.set(key, rawKey)
+    out.push([key, entry])
+  }
+  return out
 }

@@ -231,8 +231,25 @@ export function toPosixRelative(rawPath: string): string {
  * Assemble the id from parts already known to be valid. Both public constructors run the
  * full check first and share this, so the format lives in one place.
  */
+/**
+ * Assemble the id, normalizing each part to Unicode NFC.
+ *
+ * The file path arrives from the filesystem, and filesystems disagree on which spelling
+ * they hand back: macOS decomposes (`é` as `e` + combining acute), Linux and Windows do
+ * not. Without this, the same source tree yields different Symbol ids depending on where
+ * it was scanned, so `symbols[]` sorts differently and every cross-platform diff reports
+ * spurious changes.
+ *
+ * It also keeps the in-memory id and the written one the same string. `serializeCanonical`
+ * normalizes on write, while the integrity sort check (invariant #11) compares what is in
+ * memory — so an un-normalized id could pass the check and land on disk out of order,
+ * because the check was measuring a string nobody ever writes.
+ */
 function composeSymbolId(parts: SymbolIdParts): SymbolId {
-  return `${parts.language}:${parts.file}#${parts.qualifiedName}` as SymbolId
+  const language = parts.language.normalize("NFC")
+  const file = parts.file.normalize("NFC")
+  const qualifiedName = parts.qualifiedName.normalize("NFC")
+  return `${language}:${file}#${qualifiedName}` as SymbolId
 }
 
 /**
