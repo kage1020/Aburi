@@ -1,4 +1,4 @@
-import { makeComponentId } from "@aburi/core"
+import { makeComponentId, makeLanguageId } from "@aburi/core"
 import { projectWorkspace } from "@aburi/markdown-projection"
 import type { Component } from "@aburi/types"
 import { afterEach, describe, expect, it } from "vitest"
@@ -30,7 +30,7 @@ const NESTJS_BILLING_COMPONENT: Component = {
   name: "nestjs-billing",
   roots: ["."],
   publicApi: [],
-  languages: ["ts"],
+  languages: [makeLanguageId("ts")],
   frameworks: ["nestjs"],
   description: null,
 }

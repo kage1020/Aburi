@@ -243,15 +243,15 @@ discovers them by package name from `aburi.json`:
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
-  "frameworks": ["mytool"],
-  "effects": ["mytool"]
+  "frameworks": ["framework-mytool"],
+  "effects": ["effects-mytool"]
 }
 ```
 
 The loader resolves each ref as follows (`packages/cli/src/plugin-loader.ts:84-90`):
 
 - Bare name with no `@` and no `/` → prefixed with `@aburi/` verbatim.
-  `"typescript"` → `@aburi/typescript`, `"framework-mytool"` → `@aburi/framework-mytool`.
+  `"lang-typescript"` → `@aburi/lang-typescript`, `"framework-mytool"` → `@aburi/framework-mytool`.
   The loader does **not** infer a bucket prefix — a config entry `frameworks: ["mytool"]`
   resolves to `@aburi/mytool`, NOT `@aburi/framework-mytool`. Third-party plugin
   authors should write the full package name (`framework-mytool` for a first-party

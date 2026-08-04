@@ -11,6 +11,7 @@ import type {
   FrameworkPlugin,
   ImportEdge,
   Symbol as IRSymbol,
+  LanguageId,
   LanguagePlugin,
   Logger,
   OpaqueAstNode,
@@ -24,6 +25,7 @@ import type {
 import { makeCallSiteKey } from "../callgraph"
 import { CoreError } from "../errors"
 import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
+import { makeLanguageId } from "../id"
 import { decideSymbolDrop } from "./drop-b"
 import type { DropCFilter } from "./drop-c"
 import { type ClassifyTimeoutEvent, classifyWithTimeout } from "./timeout"
@@ -237,7 +239,7 @@ interface ClassifyCallsInput {
   config: Config
   candidate: SymbolCandidate<OpaqueAstNode>
   file: SourceFile
-  language: string
+  language: LanguageId
   imports: readonly ImportEdge[]
   dropCFilter: DropCFilter
   timeoutEvents: ClassifyTimeoutEvent[]
@@ -334,7 +336,7 @@ function byTargetThenLine(
  * than emitting a Symbol with an empty language that silently passes the (currently
  * language-agnostic) integrity check.
  */
-function extractLanguageFromId(id: string): string {
+function extractLanguageFromId(id: string): LanguageId {
   const colon = id.indexOf(":")
   if (colon <= 0) {
     throw new CoreError(
@@ -342,13 +344,13 @@ function extractLanguageFromId(id: string): string {
       { code: "scan-plugin-misconfigured", value: id },
     )
   }
-  return id.slice(0, colon)
+  return makeLanguageId(id.slice(0, colon))
 }
 
 function buildDroppedSymbol(
   candidate: SymbolCandidate<OpaqueAstNode>,
   reason: string,
-  language: string,
+  language: LanguageId,
   frameworkConfidence: Confidence,
 ): IRSymbol {
   return {
@@ -379,7 +381,7 @@ function buildDroppedSymbol(
 
 interface BuildKeptSymbolInput {
   candidate: SymbolCandidate<OpaqueAstNode>
-  language: string
+  language: LanguageId
   rules: import("@aburi/types").Rule[]
   effects: Effect[]
   calls: Call[]

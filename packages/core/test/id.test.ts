@@ -4,12 +4,15 @@ import {
   DEFAULT_EXPORT_QNAME,
   isComponentId,
   isDefaultExportQname,
+  isLanguageId,
   isSymbolId,
   makeComponentId,
+  makeLanguageId,
   makeMemberQname,
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  RESERVED_LANGUAGE_IDS,
   toPosixRelative,
   trySymbolId,
 } from "../src/index"
@@ -252,6 +255,44 @@ describe("id guards", () => {
     // kind is recovered from the shape alone (ir-schema.md §11).
     for (const value of ["ts:src/a.ts#foo", "billing", "not a valid id"]) {
       expect(isSymbolId(value) && isComponentId(value), value).toBe(false)
+    }
+  })
+})
+
+describe("makeLanguageId", () => {
+  it("accepts the tokens the schema's LanguageId pattern allows", () => {
+    for (const raw of ["ts", "tsx", "py", "go", "cs", "ex"]) {
+      expect(makeLanguageId(raw)).toBe(raw)
+    }
+  })
+
+  it("rejects a plugin manifest name", () => {
+    // The precise value that used to reach `workspace.languages`; hyphens are outside the
+    // grammar, which is what made every produced IR fail its own schema.
+    expect(() => makeLanguageId("lang-typescript")).toThrow(CoreError)
+  })
+
+  it("rejects tokens outside the grammar", () => {
+    for (const raw of ["", "TS", "1ts", "ts.x", "ts_x", "@scope/x"]) {
+      expect(() => makeLanguageId(raw)).toThrow(CoreError)
+    }
+  })
+
+  it("rejects a reserved token that would collide with another id namespace", () => {
+    for (const reserved of RESERVED_LANGUAGE_IDS) {
+      expect(() => makeLanguageId(reserved)).toThrow(CoreError)
+    }
+  })
+
+  it("isLanguageId agrees with the constructor on every case", () => {
+    for (const raw of ["ts", "py", "lang-typescript", "TS", "", "slice"]) {
+      let constructed = true
+      try {
+        makeLanguageId(raw)
+      } catch {
+        constructed = false
+      }
+      expect(isLanguageId(raw)).toBe(constructed)
     }
   })
 })

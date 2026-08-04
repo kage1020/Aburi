@@ -1,51 +1,51 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { runInit, runScan } from "@aburi/cli"
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { checkoutFixture } from "../src/fixture"
+import { irValidator } from "../src/ir-schema"
 
 /**
- * The README quick start is `aburi init` followed by `aburi scan`, and until now nothing
- * exercised it: `scan-helper.ts` injects plugin objects directly, so the real
- * `loadPlugins` path — the one that turns `config.languages` entries into module
- * specifiers — was never reached from a config that `init` actually wrote. That is how
- * `init` came to emit detector ids (`ts`) into a field the loader reads as a plugin ref
- * (`@aburi/ts`, which does not exist).
+ * The README quick start is `aburi init` followed by `aburi scan`, and this is the only
+ * place the two run against each other. `scan-helper.ts` injects plugin objects directly,
+ * so it never reaches `loadPlugins` — the code that turns a `config.languages` entry into a
+ * module specifier — and so it cannot tell whether `init` wrote something loadable.
  *
- * Plugin resolution happens relative to the CLI module, not the scanned workspace, so
- * the first-party plugins are devDependencies of `@aburi/cli` purely to make this path
- * reachable inside the monorepo. A published install gets the same resolution from the
- * consumer's own `node_modules`.
+ * Plugin resolution is anchored to the CLI module rather than to the scanned workspace,
+ * which is why the first-party plugins are devDependencies of `@aburi/cli`: it is what
+ * makes that path reachable inside the monorepo. The same anchoring works for a consumer on
+ * npm or yarn, where plugins are hoisted alongside the CLI. It does not hold for pnpm's
+ * default isolated layout — a consumer's `@aburi/lang-typescript` is not visible from
+ * `@aburi/cli`'s own `node_modules` there — so a pnpm resolution failure cannot surface
+ * from this test.
  */
-
-let cleanup: (() => Promise<void>) | null = null
-let outDir = ""
-
-afterEach(async () => {
-  if (cleanup !== null) {
-    await cleanup()
-    cleanup = null
-  }
-  if (outDir !== "") {
-    await rm(outDir, { recursive: true, force: true })
-    outDir = ""
-  }
-})
 
 describe("e2e: `aburi init` output is loadable by `aburi scan`", () => {
   it("scans the fixture using only the config init produced", async () => {
     const fixture = await checkoutFixture()
-    cleanup = fixture.cleanup
-    outDir = await mkdtemp(resolve(tmpdir(), "aburi-init-scan-"))
+    const outDir = await mkdtemp(resolve(tmpdir(), "aburi-init-scan-"))
+    try {
+      const init = await runInit({ cwd: fixture.root })
+      expect(init.exitCode).toBe(0)
+      expect(init.unmappedLanguages).toEqual([])
 
-    const init = await runInit({ cwd: fixture.root })
-    expect(init.exitCode).toBe(0)
+      const report = await runScan({ cwd: fixture.root, outputDir: outDir, format: "json" })
 
-    const report = await runScan({ cwd: fixture.root, outputDir: outDir, format: "json" })
+      expect(report.keptSymbols).toBeGreaterThan(0)
+      expect(report.skipped).toEqual([])
+      expect(report.parseErrorCount).toBe(0)
 
-    expect(report.keptSymbols).toBeGreaterThan(0)
-    expect(report.skipped).toEqual([])
-    expect(report.parseErrorCount).toBe(0)
+      // The document the loader-resolved plugin set produced, read back off disk. The
+      // conformance suite validates the injected plugin set, so without this the real
+      // lineup falls between the two tests unvalidated.
+      expect(report.irPath).not.toBeNull()
+      const written: unknown = JSON.parse(await readFile(report.irPath as string, "utf8"))
+      const validate = await irValidator()
+      expect(validate(written)).toEqual([])
+    } finally {
+      await rm(outDir, { recursive: true, force: true })
+      await fixture.cleanup()
+    }
   })
 })

@@ -1,5 +1,6 @@
 import type { Symbol as IRSymbol, Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import { makeLanguageId } from "../../src/id"
 import { apiFingerprint } from "../../src/index"
 import { makeSymbol } from "../fixtures/ir"
 
@@ -119,8 +120,8 @@ describe("apiFingerprint — invariance", () => {
   })
 
   it("A13: changing language does not change the api hash (language is not part of the input)", () => {
-    const asTs = makeSymbol(base().id, { ...base(), language: "ts" })
-    const asTsx = makeSymbol(base().id, { ...base(), language: "tsx" })
+    const asTs = makeSymbol(base().id, { ...base(), language: makeLanguageId("ts") })
+    const asTsx = makeSymbol(base().id, { ...base(), language: makeLanguageId("tsx") })
     expect(apiFingerprint(asTs)).toBe(apiFingerprint(asTsx))
   })
 

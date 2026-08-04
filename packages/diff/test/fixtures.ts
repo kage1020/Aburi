@@ -1,3 +1,4 @@
+import { makeLanguageId } from "@aburi/core"
 import type {
   Call,
   Component,
@@ -57,7 +58,7 @@ export function makeSymbol(
     kind: overrides.kind ?? "function",
     extKind: overrides.extKind ?? null,
     name: overrides.name,
-    language: overrides.language ?? "ts",
+    language: overrides.language ?? makeLanguageId("ts"),
     component:
       overrides.component === undefined || overrides.component === null
         ? null
@@ -170,7 +171,7 @@ export function component(
     name: overrides.name,
     roots: overrides.roots ?? [`apps/${overrides.id}`],
     publicApi: overrides.publicApi ?? [],
-    languages: overrides.languages ?? ["ts"],
+    languages: overrides.languages ?? [makeLanguageId("ts")],
     frameworks: overrides.frameworks ?? [],
     description: overrides.description ?? null,
   }
@@ -199,7 +200,7 @@ export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): 
     workspace: overrides.workspace ?? {
       root: ".",
       managers: [],
-      languages: ["ts"],
+      languages: [makeLanguageId("ts")],
     },
     components: overrides.components ?? [],
     symbols: overrides.symbols ?? [],

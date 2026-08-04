@@ -7,6 +7,7 @@ import type {
   Symbol as IRSymbol,
   SymbolId,
 } from "@aburi/types"
+import { makeLanguageId } from "../../src/id"
 
 const SCHEMA = "https://aburi.dev/schema/aburi.ir.v1.json"
 
@@ -43,7 +44,7 @@ export function makeComponent(
     id: componentId(id),
     name: id,
     roots: [`apps/${id}`],
-    languages: ["ts"],
+    languages: [makeLanguageId("ts")],
     ...overrides,
   }
 }
@@ -73,7 +74,7 @@ export function minimalIR(): IR {
     workspace: {
       root: ".",
       managers: [],
-      languages: ["ts"],
+      languages: [makeLanguageId("ts")],
     },
     components: [],
     symbols: [],
@@ -110,7 +111,7 @@ export function makeSymbol(id: string, overrides: SymbolOverrides = {}): IRSymbo
     kind: "function",
     extKind: null,
     name: id.split("#")[1] ?? "anonymous",
-    language: "ts",
+    language: makeLanguageId("ts"),
     component: component === undefined || component === null ? null : componentId(component),
     visibility: "public",
     decorators: [],

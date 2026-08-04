@@ -173,7 +173,7 @@ Aburi/
 │  ├─ cli/                      ← @aburi/cli (aburi command)
 │  ├─ lang-typescript/          ← @aburi/lang-typescript    (type=lang)
 │  ├─ framework-nestjs/         ← @aburi/framework-nestjs    (type=framework)
-│  ├─ framework-nextjs/         ← @aburi/framework-nextjs    (type=framework)
+│  ├─ framework-next/         ← @aburi/framework-next     (type=framework)
 │  ├─ effects-nest/             ← @aburi/effects-nest        (type=effects, xPrefix=nest)
 │  ├─ effects-prisma/           ← @aburi/effects-prisma      (type=effects, xPrefix=prisma)
 │  └─ github-action/            ← @aburi/github-action

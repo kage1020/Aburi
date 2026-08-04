@@ -48,12 +48,18 @@ export const ENTRIES: readonly SchemaEntry[] = [
       // §11: one array holds both endpoint kinds and the kind is recovered from the id
       // shape. The union keeps a bare string out while admitting either id.
       DependencyEndpoint: "SymbolId | ComponentId",
+      // A plugin-declared token rather than an entity id, but one with a grammar
+      // (`^[a-z][a-z0-9]*$`) and a reserved list, and one that three vocabularies compete
+      // over: the plugin manifest name (`lang-typescript`), the component detector's token
+      // (`tsx`, `js`) and this. A bare alias let a manifest name be assigned straight into
+      // `workspace.languages`, which the frozen IR schema rejects. The brand makes that a
+      // compile error and routes construction through `makeLanguageId` in `@aburi/core`.
+      LanguageId: brand("LanguageId"),
     },
     // `EffectId` is a vocabulary term, not an entity id — it names a kind of side effect,
-    // and `x-<plugin>:<action>` values are meant to be written as literals. `LanguageId` is
-    // a plugin-declared token that a Symbol id embeds rather than an identifier of its own.
-    // Neither can be confused with the ids above, so neither earns a namespace.
-    unbrandedIds: ["EffectId", "LanguageId"],
+    // and `x-<plugin>:<action>` values are meant to be written as literals, so it cannot be
+    // confused with the ids above and does not earn a namespace.
+    unbrandedIds: ["EffectId"],
   },
   { schema: "aburi.config.v1.json", out: "config.ts", rootName: "Config" },
   {

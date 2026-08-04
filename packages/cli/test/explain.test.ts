@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
+import { makeLanguageId } from "@aburi/core"
 import type { IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runExplain } from "../src"
@@ -12,7 +13,7 @@ function makeIRWithTwoNamed(): IR {
   return {
     $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
-    workspace: { root: ".", managers: [], languages: ["ts"] },
+    workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
     components: [],
     symbols: [
       {
@@ -20,7 +21,7 @@ function makeIRWithTwoNamed(): IR {
         kind: "function",
         extKind: null,
         name: "getUser",
-        language: "ts",
+        language: makeLanguageId("ts"),
         component: null,
         visibility: "public",
         decorators: [],
@@ -46,7 +47,7 @@ function makeIRWithTwoNamed(): IR {
         kind: "function",
         extKind: null,
         name: "getUsers",
-        language: "ts",
+        language: makeLanguageId("ts"),
         component: null,
         visibility: "public",
         decorators: [],
@@ -90,6 +91,23 @@ beforeEach(async () => {
   await writeFile(
     resolve(scratch, "out/aburi.ir.json"),
     JSON.stringify(makeIRWithTwoNamed()),
+    "utf8",
+  )
+  // The on-disk IR above names `src/a.ts` and `src/b.ts`, which do not exist on disk. A
+  // rescan therefore finds nothing, and `--debug-resolution` returning `not-found` for an
+  // id that IS in the file is what proves the file was bypassed. The config exists so the
+  // rescan is a real one rather than a run refused for having no language plugin.
+  await writeFile(
+    resolve(scratch, "package.json"),
+    JSON.stringify({ name: "explain-fixture", private: true }),
+    "utf8",
+  )
+  await writeFile(
+    resolve(scratch, "aburi.json"),
+    JSON.stringify({
+      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      languages: ["lang-typescript"],
+    }),
     "utf8",
   )
 })
@@ -175,9 +193,9 @@ describe("runExplain — --debug-resolution (call-resolution.md §8.1)", () => {
   })
 
   it("ignores the IR sitting on disk and rescans instead", async () => {
-    // The scratch workspace has no language plugin configured, so a rescan
-    // yields zero symbols. Getting `not-found` for an id that IS present in
-    // out/aburi.ir.json is exactly the proof that the file was bypassed.
+    // The workspace has no source files, so a rescan yields zero symbols. Getting
+    // `not-found` for an id that IS present in out/aburi.ir.json is exactly the proof
+    // that the file was bypassed.
     const outcome = await runExplain({
       cwd: scratch,
       argument: "ts:src/a.ts#getUser",

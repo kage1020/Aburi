@@ -3,7 +3,7 @@ import { basename, join } from "node:path"
 import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "./errors"
-import { makeComponentId } from "./id"
+import { makeComponentId, makeLanguageId } from "./id"
 import {
   detectManagers,
   isDirectory,
@@ -16,7 +16,7 @@ import {
  * candidate directory. The list mirrors docs/design/component-detect.md §4.4; the
  * future lang-plugin path will register additions on top of this table.
  */
-const EXTENSION_TO_LANGUAGE: ReadonlyMap<string, LanguageId> = new Map([
+const EXTENSION_TO_LANGUAGE: ReadonlyMap<string, string> = new Map([
   [".ts", "ts"],
   [".mts", "ts"],
   [".cts", "ts"],
@@ -66,6 +66,13 @@ const LANGUAGE_MIN_FILES = 10
 
 /** Language-frequency filter: skip extensions whose share is below this fraction. */
 const LANGUAGE_MIN_SHARE = 0.05
+
+/**
+ * Language recorded on a Component when frequency counting produced nothing — an empty
+ * directory, or one whose files all sit below the thresholds above. `Component.languages`
+ * is `minItems: 1` on the wire, so detection cannot hand back an empty list.
+ */
+const FALLBACK_LANGUAGE: LanguageId = makeLanguageId("ts")
 
 export interface DetectComponentsOptions {
   /** Workspace root absolute path; same value passed to detectManagers. */
@@ -135,7 +142,7 @@ async function buildComponent(entry: MergedCandidate): Promise<Component> {
     id,
     name,
     roots: [entry.relativeRoot],
-    languages: languages.length > 0 ? languages : ["ts"],
+    languages: languages.length > 0 ? languages : [FALLBACK_LANGUAGE],
     // Class A per ir-schema.md §1.1: always written, `null` when unset. Detection has no
     // source for a description; the config path (`resolveComponents` in @aburi/cli) writes
     // the same key from `components[].description`, so both producers agree on the shape.
@@ -162,7 +169,7 @@ async function buildSingleProjectComponent(workspaceRoot: string): Promise<Compo
     id,
     name,
     roots: ["."],
-    languages: languages.length > 0 ? languages : ["ts"],
+    languages: languages.length > 0 ? languages : [FALLBACK_LANGUAGE],
     // Class A per ir-schema.md §1.1 -- see buildComponent.
     description: null,
   }
@@ -261,8 +268,11 @@ async function detectLanguagesForDirectory(absoluteRoot: string): Promise<Langua
     const dot = file.lastIndexOf(".")
     if (dot < 0) continue
     const ext = file.slice(dot).toLowerCase()
-    const lang = EXTENSION_TO_LANGUAGE.get(ext)
-    if (lang === undefined) continue
+    const raw = EXTENSION_TO_LANGUAGE.get(ext)
+    if (raw === undefined) continue
+    // The table is the boundary where a per-extension token becomes a LanguageId, so the
+    // grammar check happens once here rather than at every consumer.
+    const lang = makeLanguageId(raw)
     counts.set(lang, (counts.get(lang) ?? 0) + 1)
   }
   const total = [...counts.values()].reduce((a, b) => a + b, 0)

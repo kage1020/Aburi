@@ -7,7 +7,7 @@
  * a well-formed id?" has one implementation rather than one per call site — and an id that
  * reaches the IR has necessarily passed it.
  */
-import type { ComponentId, SymbolId } from "@aburi/types"
+import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
 import { CoreError, type CoreErrorCode } from "./errors"
 
 /** Sentinel qualified name reserved for the lone default export of a module. */
@@ -105,6 +105,33 @@ export function makeComponentId(raw: string): ComponentId {
     )
   }
   return raw as ComponentId
+}
+
+/**
+ * Build a `LanguageId` — the token before the colon of a Symbol id, the element type of
+ * `workspace.languages`, and what a language plugin declares as `languageId`.
+ *
+ * Same grammar and same reserved list the Symbol id constructor applies to its language
+ * segment, so a plugin cannot declare one token and stamp another. Three vocabularies sit
+ * close enough to be mistaken for this one — the plugin manifest name (`lang-typescript`),
+ * the component detector's per-extension token (`tsx`, `js`), and the npm package id — and
+ * the first of those was in fact assigned straight into `workspace.languages`, producing
+ * documents the frozen IR schema rejects.
+ */
+export function makeLanguageId(raw: string): LanguageId {
+  const violation = languageIdViolation(raw)
+  if (violation !== null) {
+    throw new CoreError(`Language id "${raw}": ${violation.message}`, {
+      code: violation.code,
+      value: raw,
+    })
+  }
+  return raw as LanguageId
+}
+
+/** Narrowing counterpart to `makeLanguageId` for values arriving from outside the process. */
+export function isLanguageId(value: string): value is LanguageId {
+  return languageIdViolation(value) === null
 }
 
 /**

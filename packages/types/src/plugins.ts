@@ -311,6 +311,11 @@ export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
    * (`lang-typescript`, kebab-case, resolved as a module specifier) while `LanguageId` is
    * constrained to `^[a-z][a-z0-9]*$` by `aburi.ir.v1`. A plugin whose manifest name were
    * used here would emit an IR that fails its own frozen schema.
+   *
+   * One token per plugin, not one per `fileExtensions` entry: a plugin that parses a family
+   * of dialects reports the family. `@aburi/lang-typescript` claims `.ts` / `.tsx` / `.js` /
+   * `.jsx` and reports `ts` for all of them, so the component detector's finer per-extension
+   * vocabulary (`tsx`, `js`, `jsx`) and this one can legitimately disagree within a document.
    */
   languageId: LanguageId
   /** Extension list (not glob), e.g. [".ts", ".tsx"]. */

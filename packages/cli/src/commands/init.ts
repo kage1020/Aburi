@@ -22,6 +22,13 @@ export interface InitReport {
   detectedFrameworks: string[]
   componentCount: number
   suggestedPlugins: readonly string[]
+  /**
+   * Detected language ids with no first-party plugin. Non-empty means the written config
+   * names no language plugin, so `aburi scan` cannot parse anything and will say so.
+   */
+  unmappedLanguages: readonly string[]
+  /** Detected framework ids with no first-party plugin; classification is simply narrower. */
+  unmappedFrameworks: readonly string[]
   overwrote: boolean
   exitCode: ExitCode
 }
@@ -67,7 +74,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const frameworkSet = new Set<string>()
   for (const c of components) for (const f of c.frameworks ?? []) frameworkSet.add(f)
 
-  const suggestions = options.withSuggestions ? suggestPluginsFor(frameworkSet) : []
+  const suggestions = options.withSuggestions ? suggestPluginsFor(languageSet, frameworkSet) : []
   const contents = renderConfig({
     languages: pluginRefsFor(languageSet, LANGUAGE_TO_PLUGIN),
     frameworks: pluginRefsFor(frameworkSet, FRAMEWORK_TO_PLUGIN),
@@ -91,6 +98,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     detectedFrameworks: [...frameworkSet].sort(),
     componentCount: components.length,
     suggestedPlugins: suggestions,
+    unmappedLanguages: unmappedIds(languageSet, LANGUAGE_TO_PLUGIN),
+    unmappedFrameworks: unmappedIds(frameworkSet, FRAMEWORK_TO_PLUGIN),
     overwrote: existed,
     exitCode: EXIT.SUCCESS,
   }
@@ -156,7 +165,8 @@ const LANGUAGE_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
 
 const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
   ["nestjs", "framework-nestjs"],
-  ["next", "framework-next"],
+  // `nextjs`, not `next`: the npm dependency `next` is normalised to the framework id
+  // `nextjs` by the detector, and this table's left column is the detector's vocabulary.
   ["nextjs", "framework-next"],
   ["react", "framework-react"],
   ["express", "framework-express"],
@@ -177,9 +187,30 @@ function pluginRefsFor(
 /**
  * §4.6 tail — the `--with-suggestions` banner. Install instructions name the npm package,
  * so these carry the `@aburi/` scope that `PluginRef` leaves implicit.
+ *
+ * Languages come first and are included unconditionally, per `cli-spec.md` §4.6: the
+ * language plugin `init` just wrote into `languages` is a hard requirement for the next
+ * `aburi scan`, where a framework plugin only adds classification.
  */
-function suggestPluginsFor(frameworks: ReadonlySet<string>): string[] {
-  return pluginRefsFor(frameworks, FRAMEWORK_TO_PLUGIN).map((name) => `@aburi/${name}`)
+function suggestPluginsFor(
+  languages: ReadonlySet<string>,
+  frameworks: ReadonlySet<string>,
+): string[] {
+  return [
+    ...pluginRefsFor(languages, LANGUAGE_TO_PLUGIN),
+    ...pluginRefsFor(frameworks, FRAMEWORK_TO_PLUGIN),
+  ].map((name) => `@aburi/${name}`)
+}
+
+/**
+ * Detected ids this CLI has no plugin for. They stay in `components[].languages` /
+ * `components[].frameworks` — that is the detector's own vocabulary and remains accurate —
+ * but they cannot appear in the top-level plugin-ref arrays, so the caller surfaces them:
+ * an unmapped *language* means the generated config resolves no language plugin at all, and
+ * `aburi scan` will refuse to run until one is added.
+ */
+function unmappedIds(detected: ReadonlySet<string>, table: ReadonlyMap<string, string>): string[] {
+  return [...detected].filter((id) => !table.has(id)).sort()
 }
 
 interface RenderedConfigInput {

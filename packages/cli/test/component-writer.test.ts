@@ -21,10 +21,9 @@ import { runScan } from "../src"
 const ajv = new Ajv2020({ strict: false, allErrors: true })
 ajv.addSchema(irSchema, "ir")
 /**
- * Validates one `components[]` entry rather than the whole document. A whole-document check
- * belongs where a real language plugin is loaded (`@aburi/e2e-integration`): a plugin-less
- * `runScan` writes `workspace.languages: []` against a `minItems: 1` schema, which is a
- * separate defect from anything this file is about and would sit here as unrelated noise.
+ * Validates one `components[]` entry rather than the whole document, matching the scope of
+ * this file: the two Component writers agreeing on shape. Whole-document conformance is
+ * covered against a full plugin lineup in `@aburi/e2e-integration`.
  */
 const validateComponent = ajv.getSchema("ir#/$defs/Component") as (v: unknown) => boolean
 
@@ -46,7 +45,13 @@ afterEach(async () => {
 async function scanWithComponents(components: unknown[]): Promise<Record<string, unknown>> {
   await writeFile(
     resolve(scratch, "aburi.json"),
-    JSON.stringify({ $schema: "https://aburi.dev/schema/aburi.config.v1.json", components }),
+    JSON.stringify({
+      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      // A scan with no language plugin cannot produce a schema-valid IR and is refused, so
+      // the plugin is named here even though this file never asserts on Symbols.
+      languages: ["lang-typescript"],
+      components,
+    }),
     "utf8",
   )
   const report = await runScan({

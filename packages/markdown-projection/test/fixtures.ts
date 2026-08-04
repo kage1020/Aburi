@@ -11,6 +11,7 @@ import type {
   Fingerprint,
   IR,
   Symbol as IRSymbol,
+  LanguageId,
   Rule,
   Signature,
   SliceId,
@@ -39,6 +40,11 @@ export function sliceId(raw: string): SliceId {
   return raw as SliceId
 }
 
+/** Language-id counterpart of `symbolId`; production code goes through `makeLanguageId`. */
+export function languageId(raw: string): LanguageId {
+  return raw as LanguageId
+}
+
 /** Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md §11). */
 export function endpoint(raw: string): DependencyEndpoint {
   return raw as DependencyEndpoint
@@ -56,7 +62,7 @@ export function makeSymbol(
     kind: overrides.kind ?? "function",
     extKind: overrides.extKind ?? null,
     name: overrides.name,
-    language: overrides.language ?? "ts",
+    language: overrides.language ?? languageId("ts"),
     component:
       overrides.component === undefined || overrides.component === null
         ? null
@@ -169,7 +175,7 @@ export function component(
     name: overrides.name,
     roots: overrides.roots ?? [`apps/${overrides.id}`],
     publicApi: overrides.publicApi ?? [],
-    languages: overrides.languages ?? ["ts"],
+    languages: overrides.languages ?? [languageId("ts")],
     frameworks: overrides.frameworks ?? [],
     description: overrides.description ?? null,
   }
@@ -191,7 +197,7 @@ export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): 
   return {
     $schema: overrides.$schema ?? "https://aburi.dev/schema/aburi.ir.v1.json",
     generator: overrides.generator ?? { name: "aburi", version: "0.0.0", plugins: [] },
-    workspace: overrides.workspace ?? { root: ".", managers: [], languages: ["ts"] },
+    workspace: overrides.workspace ?? { root: ".", managers: [], languages: [languageId("ts")] },
     components: overrides.components ?? [],
     symbols: overrides.symbols ?? [],
     dependencies: overrides.dependencies ?? [],

@@ -413,7 +413,7 @@ function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
   return out
 }
 
-function uniqueSorted(values: readonly string[]): string[] {
+function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort()
 }
 

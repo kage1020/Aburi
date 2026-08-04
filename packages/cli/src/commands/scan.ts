@@ -6,6 +6,7 @@ import {
   detectManagers,
   detectWorkspaceRoot,
   makeComponentId,
+  makeLanguageId,
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -105,6 +106,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     workspaceRoot,
     syntheticPlugins: loaded.syntheticPlugins,
   })
+  requireLanguagePlugin(plugins.languages.length, loaded.source)
 
   const managers = await detectManagers(workspaceRoot)
   const components = await resolveComponents(config, workspaceRoot)
@@ -191,6 +193,28 @@ async function resolveWorkspaceRoot(cwd: string): Promise<string> {
   }
 }
 
+/**
+ * Refuse to scan with no language plugin resolved.
+ *
+ * Nothing can be parsed in that state, so the run would write an IR with zero Symbols and
+ * an empty `workspace.languages` — which the IR schema rejects (`minItems: 1`) and which
+ * integrity invariant #18 rejects. Catching it here instead of letting the invariant fire
+ * is about the message: "no language plugin is configured, add one" says what to do, where
+ * "workspace.languages is empty" describes a symptom of it.
+ *
+ * The shape this replaces was the dangerous one, because it was a success: an empty IR
+ * diffs against another empty IR as `+0 -0 ~0`, so every `--fail-on` gate downstream passed.
+ */
+function requireLanguagePlugin(count: number, configSource: string | null): void {
+  if (count > 0) return
+  const where = configSource === null ? "no aburi.json was found" : `config: ${configSource}`
+  throw new CliError(
+    `No language plugin is configured (${where}), so no source file can be parsed. Add one ` +
+      `to "languages" in aburi.json — e.g. "lang-typescript" — or run \`aburi init\`.`,
+    "config-error",
+  )
+}
+
 async function resolveConfig(
   workspaceRoot: string,
   overridePath: string | undefined,
@@ -257,12 +281,16 @@ async function resolveComponents(
         // so an entry that omits it would otherwise produce a document that fails its own
         // schema. Fall back to the same `["ts"]` that `detectComponents` uses when frequency
         // counting finds nothing, rather than inventing a second answer to the same question.
-        const languages = entry.languages ?? []
+        // Each entry goes through `makeLanguageId`: `ComponentOverride.languages` is a
+        // hand-written field with only `type: "string"` behind it in the config schema, so
+        // this is where a config-supplied token is checked against the IR's grammar rather
+        // than at the point it would surface as an unexplained schema failure.
+        const languages = (entry.languages ?? []).map(makeLanguageId)
         const component: Component = {
           id: makeComponentId(entry.id),
           name: entry.name ?? entry.id,
           roots: [...entry.roots],
-          languages: languages.length > 0 ? [...languages] : ["ts"],
+          languages: languages.length > 0 ? languages : [makeLanguageId("ts")],
           description: entry.description ?? null,
         }
         if (entry.publicApi !== undefined && entry.publicApi.length > 0) {

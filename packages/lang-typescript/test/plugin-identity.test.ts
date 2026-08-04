@@ -6,9 +6,11 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
 /**
  * `LanguagePlugin.languageId` is the `LanguageId` this plugin stamps on every Symbol id
  * (`<language>:<file>#<qname>`), and it is what `@aburi/core` projects into
- * `IR.workspace.languages`. The manifest name (`lang-typescript`) is a *plugin ref* and
- * belongs to a different vocabulary — mixing the two produced an IR that failed its own
- * frozen schema, so these tests pin both halves of the contract.
+ * `IR.workspace.languages`. The manifest name (`lang-typescript`) is a *plugin ref*,
+ * resolved as a module specifier and outside the `LanguageId` grammar, so the two are not
+ * interchangeable: a manifest name in this field yields an IR its own frozen schema
+ * rejects. Both halves are pinned here — the declared value, and the value the extractor
+ * actually writes.
  */
 describe("langTypescriptPlugin.languageId", () => {
   it("is the LanguageId, not the manifest name", () => {

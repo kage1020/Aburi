@@ -1,6 +1,7 @@
 import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
+import { makeLanguageId } from "../src/id"
 import { makeSymbol, minimalIR, type SymbolOverrides, symbolId } from "./fixtures/ir"
 
 function withCalls(
@@ -541,7 +542,7 @@ describe("resolveCallGraph", () => {
     })
     const py = makeSymbol("py:src/other.py#Uniq.method", {
       kind: "method",
-      language: "py",
+      language: makeLanguageId("py"),
       component: "reporting",
     })
     const result = resolveCallGraph({ symbols: [caller, py], importsByFile: new Map() })
