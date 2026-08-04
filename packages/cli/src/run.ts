@@ -1,3 +1,4 @@
+import { dirname } from "node:path"
 import { Command, InvalidArgumentError } from "commander"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
 import { runExplain } from "./commands/explain"
@@ -339,11 +340,29 @@ function withConfigPath(
 }
 
 /**
+ * Config discovery is anchored to `cwd`, everything inside the config to the workspace
+ * root. When the two directories differ — running inside a monorepo package that has its
+ * own `aburi.json` — a relative path in that file points somewhere other than where its
+ * author was looking, and the scan still covers the whole workspace. Both are deliberate
+ * (see `resolveConfig`), and neither is visible from the command line, so say it.
+ */
+function warnOnConfigOutsideWorkspaceRoot(report: ScanReport, stderr: NodeJS.WritableStream): void {
+  if (report.configSource === null) return
+  if (dirname(report.configSource) === report.workspaceRoot) return
+  stderr.write(
+    `⚠ Config ${report.configSource} sits below the workspace root ${report.workspaceRoot}. ` +
+      `Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, ` +
+      `and the scan covers the whole workspace.\n`,
+  )
+}
+
+/**
  * §5.6 — surface parse failures / soft timeouts / discovery-time skips on stderr so a
  * scan that ate 50 broken files still produces a visible signal. The main summary line
  * on stdout stays clean; this only fires when a non-empty incident list exists.
  */
 function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream): void {
+  warnOnConfigOutsideWorkspaceRoot(report, stderr)
   if (report.parseErrorCount > 0) {
     stderr.write(`⚠ ${report.parseErrorCount} file(s) had recoverable parse errors.\n`)
   }
