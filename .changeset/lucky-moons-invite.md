@@ -18,9 +18,21 @@ Keys are now normalized first and ordered afterwards, and a post-normalization c
 is rejected with a `CoreError` rather than written, matching how the serializer already
 treats other lossy coercions.
 
-`makeSymbolId` normalizes its parts for the same reason. Filesystems disagree on which
-spelling they return — macOS decomposes, Linux and Windows do not — so the same source
-tree produced different Symbol ids depending on where it was scanned, and every
-cross-platform diff reported spurious changes. It also keeps the id in memory and the id
-on disk the same string: integrity invariant #11 compares the in-memory form, so an
-un-normalized id could pass the sort check and still land on disk out of order.
+Paths are normalized where they enter the process, in `toPosixRelative`. Which Unicode
+spelling a path arrives in depends on how the name was created — an archive, an HFS+
+volume, a Finder rename — and it survives copying to any platform, so one source tree could
+produce two spellings for a file and every cross-platform diff reported spurious changes.
+Normalizing at that single point keeps `symbol.source.file`, `components[].roots` and the
+Symbol id built from the same string spelled identically; normalizing inside the id
+constructor alone would have left them disagreeing, which silently degrades a rename into
+a delete-plus-add in `@aburi/diff`.
+
+`makeSymbolId` and `trySymbolId` normalize their parts too, before validating rather than
+after, so the ids `isSymbolId` accepts are exactly the ids the constructors can mint. That
+also keeps the id in memory and the id on disk the same string: the integrity sort check
+compares the in-memory form, so an un-normalized id could pass it and still land on disk
+out of order.
+
+`serializeCanonical`'s new refusal has its own error code, `canonical-key-collision`.
+Reusing `non-plain-json` would have been wrong — each key is perfectly representable, and
+it is their coexistence that is not.

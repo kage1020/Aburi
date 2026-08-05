@@ -68,11 +68,12 @@ interface IdViolation {
  * same rejections as `null`.
  */
 export function makeSymbolId(parts: SymbolIdParts): SymbolId {
-  const violation = symbolIdViolation(parts)
+  const normalized = normalizeParts(parts)
+  const violation = symbolIdViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
   }
-  return composeSymbolId(parts)
+  return composeSymbolId(normalized)
 }
 
 /**
@@ -88,8 +89,9 @@ export function makeSymbolId(parts: SymbolIdParts): SymbolId {
  * for a document read off disk.
  */
 export function trySymbolId(parts: SymbolIdParts): SymbolId | null {
-  if (symbolIdViolation(parts) !== null) return null
-  return composeSymbolId(parts)
+  const normalized = normalizeParts(parts)
+  if (symbolIdViolation(normalized) !== null) return null
+  return composeSymbolId(normalized)
 }
 
 /**
@@ -219,7 +221,14 @@ export function isDefaultExportQname(qname: string): boolean {
  * filesystem layout in the IR).
  */
 export function toPosixRelative(rawPath: string): string {
-  const normalized = rawPath.replace(/\\/g, "/")
+  // NFC as well as separator normalization. Which Unicode spelling a path arrives in
+  // depends on how the name was created — a decomposed `é` from an archive, an HFS+ volume
+  // or a Finder rename survives on any platform — so the same source tree can hand back
+  // two different strings for one file. This is the single point where a path enters the
+  // process, so normalizing here keeps `symbol.source.file`, `components[].roots` and the
+  // Symbol id built from that path spelled identically. Normalizing only inside the id
+  // constructor would leave them disagreeing.
+  const normalized = rawPath.replace(/\\/g, "/").normalize("NFC")
   const violation = posixWorkspaceRelativeViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -228,28 +237,37 @@ export function toPosixRelative(rawPath: string): string {
 }
 
 /**
- * Assemble the id from parts already known to be valid. Both public constructors run the
- * full check first and share this, so the format lives in one place.
+ * Put every part into Unicode NFC, which is the form an id is defined to be in.
+ *
+ * This keeps the id held in memory and the id written to disk the same string:
+ * `serializeCanonical` normalizes on write while the integrity sort check compares the
+ * in-memory value, so an un-normalized id could satisfy that check and still land out of
+ * order in the file.
+ *
+ * It runs before validation rather than after, so `symbolIdViolation` — which rejects a
+ * non-NFC part — describes exactly the ids `isSymbolId` will accept. Normalization cannot
+ * introduce a separator: the only characters whose NFC form is ASCII are U+037E, U+1FEF
+ * and U+212A, mapping to `;`, a backtick and `K`.
+ *
+ * Only the file path can differ in practice. `posixWorkspaceRelativeViolation` imposes no
+ * ASCII restriction, whereas the language and qualified-name grammars are ASCII-only and
+ * so normalize to themselves; those two are covered anyway, so widening either grammar
+ * does not quietly reopen this.
  */
+function normalizeParts(parts: SymbolIdParts): SymbolIdParts {
+  return {
+    language: parts.language.normalize("NFC"),
+    file: parts.file.normalize("NFC"),
+    qualifiedName: parts.qualifiedName.normalize("NFC"),
+  }
+}
+
 /**
- * Assemble the id, normalizing each part to Unicode NFC.
- *
- * The file path arrives from the filesystem, and filesystems disagree on which spelling
- * they hand back: macOS decomposes (`é` as `e` + combining acute), Linux and Windows do
- * not. Without this, the same source tree yields different Symbol ids depending on where
- * it was scanned, so `symbols[]` sorts differently and every cross-platform diff reports
- * spurious changes.
- *
- * It also keeps the in-memory id and the written one the same string. `serializeCanonical`
- * normalizes on write, while the integrity sort check (invariant #11) compares what is in
- * memory — so an un-normalized id could pass the check and land on disk out of order,
- * because the check was measuring a string nobody ever writes.
+ * Assemble the id from parts already known to be valid and normalized. Both public
+ * constructors run the full check first and share this, so the format lives in one place.
  */
 function composeSymbolId(parts: SymbolIdParts): SymbolId {
-  const language = parts.language.normalize("NFC")
-  const file = parts.file.normalize("NFC")
-  const qualifiedName = parts.qualifiedName.normalize("NFC")
-  return `${language}:${file}#${qualifiedName}` as SymbolId
+  return `${parts.language}:${parts.file}#${parts.qualifiedName}` as SymbolId
 }
 
 /**
@@ -275,8 +293,35 @@ function symbolIdViolation(parts: SymbolIdParts): IdViolation | null {
   return (
     languageIdViolation(parts.language) ??
     posixWorkspaceRelativeViolation(parts.file) ??
-    qualifiedNameViolation(parts.qualifiedName)
+    qualifiedNameViolation(parts.qualifiedName) ??
+    unnormalizedViolation(parts)
   )
+}
+
+/**
+ * Reject a part that is not in Unicode NFC.
+ *
+ * `composeSymbolId` normalizes, so `makeSymbolId` cannot mint such an id — but `isSymbolId`
+ * runs these same checks against a string it did not build, and that is what invariant #17
+ * uses to decide whether a document read off disk holds well-formed ids. Without this the
+ * predicate would accept an id the constructor can no longer produce, and `trySymbolId`'s
+ * safety argument — which rests on every id in the set having gone through the constructor
+ * — would not hold for a document Aburi did not write.
+ */
+function unnormalizedViolation(parts: SymbolIdParts): IdViolation | null {
+  for (const [field, raw] of [
+    ["language", parts.language],
+    ["file", parts.file],
+    ["qualified name", parts.qualifiedName],
+  ] as const) {
+    if (raw === raw.normalize("NFC")) continue
+    return {
+      code: "invalid-symbol-id",
+      message: `Symbol id ${field} "${raw}" is not in Unicode NFC; ids are normalized at construction so the in-memory and written forms match`,
+      value: raw,
+    }
+  }
+  return null
 }
 
 function languageIdViolation(language: string): IdViolation | null {

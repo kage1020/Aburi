@@ -23,14 +23,20 @@ export interface SerializeOptions {
  *    Multilingual Plane the ordering coincides with Unicode codepoint order; astral-plane
  *    strings differ, but this serializer, the integrity checker's sort-order invariant,
  *    and every consumer that uses the default `<`/`>` operators or `Array.prototype.sort`
- *    all agree on UTF-16 code unit order, so the three paths cannot diverge.
+ *    all agree on UTF-16 code unit order. The comparator alone is not enough to keep them
+ *    in step, because this function orders normalized keys while the integrity checker
+ *    orders the string it holds in memory; what closes that is normalizing ids at
+ *    construction (`makeSymbolId`) and paths at their source (`toPosixRelative`), so both
+ *    sides are comparing the same operand.
  * 3. Array order is preserved; the caller is responsible for sorting arrays per the IR
  *    schema's per-collection ordering rules (this serializer is not in the business of
  *    interpreting which collection is which).
  *
- * Non-JSON values (functions, symbols, bigint, undefined, Map/Set, Date, class instances)
- * throw CoreError "non-plain-json" so silent coercion to "{}" or "null" cannot leak into
- * the IR and corrupt fingerprints downstream.
+ * Two failure modes, both loud rather than lossy. Non-JSON values (functions, symbols,
+ * bigint, Map/Set, Date, class instances) throw `non-plain-json`, so silent coercion to
+ * "{}" or "null" cannot leak into the IR and corrupt fingerprints downstream. Keys that
+ * collide under NFC throw `canonical-key-collision`, since a parser reading the result
+ * would keep only one of them.
  */
 export function serializeCanonical(value: unknown, options: SerializeOptions = {}): string {
   const format = options.format ?? "pretty"
@@ -73,9 +79,6 @@ function write(
     assertPlainObject(value, path)
     const entries = normalizedEntries(value as Record<string, unknown>, path)
     if (entries.length === 0) return "{}"
-    // Normalize first, then order. Ordering the input spelling and writing the normalized
-    // one produces a document whose key order is wrong for the bytes it contains, and makes
-    // the output depend on which Unicode form the caller happened to hold.
     entries.sort(([a], [b]) => compareByCodeUnit(a, b))
     const childIndent = indent.repeat(depth + 1)
     const closeIndent = indent.repeat(depth)
@@ -134,17 +137,30 @@ function normalizedEntries(value: Record<string, unknown>, path: string): [strin
   const out: [string, unknown][] = []
   const seen = new Map<string, string>()
   for (const [rawKey, entry] of Object.entries(value)) {
+    // Skipped before the collision check on purpose: `{ [NFD]: 1, [NFC]: undefined }` writes
+    // one key and loses nothing, so it is not a collision. A key with no value is not a key.
     if (entry === undefined) continue
     const key = rawKey.normalize("NFC")
     const prior = seen.get(key)
     if (prior !== undefined) {
       throw new CoreError(
-        `serializeCanonical at ${path}: keys ${JSON.stringify(prior)} and ${JSON.stringify(rawKey)} are distinct strings but identical after Unicode NFC normalization, so one would be lost on write`,
-        { code: "non-plain-json", value: `${path}.${key}` },
+        `serializeCanonical at ${path}: keys ${describeKey(prior)} and ${describeKey(rawKey)} render identically and are identical after Unicode NFC normalization, so writing both would lose one. Rename one to the composed form.`,
+        { code: "canonical-key-collision", value: path },
       )
     }
     seen.set(key, rawKey)
     out.push([key, entry])
   }
   return out
+}
+
+/**
+ * Render a key alongside its code points. Colliding keys look the same on screen by
+ * definition, so quoting them twice would produce a message that names no difference.
+ */
+function describeKey(key: string): string {
+  const codePoints = [...key]
+    .map((c) => `U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`)
+    .join(" ")
+  return `${JSON.stringify(key)} (${codePoints})`
 }
