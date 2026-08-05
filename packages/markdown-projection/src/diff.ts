@@ -189,16 +189,27 @@ function renderDeltaBody(delta: SymbolDelta): string[] {
  * it reads as "no reason was found", when it means one of two things the reviewer cannot
  * distinguish: the delta carries no field-level detail, or a bucket went unrendered.
  *
- * This is a note rather than a thrown invariant because the first case is legitimately
- * reachable. `apiChanged` comes from comparing API fingerprints (`delta.ts:41`), and the
- * fingerprint covers inputs the structured delta does not model — so a real document can
- * set the flag with every `ArrayDelta` empty. Failing the render would turn a gap in the
+ * All three flags are covered, not just the two that route into the API and Logic
+ * sections. `renderMovedChanged` renders every moved+changed entry regardless of which
+ * flag is set, so a syntax-only move reaches this function too — and is the case least
+ * likely to carry field-level detail.
+ *
+ * This is a note rather than a thrown invariant because an empty delta is legitimately
+ * reachable: the three flags come from comparing fingerprints in `computeSymbolDelta`, and
+ * the fingerprints cover inputs the structured delta does not model, so a real document
+ * can set one with every `ArrayDelta` empty. Failing the render would turn a gap in the
  * projection into a failed CI job; saying so in one line does not.
  */
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
   if (rows.length > 0) return
-  if (!delta.apiChanged && !delta.logicChanged) return
-  const which = delta.apiChanged ? "API" : "logic"
+  const which = delta.apiChanged
+    ? "API"
+    : delta.logicChanged
+      ? "logic"
+      : delta.syntaxChanged
+        ? "syntax"
+        : null
+  if (which === null) return
   rows.push(`- ${which} fingerprint changed; no field-level detail was recorded`)
 }
 
@@ -212,18 +223,10 @@ function appendSignatureDelta(
     const after = renderStringList(sig.outputs.added)
     rows.push(`- signature.outputs: \`${before}\` → \`${after}\``)
   }
-  if (sig.outputs.modified.length > 0) {
-    rows.push(`- signature.outputs modified: ${renderInlineList(sig.outputs.modified)}`)
-  }
-  if (sig.throws.added.length > 0) {
-    rows.push(`- signature.throws added: ${renderInlineList(sig.throws.added)}`)
-  }
-  if (sig.throws.removed.length > 0) {
-    rows.push(`- signature.throws removed: ${renderInlineList(sig.throws.removed)}`)
-  }
-  if (sig.throws.modified.length > 0) {
-    rows.push(`- signature.throws modified: ${renderInlineList(sig.throws.modified)}`)
-  }
+  appendInlineRow(rows, "signature.outputs modified", sig.outputs.modified)
+  appendInlineRow(rows, "signature.throws added", sig.throws.added)
+  appendInlineRow(rows, "signature.throws removed", sig.throws.removed)
+  appendInlineRow(rows, "signature.throws modified", sig.throws.modified)
   if (sig.inputs.added.length > 0) {
     rows.push(`- signature.inputs added: ${describeInputs(sig.inputs.added)}`)
   }
@@ -292,7 +295,7 @@ function appendCallDelta(rows: string[], delta: SymbolDelta["calls"]): void {
 function appendArrayGroup(
   rows: string[],
   label: string,
-  delta: { added: readonly unknown[]; removed: readonly unknown[]; modified: readonly unknown[] },
+  delta: NonNullable<SymbolDelta["rules"]>,
   describe: (item: unknown) => string | null,
 ): void {
   appendBucket(rows, `${label} added`, delta.added, describe)
@@ -405,8 +408,11 @@ function describeCallLike(value: unknown): string | null {
 /**
  * `Signature.inputs` entries are `{ name, type }`. Both are needed: the name identifies
  * which parameter moved, and the type is the change itself for the `modified` bucket.
- * Entries that do not match the shape are dropped rather than rendered as placeholders,
- * matching how the other `describe*Like` helpers handle a surprise.
+ *
+ * An entry that does not match the shape is dropped, as the other `describe*Like` helpers
+ * do. If *every* entry fails to match, the count is emitted instead — unlike
+ * `appendBucket`, which suppresses the row. The bucket is non-empty either way, and
+ * "1 item(s)" at least says a parameter moved, where silence would claim none did.
  */
 function describeInputs(items: readonly unknown[]): string {
   const rendered = items
@@ -430,6 +436,19 @@ function renderInlineList(values: readonly unknown[]): string {
     .filter((v): v is string => typeof v === "string")
     .map((s) => `\`${s}\``)
     .join(", ")
+}
+
+/**
+ * Emit `- <label>: <values>` only when something renders. `renderInlineList` drops
+ * non-strings, so a bucket holding only unexpected shapes would otherwise produce a row
+ * with nothing after the colon — the same silent-blank this file exists to remove, one
+ * level down. Mirrors `appendBucket`'s rule for the array groups.
+ */
+function appendInlineRow(rows: string[], label: string, values: readonly unknown[]): void {
+  if (values.length === 0) return
+  const rendered = renderInlineList(values)
+  if (rendered === "") return
+  rows.push(`- ${label}: ${rendered}`)
 }
 
 function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {

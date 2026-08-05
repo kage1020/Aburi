@@ -1,4 +1,4 @@
-import type { ArrayDelta, SymbolChanged, SymbolDelta } from "@aburi/types"
+import type { ArrayDelta, SymbolChanged, SymbolDelta, SymbolMovedChanged } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
 import { emptySummary, makeDiff, makeSymbol } from "./fixtures"
@@ -11,6 +11,11 @@ import { emptySummary, makeDiff, makeSymbol } from "./fixtures"
  *
  * A bucket the projection does not read produces a heading, a file link and no body: the
  * CI gate fires, and the Markdown that explains it to a reviewer is blank.
+ *
+ * `rules`, `effects`, `calls` and `signature.inputs` are the four the differ actually
+ * fills. `signature.outputs` and `throws` go through `diffStringList` / `diffStringSet`,
+ * which hardcode `modified: []`, so those are rendered for robustness against another
+ * producer rather than to close a live gap.
  */
 
 function emptyDelta(): ArrayDelta {
@@ -125,7 +130,11 @@ describe("signature — modified bucket", () => {
     expect(md).toContain("id: number")
   })
 
-  it("renders modified outputs and throws", () => {
+  // `outputs` and `throws` are diffed by `diffStringList` / `diffStringSet`, both of which
+  // hardcode `modified: []`, so this pair is unreachable from `@aburi/diff` today. It is
+  // rendered defensively — the projection reads a JSON document it did not produce — which
+  // is why this case builds the delta by hand rather than through the differ.
+  it("renders modified outputs and throws when a producer supplies them", () => {
     const md = render(
       changed({
         apiChanged: true,
@@ -162,5 +171,43 @@ describe("empty-body note", () => {
 
     expect(md).toContain("- component: changed")
     expect(md).not.toContain("no field-level detail")
+  })
+
+  it("prefers API when both the API and logic flags are set", () => {
+    const md = render(changed({ apiChanged: true, logicChanged: true }))
+
+    expect(md).toContain("API fingerprint changed")
+    expect(md).not.toContain("logic fingerprint changed")
+  })
+
+  /**
+   * `partition` routes every moved+changed entry into the Moved + Changed section whatever
+   * its flags say, so `renderMovedChanged` reaches deltas the API and Logic sections never
+   * see. A syntax-only move is the case least likely to carry field-level detail, and it
+   * renders `**Delta**:` followed by nothing without this.
+   */
+  it("covers a syntax-only moved+changed, which no other section renders", () => {
+    const before = makeSymbol({ id: "ts:src/a.ts#f", name: "f" })
+    const after = makeSymbol({ id: "ts:src/b.ts#f", name: "f" })
+    const moved: SymbolMovedChanged = {
+      status: "moved+changed",
+      before,
+      after,
+      rationale: "name-signature",
+      delta: {
+        apiChanged: false,
+        logicChanged: false,
+        syntaxChanged: true,
+        componentChanged: false,
+        visibilityChanged: false,
+      },
+    }
+
+    const md = projectDiff(
+      makeDiff({ symbols: [moved], summary: { ...emptySummary(), movedChanged: 1 } }),
+    )
+
+    expect(md).toContain("**Delta**:")
+    expect(md).toContain("syntax fingerprint changed; no field-level detail was recorded")
   })
 })
