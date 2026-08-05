@@ -4,10 +4,10 @@
 
 Make the effect-propagation sweep order sub-quadratic
 
-`reverseTopoOrder` re-sorted the ready set on every dequeue and shifted off its front, so
-both operations were linear in the size of that set. Most symbols call nothing, which
-means nearly every SCC is ready from the start and the set grows to the size of the graph
-— giving a quadratic sweep on the most ordinary shape a workspace has.
+`reverseTopoOrder` re-sorted the ready set on every dequeue and shifted off its front. Both
+are linear in the size of that set, and the set is large in the ordinary case: most symbols
+call nothing, so nearly every SCC is ready from the start and the set grows to the size of
+the graph. That put the pass at `O(V² log V)` on the most common workspace shape.
 
 Measured on out-degree-zero symbols, before and after:
 
@@ -18,7 +18,14 @@ Measured on out-degree-zero symbols, before and after:
 | 20,000 | 3,923 ms | 72 ms |
 | 40,000 | 14,196 ms | 148 ms |
 
-The ready set is now a binary min-heap, which answers the same question the sort did —
-smallest ready index — without re-deriving it each time. The emitted order is unchanged,
-so `derivedFrom`, effect ordering and every fingerprint downstream of them are unaffected;
-both strategies were replayed over 3,000 randomly generated DAGs and agreed on every one.
+A binary min-heap answers the same question the sort did — smallest ready index — bringing
+the pass to `O((V + E) log V)` and leaving the emitted permutation unchanged.
+
+`reverseTopoOrder` is now exported. The tie-break it implements is not observable through
+`propagateEffects`, because the SCC aggregation is commutative and both `derivedFrom` and
+the propagated entries are sorted explicitly afterwards — so pinning the permutation
+requires calling the function directly.
+
+`effect-propagation.md` described the pass as `O(V + E)`, which the previous implementation
+did not meet and this one still does not: the log factor is unavoidable while the spec
+mandates a deterministic minimum-index tie-break. The document now states the real bound.

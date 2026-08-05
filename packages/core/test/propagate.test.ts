@@ -3,33 +3,14 @@ import { describe, expect, it } from "vitest"
 import type { CallEdge } from "../src/callgraph"
 import { propagateEffects } from "../src/propagate"
 import { makeSymbol } from "./fixtures/ir"
+import { edge, effect } from "./fixtures/propagate"
 
 /**
- * Fixture builder aligned with `callgraph.test.ts`'s style.
- *
- * `local()` produces a locally-detected Effect with `line`; `edge()` produces a
- * CallEdge. Symbols default to a single-effect / effect-free body — override via
- * partial fields when a case needs more.
+ * Object-literal wrapper over the shared `effect` builder, keeping this file's call sites
+ * (`local({ id, target, confidence })`) readable where several fields are overridden.
  */
 function local(overrides: Partial<Effect> & { id: string; target: string }): Effect {
-  return {
-    id: overrides.id,
-    target: overrides.target,
-    line: overrides.line ?? 1,
-    plugin: overrides.plugin ?? "effects-test",
-    confidence: overrides.confidence ?? "high",
-    derivedBy: overrides.derivedBy ?? `effects-plugin:test:${overrides.id}`,
-  }
-}
-
-function edge(from: string, to: string, over: Partial<CallEdge> = {}): CallEdge {
-  return {
-    from: from as CallEdge["from"],
-    to: to as CallEdge["to"],
-    via: "call",
-    confidence: over.confidence ?? "high",
-    line: over.line ?? 1,
-  }
+  return effect(overrides.id, overrides.target, overrides)
 }
 
 function bySymbolId(symbols: IRSymbol[], id: string): IRSymbol {

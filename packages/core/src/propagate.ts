@@ -65,7 +65,7 @@ interface AggregatedEntry {
   hasLocal: boolean
 }
 
-interface SccNode {
+export interface SccNode {
   id: string
   members: SymbolId[]
   outSccs: number[]
@@ -407,18 +407,23 @@ function condense(
 
 /**
  * Kahn's algorithm over the condensed DAG, run backwards so a callee is emitted before
- * every caller that reaches it. Among SCCs that are ready at the same time the smallest
- * index wins, which is what keeps the sweep — and therefore `derivedFrom`, the effect
- * ordering, and every fingerprint downstream of them — independent of edge insertion order.
+ * every caller that reaches it. Among SCCs ready at the same moment the smallest index
+ * wins — the tie-break effect-propagation.md §6 requires.
+ *
+ * What that tie-break does and does not buy: determinism comes from the sorts around this
+ * function — the id-sorted node list, the sorted `outSccs`, and the explicit sorts applied
+ * to `derivedFrom` and to the propagated entries — not from the tie-break itself. The SCC
+ * aggregation is commutative (every merge is a min, a max, or a lexicographic-min), so any
+ * valid topological order would produce the same bytes today. The tie-break is still worth
+ * holding, because that commutativity is a property of the current merge steps and nothing
+ * forces the next one to preserve it.
  *
  * The ready set is a binary min-heap rather than a re-sorted array. Most symbols call
- * nothing, so in a real workspace nearly every SCC is ready at the start: the ready set
- * grows to O(V), and sorting it on each of the V dequeues is quadratic. Measured on
- * out-degree-zero symbols, which is that shape exactly: 20k took ~3.9s and 40k ~14.2s,
- * against ~8ms and ~14ms here. The emitted order is unchanged — the heap answers the same
- * question the sort did, "smallest ready index", just without re-deriving it each time.
+ * nothing, so nearly every SCC is ready at the start: the set grows to O(V), and
+ * re-sorting it on each of the V dequeues made this `O(V² log V)`. A heap brings it to
+ * `O((V + E) log V)`; the log factor is unavoidable while §6 mandates a min tie-break.
  */
-function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
+export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
   const remainingOut = condensed.map((n) => n.outSccs.length)
   const reverseAdj: number[][] = condensed.map(() => [])
   condensed.forEach((node, idx) => {
