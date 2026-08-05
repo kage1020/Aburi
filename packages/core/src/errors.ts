@@ -14,6 +14,14 @@ export type CoreErrorCode =
   | "invalid-component-id"
   /** serializeCanonical encountered a value JSON cannot represent (function, symbol, bigint, …). */
   | "non-plain-json"
+  /**
+   * Two object keys were distinct strings but identical after Unicode NFC normalization, so
+   * writing both would lose one on read-back. Distinct from `non-plain-json`: each key is
+   * perfectly representable, and it is their coexistence that is not.
+   */
+  | "canonical-key-collision"
+  /** An id part was not in Unicode NFC; ids are normalized at construction so both forms match. */
+  | "invalid-symbol-id"
   /** One or more of the IR invariants in ir-schema.md §14 were violated; `details` carries each violation. */
   | "integrity-violation"
   /** Workspace root detection failed (no marker found between cwd and filesystem root). */

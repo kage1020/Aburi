@@ -146,9 +146,23 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const componentMdPaths = await maybeWriteComponentMd(format, outputDir, scanResult.ir)
   if (format !== "md") {
     irPath = resolve(outputDir, "aburi.ir.json")
-    await writeCanonicalIR(scanResult.ir, irPath, {
-      format: options.compact ? "compact" : "pretty",
-    })
+    // Serialization can refuse the document — two object keys that differ only in Unicode
+    // composition cannot both be written without one being lost on read-back. That is a
+    // property of the scanned project, so it belongs on the input-error exit code with the
+    // target path attached, not on the generic handler as a bare runtime failure.
+    try {
+      await writeCanonicalIR(scanResult.ir, irPath, {
+        format: options.compact ? "compact" : "pretty",
+      })
+    } catch (error) {
+      throw new CliError(
+        `Failed to write IR to ${irPath}: ${errorMessage(error)}`,
+        "config-error",
+        {
+          cause: error,
+        },
+      )
+    }
   }
 
   return {
