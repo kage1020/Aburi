@@ -16,6 +16,7 @@ import {
   toPosixRelative,
   trySymbolId,
 } from "../src/index"
+import { WORKSPACE_PATH_CASES } from "./fixtures/paths"
 
 describe("makeSymbolId", () => {
   it("composes lang:file#qname for a top-level function", () => {
@@ -79,6 +80,30 @@ describe("makeSymbolId", () => {
     ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
   })
 
+  it("answers the shared workspace-path table the way integrity invariant #10 does", () => {
+    for (const { path, rejected, why } of WORKSPACE_PATH_CASES) {
+      const build = () => makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" })
+      if (rejected) {
+        expect(build, `${path} (${why})`).toThrowError(
+          expect.objectContaining({ code: "non-posix-path" }),
+        )
+      } else {
+        expect(build(), `${path} (${why})`).toBe(`ts:${path}#foo`)
+      }
+    }
+  })
+
+  it("rejects the id's own separators inside the file path", () => {
+    // Not part of the shared table: this rule exists because the id is split on its first
+    // `:` and first `#`, so a path holding either would split back into parts the producer
+    // never wrote. A component root has no such structure and is free to contain them.
+    for (const file of ["src/a:b.ts", "src/a#b.ts"]) {
+      expect(() => makeSymbolId({ language: "ts", file, qualifiedName: "foo" }), file).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
+  })
+
   it("rejects language ids that are not lowercase-ASCII identifiers", () => {
     expect(() =>
       makeSymbolId({ language: "TS", file: "src/a.ts", qualifiedName: "foo" }),
@@ -131,6 +156,56 @@ describe("makeTopLevelQname / makeNestedQname", () => {
     expect(() => makeNestedQname([])).toThrowError(
       expect.objectContaining({ code: "anonymous-symbol-id-attempted" }),
     )
+  })
+})
+
+describe("qualified-name segment grammar", () => {
+  /**
+   * Separators that join nothing. `makeMemberQname` / `makeNestedQname` cannot produce
+   * these, but a plugin that assembles a qname by hand can, and `makeSymbolId` is the last
+   * gate before the id reaches the IR.
+   */
+  const emptySegment = ["A.", ".A", "A..B", ".", "..", "::", "A::", "::B", "A.::B", "A::.B"]
+
+  it("makeSymbolId rejects a qualified name with an empty segment", () => {
+    for (const qualifiedName of emptySegment) {
+      expect(
+        () => makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName }),
+        qualifiedName,
+      ).toThrowError(expect.objectContaining({ code: "anonymous-symbol-id-attempted" }))
+    }
+  })
+
+  it("isSymbolId and trySymbolId refuse them too", () => {
+    // Not a restatement of the case above: an id built elsewhere reaches the codebase
+    // through the guard rather than the constructor, and it is the guard that IR integrity
+    // invariant #17 consults about a document read off disk.
+    for (const qualifiedName of emptySegment) {
+      expect(isSymbolId(`ts:src/a.ts#${qualifiedName}`), qualifiedName).toBe(false)
+      expect(
+        trySymbolId({ language: "ts", file: "src/a.ts", qualifiedName }),
+        qualifiedName,
+      ).toBeNull()
+    }
+  })
+
+  it("still accepts every shape the qname builders produce", () => {
+    const accepted = [
+      makeTopLevelQname("createInvoice"),
+      makeMemberQname(["InvoiceService"], "create", "instance"),
+      makeMemberQname(["InvoiceService"], "fromJson", "static"),
+      makeMemberQname(["Billing", "Invoice"], "create", "instance"),
+      makeNestedQname(["Billing", "Invoice", "create"]),
+      makeTopLevelQname("_private"),
+      makeTopLevelQname("$dollar"),
+      makeTopLevelQname("a1"),
+      DEFAULT_EXPORT_QNAME,
+    ]
+    for (const qualifiedName of accepted) {
+      expect(makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName }), qualifiedName).toBe(
+        `ts:src/a.ts#${qualifiedName}`,
+      )
+    }
   })
 })
 

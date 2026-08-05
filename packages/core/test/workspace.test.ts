@@ -153,6 +153,50 @@ describe("detectManagers", () => {
     expect(turbo?.roots).toEqual([])
   })
 
+  it("drops a declared package that lies outside the workspace root", async () => {
+    // A glob may ascend: `tinyglobby` honours `../` and returns matches above `cwd`. The
+    // file walk does not — it globs `**/*` under the workspace root — so a package up there
+    // contributes no Symbol either way. Recording its root would put a `..` path into
+    // `workspace.managers[].roots`, which IR integrity invariant #10 refuses, and would
+    // describe a directory the scan never opened.
+    const outside = join(tmp, "outside")
+    await mkdir(join(outside, "pkg"), { recursive: true })
+    await writeFile(join(outside, "pkg", "package.json"), JSON.stringify({ name: "o" }), "utf8")
+    const root = join(tmp, "repo")
+    await mkdir(join(root, "apps", "a"), { recursive: true })
+    await writeFile(join(root, "apps", "a", "package.json"), JSON.stringify({ name: "a" }), "utf8")
+    await writeFile(
+      join(root, "pnpm-workspace.yaml"),
+      "packages:\n  - apps/*\n  - ../outside/*\n",
+      "utf8",
+    )
+
+    const result = await detectManagers(root)
+    expect(result.workspaces.map((w) => w.relativeRoot)).toEqual(["apps/a"])
+    expect(result.managers.find((m) => m.tool === "pnpm")?.roots).toEqual(["apps/a"])
+  })
+
+  it("spells a workspace root in Unicode NFC, as the paths beside it are spelled", async () => {
+    // `symbols[].source.file` is normalized at its source (`toPosixRelative`). A root left
+    // in the spelling the filesystem handed back would disagree with it for the same
+    // directory, which is the divergence canonical serialization exists to prevent.
+    // Written decomposed on purpose: `e` + U+0301, the spelling an archive, an HFS+
+    // volume or a Finder rename hands back.
+    const decomposed = "café"
+    await mkdir(join(tmp, "apps", decomposed), { recursive: true })
+    await writeFile(
+      join(tmp, "apps", decomposed, "package.json"),
+      JSON.stringify({ name: "cafe" }),
+      "utf8",
+    )
+    await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8")
+
+    const result = await detectManagers(tmp)
+    expect(result.workspaces.map((w) => w.relativeRoot)).toEqual([
+      `apps/${decomposed.normalize("NFC")}`,
+    ])
+  })
+
   it("dedupes the same workspace path under one tool entry", async () => {
     await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8")
     await mkdir(join(tmp, "apps", "billing"), { recursive: true })

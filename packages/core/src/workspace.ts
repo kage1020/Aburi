@@ -4,6 +4,7 @@ import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
 import { CoreError } from "./errors"
+import { posixWorkspaceRelativeViolation } from "./id"
 
 /**
  * Filenames whose presence at any directory ancestor identifies a workspace root. The
@@ -183,6 +184,14 @@ function mergeManager(
   if (scan === null) return
   const roots = new Set<string>()
   for (const candidate of scan.candidates) {
+    // `tinyglobby` honours a `../` pattern and returns matches above `cwd`, so a manifest
+    // declaring `packages: ['../shared/*']` yields candidates outside the workspace root.
+    // The file walk does not follow them — it globs `**/*` under the root — so such a
+    // package contributes no Symbol whether or not it is recorded here. Recording it would
+    // put a `..` path into `workspace.managers[].roots` and `components[].roots`, which IR
+    // integrity invariant #10 refuses, and would have the Document describe a directory the
+    // scan never opened. Dropping it removes the claim, not the coverage.
+    if (posixWorkspaceRelativeViolation(candidate.relativeRoot) !== null) continue
     roots.add(candidate.relativeRoot)
     const key = `${candidate.managerTool}\t${candidate.relativeRoot}`
     if (seen.has(key)) continue
@@ -345,10 +354,24 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
+/**
+ * Express `target` as a workspace-relative POSIX path, in the same spelling
+ * `toPosixRelative` gives the file paths that sit beside it in the IR.
+ *
+ * The NFC step is not decoration: `symbols[].source.file` is normalized where the path
+ * enters the process, so a root left in whatever spelling the filesystem returned would
+ * disagree with a `source.file` naming the same directory — one `café` composed, one
+ * decomposed — and canonical serialization would write two different byte sequences for
+ * one path.
+ *
+ * A `..` result is possible and is not normalized away: glob patterns may ascend, and a
+ * directory above the workspace root genuinely is outside it. `mergeManager` drops those.
+ */
 function toRelativePosix(root: string, target: string): string {
   const rel = relative(root, target)
   if (rel.length === 0) return "."
-  return sep === "/" ? rel : rel.split(sep).join(posix.sep)
+  const posixRel = sep === "/" ? rel : rel.split(sep).join(posix.sep)
+  return posixRel.normalize("NFC")
 }
 
 function compareString(a: string, b: string): number {

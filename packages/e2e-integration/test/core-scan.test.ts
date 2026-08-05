@@ -64,7 +64,7 @@ function buildRegistry() {
 }
 
 describe("scan — integration through real plugins", () => {
-  it("produces an IR that survives the 15 integrity invariants", async () => {
+  it("produces an IR that survives every integrity invariant", async () => {
     await writeSource(
       "app/dashboard/page.tsx",
       "export default function DashboardPage() {\n  return null\n}\n",

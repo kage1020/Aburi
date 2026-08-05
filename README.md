@@ -86,7 +86,7 @@ source files
   ↓ (@aburi/core scan)                               walkBody → Rules + Calls + Effects
   ↓                                                  drop rules (interfaces, empty bodies, re-exports)
   ↓                                                  fingerprint per Symbol (api / logic / syntax)
-  ↓                                                  IR integrity check (11 invariants)
+  ↓                                                  IR integrity check (ir-schema.md §14)
   ↓
 aburi.ir.v1.json  ─────────────────────────────────────────  Source of Truth (L3)
   │

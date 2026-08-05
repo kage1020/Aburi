@@ -10,6 +10,12 @@ import {
   minimalIR,
   symbolId,
 } from "./fixtures/ir"
+import { WORKSPACE_PATH_CASES } from "./fixtures/paths"
+
+/** A `Symbol.source` whose only interesting field is the path under test. */
+function sourceAt(file: string) {
+  return { file, startLine: 1, endLine: 1, startColumn: null, endColumn: null }
+}
 
 describe("checkIRIntegrity", () => {
   it("returns [] for an empty but well-formed IR", () => {
@@ -166,6 +172,39 @@ describe("checkIRIntegrity", () => {
     ]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 10)).toBe(true)
+  })
+
+  it("#10: answers the shared workspace-path table at every path site", () => {
+    // Invariant #10 is what stands between a document Aburi did not write and the passes
+    // that use its paths directly — `aburi diff --base <ir.json>` resolves them off disk.
+    // A path the Symbol id constructor refuses has to be refused here as well, at all three
+    // sites, or a hand-edited IR reintroduces exactly what the constructor kept out.
+    for (const { path, rejected, why } of WORKSPACE_PATH_CASES) {
+      const ir = minimalIR()
+      ir.components = [makeComponent("a", { roots: [path] })]
+      ir.symbols = [makeSymbol("ts:src/a.ts#foo", { source: sourceAt(path) })]
+      ir.workspace.managers = [{ tool: "pnpm", roots: [path] }]
+
+      const subjects = checkIRIntegrity(ir)
+        .filter((v) => v.invariant === 10)
+        .map((v) => v.subject)
+        .sort()
+      const label = `${JSON.stringify(path)} (${why})`
+      expect(subjects, label).toEqual(
+        rejected
+          ? ["components[id=a].roots", "ts:src/a.ts#foo", "workspace.managers[tool=pnpm].roots"]
+          : [],
+      )
+    }
+  })
+
+  it("#17: detects a Symbol id whose qualified name has an empty segment", () => {
+    // `ts:src/a.ts#A.` used to satisfy every invariant and then throw out of `apiFingerprint`,
+    // where `lastQnameSegment` found the leaf empty. The id grammar is where that is caught.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#A.")]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
   })
 
   it("#11: detects unsorted symbols[] by id", () => {

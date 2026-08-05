@@ -1,6 +1,12 @@
 import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
 import { CoreError, type IntegrityViolation } from "./errors"
-import { isComponentId, isLanguageId, isSymbolId, RESERVED_LANGUAGE_IDS } from "./id"
+import {
+  isComponentId,
+  isLanguageId,
+  isSymbolId,
+  posixWorkspaceRelativeViolation,
+  RESERVED_LANGUAGE_IDS,
+} from "./id"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -75,7 +81,8 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *   7. Effect.id ∈ core vocab OR x-<plugin>: prefix
  *   8. Symbol.kind ∈ enum
  *   9. Symbol.extKind null or matches namespace:segment+ pattern
- *  10. All file paths POSIX (forward slash, no backslash, no absolute prefix)
+ *  10. All file paths are workspace-relative POSIX (non-empty, no backslash, no absolute
+ *      prefix, no `..` ascent)
  *  11. Arrays are sorted per the IR schema's ordering rules
  *  12. via:"call" edges: both endpoints are Symbol ids present in Symbols[]
  *  13. dependencies[]: no duplicate (from, to, via) triples
@@ -363,6 +370,16 @@ function checkSymbolExtKindShape(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
+/**
+ * Invariant #10 (ir-schema.md §14): every path in the document is non-empty, POSIX-separated
+ * and inside the workspace.
+ *
+ * Delegates to `posixWorkspaceRelativeViolation`, the same rule the Symbol id constructor
+ * applies on the way out, so the document Aburi writes and the document it accepts describe
+ * one set of paths. The two were separate implementations, and the copy here had no `..`
+ * rule — leaving `aburi diff --base <ir.json>`, which resolves these paths against the
+ * filesystem, to accept a hand-edited `source.file` of `../../../../etc/passwd.ts`.
+ */
 function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
   const pathSites: Array<{ subject: string; path: string }> = []
   for (const component of ir.components) {
@@ -380,20 +397,9 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
   }
 
   for (const site of pathSites) {
-    if (site.path.includes("\\")) {
-      out.push({
-        invariant: 10,
-        subject: site.subject,
-        message: `path "${site.path}" contains a backslash; only POSIX forward slashes are allowed`,
-      })
-    }
-    if (/^([/]|[A-Za-z]:)/.test(site.path)) {
-      out.push({
-        invariant: 10,
-        subject: site.subject,
-        message: `path "${site.path}" is absolute; only workspace-relative paths are allowed`,
-      })
-    }
+    const violation = posixWorkspaceRelativeViolation(site.path)
+    if (violation === null) continue
+    out.push({ invariant: 10, subject: site.subject, message: violation.message })
   }
 }
 

@@ -32,8 +32,13 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 /** Identifier-like segment that may appear in a qualified name (no separators, no spaces). */
 const QNAME_SEGMENT_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
-/** Path that contains the workspace-relative POSIX shape expected by Symbol.id. */
-const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:[\\/])/
+/**
+ * Prefixes that make a path absolute rather than workspace-relative. The Windows drive
+ * letter needs no following separator: `C:a.ts` is drive-relative, resolves against a
+ * per-drive working directory the IR does not record, and so is no more portable than
+ * `C:/a.ts`.
+ */
+const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:)/
 
 /**
  * ASCII kebab-case, matching `aburi.ir.v1.json#/$defs/ComponentId`.
@@ -51,8 +56,8 @@ export interface SymbolIdParts {
   qualifiedName: string
 }
 
-/** A reason a candidate Symbol id was rejected, in the shape `CoreError` wants. */
-interface IdViolation {
+/** A reason a candidate id or path was rejected, in the shape `CoreError` wants. */
+export interface IdViolation {
   code: CoreErrorCode
   message: string
   value: string
@@ -229,7 +234,10 @@ export function toPosixRelative(rawPath: string): string {
   // Symbol id built from that path spelled identically. Normalizing only inside the id
   // constructor would leave them disagreeing.
   const normalized = rawPath.replace(/\\/g, "/").normalize("NFC")
-  const violation = posixWorkspaceRelativeViolation(normalized)
+  // The id rule, not just the path rule: every path this returns becomes a `Symbol.source`
+  // and the file segment of the id built alongside it, so a path this accepts must be one
+  // `makeSymbolId` will accept too.
+  const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
   }
@@ -292,7 +300,7 @@ function splitSymbolId(value: string): SymbolIdParts | null {
 function symbolIdViolation(parts: SymbolIdParts): IdViolation | null {
   return (
     languageIdViolation(parts.language) ??
-    posixWorkspaceRelativeViolation(parts.file) ??
+    symbolIdPathViolation(parts.file) ??
     qualifiedNameViolation(parts.qualifiedName) ??
     unnormalizedViolation(parts)
   )
@@ -344,35 +352,60 @@ function languageIdViolation(language: string): IdViolation | null {
   return null
 }
 
-function posixWorkspaceRelativeViolation(path: string): IdViolation | null {
+/**
+ * The rule every path written into the IR obeys: non-empty, POSIX-separated, and pointing
+ * somewhere inside the workspace.
+ *
+ * Exported because `checkIRIntegrity` asks the same question of a document it did not build
+ * (ir-schema.md §14 invariant #10). Sharing one implementation is what keeps the two
+ * answers equal: while invariant #10 carried its own copy it omitted the `..` rule, so an
+ * IR could be hand-edited to point `symbols[].source.file` at `../../../../etc/passwd.ts`,
+ * pass every invariant, and be handed to `aburi diff --base` — which resolves those paths
+ * against the filesystem.
+ *
+ * Messages name no particular field, since the caller knows whether it is describing a
+ * Symbol id, a component root or a workspace-manager root.
+ */
+export function posixWorkspaceRelativeViolation(path: string): IdViolation | null {
   if (path.length === 0) {
-    return { code: "non-posix-path", message: "Symbol id file path is empty", value: path }
+    return { code: "non-posix-path", message: "path is empty", value: path }
   }
   if (path.includes("\\")) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" contains a backslash; pass it through toPosixRelative() first`,
+      message: `path "${path}" contains a backslash; only POSIX forward slashes are allowed`,
       value: path,
     }
   }
   if (ABSOLUTE_PATH_PATTERN.test(path)) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" is absolute; rebase it onto the workspace root`,
+      message: `path "${path}" is absolute; only workspace-relative paths are allowed`,
       value: path,
     }
   }
   if (path.split("/").some((s) => s === "..")) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" escapes the workspace via "..", which would leak the host layout into the IR`,
+      message: `path "${path}" escapes the workspace via a ".." segment, which would leak the host layout into the IR`,
       value: path,
     }
   }
-  // `:` and `#` are the id's own separators, so a path holding either assembles into a
-  // string whose first `:` / `#` fall in the wrong place: it still satisfies the schema
-  // pattern, but splitting it back yields parts the producer never wrote. Checked last so a
-  // Windows drive path still reports the more useful "is absolute".
+  return null
+}
+
+/**
+ * The path rule plus the one restriction that belongs to the id rather than to the path.
+ *
+ * `:` and `#` are the id's own separators, so a path holding either assembles into a string
+ * whose first `:` / `#` fall in the wrong place: it still satisfies the schema pattern, but
+ * splitting it back yields parts the producer never wrote. A component root is not split on
+ * anything, which is why this sits here and not in the shared rule. Checked after the path
+ * rule so a Windows drive path still reports the more useful "is absolute".
+ */
+function symbolIdPathViolation(path: string): IdViolation | null {
+  const violation = posixWorkspaceRelativeViolation(path)
+  if (violation !== null) return prefixed(violation, "Symbol id file ")
   if (path.includes(":") || path.includes("#")) {
     return {
       code: "non-posix-path",
@@ -381,6 +414,11 @@ function posixWorkspaceRelativeViolation(path: string): IdViolation | null {
     }
   }
   return null
+}
+
+/** Attribute a field-neutral violation to the field the caller was checking. */
+function prefixed(violation: IdViolation, prefix: string): IdViolation {
+  return { ...violation, message: `${prefix}${violation.message}` }
 }
 
 function qualifiedNameViolation(qname: string): IdViolation | null {
@@ -400,6 +438,13 @@ function qualifiedNameViolation(qname: string): IdViolation | null {
     }
   }
   for (const segment of splitQnameSegments(qname)) {
+    if (segment.length === 0) {
+      return {
+        code: "anonymous-symbol-id-attempted",
+        message: `Symbol id qualified name "${qname}" has an empty segment; "." and "::" join two named constructs, so neither may sit at an end or beside another`,
+        value: qname,
+      }
+    }
     if (!QNAME_SEGMENT_PATTERN.test(segment)) {
       return {
         code: "anonymous-symbol-id-attempted",
@@ -414,9 +459,15 @@ function qualifiedNameViolation(qname: string): IdViolation | null {
 /**
  * Split a fully-built qname back into the segments that must each pass the identifier
  * pattern. Both the instance separator (".") and the static separator ("::") split here.
+ *
+ * Empty segments are kept rather than dropped. Discarding them made a dangling separator
+ * invisible to the check above: `A.` split to `["A"]`, satisfied the constructor and every
+ * IR invariant, and then threw four passes later out of `apiFingerprint`, where
+ * `lastQnameSegment` found the leaf empty. An empty segment is the defect, so it has to
+ * reach the validator that reports it.
  */
 function splitQnameSegments(qname: string): string[] {
-  return qname.split(/::|\./).filter((s) => s.length > 0)
+  return qname.split(/::|\./)
 }
 
 function assertQnameSegment(segment: string, originalQname: string): void {
