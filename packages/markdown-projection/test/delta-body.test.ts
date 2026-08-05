@@ -75,7 +75,7 @@ describe("renderDeltaBody — signature branches", () => {
     expect(md).toContain("- signature.throws removed: `Legacy`")
   })
 
-  it("emits input added/removed counts", () => {
+  it("names each added / removed input rather than counting them", () => {
     const md = renderWith({
       ...baseDelta(),
       signature: {
@@ -91,8 +91,8 @@ describe("renderDeltaBody — signature branches", () => {
         typeParametersChanged: false,
       },
     })
-    expect(md).toContain("- signature.inputs added: 1 item(s)")
-    expect(md).toContain("- signature.inputs removed: 1 item(s)")
+    expect(md).toContain("- signature.inputs added: `b: number`")
+    expect(md).toContain("- signature.inputs removed: `a: string`")
   })
 
   it("emits async / generator / typeParameters toggles", () => {
