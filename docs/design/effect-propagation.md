@@ -185,7 +185,7 @@ Determinism inside the algorithm (see also §10):
 - When Tarjan produces SCCs, they are re-sorted by the smallest Symbol id inside each SCC before the reverse-topological sweep.
 - The reverse-topological sweep breaks ties by SCC id (= smallest Symbol id).
 
-Complexity is `O(V + E)` — linear in the size of the graph.
+Complexity is `O((V + E) log V)`. The graph walk itself is linear; the log factor comes from the ready-set ordering the §6 tie-break requires (a min-heap keyed on SCC index). A linear bound would mean giving up the deterministic tie-break, which §10 depends on.
 
 Alternative rejected — fixed-point iteration over all Symbols until no set grows: the fixed point exists and is the same set (join is monotone; domain is finite), but the iteration cost is non-linear in adversarial graphs, and stable iteration order still requires a deterministic schedule, so the SCC condensation approach costs no extra work while providing an explicit termination proof.
 
@@ -195,7 +195,7 @@ The domain of possible effect sets on each Symbol is a finite lattice: the unive
 
 The SCC-condensed DAG has finite depth. The reverse-topological sweep processes each SCC node exactly once. Within an SCC, the union of every member's local effects is computed once and assigned to every member. No further iteration is needed because the SCC has no other incoming edges from within itself that would introduce new effects.
 
-Therefore the algorithm terminates in `O(V + E)` steps for any input. No bounded-iteration fallback and no depth limit are required or specified.
+Therefore the algorithm terminates in `O((V + E) log V)` steps for any input. No bounded-iteration fallback and no depth limit are required or specified.
 
 ## 8. Interaction with the 3-Layer Fingerprint
 
@@ -303,7 +303,7 @@ Effects describe **what a piece of code causes to happen**. The caller inherits 
 
 ### 12.2 Why SCC condensation over fixed-point iteration
 
-Both terminate on the same result because the join is monotone over a finite lattice. SCC condensation is `O(V + E)` in one pass; fixed-point iteration is non-linear on adversarial graphs and still needs a deterministic schedule to satisfy [`overview.md`](./overview.md) §2 "diff stability". SCC condensation gives determinism, a linear cost bound, and an explicit termination proof — three properties for the same complexity.
+Both terminate on the same result because the join is monotone over a finite lattice. SCC condensation is `O((V + E) log V)` in one pass — linear apart from the ready-set ordering — while fixed-point iteration is non-linear on adversarial graphs and still needs a deterministic schedule to satisfy [`overview.md`](./overview.md) §2 "diff stability". SCC condensation gives determinism, a near-linear cost bound, and an explicit termination proof — three properties for close to the same complexity.
 
 ### 12.3 Why `(effectId, target)` as the merge key
 

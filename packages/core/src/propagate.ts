@@ -65,7 +65,7 @@ interface AggregatedEntry {
   hasLocal: boolean
 }
 
-interface SccNode {
+export interface SccNode {
   id: string
   members: SymbolId[]
   outSccs: number[]
@@ -405,30 +405,92 @@ function condense(
   return nodes
 }
 
-function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
+/**
+ * Kahn's algorithm over the condensed DAG, run backwards so a callee is emitted before
+ * every caller that reaches it. Among SCCs ready at the same moment the smallest index
+ * wins — the tie-break effect-propagation.md §6 requires.
+ *
+ * What that tie-break does and does not buy: determinism comes from the sorts around this
+ * function — the id-sorted node list, the sorted `outSccs`, and the explicit sorts applied
+ * to `derivedFrom` and to the propagated entries — not from the tie-break itself. The SCC
+ * aggregation is commutative (every merge is a min, a max, or a lexicographic-min), so any
+ * valid topological order would produce the same bytes today. The tie-break is still worth
+ * holding, because that commutativity is a property of the current merge steps and nothing
+ * forces the next one to preserve it.
+ *
+ * The ready set is a binary min-heap rather than a re-sorted array. Most symbols call
+ * nothing, so nearly every SCC is ready at the start: the set grows to O(V), and
+ * re-sorting it on each of the V dequeues made this `O(V² log V)`. A heap brings it to
+ * `O((V + E) log V)`; the log factor is unavoidable while §6 mandates a min tie-break.
+ */
+export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
   const remainingOut = condensed.map((n) => n.outSccs.length)
   const reverseAdj: number[][] = condensed.map(() => [])
   condensed.forEach((node, idx) => {
     for (const toScc of node.outSccs) reverseAdj[toScc]?.push(idx)
   })
-  const queue: number[] = []
+
+  const ready = new MinHeap()
   condensed.forEach((_, idx) => {
-    if (remainingOut[idx] === 0) queue.push(idx)
+    if (remainingOut[idx] === 0) ready.push(idx)
   })
-  queue.sort((a, b) => a - b)
+
   const order: number[] = []
-  while (queue.length > 0) {
-    queue.sort((a, b) => a - b)
-    const next = queue.shift() as number
+  for (let next = ready.pop(); next !== undefined; next = ready.pop()) {
     order.push(next)
     for (const upstream of reverseAdj[next] ?? []) {
       const rem = remainingOut[upstream]
       if (rem === undefined) continue
       remainingOut[upstream] = rem - 1
-      if (remainingOut[upstream] === 0) queue.push(upstream)
+      if (remainingOut[upstream] === 0) ready.push(upstream)
     }
   }
   return order
+}
+
+/**
+ * Binary min-heap over SCC indices. Small and local on purpose: the only ordering this
+ * needs is numeric ascending, and the only operations are push and pop-min.
+ */
+class MinHeap {
+  private readonly items: number[] = []
+
+  push(value: number): void {
+    const items = this.items
+    items.push(value)
+    let child = items.length - 1
+    while (child > 0) {
+      const parent = (child - 1) >> 1
+      if ((items[parent] as number) <= (items[child] as number)) break
+      ;[items[parent], items[child]] = [items[child] as number, items[parent] as number]
+      child = parent
+    }
+  }
+
+  pop(): number | undefined {
+    const items = this.items
+    const top = items[0]
+    if (top === undefined) return undefined
+    const last = items.pop() as number
+    if (items.length === 0) return top
+    items[0] = last
+    let parent = 0
+    for (;;) {
+      const left = parent * 2 + 1
+      const right = left + 1
+      let smallest = parent
+      if (left < items.length && (items[left] as number) < (items[smallest] as number)) {
+        smallest = left
+      }
+      if (right < items.length && (items[right] as number) < (items[smallest] as number)) {
+        smallest = right
+      }
+      if (smallest === parent) break
+      ;[items[parent], items[smallest]] = [items[smallest] as number, items[parent] as number]
+      parent = smallest
+    }
+    return top
+  }
 }
 
 function compareCodeUnit(a: string, b: string): number {
