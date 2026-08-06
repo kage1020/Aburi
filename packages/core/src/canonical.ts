@@ -12,22 +12,14 @@ export interface SerializeOptions {
  * Serialize any plain-JSON value into a byte-deterministic UTF-8 string.
  *
  * Three rules together guarantee bit-identical output for equal inputs:
- * 1. Every string is normalized to Unicode NFC before encoding. Composing characters from
- *    NFD ("é" written as "é") would otherwise change byte length even though the
- *    rendered text is identical. Keys are normalized *before* rule 2 orders them:
- *    ordering the input spelling and writing the normalized one yields a document whose
- *    key order does not match the bytes it contains. Two keys that are distinct strings
- *    but identical once normalized are rejected rather than both written, since a parser
- *    reading the result back would keep only one of them.
- * 2. Object keys are sorted by UTF-16 code unit (not locale-aware). Within the Basic
- *    Multilingual Plane the ordering coincides with Unicode codepoint order; astral-plane
- *    strings differ, but this serializer, the integrity checker's sort-order invariant,
- *    and every consumer that uses the default `<`/`>` operators or `Array.prototype.sort`
- *    all agree on UTF-16 code unit order. The comparator alone is not enough to keep them
- *    in step, because this function orders normalized keys while the integrity checker
- *    orders the string it holds in memory; what closes that is normalizing ids at
- *    construction (`makeSymbolId`) and paths at their source (`toPosixRelative`), so both
- *    sides are comparing the same operand.
+ * 1. Every string is normalized to Unicode NFC (ir-schema.md §1.2, which states why the
+ *    form matters and where the rest of the pipeline establishes it). Keys are normalized
+ *    *before* rule 2 orders them: ordering the input spelling and writing the normalized
+ *    one yields a document whose key order does not match the bytes it contains.
+ * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md §1. Rule 1 is what lets
+ *    that comparator agree with the rest of the codebase: this function orders normalized
+ *    keys while every other ordering decision compares the string held in memory, so the
+ *    two stay in step only because §1.2 puts both in the same form.
  * 3. Array order is preserved; the caller is responsible for sorting arrays per the IR
  *    schema's per-collection ordering rules (this serializer is not in the business of
  *    interpreting which collection is which).

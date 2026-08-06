@@ -93,6 +93,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *  17. Symbol and Component ids satisfy their own grammars, and Symbol.name satisfies the
  *      qualified-name grammar
  *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
+ *  19. Every string the Document orders or identifies by is in Unicode NFC
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -115,6 +116,7 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkSymbolIdNamespace(ir, violations)
   checkIdGrammar(ir, violations)
   checkWorkspaceLanguages(ir, violations)
+  checkUnicodeNormalization(ir, violations)
 
   return violations
 }
@@ -259,6 +261,58 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
       message: `Symbol.language "${symbol.language}" is not listed in workspace.languages`,
     })
   }
+}
+
+/**
+ * Invariant #19 (ir-schema.md §14, §1.2): every string the Document orders or identifies by
+ * is in Unicode NFC.
+ *
+ * `serializeCanonical` normalizes on write, while every ordering and equality decision in
+ * this codebase compares the string held in memory. Where the two forms differ, a Document
+ * can satisfy the sort invariant and land on disk violating it, and two spellings of one
+ * value can be carried as two distinct entries.
+ *
+ * Scoped to the strings whose spelling decides something. `symbols[].id` and
+ * `components[].id` are left to #17, whose grammar already rejects a non-NFC part; strings
+ * that are only ever rendered — a decorator's raw source text, a signature type — decide
+ * nothing by their spelling and are not checked, because normalizing them would edit
+ * source text the Document is quoting.
+ */
+function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
+  for (const component of ir.components) {
+    for (const root of component.roots) {
+      reportUnnormalized(root, `components[id=${component.id}].roots`, "root", out)
+    }
+  }
+  for (const manager of ir.workspace.managers) {
+    for (const root of manager.roots) {
+      reportUnnormalized(root, `workspace.managers[tool=${manager.tool}].roots`, "root", out)
+    }
+  }
+  for (const symbol of ir.symbols) {
+    reportUnnormalized(symbol.source.file, symbol.id, "source.file", out)
+    reportUnnormalized(symbol.name, symbol.id, "name", out)
+    for (const effect of symbol.effects) {
+      reportUnnormalized(effect.target, symbol.id, `effects[id=${effect.id}].target`, out)
+    }
+    for (const call of symbol.calls) {
+      reportUnnormalized(call.target, symbol.id, `calls[line=${call.line}].target`, out)
+    }
+  }
+}
+
+function reportUnnormalized(
+  value: string,
+  subject: string,
+  field: string,
+  out: IntegrityViolation[],
+): void {
+  if (value === value.normalize("NFC")) return
+  out.push({
+    invariant: 19,
+    subject,
+    message: `${field} "${value}" is not in Unicode NFC; the canonical serializer writes the normalized form, so this value is ordered and compared in one spelling and written in another`,
+  })
 }
 
 function checkSymbolIdUniqueness(ir: IR, out: IntegrityViolation[]): void {

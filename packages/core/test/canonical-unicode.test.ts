@@ -3,14 +3,11 @@ import { CoreError, checkIRIntegrity, makeSymbolId, serializeCanonical } from ".
 import { makeSymbol, minimalIR } from "./fixtures/ir"
 
 /**
- * The same text can be spelled two ways in Unicode: `é` as one code point (NFC, U+00E9) or
- * as `e` plus a combining acute (NFD, U+0065 U+0301). Which one a path arrives in depends
- * on how the name was created — an archive, an HFS+ volume, a Finder rename — and it
- * survives copying to any platform, so one source tree can yield two spellings for a file.
- *
- * Canonical serialization is what makes that invisible: normalize first, then order. Doing
- * it the other way round orders by one spelling and emits another, so byte-identical
- * inputs stop producing byte-identical output and the fingerprints built on it diverge.
+ * Unicode normalization, from the serializer's side. ir-schema.md §1.2 states the rule and
+ * why the Document depends on it; what these cases pin is the ordering half — normalize
+ * first, then order. Doing it the other way round orders by one spelling and emits another,
+ * so byte-identical inputs stop producing byte-identical output and the fingerprints built
+ * on them diverge.
  */
 
 // Escapes, not literal characters: a formatter or editor that NFC-normalizes this file

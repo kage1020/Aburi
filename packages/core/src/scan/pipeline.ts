@@ -1,6 +1,7 @@
 import type {
   BodyExtraction,
   Call,
+  CallCandidate,
   Confidence,
   Config,
   DropHint,
@@ -117,7 +118,11 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const dynamicCallSites: string[] = []
 
   for (const raw of candidates) {
-    const { candidate, confidence } = mergeFrameworkClassification(raw, frameworks, extractCtx)
+    const { candidate, confidence } = mergeFrameworkClassification(
+      normalizeCandidateStrings(raw),
+      frameworks,
+      extractCtx,
+    )
     const dropReason = decideDropReason(candidate, language, extractCtx)
 
     if (dropReason !== null) {
@@ -233,7 +238,7 @@ function decideDropReason(
 }
 
 interface ClassifyCallsInput {
-  calls: readonly import("@aburi/types").CallCandidate[]
+  calls: readonly CallCandidate[]
   effects: readonly EffectPlugin[]
   registry: VocabRegistry
   config: Config
@@ -244,6 +249,44 @@ interface ClassifyCallsInput {
   dropCFilter: DropCFilter
   timeoutEvents: ClassifyTimeoutEvent[]
   classifyTimeoutMs?: number
+}
+
+/**
+ * Put the strings a language plugin hands back into Unicode NFC, which is the form
+ * ir-schema.md §1.2 defines every Document string to be in.
+ *
+ * A plugin reads identifiers out of source bytes, so whichever spelling the file carries is
+ * the spelling it returns — and which spelling a file carries depends on how it was written,
+ * not on what it means. This is the boundary where plugin output becomes IR, so it is where
+ * the two spellings collapse into one. `Symbol.id` is already normalized by `makeSymbolId`;
+ * what needs it here is `name`, which the api fingerprint reduces to a short name and the
+ * diff matcher compares between revisions.
+ *
+ * The candidate is returned unchanged when nothing differs, so the ASCII case — every
+ * candidate in an ordinary scan — allocates nothing.
+ */
+function normalizeCandidateStrings(
+  candidate: SymbolCandidate<OpaqueAstNode>,
+): SymbolCandidate<OpaqueAstNode> {
+  const name = candidate.name.normalize("NFC")
+  return name === candidate.name ? candidate : { ...candidate, name }
+}
+
+/**
+ * The same treatment for a call, which carries the other string the IR orders by.
+ *
+ * `target` reaches the Document twice — as `calls[].target` when nothing claims the call,
+ * and as `effects[].target` when an effect plugin does. The second is a sort key:
+ * `propagateEffects` orders propagated entries by `(id, target)` and integrity invariant #11
+ * verifies that order against the in-memory string, while the serializer writes the
+ * normalized one. Two spellings there put a Document on disk out of the order it declares.
+ *
+ * Normalized before the drop filter and before any classifier sees it, so a plugin cannot
+ * be handed a spelling that differs from the one recorded against its own answer.
+ */
+function normalizeCallStrings(call: CallCandidate): CallCandidate {
+  const target = call.target.normalize("NFC")
+  return target === call.target ? call : { ...call, target }
 }
 
 function classifyCalls(input: ClassifyCallsInput): {
@@ -263,7 +306,8 @@ function classifyCalls(input: ClassifyCallsInput): {
     component: null,
   }
 
-  for (const call of input.calls) {
+  for (const produced of input.calls) {
+    const call = normalizeCallStrings(produced)
     if (input.dropCFilter.shouldDropCall(call)) continue
 
     const ctx = {

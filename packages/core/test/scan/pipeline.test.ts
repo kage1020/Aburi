@@ -447,3 +447,76 @@ describe("runFilePipeline — Symbol id contract", () => {
     )
   })
 })
+
+describe("runFilePipeline — Unicode normalization at the plugin boundary", () => {
+  // A language plugin reads identifiers out of source bytes, so whichever Unicode spelling
+  // the file carries is the spelling it hands back. The canonical serializer writes NFC, so
+  // an un-normalized string is ordered and compared in one form and written in another —
+  // the divergence ir-schema.md §1.2 exists to rule out.
+  const decomposed = "café".normalize("NFD")
+  const composed = decomposed.normalize("NFC")
+
+  it("uses a genuinely decomposed fixture, so the cases below are not vacuous", () => {
+    expect(decomposed).not.toBe(composed)
+    expect(decomposed.length).toBe(composed.length + 1)
+  })
+
+  it("normalizes the name a candidate arrives with", async () => {
+    const candidate = { ...baseCandidate(), name: decomposed }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.name).toBe(composed)
+  })
+
+  it("normalizes the name of a dropped candidate too", async () => {
+    // Dropped Symbols stay in the Document and carry the same fields; a form that only
+    // held for kept Symbols would be no form at all.
+    const candidate = { ...baseCandidate(), name: decomposed, kind: "interface" as const }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.dropped).toBe(true)
+    expect(result.symbols[0]?.name).toBe(composed)
+  })
+
+  it("normalizes an unclassified call target", async () => {
+    const result = await runPipelineWithStubs({
+      body: { rules: [], calls: [stubCall(`${decomposed}.doWork`, 1)] },
+    })
+    expect(result.symbols[0]?.calls.map((c) => c.target)).toEqual([`${composed}.doWork`])
+  })
+
+  it("normalizes a classified effect target, which is a sort key once propagated", async () => {
+    // `propagate.ts` orders propagated entries by `(id, target)` and integrity invariant
+    // #11 verifies that order against the in-memory string, while the serializer writes the
+    // normalized one. Two spellings there put the Document on disk out of its own order.
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-loud"),
+      init: async () => {},
+      classify: (): EffectClassification => ({
+        effectId: "event.publish",
+        confidence: "high",
+        derivedBy: "effects-loud:hit",
+      }),
+    }
+    const result = await runPipelineWithStubs({
+      effects: [eff],
+      body: { rules: [], calls: [stubCall(`${decomposed}.emit`, 1)] },
+    })
+    expect(result.symbols[0]?.effects.map((e) => e.target)).toEqual([`${composed}.emit`])
+  })
+
+  it("hands the effect plugin the normalized target, so one spelling reaches every classifier", async () => {
+    const seen: string[] = []
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-watch"),
+      init: async () => {},
+      classify: (call: CallCandidate): EffectClassification | null => {
+        seen.push(call.target)
+        return null
+      },
+    }
+    await runPipelineWithStubs({
+      effects: [eff],
+      body: { rules: [], calls: [stubCall(`${decomposed}.emit`, 1)] },
+    })
+    expect(seen).toEqual([`${composed}.emit`])
+  })
+})

@@ -633,3 +633,95 @@ describe("invariant #18 — workspace.languages", () => {
     expect(checkIRIntegrity(ir).filter((v) => v.invariant === 18)).toEqual([])
   })
 })
+
+describe("checkIRIntegrity #19 — Unicode normalization", () => {
+  const decomposed = "café".normalize("NFD")
+
+  it("reports every string the Document orders or identifies by", () => {
+    const cases: Array<{ what: string; build: (ir: ReturnType<typeof minimalIR>) => void }> = [
+      {
+        what: "components[].roots",
+        build: (ir) => {
+          ir.components = [makeComponent("a", { roots: [`apps/${decomposed}`] })]
+        },
+      },
+      {
+        what: "workspace.managers[].roots",
+        build: (ir) => {
+          ir.workspace.managers = [{ tool: "pnpm", roots: [`apps/${decomposed}`] }]
+        },
+      },
+      {
+        what: "symbols[].source.file",
+        build: (ir) => {
+          ir.symbols = [makeSymbol("ts:src/a.ts#foo", { source: sourceAt(`${decomposed}.ts`) })]
+        },
+      },
+      {
+        what: "symbols[].name",
+        build: (ir) => {
+          ir.symbols = [makeSymbol("ts:src/a.ts#foo", { name: decomposed })]
+        },
+      },
+      {
+        what: "symbols[].effects[].target",
+        build: (ir) => {
+          ir.symbols = [
+            makeSymbol("ts:src/a.ts#foo", {
+              effects: [
+                {
+                  id: "db.write",
+                  target: decomposed,
+                  line: 1,
+                  plugin: "p",
+                  confidence: "high",
+                  derivedBy: "convention:test",
+                },
+              ],
+            }),
+          ]
+        },
+      },
+      {
+        what: "symbols[].calls[].target",
+        build: (ir) => {
+          ir.symbols = [
+            makeSymbol("ts:src/a.ts#foo", {
+              calls: [{ target: decomposed, line: 1, resolved: null }],
+            }),
+          ]
+        },
+      },
+    ]
+    for (const { what, build } of cases) {
+      const ir = minimalIR()
+      build(ir)
+      expect(
+        checkIRIntegrity(ir).some((v) => v.invariant === 19),
+        what,
+      ).toBe(true)
+    }
+  })
+
+  it("says nothing about a Document that is already normalized", () => {
+    const ir = minimalIR()
+    ir.components = [makeComponent("a", { roots: [`apps/${decomposed.normalize("NFC")}`] })]
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", {
+        name: decomposed.normalize("NFC"),
+        calls: [{ target: decomposed.normalize("NFC"), line: 1, resolved: null }],
+      }),
+    ]
+    expect(checkIRIntegrity(ir).filter((v) => v.invariant === 19)).toEqual([])
+  })
+
+  it("leaves ids to #17, which already refuses a non-NFC part", () => {
+    // Two invariants reporting one defect would have the reader chasing the same string
+    // twice. `isSymbolId` rejects an un-normalized part, so #17 is where an id lands.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol(`ts:src/a.ts#${decomposed}`, { name: "foo" })]
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
+    expect(violations.some((v) => v.invariant === 19)).toBe(false)
+  })
+})

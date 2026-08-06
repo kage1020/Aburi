@@ -18,6 +18,8 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
 
 The ordering convention is a **precondition for diff stability**. Spurious diffs caused by array order must never occur.
 
+Ordering is by **UTF-16 code unit**, not by locale. Within the Basic Multilingual Plane that coincides with codepoint order; astral-plane strings differ, but the serializer, the integrity checker and every consumer using the default `<` / `>` operators or `Array.prototype.sort` all agree on it, which is what matters.
+
 ### 1.1 Absent key vs explicit `null`
 
 An absent key and an explicit `null` are **not** interchangeable. Every optional property fixes one of the two as its way of saying "no value", and which one it is follows mechanically from the property's type:
@@ -65,6 +67,31 @@ Most of the table is convention that the schema cannot express, and the two rows
 **Why the schema does not use `"default": null`.** JSON Schema's `default` is an annotation; it does not participate in validation. Writing it would look like a declaration that absence means `null` while no validator treats it that way. The rule lives here and in each property's `description` instead.
 
 **Adding an optional field to v1** means adding a row to the table above and stating the class in the property's `description` in `schema/aburi.ir.v1.json`. An optional property with no `description` has not declared its class, and `packages/types/test/schema-conventions.test.ts` fails on it.
+
+### 1.2 Unicode normalization
+
+**Every string in a Document is in Unicode NFC.** The canonical serializer normalizes on write, so this is not a preference: it is the form the bytes on disk are in, and anything else means the Document says one thing and its producer believed another.
+
+The rule is load-bearing rather than tidy, for two reasons.
+
+**Ordering.** §1 orders arrays by their key strings. Every ordering decision in the pipeline compares the string held in memory, while the serializer writes the normalized one. Where the two differ, a Document satisfies the sort rule in memory and lands on disk violating it — `é` written as one codepoint and as `e` plus a combining acute sort differently and are the same name.
+
+**Identity.** Two spellings of one value are two entries: two Symbol ids for one construct, two effect targets for one table, a rename degraded into a delete plus an add. Which spelling a string arrives in is decided by how the text was created — an archive, an HFS+ volume, a `git` checkout of a name someone typed on a Mac — and it survives copying to any platform, so one source tree can hand back both.
+
+Normalization therefore happens **where a string enters the process**, not where it is compared:
+
+| Entry point | What it normalizes |
+|---|---|
+| `makeSymbolId` / `trySymbolId` | the three id parts, before validating them, so the ids the guard accepts are the ids the constructors can mint |
+| `toPosixRelative` | every path the file walk produces — `symbols[].source.file` and the file segment of the id built beside it |
+| `toRelativePosix` (workspace detection) | `components[].roots` and `workspace.managers[].roots` |
+| the scan pipeline's plugin boundary | `symbols[].name` and the call target that becomes `calls[].target` or `effects[].target` |
+
+Normalizing at the comparator instead would fix an ordering and leave the two spellings in the Document as two entries, which is the larger of the two problems.
+
+§14 invariant #19 checks this on a Document read off disk, scoped to the strings whose spelling decides an order or an identity. Strings that are only rendered — a decorator's raw source text, a signature type — are not checked and not normalized on the way in, because they are quotations of source and editing them would misquote it. They still reach disk normalized, since the serializer normalizes everything.
+
+**Two keys that collide under normalization are a Document error.** `{"é": 1, "é": 2}` with one key composed and one decomposed is JSON a parser accepts and silently collapses, losing an entry, so `serializeCanonical` refuses it with `canonical-key-collision` rather than writing it.
 
 ## 2. Top-Level Structure (Document)
 
@@ -523,6 +550,7 @@ Guaranteed by the schema validator plus Aburi internals:
 16. No `symbols[].id` and no `dependencies[].from` / `.to` uses a reserved language token (§3.5) — today that means no id begins `slice:`, which would be indistinguishable from a Slice id and would make the Slice-id derivation produce `slice:slice:…`
 17. `symbols[].id` and `components[].id` satisfy the grammars of §3.1 and §4, and `symbols[].name` satisfies the qualified-name grammar of §3.1. Every other route to an id runs a constructor that enforces this; a document read from disk has its ids branded by a single whole-document assertion, and this is where they are actually checked
 18. `workspace.languages` is non-empty, every entry satisfies the `LanguageId` grammar of §3.1, and every `symbols[].language` appears in it. The Document declares which languages it covers, so a Symbol in a language the Document does not list means either an incomplete declaration or a Symbol that does not belong to this scan
+19. Every string the Document orders or identifies by is in Unicode NFC (§1.2): `symbols[].name`, `symbols[].source.file`, `symbols[].effects[].target`, `symbols[].calls[].target`, `components[].roots[]` and `workspace.managers[].roots[]`. Ids are covered by #17, whose grammar already refuses a non-NFC part. Strings the Document merely quotes — a decorator's raw text, a signature type — are out of scope: their spelling decides nothing, and normalizing a quotation would misquote it
 
 An invariant violation is a **fatal error**, not a warning.
 
