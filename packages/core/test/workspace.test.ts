@@ -153,12 +153,9 @@ describe("detectManagers", () => {
     expect(turbo?.roots).toEqual([])
   })
 
-  it("drops a declared package that lies outside the workspace root", async () => {
-    // A glob may ascend: `tinyglobby` honours `../` and returns matches above `cwd`. The
-    // file walk does not — it globs `**/*` under the workspace root — so a package up there
-    // contributes no Symbol either way. Recording its root would put a `..` path into
-    // `workspace.managers[].roots`, which IR integrity invariant #10 refuses, and would
-    // describe a directory the scan never opened.
+  it("refuses a declared package that lies outside the workspace root", async () => {
+    // `tinyglobby` honours the ascending pattern and returns the match above `cwd`, which
+    // is what makes this reachable at all. `assertInsideWorkspace` carries the reasoning.
     const outside = join(tmp, "outside")
     await mkdir(join(outside, "pkg"), { recursive: true })
     await writeFile(join(outside, "pkg", "package.json"), JSON.stringify({ name: "o" }), "utf8")
@@ -171,9 +168,16 @@ describe("detectManagers", () => {
       "utf8",
     )
 
-    const result = await detectManagers(root)
-    expect(result.workspaces.map((w) => w.relativeRoot)).toEqual(["apps/a"])
-    expect(result.managers.find((m) => m.tool === "pnpm")?.roots).toEqual(["apps/a"])
+    let caught: unknown
+    try {
+      await detectManagers(root)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("workspace-root-outside")
+    expect((caught as CoreError).message).toContain("pnpm workspace root")
+    expect((caught as CoreError).value).toContain("..")
   })
 
   it("spells a workspace root in Unicode NFC, as the paths beside it are spelled", async () => {

@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { Writable } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runCli, runScan } from "../src"
+import { CliError } from "../src/errors"
 
 class MemStream extends Writable {
   chunks: string[] = []
@@ -140,5 +141,48 @@ describe("runScan — respects --ignore glob", () => {
     // `vendor/x.ts` is excluded before routing, so it contributes no Symbol; what this
     // asserts is that the ignore glob is accepted and the run still writes an IR.
     expect(report.irPath).not.toBeNull()
+  })
+})
+
+describe("runScan — config-supplied component roots", () => {
+  async function writeConfigWithRoots(roots: readonly string[]): Promise<void> {
+    await writeFile(
+      resolve(scratch, "aburi.json"),
+      JSON.stringify({
+        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        languages: ["lang-typescript"],
+        components: [{ id: "shared", name: "Shared", roots, languages: ["ts"] }],
+      }),
+      "utf8",
+    )
+  }
+
+  it("blames the config, not the IR, for a root that leaves the workspace", async () => {
+    // `RelativePath` in the config schema constrains only `minLength` and "no backslash",
+    // so this is schema-valid and reaches component construction untouched. Left to run, it
+    // would be caught at the very end by `assertIRIntegrity` — reported against
+    // `components[id=shared].roots` as though the Document were at fault, and exiting 1
+    // through the generic handler rather than 2 as a problem with the scanned project.
+    await writeConfigWithRoots(["../shared"])
+    let caught: unknown
+    try {
+      await runScan({ cwd: scratch, outputDir: resolve(scratch, "out"), format: "json" })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CliError)
+    expect((caught as CliError).code).toBe("config-error")
+    expect((caught as CliError).message).toContain("components[id=shared] root")
+  })
+
+  it("still accepts an ordinary relative root", async () => {
+    await mkdir(resolve(scratch, "packages/shared"), { recursive: true })
+    await writeConfigWithRoots(["packages/shared"])
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.exitCode).toBe(0)
   })
 })

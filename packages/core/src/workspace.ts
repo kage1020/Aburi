@@ -184,14 +184,7 @@ function mergeManager(
   if (scan === null) return
   const roots = new Set<string>()
   for (const candidate of scan.candidates) {
-    // `tinyglobby` honours a `../` pattern and returns matches above `cwd`, so a manifest
-    // declaring `packages: ['../shared/*']` yields candidates outside the workspace root.
-    // The file walk does not follow them — it globs `**/*` under the root — so such a
-    // package contributes no Symbol whether or not it is recorded here. Recording it would
-    // put a `..` path into `workspace.managers[].roots` and `components[].roots`, which IR
-    // integrity invariant #10 refuses, and would have the Document describe a directory the
-    // scan never opened. Dropping it removes the claim, not the coverage.
-    if (posixWorkspaceRelativeViolation(candidate.relativeRoot) !== null) continue
+    assertInsideWorkspace(candidate, scan.tool)
     roots.add(candidate.relativeRoot)
     const key = `${candidate.managerTool}\t${candidate.relativeRoot}`
     if (seen.has(key)) continue
@@ -199,6 +192,34 @@ function mergeManager(
     workspaces.push(candidate)
   }
   managers.push({ tool: scan.tool, roots: [...roots] })
+}
+
+/**
+ * Refuse a declared package that sits outside the workspace root.
+ *
+ * `tinyglobby` honours an ascending pattern and returns matches above `cwd`, so a manifest
+ * declaring `packages: ['../shared/*']` produces candidates whose relative root starts
+ * `..`. Two things are then true at once, and neither is something to record: the IR cannot
+ * express such a root (`workspace.root` anchors every path in the Document, and integrity
+ * invariant #10 refuses one that ascends past it), and the file walk never opens those
+ * directories anyway, because it globs `**` under the workspace root.
+ *
+ * Failing is the honest outcome rather than dropping the candidate. Silently continuing
+ * would produce a Document that omits packages the user declared, with nothing anywhere
+ * saying so; `detectManagers` already refuses a manifest it cannot parse, and this is the
+ * same class of problem in the same file. The message names the tool and the offending
+ * root, and the CLI reports it against the workspace rather than as an internal failure.
+ */
+function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): void {
+  const violation = posixWorkspaceRelativeViolation(
+    candidate.relativeRoot,
+    `${tool} workspace root`,
+  )
+  if (violation === null) return
+  throw new CoreError(
+    `${violation.message}. A package outside the workspace root cannot be described by this IR, and the file walk never reaches it — declare it from the workspace that contains it, or move the workspace root.`,
+    { code: "workspace-root-outside", value: candidate.relativeRoot },
+  )
 }
 
 async function detectPnpm(root: string): Promise<ManagerScan | null> {

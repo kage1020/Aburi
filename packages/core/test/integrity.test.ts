@@ -174,37 +174,66 @@ describe("checkIRIntegrity", () => {
     expect(violations.some((v) => v.invariant === 10)).toBe(true)
   })
 
-  it("#10: answers the shared workspace-path table at every path site", () => {
-    // Invariant #10 is what stands between a document Aburi did not write and the passes
-    // that use its paths directly — `aburi diff --base <ir.json>` resolves them off disk.
-    // A path the Symbol id constructor refuses has to be refused here as well, at all three
-    // sites, or a hand-edited IR reintroduces exactly what the constructor kept out.
-    for (const { path, rejected, why } of WORKSPACE_PATH_CASES) {
+  it("#10: answers the shared path table at every path site, with the stated reason", () => {
+    // #10 is the rule the Symbol id constructor applies, asked of a Document Aburi did not
+    // write. All three sites are checked at once, so both a missed site and a spurious one
+    // fail; the reason is asserted because several clauses share the one error text shape.
+    for (const { path, root, why } of WORKSPACE_PATH_CASES) {
       const ir = minimalIR()
       ir.components = [makeComponent("a", { roots: [path] })]
       ir.symbols = [makeSymbol("ts:src/a.ts#foo", { source: sourceAt(path) })]
       ir.workspace.managers = [{ tool: "pnpm", roots: [path] }]
 
-      const subjects = checkIRIntegrity(ir)
-        .filter((v) => v.invariant === 10)
-        .map((v) => v.subject)
-        .sort()
+      const tenth = checkIRIntegrity(ir).filter((v) => v.invariant === 10)
       const label = `${JSON.stringify(path)} (${why})`
-      expect(subjects, label).toEqual(
-        rejected
-          ? ["components[id=a].roots", "ts:src/a.ts#foo", "workspace.managers[tool=pnpm].roots"]
-          : [],
-      )
+      if (root.ok) {
+        expect(tenth, label).toEqual([])
+        continue
+      }
+      expect(tenth.map((v) => v.subject).sort(), label).toEqual([
+        "components[id=a].roots",
+        "ts:src/a.ts#foo",
+        "workspace.managers[tool=pnpm].roots",
+      ])
+      for (const violation of tenth) {
+        expect(violation.message, `${label} @ ${violation.subject}`).toContain(root.reason)
+      }
     }
   })
 
-  it("#17: detects a Symbol id whose qualified name has an empty segment", () => {
-    // `ts:src/a.ts#A.` used to satisfy every invariant and then throw out of `apiFingerprint`,
-    // where `lastQnameSegment` found the leaf empty. The id grammar is where that is caught.
+  it("#10: assertIRIntegrity throws on a source.file that leaves the workspace", () => {
+    // The throwing form is the gate `readIR` relies on, and it is the only thing standing
+    // between a hand-edited Document and every consumer that trusts `source.file`.
     const ir = minimalIR()
-    ir.symbols = [makeSymbol("ts:src/a.ts#A.")]
+    ir.symbols = [makeSymbol("ts:src/a.ts#foo", { source: sourceAt("../../../../etc/passwd.ts") })]
+    let caught: unknown
+    try {
+      assertIRIntegrity(ir)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("integrity-violation")
+    expect((caught as CoreError).violations?.some((v) => v.invariant === 10)).toBe(true)
+  })
+
+  it("#17: detects a Symbol id whose qualified name has an empty segment", () => {
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#A.", { name: "A" })]
     const violations = checkIRIntegrity(ir)
     expect(violations.some((v) => v.invariant === 17)).toBe(true)
+  })
+
+  it("#17: detects a malformed Symbol.name even when the id is well-formed", () => {
+    // `apiFingerprint` and the framework classifiers call `lastQnameSegment` on
+    // `Symbol.name`, not on the qname inside the id, and nothing in the Document ties the
+    // two together. Checking only the id would leave the value they actually read
+    // unchecked, and a `name` of `"A."` would surface as a throw from a later pass.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#A", { name: "A." })]
+    const violations = checkIRIntegrity(ir).filter((v) => v.invariant === 17)
+    expect(violations).toHaveLength(1)
+    expect(violations[0]?.message).toContain("Symbol.name")
   })
 
   it("#11: detects unsorted symbols[] by id", () => {

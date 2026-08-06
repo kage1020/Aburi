@@ -80,27 +80,27 @@ describe("makeSymbolId", () => {
     ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
   })
 
-  it("answers the shared workspace-path table the way integrity invariant #10 does", () => {
-    for (const { path, rejected, why } of WORKSPACE_PATH_CASES) {
-      const build = () => makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" })
-      if (rejected) {
-        expect(build, `${path} (${why})`).toThrowError(
-          expect.objectContaining({ code: "non-posix-path" }),
+  it("answers the shared path table on the `symbolPath` side, with the stated reason", () => {
+    for (const { path, symbolPath, why } of WORKSPACE_PATH_CASES) {
+      const label = `${JSON.stringify(path)} (${why})`
+      if (symbolPath.ok) {
+        expect(makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" }), label).toBe(
+          `ts:${path}#foo`,
         )
-      } else {
-        expect(build(), `${path} (${why})`).toBe(`ts:${path}#foo`)
+        continue
       }
-    }
-  })
-
-  it("rejects the id's own separators inside the file path", () => {
-    // Not part of the shared table: this rule exists because the id is split on its first
-    // `:` and first `#`, so a path holding either would split back into parts the producer
-    // never wrote. A component root has no such structure and is free to contain them.
-    for (const file of ["src/a:b.ts", "src/a#b.ts"]) {
-      expect(() => makeSymbolId({ language: "ts", file, qualifiedName: "foo" }), file).toThrowError(
-        expect.objectContaining({ code: "non-posix-path" }),
-      )
+      // The reason matters, not just the refusal: `C:notabs.ts` is refused by the absolute
+      // clause and by the separator clause under one shared code, so asserting the code
+      // alone would stay green if the absolute-path pattern stopped covering it.
+      let caught: unknown
+      try {
+        makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" })
+      } catch (err) {
+        caught = err
+      }
+      expect(caught, label).toBeInstanceOf(CoreError)
+      expect((caught as CoreError).code, label).toBe("non-posix-path")
+      expect((caught as CoreError).message, label).toContain(symbolPath.reason)
     }
   })
 
@@ -167,12 +167,21 @@ describe("qualified-name segment grammar", () => {
    */
   const emptySegment = ["A.", ".A", "A..B", ".", "..", "::", "A::", "::B", "A.::B", "A::.B"]
 
-  it("makeSymbolId rejects a qualified name with an empty segment", () => {
+  it("makeSymbolId rejects a qualified name with an empty segment, and says so", () => {
+    // `QNAME_SEGMENT_PATTERN` refuses the empty string as well, so the dedicated branch
+    // changes only the message. Asserting the message is what makes it load-bearing —
+    // without it the branch could be deleted and every assertion would stay green while the
+    // reader was told `A.` "contains the non-identifier segment """.
     for (const qualifiedName of emptySegment) {
-      expect(
-        () => makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName }),
-        qualifiedName,
-      ).toThrowError(expect.objectContaining({ code: "anonymous-symbol-id-attempted" }))
+      let caught: unknown
+      try {
+        makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName })
+      } catch (err) {
+        caught = err
+      }
+      expect(caught, qualifiedName).toBeInstanceOf(CoreError)
+      expect((caught as CoreError).code, qualifiedName).toBe("anonymous-symbol-id-attempted")
+      expect((caught as CoreError).message, qualifiedName).toContain("has an empty segment")
     }
   })
 
@@ -218,6 +227,18 @@ describe("toPosixRelative", () => {
     expect(() => toPosixRelative("C:\\Users\\foo\\a.ts")).toThrowError(
       expect.objectContaining({ code: "non-posix-path" }),
     )
+  })
+
+  it("applies the id rule, not only the shared path rule", () => {
+    // Every path this returns becomes a `symbols[].source.file` and the file segment of the
+    // id built beside it, so a path it accepts must be one `makeSymbolId` accepts. Under
+    // the shared rule alone all three pass here and throw one call later, from a constructor
+    // whose input this function is supposed to have already made valid.
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
+      expect(() => toPosixRelative(raw), raw).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
   })
 })
 

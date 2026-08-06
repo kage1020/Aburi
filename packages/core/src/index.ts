@@ -33,9 +33,11 @@ export {
 } from "./fingerprint"
 export {
   DEFAULT_EXPORT_QNAME,
+  type GrammarViolation,
   isComponentId,
   isDefaultExportQname,
   isLanguageId,
+  isQualifiedName,
   isSymbolId,
   makeComponentId,
   makeLanguageId,
@@ -43,6 +45,7 @@ export {
   makeNestedQname,
   makeSymbolId,
   makeTopLevelQname,
+  posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
   type SymbolIdParts,
   toPosixRelative,

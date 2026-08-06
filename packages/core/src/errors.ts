@@ -28,6 +28,8 @@ export type CoreErrorCode =
   | "workspace-root-not-found"
   /** A workspace manager manifest could not be parsed (malformed YAML / JSON). */
   | "workspace-manifest-malformed"
+  /** A workspace manager manifest declared a package outside the workspace root, which no IR path can name. */
+  | "workspace-root-outside"
   /** Two language plugins claim the same file extension — a plugin-registry misconfiguration. */
   | "language-routing-collision"
   /** A caller supplied a plugin list that violates the manifest-registry contract at scan wiring time. */
