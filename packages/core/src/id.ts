@@ -32,8 +32,13 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 /** Identifier-like segment that may appear in a qualified name (no separators, no spaces). */
 const QNAME_SEGMENT_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
-/** Path that contains the workspace-relative POSIX shape expected by Symbol.id. */
-const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:[\\/])/
+/**
+ * Prefixes that make a path absolute rather than workspace-relative. The Windows drive
+ * letter needs no following separator: `C:a.ts` is drive-relative, resolves against a
+ * per-drive working directory the IR does not record, and so is no more portable than
+ * `C:/a.ts`.
+ */
+const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:)/
 
 /**
  * ASCII kebab-case, matching `aburi.ir.v1.json#/$defs/ComponentId`.
@@ -51,17 +56,28 @@ export interface SymbolIdParts {
   qualifiedName: string
 }
 
-/** A reason a candidate Symbol id was rejected, in the shape `CoreError` wants. */
-interface IdViolation {
-  code: CoreErrorCode
+/** The subset of `CoreErrorCode` a grammar check can produce. */
+type GrammarViolationCode = Extract<
+  CoreErrorCode,
+  "anonymous-symbol-id-attempted" | "invalid-language-id" | "invalid-symbol-id" | "non-posix-path"
+>
+
+/**
+ * A reason a candidate id, qualified name or path was rejected, in the shape `CoreError`
+ * wants. `message` already names its subject, so a caller neither builds nor edits it.
+ */
+export interface GrammarViolation {
+  code: GrammarViolationCode
   message: string
   value: string
 }
 
 /**
- * Build a Symbol id from its three deterministic components. Refuses anything that would
- * make the id position-dependent (anonymous qualified names, backslash paths, absolute
- * paths, ascending `..` paths), so position-dependent ids cannot leak into the IR.
+ * Build a Symbol id from its three deterministic components.
+ *
+ * Refuses everything that would make the id position-dependent or ambiguous: anonymous and
+ * empty-segment qualified names, backslash and absolute paths, `..` ascents, non-canonical
+ * `.` segments, and the id's own `:` / `#` separators inside the path.
  *
  * Use this wherever a failed id is a bug. Where a candidate id is speculative — a resolver
  * guessing at a callee that may not exist — use `trySymbolId` instead, which reports the
@@ -216,20 +232,20 @@ export function isDefaultExportQname(qname: string): boolean {
 
 /**
  * Normalize a filesystem path into the POSIX, workspace-relative form Symbol.id requires.
- * Windows backslashes are rewritten; absolute paths and `..` ascents throw because they
- * are not valid Symbol.id inputs even after normalization (they would expose the host
- * filesystem layout in the IR).
+ *
+ * This is where the paths the file walk produces enter the IR: what it returns becomes a
+ * `symbols[].source.file` and the file segment of the id built alongside it, so it applies
+ * the id rule and not only the shared path rule. Workspace and component roots take the
+ * other entry point — `toRelativePosix` in `workspace.ts` — which normalizes the same way
+ * and is checked against the same shared rule.
  */
 export function toPosixRelative(rawPath: string): string {
   // NFC as well as separator normalization. Which Unicode spelling a path arrives in
   // depends on how the name was created — a decomposed `é` from an archive, an HFS+ volume
-  // or a Finder rename survives on any platform — so the same source tree can hand back
-  // two different strings for one file. This is the single point where a path enters the
-  // process, so normalizing here keeps `symbol.source.file`, `components[].roots` and the
-  // Symbol id built from that path spelled identically. Normalizing only inside the id
-  // constructor would leave them disagreeing.
+  // or a Finder rename survives on any platform — so one source tree can hand back two
+  // strings for one file, and the id and the path it names would be spelled differently.
   const normalized = rawPath.replace(/\\/g, "/").normalize("NFC")
-  const violation = posixWorkspaceRelativeViolation(normalized)
+  const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
   }
@@ -274,7 +290,7 @@ function composeSymbolId(parts: SymbolIdParts): SymbolId {
  * Inverse of `composeSymbolId`: recover the three parts from an assembled id, or `null` when
  * the string has no `:` / `#` structure at all. Neither the language token nor the file path
  * may contain `:` or `#`, so the first occurrence of each is the separator — which is why
- * `posixWorkspaceRelativeViolation` rejects both characters in a path.
+ * `symbolIdPathViolation` rejects both characters in a path.
  */
 function splitSymbolId(value: string): SymbolIdParts | null {
   const colon = value.indexOf(":")
@@ -289,10 +305,10 @@ function splitSymbolId(value: string): SymbolIdParts | null {
 }
 
 /** Full validation of a candidate Symbol id, in the order the assertions used to run. */
-function symbolIdViolation(parts: SymbolIdParts): IdViolation | null {
+function symbolIdViolation(parts: SymbolIdParts): GrammarViolation | null {
   return (
     languageIdViolation(parts.language) ??
-    posixWorkspaceRelativeViolation(parts.file) ??
+    symbolIdPathViolation(parts.file) ??
     qualifiedNameViolation(parts.qualifiedName) ??
     unnormalizedViolation(parts)
   )
@@ -308,7 +324,7 @@ function symbolIdViolation(parts: SymbolIdParts): IdViolation | null {
  * safety argument — which rests on every id in the set having gone through the constructor
  * — would not hold for a document Aburi did not write.
  */
-function unnormalizedViolation(parts: SymbolIdParts): IdViolation | null {
+function unnormalizedViolation(parts: SymbolIdParts): GrammarViolation | null {
   for (const [field, raw] of [
     ["language", parts.language],
     ["file", parts.file],
@@ -324,7 +340,7 @@ function unnormalizedViolation(parts: SymbolIdParts): IdViolation | null {
   return null
 }
 
-function languageIdViolation(language: string): IdViolation | null {
+function languageIdViolation(language: string): GrammarViolation | null {
   if (!LANGUAGE_ID_PATTERN.test(language)) {
     return {
       code: "invalid-language-id",
@@ -344,50 +360,117 @@ function languageIdViolation(language: string): IdViolation | null {
   return null
 }
 
-function posixWorkspaceRelativeViolation(path: string): IdViolation | null {
+/** How a path site is named in its rejection message. */
+const PATH_SUBJECT = "path"
+const SYMBOL_ID_PATH_SUBJECT = "Symbol id file path"
+
+/**
+ * The rule every path written into the IR obeys: non-empty, POSIX-separated, canonical, and
+ * naming somewhere inside the workspace.
+ *
+ * Exported because `checkIRIntegrity` asks the same question of a document it did not build
+ * (ir-schema.md §14 invariant #10), and one implementation is what keeps the two answers
+ * equal. A path leaving the workspace is refused because the Document claims to describe
+ * that workspace: `workspace.root` anchors every other path in it, so a `..` root or
+ * `source.file` names something the Document has no way to be about.
+ *
+ * `subject` is how the offending field is named in the message, so a caller never edits the
+ * string it gets back.
+ */
+export function posixWorkspaceRelativeViolation(
+  path: string,
+  subject: string = PATH_SUBJECT,
+): GrammarViolation | null {
   if (path.length === 0) {
-    return { code: "non-posix-path", message: "Symbol id file path is empty", value: path }
+    return { code: "non-posix-path", message: `${subject} is empty`, value: path }
   }
   if (path.includes("\\")) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" contains a backslash; pass it through toPosixRelative() first`,
+      message: `${subject} "${path}" contains a backslash; only POSIX forward slashes are allowed`,
       value: path,
     }
   }
   if (ABSOLUTE_PATH_PATTERN.test(path)) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" is absolute; rebase it onto the workspace root`,
+      message: `${subject} "${path}" is absolute; only workspace-relative paths are allowed`,
       value: path,
     }
   }
-  if (path.split("/").some((s) => s === "..")) {
+  const segments = path.split("/")
+  if (segments.some((s) => s === "..")) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" escapes the workspace via "..", which would leak the host layout into the IR`,
+      message: `${subject} "${path}" leaves the workspace through a ".." segment, so it names something outside what the Document describes`,
       value: path,
     }
   }
-  // `:` and `#` are the id's own separators, so a path holding either assembles into a
-  // string whose first `:` / `#` fall in the wrong place: it still satisfies the schema
-  // pattern, but splitting it back yields parts the producer never wrote. Checked last so a
-  // Windows drive path still reports the more useful "is absolute".
-  if (path.includes(":") || path.includes("#")) {
+  // A bare "." is the workspace root itself and is the root component's root. Anywhere else
+  // a "." segment is a second spelling of a path that already has one — `./src/a.ts` and
+  // `src/a.ts` name one file, and two spellings mean two Symbol ids for it, which invariant
+  // #1 cannot see as a duplicate. Every producer here goes through `relative()`, which never
+  // emits one, so this closes the shape rather than rejecting anything Aburi writes.
+  if (path !== "." && segments.some((s) => s === ".")) {
     return {
       code: "non-posix-path",
-      message: `Symbol id file path "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,
+      message: `${subject} "${path}" contains a "." segment; a path has one spelling, and "${segments.filter((s) => s !== ".").join("/")}" is it`,
       value: path,
     }
   }
   return null
 }
 
-function qualifiedNameViolation(qname: string): IdViolation | null {
+/**
+ * The path rule plus the one restriction that belongs to the id rather than to the path.
+ *
+ * `:` and `#` are the id's own separators, so a path holding either assembles into a string
+ * whose first `:` / `#` fall in the wrong place: it still satisfies the schema pattern, but
+ * splitting it back yields parts the producer never wrote. A component root is not split on
+ * anything, which is why this sits here and not in the shared rule. Checked after the path
+ * rule so a Windows drive path still reports the more useful "is absolute".
+ *
+ * The bare "." is refused here for the same reason: it is the workspace root, a legitimate
+ * `components[].roots` entry and never a `symbols[].source.file`, because a directory holds
+ * no Symbol.
+ */
+function symbolIdPathViolation(path: string): GrammarViolation | null {
+  const violation = posixWorkspaceRelativeViolation(path, SYMBOL_ID_PATH_SUBJECT)
+  if (violation !== null) return violation
+  if (path === ".") {
+    return {
+      code: "non-posix-path",
+      message: `${SYMBOL_ID_PATH_SUBJECT} is "."; that names the workspace root, and a directory holds no Symbol`,
+      value: path,
+    }
+  }
+  if (path.includes(":") || path.includes("#")) {
+    return {
+      code: "non-posix-path",
+      message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,
+      value: path,
+    }
+  }
+  return null
+}
+
+/**
+ * Does a string satisfy the qualified-name grammar of ir-schema.md §3.1?
+ *
+ * `Symbol.name` carries a qualified name too, and `lastQnameSegment` is called on it by
+ * `apiFingerprint` and by two framework classifiers. Nothing ties it to the qname inside
+ * `Symbol.id`, so checking the id alone leaves the value those three actually read
+ * unchecked. Invariant #17 uses this on both.
+ */
+export function isQualifiedName(value: string): boolean {
+  return qualifiedNameViolation(value) === null
+}
+
+function qualifiedNameViolation(qname: string): GrammarViolation | null {
   if (qname.length === 0) {
     return {
       code: "anonymous-symbol-id-attempted",
-      message: "Symbol id qualified name is empty",
+      message: "qualified name is empty",
       value: qname,
     }
   }
@@ -395,15 +478,22 @@ function qualifiedNameViolation(qname: string): IdViolation | null {
   if (containsAnonymousMarker(qname)) {
     return {
       code: "anonymous-symbol-id-attempted",
-      message: `Symbol id qualified name "${qname}" looks anonymous (position-dependent markers like <anon@L42> are forbidden); attach the construct to its parent Symbol instead`,
+      message: `qualified name "${qname}" looks anonymous (position-dependent markers like <anon@L42> are forbidden); attach the construct to its parent Symbol instead`,
       value: qname,
     }
   }
   for (const segment of splitQnameSegments(qname)) {
+    if (segment.length === 0) {
+      return {
+        code: "anonymous-symbol-id-attempted",
+        message: `qualified name "${qname}" has an empty segment; "." and "::" join two named constructs, so neither may sit at an end or beside another`,
+        value: qname,
+      }
+    }
     if (!QNAME_SEGMENT_PATTERN.test(segment)) {
       return {
         code: "anonymous-symbol-id-attempted",
-        message: `Symbol id qualified name "${qname}" contains the non-identifier segment "${segment}"`,
+        message: `qualified name "${qname}" contains the non-identifier segment "${segment}"`,
         value: qname,
       }
     }
@@ -414,15 +504,20 @@ function qualifiedNameViolation(qname: string): IdViolation | null {
 /**
  * Split a fully-built qname back into the segments that must each pass the identifier
  * pattern. Both the instance separator (".") and the static separator ("::") split here.
+ *
+ * Empty segments are kept rather than dropped. Discarding them made a dangling separator
+ * invisible to the check above: `A.` split to `["A"]` and satisfied the constructor, so an
+ * id no producer is able to build passed every gate that exists to stop one. An empty
+ * segment is the defect, so it has to reach the validator that reports it.
  */
 function splitQnameSegments(qname: string): string[] {
-  return qname.split(/::|\./).filter((s) => s.length > 0)
+  return qname.split(/::|\./)
 }
 
 function assertQnameSegment(segment: string, originalQname: string): void {
   if (!QNAME_SEGMENT_PATTERN.test(segment)) {
     throw new CoreError(
-      `Symbol id qualified name "${originalQname}" contains the non-identifier segment "${segment}"`,
+      `qualified name "${originalQname}" contains the non-identifier segment "${segment}"`,
       { code: "anonymous-symbol-id-attempted", value: originalQname },
     )
   }

@@ -4,6 +4,7 @@ import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
 import { CoreError } from "./errors"
+import { posixWorkspaceRelativeViolation } from "./id"
 
 /**
  * Filenames whose presence at any directory ancestor identifies a workspace root. The
@@ -183,6 +184,7 @@ function mergeManager(
   if (scan === null) return
   const roots = new Set<string>()
   for (const candidate of scan.candidates) {
+    assertInsideWorkspace(candidate, scan.tool)
     roots.add(candidate.relativeRoot)
     const key = `${candidate.managerTool}\t${candidate.relativeRoot}`
     if (seen.has(key)) continue
@@ -190,6 +192,34 @@ function mergeManager(
     workspaces.push(candidate)
   }
   managers.push({ tool: scan.tool, roots: [...roots] })
+}
+
+/**
+ * Refuse a declared package that sits outside the workspace root.
+ *
+ * `tinyglobby` honours an ascending pattern and returns matches above `cwd`, so a manifest
+ * declaring `packages: ['../shared/*']` produces candidates whose relative root starts
+ * `..`. Two things are then true at once, and neither is something to record: the IR cannot
+ * express such a root (`workspace.root` anchors every path in the Document, and integrity
+ * invariant #10 refuses one that ascends past it), and the file walk never opens those
+ * directories anyway, because it globs `**` under the workspace root.
+ *
+ * Failing is the honest outcome rather than dropping the candidate. Silently continuing
+ * would produce a Document that omits packages the user declared, with nothing anywhere
+ * saying so; `detectManagers` already refuses a manifest it cannot parse, and this is the
+ * same class of problem in the same file. The message names the tool and the offending
+ * root, and the CLI reports it against the workspace rather than as an internal failure.
+ */
+function assertInsideWorkspace(candidate: WorkspaceCandidate, tool: string): void {
+  const violation = posixWorkspaceRelativeViolation(
+    candidate.relativeRoot,
+    `${tool} workspace root`,
+  )
+  if (violation === null) return
+  throw new CoreError(
+    `${violation.message}. A package outside the workspace root cannot be described by this IR, and the file walk never reaches it — declare it from the workspace that contains it, or move the workspace root.`,
+    { code: "workspace-root-outside", value: candidate.relativeRoot },
+  )
 }
 
 async function detectPnpm(root: string): Promise<ManagerScan | null> {
@@ -345,10 +375,24 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
+/**
+ * Express `target` as a workspace-relative POSIX path, in the same spelling
+ * `toPosixRelative` gives the file paths that sit beside it in the IR.
+ *
+ * The NFC step is not decoration: `symbols[].source.file` is normalized where the path
+ * enters the process, so a root left in whatever spelling the filesystem returned would
+ * disagree with a `source.file` naming the same directory — one `café` composed, one
+ * decomposed — and canonical serialization would write two different byte sequences for
+ * one path.
+ *
+ * A `..` result is possible and is not normalized away: glob patterns may ascend, and a
+ * directory above the workspace root genuinely is outside it. `mergeManager` drops those.
+ */
 function toRelativePosix(root: string, target: string): string {
   const rel = relative(root, target)
   if (rel.length === 0) return "."
-  return sep === "/" ? rel : rel.split(sep).join(posix.sep)
+  const posixRel = sep === "/" ? rel : rel.split(sep).join(posix.sep)
+  return posixRel.normalize("NFC")
 }
 
 function compareString(a: string, b: string): number {

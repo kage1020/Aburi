@@ -1,6 +1,13 @@
 import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
 import { CoreError, type IntegrityViolation } from "./errors"
-import { isComponentId, isLanguageId, isSymbolId, RESERVED_LANGUAGE_IDS } from "./id"
+import {
+  isComponentId,
+  isLanguageId,
+  isQualifiedName,
+  isSymbolId,
+  posixWorkspaceRelativeViolation,
+  RESERVED_LANGUAGE_IDS,
+} from "./id"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -65,7 +72,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
  * empty); callers that want the throwing form use `assertIRIntegrity`.
  *
- * The 18 invariants checked here are:
+ * The invariants checked here, in §14 numbering, are:
  *   1. Symbol id uniqueness
  *   2. Component id uniqueness
  *   3. Symbol.component → Components[].id existence
@@ -75,14 +82,16 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *   7. Effect.id ∈ core vocab OR x-<plugin>: prefix
  *   8. Symbol.kind ∈ enum
  *   9. Symbol.extKind null or matches namespace:segment+ pattern
- *  10. All file paths POSIX (forward slash, no backslash, no absolute prefix)
+ *  10. All file paths are workspace-relative POSIX (non-empty, no backslash, no absolute
+ *      prefix, no `..` ascent)
  *  11. Arrays are sorted per the IR schema's ordering rules
  *  12. via:"call" edges: both endpoints are Symbol ids present in Symbols[]
  *  13. dependencies[]: no duplicate (from, to, via) triples
  *  14. Symbol.calls[].resolved and via:"call" edges agree (call-graph projection is total)
  *  15. stats.callResolution (when present) is a faithful census of Symbol.calls[]
  *  16. No Symbol id or Dependency endpoint uses a reserved language token (today: `slice`)
- *  17. Symbol and Component ids satisfy their own grammars
+ *  17. Symbol and Component ids satisfy their own grammars, and Symbol.name satisfies the
+ *      qualified-name grammar
  *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
@@ -172,12 +181,25 @@ function reportReservedNamespace(id: string, subject: string, out: IntegrityViol
  */
 function checkIdGrammar(ir: IR, out: IntegrityViolation[]): void {
   for (const symbol of ir.symbols) {
-    if (isSymbolId(symbol.id)) continue
-    out.push({
-      invariant: 17,
-      subject: symbol.id,
-      message: `Symbol id does not satisfy the <language>:<posix-path>#<qualified-name> grammar (ir-schema.md §3.1)`,
-    })
+    if (!isSymbolId(symbol.id)) {
+      out.push({
+        invariant: 17,
+        subject: symbol.id,
+        message: `Symbol id does not satisfy the <language>:<posix-path>#<qualified-name> grammar (ir-schema.md §3.1)`,
+      })
+    }
+    // `Symbol.name` carries a qualified name of its own (ir-schema.md §5), and nothing in
+    // the Document ties it to the qname inside the id. It is the value `apiFingerprint` and
+    // the framework classifiers pass to `lastQnameSegment`, which throws on an empty leaf,
+    // so checking the id alone would leave a `name` of `"A."` to surface as a crash in a
+    // later pass instead of as the malformed Document it is.
+    if (!isQualifiedName(symbol.name)) {
+      out.push({
+        invariant: 17,
+        subject: symbol.id,
+        message: `Symbol.name "${symbol.name}" does not satisfy the qualified-name grammar (ir-schema.md §3.1)`,
+      })
+    }
   }
   for (const component of ir.components) {
     if (isComponentId(component.id)) continue
@@ -363,6 +385,16 @@ function checkSymbolExtKindShape(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
+/**
+ * Invariant #10 (ir-schema.md §14): every path in the Document is non-empty,
+ * POSIX-separated, canonical, and names somewhere inside the workspace.
+ *
+ * Delegates to `posixWorkspaceRelativeViolation`, the rule the Symbol id constructor applies
+ * on the way out, so the Document Aburi writes and the Document it accepts describe one set
+ * of paths rather than two that can drift. A path leaving the workspace is refused because
+ * `workspace.root` anchors every path in the Document: one that ascends past it names
+ * something the Document has no way to be about.
+ */
 function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
   const pathSites: Array<{ subject: string; path: string }> = []
   for (const component of ir.components) {
@@ -380,20 +412,9 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
   }
 
   for (const site of pathSites) {
-    if (site.path.includes("\\")) {
-      out.push({
-        invariant: 10,
-        subject: site.subject,
-        message: `path "${site.path}" contains a backslash; only POSIX forward slashes are allowed`,
-      })
-    }
-    if (/^([/]|[A-Za-z]:)/.test(site.path)) {
-      out.push({
-        invariant: 10,
-        subject: site.subject,
-        message: `path "${site.path}" is absolute; only workspace-relative paths are allowed`,
-      })
-    }
+    const violation = posixWorkspaceRelativeViolation(site.path)
+    if (violation === null) continue
+    out.push({ invariant: 10, subject: site.subject, message: violation.message })
   }
 }
 

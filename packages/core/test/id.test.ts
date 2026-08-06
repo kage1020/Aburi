@@ -16,6 +16,7 @@ import {
   toPosixRelative,
   trySymbolId,
 } from "../src/index"
+import { WORKSPACE_PATH_CASES } from "./fixtures/paths"
 
 describe("makeSymbolId", () => {
   it("composes lang:file#qname for a top-level function", () => {
@@ -79,6 +80,30 @@ describe("makeSymbolId", () => {
     ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
   })
 
+  it("answers the shared path table on the `symbolPath` side, with the stated reason", () => {
+    for (const { path, symbolPath, why } of WORKSPACE_PATH_CASES) {
+      const label = `${JSON.stringify(path)} (${why})`
+      if (symbolPath.ok) {
+        expect(makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" }), label).toBe(
+          `ts:${path}#foo`,
+        )
+        continue
+      }
+      // The reason matters, not just the refusal: `C:notabs.ts` is refused by the absolute
+      // clause and by the separator clause under one shared code, so asserting the code
+      // alone would stay green if the absolute-path pattern stopped covering it.
+      let caught: unknown
+      try {
+        makeSymbolId({ language: "ts", file: path, qualifiedName: "foo" })
+      } catch (err) {
+        caught = err
+      }
+      expect(caught, label).toBeInstanceOf(CoreError)
+      expect((caught as CoreError).code, label).toBe("non-posix-path")
+      expect((caught as CoreError).message, label).toContain(symbolPath.reason)
+    }
+  })
+
   it("rejects language ids that are not lowercase-ASCII identifiers", () => {
     expect(() =>
       makeSymbolId({ language: "TS", file: "src/a.ts", qualifiedName: "foo" }),
@@ -134,6 +159,65 @@ describe("makeTopLevelQname / makeNestedQname", () => {
   })
 })
 
+describe("qualified-name segment grammar", () => {
+  /**
+   * Separators that join nothing. `makeMemberQname` / `makeNestedQname` cannot produce
+   * these, but a plugin that assembles a qname by hand can, and `makeSymbolId` is the last
+   * gate before the id reaches the IR.
+   */
+  const emptySegment = ["A.", ".A", "A..B", ".", "..", "::", "A::", "::B", "A.::B", "A::.B"]
+
+  it("makeSymbolId rejects a qualified name with an empty segment, and says so", () => {
+    // `QNAME_SEGMENT_PATTERN` refuses the empty string as well, so the dedicated branch
+    // changes only the message. Asserting the message is what makes it load-bearing —
+    // without it the branch could be deleted and every assertion would stay green while the
+    // reader was told `A.` "contains the non-identifier segment """.
+    for (const qualifiedName of emptySegment) {
+      let caught: unknown
+      try {
+        makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName })
+      } catch (err) {
+        caught = err
+      }
+      expect(caught, qualifiedName).toBeInstanceOf(CoreError)
+      expect((caught as CoreError).code, qualifiedName).toBe("anonymous-symbol-id-attempted")
+      expect((caught as CoreError).message, qualifiedName).toContain("has an empty segment")
+    }
+  })
+
+  it("isSymbolId and trySymbolId refuse them too", () => {
+    // Not a restatement of the case above: an id built elsewhere reaches the codebase
+    // through the guard rather than the constructor, and it is the guard that IR integrity
+    // invariant #17 consults about a document read off disk.
+    for (const qualifiedName of emptySegment) {
+      expect(isSymbolId(`ts:src/a.ts#${qualifiedName}`), qualifiedName).toBe(false)
+      expect(
+        trySymbolId({ language: "ts", file: "src/a.ts", qualifiedName }),
+        qualifiedName,
+      ).toBeNull()
+    }
+  })
+
+  it("still accepts every shape the qname builders produce", () => {
+    const accepted = [
+      makeTopLevelQname("createInvoice"),
+      makeMemberQname(["InvoiceService"], "create", "instance"),
+      makeMemberQname(["InvoiceService"], "fromJson", "static"),
+      makeMemberQname(["Billing", "Invoice"], "create", "instance"),
+      makeNestedQname(["Billing", "Invoice", "create"]),
+      makeTopLevelQname("_private"),
+      makeTopLevelQname("$dollar"),
+      makeTopLevelQname("a1"),
+      DEFAULT_EXPORT_QNAME,
+    ]
+    for (const qualifiedName of accepted) {
+      expect(makeSymbolId({ language: "ts", file: "src/a.ts", qualifiedName }), qualifiedName).toBe(
+        `ts:src/a.ts#${qualifiedName}`,
+      )
+    }
+  })
+})
+
 describe("toPosixRelative", () => {
   it("normalizes backslashes into forward slashes", () => {
     expect(toPosixRelative("src\\a\\b.ts")).toBe("src/a/b.ts")
@@ -143,6 +227,18 @@ describe("toPosixRelative", () => {
     expect(() => toPosixRelative("C:\\Users\\foo\\a.ts")).toThrowError(
       expect.objectContaining({ code: "non-posix-path" }),
     )
+  })
+
+  it("applies the id rule, not only the shared path rule", () => {
+    // Every path this returns becomes a `symbols[].source.file` and the file segment of the
+    // id built beside it, so a path it accepts must be one `makeSymbolId` accepts. Under
+    // the shared rule alone all three pass here and throw one call later, from a constructor
+    // whose input this function is supposed to have already made valid.
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
+      expect(() => toPosixRelative(raw), raw).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
   })
 })
 

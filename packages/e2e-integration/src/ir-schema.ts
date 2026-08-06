@@ -9,7 +9,7 @@ import Ajv2020, { type ErrorObject } from "ajv/dist/2020"
  *
  * The v1 schemas are frozen and are the stated source of truth for the IR, so a produced
  * document failing them is a contract break: a downstream consumer that validates rejects
- * every document. The 17 integrity invariants encode cross-field relationships the schema
+ * every document. The integrity invariants encode cross-field relationships the schema
  * cannot express and never check the schema itself, so the two are complementary.
  */
 export async function irValidator(): Promise<(doc: unknown) => string[]> {

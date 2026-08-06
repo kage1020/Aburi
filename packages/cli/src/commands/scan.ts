@@ -2,11 +2,13 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { type LoadedConfig, loadConfig, readConfigFile } from "@aburi/config"
 import {
+  CoreError,
   detectComponents,
   detectManagers,
   detectWorkspaceRoot,
   makeComponentId,
   makeLanguageId,
+  posixWorkspaceRelativeViolation,
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -292,6 +294,26 @@ function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Confi
  * `../exit-codes` maps that to 2, and an unwrapped `CoreError` would fall through to the
  * generic handler and report 1 with no command context.
  */
+/**
+ * Check a config-supplied component root against the rule the IR holds every path to.
+ *
+ * The config schema's `RelativePath` constrains only `minLength: 1` and "no backslash", so
+ * `"../shared"` is schema-valid and used to reach the IR untouched. It would now be caught
+ * by `assertIRIntegrity` at the very end of the scan — reported as an integrity violation
+ * against `components[id=…].roots`, blaming the Document for what the config said, and
+ * exiting 1 through the generic handler. Checking it here instead keeps the report pointed
+ * at the file the user can edit, and inside the wrapper that makes it exit 2.
+ */
+function assertWorkspaceRelative(root: string, componentId: string): string {
+  const normalized = root.normalize("NFC")
+  const violation = posixWorkspaceRelativeViolation(
+    normalized,
+    `components[id=${componentId}] root`,
+  )
+  if (violation !== null) throw new CoreError(violation.message, violation)
+  return normalized
+}
+
 async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
@@ -321,7 +343,7 @@ async function resolveComponents(
         const component: Component = {
           id: makeComponentId(entry.id),
           name: entry.name ?? entry.id,
-          roots: [...entry.roots],
+          roots: entry.roots.map((root) => assertWorkspaceRelative(root, entry.id)),
           languages: languages.length > 0 ? languages : [makeLanguageId("ts")],
           description: entry.description ?? null,
         }
