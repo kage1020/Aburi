@@ -543,7 +543,7 @@ For symbols with `dropped: true`, all fingerprints are fixed to the 12-hex strin
 
 ## 14. Invariants
 
-Guaranteed by the schema validator plus Aburi internals:
+Guaranteed by Aburi internals. Item 20 restates the schema's own structural requirements, because nothing in the pipeline runs a schema validator — `readIR` checks `$schema` and hands the parsed object to the integrity checker — and the nineteen relational rules above it are statements about a Document of that shape:
 
 1. `symbols[].id` is unique within the Document
 2. `components[].id` is unique within the Document
@@ -564,7 +564,7 @@ Guaranteed by the schema validator plus Aburi internals:
 17. `symbols[].id` and `components[].id` satisfy the grammars of §3.1 and §4, and `symbols[].name` satisfies the qualified-name grammar of §3.1. Every other route to an id runs a constructor that enforces this; a document read from disk has its ids branded by a single whole-document assertion, and this is where they are actually checked
 18. `workspace.languages` is non-empty, every entry satisfies the `LanguageId` grammar of §3.1, and every `symbols[].language` appears in it. The Document declares which languages it covers, so a Symbol in a language the Document does not list means either an incomplete declaration or a Symbol that does not belong to this scan
 19. Every string the Document orders or identifies by is in Unicode NFC. §1.2 defines the rule, the fields it covers, and the two categories it deliberately excludes
-20. The Document carries every container and field the nineteen above read. This one is different in kind: the schema already guarantees the shape, and #20 exists because nothing in the pipeline runs a schema validator — `readIR` checks `$schema` and hands the parsed object to the integrity checker, which is therefore the only gate a Document read off disk passes. A checker whose answer to a malformed input is a crash has no answer, so the precondition is reported the same way every other breach is. When it fails, it is reported **alone**: the other nineteen read the fields it just called absent, and their output would be violations about `undefined` burying the one fact that matters. What it covers is the checker's own precondition rather than the schema's `required` list, so the two cannot drift — a field the checker stops reading leaves #20 in the same edit
+20. The Document has the shape `aburi.ir.v1` requires: every field the schema lists as `required`, of the declared kind, at every depth. This one is different in kind from the nineteen above — they relate fields to each other, this one establishes that the fields are there to relate. The scope is the schema's requirements rather than "whatever the other invariants happen to read", because `readIR` brands its result `IR` on the strength of this check alone: a narrower check would hand `@aburi/diff` a Document with no `fingerprint` and let it fail outside anyone's error handling. When #20 fails it is reported **alone** — the nineteen are statements about a Document, and a value that fails #20 is not one. The restatement is kept honest by a test that reads `schema/aburi.ir.v1.json` and fails on a `required` entry with no counterpart
 
 An invariant violation is a **fatal error**, not a warning.
 

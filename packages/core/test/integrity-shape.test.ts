@@ -39,67 +39,71 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
   })
 
   it.each([
-    ["components", "components"],
-    ["symbols", "symbols"],
-    ["dependencies", "dependencies"],
-    ["workspace", "workspace"],
-    ["stats", "stats"],
-  ])("reports the missing top-level container %s by name", (_what, key) => {
+    "components",
+    "symbols",
+    "dependencies",
+    "workspace",
+    "stats",
+    "generator",
+  ])("names the enclosing record and the missing field for %s", (key) => {
     const violations = shapeViolations(without(key))
     expect(violations).toHaveLength(1)
-    expect(violations[0]?.subject).toBe(key)
+    expect(violations[0]?.subject).toBe("document")
+    expect(violations[0]?.message).toContain(`"${key}" is absent`)
   })
 
   it.each([
-    ["symbols", {}],
-    ["components", "nope"],
-    ["dependencies", 7],
-  ])("reports %s when it is present but not an array", (key, value) => {
+    ["symbols", {}, "not an array"],
+    ["components", "nope", "not an array"],
+    ["dependencies", 7, "not an array"],
+    ["workspace", [], "not an object"],
+    ["stats", null, "not an object"],
+  ])("reports %s when it is present but the wrong type", (key, value, expected) => {
     const violations = shapeViolations(withField(key, value))
     expect(violations).toHaveLength(1)
-    expect(violations[0]?.subject).toBe(key)
+    expect(violations[0]?.message).toContain(expected)
   })
 
-  it("reports the workspace sub-containers the invariants read", () => {
-    expect(
-      shapeViolations(withField("workspace", {}))
-        .map((v) => v.subject)
-        .sort(),
-    ).toEqual(["workspace.languages", "workspace.managers"])
+  it("descends into every nested record the branded type promises", () => {
+    const subjects = shapeViolations(
+      withField("workspace", { managers: [{}], languages: ["ts"] }),
+    ).map((v) => v.subject)
+    expect(subjects).toContain("workspace")
+    expect(subjects).toContain("workspace.managers[0]")
   })
 
   it("names the record and the field for a Symbol missing everything", () => {
     const violations = shapeViolations(withField("symbols", [{}]))
-    expect(violations.length).toBeGreaterThan(0)
     for (const violation of violations) {
       expect(violation.subject).toBe("symbols[0]")
     }
-    const fields = violations.map((v) => v.message)
-    for (const field of ["id", "name", "kind", "source", "effects", "calls"]) {
+    const messages = violations.map((v) => v.message)
+    // `fingerprint` and `visibility` are read by `@aburi/diff` rather than by any invariant.
+    // They are here because `readIR` brands its result `IR`, and that is what the brand says.
+    for (const field of [
+      "id",
+      "name",
+      "kind",
+      "source",
+      "effects",
+      "calls",
+      "fingerprint",
+      "visibility",
+    ]) {
       expect(
-        fields.some((m) => m.includes(`"${field}"`)),
+        messages.some((m) => m.includes(`"${field}"`)),
         field,
       ).toBe(true)
     }
   })
 
-  it("names the record for a malformed component, manager and dependency", () => {
-    const cases: Array<[key: string, value: unknown, subject: string]> = [
-      ["components", [{ id: "a" }], "components[0]"],
-      ["dependencies", [{ from: "a" }], "dependencies[0]"],
-    ]
-    for (const [key, value, subject] of cases) {
-      const violations = shapeViolations(withField(key, value))
-      expect(violations.length, subject).toBeGreaterThan(0)
-      expect(
-        violations.every((v) => v.subject === subject),
-        subject,
-      ).toBe(true)
-    }
-    const managers = shapeViolations(
-      withField("workspace", { managers: [{}], languages: ["ts"], root: "." }),
-    )
-    expect(managers.every((v) => v.subject === "workspace.managers[0]")).toBe(true)
+  it.each([
+    ["components", [{ id: "a" }], "components[0]"],
+    ["dependencies", [{ from: "a" }], "dependencies[0]"],
+  ])("names the record for a malformed %s entry", (key, value, subject) => {
+    const violations = shapeViolations(withField(key, value))
+    expect(violations.length).toBeGreaterThan(0)
+    expect(violations.every((v) => v.subject === subject)).toBe(true)
   })
 
   it("names the record for a malformed effect and call inside a Symbol", () => {
@@ -109,6 +113,22 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
     const subjects = shapeViolations(withField("symbols", [symbol])).map((v) => v.subject)
     expect(subjects).toContain("symbols[0].effects[0]")
     expect(subjects).toContain("symbols[0].calls[0]")
+  })
+
+  it("names the element, not the array, when a string array holds a non-string", () => {
+    // `components[].roots` and `workspace.managers[].roots` reach `posixWorkspaceRelative-
+    // Violation`, which calls `.includes` on each entry; `publicApi` reaches `.normalize`.
+    const violations = shapeViolations(
+      withField("components", [{ ...makeComponent("a"), roots: [7] }]),
+    )
+    expect(violations.map((v) => v.subject)).toContain("components[0].roots[0]")
+  })
+
+  it("reports NaN and Infinity as themselves rather than as numbers", () => {
+    const symbol = makeSymbol("ts:src/a.ts#foo") as unknown as Record<string, unknown>
+    symbol.calls = [{ target: "t", line: Number.NaN, resolved: null }]
+    const messages = shapeViolations(withField("symbols", [symbol])).map((v) => v.message)
+    expect(messages.some((m) => m.includes("is NaN, not a finite number"))).toBe(true)
   })
 
   it("reports the shape alone, without the invariants derived from what is missing", () => {

@@ -7,6 +7,7 @@ import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
+import { CliError } from "../src/errors"
 import { symbolId } from "./fixtures"
 
 class MemStream extends Writable {
@@ -315,29 +316,69 @@ describe("runDiff — a base IR that is not shaped like a Document", () => {
     await writeFile(path, JSON.stringify(ir), "utf8")
   }
 
-  it.each([
-    "workspace",
-    "stats",
-    "symbols",
-  ])("names the missing %s instead of reporting an unexplained load failure", async (key) => {
-    // The invariant list exists to say which rule broke. A malformed Document used to
-    // reach a `TypeError` inside the checker, which the CLI reported as "failed integrity
-    // check: Cannot read properties of undefined" — the caller learned only that
-    // something went wrong inside Aburi.
+  /** Write an IR file with one top-level key replaced. */
+  async function writeIRWith(path: string, key: string, value: unknown): Promise<void> {
+    const ir = makeEmptyIR() as unknown as Record<string, unknown>
+    ir[key] = value
+    await writeFile(path, JSON.stringify(ir), "utf8")
+  }
+
+  async function readErrorFor(write: (path: string) => Promise<void>): Promise<CliError> {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeIRWithout(basePath, key)
+    await write(basePath)
     await writeFile(headPath, JSON.stringify(makeEmptyIR()), "utf8")
-
     let caught: unknown
     try {
       await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
     } catch (error) {
       caught = error
     }
-    const message = (caught as Error).message
-    expect(message).toContain("[#20]")
-    expect(message).toContain(key)
-    expect(message).not.toContain("Cannot read properties")
+    expect(caught).toBeInstanceOf(CliError)
+    return caught as CliError
+  }
+
+  it.each([
+    "workspace",
+    "stats",
+    "symbols",
+    "components",
+    "dependencies",
+    "generator",
+  ])("names the missing %s instead of reporting an unexplained load failure", async (key) => {
+    // The invariant list exists to say which rule broke. A malformed Document used to
+    // reach a `TypeError` inside the checker, which the CLI reported as "failed integrity
+    // check: Cannot read properties of undefined" — the caller learned only that
+    // something went wrong inside Aburi.
+    const error = await readErrorFor((path) => writeIRWithout(path, key))
+    expect(error.code).toBe("config-error")
+    expect(error.message).toContain("[#20]")
+    expect(error.message).toContain(key)
+    expect(error.message).not.toContain("Cannot read properties")
+  })
+
+  it.each([
+    ["symbols", {}],
+    ["workspace", null],
+    ["stats", 7],
+  ])("names %s when it is present but the wrong type", async (key, value) => {
+    // Deleting a key is not the only corruption a hand-edit produces, and the pre-check
+    // this replaced rejected `"symbols": {}` too.
+    const error = await readErrorFor((path) => writeIRWith(path, key, value))
+    expect(error.code).toBe("config-error")
+    expect(error.message).toContain("[#20]")
+    expect(error.message).toContain(key)
+  })
+
+  it("names the record and the field for a corruption inside a Symbol", async () => {
+    // The field the diff reads without the invariants ever having looked at it.
+    const error = await readErrorFor((path) =>
+      writeIRWith(path, "symbols", [
+        { ...(makeIRWithAdded().symbols[0] as object), fingerprint: undefined },
+      ]),
+    )
+    expect(error.message).toContain("symbols[0]")
+    expect(error.message).toContain("fingerprint")
+    expect(error.message).not.toContain("Cannot read properties")
   })
 })

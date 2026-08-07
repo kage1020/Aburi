@@ -6,18 +6,21 @@ import { CliError } from "./errors"
 const IR_SCHEMA_URL = "https://aburi.dev/schema/aburi.ir.v1.json"
 
 /**
- * Read an IR file from disk and validate it enough to catch obvious corruption before
- * downstream code (buildDiff, explain lookup) hits an undefined-property crash. The
- * three failure modes are separated so the CLI can map them to distinct exit codes:
- * - Missing / permission / IO failure → `input-error` (exit 2)
- * - Malformed JSON                    → `input-error` (exit 2)
- * - Schema-shape mismatch             → `config-error` (exit 2)
+ * Read an IR file from disk and establish that what comes back is one, so downstream code
+ * — `buildDiff`, the `explain` lookup — can hold the branded type without checking again.
  *
- * Shape is not checked here beyond `$schema`. `assertIRIntegrity` reports a missing or
- * mistyped container as invariant #20 and names the field, so a second copy of that check
- * would only be a second place for the answer to drift from the one the invariant list
- * gives. `$schema` stays because it identifies the document format rather than describing
- * its contents — a v2 document could satisfy every v1 invariant and still not be one.
+ * Three failure modes, distinguished by `CliErrorCode` rather than by exit code (all three
+ * are exit 2 per `../exit-codes`); the code is what the CLI reports and what tests assert:
+ * - Missing / permission / IO failure → `input-error`
+ * - Malformed JSON                    → `input-error`
+ * - Not an `aburi.ir.v1` Document     → `config-error`
+ *
+ * Shape is left entirely to `assertIRIntegrity`, which reports a missing or mistyped field
+ * as invariant #20 and names it. A second copy here would only be a second place for the
+ * answer to drift from the one the invariant list gives. Two checks stay because neither is
+ * about shape: `$schema` identifies the document format — a v2 document could satisfy every
+ * v1 invariant and still not be one — and the root-object test is what makes reading
+ * `$schema` off the parsed value legal in the first place.
  */
 export async function readIR(path: string): Promise<IR> {
   let raw: string

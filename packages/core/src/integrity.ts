@@ -96,16 +96,18 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *      qualified-name grammar
  *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
  *  19. Every string the Document orders or identifies by is in Unicode NFC
- *  20. The Document carries every container and field the nineteen above read
+ *  20. The Document has the shape `aburi.ir.v1` requires
  *
  * The parameter is `unknown` rather than `IR` on purpose. Every other caller in this
  * workspace holds a typed `IR`, but the one this function exists for does not: `readIR`
- * brands a parsed JSON object, and what it brands has been checked for `$schema` and three
- * array keys, nothing more. Taking `IR` would have this function assert the very thing it
- * is being asked to establish — and it did, until a Document missing `workspace` reached
- * it and produced a `TypeError` instead of an answer. #20 runs first and, when it finds
- * anything, is returned alone: the other nineteen read the fields it just reported missing,
- * so their output would be violations about `undefined` burying the one fact that matters.
+ * checks `$schema` and hands over a parsed JSON object. Taking `IR` would have this
+ * function assert the very thing it is being asked to establish — and it did, until a
+ * Document missing `workspace` reached it and produced a `TypeError` instead of an answer.
+ *
+ * #20 runs first and, when it finds anything, is returned alone. The nineteen below are
+ * statements about a Document; a value that fails #20 is not one, so their answers would
+ * be about something else — and where the missing field is one they read, they would crash
+ * rather than answer at all.
  */
 export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   const shape = checkDocumentShape(document)
@@ -730,7 +732,9 @@ function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
         })
         continue
       }
-      if (target.dropped) {
+      // `=== true`, matching #5 above. A Document is only here because #20 established
+      // `dropped` is a boolean, but the two readings of one field should not differ.
+      if (target.dropped === true) {
         out.push({
           invariant: 12,
           subject: `dependencies[${role}=${endpoint}]`,
