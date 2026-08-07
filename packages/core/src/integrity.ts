@@ -9,6 +9,7 @@ import {
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
 } from "./id"
+import { checkDocumentShape } from "./integrity-shape"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -95,8 +96,22 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *      qualified-name grammar
  *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
  *  19. Every string the Document orders or identifies by is in Unicode NFC
+ *  20. The Document carries every container and field the nineteen above read
+ *
+ * The parameter is `unknown` rather than `IR` on purpose. Every other caller in this
+ * workspace holds a typed `IR`, but the one this function exists for does not: `readIR`
+ * brands a parsed JSON object, and what it brands has been checked for `$schema` and three
+ * array keys, nothing more. Taking `IR` would have this function assert the very thing it
+ * is being asked to establish — and it did, until a Document missing `workspace` reached
+ * it and produced a `TypeError` instead of an answer. #20 runs first and, when it finds
+ * anything, is returned alone: the other nineteen read the fields it just reported missing,
+ * so their output would be violations about `undefined` burying the one fact that matters.
  */
-export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
+export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
+  const shape = checkDocumentShape(document)
+  if (shape.length > 0) return shape
+
+  const ir = document as IR
   const violations: IntegrityViolation[] = []
 
   checkSymbolIdUniqueness(ir, violations)
@@ -123,8 +138,8 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
 }
 
 /** Throwing variant: same checks, aggregates every violation into one CoreError. */
-export function assertIRIntegrity(ir: IR): void {
-  const violations = checkIRIntegrity(ir)
+export function assertIRIntegrity(document: unknown): void {
+  const violations = checkIRIntegrity(document)
   if (violations.length === 0) return
   const summary = violations.map((v) => `[#${v.invariant}] ${v.subject}: ${v.message}`).join("; ")
   throw new CoreError(`IR integrity check failed (${violations.length}): ${summary}`, {

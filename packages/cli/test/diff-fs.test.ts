@@ -306,3 +306,38 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md §9)
     expect(cliError.cause).toBe(cause)
   })
 })
+
+describe("runDiff — a base IR that is not shaped like a Document", () => {
+  /** Write an IR file with one top-level key removed. */
+  async function writeIRWithout(path: string, key: string): Promise<void> {
+    const ir = makeEmptyIR() as unknown as Record<string, unknown>
+    delete ir[key]
+    await writeFile(path, JSON.stringify(ir), "utf8")
+  }
+
+  it.each([
+    "workspace",
+    "stats",
+    "symbols",
+  ])("names the missing %s instead of reporting an unexplained load failure", async (key) => {
+    // The invariant list exists to say which rule broke. A malformed Document used to
+    // reach a `TypeError` inside the checker, which the CLI reported as "failed integrity
+    // check: Cannot read properties of undefined" — the caller learned only that
+    // something went wrong inside Aburi.
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeIRWithout(basePath, key)
+    await writeFile(headPath, JSON.stringify(makeEmptyIR()), "utf8")
+
+    let caught: unknown
+    try {
+      await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
+    } catch (error) {
+      caught = error
+    }
+    const message = (caught as Error).message
+    expect(message).toContain("[#20]")
+    expect(message).toContain(key)
+    expect(message).not.toContain("Cannot read properties")
+  })
+})

@@ -13,9 +13,11 @@ const IR_SCHEMA_URL = "https://aburi.dev/schema/aburi.ir.v1.json"
  * - Malformed JSON                    → `input-error` (exit 2)
  * - Schema-shape mismatch             → `config-error` (exit 2)
  *
- * We reuse `@aburi/core` `assertIRIntegrity` when the tree looks well-formed enough to
- * run it; when the top-level shape is wrong we throw locally with a clearer message
- * because the integrity checker assumes the object it receives is already an IR.
+ * Shape is not checked here beyond `$schema`. `assertIRIntegrity` reports a missing or
+ * mistyped container as invariant #20 and names the field, so a second copy of that check
+ * would only be a second place for the answer to drift from the one the invariant list
+ * gives. `$schema` stays because it identifies the document format rather than describing
+ * its contents — a v2 document could satisfy every v1 invariant and still not be one.
  */
 export async function readIR(path: string): Promise<IR> {
   let raw: string
@@ -45,17 +47,8 @@ export async function readIR(path: string): Promise<IR> {
       "config-error",
     )
   }
-  for (const field of ["symbols", "components", "dependencies"] as const) {
-    if (!Array.isArray(parsed[field])) {
-      throw new CliError(
-        `IR file "${path}" is missing required array field "${field}".`,
-        "config-error",
-      )
-    }
-  }
-  const ir = parsed as unknown as IR
   try {
-    assertIRIntegrity(ir)
+    assertIRIntegrity(parsed)
   } catch (error) {
     throw new CliError(
       `IR file "${path}" failed integrity check: ${errorMessage(error)}`,
@@ -63,7 +56,10 @@ export async function readIR(path: string): Promise<IR> {
       { cause: error },
     )
   }
-  return ir
+  // Branded after the check, not before: what makes this object an `IR` is having passed
+  // the invariants, and asserting the type first is what let a malformed document reach
+  // code that trusted it.
+  return parsed as unknown as IR
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
