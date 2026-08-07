@@ -286,7 +286,13 @@ describe("CL9 — argv routing for --fail-on", () => {
 
 describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md §9)", () => {
   it("maps user-fixable diff failures to config-error", () => {
-    for (const code of ["schema-mismatch", "invalid-line-fuzz", "ir-shape-invalid"] as const) {
+    const codes = [
+      "schema-mismatch",
+      "invalid-line-fuzz",
+      "ir-shape-invalid",
+      "ir-identity-collision",
+    ] as const
+    for (const code of codes) {
       const cliError = classifyDiffError(new DiffError(`boom: ${code}`, { code }))
       expect(cliError.code).toBe("config-error")
       expect(cliError.message).toBe(`boom: ${code}`)
