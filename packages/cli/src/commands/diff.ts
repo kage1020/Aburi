@@ -20,8 +20,9 @@ export type WarnFn = (message: string) => void
  * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md §9).
  *
  * Most codes describe something the reader can fix — IR schemas that disagree,
- * an out-of-range `lineFuzz`, a malformed IR — so they surface as
- * `config-error` (exit 2). `slice-invariant-violated` is the one code that
+ * an out-of-range `lineFuzz`, a malformed IR, a repeated Symbol / Component id
+ * or Dependency triple — so they surface as `config-error` (exit 2).
+ * `slice-invariant-violated` is the one code that
  * cannot: it fires only when Aburi produced a Slice breaking its own
  * derivation rule (slice-view.md §7.4). Reporting that as a config error would
  * send a reader looking through `aburi.json` for a bug that is not there, the

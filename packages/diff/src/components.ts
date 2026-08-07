@@ -90,7 +90,12 @@ export function diffDependencies(
   return { added, removed }
 }
 
-function dependencyKey(d: Dependency): string {
+/**
+ * §6.2 — Dependency identity. Exported so the entry-point uniqueness check keys on exactly
+ * what this file keys on: a check with its own notion of identity would let through the
+ * duplicates that actually collide here.
+ */
+export function dependencyKey(d: Dependency): string {
   return `${d.from}::${d.to}::${d.via}`
 }
 

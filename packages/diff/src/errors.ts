@@ -16,6 +16,13 @@ export type DiffErrorCode =
    */
   | "ir-shape-invalid"
   /**
+   * `baseIR` or `headIR` repeats an identity the diff keys on: a `symbols[].id`, a
+   * `components[].id`, or a `dependencies[]` `(from, to, via)` triple. Distinct from
+   * `ir-shape-invalid` because the Document is well-formed — the collision changes the
+   * answer rather than preventing one, and ir-schema.md §14 #1 / #2 / #13 already forbid it.
+   */
+  | "ir-identity-collision"
+  /**
    * A `SliceRecord` broke the derivation invariant of slice-view.md §7.1 / §8.2:
    * `members[]` empty, `members[]` not in strictly ascending order, or `id` not
    * equal to `"slice:" + members[0]`. The last two compare one property against

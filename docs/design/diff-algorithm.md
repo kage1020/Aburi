@@ -267,16 +267,19 @@ Instead, the dropped-only weak matcher of stage 4.5 (§3.4.5) runs:
 
 Dropped symbols are outside the IR's primary field of view, so the false-positive risk of stage 4.5 is accepted.
 
-### 3.7 Symbol ID collisions at extraction time (fail-fast)
+### 3.7 Identity collisions (fail-fast)
 
-To uphold ir-schema §14 #1, "`symbols[].id` is unique within a Document", the Aburi core stops with a **fatal error at extraction time** on:
+The diff keys three collections by identity and reads each key once per entry: the five stages pair Symbols by `id` (§3.1), §6.1 maps Components by `id`, §6.2 maps Dependencies by the `(from, to, via)` triple. Repeat any of them and the diff still produces an answer — with an entry left out, an entry classified twice, or a change the two revisions do not contain — and nothing downstream can tell that answer from the real one. ir-schema §14 #1, #2 and #13 forbid all three for that reason.
+
+**At extraction time**, the Aburi core stops with a fatal error on:
 
 - Multiple Symbols generated with the same ID (e.g., multiple `export default function` in the same file, or CJS `module.exports.default` coexisting with ESM `export default`)
 - Two or more `<default>` symbols detected within the same file
 - A dropped and a non-dropped symbol colliding on the same ID
 
 The error message is `Symbol ID collision at <file>: <id>`, prompting the user to fix the offending location.
-This lets the diff algorithm operate under the uniqueness invariant.
+
+**At the diff entry point**, `buildDiff` checks the same three identities again before the first stage runs, because it is public API: an IR read off disk has been through the integrity checker, but one a caller assembled in memory has been through nothing. The check is scoped to identity rather than delegating to the full integrity checker, whose remaining rules — array ordering, effect vocabulary, Unicode normalisation — a caller can break without changing the diff's answer. A collision raises `DiffError` with code `ir-identity-collision`, naming the side, the collection, the repeated value, and both positions.
 
 ## 4. Status determination
 
