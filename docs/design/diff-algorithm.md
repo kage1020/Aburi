@@ -98,23 +98,24 @@ git's rename detection returns a physical-level mapping, making it the most reli
 For cases git rename could not catch, or when git is unavailable.
 
 ```
-logicMap = group remainingBase by sym.fingerprint.logic (excluding dropped)
-         → {logic_hash: [base symbols with same logic]}
+group both sides by sym.fingerprint.logic (excluding dropped)
+  → a group is {bases, heads} that can only pair with each other
 
-for h in remainingHead (excluding dropped):
-  candidates = logicMap[h.fingerprint.logic]
-  if len(candidates) == 0:
-    continue  # fall through to stage 4
-  if len(candidates) == 1:
-    pair, rationale: 'logic-fingerprint'
-    remove from remaining
-  else:  # multiple candidates
-    best = argmax over candidates of nameSimilarity(c.name, h.name)
-    if best.similarity >= 0.85:
-      pair, rationale: 'logic-fingerprint+name-disambiguation'
-      remove from remaining
-    else:
-      continue  # fall through to stage 4 (leave all candidates unmatched)
+for each group:
+  while bases and heads remain:
+    if len(bases) == 1:
+      # identical logic is proof enough on its own; no similarity test
+      pair with the head of highest nameSimilarity, ties to the lower head id
+      rationale: 'logic-fingerprint'
+      break
+    candidates = [(b, h, nameSimilarity(b.name, h.name))
+                  for b in bases for h in heads
+                  if nameSimilarity >= 0.85]
+    accepted = acceptInScoreOrder(candidates)     # §3.8
+    if accepted is empty:
+      break   # fall through to stage 4 with the group intact
+    pair each, rationale: 'logic-fingerprint+name-disambiguation'
+    remove them and repeat — a round that leaves one base makes it the lone candidate above
 ```
 
 Matching logic fingerprint = same meaning. This catches a good share of "file move without rename" and "file move with a minor refactor".
@@ -130,20 +131,21 @@ Dropped symbols all share the fingerprint `"000000000000"`, so they would collid
 buckets = group remainingBase by (kind, signatureNullness)
         → { (kind, sigNull): [base symbols] }
 
+candidates = []
 for h in remainingHead:
-  bucket = buckets.get((h.kind, h.signature === null))
-  if !bucket || bucket.length === 0: continue
-  best = null
+  if h.signature === null: continue                       # §3.4.3 tail
+  bucket = buckets.get((h.kind, 'has-sig'))
+  if !bucket: continue
+  threshold = thresholdFor(h)                             # §3.4.3
   for b in bucket:
     score = 0.5 * nameSimilarity(b.name, h.name)
           + 0.3 * signatureSimilarity(b.signature, h.signature)
           + 0.2 * ownerSimilarity(b.name, h.name)         # §3.4.6
-    if score > best?.score:
-      best = {symbol: b, score}
-  threshold = thresholdFor(h)                             # §3.4.3
-  if best && best.score >= threshold:
-    pair, rationale: 'name-signature'
-    remove from remaining and from bucket
+    if score >= threshold:
+      candidates.append((b, h, score))
+
+for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
+  pair, rationale: 'name-signature'
 ```
 
 #### 3.4.0 Bucket pre-filter (mandatory)
@@ -182,19 +184,20 @@ if h.signature === null && all candidates have signature === null:
 Dropped symbols have zero fingerprints and cannot use stages 3/4. To catch dropped symbols that moved in environments without git rename, a lightweight dropped-only matcher runs after stage 4:
 
 ```
+candidates = []
 for h in remainingHead where h.dropped:
-  best = null
-  for b in remainingBase where b.dropped:
-    if b.kind != h.kind: continue
+  for b in remainingBase where b.dropped and b.kind == h.kind:
     # trailing segment of the qualified name + file basename
     score = 0.5 * (lastSegment(b.name) === lastSegment(h.name) ? 1 : 0)
           + 0.5 * (basename(b.source.file) === basename(h.source.file) ? 1 : 0)
-    if score > best?.score:
-      best = {symbol: b, score}
-  if best && best.score >= 0.5:  # accept even a one-sided match
-    pair, rationale: 'dropped-weak-match'
-    remove from remaining
+    if score >= 0.5:            # accept even a one-sided match
+      candidates.append((b, h, score))
+
+for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
+  pair, rationale: 'dropped-weak-match'
 ```
+
+Only three scores are possible here and 1.0 is rare, so which base pairs with which head is settled by the tie-break far more often than by the score.
 
 As a result, a change such as "only renamed the directory of DTO files" is recorded as `moved:10` rather than `droppedAdded:10 / droppedRemoved:10`.
 There is a false-positive risk, but dropped symbols are outside the IR's primary field of view, so the impact is small.
@@ -282,6 +285,25 @@ The error message is `Symbol ID collision at <file>: <id>`, prompting the user t
 **At the diff entry point**, `buildDiff` checks the same three identities again before the first stage runs, because it is public API: an IR read off disk has been through the integrity checker, but one a caller assembled in memory has been through nothing. A collision raises `DiffError` with code `ir-identity-collision`, naming the side, the collection, the repeated value, and both positions. Establishing an identity means reading it, so the same pass also refuses an entry that is not an object or whose identity fields are not strings — without which a Symbol carrying no `id` has nothing to collide with and derives a Slice anchored on `undefined` several stages later.
 
 The entry-point check is scoped to identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule: #19 (Unicode normalisation) and #11 (array ordering) both change the answer, since matching compares raw strings and every `score > best.score` tie resolves to whichever candidate came first. They are left to the reader of the IR because the diff has no standing to normalise its inputs, not because they are harmless.
+
+### 3.8 Choosing among candidate pairings
+
+Stages 3, 4 and 4.5 each produce a set of possible pairings and have to settle them. `acceptInScoreOrder` sorts the candidates and sweeps once, taking a pairing when neither side has been taken already:
+
+```
+sort by (score descending, base.id ascending, head.id ascending)
+for each candidate:
+  if base and head are both still free:
+    accept it
+```
+
+Two properties follow, and neither held when each head chose its own best in turn.
+
+**The diff is a function of the two Documents, not of their array order.** `(base.id, head.id)` is a total order on candidates of equal score, because ids are unique within a Document (ir-schema §14 #1) — which §3.7 has `buildDiff` establish before the first stage runs. Without it, equal scores resolve to whichever candidate was enumerated first, and permuting `symbols[]` changes the bytes of `diff.json`.
+
+**A better pairing is never passed over for a worse one.** Choosing per head consumed a base the moment some head wanted it, so an earlier head could take the base that was a later head’s exact match — putting one name in the output as an addition and as the source of a move at the same time.
+
+The sweep is greedy, not an optimal assignment: a pairing can still be stranded because both of its partners were taken by higher-scoring ones. That is a deliberate stop — the case that misleads a reader is the *best available* pairing being skipped, and a greedy sweep in score order never does that.
 
 ## 4. Status determination
 
