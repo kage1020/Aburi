@@ -249,6 +249,40 @@ describe("stage 3 keeps its unconditional single-candidate branch", () => {
   })
 })
 
+describe("the thresholds moved into the candidate filter still hold", () => {
+  it("stage 3 leaves a group whose names cannot reach 0.85", () => {
+    // Two bases and one head on one fingerprint, so the lone-candidate branch does not apply
+    // and the 0.85 test is the only thing standing between them. All three are
+    // signature-less, which keeps stage 4 out of it (§3.4.3 tail) and makes the outcome
+    // stage 3's alone.
+    const body = (file: string, name: string) =>
+      makeSymbol({
+        id: `ts:${file}#${name}`,
+        name,
+        kind: "class",
+        fingerprint: { api: "aaaaaaaaaaaa", logic: "222222222222", syntax: "bbbbbbbbbbbb" },
+      })
+    expect(
+      changes([body("src/a.ts", "Alpha"), body("src/b.ts", "Beta")], [body("src/c.ts", "Gamma")]),
+    ).toEqual(["added ts:src/c.ts#Gamma", "removed ts:src/a.ts#Alpha", "removed ts:src/b.ts#Beta"])
+  })
+
+  it("stage 4.5 refuses a pair that hits neither the name nor the basename", () => {
+    // §3.4.5 accepts a one-sided hit and nothing less. With the threshold gone every dropped
+    // symbol of the same kind becomes a candidate, and the sweep pairs them at score 0.
+    const diff = buildDiff({
+      baseIR: makeIR({ symbols: [dropped("src/a/One.ts", "Svc.alpha")] }),
+      headIR: makeIR({ symbols: [dropped("src/b/Two.ts", "Svc.beta")] }),
+      base: IR_REF,
+      head: IR_REF,
+    })
+    expect(diff.symbols).toEqual([])
+    expect(diff.summary.droppedAdded).toBe(1)
+    expect(diff.summary.droppedRemoved).toBe(1)
+    expect(diff.summary.moved).toBe(0)
+  })
+})
+
 describe("stage 4.5 does not depend on input order", () => {
   it("resolves a tie to the lower base id", () => {
     // Both bases score 0.5 — the trailing name segment hits, the file basename does not.

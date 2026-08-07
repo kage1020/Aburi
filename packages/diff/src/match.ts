@@ -147,24 +147,25 @@ export function matchStageGitRename(
   // Collect every base that predicts a given head before choosing, rather than letting the
   // first one in the array take it. Two files renamed onto one target both predict the same
   // id, and which of them is the move source should not be a property of the array order.
-  const claimants = new Map<SymbolId, IRSymbol[]>()
+  const claimants = new Map<SymbolId, { head: IRSymbol; bases: IRSymbol[] }>()
   for (const b of remainingBase) {
     const newPath = renameMap.get(b.source.file)
     if (newPath === undefined) continue
     const expectedId = rewriteIdFile(b.id, b.source.file, newPath)
-    if (expectedId === null || !headById.has(expectedId)) continue
-    const bucket = claimants.get(expectedId) ?? []
-    bucket.push(b)
-    claimants.set(expectedId, bucket)
+    if (expectedId === null) continue
+    const head = headById.get(expectedId)
+    if (head === undefined) continue
+    const claim = claimants.get(expectedId) ?? { head, bases: [] }
+    claim.bases.push(b)
+    claimants.set(expectedId, claim)
   }
 
   const matched: SymbolPair[] = []
   const usedBase = new Set<SymbolId>()
   const usedHead = new Set<SymbolId>()
-  for (const [headId, bases] of claimants) {
-    const head = headById.get(headId)
+  for (const { head, bases } of claimants.values()) {
     const base = lowestId(bases)
-    if (head === undefined || base === undefined) continue
+    if (base === undefined) continue
     matched.push({ base, head, rationale: "git-rename" })
     usedBase.add(base.id)
     usedHead.add(head.id)
