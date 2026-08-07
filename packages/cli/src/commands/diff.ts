@@ -30,15 +30,31 @@ export type WarnFn = (message: string) => void
  * missing" from "that ref does not resolve".
  */
 export function classifyDiffError(error: DiffError): CliError {
-  if (error.code === "slice-invariant-violated") {
-    return new CliError(
-      `Internal error: ${error.message} This is a bug in Aburi, not in your configuration — ` +
-        "please report it at https://github.com/kage1020/Aburi/issues.",
-      "runtime-error",
-      { cause: error },
-    )
+  switch (error.code) {
+    case "schema-mismatch":
+    case "invalid-line-fuzz":
+    case "ir-shape-invalid":
+    case "ir-identity-collision":
+      return new CliError(error.message, "config-error", { cause: error })
+    case "slice-invariant-violated":
+      return new CliError(
+        `Internal error: ${error.message} This is a bug in Aburi, not in your configuration — ` +
+          "please report it at https://github.com/kage1020/Aburi/issues.",
+        "runtime-error",
+        { cause: error },
+      )
+    default:
+      return assertNever(error.code)
   }
-  return new CliError(error.message, "config-error", { cause: error })
+}
+
+/**
+ * A new `DiffErrorCode` has to be placed in the table above rather than defaulting into
+ * `config-error`, because the two outcomes blame different people: one sends the reader to
+ * `aburi.json`, the other to the issue tracker.
+ */
+function assertNever(code: never): never {
+  throw new Error(`Unhandled DiffErrorCode: ${JSON.stringify(code)}`)
 }
 
 export interface DiffOptions {

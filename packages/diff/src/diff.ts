@@ -1,6 +1,11 @@
 import { reconstructCallEdgesFromIR, type SerializeOptions, serializeCanonical } from "@aburi/core"
 import type { DiffResult, IR, IRRef, Summary, SymbolChange } from "@aburi/types"
-import { dependencyKey, diffComponents, diffDependencies } from "./components"
+import {
+  DEPENDENCY_IDENTITY_FIELDS,
+  dependencyIdentity,
+  diffComponents,
+  diffDependencies,
+} from "./components"
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
 import { DiffError } from "./errors"
 import {
@@ -41,11 +46,9 @@ const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
  * serialisation.
  */
 export function buildDiff(input: DiffInput): DiffResult {
-  assertIRShape(input.baseIR, "baseIR")
-  assertIRShape(input.headIR, "headIR")
+  assertDiffable(input.baseIR, "baseIR")
+  assertDiffable(input.headIR, "headIR")
   ensureSchemasAgree(input.baseIR, input.headIR)
-  assertUniqueIdentity(input.baseIR, "baseIR")
-  assertUniqueIdentity(input.headIR, "headIR")
   const stage1 = matchStageId(input.baseIR.symbols, input.headIR.symbols)
   const stage2 = matchStageGitRename(
     stage1.remainingBase,
@@ -195,133 +198,155 @@ function ensureSchemasAgree(base: IR, head: IR): void {
 /** Which of the two inputs a message is about. */
 type IRSide = "baseIR" | "headIR"
 
-/** The three collections the diff walks by identity, in the order it reports them. */
-const IDENTIFIED_COLLECTIONS = ["symbols", "components", "dependencies"] as const
-
 /**
- * Top-level shape check. Refuses to enter the 5-stage matcher when a caller hands in an
- * IR-shaped object that is missing one of the collections the matcher requires as an
- * array, or whose entries are not objects. Without this, a malformed
- * `baseIR = { symbols: undefined, ... }` would crash deep inside `matchStageId` with
- * `TypeError: undefined is not iterable`, and a `symbols: [null]` would crash a stage
- * later still on `null.dropped` — with neither the collection nor the index named.
- *
- * Not a full schema validation: a Symbol here is an object, but nothing checks that it
- * carries a `fingerprint`. That is `checkIRIntegrity` #20's job, and the CLI applies it
- * when reading an IR off disk. This covers the entries the uniqueness check below
- * dereferences, so that check is defined for everything this one lets through.
+ * A collection `buildDiff` keys by identity. One descriptor drives both halves of the
+ * entry-point check — that the entries are objects carrying string identity fields, and that
+ * no identity repeats — so the two cannot come to describe different collections, and a
+ * fourth entry added here is guarded by both or by neither. Reporting order is the order of
+ * this array, base side before head side.
  */
-function assertIRShape(ir: IR, name: IRSide): void {
-  if (ir === null || typeof ir !== "object") {
-    throw new DiffError(`${name} must be an IR object; got ${typeof ir}.`, {
-      code: "ir-shape-invalid",
-      value: name,
-    })
-  }
-  if (typeof ir.$schema !== "string" || ir.$schema.length === 0) {
-    throw new DiffError(`${name}.$schema must be a non-empty schema URL.`, {
-      code: "ir-shape-invalid",
-      value: `${name}.$schema`,
-    })
-  }
-  for (const field of IDENTIFIED_COLLECTIONS) {
-    const entries: unknown = ir[field]
-    if (!Array.isArray(entries)) {
-      throw new DiffError(`${name}.${field} must be an array.`, {
-        code: "ir-shape-invalid",
-        value: `${name}.${field}`,
-      })
-    }
-    for (const [index, entry] of entries.entries()) {
-      if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) continue
-      const subject = `${name}.${field}[${index}]`
-      throw new DiffError(`${subject} must be an object; got ${describeEntry(entry)}.`, {
-        code: "ir-shape-invalid",
-        value: subject,
-      })
-    }
-  }
-}
-
-function describeEntry(entry: unknown): string {
-  if (entry === null) return "null"
-  if (Array.isArray(entry)) return "an array"
-  return `a ${typeof entry}`
-}
-
-/**
- * The diff keys three collections by identity, and reads each key exactly once per entry:
- * the 5-stage matcher pairs Symbols by `id`, `diffComponents` maps Components by `id`,
- * `diffDependencies` maps Dependencies by the `(from, to, via)` triple. A repeat does not
- * crash — it produces an answer with an entry missing, an entry counted twice, or a change
- * the two revisions do not contain, none of which a reader of the diff can tell from the
- * real thing.
- *
- * All three are Document invariants (ir-schema.md §14 #1, #2, #13) and extraction fails
- * fast on a Symbol-id collision (diff-algorithm.md §3.7), but `buildDiff` is public API and
- * a caller that assembles an IR itself reaches the matcher having satisfied neither.
- *
- * Restated here rather than delegated to `checkIRIntegrity` deliberately: running the full
- * check would make `buildDiff` enforce sixteen further rules — array ordering, effect
- * vocabulary, Unicode normalisation — that a caller can break without changing the diff's
- * answer. `test/identity.test.ts` asserts each fixture against `checkIRIntegrity` so the
- * restatement cannot drift from the rule it restates.
- */
-function assertUniqueIdentity(ir: IR, name: IRSide): void {
-  assertUnique(ir.symbols, `${name}.symbols`, (s) => s.id, SYMBOL_IDENTITY)
-  assertUnique(ir.components, `${name}.components`, (c) => c.id, COMPONENT_IDENTITY)
-  assertUnique(ir.dependencies, `${name}.dependencies`, dependencyKey, DEPENDENCY_IDENTITY)
-}
-
-interface Identity {
-  /** How the message names the repeated value. */
+interface IdentifiedCollection {
+  readonly field: "symbols" | "components" | "dependencies"
+  /** The fields identity is read from, in the order `keyOf` receives them. */
+  readonly identityFields: readonly string[]
+  /** Join them the way the diff itself keys on them, or the check guards nothing. */
+  readonly keyOf: (parts: readonly string[]) => string
+  /** How a message names the repeated value. */
   readonly noun: string
+  /** The repeated value as the IR spells it; also what `DiffError.value` carries. */
+  readonly show: (parts: readonly string[]) => string
   /** What the diff does with a repeat, and the invariant that forbids it. */
   readonly consequence: string
 }
 
-const SYMBOL_IDENTITY: Identity = {
-  noun: "id",
-  consequence:
-    "the 5-stage matcher pairs Symbols by id, so a repeat leaves one entry out of the diff " +
-    "entirely or classifies its counterpart twice (ir-schema.md §14 #1)",
+/** Identity is a single field, so joining the one-member tuple is joining nothing. */
+const soleField = (parts: readonly string[]): string => parts.join("")
+
+const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
+  {
+    field: "symbols",
+    identityFields: ["id"],
+    keyOf: soleField,
+    noun: "id",
+    show: soleField,
+    consequence:
+      "stage 1 pairs Symbols by id and every later stage tracks the base Symbols it has " +
+      "consumed by id, so a repeat leaves one entry out of the diff entirely or classifies " +
+      "its counterpart twice (ir-schema.md §14 #1)",
+  },
+  {
+    field: "components",
+    identityFields: ["id"],
+    keyOf: soleField,
+    noun: "id",
+    show: soleField,
+    consequence:
+      "Component identity is the id, so a repeat hides one entry and can report a change " +
+      "the two revisions do not contain (ir-schema.md §14 #2)",
+  },
+  {
+    field: "dependencies",
+    identityFields: DEPENDENCY_IDENTITY_FIELDS,
+    keyOf: dependencyIdentity,
+    noun: "(from, to, via) triple",
+    show: (parts) => `(${parts.join(", ")})`,
+    consequence:
+      "direction and effect are deliberately outside Dependency identity (§6.2), so a " +
+      "repeat surfaces as an added + removed pair no reader can tell from a real flip " +
+      "(ir-schema.md §14 #13)",
+  },
+]
+
+/**
+ * The two things `buildDiff` needs before stage 1 runs: a Document it can walk, and
+ * identities it can key on. diff-algorithm.md §3.7 states the second and why it is checked
+ * here as well as at extraction time.
+ *
+ * Neither half is a full schema validation. A Symbol that reaches stage 1 is an object with
+ * a string `id`, because the identity scan reads that much; nothing checks it carries a
+ * `fingerprint`, which is `checkIRIntegrity` #20's job and runs when the CLI reads an IR off
+ * disk. What this does buy is that a malformed collection is named — `symbols: undefined`
+ * used to surface as `TypeError: undefined is not iterable` and `symbols: [null]` as
+ * `TypeError: Cannot read properties of null (reading 'id')`, both from inside
+ * `matchStageId`, with neither the collection nor the index named.
+ */
+function assertDiffable(ir: IR, name: IRSide): void {
+  if (ir === null || typeof ir !== "object") {
+    throw shapeError(name, `${name} must be an IR object; got ${describeValue(ir)}.`)
+  }
+  if (typeof ir.$schema !== "string" || ir.$schema.length === 0) {
+    throw shapeError(`${name}.$schema`, `${name}.$schema must be a non-empty schema URL.`)
+  }
+  for (const collection of IDENTIFIED_COLLECTIONS) {
+    assertUniqueIdentity(ir[collection.field], `${name}.${collection.field}`, collection)
+  }
 }
 
-const COMPONENT_IDENTITY: Identity = {
-  noun: "id",
-  consequence:
-    "Component identity is the id, so a repeat hides one entry and can report a change the " +
-    "two revisions do not contain (ir-schema.md §14 #2)",
-}
-
-const DEPENDENCY_IDENTITY: Identity = {
-  noun: "(from, to, via) triple",
-  consequence:
-    "direction and effect are deliberately outside Dependency identity (§6.2), so a repeat " +
-    "surfaces as an added + removed pair no reader can tell from a real flip " +
-    "(ir-schema.md §14 #13)",
-}
-
-function assertUnique<T>(
-  entries: readonly T[],
+function assertUniqueIdentity(
+  entries: unknown,
   subject: string,
-  identityOf: (entry: T) => string,
-  identity: Identity,
+  collection: IdentifiedCollection,
 ): void {
+  if (!Array.isArray(entries)) {
+    throw shapeError(subject, `${subject} must be an array.`)
+  }
   const firstSeen = new Map<string, number>()
   for (const [index, entry] of entries.entries()) {
-    const value = identityOf(entry)
-    const first = firstSeen.get(value)
+    const entrySubject = `${subject}[${index}]`
+    const parts = identityFieldsOf(entry, entrySubject, collection)
+    const key = collection.keyOf(parts)
+    const first = firstSeen.get(key)
     if (first === undefined) {
-      firstSeen.set(value, index)
+      firstSeen.set(key, index)
       continue
     }
+    const shown = collection.show(parts)
     throw new DiffError(
-      `${subject}[${index}] repeats the ${identity.noun} "${value}" first seen at index ` +
-        `${first}; ${identity.consequence}.`,
-      { code: "ir-identity-collision", value },
+      `${entrySubject} repeats the ${collection.noun} "${shown}" first seen at index ` +
+        `${first}; ${collection.consequence}.`,
+      { code: "ir-identity-collision", value: shown },
     )
   }
+}
+
+/**
+ * The identity fields of one entry, established as strings on the way out. Reading them is
+ * what forces the check: without it a Symbol carrying no `id` has nothing to collide with,
+ * passes, and derives a Slice anchored on `undefined` several stages later — which
+ * `assertSliceRecordInvariant` reports as `slice-invariant-violated`, the one code the CLI
+ * presents as a bug in Aburi rather than in the caller's IR.
+ */
+function identityFieldsOf(
+  entry: unknown,
+  subject: string,
+  collection: IdentifiedCollection,
+): string[] {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+    throw shapeError(subject, `${subject} must be an object; got ${describeValue(entry)}.`)
+  }
+  const parts: string[] = []
+  for (const field of collection.identityFields) {
+    const value = (entry as Record<string, unknown>)[field]
+    if (typeof value !== "string") {
+      throw shapeError(
+        `${subject}.${field}`,
+        `${subject}.${field} must be a string; got ${describeValue(value)}.`,
+      )
+    }
+    parts.push(value)
+  }
+  return parts
+}
+
+function shapeError(subject: string, message: string): DiffError {
+  return new DiffError(message, { code: "ir-shape-invalid", value: subject })
+}
+
+function describeValue(value: unknown): string {
+  if (value === undefined) return "undefined"
+  if (value === null) return "null"
+  if (Array.isArray(value)) return "an array"
+  return `a ${typeof value}`
 }
 
 /**

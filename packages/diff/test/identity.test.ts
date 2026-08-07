@@ -5,15 +5,14 @@ import { buildDiff, DiffError } from "../src"
 import { component, dependency, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
- * `buildDiff` keys three collections by identity: the 5-stage matcher on `symbols[].id`,
- * `diffComponents` on `components[].id`, `diffDependencies` on the `(from, to, via)` triple.
- * All three are Document invariants (ir-schema.md §14 #1, #2, #13), and until this file
- * nothing checked them at the diff boundary — `buildDiff` is public API and runs no
- * integrity check, so a caller that builds an IR itself reached the matcher unverified.
+ * `buildDiff` keys three collections by identity, all three of them Document invariants
+ * (ir-schema.md §14 #1, #2, #13). diff-algorithm.md §3.7 is the canonical statement of what
+ * the diff does with a repeat and why it is checked at the entry point as well as at
+ * extraction time.
  *
- * What made it worth a coded error rather than a note in the docs: every case below
- * produced an *answer*, not a crash. A dropped Symbol is indistinguishable from one that
- * was never there, and a spurious dependency flip is indistinguishable from a real one.
+ * What each case here fixes in place is the *outcome* §3.7 forbids: every one produced an
+ * answer rather than a crash, and an answer with an entry silently missing is one no reader
+ * of the diff can tell from the truth.
  */
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
@@ -37,9 +36,9 @@ const foo = () => makeSymbol({ id: "ts:src/a.ts#foo", name: "foo" })
 
 describe("Symbol id collisions (ir-schema.md §14 #1)", () => {
   it("refuses a repeat on the head side instead of dropping one of the pair", () => {
-    // Before: stage 1 pairs the base Symbol with the first head entry and then removes
-    // *both* head entries via `usedHead`, so the second appeared in neither `matched` nor
-    // `added` — the run reported `changed: 1, added: 0` for two head Symbols.
+    // §3.7: stage 1's lookup map is last-write-wins, so the base Symbol pairs with the
+    // *second* entry and the first appears in neither `matched` nor `added` — `usedHead`
+    // then removes both. Two head Symbols in, `changed: 1, added: 0` out.
     const head = makeIR({
       symbols: [
         makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", fingerprint: fp("b") }),
@@ -54,8 +53,8 @@ describe("Symbol id collisions (ir-schema.md §14 #1)", () => {
   })
 
   it("refuses a repeat on the base side instead of counting the head Symbol twice", () => {
-    // Before: both base entries found the same head Symbol, which was classified twice —
-    // `changed: 1` and `unchanged: 1` for a single head Symbol.
+    // Both base entries find the same head Symbol, which is then classified twice —
+    // `changed: 1` and `unchanged: 1` for one Symbol.
     const base = makeIR({
       symbols: [foo(), makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", fingerprint: fp("z") })],
     })
@@ -74,9 +73,10 @@ describe("Symbol id collisions (ir-schema.md §14 #1)", () => {
   })
 
   it("refuses a repeat that stage 1 leaves for a later stage", () => {
-    // The loss is not confined to `matchStageId`: stages 3, 4 and 4.5 all track consumed
-    // base Symbols in a `Set<SymbolId>`, so a repeat there was dropped just as quietly.
-    // Before: `moved: 1`, with the second base Symbol reported neither moved nor removed.
+    // Only stage 1 pairs by id; stages 2 to 4.5 pair by rename map, logic fingerprint,
+    // name+signature and weak match — but each tracks the base Symbols it has consumed in a
+    // `Set<SymbolId>`, so a repeat is dropped there just as quietly. Here the loss is a base
+    // Symbol reported neither moved nor removed, with the run answering `moved: 1`.
     const base = makeIR({
       symbols: [
         makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", fingerprint: fp("s") }),
@@ -91,55 +91,85 @@ describe("Symbol id collisions (ir-schema.md §14 #1)", () => {
 })
 
 describe("Component id collisions (ir-schema.md §14 #2)", () => {
+  const collidingComponents = () => [
+    component({ id: "a", name: "A", roots: ["apps/a"] }),
+    component({ id: "a", name: "A", roots: ["apps/a2"] }),
+  ]
+  const soleComponent = () => [component({ id: "a", name: "A", roots: ["apps/a"] })]
+
   it("refuses a repeat instead of reporting a change between two entries of one side", () => {
-    // Before: `diffComponents` builds `Map<ComponentId, Component>` with `set`, so the
-    // second entry replaced the first and the surviving pair compared `apps/a2` against
-    // `apps/a` — `componentsChanged: 1` for two revisions that agree on every component
-    // the head actually declares.
-    const base = makeIR({
-      components: [
-        component({ id: "a", name: "A", roots: ["apps/a"] }),
-        component({ id: "a", name: "A", roots: ["apps/a2"] }),
-      ],
-    })
-    const head = makeIR({ components: [component({ id: "a", name: "A", roots: ["apps/a"] })] })
-    const error = thrownBy(() => diff(base, head))
+    // `diffComponents` builds its lookup with `Map.set`, so the second entry replaces the
+    // first and the surviving pair compares `apps/a2` against `apps/a` — `componentsChanged:
+    // 1` for two revisions that agree on every component the head declares.
+    const error = thrownBy(() =>
+      diff(makeIR({ components: collidingComponents() }), makeIR({ components: soleComponent() })),
+    )
     expect(error?.code).toBe("ir-identity-collision")
     expect(error?.value).toBe("a")
     expect(error?.message).toContain("baseIR.components[1]")
   })
+
+  it("checks the head side too", () => {
+    const error = thrownBy(() =>
+      diff(makeIR({ components: soleComponent() }), makeIR({ components: collidingComponents() })),
+    )
+    expect(error?.message).toContain("headIR.components[1]")
+  })
 })
 
 describe("Dependency triple collisions (ir-schema.md §14 #13)", () => {
+  const differingDirection = () => [
+    dependency({ from: "a", to: "b", via: "import", direction: "outbound" }),
+    dependency({ from: "a", to: "b", via: "import", direction: "inbound" }),
+  ]
+
   it("refuses a repeat instead of surfacing it as an added + removed pair", () => {
-    // Before: `depsAdded: 1, depsRemoved: 1` — indistinguishable from a genuine direction
+    // `depsAdded: 1, depsRemoved: 1` — which is exactly how §6.2 encodes a genuine direction
     // flip between the two revisions. Invariant #13 names this outcome as its own reason.
-    const base = makeIR({
-      dependencies: [
-        dependency({ from: "a", to: "b", via: "import", direction: "outbound" }),
-        dependency({ from: "a", to: "b", via: "import", direction: "inbound" }),
-      ],
-    })
+    // Differing only in `direction`, so this is also the case that pins `direction` out of
+    // the key: fold it in and the collision disappears.
     const head = makeIR({
       dependencies: [dependency({ from: "a", to: "b", via: "import", direction: "outbound" })],
     })
-    const error = thrownBy(() => diff(base, head))
+    const error = thrownBy(() => diff(makeIR({ dependencies: differingDirection() }), head))
     expect(error?.code).toBe("ir-identity-collision")
-    expect(error?.value).toBe("a::b::import")
+    expect(error?.value).toBe("(a, b, import)")
     expect(error?.message).toContain("baseIR.dependencies[1]")
   })
 
+  it("checks the head side too", () => {
+    const error = thrownBy(() => diff(makeIR(), makeIR({ dependencies: differingDirection() })))
+    expect(error?.message).toContain("headIR.dependencies[1]")
+  })
+
   it("identifies by the triple alone, as §6.2 does", () => {
-    // `direction` and `effect` are excluded from identity by design, so entries differing
-    // only there collide. Stating it as its own case pins the exclusion: an implementation
-    // that folded `direction` into the key would pass every other test in this file.
-    const withEffects = makeIR({
+    // `effect` is excluded from identity on the same terms as `direction`, and is the half
+    // no other case here covers: every other fixture leaves `effect` null on both entries,
+    // so folding it into the key would slip past all of them.
+    const differingEffect = makeIR({
       dependencies: [
         dependency({ from: "a", to: "b", via: "import", effect: "db.read" }),
         dependency({ from: "a", to: "b", via: "import", effect: "db.write" }),
       ],
     })
-    expect(thrownBy(() => diff(withEffects, makeIR()))?.code).toBe("ir-identity-collision")
+    expect(thrownBy(() => diff(differingEffect, makeIR()))?.code).toBe("ir-identity-collision")
+  })
+
+  it("keeps the boundaries between the three fields", () => {
+    // The triple is joined into one key, so the join has to be injective: these two edges
+    // concatenate to the same characters and are not the same edge. Getting this wrong would
+    // not only invent a collision here — `diffDependencies` keys the same way and would
+    // merge them. (Core's #13 joins on a different separator, so the two implementations
+    // agree for every endpoint satisfying the §3.1 / §4 grammars and are not guaranteed to
+    // for one that does not; `buildDiff` checks no grammar.)
+    const adjacent = makeIR({
+      dependencies: [
+        dependency({ from: "ab", to: "c", via: "import" }),
+        dependency({ from: "a", to: "bc", via: "import" }),
+      ],
+    })
+    expect(thrownBy(() => diff(adjacent, adjacent))).toBeNull()
+    expect(diff(makeIR(), adjacent).summary.depsAdded).toBe(2)
   })
 
   it("treats a differing `via` as a different edge", () => {
@@ -153,33 +183,64 @@ describe("Dependency triple collisions (ir-schema.md §14 #13)", () => {
   })
 })
 
-describe("the collections the identity scan walks are objects", () => {
+describe("the identity fields are established before they are read", () => {
   // The scan reads `.id` / `.from` off every entry, so it is the first code to dereference
-  // them. `assertIRShape` established that the collections are arrays and stopped there,
-  // which left `symbols: [null]` to reach the matcher and fail as a `TypeError` with no
-  // collection or index named.
-  const cases: ReadonlyArray<[string, Partial<IR>]> = [
-    ["symbols", { symbols: [null as unknown as IRSymbol] }],
-    ["components", { components: [null as unknown as Component] }],
-    ["dependencies", { dependencies: [7 as unknown as Dependency] }],
+  // them — and reading them is what forces the check. Without it, `symbols: [null]` reached
+  // `matchStageId` and failed on `null.id` with no collection or index named, while a single
+  // Symbol carrying *no* `id` had nothing to collide with, passed, and derived a Slice
+  // anchored on `undefined` — reported as `slice-invariant-violated`, the one code the CLI
+  // presents as a bug in Aburi rather than in the caller's IR.
+  const withoutId = () => {
+    const bad = { ...foo() } as Record<string, unknown>
+    delete bad.id
+    return bad as unknown as IRSymbol
+  }
+
+  const cases: ReadonlyArray<[string, Partial<IR>, string]> = [
+    ["a null Symbol", { symbols: [null as unknown as IRSymbol] }, "baseIR.symbols[0]"],
+    ["a null Component", { components: [null as unknown as Component] }, "baseIR.components[0]"],
+    [
+      "a numeric Dependency",
+      { dependencies: [7 as unknown as Dependency] },
+      "baseIR.dependencies[0]",
+    ],
+    ["a Symbol with no id", { symbols: [withoutId()] }, "baseIR.symbols[0].id"],
+    [
+      "a Symbol whose id is a number",
+      { symbols: [{ ...foo(), id: 42 } as unknown as IRSymbol] },
+      "baseIR.symbols[0].id",
+    ],
+    [
+      "a Dependency with no via",
+      { dependencies: [{ from: "a", to: "b" } as unknown as Dependency] },
+      "baseIR.dependencies[0].via",
+    ],
   ]
 
-  for (const [field, overrides] of cases) {
-    it(`names \`${field}[0]\` rather than throwing a TypeError`, () => {
+  for (const [label, overrides, subject] of cases) {
+    it(`names ${subject} for ${label}`, () => {
       const broken = { ...makeIR(), ...overrides } as IR
       const error = thrownBy(() => diff(broken, makeIR()))
       expect(error?.code).toBe("ir-shape-invalid")
-      expect(error?.message).toContain(`baseIR.${field}[0]`)
+      expect(error?.message).toContain(subject)
     })
   }
+
+  it("distinguishes an absent field from a null one", () => {
+    const absent = { ...makeIR(), symbols: [withoutId()] } as IR
+    const nulled = { ...makeIR(), symbols: [{ ...foo(), id: null } as unknown as IRSymbol] } as IR
+    expect(thrownBy(() => diff(absent, makeIR()))?.message).toContain("got undefined")
+    expect(thrownBy(() => diff(nulled, makeIR()))?.message).toContain("got null")
+  })
 })
 
 describe("the diff-side rule is the Document's rule", () => {
   // The check restates ir-schema.md §14 #1 / #2 / #13 at the diff boundary rather than
-  // running `checkIRIntegrity`, which would make `buildDiff` enforce sixteen further rules
-  // that do not change its answer. A restatement is a second source of truth, so each
-  // fixture is asserted against the original: if core ever stops requiring one of these,
-  // this fails instead of the two quietly disagreeing.
+  // running `checkIRIntegrity`, which would make `buildDiff` enforce further rules that do
+  // not change its answer. A restatement is a second source of truth: if core ever stops
+  // requiring one of these, this fails instead of the two quietly disagreeing. It does not
+  // pin the two *definitions* together — core comparing #1 after NFC normalisation would
+  // still pass here.
   const cases: ReadonlyArray<[number, IR]> = [
     [1, makeIR({ symbols: [foo(), foo()] })],
     [
@@ -208,23 +269,27 @@ describe("the diff-side rule is the Document's rule", () => {
 })
 
 describe("a Document with unique identities is unaffected", () => {
+  const clean = (seed: string) =>
+    makeIR({
+      symbols: [makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", component: "a", ...fpOf(seed) })],
+      components: [component({ id: "a", name: "A" })],
+    })
+  const fpOf = (seed: string) => ({ fingerprint: fp(seed) })
+
   it("reports the same diff it always did", () => {
-    const base = makeIR({
-      symbols: [foo()],
-      components: [component({ id: "a", name: "A" })],
-      dependencies: [dependency({ from: "a", to: "b", via: "import" })],
-    })
-    const head = makeIR({
-      symbols: [makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", fingerprint: fp("b") })],
-      components: [component({ id: "a", name: "A" })],
-      dependencies: [dependency({ from: "a", to: "b", via: "import" })],
-    })
-    expect(diff(base, head).summary.changed).toBe(1)
+    expect(diff(clean("a"), clean("b")).summary.changed).toBe(1)
+  })
+
+  it("is a Document the integrity checker also accepts", () => {
+    // The other half of the drift guard: the rejected fixtures above pin that both sides say
+    // no, and this pins that the accepted one is a Document core says yes to — without it,
+    // a check that rejected everything would satisfy every case in this file.
+    expect(checkIRIntegrity(clean("a"))).toEqual([])
   })
 
   it("reads every entry, not just the first two", () => {
-    // A scan that stopped early would pass every case above, all of which collide at
-    // index 1.
+    // A scan that stopped early would pass every collision case above, all of which collide
+    // at index 1.
     const many = makeIR({
       symbols: [
         makeSymbol({ id: "ts:src/a.ts#a", name: "a" }),
@@ -244,22 +309,24 @@ describe("which collision is reported is fixed", () => {
   })
 
   it("reports symbols before components before dependencies", () => {
+    const collidingComponents = [
+      component({ id: "a", name: "A" }),
+      component({ id: "a", name: "A" }),
+    ]
+    const collidingDependencies = [
+      dependency({ from: "a", to: "b", via: "import" }),
+      dependency({ from: "a", to: "b", via: "import" }),
+    ]
     const everything = makeIR({
       symbols: [foo(), foo()],
-      components: [component({ id: "a", name: "A" }), component({ id: "a", name: "A" })],
-      dependencies: [
-        dependency({ from: "a", to: "b", via: "import" }),
-        dependency({ from: "a", to: "b", via: "import" }),
-      ],
+      components: collidingComponents,
+      dependencies: collidingDependencies,
     })
     expect(thrownBy(() => diff(everything, makeIR()))?.message).toContain("baseIR.symbols[1]")
 
     const noSymbols = makeIR({
-      components: [component({ id: "a", name: "A" }), component({ id: "a", name: "A" })],
-      dependencies: [
-        dependency({ from: "a", to: "b", via: "import" }),
-        dependency({ from: "a", to: "b", via: "import" }),
-      ],
+      components: collidingComponents,
+      dependencies: collidingDependencies,
     })
     expect(thrownBy(() => diff(noSymbols, makeIR()))?.message).toContain("baseIR.components[1]")
   })

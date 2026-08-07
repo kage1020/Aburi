@@ -23,6 +23,13 @@ const ZERO_LOGIC_FP = "000000000000"
 /**
  * §3.1 — segments Symbols with identical `id` into paired matches. Runs first because it
  * is the highest-confidence signal (no heuristics, just hash lookup).
+ *
+ * Assumes `id` is unique on each side (ir-schema.md §14 #1) and does not check it:
+ * `buildDiff` establishes that before calling, and a caller reaching this export directly
+ * owns the obligation. A repeat on the head side loses all but the last entry to the lookup
+ * map and then removes every one of them from `remainingHead`; a repeat on the base side
+ * pairs the same head Symbol more than once. The later stages track consumed base Symbols
+ * by id and lose a repeat the same way.
  */
 export function matchStageId(
   base: readonly IRSymbol[],
