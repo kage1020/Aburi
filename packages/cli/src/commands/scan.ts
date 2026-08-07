@@ -348,7 +348,10 @@ async function resolveComponents(
           description: entry.description ?? null,
         }
         if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
-          component.publicApi = [...entry.publicApi]
+          // NFC, as `collectPublicApi` does for the detected path (ir-schema.md §1.2). The
+          // array decides an identity: `@aburi/diff` compares it against the previous
+          // revision's, which was read off disk and is therefore normalized.
+          component.publicApi = entry.publicApi.map((pattern) => pattern.normalize("NFC"))
         }
         if (entry.frameworks !== undefined && entry.frameworks.length > 0) {
           component.frameworks = [...entry.frameworks]

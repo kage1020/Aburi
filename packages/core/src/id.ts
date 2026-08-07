@@ -8,6 +8,7 @@
  * reaches the IR has necessarily passed it.
  */
 import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
+import { describeCodePoints } from "./codepoints"
 import { CoreError, type CoreErrorCode } from "./errors"
 
 /** Sentinel qualified name reserved for the lone default export of a module. */
@@ -327,7 +328,7 @@ function unnormalizedViolation(parts: SymbolIdParts): GrammarViolation | null {
     if (raw === raw.normalize("NFC")) continue
     return {
       code: "invalid-symbol-id",
-      message: `Symbol id ${field} "${raw}" is not in Unicode NFC; ids are normalized at construction so the in-memory and written forms match`,
+      message: `Symbol id ${field} ${describeCodePoints(raw)} is not in Unicode NFC; write it as ${describeCodePoints(raw.normalize("NFC"))}`,
       value: raw,
     }
   }

@@ -1,3 +1,4 @@
+import { describeCodePoints } from "./codepoints"
 import { CoreError } from "./errors"
 
 export interface SerializeOptions {
@@ -136,7 +137,7 @@ function normalizedEntries(value: Record<string, unknown>, path: string): [strin
     const prior = seen.get(key)
     if (prior !== undefined) {
       throw new CoreError(
-        `serializeCanonical at ${path}: keys ${describeKey(prior)} and ${describeKey(rawKey)} render identically and are identical after Unicode NFC normalization, so writing both would lose one. Rename one to the composed form.`,
+        `serializeCanonical at ${path}: keys ${describeCodePoints(prior)} and ${describeCodePoints(rawKey)} render identically and are identical after Unicode NFC normalization, so writing both would lose one. Rename one to the composed form.`,
         { code: "canonical-key-collision", value: path },
       )
     }
@@ -144,15 +145,4 @@ function normalizedEntries(value: Record<string, unknown>, path: string): [strin
     out.push([key, entry])
   }
   return out
-}
-
-/**
- * Render a key alongside its code points. Colliding keys look the same on screen by
- * definition, so quoting them twice would produce a message that names no difference.
- */
-function describeKey(key: string): string {
-  const codePoints = [...key]
-    .map((c) => `U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`)
-    .join(" ")
-  return `${JSON.stringify(key)} (${codePoints})`
 }

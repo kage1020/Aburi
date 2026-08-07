@@ -172,6 +172,22 @@ describe("detectComponents", () => {
     ])
   })
 
+  it("CD10: normalizes publicApi entries, which decide both an identity and an order", async () => {
+    // The `Set` collapses duplicates and the result is sorted, so the spelling decides both
+    // (ir-schema.md §1.2). `@aburi/diff` then compares this array against the previous
+    // revision's, which was read off disk and is therefore normalized — so an un-normalized
+    // entry here reports a `publicApiChanged` for a component nobody touched.
+    const decomposed = "café".normalize("NFD")
+    const composed = decomposed.normalize("NFC")
+    const manifest = {
+      name: "lib",
+      exports: { ".": `./src/${decomposed}.ts` },
+      main: `./src/${composed}.ts`,
+    }
+    // One entry, not two: the two spellings are one path.
+    expect(__testing_component.collectPublicApi(manifest)).toEqual([`src/${composed}.ts`])
+  })
+
   it("CD11: missing package.json falls back to directory name as kebab id", async () => {
     const components = await detectComponents({ workspaceRoot: tmp })
     expect(components[0]?.id.length).toBeGreaterThan(0)

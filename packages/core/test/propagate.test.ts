@@ -1,6 +1,7 @@
 import type { Effect, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { CallEdge } from "../src/callgraph"
+import { serializeCanonical } from "../src/canonical"
 import { propagateEffects } from "../src/propagate"
 import { makeSymbol } from "./fixtures/ir"
 import { edge, effect } from "./fixtures/propagate"
@@ -448,5 +449,49 @@ describe("propagateEffects — coverage for merge / condense internals", () => {
     const symbols: IRSymbol[] = [makeSymbol("ts:a.ts#A")]
     const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:ghost.ts#Ghost")]
     expect(() => propagateEffects({ symbols, edges })).toThrow(/CallEdge\.to/)
+  })
+})
+
+describe("propagateEffects — the sweep order and the written bytes agree", () => {
+  // The failure this guards is the one Unicode normalization exists to prevent, at the one
+  // place it is a sort key. Propagated entries are ordered by `(id, target)`; integrity
+  // invariant #11 verifies that order against the string held in memory, and
+  // `serializeCanonical` writes the normalized string. The two spellings of `é` sort on
+  // opposite sides of `z`: U+00E9 after it, `e`+U+0301 before it. So if the array were
+  // ordered on one form and emitted in the other, the Document would land on disk violating
+  // the order it declares — and it does not, only because the target reaching here is NFC.
+  const NFC_CAFE = `caf${"\u00e9"}`
+  const NFD_CAFE = NFC_CAFE.normalize("NFD")
+
+  function propagatedTargets(target: string): string[] {
+    const symbols: IRSymbol[] = [
+      makeSymbol("ts:a.ts#A", { effects: [] }),
+      makeSymbol("ts:b.ts#B", {
+        effects: [local({ id: "db.write", target }), local({ id: "db.write", target: "cafz" })],
+      }),
+    ]
+    const edges: CallEdge[] = [edge("ts:a.ts#A", "ts:b.ts#B")]
+    const result = propagateEffects({ symbols, edges })
+    return bySymbolId(result.symbols, "ts:a.ts#A").effects.map((e) => e.target)
+  }
+
+  it("orders a normalized target where the serializer will write it", () => {
+    expect(propagatedTargets(NFC_CAFE)).toEqual(["cafz", NFC_CAFE])
+  })
+
+  it("orders an un-normalized one somewhere else — which is why it never reaches here", () => {
+    // Not an endorsement: `propagateEffects` is public API and cannot police its input, so
+    // this records what a caller that skipped the scan pipeline's boundary would get. The
+    // serializer would emit `caf\u00e9` after `cafz`, inverting this array.
+    expect(propagatedTargets(NFD_CAFE)).toEqual([NFD_CAFE, "cafz"])
+  })
+
+  it("serializes a normalized run in the order the array declares", () => {
+    const targets = propagatedTargets(NFC_CAFE)
+    const json = serializeCanonical(
+      targets.map((t) => ({ target: t })),
+      { format: "compact" },
+    )
+    expect(json).toBe(`[{"target":"cafz"},{"target":"${NFC_CAFE}"}]`)
   })
 })

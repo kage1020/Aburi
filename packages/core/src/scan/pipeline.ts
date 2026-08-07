@@ -96,11 +96,14 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const parseResult = await language.parseFile(file)
   const parseErrors = parseResult.errors
   const timeoutEvents: ClassifyTimeoutEvent[] = []
+  // Normalized before the early return as well: a terminal parse failure still hands its
+  // import edges to the caller, and dependency extraction compares them the same way.
+  const imports = parseResult.imports.map(normalizeImportEdge)
 
   if (parseResult.tree === null) {
     return {
       symbols: [],
-      imports: parseResult.imports,
+      imports,
       parseErrors,
       timeoutEvents,
       terminalParseFailure: true,
@@ -143,7 +146,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       candidate,
       file,
       language: extractLanguageFromId(candidate.id),
-      imports: parseResult.imports,
+      imports,
       dropCFilter,
       timeoutEvents,
     }
@@ -174,7 +177,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
 
   return {
     symbols,
-    imports: parseResult.imports,
+    imports,
     parseErrors,
     timeoutEvents,
     terminalParseFailure: false,
@@ -252,15 +255,26 @@ interface ClassifyCallsInput {
 }
 
 /**
- * Put the strings a language plugin hands back into Unicode NFC, which is the form
- * ir-schema.md §1.2 defines every Document string to be in.
+ * Put the strings a language plugin hands back into Unicode NFC, the form ir-schema.md §1.2
+ * defines every Document string to be in.
  *
- * A plugin reads identifiers out of source bytes, so whichever spelling the file carries is
- * the spelling it returns — and which spelling a file carries depends on how it was written,
- * not on what it means. This is the boundary where plugin output becomes IR, so it is where
- * the two spellings collapse into one. `Symbol.id` is already normalized by `makeSymbolId`;
- * what needs it here is `name`, which the api fingerprint reduces to a short name and the
- * diff matcher compares between revisions.
+ * A plugin reads identifiers and paths out of source bytes, so whichever spelling a file
+ * carries is the spelling it returns. This is the boundary where plugin output becomes IR,
+ * and normalization has to be total across it: a value normalized here is then compared
+ * against values that arrive from elsewhere, so leaving one side alone turns a match into a
+ * miss. What is covered:
+ *
+ * - `source.file`, which §14 invariant #19 checks and which `resolveCallGraph` matches
+ *   against call-site keys built from the already-normalized `SourceFile.path`.
+ * - `signature.inputs[].name`, which the call resolver compares against a call's head
+ *   segment to decide that a parameter shadows a Symbol of the same name
+ *   (call-resolution.md §4.2). Missing that comparison emits an edge to an unrelated
+ *   Symbol, which then carries effects through propagation.
+ *
+ * `id` is deliberately not touched: it is constructed rather than read, `makeSymbolId`
+ * normalizes it there, and quietly repairing one asserted by hand would hide the plugin bug
+ * invariant #17 exists to report. `name` needs nothing either — it is held to the
+ * qualified-name grammar, which is ASCII-only, so it normalizes to itself.
  *
  * The candidate is returned unchanged when nothing differs, so the ASCII case — every
  * candidate in an ordinary scan — allocates nothing.
@@ -268,18 +282,68 @@ interface ClassifyCallsInput {
 function normalizeCandidateStrings(
   candidate: SymbolCandidate<OpaqueAstNode>,
 ): SymbolCandidate<OpaqueAstNode> {
-  const name = candidate.name.normalize("NFC")
-  return name === candidate.name ? candidate : { ...candidate, name }
+  const file = candidate.source.file.normalize("NFC")
+  const signature = normalizeSignatureStrings(candidate.signature)
+  if (file === candidate.source.file && signature === candidate.signature) return candidate
+  return { ...candidate, source: { ...candidate.source, file }, signature }
 }
 
 /**
- * The same treatment for a call, which carries the other string the IR orders by.
+ * Only `inputs[].name` is normalized. The type strings beside it are quotations of source
+ * text (§1.2): their spelling decides nothing, and rewriting one would misquote the
+ * declaration the Document is reporting.
+ */
+function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["signature"]>(
+  signature: T,
+): T {
+  if (signature === null || signature === undefined) return signature
+  let changed = false
+  const inputs = signature.inputs.map((input) => {
+    const name = input.name.normalize("NFC")
+    if (name === input.name) return input
+    changed = true
+    return { ...input, name }
+  })
+  return changed ? ({ ...signature, inputs } as T) : signature
+}
+
+/**
+ * The same treatment for an import edge, whose three fields are all matched against strings
+ * this boundary normalizes.
  *
- * `target` reaches the Document twice — as `calls[].target` when nothing claims the call,
- * and as `effects[].target` when an effect plugin does. The second is a sort key:
- * `propagateEffects` orders propagated entries by `(id, target)` and integrity invariant #11
- * verifies that order against the in-memory string, while the serializer writes the
- * normalized one. Two spellings there put a Document on disk out of the order it declares.
+ * `namespaceBinding` and the local half of `symbols[]` are compared against a call's head
+ * segment, and `source` is resolved into a file path and compared against the discovered
+ * file set — which `toPosixRelative` normalized. A miss here is silent: the call falls into
+ * the `no-match` diagnostic bucket rather than `external`, which is precisely the state that
+ * sends a reviewer looking for a typo that does not exist.
+ */
+function normalizeImportEdge(edge: ImportEdge): ImportEdge {
+  const source = edge.source.normalize("NFC")
+  const binding = edge.namespaceBinding
+  const namespaceBinding = typeof binding === "string" ? binding.normalize("NFC") : binding
+  const symbols =
+    edge.symbols === "*" ? edge.symbols : edge.symbols.map((entry) => entry.normalize("NFC"))
+  if (
+    source === edge.source &&
+    namespaceBinding === edge.namespaceBinding &&
+    symbols === edge.symbols
+  ) {
+    return edge
+  }
+  const next: ImportEdge = { ...edge, source, symbols }
+  if (namespaceBinding !== undefined) next.namespaceBinding = namespaceBinding
+  return next
+}
+
+/**
+ * The same treatment for a call, which carries the string the IR orders by.
+ *
+ * `target` reaches the Document through one of two fields — `calls[].target` when nothing
+ * claims the call, `effects[].target` when an effect plugin does (§9.3; the two are
+ * exclusive). The second is a sort key: `propagateEffects` orders propagated entries by
+ * `(id, target)` and integrity invariant #11 verifies that order against the in-memory
+ * string, while the serializer writes the normalized one. Two spellings there put a Document
+ * on disk out of the order it declares.
  *
  * Normalized before the drop filter and before any classifier sees it, so a plugin cannot
  * be handed a spelling that differs from the one recorded against its own answer.
@@ -446,7 +510,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     component: null,
     visibility: input.candidate.visibility,
     // Sort every list-field by `.line` before it enters the IR. Integrity invariant
-    // #11 (`integrity.ts:284-311`) demands monotonic `.line` on `decorators` /
+    // #11 (`checkArraySortOrder`) demands monotonic `.line` on `decorators` /
     // `rules` / `effects` / `calls` — but the upstream producers do NOT guarantee
     // that ordering on their own:
     //   - `decorators` from the language plugin land in AST traversal order, which
@@ -456,7 +520,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     //     branch bodies, `else` before `try/finally`), so an integrity-safe
     //     ordering has to be applied here.
     //   - `effects` and `calls` were both re-sorted by `byTargetThenLine` in
-    //     `classifyCalls` (see pipeline.ts:273-274). That satisfies human
+    //     `classifyCalls` by `byTargetThenLine`. That satisfies human
     //     readability but violates monotonic `.line` the moment a Symbol has two
     //     entries whose target-alpha order is inverted from their source line.
     // A stable line sort here restores invariant #11 without disturbing the

@@ -9,16 +9,17 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
 
 - Format: JSON (UTF-8, LF)
 - Indentation: 2 spaces (default), single line with `--compact`
-- Top-level keys: ascending alphabetical order
+- Top-level keys: ascending, by UTF-16 code unit
 - Array ordering (fixed for diff stability):
   - `components[]`: ascending by `id`
   - `symbols[]`: ascending by `id`
   - `dependencies[]`: lexicographic by (`from`, `to`, `via`)
-  - `decorators[]` / `rules[]` / `effects[]` / `calls[]` within a Symbol: ascending by `line` (source order within the same line)
+  - `publicApi[]` within a Component: ascending by value
+  - `decorators[]` / `rules[]` / `effects[]` / `calls[]` within a Symbol: ascending by `line` (source order within the same line). Propagated effects are the one exception and sit in their own segment, ordered by (`id`, `target`) - see section 9.4
+
+Every string ordering above is by **UTF-16 code unit**, not by locale and not "alphabetical". Within the Basic Multilingual Plane that coincides with codepoint order; astral-plane strings differ, but the serializer, the integrity checker and every consumer using the default `<` / `>` operators or `Array.prototype.sort` all agree on it, which is what matters.
 
 The ordering convention is a **precondition for diff stability**. Spurious diffs caused by array order must never occur.
-
-Ordering is by **UTF-16 code unit**, not by locale. Within the Basic Multilingual Plane that coincides with codepoint order; astral-plane strings differ, but the serializer, the integrity checker and every consumer using the default `<` / `>` operators or `Array.prototype.sort` all agree on it, which is what matters.
 
 ### 1.1 Absent key vs explicit `null`
 
@@ -74,7 +75,7 @@ Most of the table is convention that the schema cannot express, and the two rows
 
 The rule is load-bearing rather than tidy, for two reasons.
 
-**Ordering.** §1 orders arrays by their key strings. Every ordering decision in the pipeline compares the string held in memory, while the serializer writes the normalized one. Where the two differ, a Document satisfies the sort rule in memory and lands on disk violating it — `é` written as one codepoint and as `e` plus a combining acute sort differently and are the same name.
+**Ordering.** Five of §1's orderings are on strings: `components[]` and `symbols[]` by `id`, `dependencies[]` by (`from`, `to`, `via`), `publicApi[]` by value, and the propagated segment of `effects[]` by (`id`, `target`) per §9.4. Every ordering decision in the pipeline compares the string held in memory, while the serializer writes the normalized one. Where the two differ, a Document satisfies the sort rule in memory and lands on disk violating it — `é` written as one codepoint and as `e` plus a combining acute sort on opposite sides of `z`, and are the same name.
 
 **Identity.** Two spellings of one value are two entries: two Symbol ids for one construct, two effect targets for one table, a rename degraded into a delete plus an add. Which spelling a string arrives in is decided by how the text was created — an archive, an HFS+ volume, a `git` checkout of a name someone typed on a Mac — and it survives copying to any platform, so one source tree can hand back both.
 
@@ -85,11 +86,21 @@ Normalization therefore happens **where a string enters the process**, not where
 | `makeSymbolId` / `trySymbolId` | the three id parts, before validating them, so the ids the guard accepts are the ids the constructors can mint |
 | `toPosixRelative` | every path the file walk produces — `symbols[].source.file` and the file segment of the id built beside it |
 | `toRelativePosix` (workspace detection) | `components[].roots` and `workspace.managers[].roots` |
-| the scan pipeline's plugin boundary | `symbols[].name` and the call target that becomes `calls[].target` or `effects[].target` |
+| `resolveComponents` (CLI config load) | those same fields when they come from `aburi.json` rather than from detection |
+| `normalizePackagePath` (component detection) | `components[].publicApi` |
+| the scan pipeline's plugin boundary | `symbols[].source.file`, `signature.inputs[].name`, the import edges the call resolver matches, and the call target that becomes `calls[].target` or `effects[].target` |
+| `buildDropCFilter` | the `suppress` / `keep` / `dropCallees` prefixes those call targets are matched against |
+
+The last row is not a separate rule: normalization has to be **total across a comparison**. A value normalized on one side and left alone on the other turns a match into a miss, and these misses are quiet - a suppressed call reappears in the Document, a resolved edge points at an unrelated Symbol, a call lands in the `no-match` diagnostic bucket instead of `external`.
 
 Normalizing at the comparator instead would fix an ordering and leave the two spellings in the Document as two entries, which is the larger of the two problems.
 
-§14 invariant #19 checks this on a Document read off disk, scoped to the strings whose spelling decides an order or an identity. Strings that are only rendered — a decorator's raw source text, a signature type — are not checked and not normalized on the way in, because they are quotations of source and editing them would misquote it. They still reach disk normalized, since the serializer normalizes everything.
+§14 invariant #19 checks this on a Document read off disk, scoped to the strings whose spelling decides an order or an identity. Two categories sit outside it:
+
+- **Values held to an ASCII-only grammar** - `symbols[].id`, `components[].id`, `symbols[].name`. NFC leaves ASCII alone, so a non-NFC value fails the grammar before normalization is in question, and #17 reports it. Widening one of those grammars past ASCII moves its field onto #19's list.
+- **Strings the Document quotes** - a decorator's raw source text, a signature type. Their spelling decides nothing, and rewriting a quotation would misquote it. They still reach disk normalized, since the serializer normalizes everything.
+
+**NFC, not NFKC.** NFC composes characters that are *canonically* equivalent: one character, spelled two ways. NFKC additionally folds compatibility characters - `ﬁ` to `fi`, fullwidth `Ａ` to `A` - which are different characters. Under NFKC two Symbols whose ids differ only by such a character would collapse onto one, and quoted source text would be rewritten into something that never appeared in the file.
 
 **Two keys that collide under normalization are a Document error.** `{"é": 1, "é": 2}` with one key composed and one decomposed is JSON a parser accepts and silently collapses, losing an entry, so `serializeCanonical` refuses it with `canonical-key-collision` rather than writing it.
 
@@ -446,6 +457,8 @@ If a call_expression is recognized by an effect plugin, it is recorded in `effec
 
 `Effect` records may carry the optional fields `propagated: boolean` and `derivedFrom: SymbolId[]` when produced by the effect-propagation pass; see [`effect-propagation.md`](./effect-propagation.md) §5. On entries with `propagated: true`, the `line` field is **omitted from the JSON output** — not set to `null`, not set to a placeholder — because the effect originates N hops away and has no line in the containing Symbol's body. The JSON Schema (`aburi.ir.v1.json`) narrows `line` accordingly: required when `propagated` is absent or `false`; forbidden when `propagated` is `true`. These extensions are non-breaking under §15.2.
 
+**Ordering.** Within one Symbol, `effects[]` is in two segments: the locally-detected entries first, ascending by `line` per §1, then the propagated entries, ascending by (`id`, `target`). A propagated entry has no `line` to order on, so it orders on the pair that identifies it. That makes `target` a sort key, which is why §1.2's normalization rule reaches it - the two spellings of one target sort differently and the serializer writes only one of them.
+
 `propagated` is itself Class B per §1.1, so a writer records a locally-detected entry by **omitting** the key, never by writing `propagated: false`. The schema's condition is `propagated` present *and* `true`, which puts absent and `false` on the same branch — so a `false` validates and is read correctly by every consumer, but it spends a key to say what absence already says. The distinction matters when reading these rules together: the schema pins where `line` and `derivedFrom` may appear, while the choice between absent and `false` is convention only.
 
 ## 10. Call
@@ -550,7 +563,7 @@ Guaranteed by the schema validator plus Aburi internals:
 16. No `symbols[].id` and no `dependencies[].from` / `.to` uses a reserved language token (§3.5) — today that means no id begins `slice:`, which would be indistinguishable from a Slice id and would make the Slice-id derivation produce `slice:slice:…`
 17. `symbols[].id` and `components[].id` satisfy the grammars of §3.1 and §4, and `symbols[].name` satisfies the qualified-name grammar of §3.1. Every other route to an id runs a constructor that enforces this; a document read from disk has its ids branded by a single whole-document assertion, and this is where they are actually checked
 18. `workspace.languages` is non-empty, every entry satisfies the `LanguageId` grammar of §3.1, and every `symbols[].language` appears in it. The Document declares which languages it covers, so a Symbol in a language the Document does not list means either an incomplete declaration or a Symbol that does not belong to this scan
-19. Every string the Document orders or identifies by is in Unicode NFC (§1.2): `symbols[].name`, `symbols[].source.file`, `symbols[].effects[].target`, `symbols[].calls[].target`, `components[].roots[]` and `workspace.managers[].roots[]`. Ids are covered by #17, whose grammar already refuses a non-NFC part. Strings the Document merely quotes — a decorator's raw text, a signature type — are out of scope: their spelling decides nothing, and normalizing a quotation would misquote it
+19. Every string the Document orders or identifies by is in Unicode NFC. §1.2 defines the rule, the fields it covers, and the two categories it deliberately excludes
 
 An invariant violation is a **fatal error**, not a warning.
 

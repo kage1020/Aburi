@@ -329,6 +329,15 @@ function collectFrameworks(manifest: PackageJsonShape | null): string[] {
   return [...out].sort(compareString)
 }
 
+/**
+ * Gather the component's declared public surface from its manifest.
+ *
+ * Every value is put into Unicode NFC (ir-schema.md §1.2) because this function decides
+ * both an identity and an order with them: the `Set` collapses duplicates and the result is
+ * sorted. `@aburi/diff` then compares the array against the previous revision's, which was
+ * read off disk and is therefore normalized — so an un-normalized entry here reports a
+ * `publicApiChanged` for a component nobody touched.
+ */
 function collectPublicApi(manifest: PackageJsonShape | null): string[] {
   if (manifest === null) return []
   const found = new Set<string>()
@@ -356,11 +365,16 @@ function collectFromExports(value: unknown, out: Set<string>): void {
   }
 }
 
+/**
+ * The single funnel every `publicApi` entry passes through, whether it came from `exports`
+ * or from one of the scalar keys — so the NFC normalization §1.2 requires cannot be applied
+ * to one source and forgotten on the other.
+ */
 function normalizePackagePath(raw: string | undefined | null): string | null {
   if (raw === undefined || raw === null) return null
   if (typeof raw !== "string" || raw.length === 0) return null
   if (raw.includes("\\")) return null
-  return raw.replace(/^\.\//, "")
+  return raw.replace(/^\.\//, "").normalize("NFC")
 }
 
 /**
