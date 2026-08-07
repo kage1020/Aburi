@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
@@ -184,5 +184,41 @@ describe("runScan — config-supplied component roots", () => {
       format: "json",
     })
     expect(report.exitCode).toBe(0)
+  })
+})
+
+describe("runScan — config-supplied publicApi", () => {
+  it("normalizes the patterns, as component detection does for the detected path", async () => {
+    // ir-schema.md §1.2: `@aburi/diff` compares `publicApi` against the previous revision's,
+    // which was read off disk and is therefore NFC. An un-normalized entry written here
+    // reports a `publicApiChanged` for a component nobody touched.
+    const decomposed = "café".normalize("NFD")
+    await mkdir(resolve(scratch, "packages/shared"), { recursive: true })
+    await writeFile(
+      resolve(scratch, "aburi.json"),
+      JSON.stringify({
+        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        languages: ["lang-typescript"],
+        components: [
+          {
+            id: "shared",
+            name: "Shared",
+            roots: ["packages/shared"],
+            languages: ["ts"],
+            publicApi: [`src/${decomposed}.ts`],
+          },
+        ],
+      }),
+      "utf8",
+    )
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    const ir = JSON.parse(await readFile(report.irPath ?? "", "utf8")) as {
+      components: { publicApi?: string[] }[]
+    }
+    expect(ir.components[0]?.publicApi).toEqual([`src/${decomposed.normalize("NFC")}.ts`])
   })
 })

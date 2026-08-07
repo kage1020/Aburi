@@ -1,3 +1,4 @@
+import type { IR } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeLanguageId } from "../src/id"
 import { assertIRIntegrity, CoreError, checkIRIntegrity } from "../src/index"
@@ -631,5 +632,138 @@ describe("invariant #18 — workspace.languages", () => {
     ir.workspace.languages = [makeLanguageId("ts"), makeLanguageId("py")]
     ir.symbols = [makeSymbol("ts:src/a.ts#alpha")]
     expect(checkIRIntegrity(ir).filter((v) => v.invariant === 18)).toEqual([])
+  })
+})
+
+describe("checkIRIntegrity #19 — Unicode normalization", () => {
+  const decomposed = "café".normalize("NFD")
+  const composed = decomposed.normalize("NFC")
+
+  it("uses a genuinely decomposed fixture, so the cases below are not vacuous", () => {
+    expect([...decomposed].map((c) => c.codePointAt(0))).toEqual([0x63, 0x61, 0x66, 0x65, 0x301])
+  })
+
+  const sites: Array<[what: string, build: (ir: IR) => void]> = [
+    [
+      "components[].roots",
+      (ir) => {
+        ir.components = [makeComponent("a", { roots: [`apps/${decomposed}`] })]
+      },
+    ],
+    [
+      "components[].publicApi",
+      (ir) => {
+        ir.components = [makeComponent("a", { publicApi: [`src/${decomposed}.ts`] })]
+      },
+    ],
+    [
+      "workspace.managers[].roots",
+      (ir) => {
+        ir.workspace.managers = [{ tool: "pnpm", roots: [`apps/${decomposed}`] }]
+      },
+    ],
+    [
+      "symbols[].source.file",
+      (ir) => {
+        ir.symbols = [makeSymbol("ts:src/a.ts#foo", { source: sourceAt(`${decomposed}.ts`) })]
+      },
+    ],
+    [
+      "symbols[].effects[].target",
+      (ir) => {
+        ir.symbols = [
+          makeSymbol("ts:src/a.ts#foo", {
+            effects: [
+              {
+                id: "db.write",
+                target: decomposed,
+                line: 1,
+                plugin: "p",
+                confidence: "high",
+                derivedBy: "convention:test",
+              },
+            ],
+          }),
+        ]
+      },
+    ],
+    [
+      "symbols[].calls[].target",
+      (ir) => {
+        ir.symbols = [
+          makeSymbol("ts:src/a.ts#foo", {
+            calls: [{ target: decomposed, line: 1, resolved: null }],
+          }),
+        ]
+      },
+    ],
+    [
+      "dependencies[] endpoints",
+      (ir) => {
+        // A Component-shaped endpoint: no id grammar is applied to it anywhere, and #11
+        // orders `dependencies[]` on `(from, to, via)`, so its spelling decides an order
+        // that nothing else validates.
+        ir.components = [makeComponent("a"), makeComponent("b")]
+        ir.dependencies = [makeDependency({ from: "a", to: decomposed, via: "import" })]
+      },
+    ],
+  ]
+
+  it.each(sites)("reports %s", (_what, build) => {
+    const ir = minimalIR()
+    build(ir)
+    expect(checkIRIntegrity(ir).filter((v) => v.invariant === 19)).toHaveLength(1)
+  })
+
+  it("says nothing at all about a Document that is already normalized", () => {
+    const ir = minimalIR()
+    ir.components = [makeComponent("a", { roots: [`apps/${composed}`] })]
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", { calls: [{ target: composed, line: 1, resolved: null }] }),
+    ]
+    // Every invariant, not only #19: a fixture that trips something else would make the
+    // filtered assertion pass while the Document was malformed for an unrelated reason.
+    expect(checkIRIntegrity(ir)).toEqual([])
+  })
+
+  it("names both spellings by code point, since they render identically", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#foo", { calls: [{ target: decomposed, line: 1, resolved: null }] }),
+    ]
+    const message = checkIRIntegrity(ir).find((v) => v.invariant === 19)?.message ?? ""
+    expect(message).toContain("U+0065 U+0301")
+    expect(message).toContain("U+00E9")
+  })
+
+  it("leaves ids and Symbol.name to #17, which already refuses a non-NFC value", () => {
+    // Every one of those grammars is ASCII-only and NFC leaves ASCII alone, so a non-NFC
+    // value fails the grammar first. Two invariants for one string would have the reader
+    // chasing it twice.
+    for (const ir of [
+      (() => {
+        const doc = minimalIR()
+        doc.symbols = [makeSymbol(`ts:src/a.ts#${decomposed}`, { name: "foo" })]
+        return doc
+      })(),
+      (() => {
+        const doc = minimalIR()
+        doc.symbols = [makeSymbol("ts:src/a.ts#foo", { name: decomposed })]
+        return doc
+      })(),
+    ]) {
+      const violations = checkIRIntegrity(ir)
+      expect(violations.some((v) => v.invariant === 17)).toBe(true)
+      expect(violations.some((v) => v.invariant === 19)).toBe(false)
+    }
+  })
+
+  it("refuses NFKC as a substitute: compatibility folding is not normalization here", () => {
+    // NFKC maps `ﬁ` to `fi` and fullwidth `Ａ` to `A`. Under it two distinct
+    // Symbols collapse onto one id and quoted source is rewritten — the damage §1.2 scopes
+    // out. These values are already NFC, so a checker using NFKC would report them.
+    const ir = minimalIR()
+    ir.components = [makeComponent("a", { roots: ["apps/ﬁle", "apps/Ａpp"] })]
+    expect(checkIRIntegrity(ir).filter((v) => v.invariant === 19)).toEqual([])
   })
 })

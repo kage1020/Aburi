@@ -3,14 +3,11 @@ import { CoreError, checkIRIntegrity, makeSymbolId, serializeCanonical } from ".
 import { makeSymbol, minimalIR } from "./fixtures/ir"
 
 /**
- * The same text can be spelled two ways in Unicode: `é` as one code point (NFC, U+00E9) or
- * as `e` plus a combining acute (NFD, U+0065 U+0301). Which one a path arrives in depends
- * on how the name was created — an archive, an HFS+ volume, a Finder rename — and it
- * survives copying to any platform, so one source tree can yield two spellings for a file.
- *
- * Canonical serialization is what makes that invisible: normalize first, then order. Doing
- * it the other way round orders by one spelling and emits another, so byte-identical
- * inputs stop producing byte-identical output and the fingerprints built on it diverge.
+ * Unicode normalization, from the serializer's side. ir-schema.md §1.2 states the rule and
+ * why the Document depends on it; what these cases pin is the ordering half — normalize
+ * first, then order. Doing it the other way round orders by one spelling and emits another,
+ * so byte-identical inputs stop producing byte-identical output and the fingerprints built
+ * on them diverge.
  */
 
 // Escapes, not literal characters: a formatter or editor that NFC-normalizes this file
@@ -137,5 +134,34 @@ describe("Symbol ids are normalized at construction", () => {
     const written = JSON.parse(serializeCanonical(ir)) as { symbols: { id: string }[] }
     const writtenIds = written.symbols.map((s) => s.id)
     expect(writtenIds).toEqual([...writtenIds].sort())
+  })
+})
+
+describe("NFC, not NFKC", () => {
+  // The choice of normalization form is a decision, not a detail. NFC composes characters
+  // that are canonically equivalent — the same character, spelled two ways. NFKC additionally
+  // folds compatibility characters: `ﬁ` becomes `fi`, fullwidth `Ａ` becomes `A`. Those are
+  // different characters, so folding them rewrites the text rather than respelling it.
+  const LIGATURE_FI = "\uFB01"
+  const FULLWIDTH_A = "\uFF21"
+
+  it("preserves compatibility characters in values and keys", () => {
+    // Under NFKC this would emit `{"A":"fi"}` — a Document quoting source text that never
+    // appeared in the source.
+    expect(serializeCanonical({ [FULLWIDTH_A]: LIGATURE_FI }, { format: "compact" })).toBe(
+      `{"${FULLWIDTH_A}":"${LIGATURE_FI}"}`,
+    )
+  })
+
+  it("keeps two ids that differ only by a compatibility character distinct", () => {
+    // Under NFKC both collapse onto `ts:src/file.ts#f`, so two Symbols would share one id
+    // and invariant #1 would report a duplicate the source does not contain.
+    const ligature = makeSymbolId({
+      language: "ts",
+      file: `src/${LIGATURE_FI}le.ts`,
+      qualifiedName: "f",
+    })
+    const ascii = makeSymbolId({ language: "ts", file: "src/file.ts", qualifiedName: "f" })
+    expect(ligature).not.toBe(ascii)
   })
 })

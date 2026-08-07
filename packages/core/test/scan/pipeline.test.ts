@@ -7,6 +7,7 @@ import type {
   ExtractionContext,
   FrameworkManifest,
   FrameworkPlugin,
+  ImportEdge,
   LangManifest,
   LanguagePlugin,
   Logger,
@@ -107,6 +108,7 @@ function stubLanguagePlugin(options: {
   candidate: SymbolCandidate<OpaqueAstNode>
   body: BodyExtraction
   normalized?: string
+  imports?: readonly ImportEdge[]
 }): LanguagePlugin {
   const plugin = {
     manifest: langManifest("lang-stub"),
@@ -128,7 +130,7 @@ function stubLanguagePlugin(options: {
     parseFile: async (_file: SourceFile): Promise<ParseResult> => ({
       tree: {} as OpaqueAstNode,
       errors: [],
-      imports: [],
+      imports: [...(options.imports ?? [])],
     }),
     extractSymbols: (_tree: OpaqueAstNode, _ctx: ExtractionContext) => [options.candidate],
     walkBody: (_symbol: SymbolCandidate<OpaqueAstNode>, _ctx: WalkContext<OpaqueAstNode>) =>
@@ -167,10 +169,11 @@ async function runPipelineWithStubs(overrides: {
   effects?: readonly EffectPlugin[]
   candidate?: SymbolCandidate<OpaqueAstNode>
   body?: BodyExtraction
+  imports?: readonly ImportEdge[]
 }) {
   const candidate = overrides.candidate ?? baseCandidate()
   const body: BodyExtraction = overrides.body ?? { rules: [], calls: [] }
-  const language = stubLanguagePlugin({ candidate, body })
+  const language = stubLanguagePlugin({ candidate, body, imports: overrides.imports ?? [] })
   return runFilePipeline({
     file: stubFile,
     language,
@@ -445,5 +448,152 @@ describe("runFilePipeline — Symbol id contract", () => {
     await expect(runPipelineWithStubs({ candidate: bogusCandidate })).rejects.toThrow(
       /language prefix/,
     )
+  })
+})
+
+describe("runFilePipeline — Unicode normalization at the plugin boundary", () => {
+  // A language plugin reads identifiers and paths out of source bytes, so whichever Unicode
+  // spelling the file carries is the spelling it hands back. ir-schema.md §1.2 states why
+  // the Document cannot hold both, and this boundary is where the two collapse into one.
+  const decomposed = "café".normalize("NFD")
+  const composed = decomposed.normalize("NFC")
+
+  it("uses a genuinely decomposed fixture, so the cases below are not vacuous", () => {
+    expect([...decomposed].map((c) => c.codePointAt(0))).toEqual([0x63, 0x61, 0x66, 0x65, 0x301])
+    expect([...composed].map((c) => c.codePointAt(0))).toEqual([0x63, 0x61, 0x66, 0xe9])
+  })
+
+  it("normalizes source.file, which invariant #19 checks and the call resolver matches", async () => {
+    const candidate = {
+      ...baseCandidate(),
+      source: { ...baseCandidate().source, file: `${decomposed}.stub` },
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.source.file).toBe(`${composed}.stub`)
+  })
+
+  it("normalizes signature.inputs[].name, which the local-shadow guard compares", async () => {
+    // call-resolution.md §4.2: a parameter of the same name as a Symbol shadows it, and the
+    // resolver decides that by comparing this string against the call's head segment. The
+    // head is normalized; leaving the parameter alone turns the guard off and emits an edge
+    // to an unrelated Symbol, which then carries effects through propagation.
+    const candidate = {
+      ...baseCandidate(),
+      signature: {
+        inputs: [{ name: decomposed, type: "string" }],
+        outputs: [],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.signature?.inputs.map((i) => i.name)).toEqual([composed])
+  })
+
+  it("leaves the signature type strings alone, because they are quotations of source", async () => {
+    const candidate = {
+      ...baseCandidate(),
+      signature: {
+        inputs: [{ name: "x", type: decomposed }],
+        outputs: [decomposed],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.signature?.inputs[0]?.type).toBe(decomposed)
+    expect(result.symbols[0]?.signature?.outputs).toEqual([decomposed])
+  })
+
+  it("normalizes an unclassified call target", async () => {
+    const result = await runPipelineWithStubs({
+      body: { rules: [], calls: [stubCall(`${decomposed}.doWork`, 1)] },
+    })
+    expect(result.symbols[0]?.calls.map((c) => c.target)).toEqual([`${composed}.doWork`])
+  })
+
+  it("normalizes a classified effect target, which is a sort key once propagated", async () => {
+    // `propagate.ts` orders propagated entries by `(id, target)` and integrity invariant
+    // #11 verifies that order against the in-memory string, while the serializer writes the
+    // normalized one. Two spellings there put the Document on disk out of its own order.
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-loud"),
+      init: async () => {},
+      classify: (): EffectClassification => ({
+        effectId: "event.publish",
+        confidence: "high",
+        derivedBy: "effects-loud:hit",
+      }),
+    }
+    const result = await runPipelineWithStubs({
+      effects: [eff],
+      body: { rules: [], calls: [stubCall(`${decomposed}.emit`, 1)] },
+    })
+    expect(result.symbols[0]?.effects.map((e) => e.target)).toEqual([`${composed}.emit`])
+  })
+
+  it("hands the effect plugin the normalized target, so one spelling reaches every classifier", async () => {
+    const seen: string[] = []
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-watch"),
+      init: async () => {},
+      classify: (call: CallCandidate): EffectClassification | null => {
+        seen.push(call.target)
+        return null
+      },
+    }
+    await runPipelineWithStubs({
+      effects: [eff],
+      body: { rules: [], calls: [stubCall(`${decomposed}.emit`, 1)] },
+    })
+    expect(seen).toEqual([`${composed}.emit`])
+  })
+
+  it("normalizes the import edges the call resolver matches against", async () => {
+    // `namespaceBinding` and the local half of `symbols[]` are compared against a call's
+    // head segment; `source` resolves into a path compared against the discovered file set.
+    // A miss is silent — the call lands in the `no-match` bucket rather than `external`.
+    const result = await runPipelineWithStubs({
+      imports: [
+        {
+          source: `./${decomposed}`,
+          symbols: [`${decomposed} as ${decomposed}Local`],
+          namespaceBinding: decomposed,
+          line: 1,
+          dynamic: false,
+        },
+      ],
+    })
+    expect(result.imports).toEqual([
+      {
+        source: `./${composed}`,
+        symbols: [`${composed} as ${composed}Local`],
+        namespaceBinding: composed,
+        line: 1,
+        dynamic: false,
+      },
+    ])
+  })
+
+  it("returns the candidate and the call untouched when nothing needs normalizing", async () => {
+    // The identity, not just the equality: an ordinary ASCII scan must not pay a copy per
+    // candidate and per call for a normalization that changes nothing.
+    const candidate = baseCandidate()
+    const seen: CallCandidate[] = []
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-watch"),
+      init: async () => {},
+      classify: (call: CallCandidate): EffectClassification | null => {
+        seen.push(call)
+        return null
+      },
+    }
+    const call = stubCall("helper.doWork", 1)
+    await runPipelineWithStubs({ candidate, effects: [eff], body: { rules: [], calls: [call] } })
+    expect(seen[0]).toBe(call)
   })
 })

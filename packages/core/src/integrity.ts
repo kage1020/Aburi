@@ -1,4 +1,5 @@
 import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
+import { describeCodePoints } from "./codepoints"
 import { CoreError, type IntegrityViolation } from "./errors"
 import {
   isComponentId,
@@ -93,6 +94,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  *  17. Symbol and Component ids satisfy their own grammars, and Symbol.name satisfies the
  *      qualified-name grammar
  *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
+ *  19. Every string the Document orders or identifies by is in Unicode NFC
  */
 export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   const violations: IntegrityViolation[] = []
@@ -115,6 +117,7 @@ export function checkIRIntegrity(ir: IR): IntegrityViolation[] {
   checkSymbolIdNamespace(ir, violations)
   checkIdGrammar(ir, violations)
   checkWorkspaceLanguages(ir, violations)
+  checkUnicodeNormalization(ir, violations)
 
   return violations
 }
@@ -259,6 +262,79 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
       message: `Symbol.language "${symbol.language}" is not listed in workspace.languages`,
     })
   }
+}
+
+/**
+ * Invariant #19 (ir-schema.md §14, §1.2): every string the Document orders or identifies by
+ * is in Unicode NFC.
+ *
+ * `serializeCanonical` normalizes on write, while every ordering and equality decision in
+ * this codebase compares the string held in memory. Where the two forms differ, a Document
+ * can satisfy the sort invariant and land on disk violating it, and two spellings of one
+ * value can be carried as two distinct entries.
+ *
+ * Two exclusions, each because the field is already covered:
+ *
+ * - `symbols[].id`, `components[].id` and `symbols[].name` are left to #17. Every one of
+ *   those grammars is ASCII-only, and NFC leaves ASCII alone, so a non-NFC value fails the
+ *   grammar first. Reporting it here as well would have the reader chase one string twice.
+ *   Should any of those grammars be widened past ASCII, its field belongs on this list.
+ * - Strings the Document only quotes — a decorator's raw source text, a signature type —
+ *   decide nothing by their spelling, and normalizing a quotation would misquote it. They
+ *   still reach disk normalized, because the serializer normalizes everything.
+ *
+ * `dependencies[]` endpoints are here rather than with the ids because no id grammar is
+ * applied to them: #17 does not look at them, #4 only checks the Symbol-shaped ones, and #11
+ * orders on `(from, to, via)` — so a Component-shaped endpoint is ordered on a string
+ * nothing else validates.
+ */
+function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
+  for (const component of ir.components) {
+    for (const root of component.roots) {
+      reportUnnormalized(root, `components[id=${component.id}].roots`, "root", out)
+    }
+    for (const pattern of component.publicApi ?? []) {
+      reportUnnormalized(pattern, `components[id=${component.id}].publicApi`, "pattern", out)
+    }
+  }
+  for (const manager of ir.workspace.managers) {
+    for (const root of manager.roots) {
+      reportUnnormalized(root, `workspace.managers[tool=${manager.tool}].roots`, "root", out)
+    }
+  }
+  for (const symbol of ir.symbols) {
+    reportUnnormalized(symbol.source.file, symbol.id, "source.file", out)
+    for (const [index, effect] of symbol.effects.entries()) {
+      // Indexed, not keyed by `effect.id`: the effect id is a vocabulary term and one Symbol
+      // may carry several entries under it, so the id alone would not say which one.
+      reportUnnormalized(effect.target, symbol.id, `effects[${index}].target`, out)
+    }
+    for (const [index, call] of symbol.calls.entries()) {
+      reportUnnormalized(call.target, symbol.id, `calls[${index}].target`, out)
+    }
+  }
+  for (const dep of ir.dependencies) {
+    for (const role of ["from", "to"] as const) {
+      reportUnnormalized(dep[role], `dependencies[${role}=${dep[role]}]`, role, out)
+    }
+  }
+}
+
+function reportUnnormalized(
+  value: string,
+  subject: string,
+  field: string,
+  out: IntegrityViolation[],
+): void {
+  if (value === value.normalize("NFC")) return
+  out.push({
+    invariant: 19,
+    subject,
+    // Both spellings are quoted with their code points. They render identically — that is
+    // what makes the defect invisible — so a message naming only the offending value would
+    // show a string that looks correct beside the claim that it is not.
+    message: `${field} ${describeCodePoints(value)} is not in Unicode NFC; write it as ${describeCodePoints(value.normalize("NFC"))}`,
+  })
 }
 
 function checkSymbolIdUniqueness(ir: IR, out: IntegrityViolation[]): void {
@@ -503,12 +579,7 @@ function assertNumericSorted(
   }
 }
 
-/**
- * Compare two strings by UTF-16 code unit (matches `Array.prototype.sort` default and the
- * `<` operator on strings). BMP-only strings coincide with Unicode codepoint order; astral-
- * plane strings differ, but the serializer, the schema, and every generator that uses the
- * default JS ordering all agree on this comparator so the three paths cannot diverge.
- */
+/** The ordering ir-schema.md §1 fixes: UTF-16 code unit, matching `<` and the default sort. */
 function compareCodeUnit(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }

@@ -48,6 +48,10 @@ export function buildDropCFilter(input: DropCFilterInput = {}): DropCFilter {
   )
 }
 
+function toNfc(value: string): string {
+  return value.normalize("NFC")
+}
+
 export class DropCFilter {
   readonly #dropPrefixes: readonly string[]
   readonly #keepPrefixes: readonly string[]
@@ -62,8 +66,13 @@ export class DropCFilter {
     // Decorator names in `keep[]` use `@Name` syntax per drop-list.md §6.2. Strip the
     // `@` for prefix comparison — a decorator can't reach here anyway (this is
     // call-level) so the strip is defensive against consumers mixing the two syntaxes.
-    this.#dropPrefixes = [...core, ...pluginDropCallees, ...suppress]
-    this.#keepPrefixes = keep.map((k) => (k.startsWith("@") ? k.slice(1) : k))
+    //
+    // Both lists are put into Unicode NFC because the `target` they are matched against is
+    // (ir-schema.md §1.2). These arrive from a JSON config and a plugin manifest, neither of
+    // which normalizes, so without this a `suppress` entry could fail to match the call it
+    // names — and a dropped call leaves nothing in the Document to trace the miss back from.
+    this.#dropPrefixes = [...core, ...pluginDropCallees, ...suppress].map(toNfc)
+    this.#keepPrefixes = keep.map((k) => toNfc(k.startsWith("@") ? k.slice(1) : k))
   }
 
   /** True when the call's `target` should be dropped from effects / calls. */

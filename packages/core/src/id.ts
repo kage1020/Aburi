@@ -8,6 +8,7 @@
  * reaches the IR has necessarily passed it.
  */
 import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
+import { describeCodePoints } from "./codepoints"
 import { CoreError, type CoreErrorCode } from "./errors"
 
 /** Sentinel qualified name reserved for the lone default export of a module. */
@@ -240,10 +241,8 @@ export function isDefaultExportQname(qname: string): boolean {
  * and is checked against the same shared rule.
  */
 export function toPosixRelative(rawPath: string): string {
-  // NFC as well as separator normalization. Which Unicode spelling a path arrives in
-  // depends on how the name was created — a decomposed `é` from an archive, an HFS+ volume
-  // or a Finder rename survives on any platform — so one source tree can hand back two
-  // strings for one file, and the id and the path it names would be spelled differently.
+  // NFC as well as separator normalization: this is one of the entry points ir-schema.md
+  // §1.2 names, and the id built from this path is spelled by the same string.
   const normalized = rawPath.replace(/\\/g, "/").normalize("NFC")
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
@@ -253,12 +252,8 @@ export function toPosixRelative(rawPath: string): string {
 }
 
 /**
- * Put every part into Unicode NFC, which is the form an id is defined to be in.
- *
- * This keeps the id held in memory and the id written to disk the same string:
- * `serializeCanonical` normalizes on write while the integrity sort check compares the
- * in-memory value, so an un-normalized id could satisfy that check and still land out of
- * order in the file.
+ * Put every part into Unicode NFC — the form ir-schema.md §1.2 defines every Document
+ * string to be in, and the reason an id in memory and the same id on disk are one string.
  *
  * It runs before validation rather than after, so `symbolIdViolation` — which rejects a
  * non-NFC part — describes exactly the ids `isSymbolId` will accept. Normalization cannot
@@ -333,7 +328,7 @@ function unnormalizedViolation(parts: SymbolIdParts): GrammarViolation | null {
     if (raw === raw.normalize("NFC")) continue
     return {
       code: "invalid-symbol-id",
-      message: `Symbol id ${field} "${raw}" is not in Unicode NFC; ids are normalized at construction so the in-memory and written forms match`,
+      message: `Symbol id ${field} ${describeCodePoints(raw)} is not in Unicode NFC; write it as ${describeCodePoints(raw.normalize("NFC"))}`,
       value: raw,
     }
   }

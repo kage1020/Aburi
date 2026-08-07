@@ -379,11 +379,9 @@ async function readJson(path: string): Promise<unknown> {
  * Express `target` as a workspace-relative POSIX path, in the same spelling
  * `toPosixRelative` gives the file paths that sit beside it in the IR.
  *
- * The NFC step is not decoration: `symbols[].source.file` is normalized where the path
- * enters the process, so a root left in whatever spelling the filesystem returned would
- * disagree with a `source.file` naming the same directory — one `café` composed, one
- * decomposed — and canonical serialization would write two different byte sequences for
- * one path.
+ * The NFC step is the §1.2 entry point for roots (ir-schema.md): a root left in whatever
+ * spelling the filesystem returned would disagree with a `symbols[].source.file` naming
+ * the same directory, which is normalized at its own entry point.
  *
  * A `..` result is possible and is not normalized away: glob patterns may ascend, and a
  * directory above the workspace root genuinely is outside it. `mergeManager` drops those.
