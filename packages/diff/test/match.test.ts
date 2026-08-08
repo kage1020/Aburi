@@ -108,23 +108,25 @@ describe("matchStageLogicFingerprint", () => {
 })
 
 describe("matchStageNameSignature", () => {
-  it("holds a 1-token name to the 1.0 floor", () => {
-    const b = makeSymbol({ id: "ts:a.ts#foo", name: "foo", signature: sig() })
-    const h = makeSymbol({ id: "ts:a.ts#foo2", name: "foo2", signature: sig() })
+  it("holds a 1-token last segment to the 1.0 floor", () => {
+    // §3.4.3's first row. The name says three tokens' worth, so the head is read (see
+    // single-token-name.test.ts), but its last segment says one, and a changed verb costs
+    // half the name axis: 0.25 + 0.3 + 0.2 = 0.75.
+    const b = makeSymbol({ id: "ts:a.ts#UserRepo.get", name: "UserRepo.get", signature: sig() })
+    const h = makeSymbol({ id: "ts:a.ts#UserRepo.set", name: "UserRepo.set", signature: sig() })
     const result = matchStageNameSignature([b], [h])
     expect(result.matched).toEqual([])
   })
 
-  it("pairs a 1-token name that scores exactly 1.0", () => {
-    // 1.0 is reachable, not impossible: identical name, signature and owner give
-    // `0.5 + 0.3 + 0.2`, which is exactly 1 in IEEE 754. A top-level `main` moved to another
-    // file with an edited body falls out of stage 3 and lands here, and `score >= threshold`
-    // is what lets it pair — the case a `>` would silently take away.
-    const b = makeSymbol({ id: "ts:src/a.ts#main", name: "main", signature: sig() })
-    const h = makeSymbol({ id: "ts:src/b.ts#main", name: "main", signature: sig() })
+  it("pairs one that reaches the floor exactly", () => {
+    // 1.0 is the top of the scale and a reachable score: an identical name, signature and
+    // owner give `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. `score >= threshold` is what lets
+    // this row pair at all — a `>` would empty it.
+    const b = makeSymbol({ id: "ts:src/a.ts#UserRepo.get", name: "UserRepo.get", signature: sig() })
+    const h = makeSymbol({ id: "ts:src/b.ts#UserRepo.get", name: "UserRepo.get", signature: sig() })
     const result = matchStageNameSignature([b], [h])
     expect(result.matched.map((pair) => `${pair.base.id} -> ${pair.head.id}`)).toEqual([
-      "ts:src/a.ts#main -> ts:src/b.ts#main",
+      "ts:src/a.ts#UserRepo.get -> ts:src/b.ts#UserRepo.get",
     ])
   })
 

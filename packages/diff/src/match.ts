@@ -347,14 +347,17 @@ function closestNameTo(
  * The composite score:
  *   0.5 * nameSimilarity + 0.3 * signatureSimilarity + 0.2 * ownerSimilarity
  *
- * §3.4.3 threshold table, applied per head:
- * - 1-token name → 1.0 (the false-positive shield)
- * - 2-token name → 0.95 (strict, avoids `getUser` vs `getUsers`)
- * - default      → 0.85
+ * §3.4.3 threshold table, applied per head by the token count of its last name segment:
+ * - 1 token  → 1.0 (an exact match on all three axes)
+ * - 2 tokens → 0.95 (strict, avoids `getUser` vs `getUsers`)
+ * - default  → 0.85
  *
- * §3.4.3 tail — a signature-less head is not paired at all, because
- * `signatureSimilarity(null, null)` is 1.0 and the bucket key already restricts it to
- * candidates that are equally signature-less.
+ * §3.4.3 also names two heads the stage does not read at all, because for them the score is
+ * high on evidence it does not have rather than on a resemblance: one whose signature is
+ * null, since `signatureSimilarity(null, null)` is 1.0 and the bucket key restricts it to
+ * candidates that are equally signature-less; and one whose qualified name carries a single
+ * distinct token, since that is the whole of what the name and owner axes read. Neither can
+ * be expressed as a threshold — the second wants a bar above the top of the scale.
  *
  * Every pairing in a bucket that clears its head’s threshold becomes a candidate, and the
  * candidates are settled in score order rather than one head at a time — see
@@ -387,6 +390,10 @@ export function matchStageNameSignature(
     // signature nullness, so a signature-less head only ever sees signature-less candidates:
     // there is nothing here it could legitimately pair with.
     if (h.signature === null || h.signature === undefined) continue
+    // §3.4.3 — a name of one distinct token scores 1.0 against any other of the same
+    // signature, which is the top of the scale and so above no threshold. See
+    // `saysEnoughToPair`.
+    if (!saysEnoughToPair(h.name)) continue
     const bucket = buckets.get(bucketKey(h))
     if (bucket === undefined) continue
     const threshold = thresholdFor(h.name)
@@ -420,19 +427,65 @@ function bucketKey(s: IRSymbol): string {
 
 /**
  * §3.4.3 — the composite score a pair must reach, by how many tokens the head's last name
- * segment has. 1.0 is reachable, not impossible: an identical name with an identical
- * signature and owner is `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754, so a one-token name pairs
- * when nothing but its file changed and never otherwise.
+ * segment has. A one-token segment still asks for the whole scale, which a pair reaches only
+ * on an identical name, signature and owner: `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754.
  */
 const EXACT_MATCH_ONLY = 1
 const TWO_TOKEN_THRESHOLD = 0.95
 const DEFAULT_THRESHOLD = 0.85
+
+/** The lowest score §3.4.3 will accept, whichever row of the table applies. */
+export const LOWEST_THRESHOLD = DEFAULT_THRESHOLD
+
+/**
+ * §3.4.3 — the most a pairing short on one side alone can score: `0.5 * (1/2) + 0.3 + 0.2`.
+ * One distinct token against two or more is a Jaccard of at most a half, and the other two
+ * axes are granted in full.
+ *
+ * `saysEnoughToPair` reads the head and not the base because this sits under
+ * `LOWEST_THRESHOLD`, which makes a one-token base unreachable without a check of its own.
+ * That is a relation between the axis weights and the table, not a fact about either, and
+ * `single-token-name.test.ts` asserts it — the margin is 0.10, and §3.4.4 has a configurable
+ * threshold on the roadmap.
+ */
+export const SHORT_NAME_CEILING = 0.75
 
 function thresholdFor(qname: string): number {
   const tokens = tokenizeName(lastSegment(qname)).length
   if (tokens <= 1) return EXACT_MATCH_ONLY
   if (tokens === 2) return TWO_TOKEN_THRESHOLD
   return DEFAULT_THRESHOLD
+}
+
+/**
+ * §3.4.3 — whether a head's qualified name says enough for stage 4 to read it at all.
+ *
+ * The score is built from three things the name supplies: its tokens, its owner's tokens,
+ * and a signature. A name of one distinct token supplies one word and an owner that either
+ * repeats it or is empty, and `main(x: string): void` against another `main(x: string): void`
+ * scores the full 1.0 on that — two unrelated CLI entry points reported as one move. The
+ * table's first row was written to refuse this and could not: 1.0 is the top of the scale,
+ * so no threshold sits above it. Being unpairable is a property of the name, not a score it
+ * failed to reach, so it is decided here rather than by the comparison.
+ *
+ * Counted over the whole qualified name, because that is what the score reads.
+ * `UserRepo.get` supplies three tokens and pairs, though its last segment is one — the
+ * measure `thresholdFor` uses, and the wrong one for this question. Tokens are deduped, so
+ * `Main.main` supplies one and does not.
+ *
+ * Read off the head only, though the property belongs to a pairing: a short name on either
+ * side caps the score at `SHORT_NAME_CEILING`, so the only pairing this changes is one short
+ * on both, and skipping the head costs one test rather than one per candidate.
+ *
+ * The count stands in for how much the name says, and `tokenizeName` splits on ASCII case
+ * boundaries, so a name written in a script that has none is one token however long it is:
+ * `ユーザー情報を取得する` is refused here on the same footing as `main`. For that name the
+ * proxy is wrong — two unrelated Symbols do not carry it by coincidence the way two carry
+ * `main` — and the cost is a stage-4 move this stage will not find. Fixing it means measuring
+ * the name by something other than a bare token count, which is §3.4.1's to change.
+ */
+function saysEnoughToPair(qname: string): boolean {
+  return tokenizeName(qname).length > 1
 }
 
 /**
