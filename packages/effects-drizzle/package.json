@@ -1,6 +1,6 @@
 {
   "name": "@aburi/effects-drizzle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Aburi Drizzle ORM effects plugin: classifies db.select / insert / update / delete / query.<table>.findMany / transaction call expressions into core db.read / db.write / db.transaction effects",
   "license": "MIT",
   "author": "kage1020",

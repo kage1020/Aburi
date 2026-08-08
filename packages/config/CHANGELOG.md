@@ -1,5 +1,12 @@
 # @aburi/config
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [14bdb6b]
+  - @aburi/types@0.3.0
+
 ## 0.1.1
 
 ### Patch Changes

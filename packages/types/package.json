@@ -1,6 +1,6 @@
 {
   "name": "@aburi/types",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Aburi shared types: schema-generated IR / config / diff / plugin manifest, plus hand-written plugin interface signatures",
   "license": "MIT",
   "author": "kage1020",

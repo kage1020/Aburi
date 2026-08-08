@@ -1,5 +1,226 @@
 # @aburi/cli
 
+## 0.3.0
+
+### Minor Changes
+
+- bc3816c: Discover `aburi.json` from `cwd`, not from the detected workspace root
+
+  `runScan` handed the marker-detected workspace root to `loadConfig`, so discovery could
+  only ever walk _upwards from the root_. A config below it — the normal case for a package
+  inside a monorepo — was never read. The run then fell through to autodetect, resolved no
+  language plugin, reported every file as unroutable, and wrote an empty IR at exit 0, which
+  silently makes every downstream `--fail-on` gate pass.
+
+  - `--config` **and `ABURI_CONFIG`** relative paths now resolve against `cwd`, matching
+    `--output-dir`, `--base`, `--head`, `--ir`, `init --output` and `explain --output`. Both
+    feed the same code path, so a CI job that exports a relative `ABURI_CONFIG` at the repo
+    root and then changes directory reads a different file than before — if one exists there.
+  - `ScanReport` gains `configSource` and `workspaceRoot`. Once discovery starts at `cwd`,
+    which config won is no longer deducible from the arguments.
+  - `aburi scan` warns on stderr when the config sits below the workspace root. Discovery is
+    anchored to `cwd`, but everything inside the config — `ignore`, `components[].roots`,
+    relative plugin refs — and file discovery itself are anchored to the workspace root, so a
+    package-local `ignore: ["src/**"]` matches the _root's_ `src` and the scan still covers
+    the whole workspace.
+
+- 85ade16: Give paths and qualified names one grammar, applied everywhere they are read
+
+  Four places asked overlapping questions about the same strings and answered differently, so
+  a value could pass every gate and break something that trusted it.
+
+  **One path rule.** IR integrity invariant #10 carried its own copy of the workspace-relative
+  path rule, and that copy checked only backslashes and absolute prefixes. An IR whose
+  `symbols[].source.file` read `../../../../etc/passwd.ts` — or whose `components[].roots` /
+  `workspace.managers[].roots` pointed above the workspace — produced zero violations, while
+  `readIR` uses `assertIRIntegrity` as its only validation gate. `workspace.root` anchors every
+  path in a Document, so a path that ascends past it names something the Document has no way
+  to be about. Invariant #10 now calls `posixWorkspaceRelativeViolation`, the rule the Symbol
+  id constructor calls, and the shared rule additionally rejects an empty path, a
+  drive-relative `C:a.ts`, and a `.` segment — `./src/a.ts` beside `src/a.ts` is one file with
+  two spellings, and by §3.1 that is one file with two Symbol ids that invariant #1 cannot see
+  as a duplicate.
+
+  A file path keeps the two restrictions that belong to the id rather than to the path: it
+  holds neither `:` nor `#` (the id is split on the first of each), and it is never the bare
+  `.`, which names the workspace root. `toPosixRelative` applies those too, since everything
+  it returns becomes a `source.file` and the file segment of an id.
+
+  **One qualified-name rule, applied to both places one is stored.** `makeSymbolId` dropped
+  empty segments before validating them, so `A.`, `A..B`, `.` and `::` all built ids and
+  satisfied `isSymbolId`. Separately, `Symbol.name` carries a qualified name of its own and
+  nothing checked it at all — and it, not the qname inside the id, is what `apiFingerprint`
+  and the framework classifiers hand to `lastQnameSegment`, which throws on an empty leaf.
+  Both are now covered: the constructor refuses an empty segment, and invariant #17 checks
+  `symbols[].name` alongside `symbols[].id`.
+
+  **Producers that could break the tightened rules.** Two existed, and both now report against
+  the input rather than the Document:
+
+  - Glob patterns may ascend (`packages: ['../shared/*']`), and the matches became
+    `workspace.managers[].roots` entries containing `..`. The file walk never followed them —
+    it globs under the workspace root — so those packages contributed no Symbol, and the entry
+    described a directory the scan never opened. `detectManagers` now refuses such a manifest
+    with `workspace-root-outside`, naming the tool and the root. Continuing would have produced
+    a Document silently missing packages the user declared.
+  - The config schema's `RelativePath` constrains only `minLength` and "no backslash", so a
+    `components[].roots` entry of `"../shared"` was schema-valid and copied into the IR
+    verbatim. It is now checked where the config is read, so it is reported against
+    `components[id=…].roots` in the config with the input-error exit code, instead of
+    surfacing as an integrity violation blaming the Document at the end of the scan.
+
+  Workspace and component roots are also normalized to Unicode NFC, matching
+  `symbols[].source.file`, so one directory is not spelled two ways within one Document.
+
+  `@aburi/core` newly exports `posixWorkspaceRelativeViolation`, `isQualifiedName` and the
+  `GrammarViolation` type, so a consumer building an IR can apply the same rules the integrity
+  checker will.
+
+- 14bdb6b: Separate the `LanguageId` and `PluginRef` vocabularies
+
+  `aburi.json` uses the key `languages` at two nesting levels with two different
+  vocabularies: the top-level array holds plugin refs the loader resolves as module
+  specifiers, while `components[].languages` holds `LanguageId`s constrained to
+  `^[a-z][a-z0-9]*$`. Both writers conflated them.
+
+  - `LanguagePlugin` gains a required `languageId` field. `@aburi/core` projects it into
+    `IR.workspace.languages`, which previously received `manifest.name` and therefore
+    emitted `"lang-typescript"` — a value that fails the frozen `aburi.ir.v1` schema for
+    every first-party plugin. Third-party language plugins must add the field.
+  - `LanguageId` is now a branded type constructed through `makeLanguageId` (exported from
+    `@aburi/core`), so a manifest name can no longer be assigned where a language id belongs.
+  - `aburi init` writes plugin manifest names (`lang-typescript`, `framework-nestjs`) in the
+    top-level arrays and keeps `LanguageId`s inside `components[]`. It previously wrote
+    detector ids, so the loader looked for the non-existent `@aburi/ts` package and the
+    documented `init` then `scan` quick start failed on every project.
+  - `InitReport` gains `unmappedLanguages` / `unmappedFrameworks`, and the CLI warns about
+    them. A detected language with no first-party plugin leaves `languages` empty, which is
+    otherwise invisible until the next command stops.
+  - `--with-suggestions` names the language plugin first, per `cli-spec.md` §4.6: it is a
+    hard requirement for the next `aburi scan`, where a framework plugin only widens
+    classification.
+  - `aburi scan` refuses to run when no language plugin resolves, instead of writing an IR
+    with zero Symbols and an empty `workspace.languages` at exit 0. That document fails the
+    schema's `minItems: 1`, and two of them diff to `+0 -0 ~0` — so every `--fail-on` gate
+    downstream passed regardless of what changed.
+  - New integrity invariant #18: `workspace.languages` is non-empty, every entry satisfies
+    the `LanguageId` grammar, and every `Symbol.language` appears in it. It also covers an IR
+    read off disk, which `readIR` brands without validating.
+
+### Patch Changes
+
+- e2dab93: Establish the Document's shape before the invariants assume it
+
+  `checkIRIntegrity` took an `IR` and dereferenced its way through the Document. `readIR`
+  brands a parsed JSON object after checking `$schema`, so in practice the checker is the only
+  gate a Document read off disk passes — and it assumed the thing it was being asked to
+  establish. Fourteen shapes that survive that gate produced a `TypeError` instead of a
+  violation list, among them a missing `workspace`, a `stats.callResolution` of `null`, a
+  non-string entry in `components[].roots`, and a `derivedFrom` of `null`.
+
+  The CLI wrapped each as `config-error`, so a user was told the IR failed to load and not
+  which invariant broke — which is the one thing the invariant list exists to say.
+
+  **Invariant #20** is the Document's shape as `aburi.ir.v1` requires it: every `required`
+  field, of the declared kind, at every depth. It names the record and the field:
+
+  ```
+  [#20] symbols[0]: "fingerprint" is absent, not an object
+  [#20] document: "workspace" is absent, not an object
+  [#20] components[0].roots[0]: entry is a number, not a string
+  ```
+
+  Three decisions worth stating:
+
+  - **The scope is the schema's requirements, not "the fields the invariants read".** `readIR`
+    brands its result `IR` on the strength of this check, so what #20 establishes is what that
+    brand asserts. A narrower check would hand `@aburi/diff` a Document with no `fingerprint`
+    and let it fail on `b.fingerprint.logic`, outside anyone's error handling and with no file
+    or field named.
+  - **The restatement is checked, not trusted.** A test reads `schema/aburi.ir.v1.json` and
+    fails on a `required` entry with no counterpart in the spec, on a spec field the schema
+    does not declare, and on a structural definition the spec omits entirely.
+  - **#20 is reported alone.** The nineteen relational invariants are statements about a
+    Document; a value that fails #20 is not one.
+
+  `checkIRIntegrity` and `assertIRIntegrity` now take `unknown`. Every other caller holds a
+  typed `IR` and is unaffected; the caller these exist for holds a parsed JSON object, and
+  declaring `IR` had them assert what they were being asked to establish. `readIR` brands
+  after the check rather than before, and its own array pre-check is gone — #20 covers it, and
+  a duplicate is only a second place for the answer to drift.
+
+  Also fixed by the same shape guarantee: four invariants that a mistyped field silently
+  disabled rather than crashed. `dropped: "true"` skipped #5 entirely, `derivedFrom: 5` passed
+  #11 because `(5).length` is `undefined`, and `workspace.languages: [null]` passed #18 because
+  the grammar regex coerced `null` to the string `"null"`.
+
+- b8763eb: Make Unicode normalization total across every comparison the IR makes
+
+  Ids and paths were normalized to Unicode NFC at the points where they enter the process, so
+  the string held in memory and the string written to disk are one string. Several values that
+  decide an order or an identity were not, and the missing halves were quiet.
+
+  `effects[].target` is the clearest. `propagateEffects` orders propagated entries by
+  `(id, target)`, integrity invariant #11 verifies that order against the in-memory value, and
+  `serializeCanonical` writes the normalized one — so a Document could satisfy the sort
+  invariant and land on disk violating it. The two spellings of `é` sort on opposite sides of
+  `z`, so this is an inversion, not a near-miss.
+
+  The rest are comparisons where one side is normalized and the other is not. That is worse
+  than neither being normalized, because it turns a match into a miss:
+
+  - `signature.inputs[].name` is compared against a call's head segment to decide that a
+    parameter shadows a Symbol of the same name. A miss emits an edge to an unrelated Symbol,
+    which then carries effects through propagation.
+  - `ImportEdge.namespaceBinding` / `symbols[]` / `source` decide import-scope resolution. A
+    miss puts the call in the `no-match` diagnostic bucket instead of `external` — the state
+    that sends a reviewer looking for a typo that does not exist.
+  - The `suppress` / `keep` / `dropCallees` prefixes decide whether a call is dropped. A miss
+    leaves nothing in the Document to trace it back from.
+  - `components[].publicApi` is deduped and sorted at collection and compared across revisions
+    by `@aburi/diff`, whose base side came off disk normalized. A mismatch reports a
+    `publicApiChanged` for a component nobody touched.
+
+  All of them are now normalized where they enter: the scan pipeline's plugin boundary,
+  `buildDropCFilter`, `normalizePackagePath`, and the CLI's config-component path.
+
+  **The rule now has one home.** `ir-schema.md` §1.2 states it — every string in a Document is
+  NFC, why that is load-bearing for both ordering and identity, the entry points where it is
+  established, and why it is NFC and not NFKC (compatibility folding rewrites text rather than
+  respelling it, collapsing distinct ids and misquoting source). The explanation had been
+  repeated across `canonical.ts`, `id.ts`, `workspace.ts` and their tests; those now reference
+  the section. §1 no longer says "alphabetical" and "UTF-16 code unit" in the same breath, and
+  §9.4 states the propagated-effect ordering that made `target` a sort key in the first place.
+
+  **Invariant #19** makes it checkable on a Document read off disk: `source.file`,
+  `effects[].target`, `calls[].target`, `components[].roots`, `components[].publicApi`,
+  `workspace.managers[].roots` and both `dependencies[]` endpoints. Ids and `Symbol.name` are
+  left to #17 — all three grammars are ASCII-only, so a non-NFC value fails the grammar first
+  and reporting it twice would have the reader chase one string twice. Strings the Document
+  quotes are excluded for the opposite reason: their spelling decides nothing, and normalizing
+  a quotation would misquote it.
+
+  Normalization violations now name both spellings by code point. They render identically by
+  definition, so the old message showed a string that looked correct beside the claim that it
+  was not. The Symbol id constructor's version of the same message was fixed with it.
+
+- Updated dependencies [e2dab93]
+- Updated dependencies [630460f]
+- Updated dependencies [c825c74]
+- Updated dependencies [14d3aa7]
+- Updated dependencies [4a4296e]
+- Updated dependencies [b8763eb]
+- Updated dependencies [39ef5b9]
+- Updated dependencies [722903a]
+- Updated dependencies [85ade16]
+- Updated dependencies [14bdb6b]
+  - @aburi/core@0.3.0
+  - @aburi/diff@0.3.0
+  - @aburi/markdown-projection@0.2.1
+  - @aburi/types@0.3.0
+  - @aburi/config@0.1.2
+  - @aburi/plugin-registry@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes

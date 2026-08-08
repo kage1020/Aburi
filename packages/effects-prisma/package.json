@@ -1,6 +1,6 @@
 {
   "name": "@aburi/effects-prisma",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Aburi Prisma effects plugin: classifies prisma.<model>.<verb> and prisma.$transaction call expressions into core db.read / db.write / db.transaction effects",
   "license": "MIT",
   "author": "kage1020",

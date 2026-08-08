@@ -1,5 +1,51 @@
 # @aburi/lang-typescript
 
+## 0.3.0
+
+### Minor Changes
+
+- 14bdb6b: Separate the `LanguageId` and `PluginRef` vocabularies
+
+  `aburi.json` uses the key `languages` at two nesting levels with two different
+  vocabularies: the top-level array holds plugin refs the loader resolves as module
+  specifiers, while `components[].languages` holds `LanguageId`s constrained to
+  `^[a-z][a-z0-9]*$`. Both writers conflated them.
+
+  - `LanguagePlugin` gains a required `languageId` field. `@aburi/core` projects it into
+    `IR.workspace.languages`, which previously received `manifest.name` and therefore
+    emitted `"lang-typescript"` — a value that fails the frozen `aburi.ir.v1` schema for
+    every first-party plugin. Third-party language plugins must add the field.
+  - `LanguageId` is now a branded type constructed through `makeLanguageId` (exported from
+    `@aburi/core`), so a manifest name can no longer be assigned where a language id belongs.
+  - `aburi init` writes plugin manifest names (`lang-typescript`, `framework-nestjs`) in the
+    top-level arrays and keeps `LanguageId`s inside `components[]`. It previously wrote
+    detector ids, so the loader looked for the non-existent `@aburi/ts` package and the
+    documented `init` then `scan` quick start failed on every project.
+  - `InitReport` gains `unmappedLanguages` / `unmappedFrameworks`, and the CLI warns about
+    them. A detected language with no first-party plugin leaves `languages` empty, which is
+    otherwise invisible until the next command stops.
+  - `--with-suggestions` names the language plugin first, per `cli-spec.md` §4.6: it is a
+    hard requirement for the next `aburi scan`, where a framework plugin only widens
+    classification.
+  - `aburi scan` refuses to run when no language plugin resolves, instead of writing an IR
+    with zero Symbols and an empty `workspace.languages` at exit 0. That document fails the
+    schema's `minItems: 1`, and two of them diff to `+0 -0 ~0` — so every `--fail-on` gate
+    downstream passed regardless of what changed.
+  - New integrity invariant #18: `workspace.languages` is non-empty, every entry satisfies
+    the `LanguageId` grammar, and every `Symbol.language` appears in it. It also covers an IR
+    read off disk, which `readIR` brands without validating.
+
+### Patch Changes
+
+- Updated dependencies [e2dab93]
+- Updated dependencies [630460f]
+- Updated dependencies [c825c74]
+- Updated dependencies [b8763eb]
+- Updated dependencies [85ade16]
+- Updated dependencies [14bdb6b]
+  - @aburi/core@0.3.0
+  - @aburi/types@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
