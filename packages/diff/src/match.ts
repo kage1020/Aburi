@@ -434,6 +434,22 @@ const EXACT_MATCH_ONLY = 1
 const TWO_TOKEN_THRESHOLD = 0.95
 const DEFAULT_THRESHOLD = 0.85
 
+/** The lowest score §3.4.3 will accept, whichever row of the table applies. */
+export const LOWEST_THRESHOLD = DEFAULT_THRESHOLD
+
+/**
+ * §3.4.3 — the most a pairing short on one side alone can score: `0.5 * (1/2) + 0.3 + 0.2`.
+ * One distinct token against two or more is a Jaccard of at most a half, and the other two
+ * axes are granted in full.
+ *
+ * `saysEnoughToPair` reads the head and not the base because this sits under
+ * `LOWEST_THRESHOLD`, which makes a one-token base unreachable without a check of its own.
+ * That is a relation between the axis weights and the table, not a fact about either, and
+ * `single-token-name.test.ts` asserts it — the margin is 0.10, and §3.4.4 has a configurable
+ * threshold on the roadmap.
+ */
+export const SHORT_NAME_CEILING = 0.75
+
 function thresholdFor(qname: string): number {
   const tokens = tokenizeName(lastSegment(qname)).length
   if (tokens <= 1) return EXACT_MATCH_ONLY
@@ -457,10 +473,16 @@ function thresholdFor(qname: string): number {
  * measure `thresholdFor` uses, and the wrong one for this question. Tokens are deduped, so
  * `Main.main` supplies one and does not.
  *
- * Read off the head only, though the property belongs to a pairing. One token against two or
- * more is a Jaccard of at most 1/2, capping the total at 0.75 whichever side is short, so the
- * only pairing this changes is one where both sides are short — and skipping the head costs
- * one test rather than one per candidate.
+ * Read off the head only, though the property belongs to a pairing: a short name on either
+ * side caps the score at `SHORT_NAME_CEILING`, so the only pairing this changes is one short
+ * on both, and skipping the head costs one test rather than one per candidate.
+ *
+ * The count stands in for how much the name says, and `tokenizeName` splits on ASCII case
+ * boundaries, so a name written in a script that has none is one token however long it is:
+ * `ユーザー情報を取得する` is refused here on the same footing as `main`. For that name the
+ * proxy is wrong — two unrelated Symbols do not carry it by coincidence the way two carry
+ * `main` — and the cost is a stage-4 move this stage will not find. Fixing it means measuring
+ * the name by something other than a bare token count, which is §3.4.1's to change.
  */
 function saysEnoughToPair(qname: string): boolean {
   return tokenizeName(qname).length > 1

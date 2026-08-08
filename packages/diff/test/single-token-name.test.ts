@@ -1,6 +1,8 @@
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageNameSignature } from "../src"
+import { LOWEST_THRESHOLD, SHORT_NAME_CEILING } from "../src/match"
+import { nameSimilarity } from "../src/similarity"
 import { fp, makeIR, makeSymbol, sig } from "./fixtures"
 
 /**
@@ -137,12 +139,91 @@ describe("the qualified name is what carries the evidence", () => {
   })
 })
 
+describe("a script with no ASCII case boundary is one token, whatever it says", () => {
+  // `tokenizeName` finds camel humps by comparing code points against `a`-`z` and `A`-`Z`, so
+  // a name in a script that has no such boundary comes back whole however much it says. The
+  // count is a proxy for that, and here the proxy is wrong: `ユーザー情報を取得する` is not a
+  // name two unrelated Symbols carry by coincidence the way two carry `main`.
+  //
+  // The rule refuses them anyway, and these pin that as known rather than discovered. What it
+  // costs is a stage-4 move — a cross-file move git did not record, with an edited body.
+  // Measuring the name by something other than a bare token count is §3.4.1's to change, and
+  // these tests are what will fail when it does.
+
+  it("counts a Japanese name as one token", () => {
+    expect(
+      pairs(
+        [fn("src/legacy/user.ts", "ユーザー情報を取得する", "aaa")],
+        [fn("src/api/user.ts", "ユーザー情報を取得する", "bbb")],
+      ),
+    ).toEqual([])
+  })
+
+  it("counts a Chinese name as one token", () => {
+    expect(
+      pairs([fn("src/a.ts", "获取用户信息", "aaa")], [fn("src/b.ts", "获取用户信息", "bbb")]),
+    ).toEqual([])
+  })
+
+  it("does not see the camel hump in a Cyrillic name either", () => {
+    expect(
+      pairs(
+        [fn("src/a.ts", "получитьПользователя", "aaa")],
+        [fn("src/b.ts", "получитьПользователя", "bbb")],
+      ),
+    ).toEqual([])
+  })
+
+  it("splits such a name on a separator, and on its ASCII half", () => {
+    // Two tokens each, so both are read and pair. The boundary is the tokeniser's alphabet,
+    // not the script.
+    expect(
+      pairs(
+        [method("src/a.ts", "ユーザー.取得", "aaa")],
+        [method("src/b.ts", "ユーザー.取得", "bbb")],
+      ),
+    ).toEqual(["ts:src/a.ts#ユーザー.取得 -> ts:src/b.ts#ユーザー.取得"])
+    expect(
+      pairs(
+        [method("src/a.ts", "UserRepo.取得", "aaa")],
+        [method("src/b.ts", "UserRepo.取得", "bbb")],
+      ),
+    ).toEqual(["ts:src/a.ts#UserRepo.取得 -> ts:src/b.ts#UserRepo.取得"])
+  })
+
+  it("leaves stages 1 to 3 to carry these names", () => {
+    // Which is what keeps the loss narrow: an unchanged move is stage 3's, and an unmoved
+    // change never reaches stage 4 at all.
+    expect(
+      pairs(
+        [fn("src/a.ts", "ユーザー情報を取得する", "same")],
+        [fn("src/b.ts", "ユーザー情報を取得する", "same")],
+      ),
+    ).toEqual(["ts:src/a.ts#ユーザー情報を取得する -> ts:src/b.ts#ユーザー情報を取得する"])
+  })
+})
+
 describe("the rule is scoped to the head, and to stage 4", () => {
+  it("keeps the ceiling that argument rests on below the table", () => {
+    // Reading the head and not the base is licensed by `SHORT_NAME_CEILING < LOWEST_THRESHOLD`
+    // — a relation between the axis weights and §3.4.3's table, not a fact about either. The
+    // margin is 0.10, and §3.4.4 has a configurable threshold on the roadmap, so the relation
+    // is asserted rather than left to the prose that states it three times.
+    expect(SHORT_NAME_CEILING).toBeLessThan(LOWEST_THRESHOLD)
+  })
+
+  it("derives that ceiling from the axis weights it claims to", () => {
+    // The 1/2 the ceiling is built on: one distinct token against two is a Jaccard of 1/2,
+    // and against more it is smaller. Granting the other two axes in full gives the rest.
+    expect(nameSimilarity("main", "mainRunner")).toBe(0.5)
+    expect(nameSimilarity("main", "mainRunnerEntry")).toBeLessThan(0.5)
+    expect(0.5 * 0.5 + 0.3 + 0.2).toBe(SHORT_NAME_CEILING)
+  })
+
   it("needs no base-side twin, because a short name on either side already caps the score", () => {
-    // One token against two or more is a Jaccard of at most 1/2, so even a perfect signature
-    // and a perfect owner cap the total at 0.5 * 0.5 + 0.3 + 0.2 = 0.75 — under 0.85, the
-    // lowest threshold left. Only a pairing short on both sides reads 1.0 on the axis, which
-    // is why the check is on the head alone and why moving it to the base changes nothing.
+    // The ceiling in the diff: each head below is admissible and shares `main`, and each is
+    // reported as added + removed rather than moved. Only a pairing short on both sides reads
+    // 1.0 on the name axis — which is why moving the check to the base changes nothing.
     expect(pairs([fn("src/a.ts", "main", "aaa")], [fn("src/b.ts", "mainRunner", "bbb")])).toEqual(
       [],
     )

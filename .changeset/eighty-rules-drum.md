@@ -41,4 +41,18 @@ The rule reads the head, though the property belongs to a pairing, and that is a
 rather than a semantic one: one token against two or more is a Jaccard of at most 1/2, capping
 the total at `0.5 * 0.5 + 0.3 + 0.2 = 0.75` — under the lowest threshold left — so the only
 pairing this changes is one short on both sides. Skipping the head costs one test; testing
-the base would cost one per candidate.
+the base would cost one per candidate. Both numbers are now named (`SHORT_NAME_CEILING`,
+`LOWEST_THRESHOLD`) with their ordering asserted, since the licence is a relation between
+them and §3.4.4 has a configurable threshold on the roadmap.
+
+**What this gives up.** A one-token name that moved file *and* changed body is reported as
+`added` + `removed` where it was one `moved+changed`. The band is narrow — stage 1 takes it if
+the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is
+unchanged — leaving a cross-file move git did not record, with an edited body.
+
+It is wider on codebases with non-Latin identifiers. `tokenizeName` finds camel boundaries by
+ASCII code-point range, so `ユーザー情報を取得する` and `获取用户信息` are one token each and
+are refused on the same footing as `main` — for those names the count is a bad proxy for how
+much the name says. The rule keeps the count rather than special-casing a script: the fix is a
+better measure in §3.4.1, which every caller of `tokenizeName` reads, so it belongs in its own
+change. §3.4.1 and §3.4.3 state the boundary and tests pin the behaviour.

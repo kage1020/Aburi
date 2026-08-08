@@ -191,11 +191,17 @@ if tokenize(h.name).length <= 1:    skip the head entirely, leave for added/remo
 
 The count is over the **whole qualified name**, which is what the score reads — not over the last segment, which is what `thresholdFor` reads. `UserRepo.get` supplies three tokens and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
 
-The rule is stated on the head, and needs no base-side twin, because a one-token name on **either** side already caps the score below the table. One token against two or more is a `jaccard` of at most `1 / 2`, so even a perfect signature and a perfect owner reach only `0.5 * 0.5 + 0.3 + 0.2 = 0.75`, under 0.85 — and a name of no tokens at all scores 0 on the axis and caps lower still.
+The rule is stated on the head, and needs no base-side twin, because a one-token name on **either** side already caps the score below the table. One token against two or more is a `jaccard` of at most `1 / 2`, so even a perfect signature and a perfect owner reach only `0.5 * 0.5 + 0.3 + 0.2 = 0.75` — and a name of no tokens at all scores 0 on the axis and caps lower still.
 
 Which means the rule changes an answer in exactly one case: **both** sides one token, where the axis reads 1.0 instead and the total reaches the top of the scale. Reading the head is therefore a choice about cost, not about meaning — a head is skipped once, where a base would be tested once per candidate.
 
-Stage 3 is untouched by this: an identical logic fingerprint is proof on its own and does not ask the name to carry anything, so a `main` that moved file unchanged is still a move.
+That licence is a relation, not a fact about either side of it: `0.75` is fixed by the axis weights, `0.85` by the table's last row, and the margin between them is 0.10. §3.4.4 has a configurable threshold on the roadmap, and below 0.75 the rule would need a base-side twin. The two constants are named in the code (`SHORT_NAME_CEILING`, `LOWEST_THRESHOLD`) and their ordering is asserted by a test, so the premise fails loudly rather than the conclusion failing silently.
+
+**What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged. What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
+
+The band is wider than it looks on codebases with non-Latin identifiers, because §3.4.1's tokeniser reads such a name as one token however much it says. `ユーザー情報を取得する` is refused on the same footing as `main`, and for that name the proxy is simply wrong: two unrelated Symbols do not carry it by coincidence. The rule keeps the count anyway rather than special-casing a script, because the fix is to measure what a name says by something better than a bare distinct-token count, and that is §3.4.1's to change. Tests pin the current behaviour so the change is visible when it comes.
+
+Stage 3 is untouched by all of this: an identical logic fingerprint is proof on its own and does not ask the name to carry anything, so a `main` that moved file unchanged is still a move.
 
 #### 3.4.4 Tuning via configuration
 
@@ -236,6 +242,18 @@ Token split (camelCase / snake_case / `.` / `::`) → Jaccard similarity. Levens
 tokenize("InvoiceService.createInvoice") = ["invoice", "service", "create", "invoice"] (lowercase, dedupe)
 jaccard(A, B) = |A ∩ B| / |A ∪ B|
 ```
+
+**The camel boundary is ASCII.** The split compares code points against `a`–`z`, `A`–`Z` and `0`–`9`, so a name written in a script with no ASCII case boundary and no separator comes back whole:
+
+```
+tokenize("ユーザー情報を取得する") = ["ユーザー情報を取得する"]     (1)
+tokenize("获取用户信息")           = ["获取用户信息"]               (1)
+tokenize("получитьПользователя")  = ["получитьпользователя"]       (1 — the camel hump does not register)
+tokenize("ユーザー.取得")          = ["ユーザー", "取得"]           (2 — a separator still splits)
+tokenize("UserRepo.取得")          = ["user", "repo", "取得"]       (3 — the ASCII half splits)
+```
+
+Jaccard is unharmed by this: two names that tokenise whole still score 1.0 against each other and 0 against anything else, which is the right answer for identical and for unrelated names alike. What it does harm is any reading of the **count** as a measure of how much a name says — §3.4.3's admissibility rule is the one place that does, and it states the cost there.
 
 #### 3.4.6 ownerSimilarity (R-8: avoiding same-name method collisions)
 
