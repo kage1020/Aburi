@@ -190,26 +190,26 @@ The bucket key partitions by signature nullness, so a signature-less head only e
 
 #### 3.4.5 Stage 4.5: dedicated weak matcher for dropped
 
-Dropped symbols have zero fingerprints and cannot use stages 3/4. To catch dropped symbols that moved in environments without git rename, a lightweight dropped-only matcher runs after stage 4:
+Dropped symbols have zero fingerprints and cannot use stages 3/4. To catch dropped symbols that moved in environments without git rename, a lightweight dropped-only matcher runs after stage 4. Two signals remain: the trailing segment of the qualified name, and the file basename. Either one alone is enough to pair.
+
+A signal counts only when it **identifies** a Symbol — when exactly one dropped base and one dropped head of that kind carry the key:
 
 ```
-candidates = []
-for h in remainingHead where h.dropped:
-  for b in remainingBase where b.dropped and b.kind == h.kind:
-    # trailing segment of the qualified name + file basename
-    score = 0.5 * (lastSegment(b.name) === lastSegment(h.name) ? 1 : 0)
-          + 0.5 * (basename(b.source.file) === basename(h.source.file) ? 1 : 0)
-    if score >= 0.5:            # accept even a one-sided match
-      candidates.append((b, h, score))
+for keyOf in [ (kind, lastSegment(name)), (kind, basename(source.file)) ]:
+  for key carried by exactly one dropped base AND exactly one dropped head:
+    candidates.add((that base, that head))    # a set: both keys may name the same pairing
 
-for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
+for (b, h) in acceptInScoreOrder(candidates):             # §3.8
   pair, rationale: 'dropped-weak-match'
 ```
 
-Only three scores are possible here and 1.0 is rare, so which base pairs with which head is settled by the tie-break far more often than by the score.
-
 As a result, a change such as "only renamed the directory of DTO files" is recorded as `moved:10` rather than `droppedAdded:10 / droppedRemoved:10`.
-There is a false-positive risk, but dropped symbols are outside the IR's primary field of view, so the impact is small.
+
+**Why identifying, and not just matching.** A key several Symbols carry names a group, and a group is not a pairing. `index.ts` is the most common filename in a TypeScript monorepo, so a bare basename match paired every dropped Symbol of one kind under one with every other — at a score they all tied on, which left the choice among unrelated classes to the tie-break. Those pairings land in `summary.moved`, which `--fail-on moved` gates on, so the false-positive budget this section grants itself was being spent on the default case rather than an unusual one. Requiring the key to identify costs the pairings where the surviving signal was ambiguous, which are the ones with nothing to distinguish the candidates by — the fingerprint is zeroed, so there is no second opinion to consult.
+
+**The candidates carry no weight.** §3.8 orders by score first, and here every candidate scores the same. A pairing both halves identify cannot be contested — both keys are sole on both sides and point at each other, so neither Symbol appears in any other candidate — and the case that remains, one base offered different heads by the two halves, is one the 0.5-per-half scale scored equally anyway. So the order is `(base.id, head.id)` throughout. This is also what bounds the work: at most one pairing per discriminating key, two axes, against the cross-product a shared basename used to produce.
+
+There is still a false-positive risk — two unrelated classes can be the sole carriers of one basename — but dropped symbols are outside the IR's primary field of view, so the impact is small.
 
 #### 3.4.1 nameSimilarity
 
@@ -615,7 +615,7 @@ Large repositories (>100k) would require streaming, which is not yet supported.
 
 Stage 4 additionally holds one record per candidate pairing (§3.8) — every (base, head) pair in a bucket that clears the head's threshold. That is O(1) in the ordinary case, where a threshold of 0.85 or above admits few pairs, and O(base × head) for a bucket whose members are near-identically named. The per-head loop it replaced held one record; the trade buys the guarantee that the best available pairing is never skipped, and §3.4.0's bucket pre-filter is what keeps the bound to a bucket rather than to the Document.
 
-Stage 4.5 does not pay this. Its two score components are equalities, so its candidates are looked up rather than enumerated, and §3.8's order is applied through a cursor per group. This matters because a group of dropped Symbols of one kind sharing a basename — `index.ts` — is a join that returns everything, which is the ordinary shape of the directory rename §3.4.5 exists to catch.
+Stage 4.5 does not pay this. Its candidates are the keys that identify a pairing (§3.4.5), at most one each over two axes, so the list is bounded by the dropped Symbols themselves rather than by their pairs. The rule that bounds it is the same one that stops a shared `index.ts` from pairing unrelated Symbols: a key several Symbols carry identifies none of them.
 
 ### 8.3 Targets
 

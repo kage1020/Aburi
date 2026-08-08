@@ -290,29 +290,35 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   })
 })
 
-describe("stage 4.5 settles the same pairings as a candidate list would", () => {
-  // §3.4.5's two halves are equalities and only two scores can clear the threshold, so the
-  // stage applies §3.8's order by lookup instead of by building the candidates. The saving is
-  // the point — a group of dropped Symbols sharing `index.ts` is a join that returns
-  // everything — but a specialised sweep is only worth having if it agrees with the general
-  // one, and that is not something a handful of fixtures can show.
+describe("stage 4.5 settles the same pairings as a direct reading of §3.4.5", () => {
+  // The stage collects its candidates through two lookup tables. This spells §3.4.5 out the
+  // slow way instead — every (base, head) pair, both halves evaluated, a half counted only
+  // when the key that carries it identifies one Symbol on each side — and holds the two
+  // against each other, which a handful of fixtures cannot do.
 
-  /** §3.8 spelled out over an explicit candidate list, as the other stages run it. */
+  /** §3.4.5 and §3.8 read literally, over an explicit cross-product. */
   function referencePairs(base: IRSymbol[], head: IRSymbol[]): string[] {
-    const last = (name: string) => name.slice(name.lastIndexOf(".") + 1)
-    const file = (path: string) => path.slice(path.lastIndexOf("/") + 1)
-    const candidates: { base: IRSymbol; head: IRSymbol; score: number }[] = []
-    for (const h of head.filter((s) => s.dropped)) {
-      for (const b of base.filter((s) => s.dropped)) {
-        if (b.kind !== h.kind) continue
-        const nameHit = last(b.name) === last(h.name) ? 1 : 0
-        const fileHit = file(b.source.file) === file(h.source.file) ? 1 : 0
-        const score = 0.5 * nameHit + 0.5 * fileHit
-        if (score >= 0.5) candidates.push({ base: b, head: h, score })
+    const droppedBase = base.filter((s) => s.dropped)
+    const droppedHead = head.filter((s) => s.dropped)
+    const last = (s: IRSymbol) => `${s.kind}/${s.name.slice(s.name.lastIndexOf(".") + 1)}`
+    const file = (s: IRSymbol) =>
+      `${s.kind}/${s.source.file.slice(s.source.file.lastIndexOf("/") + 1)}`
+    const carriedOnce = (symbols: IRSymbol[], keyOf: (s: IRSymbol) => string, key: string) =>
+      symbols.filter((s) => keyOf(s) === key).length === 1
+
+    const candidates: { base: IRSymbol; head: IRSymbol }[] = []
+    for (const h of droppedHead) {
+      for (const b of droppedBase) {
+        const hits = [last, file].filter(
+          (keyOf) =>
+            keyOf(b) === keyOf(h) &&
+            carriedOnce(droppedBase, keyOf, keyOf(b)) &&
+            carriedOnce(droppedHead, keyOf, keyOf(h)),
+        )
+        if (hits.length > 0) candidates.push({ base: b, head: h })
       }
     }
     candidates.sort((a, b) => {
-      if (a.score !== b.score) return b.score - a.score
       if (a.base.id !== b.base.id) return a.base.id < b.base.id ? -1 : 1
       return a.head.id < b.head.id ? -1 : a.head.id > b.head.id ? 1 : 0
     })
@@ -374,11 +380,13 @@ describe("stage 4.5 settles the same pairings as a candidate list would", () => 
 
 describe("stage 4.5 does not depend on input order", () => {
   it("resolves a tie to the lower base id", () => {
-    // Both bases score 0.5 — the trailing name segment hits, the file basename does not.
-    const head = () => [dropped("src/mid/Order.ts", "Svc.handle")]
+    // Two bases identified by different halves of §3.4.5's score, both offering the same
+    // head: `Svc.handle` by the trailing name segment, `Shared.ts` by the file basename.
+    // Every candidate carries the same weight there, so the id keys decide.
+    const head = () => [dropped("src/mid/Shared.ts", "Svc.handle")]
     const a = () => dropped("src/aaa/Alpha.ts", "Svc.handle")
-    const z = () => dropped("src/zzz/Zeta.ts", "Svc.handle")
-    const expected = ["moved ts:src/aaa/Alpha.ts#Svc.handle -> ts:src/mid/Order.ts#Svc.handle"]
+    const z = () => dropped("src/zzz/Shared.ts", "Svc.other")
+    const expected = ["moved ts:src/aaa/Alpha.ts#Svc.handle -> ts:src/mid/Shared.ts#Svc.handle"]
     expect(changes([a(), z()], head())).toEqual(expected)
     expect(changes([z(), a()], head())).toEqual(expected)
   })
