@@ -23,9 +23,6 @@ const ZERO_LOGIC_FP = "000000000000"
 /** §3.3 — the similarity a multi-candidate logic-fingerprint group must reach to pair. */
 const NAME_DISAMBIGUATION_THRESHOLD = 0.85
 
-/** §3.4.5 — the weak matcher accepts a one-sided hit. */
-const DROPPED_WEAK_THRESHOLD = 0.5
-
 /** One candidate pairing and the score that ranks it against the others. */
 interface ScoredPair {
   base: IRSymbol
@@ -33,30 +30,46 @@ interface ScoredPair {
   score: number
 }
 
+/** What one sweep settled: the pairings, and the ids each side spent on them. */
+interface Assignment {
+  pairs: readonly ScoredPair[]
+  baseIds: ReadonlySet<SymbolId>
+  headIds: ReadonlySet<SymbolId>
+}
+
 /**
- * §3.8 — accept candidate pairings highest score first, taking each base and each head at most
- * once. Stages 3, 4 and 4.5 all choose from a set of possible pairings, and all three used
- * to decide one head at a time — which let an earlier head consume a base that was a later
- * head’s exact match, and reported the loser as `added` beside the pair it lost.
+ * §3.8 — accept candidate pairings highest score first, taking each base and each head at
+ * most once. Stages 3, 4 and 4.5 all choose from a set of possible pairings, and all three
+ * used to decide one head at a time — which let an earlier head consume a base that was a
+ * later head's exact match, and reported the loser as `added` beside the pair it lost.
  *
- * Ordering the candidates instead of the heads costs nothing: every score is computed either
- * way, and the sweep below is linear in the candidates that clear their threshold. It is not
- * an optimal assignment — a greedy sweep can still strand a pair whose partners were both
- * taken by higher-scoring ones — but it never passes over the best available pairing, which
- * is the case that shows up in a review as one symbol appearing twice.
+ * The two id sets come back with the pairings because every caller needs them to work out
+ * what is left over, and deriving them again at the call site is a chance to derive the
+ * wrong one: reading the head ids out as the base ids typechecks, and reproduces the very
+ * symptom this exists to prevent.
+ *
+ * Not free, and §8.2 carries the bound: `candidates` is every pairing that clears its
+ * threshold, so this holds O(base × head) records in the worst case where the per-head loop
+ * it replaced held one, and sorting them is O(C log C). Stage 4 buys that back and more with
+ * `createNameScorer`. Stage 4.5 does not call this at all — its score has two reachable
+ * values and both components are equalities, so it applies the same order by lookup.
+ *
+ * It is not an optimal assignment — a greedy sweep can still strand a pair whose partners
+ * were both taken by higher-scoring ones — but it never passes over the best available
+ * pairing, which is the case that shows up in a review as one symbol appearing twice.
  */
-function acceptInScoreOrder(candidates: ScoredPair[]): ScoredPair[] {
+function acceptInScoreOrder(candidates: ScoredPair[]): Assignment {
   candidates.sort(compareCandidates)
-  const usedBase = new Set<SymbolId>()
-  const usedHead = new Set<SymbolId>()
-  const accepted: ScoredPair[] = []
+  const baseIds = new Set<SymbolId>()
+  const headIds = new Set<SymbolId>()
+  const pairs: ScoredPair[] = []
   for (const candidate of candidates) {
-    if (usedBase.has(candidate.base.id) || usedHead.has(candidate.head.id)) continue
-    usedBase.add(candidate.base.id)
-    usedHead.add(candidate.head.id)
-    accepted.push(candidate)
+    if (baseIds.has(candidate.base.id) || headIds.has(candidate.head.id)) continue
+    baseIds.add(candidate.base.id)
+    headIds.add(candidate.head.id)
+    pairs.push(candidate)
   }
-  return accepted
+  return { pairs, baseIds, headIds }
 }
 
 /**
@@ -75,10 +88,6 @@ function compareCandidates(a: ScoredPair, b: ScoredPair): number {
 /** The entries of `symbols` that no accepted pairing claimed, in their original order. */
 function unclaimed(symbols: readonly IRSymbol[], claimed: ReadonlySet<SymbolId>): IRSymbol[] {
   return symbols.filter((symbol) => !claimed.has(symbol.id))
-}
-
-function idsOf(pairs: readonly ScoredPair[], side: "base" | "head"): Set<SymbolId> {
-  return new Set(pairs.map((pair) => pair[side].id))
 }
 
 /**
@@ -147,7 +156,7 @@ export function matchStageGitRename(
   // Collect every base that predicts a given head before choosing, rather than letting the
   // first one in the array take it. Two files renamed onto one target both predict the same
   // id, and which of them is the move source should not be a property of the array order.
-  const claimants = new Map<SymbolId, { head: IRSymbol; bases: IRSymbol[] }>()
+  const claimants = new Map<SymbolId, { head: IRSymbol; bases: [IRSymbol, ...IRSymbol[]] }>()
   for (const b of remainingBase) {
     const newPath = renameMap.get(b.source.file)
     if (newPath === undefined) continue
@@ -155,9 +164,9 @@ export function matchStageGitRename(
     if (expectedId === null) continue
     const head = headById.get(expectedId)
     if (head === undefined) continue
-    const claim = claimants.get(expectedId) ?? { head, bases: [] }
-    claim.bases.push(b)
-    claimants.set(expectedId, claim)
+    const claim = claimants.get(expectedId)
+    if (claim === undefined) claimants.set(expectedId, { head, bases: [b] })
+    else claim.bases.push(b)
   }
 
   const matched: SymbolPair[] = []
@@ -165,7 +174,6 @@ export function matchStageGitRename(
   const usedHead = new Set<SymbolId>()
   for (const { head, bases } of claimants.values()) {
     const base = lowestId(bases)
-    if (base === undefined) continue
     matched.push({ base, head, rationale: "git-rename" })
     usedBase.add(base.id)
     usedHead.add(head.id)
@@ -177,10 +185,11 @@ export function matchStageGitRename(
   }
 }
 
-function lowestId(symbols: readonly IRSymbol[]): IRSymbol | undefined {
-  let lowest: IRSymbol | undefined
+/** Total on the non-empty claim lists above: a claim is created holding its first base. */
+function lowestId(symbols: readonly [IRSymbol, ...IRSymbol[]]): IRSymbol {
+  let lowest = symbols[0]
   for (const symbol of symbols) {
-    if (lowest === undefined || symbol.id < lowest.id) lowest = symbol
+    if (symbol.id < lowest.id) lowest = symbol
   }
   return lowest
 }
@@ -295,12 +304,12 @@ function pairWithinLogicGroup(
       }
     }
     const accepted = acceptInScoreOrder(candidates)
-    if (accepted.length === 0) break
-    for (const { base, head } of accepted) {
+    if (accepted.pairs.length === 0) break
+    for (const { base, head } of accepted.pairs) {
       matched.push({ base, head, rationale: "logic-fingerprint+name-disambiguation" })
     }
-    freeBase = unclaimed(freeBase, idsOf(accepted, "base"))
-    freeHead = unclaimed(freeHead, idsOf(accepted, "head"))
+    freeBase = unclaimed(freeBase, accepted.baseIds)
+    freeHead = unclaimed(freeHead, accepted.headIds)
   }
   return matched
 }
@@ -391,9 +400,13 @@ export function matchStageNameSignature(
   }
   const accepted = acceptInScoreOrder(candidates)
   return {
-    matched: accepted.map(({ base, head }) => ({ base, head, rationale: "name-signature" })),
-    remainingBase: unclaimed(remainingBase, idsOf(accepted, "base")),
-    remainingHead: unclaimed(remainingHead, idsOf(accepted, "head")),
+    matched: accepted.pairs.map(({ base, head }) => ({
+      base,
+      head,
+      rationale: "name-signature" as const,
+    })),
+    remainingBase: unclaimed(remainingBase, accepted.baseIds),
+    remainingHead: unclaimed(remainingHead, accepted.headIds),
   }
 }
 
@@ -402,23 +415,42 @@ function bucketKey(s: IRSymbol): string {
   return `${s.kind}::${sig}`
 }
 
+/**
+ * §3.4.3 — the composite score a pair must reach, by how many tokens the head's last name
+ * segment has. 1.0 is reachable, not impossible: an identical name with an identical
+ * signature and owner is `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754, so a one-token name pairs
+ * when nothing but its file changed and never otherwise.
+ */
+const EXACT_MATCH_ONLY = 1
+const TWO_TOKEN_THRESHOLD = 0.95
+const DEFAULT_THRESHOLD = 0.85
+
 function thresholdFor(qname: string): number {
   const tokens = tokenizeName(lastSegment(qname)).length
-  if (tokens <= 1) return 1
-  if (tokens === 2) return 0.95
-  return 0.85
+  if (tokens <= 1) return EXACT_MATCH_ONLY
+  if (tokens === 2) return TWO_TOKEN_THRESHOLD
+  return DEFAULT_THRESHOLD
 }
 
 /**
  * §3.4.5 — dropped-only weak matcher. For dropped Symbols the fingerprint is zeroed and
  * name/signature are the only remaining signals. Score is a coarse "did the last name
- * segment or file basename survive?" — if either half matches we pair (threshold 0.5).
- * Almost every score here is exactly 0.5, so which base pairs with which head is the
- * tie-break’s decision rather than the score’s.
+ * segment or file basename survive?" — if either half matches we pair (threshold 0.5). Only
+ * 0.5 and 1.0 can clear it, so the tie-break decides far more pairings here than the score
+ * does.
  *
  * This is deliberately lax; diff-algorithm.md §3.4.5 already accepts that dropped Symbols live
  * outside the main IR review surface, so occasional false pairings only affect the
  * "Drop-rule variation" fold-out section in the Markdown projection.
+ *
+ * §3.8's order is applied without building the candidate list, because here it can be. Both
+ * halves of the score are equalities, so candidates are two lookups rather than a predicate
+ * over every pair; and with only two reachable scores, §3.8's sweep reduces to "for each base
+ * in id order, take the lowest-id head still free that shares a key". A group of dropped
+ * Symbols of one kind under a common basename — `index.ts`, in a TypeScript monorepo — is a
+ * join that returns everything, so a candidate list is quadratic in exactly the case this
+ * stage exists for. `test/matching-order.test.ts` holds the two forms against each other on
+ * randomised inputs.
  */
 export function matchStageDroppedWeak(
   remainingBase: readonly IRSymbol[],
@@ -428,28 +460,118 @@ export function matchStageDroppedWeak(
   remainingBase: IRSymbol[]
   remainingHead: IRSymbol[]
 } {
-  const droppedBase = remainingBase.filter((s) => s.dropped)
-  const candidates: ScoredPair[] = []
-  for (const h of remainingHead) {
-    if (!h.dropped) continue
-    for (const b of droppedBase) {
-      if (b.kind !== h.kind) continue
-      const nameHit = lastSegment(b.name) === lastSegment(h.name) ? 1 : 0
-      const fileHit = basename(b.source.file) === basename(h.source.file) ? 1 : 0
-      const score = 0.5 * nameHit + 0.5 * fileHit
-      if (score >= DROPPED_WEAK_THRESHOLD) candidates.push({ base: b, head: h, score })
-    }
+  const bases = [...remainingBase.filter((s) => s.dropped)].sort(byId)
+  const heads = remainingHead.filter((s) => s.dropped)
+  const usedBase = new Set<SymbolId>()
+  const usedHead = new Set<SymbolId>()
+  const matched: SymbolPair[] = []
+
+  const claim = (base: IRSymbol, head: IRSymbol): void => {
+    usedBase.add(base.id)
+    usedHead.add(head.id)
+    matched.push({ base, head, rationale: "dropped-weak-match" })
   }
-  const accepted = acceptInScoreOrder(candidates)
+
+  // Score 1.0 first: both halves hit, which is one lookup on the two keys together.
+  const byBoth = freeHeadsBy(heads, bothKeys, usedHead)
+  for (const base of bases) {
+    const head = byBoth.lowestFree(bothKeys(base))
+    if (head !== undefined) claim(base, head)
+  }
+
+  // Then 0.5: either half. No base and head left free here could have scored 1.0 together —
+  // the pass above would have taken them.
+  const byName = freeHeadsBy(heads, nameKeys, usedHead)
+  const byFile = freeHeadsBy(heads, fileKeys, usedHead)
+  for (const base of bases) {
+    if (usedBase.has(base.id)) continue
+    const head = lowerId(byName.lowestFree(nameKeys(base)), byFile.lowestFree(fileKeys(base)))
+    if (head !== undefined) claim(base, head)
+  }
+
   return {
-    matched: accepted.map(({ base, head }) => ({
-      base,
-      head,
-      rationale: "dropped-weak-match" as const,
-    })),
-    remainingBase: unclaimed(remainingBase, idsOf(accepted, "base")),
-    remainingHead: unclaimed(remainingHead, idsOf(accepted, "head")),
+    matched,
+    remainingBase: unclaimed(remainingBase, usedBase),
+    remainingHead: unclaimed(remainingHead, usedHead),
   }
+}
+
+/**
+ * The two halves §3.4.5 scores, as lookup keys. `kind` leads because it gates a pair before
+ * either half is read.
+ */
+function nameKeys(symbol: IRSymbol): readonly string[] {
+  return [symbol.kind, lastSegment(symbol.name)]
+}
+
+function fileKeys(symbol: IRSymbol): readonly string[] {
+  return [symbol.kind, basename(symbol.source.file)]
+}
+
+function bothKeys(symbol: IRSymbol): readonly string[] {
+  return [symbol.kind, lastSegment(symbol.name), basename(symbol.source.file)]
+}
+
+function byId(a: IRSymbol, b: IRSymbol): number {
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+}
+
+function lowerId(a: IRSymbol | undefined, b: IRSymbol | undefined): IRSymbol | undefined {
+  if (a === undefined) return b
+  if (b === undefined) return a
+  return a.id < b.id ? a : b
+}
+
+/**
+ * Head Symbols grouped by a key, each group in id order behind a cursor that only moves
+ * forward. Asking a group for its lowest free head is what replaces scanning one score's
+ * candidates: the cursor steps over heads taken since the last ask and never revisits them,
+ * so a group costs one pass however many bases consult it.
+ */
+interface FreeHeads {
+  lowestFree(key: readonly string[]): IRSymbol | undefined
+}
+
+function freeHeadsBy(
+  heads: readonly IRSymbol[],
+  keyOf: (symbol: IRSymbol) => readonly string[],
+  used: ReadonlySet<SymbolId>,
+): FreeHeads {
+  const groups = new Map<string, IRSymbol[]>()
+  for (const head of heads) {
+    const key = groupKey(keyOf(head))
+    const group = groups.get(key)
+    if (group === undefined) groups.set(key, [head])
+    else group.push(head)
+  }
+  for (const group of groups.values()) group.sort(byId)
+  const cursors = new Map<string, number>()
+  return {
+    lowestFree(key) {
+      const joined = groupKey(key)
+      const group = groups.get(joined)
+      if (group === undefined) return undefined
+      let at = cursors.get(joined) ?? 0
+      while (at < group.length) {
+        const head = group[at]
+        if (head !== undefined && !used.has(head.id)) {
+          cursors.set(joined, at)
+          return head
+        }
+        at++
+      }
+      cursors.set(joined, at)
+      return undefined
+    },
+  }
+}
+
+/**
+ * Kinds come from a closed enum and the other parts are single path or name segments, so a
+ * separator none of them can contain keeps `["a", "b:c"]` and `["a:b", "c"]` apart.
+ */
+function groupKey(parts: readonly string[]): string {
+  return parts.join("/")
 }
 
 function basename(path: string): string {

@@ -82,7 +82,11 @@ function jaccardSets(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
   return intersection / (a.size + b.size - intersection)
 }
 
-/** name-token Jaccard shortcut used by nameSimilarity and ownerSimilarity call sites. */
+/**
+ * Jaccard over the tokens of two strings. Part of the module's surface rather than an
+ * internal shortcut: the two formulas below go through a token table they share for one
+ * matching pass, so this has no caller inside this file.
+ */
 export function jaccardTokens(a: string, b: string): number {
   return jaccard(tokenizeName(a), tokenizeName(b))
 }

@@ -44,7 +44,15 @@ Two side effects worth naming:
   and stage 4.5 moved non-dropped symbols to the front of what it returned. Every stage now
   returns its inputs filtered, so the arrays keep the caller's order throughout.
 - Scoring the whole bucket for every head, rather than one that shrank as heads consumed it,
-  roughly doubles the similarities computed. `createNameScorer` tokenises each distinct name
-  once per matching pass instead of once per comparison, which more than covers it: for a
-  bucket of 1000 on each side, stage 4 goes from 2785 ms to 488 ms, and at 2000 from 8789 ms
-  to 3876 ms.
+  roughly doubles the similarities stage 4 computes, and holds one record per candidate
+  where the per-head loop held one in total. `createNameScorer` tokenises each distinct name
+  once per matching pass instead of once per comparison, which more than covers the time: a
+  bucket of 1000 a side goes from 2785 ms to 488 ms, and 2000 from 8789 ms to 3876 ms. The
+  memory is a real trade and diff-algorithm.md §8.2 now carries the bound.
+- Stage 4.5 does not make that trade. Both halves of its score are equalities and only two
+  scores can clear its threshold, so it applies the same order through a cursor per group
+  rather than a candidate list — which matters because a group of dropped Symbols sharing a
+  basename (`index.ts`) is a join that returns everything, the ordinary shape of the
+  directory rename the stage exists to catch. It is now 40–120× faster than before with flat
+  memory: 1000 a side goes from 214 ms to 5 ms, and the all-`index.ts` case from 590 ms to
+  5 ms at 2000.

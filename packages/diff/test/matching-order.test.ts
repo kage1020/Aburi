@@ -1,6 +1,13 @@
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDiff, writeCanonicalDiff } from "../src"
+import {
+  buildDiff,
+  matchStageDroppedWeak,
+  matchStageGitRename,
+  matchStageLogicFingerprint,
+  matchStageNameSignature,
+  writeCanonicalDiff,
+} from "../src"
 import { fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
 
 /**
@@ -8,9 +15,9 @@ import { fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
  *
  * **The answer does not depend on the order of the input arrays.** Stages 2 to 4.5 all
  * resolved ties by whichever candidate came first, so permuting `symbols[]` changed the
- * canonical bytes of the diff. `scan` happens to emit id-sorted symbols, but `buildDiff` is
- * public API and stage 3 hands stage 4 a `remainingBase` reordered by bucket insertion, so
- * even the CLI path did not reach stage 4 in id order.
+ * canonical bytes of the diff. `scan` emits id-sorted symbols, which was no protection:
+ * `buildDiff` is public API, and stage 3 used to rebuild `remainingBase` in
+ * fingerprint-bucket order, so even the CLI path did not reach stage 4 in id order.
  *
  * **A better pair is not discarded for a worse one.** Stages 3 and 4 consumed a base the
  * moment some head wanted it, so an earlier head could take a base that was a later head's
@@ -231,9 +238,9 @@ describe("stage 3 keeps its unconditional single-candidate branch", () => {
   })
 
   it("still cascades: the pair left over after a scored match pairs unconditionally", () => {
-    // Two bases and two heads on one fingerprint. Only one pairing clears 0.85; today the
-    // bucket shrinks to a single candidate and the remaining head pairs unconditionally, and
-    // that has to survive the change from per-head greedy to a scored sweep.
+    // Two bases and two heads on one fingerprint, of which only one pairing clears 0.85.
+    // §3.3 pairs the leftovers anyway: once a round leaves a single base, it is the lone
+    // candidate and the branch above applies. Both pair, and neither similarity is tested.
     const base = [
       withLogic("src/a.ts", "Svc.createOrder", "111111111111"),
       withLogic("src/b.ts", "Svc.zzz", "111111111111"),
@@ -283,6 +290,88 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   })
 })
 
+describe("stage 4.5 settles the same pairings as a candidate list would", () => {
+  // §3.4.5's two halves are equalities and only two scores can clear the threshold, so the
+  // stage applies §3.8's order by lookup instead of by building the candidates. The saving is
+  // the point — a group of dropped Symbols sharing `index.ts` is a join that returns
+  // everything — but a specialised sweep is only worth having if it agrees with the general
+  // one, and that is not something a handful of fixtures can show.
+
+  /** §3.8 spelled out over an explicit candidate list, as the other stages run it. */
+  function referencePairs(base: IRSymbol[], head: IRSymbol[]): string[] {
+    const last = (name: string) => name.slice(name.lastIndexOf(".") + 1)
+    const file = (path: string) => path.slice(path.lastIndexOf("/") + 1)
+    const candidates: { base: IRSymbol; head: IRSymbol; score: number }[] = []
+    for (const h of head.filter((s) => s.dropped)) {
+      for (const b of base.filter((s) => s.dropped)) {
+        if (b.kind !== h.kind) continue
+        const nameHit = last(b.name) === last(h.name) ? 1 : 0
+        const fileHit = file(b.source.file) === file(h.source.file) ? 1 : 0
+        const score = 0.5 * nameHit + 0.5 * fileHit
+        if (score >= 0.5) candidates.push({ base: b, head: h, score })
+      }
+    }
+    candidates.sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score
+      if (a.base.id !== b.base.id) return a.base.id < b.base.id ? -1 : 1
+      return a.head.id < b.head.id ? -1 : a.head.id > b.head.id ? 1 : 0
+    })
+    const usedBase = new Set<string>()
+    const usedHead = new Set<string>()
+    const pairs: string[] = []
+    for (const candidate of candidates) {
+      if (usedBase.has(candidate.base.id) || usedHead.has(candidate.head.id)) continue
+      usedBase.add(candidate.base.id)
+      usedHead.add(candidate.head.id)
+      pairs.push(`${candidate.base.id} -> ${candidate.head.id}`)
+    }
+    return pairs.sort()
+  }
+
+  /** Deterministic pseudo-randomness: the same corpus on every machine and every run. */
+  function generator(seed: number): () => number {
+    let state = seed
+    return () => {
+      state = (state * 1103515245 + 12345) % 2147483648
+      return state / 2147483648
+    }
+  }
+
+  it("agrees with the candidate-list form across randomised corpora", () => {
+    const names = ["Svc.alpha", "Svc.beta", "Other.alpha", "gamma"]
+    const files = ["src/a/index.ts", "src/b/index.ts", "src/a/Dto.ts", "src/c/Other.ts"]
+    const kinds = ["class", "method"] as const
+    for (let corpus = 0; corpus < 40; corpus++) {
+      const next = generator(corpus * 7919 + 13)
+      const build = (side: string, count: number) =>
+        Array.from({ length: count }, (_, i) => {
+          const file = files[Math.floor(next() * files.length)] as string
+          const name = names[Math.floor(next() * names.length)] as string
+          return makeSymbol({
+            id: `ts:${side}/${i}/${file}#${name}`,
+            name,
+            kind: kinds[Math.floor(next() * kinds.length)] ?? "class",
+            dropped: next() < 0.85,
+            dropReason: "size",
+            fingerprint: zeroFp(),
+            source: { file: `${side}/${i}/${file}`, startLine: 1, endLine: 2 },
+          })
+        })
+      const base = build("base", 1 + Math.floor(next() * 8))
+      const head = build("head", 1 + Math.floor(next() * 8))
+      const actual = matchStageDroppedWeak(base, head)
+      expect(actual.matched.map((p) => `${p.base.id} -> ${p.head.id}`).sort()).toEqual(
+        referencePairs(base, head),
+      )
+      // The leftovers are the inputs minus what was claimed, in the caller's order.
+      const claimedBase = new Set(actual.matched.map((p) => p.base.id))
+      const claimedHead = new Set(actual.matched.map((p) => p.head.id))
+      expect(actual.remainingBase).toEqual(base.filter((s) => !claimedBase.has(s.id)))
+      expect(actual.remainingHead).toEqual(head.filter((s) => !claimedHead.has(s.id)))
+    }
+  })
+})
+
 describe("stage 4.5 does not depend on input order", () => {
   it("resolves a tie to the lower base id", () => {
     // Both bases score 0.5 — the trailing name segment hits, the file basename does not.
@@ -292,6 +381,62 @@ describe("stage 4.5 does not depend on input order", () => {
     const expected = ["moved ts:src/aaa/Alpha.ts#Svc.handle -> ts:src/mid/Order.ts#Svc.handle"]
     expect(changes([a(), z()], head())).toEqual(expected)
     expect(changes([z(), a()], head())).toEqual(expected)
+  })
+})
+
+describe("every stage hands on what it did not claim, in the caller's order", () => {
+  // `buildDiff` sorts `symbols[]` at the end, so a stage that rebuilt its leftovers in some
+  // other order would be invisible through it — and stage 3 did exactly that, handing stage 4
+  // a `remainingBase` in fingerprint-bucket order. These call the stages directly.
+  const symbols = [
+    method("src/z.ts", "Svc.zeta", "z"),
+    method("src/a.ts", "Svc.alpha", "a"),
+    method("src/m.ts", "Svc.mu", "m"),
+  ]
+
+  it("stage 2 with no rename map", () => {
+    const result = matchStageGitRename(symbols, symbols, null)
+    expect(result.remainingBase).toEqual(symbols)
+    expect(result.remainingHead).toEqual(symbols)
+  })
+
+  it("stage 3 with nothing to pair", () => {
+    const heads = [method("src/q.ts", "Svc.qoppa", "q")]
+    const result = matchStageLogicFingerprint(symbols, heads)
+    expect(result.remainingBase).toEqual(symbols)
+    expect(result.remainingHead).toEqual(heads)
+  })
+
+  it("stage 3 keeps the order of what it did not pair", () => {
+    // One head shares `src/m.ts`'s fingerprint, so `Svc.mu` is claimed and the other two come
+    // back in the order they went in — not grouped by fingerprint.
+    const heads = [method("src/n.ts", "Svc.mu", "m")]
+    const result = matchStageLogicFingerprint(symbols, heads)
+    expect(result.matched).toHaveLength(1)
+    expect(result.remainingBase.map((s) => s.id)).toEqual([
+      "ts:src/z.ts#Svc.zeta",
+      "ts:src/a.ts#Svc.alpha",
+    ])
+  })
+
+  it("stage 4 keeps the order of what it did not pair", () => {
+    const heads = [method("src/n.ts", "Svc.alpha", "n")]
+    const result = matchStageNameSignature(symbols, heads)
+    expect(result.matched).toHaveLength(1)
+    expect(result.remainingBase.map((s) => s.id)).toEqual([
+      "ts:src/z.ts#Svc.zeta",
+      "ts:src/m.ts#Svc.mu",
+    ])
+  })
+
+  it("stage 4.5 does not move non-dropped symbols to the front", () => {
+    const mixed = [
+      method("src/z.ts", "Svc.zeta", "z"),
+      dropped("src/a/Dto.ts", "Svc.alpha"),
+      method("src/m.ts", "Svc.mu", "m"),
+    ]
+    const result = matchStageDroppedWeak(mixed, [])
+    expect(result.remainingBase).toEqual(mixed)
   })
 })
 
@@ -323,6 +468,18 @@ describe("stage 2 does not depend on input order", () => {
     ]
     expect(run([a, z])).toEqual(expected)
     expect(run([z, a])).toEqual(expected)
+  })
+
+  it("leaves a base whose predicted id the grammar cannot express", () => {
+    // The rewriter goes back through the id constructor rather than concatenating, so a
+    // rename target the grammar rejects yields no prediction at all. That has to read as a
+    // lookup miss — minting an id no head can equal would be worse than not guessing.
+    const base = makeSymbol({ id: "ts:src/a.ts#foo", name: "foo", fingerprint: fp("a") })
+    const head = makeSymbol({ id: "ts:src/b.ts#foo", name: "foo", fingerprint: fp("b") })
+    const result = matchStageGitRename([base], [head], new Map([["src/a.ts", "..\\out\\b.ts"]]))
+    expect(result.matched).toEqual([])
+    expect(result.remainingBase).toEqual([base])
+    expect(result.remainingHead).toEqual([head])
   })
 })
 
