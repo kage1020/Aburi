@@ -1,5 +1,177 @@
 # @aburi/diff
 
+## 0.3.0
+
+### Minor Changes
+
+- 14d3aa7: Settle candidate pairings by score and id rather than by array order
+
+  Stages 2 to 4.5 each choose among possible pairings, and each chose one head at a time,
+  taking that head's best base immediately. Two defects followed.
+
+  **A better pairing was passed over for a worse one.** For a realistic rename:
+
+  ```
+  findUserByEmailAddress x findUserByEmailAddress = 1.0000   <- the optimum
+  findUserByEmailAddress x findUserByEmail        = 0.9167
+  findUserById           x findUserByEmail        = 0.8333
+  findUserById           x findUserByEmailAddress = 0.7857
+  ```
+
+  `findUserByEmail` sorts first, so it consumed the base `findUserByEmailAddress` at 0.9167 and
+  the head of that same name was left with 0.7857 and reported as `added` — one qualified name
+  appearing in the output as an addition and as the source of a move at the same time. The
+  canonical id-ascending order `scan` emits is exactly the order that produces it.
+
+  **The answer depended on the order of the input arrays.** All four stages resolved equal
+  scores to whichever candidate came first, and stage 4.5 has only three possible scores, so
+  almost every pairing there was decided that way. Stage 2 had the same defect for two files
+  renamed onto one target. Permuting `symbols[]` changed the canonical bytes of `diff.json`.
+
+  Both close with one change: enumerate the candidate pairings that clear their threshold and
+  settle them in `(score descending, base.id ascending, head.id ascending)` order, taking a
+  pairing when neither side is spoken for. The id keys are a total order only because ids are
+  unique within a Document, which `buildDiff` now establishes before the first stage runs.
+
+  The sweep is greedy, not an optimal assignment — a pairing can still be stranded when both
+  of its partners are taken by higher-scoring ones. That is a deliberate stop: the case that
+  misleads a reader is the _best available_ pairing being skipped, and this never does that.
+
+  Unchanged: every threshold, every rationale, stage 3's unconditional single-candidate branch
+  and the cascade that feeds it, and the rule that a signature-less head is never paired.
+
+  Two side effects worth naming:
+
+  - Stage 3 used to hand stage 4 a `remainingBase` reordered by fingerprint-bucket insertion,
+    and stage 4.5 moved non-dropped symbols to the front of what it returned. Every stage now
+    returns its inputs filtered, so the arrays keep the caller's order throughout.
+  - Scoring the whole bucket for every head, rather than one that shrank as heads consumed it,
+    roughly doubles the similarities stage 4 computes, and holds one record per candidate
+    where the per-head loop held one in total. `createNameScorer` tokenises each distinct name
+    once per matching pass instead of once per comparison, which more than covers the time: a
+    bucket of 1000 a side goes from 2785 ms to 488 ms, and 2000 from 8789 ms to 3876 ms. The
+    memory is a real trade and diff-algorithm.md §8.2 now carries the bound.
+  - Stage 4.5 does not make that trade. Both halves of its score are equalities and only two
+    scores can clear its threshold, so it applies the same order through a cursor per group
+    rather than a candidate list — which matters because a group of dropped Symbols sharing a
+    basename (`index.ts`) is a join that returns everything, the ordinary shape of the
+    directory rename the stage exists to catch. It is now 40–120× faster than before with flat
+    memory: 1000 a side goes from 214 ms to 5 ms, and the all-`index.ts` case from 590 ms to
+    5 ms at 2000.
+
+- 4a4296e: Pair dropped Symbols only on a signal that identifies one
+
+  §3.4.5 pairs dropped Symbols on two coarse signals — the trailing segment of the qualified
+  name and the file basename — and accepts either alone, on the stated grounds that dropped
+  Symbols sit outside the IR's main review surface and a false pairing there costs little.
+
+  A basename hit on `index.ts` is not a weak signal. It is the most common filename in a
+  TypeScript monorepo, so every dropped Symbol of one kind under one matched every other:
+
+  ```
+  moved: ts:src/billing/index.ts#InvoiceDto -> ts:src/orders/index.ts#OrderDto
+  moved: ts:src/auth/index.ts#LoginDto      -> ts:src/shipping/index.ts#ShipmentDto
+  ```
+
+  Every score ties at one half, so which unrelated class paired with which was decided by the
+  tie-break. The pairings land in `summary.moved`, which `--fail-on moved` gates on, so the
+  budget was being spent on the default case rather than an unusual one.
+
+  A half now counts only when the key carrying it **identifies** a Symbol: exactly one dropped
+  base and one dropped head of that kind hold it. A key several Symbols carry names a group,
+  and a group is not a pairing — and with the fingerprint zeroed there is no second opinion to
+  choose among its members with.
+
+  What still pairs, because the key identifies in each case:
+
+  - a renamed directory of DTO files — §3.4.5's own headline example, both halves
+  - a renamed directory whose DTOs all live in one `index.ts` — the names carry it alone
+  - a renamed file whose class kept its name
+  - a renamed class whose file kept its name, where that basename is not shared
+
+  "Exactly one" is counted over the Symbols the stage is handed. Stages 1 and 2 have taken
+  theirs, so a key they emptied out identifies again — which is the ordinary way a shared
+  `index.ts` still pairs unrelated symbols: three dropped classes under one, two unchanged and
+  matched by id, and the basename identifies the two that remain. That is the question the
+  stage is answering, and §3.4.5 now says so rather than leaving "exactly one" unqualified.
+
+  Two consequences worth stating:
+
+  - **The candidates carry no weight, so §3.8 no longer applies here.** A pairing both halves
+    identify cannot be contested — both keys are sole on both sides and point at each other, so
+    neither Symbol appears in any other candidate — and what remains, one base offered
+    different heads by the two halves, the 0.5-per-half scale scored equally anyway. §3.8's
+    sweep settles conflicts by score, and its licence to be greedy is that it never passes over
+    the best available pairing; with no score there is no best, and it would drop one identified
+    pairing for another over nothing but the id it sorts under. Three identified pairings over
+    four Symbols where two can hold is not a hypothetical, so the stage takes a **maximum
+    matching**: each axis identifies a Symbol at most once, so the candidates are the union of
+    two matchings — paths and even cycles — where alternate pairings along each component are
+    maximum and walking from a fixed end makes the choice among them canonical.
+  - **The bound comes for free.** At most one pairing per identifying key over two axes, so the
+    candidate list is linear in the dropped Symbols rather than in their pairs — which is what
+    a shared basename used to produce, and the reason the stage needed a memory-driven sweep of
+    its own. That one is gone.
+
+  `docs/design/diff-algorithm.md` §3.4.5 also still carried the candidate-list pseudocode from
+  before that specialised sweep, and §8.2 described the sweep itself. Both now match the code.
+
+- 722903a: Refuse a repeated identity instead of answering with one entry missing
+
+  `buildDiff` keys three collections by identity — Symbols by `id`, Components by `id`,
+  Dependencies by the `(from, to, via)` triple — and checked none of them. A repeat did not
+  crash; it produced an answer:
+
+  - Two head Symbols under one id: stage 1's lookup map is last-write-wins, so the base Symbol
+    paired with the second and the first appeared in neither `matched` nor `added` — `usedHead`
+    then removed both. Base 1 / head 2 reported `changed: 1, added: 0`.
+  - Two base Symbols under one id: both found the same head Symbol, which was classified
+    twice — `changed: 1` and `unchanged: 1` for one Symbol.
+  - The same past stage 1: stages 2 to 4.5 pair on other signals but track the base Symbols
+    they have consumed by id, so a repeat was dropped there too.
+  - Two Components under one id: the second replaced the first in the lookup map, and the
+    surviving pair compared roots belonging to different entries — a reported change between
+    two revisions that agree.
+  - Two Dependencies on one triple: a spurious `added` + `removed` pair, which is exactly how
+    §6.2 encodes a genuine direction or effect flip.
+
+  A missing Symbol is indistinguishable from one that was never there, so `buildDiff` now
+  raises `DiffError` with the new code `ir-identity-collision`, naming the side, the
+  collection, the repeated value and both positions:
+
+  ```
+  baseIR.symbols[3] repeats the id "ts:src/a.ts#foo" first seen at index 1; stage 1 pairs
+  Symbols by id and every later stage tracks the base Symbols it has consumed by id, so a
+  repeat leaves one entry out of the diff entirely or classifies its counterpart twice
+  (ir-schema.md §14 #1).
+  ```
+
+  Establishing an identity means reading it, so the same pass refuses an entry that is not an
+  object or whose identity fields are not strings. Both failures were reachable and neither
+  named the offending position: `symbols: [null]` reached `matchStageId` and failed on
+  `null.id`, and a lone Symbol carrying no `id` had nothing to collide with, passed, and
+  derived a Slice anchored on `undefined` — reported as `slice-invariant-violated`, the one
+  code the CLI presents as a bug in Aburi rather than in the caller's IR. Fields beyond
+  identity are still unchecked here; that is `checkIRIntegrity` #20's job, and the CLI applies
+  it when reading an IR off disk.
+
+  diff-algorithm.md §3.7 is the canonical statement of the rule, of why it is enforced at the
+  diff entry point as well as at extraction time, and of why the check is scoped to identity
+  rather than delegating to the whole integrity checker. The CLI maps the new code to
+  `config-error` (exit 2); `classifyDiffError` is now exhaustive over `DiffErrorCode`, so a
+  future code has to be placed in that table rather than defaulting into it.
+
+### Patch Changes
+
+- Updated dependencies [e2dab93]
+- Updated dependencies [630460f]
+- Updated dependencies [c825c74]
+- Updated dependencies [b8763eb]
+- Updated dependencies [85ade16]
+- Updated dependencies [14bdb6b]
+  - @aburi/core@0.3.0
+  - @aburi/types@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
