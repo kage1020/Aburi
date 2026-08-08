@@ -138,7 +138,8 @@ buckets = group remainingBase by (kind, signatureNullness)
 
 candidates = []
 for h in remainingHead:
-  if h.signature === null: continue                       # §3.4.3 tail
+  if h.signature === null: continue                       # §3.4.3, inadmissible
+  if tokenize(h.name).length <= 1: continue               # §3.4.3, inadmissible
   bucket = buckets.get((h.kind, 'has-sig'))
   if !bucket: continue
   threshold = thresholdFor(h)                             # §3.4.3
@@ -163,26 +164,38 @@ The effective complexity becomes the square of the per-bucket size of K — typi
 
 To avoid false positives on short names (1–2 token names like `getUser` vs `getUsers`), the threshold is adjusted by symbol kind and name token count.
 
-Note that 1.0 is a reachable score, not an impossible one: an identical qualified name with an identical signature and an identical owner gives `0.5 + 0.3 + 0.2`, which is exactly 1 in IEEE 754. So a 1-token name pairs when nothing about it changed but its file — a top-level `main` moved between files with an edited body, which stage 3 does not catch — and never otherwise. The comparison is `score >= threshold`; making it `>` would silently take 1-token move detection away.
-
 ```
 thresholdFor(kind, headName):
   tokenCount = tokenize(lastSegment(headName)).length
   if tokenCount <= 1:
-    return 1.0                  # 1-token names pair only on an exact match (false-positive prevention)
+    return 1.0                  # an exact match on all three axes
   if tokenCount == 2:
     return 0.95                 # strict (e.g. 'getUser' vs 'getUsers' scores 0.5 → does not pass)
   return 0.85                   # default
 ```
 
-Additionally, the `signature: null + null` combination (interface/type/class bodies, etc.) makes signatureSimilarity always return 1.0. Symbols with a null signature are **never paired in stage 4** (insufficient information):
+1.0 is the top of the scale and a reachable score: an identical qualified name with an identical signature and an identical owner gives `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. The comparison is `score >= threshold`, so the first row pairs an unchanged `UserRepo.get` that moved file with an edited body — which stage 3 does not catch — and nothing else. Making it `>` would empty the row rather than tighten it.
+
+##### Heads stage 4 does not read
+
+Two kinds of head are skipped before any threshold applies, because for them a high score means the evidence is missing rather than that the two names resemble each other. Neither is expressible as a threshold, and one of them wants a bar above the top of the scale:
 
 ```
-if h.signature === null:
-  skip the head entirely, leave for added/removed
+if h.signature === null:            skip the head entirely, leave for added/removed
+if tokenize(h.name).length <= 1:    skip the head entirely, leave for added/removed
 ```
 
-The bucket key partitions by signature nullness, so a signature-less head only ever sees signature-less candidates — there is nothing in its bucket it could legitimately pair with, and the rule needs no condition on them.
+**A null signature** makes `signatureSimilarity(null, null)` return 1.0 against every candidate. The bucket key partitions by signature nullness, so a signature-less head only ever sees signature-less candidates — there is nothing in its bucket it could legitimately pair with, and the rule needs no condition on them.
+
+**A one-token qualified name** is the whole of what the name and owner axes have to read. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
+
+The count is over the **whole qualified name**, which is what the score reads — not over the last segment, which is what `thresholdFor` reads. `UserRepo.get` supplies three tokens and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
+
+The rule is stated on the head, and needs no base-side twin, because a one-token name on **either** side already caps the score below the table. One token against two or more is a `jaccard` of at most `1 / 2`, so even a perfect signature and a perfect owner reach only `0.5 * 0.5 + 0.3 + 0.2 = 0.75`, under 0.85 — and a name of no tokens at all scores 0 on the axis and caps lower still.
+
+Which means the rule changes an answer in exactly one case: **both** sides one token, where the axis reads 1.0 instead and the total reaches the top of the scale. Reading the head is therefore a choice about cost, not about meaning — a head is skipped once, where a base would be tested once per candidate.
+
+Stage 3 is untouched by this: an identical logic fingerprint is proof on its own and does not ask the name to carry anything, so a `main` that moved file unchanged is still a move.
 
 #### 3.4.4 Tuning via configuration
 
