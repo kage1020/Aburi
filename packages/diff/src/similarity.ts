@@ -70,20 +70,31 @@ function isCamelBoundary(prev: string, curr: string): boolean {
  * purpose of §3.4.1). Empty on one side only returns 0.0.
  */
 export function jaccard(a: readonly string[], b: readonly string[]): number {
-  if (a.length === 0 && b.length === 0) return 1
-  if (a.length === 0 || b.length === 0) return 0
-  const setA = new Set(a)
-  const setB = new Set(b)
-  let intersection = 0
-  for (const t of setA) if (setB.has(t)) intersection++
-  const union = setA.size + setB.size - intersection
-  return intersection / union
+  return jaccardSets(new Set(a), new Set(b))
 }
 
-/** name-token Jaccard shortcut used by nameSimilarity and ownerSimilarity call sites. */
+function jaccardSets(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
+  if (a.size === 0 && b.size === 0) return 1
+  if (a.size === 0 || b.size === 0) return 0
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a]
+  let intersection = 0
+  for (const token of small) if (large.has(token)) intersection++
+  return intersection / (a.size + b.size - intersection)
+}
+
+/**
+ * Jaccard over the tokens of two strings. Part of the module's surface rather than an
+ * internal shortcut: the two formulas below go through a token table they share for one
+ * matching pass, so this has no caller inside this file.
+ */
 export function jaccardTokens(a: string, b: string): number {
   return jaccard(tokenizeName(a), tokenizeName(b))
 }
+
+/** How a formula gets the token set of a name. The only thing the memo below changes. */
+type TokenSetOf = (value: string) => ReadonlySet<string>
+
+const tokenizeEveryTime: TokenSetOf = (value) => new Set(tokenizeName(value))
 
 /**
  * §3.4.1 — Jaccard over the tokens of the full qualified name. The last segment is not
@@ -91,7 +102,7 @@ export function jaccardTokens(a: string, b: string): number {
  * what the score should reward.
  */
 export function nameSimilarity(baseName: string, headName: string): number {
-  return jaccardTokens(baseName, headName)
+  return nameFormula(tokenizeEveryTime, baseName, headName)
 }
 
 /**
@@ -109,11 +120,48 @@ export function nameSimilarity(baseName: string, headName: string): number {
  * two Symbols live in structurally different scopes.
  */
 export function ownerSimilarity(baseName: string, headName: string): number {
+  return ownerFormula(tokenizeEveryTime, baseName, headName)
+}
+
+function nameFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
+  return jaccardSets(setOf(baseName), setOf(headName))
+}
+
+function ownerFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
   const baseOwner = extractOwner(baseName)
   const headOwner = extractOwner(headName)
   if (baseOwner === "" && headOwner === "") return 1
   if (baseOwner === "" || headOwner === "") return 0
-  return jaccardTokens(baseOwner, headOwner)
+  return jaccardSets(setOf(baseOwner), setOf(headOwner))
+}
+
+/** The two similarity formulas of §3.4, over a token table shared for one matching pass. */
+export interface NameScorer {
+  name(baseName: string, headName: string): number
+  owner(baseName: string, headName: string): number
+}
+
+/**
+ * A scorer that tokenises each distinct name once.
+ *
+ * Stage 4 scores every (base, head) pair in a bucket, so a bucket of K on each side asks for
+ * K² similarities over 2K distinct names — tokenising on every call splits the same strings
+ * into the same tokens hundreds of thousands of times. The table lives for one call rather
+ * than for the process, because the names it holds are only the ones that pass is comparing.
+ */
+export function createNameScorer(): NameScorer {
+  const sets = new Map<string, ReadonlySet<string>>()
+  const setOf: TokenSetOf = (value) => {
+    const cached = sets.get(value)
+    if (cached !== undefined) return cached
+    const built: ReadonlySet<string> = new Set(tokenizeName(value))
+    sets.set(value, built)
+    return built
+  }
+  return {
+    name: (baseName, headName) => nameFormula(setOf, baseName, headName),
+    owner: (baseName, headName) => ownerFormula(setOf, baseName, headName),
+  }
 }
 
 function extractOwner(qname: string): string {

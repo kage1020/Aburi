@@ -108,11 +108,24 @@ describe("matchStageLogicFingerprint", () => {
 })
 
 describe("matchStageNameSignature", () => {
-  it("respects the 1-token-name floor (threshold 1.0 → never pairs)", () => {
+  it("holds a 1-token name to the 1.0 floor", () => {
     const b = makeSymbol({ id: "ts:a.ts#foo", name: "foo", signature: sig() })
     const h = makeSymbol({ id: "ts:a.ts#foo2", name: "foo2", signature: sig() })
     const result = matchStageNameSignature([b], [h])
     expect(result.matched).toEqual([])
+  })
+
+  it("pairs a 1-token name that scores exactly 1.0", () => {
+    // 1.0 is reachable, not impossible: identical name, signature and owner give
+    // `0.5 + 0.3 + 0.2`, which is exactly 1 in IEEE 754. A top-level `main` moved to another
+    // file with an edited body falls out of stage 3 and lands here, and `score >= threshold`
+    // is what lets it pair — the case a `>` would silently take away.
+    const b = makeSymbol({ id: "ts:src/a.ts#main", name: "main", signature: sig() })
+    const h = makeSymbol({ id: "ts:src/b.ts#main", name: "main", signature: sig() })
+    const result = matchStageNameSignature([b], [h])
+    expect(result.matched.map((pair) => `${pair.base.id} -> ${pair.head.id}`)).toEqual([
+      "ts:src/a.ts#main -> ts:src/b.ts#main",
+    ])
   })
 
   it("skips pairing when both sides are signatureless (interface / type)", () => {
