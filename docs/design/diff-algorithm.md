@@ -197,9 +197,9 @@ A signal counts only when it **identifies** a Symbol — when exactly one droppe
 ```
 for keyOf in [ (kind, lastSegment(name)), (kind, basename(source.file)) ]:
   for key carried by exactly one dropped base AND exactly one dropped head:
-    candidates.add((that base, that head))    # a set: both keys may name the same pairing
+    candidates.append((that base, that head))  # both keys may name the same pairing
 
-for (b, h) in acceptInScoreOrder(candidates):             # §3.8
+for (b, h) in the largest subset of candidates that pairs each Symbol at most once:
   pair, rationale: 'dropped-weak-match'
 ```
 
@@ -207,9 +207,13 @@ As a result, a change such as "only renamed the directory of DTO files" is recor
 
 **Why identifying, and not just matching.** A key several Symbols carry names a group, and a group is not a pairing. `index.ts` is the most common filename in a TypeScript monorepo, so a bare basename match paired every dropped Symbol of one kind under one with every other — at a score they all tied on, which left the choice among unrelated classes to the tie-break. Those pairings land in `summary.moved`, which `--fail-on moved` gates on, so the false-positive budget this section grants itself was being spent on the default case rather than an unusual one. Requiring the key to identify costs the pairings where the surviving signal was ambiguous, which are the ones with nothing to distinguish the candidates by — the fingerprint is zeroed, so there is no second opinion to consult.
 
-**The candidates carry no weight.** §3.8 orders by score first, and here every candidate scores the same. A pairing both halves identify cannot be contested — both keys are sole on both sides and point at each other, so neither Symbol appears in any other candidate — and the case that remains, one base offered different heads by the two halves, is one the 0.5-per-half scale scored equally anyway. So the order is `(base.id, head.id)` throughout. This is also what bounds the work: at most one pairing per discriminating key, two axes, against the cross-product a shared basename used to produce.
+**The candidates carry no weight, so §3.8 does not apply.** Every candidate here is worth the same: a pairing both halves identify cannot be contested — both keys are sole on both sides and point at each other, so neither Symbol appears in any other candidate — and the case that remains, one base offered different heads by the two halves, is one the 0.5-per-half scale scored equally anyway. §3.8's sweep settles conflicts by score, and its licence to be greedy is that it never passes over the best available pairing; with no score there is no best, and it would drop one identified pairing for another over nothing but the id it sorts under. Three identified pairings over four Symbols where two can hold is not a hypothetical.
 
-There is still a false-positive risk — two unrelated classes can be the sole carriers of one basename — but dropped symbols are outside the IR's primary field of view, so the impact is small.
+So this stage takes a **maximum matching**. Each axis identifies a Symbol at most once, so a Symbol carries at most two candidates and the set is the union of two matchings — a disjoint union of simple paths and even cycles, where alternate candidates along each component are a maximum matching and walking from a fixed end makes the choice among them canonical. That is also what bounds the work: at most one pairing per identifying key, two axes, against the cross-product a shared basename used to produce.
+
+**"Exactly one" is counted over what reaches this stage**, not over every dropped symbol in the Document. Stages 1 and 2 have already taken theirs, so a key they emptied out identifies again. That is the intended reading — the question is which leftover a key picks out, and the stage is handed the leftovers — but it is also the ordinary way a shared `index.ts` still pairs unrelated symbols: three dropped classes under one, two of them unchanged and matched by id, and the basename identifies the two that remain.
+
+So there is still a false-positive risk — that case, and two unrelated classes that are genuinely the sole carriers of one basename — but dropped symbols are outside the IR's primary field of view, so the impact is small.
 
 #### 3.4.1 nameSimilarity
 
@@ -274,7 +278,7 @@ Symbols with `dropped: true` are **excluded** from matching in stages 3/4:
 Instead, the dropped-only weak matcher of stage 4.5 (§3.4.5) runs:
 
 1. If caught by stage 1 (exact ID match), settled
-2. Otherwise stage 4.5 attempts the `lastSegment(name) + basename(file)` weak match
+2. Otherwise stage 4.5 attempts the `lastSegment(name) + basename(file)` weak match, on whichever of the two identifies a symbol (§3.4.5)
 3. If still unmatched, counted independently as "dropped disappeared/appeared" (aggregated in the "dropped + changes" section of the diff report)
 
 Dropped symbols are outside the IR's primary field of view, so the false-positive risk of stage 4.5 is accepted.
@@ -710,7 +714,7 @@ The stage-4 threshold of 0.85 is provisional; it will be tuned on real projects.
 
 Dropped symbols with `fingerprint.logic = "000000000000"` would "match" each other in bulk, producing meaningless pairs.
 Dropped symbols are settled first by stage 1 (exact ID match); the remainder is picked up cheaply by the dedicated weak matcher of stage 4.5 (`lastSegment + basename`, §3.4.5).
-Stage 4.5 runs with the false-positive risk priced in, under the premise that "dropped is outside the IR's primary field of view, so the impact is small".
+Stage 4.5 runs with the false-positive risk priced in, under the premise that "dropped is outside the IR's primary field of view, so the impact is small" — but only on a key that identifies one symbol on each side, because a basename every symbol shares prices in no risk, it pairs at random.
 
 ### 11.3 Why line fuzz (±2) is used only for delta display
 

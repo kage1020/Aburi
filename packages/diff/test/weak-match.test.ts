@@ -138,11 +138,64 @@ describe("the moves §3.4.5 exists to catch still land", () => {
   })
 })
 
+describe("as many identified pairings hold as can", () => {
+  it("does not strand two pairings to take one", () => {
+    // Three identified pairings over four Symbols: `Alpha -> Alpha` by the name half,
+    // `Shared.ts` and `Other.ts` by the file half. Taking the name pairing first — which is
+    // what settling by id does — consumes both Symbols the other two needed.
+    const base = [dropped("src/a/Shared.ts", "Alpha"), dropped("src/b/Other.ts", "Beta")]
+    const head = [dropped("src/x/Other.ts", "Alpha"), dropped("src/y/Shared.ts", "Gamma")]
+    expect(weakPairs(base, head)).toEqual([
+      "ts:src/b/Other.ts#Beta -> ts:src/x/Other.ts#Alpha",
+      "ts:src/a/Shared.ts#Alpha -> ts:src/y/Shared.ts#Gamma",
+    ])
+  })
+
+  it("pairs every Symbol of a closed chain", () => {
+    // A cycle: each base is identified with one head by its name and another by its file, all
+    // the way round. Every Symbol can be paired, and a walk that started mid-component or
+    // stopped alternating would leave two out.
+    const base = [dropped("src/a/One.ts", "Alpha"), dropped("src/b/Two.ts", "Beta")]
+    const head = [dropped("src/x/One.ts", "Beta"), dropped("src/y/Two.ts", "Alpha")]
+    expect(weakPairs(base, head)).toHaveLength(2)
+  })
+
+  it("takes the same pairings whichever order the arrays are written in", () => {
+    const base = [dropped("src/a/Shared.ts", "Alpha"), dropped("src/b/Other.ts", "Beta")]
+    const head = [dropped("src/x/Other.ts", "Alpha"), dropped("src/y/Shared.ts", "Gamma")]
+    const forward = weakPairs(base, head)
+    expect(weakPairs([...base].reverse(), [...head].reverse())).toEqual(forward)
+    expect(weakPairs([...base].reverse(), head)).toEqual(forward)
+    expect(weakPairs(base, [...head].reverse())).toEqual(forward)
+  })
+})
+
+describe("a key identifies among the Symbols this stage was handed", () => {
+  it("counts what the earlier stages left, not every dropped Symbol", () => {
+    // Three dropped classes a side under one `index.ts` each. Two keep their ids and leave
+    // through stage 1, which empties the basename out until it identifies the two that are
+    // left — so a shared `index.ts` can still pair unrelated classes, in the common case
+    // where most dropped Symbols are unchanged. The stage is handed the leftovers and has no
+    // way to count the rest, and counting the leftovers is the question it is answering.
+    const base = [
+      dropped("src/a/index.ts", "Foo"),
+      dropped("src/a/index.ts", "Qux"),
+      dropped("src/a/index.ts", "Bar"),
+    ]
+    const head = [
+      dropped("src/a/index.ts", "Foo"),
+      dropped("src/a/index.ts", "Qux"),
+      dropped("src/b/index.ts", "Baz"),
+    ]
+    expect(weakPairs(base, head)).toEqual(["ts:src/a/index.ts#Bar -> ts:src/b/index.ts#Baz"])
+  })
+})
+
 describe("the two halves have equal standing", () => {
-  it("a pairing both halves identify is one candidate, not two", () => {
-    // Base `Alpha` in `Dto.ts` and head `Alpha` in `Dto.ts` are picked out by both keys. If
-    // the merge failed to notice, the same pairing would enter §3.8's sweep twice — harmless
-    // here, but it would let a duplicate outrank a distinct pairing that deserved the head.
+  it("reports a pairing both halves identify once", () => {
+    // Both keys pick out the same pairing, so it is collected twice. It needs no dedup: each
+    // key being sole on both sides means neither Symbol carries another pairing, so the
+    // repeat is a component of its own and is taken once like any other.
     const base = [dropped("src/a/Dto.ts", "Alpha")]
     const head = [dropped("src/b/Dto.ts", "Alpha")]
     expect(weakPairs(base, head)).toEqual(["ts:src/a/Dto.ts#Alpha -> ts:src/b/Dto.ts#Alpha"])

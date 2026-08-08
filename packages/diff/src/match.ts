@@ -49,14 +49,17 @@ interface Assignment {
  * symptom this exists to prevent.
  *
  * Not free, and §8.2 carries the bound: `candidates` is every pairing that clears its
- * threshold, so this holds O(base × head) records in the worst case where the per-head loop
- * it replaced held one, and sorting them is O(C log C). Stage 4 buys that back and more with
- * `createNameScorer`. Stage 4.5 does not call this at all — its score has two reachable
- * values and both components are equalities, so it applies the same order by lookup.
+ * threshold, so this holds O(base × head) records for stages 3 and 4 in the worst case where
+ * the per-head loop it replaced held one, and sorting them is O(C log C). Stage 4 buys that
+ * back and more with `createNameScorer`.
  *
  * It is not an optimal assignment — a greedy sweep can still strand a pair whose partners
  * were both taken by higher-scoring ones — but it never passes over the best available
  * pairing, which is the case that shows up in a review as one symbol appearing twice.
+ *
+ * Stage 4.5 does not call this, because that licence is what it cannot borrow: §3.4.5's
+ * candidates are all worth the same, so no pairing is the best available and stranding one
+ * buys nothing. See `bestPairing`.
  */
 function acceptInScoreOrder(candidates: ScoredPair[]): Assignment {
   candidates.sort(compareCandidates)
@@ -445,15 +448,20 @@ function thresholdFor(qname: string): number {
  * dropped base and one dropped head carry that key: such a key names a pair, where a key
  * several Symbols carry names a group, and a group is not a pairing.
  *
- * That makes the candidates the discriminating keys themselves — at most one pairing each,
+ * That makes the candidates the identifying keys themselves — at most one pairing each,
  * two axes, so at most `2 × min(base, head)` of them rather than the cross-product a shared
  * basename used to produce.
  *
- * It also leaves nothing for §3.4.5's 0.5-per-half scale to rank. A pairing both halves
- * identify cannot be contested: both keys are sole on both sides and point at each other, so
- * neither Symbol appears in any other candidate. What remains is one base offered different
- * heads by the two halves, which the scale scores equally anyway. So the candidates carry no
- * weight and §3.8 settles them entirely on `(base.id, head.id)`.
+ * "Exactly one" is counted over the Symbols this stage is handed, not over every dropped
+ * Symbol in the Document — stages 1 and 2 have already taken theirs, and a key they emptied
+ * out identifies again. That is the intended reading, since the question is which leftover a
+ * key picks out, but it is also how a shared `index.ts` comes back: three dropped classes
+ * under one, two of them matched by id, and the basename identifies the two that are left.
+ *
+ * It also leaves nothing for §3.4.5's 0.5-per-half scale to rank, so §3.8's sweep is the
+ * wrong instrument: it settles conflicts by score, and with none to settle by it would drop
+ * one identified pairing for another over nothing but the id it sorts under. `bestPairing`
+ * takes a maximum matching instead.
  */
 export function matchStageDroppedWeak(
   remainingBase: readonly IRSymbol[],
@@ -466,38 +474,100 @@ export function matchStageDroppedWeak(
   const bases = remainingBase.filter((s) => s.dropped)
   const heads = remainingHead.filter((s) => s.dropped)
 
-  // Both halves have the same standing, so the two axes are collected and merged rather than
-  // consulted in an order: a pairing both identify is one candidate, not two.
-  const byPair = new Map<SymbolId, Map<SymbolId, ScoredPair>>()
+  // Both halves have the same standing, so the two axes are collected rather than consulted
+  // in an order. Both naming the same pairing needs no special handling: each key is sole on
+  // both sides, so neither Symbol carries another pairing and the repeat is a component of
+  // its own, which `bestPairing` takes once.
+  const identified: WeakEdge[] = []
   for (const keyOf of [nameKey, fileKey]) {
-    for (const { base, head } of pairsIdentifiedBy(bases, heads, keyOf)) {
-      const forBase = byPair.get(base.id) ?? new Map<SymbolId, ScoredPair>()
-      forBase.set(head.id, { base, head, score: WEAK_MATCH })
-      byPair.set(base.id, forBase)
-    }
+    identified.push(...pairsIdentifiedBy(bases, heads, keyOf))
   }
-  const candidates: ScoredPair[] = []
-  for (const forBase of byPair.values()) candidates.push(...forBase.values())
 
-  const accepted = acceptInScoreOrder(candidates)
+  const matched = bestPairing(identified)
   return {
-    matched: accepted.pairs.map(({ base, head }) => ({
+    matched: matched.map(({ base, head }) => ({
       base,
       head,
       rationale: "dropped-weak-match" as const,
     })),
-    remainingBase: unclaimed(remainingBase, accepted.baseIds),
-    remainingHead: unclaimed(remainingHead, accepted.headIds),
+    remainingBase: unclaimed(remainingBase, new Set(matched.map((edge) => edge.base.id))),
+    remainingHead: unclaimed(remainingHead, new Set(matched.map((edge) => edge.head.id))),
   }
 }
 
+/** A pairing that one of §3.4.5's two keys identifies. */
+interface WeakEdge {
+  base: IRSymbol
+  head: IRSymbol
+}
+
 /**
- * Every §3.4.5 candidate carries the same weight, per the docblock above: a pairing both
- * halves identify cannot be contested, and one base offered different heads by the two halves
- * is a choice §3.4.5 scores equally. The constant exists so §3.8's sweep has something to
- * sort on, and every comparison it makes falls through to the id keys.
+ * As many of the identified pairings as can hold at once.
+ *
+ * Each axis identifies a Symbol at most once, so a Symbol carries at most two pairings and
+ * the whole set is the union of two matchings — which is a disjoint union of simple paths and
+ * even cycles. Alternate pairings along a component are therefore a maximum matching of it,
+ * and walking each component from a fixed end makes the choice among the maximum matchings
+ * canonical rather than a property of the input order.
+ *
+ * The alternative would be §3.8's sweep, and it is the wrong instrument once §3.4.5's score
+ * is gone: over `Shared.ts#Alpha`, `Other.ts#Beta` against `Other.ts#Alpha`,
+ * `Shared.ts#Gamma`, all three pairings are identified and it takes one where two hold.
  */
-const WEAK_MATCH = 1
+function bestPairing(edges: readonly WeakEdge[]): WeakEdge[] {
+  const ordered = [...edges].sort(byEndpoints)
+  const atBase = new Map<SymbolId, number[]>()
+  const atHead = new Map<SymbolId, number[]>()
+  for (const [index, edge] of ordered.entries()) {
+    appendTo(atBase, edge.base.id, index)
+    appendTo(atHead, edge.head.id, index)
+  }
+  const adjacent = (index: number): number[] => {
+    const edge = ordered[index]
+    if (edge === undefined) return []
+    const sharing = [...(atBase.get(edge.base.id) ?? []), ...(atHead.get(edge.head.id) ?? [])]
+    return sharing.filter((other) => other !== index)
+  }
+
+  const walked = ordered.map(() => false)
+  const matching: WeakEdge[] = []
+  /** Follow a component from `start`, taking every other pairing along it. */
+  const walkFrom = (start: number): void => {
+    let step = start
+    let take = true
+    while (!walked[step]) {
+      walked[step] = true
+      const edge = ordered[step]
+      if (take && edge !== undefined) matching.push(edge)
+      take = !take
+      const next = adjacent(step).find((other) => walked[other] === false)
+      if (next === undefined) return
+      step = next
+    }
+  }
+
+  // Paths first, from an end — a component walked from the middle would not alternate to a
+  // maximum. What is unwalked afterwards is on a cycle, where every pairing is an equally
+  // good place to start and the lowest-ordered one is the canonical choice.
+  for (const [index] of ordered.entries()) {
+    if (!walked[index] && adjacent(index).length <= 1) walkFrom(index)
+  }
+  for (const [index] of ordered.entries()) {
+    if (!walked[index]) walkFrom(index)
+  }
+  return matching
+}
+
+function byEndpoints(a: WeakEdge, b: WeakEdge): number {
+  if (a.base.id !== b.base.id) return a.base.id < b.base.id ? -1 : 1
+  return a.head.id < b.head.id ? -1 : a.head.id > b.head.id ? 1 : 0
+}
+
+function appendTo(table: Map<SymbolId, number[]>, key: SymbolId, index: number): void {
+  const bucket = table.get(key)
+  if (bucket === undefined) table.set(key, [index])
+  else bucket.push(index)
+}
 
 /**
  * The pairings a key picks out on its own: those whose key exactly one dropped base and one
@@ -509,10 +579,10 @@ function pairsIdentifiedBy(
   bases: readonly IRSymbol[],
   heads: readonly IRSymbol[],
   keyOf: (symbol: IRSymbol) => string,
-): { base: IRSymbol; head: IRSymbol }[] {
+): WeakEdge[] {
   const soleBase = soleCarriers(bases, keyOf)
   const soleHead = soleCarriers(heads, keyOf)
-  const pairs: { base: IRSymbol; head: IRSymbol }[] = []
+  const pairs: WeakEdge[] = []
   for (const [key, base] of soleBase) {
     const head = soleHead.get(key)
     if (head !== undefined) pairs.push({ base, head })
