@@ -476,6 +476,48 @@ Element identity criteria:
 - Call: `(target, line)` (line fuzz)
 - Decorator: identified by `(name)`
 
+##### 5.2.0 Choosing among elements that share a key
+
+A key does not identify one element. A Symbol routinely holds two `guard` rules, two calls to
+one target, two `@Get` — so which base element a head element takes is a choice, and it is made
+in two passes:
+
+```
+for contentMustAgree in [true, false]:
+  for h in head, in order:
+    if h is already paired: continue
+    b = the unclaimed base element of the same key, nearest in line, within lineFuzz,
+        and (if contentMustAgree) whose content also equals h's
+        # ties go to the lower base index
+    if b exists: pair them
+
+unpaired head -> added
+unpaired base -> removed
+paired, contents differ -> modified
+```
+
+The first pass is what makes the answer readable. An element nothing touched has an exact
+counterpart, so it is claimed by that counterpart before an edited or deleted neighbour can
+take it; whatever is left over is then paired with what is nearest, which is where a genuine
+edit lands.
+
+Neither half is sufficient alone:
+
+| base | head | first key hit | nearest line | two passes |
+|---|---|---|---|---|
+| `guard@1 "!user"`, `guard@3 "!invoice"` | `guard@3 "!invoice"` | removed `!invoice`, **and** modified `!invoice` | removed `!user` | removed `!user` |
+| `guard@1 "!a"`, `guard@2 "!b"` | `guard@2 "!a"`, `guard@3 "!b"` | nothing | modified `!a`, modified `!b` | nothing |
+
+The first row is a deleted guard: taking the first key hit inside the window let the surviving
+guard claim the deleted one's slot, so an untouched element was reported as `removed` and
+`modified` at once, under contradictory buckets, and the element actually deleted appeared
+nowhere. The second row is two guards shifted down a line together with nothing edited — the
+noise line fuzz exists to suppress, which pairing by proximity alone reintroduces.
+
+Ties are settled on the lower base index rather than left to enumeration order, for §3.8's
+reason: the delta is a function of the two Documents, not of how their arrays happen to be
+written.
+
 ##### 5.2.1 Rationale for line fuzz
 
 Line numbers shift slightly under manual edits, so treating rules with the same `(type, condition)` as the same rule makes the delta more readable. By default a difference of up to ±2 lines is tolerated; beyond that they are treated as distinct rules.

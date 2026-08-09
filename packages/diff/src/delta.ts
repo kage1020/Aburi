@@ -81,10 +81,25 @@ interface Identified<T> {
 }
 
 /**
- * Two-index diff: build key-indexed maps for both sides, then classify each key into
- * `added` / `removed` / `modified`. Line-fuzzed identities are matched within tolerance
- * so cosmetic line shifts do not produce added/removed noise. `modified` only fires when
- * the identity key stays the same but the content differs.
+ * §5.2 — pair the two sides by identity key within ±`lineFuzz`, then classify each element
+ * into `added` / `removed` / `modified`. `modified` fires only when a pairing holds and the
+ * content differs, so a cosmetic line shift produces nothing.
+ *
+ * Several elements of one Symbol routinely share a key — two `guard` rules, two calls to one
+ * target, two `@Get` — so which base element a head element takes is a real choice. Two
+ * passes make it:
+ *
+ * 1. elements whose key **and content** agree, nearest line first
+ * 2. what is left, nearest line first
+ *
+ * An untouched element is therefore claimed by its own counterpart before an edited or
+ * deleted neighbour can take it, and whatever remains is paired with what is nearest — which
+ * is where a genuine edit lands. Taking the first key hit instead reported a deleted `guard@1`
+ * by removing its untouched `guard@3` neighbour *and* listing that same neighbour as modified.
+ *
+ * The exact pass is what nearest-line alone cannot replace: proximity would pair a shifted
+ * element with a closer neighbour and call both of them modified, which is exactly the noise
+ * line fuzz exists to suppress.
  */
 function differentiate<T>(
   base: readonly Identified<T>[],
@@ -92,37 +107,58 @@ function differentiate<T>(
   isEqual: (a: T, b: T) => boolean,
   lineFuzz: number,
 ): ArrayDelta {
-  const added: T[] = []
-  const removed: T[] = []
-  const modified: T[] = []
-  const consumedBase = new Set<number>()
-  for (const h of head) {
-    let matchIdx = -1
-    for (let j = 0; j < base.length; j++) {
-      if (consumedBase.has(j)) continue
-      const b = base[j]
-      if (b === undefined) continue
-      if (b.key !== h.key) continue
-      if (Math.abs(b.line - h.line) > lineFuzz) continue
-      matchIdx = j
-      break
+  const claimed = new Set<number>()
+  const partnerOf = new Map<number, number>()
+  for (const contentMustAgree of [true, false]) {
+    for (const [index, h] of head.entries()) {
+      if (partnerOf.has(index)) continue
+      const match = nearestUnclaimed(base, h, claimed, lineFuzz, contentMustAgree ? isEqual : null)
+      if (match === -1) continue
+      claimed.add(match)
+      partnerOf.set(index, match)
     }
-    if (matchIdx === -1) {
+  }
+
+  const added: T[] = []
+  const modified: T[] = []
+  for (const [index, h] of head.entries()) {
+    const match = partnerOf.get(index)
+    if (match === undefined) {
       added.push(h.item)
       continue
     }
-    consumedBase.add(matchIdx)
-    const bmatch = base[matchIdx]
-    if (bmatch === undefined) continue
-    if (!isEqual(bmatch.item, h.item)) modified.push(h.item)
+    const counterpart = base[match]
+    if (counterpart !== undefined && !isEqual(counterpart.item, h.item)) modified.push(h.item)
   }
-  for (let j = 0; j < base.length; j++) {
-    if (consumedBase.has(j)) continue
-    const b = base[j]
-    if (b === undefined) continue
-    removed.push(b.item)
-  }
+  const removed = base.filter((_, index) => !claimed.has(index)).map((b) => b.item)
   return { added, removed, modified }
+}
+
+/**
+ * The unclaimed base element nearest `h` in line, of the same key, within `lineFuzz`. Ties go
+ * to the lower index, so a head element facing two indistinguishable candidates does not have
+ * its pairing decided by enumeration order.
+ *
+ * `mustEqual` restricts the search to elements whose content also agrees — the first pass.
+ */
+function nearestUnclaimed<T>(
+  base: readonly Identified<T>[],
+  h: Identified<T>,
+  claimed: ReadonlySet<number>,
+  lineFuzz: number,
+  mustEqual: ((a: T, b: T) => boolean) | null,
+): number {
+  let nearest = -1
+  let shortest = Number.POSITIVE_INFINITY
+  for (const [index, b] of base.entries()) {
+    if (claimed.has(index) || b.key !== h.key) continue
+    if (mustEqual !== null && !mustEqual(b.item, h.item)) continue
+    const distance = Math.abs(b.line - h.line)
+    if (distance > lineFuzz || distance >= shortest) continue
+    nearest = index
+    shortest = distance
+  }
+  return nearest
 }
 
 function diffRules(base: readonly Rule[], head: readonly Rule[], lineFuzz: number): ArrayDelta {
