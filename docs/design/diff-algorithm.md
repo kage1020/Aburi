@@ -384,7 +384,7 @@ The error message is `Symbol ID collision at <file>: <id>`, prompting the user t
 
 **At the diff entry point**, `buildDiff` checks the same three identities again before the first stage runs, because it is public API: an IR read off disk has been through the integrity checker, but one a caller assembled in memory has been through nothing. A collision raises `DiffError` with code `ir-identity-collision`, naming the side, the collection, the repeated value, and both positions. Establishing an identity means reading it, so the same pass also refuses an entry that is not an object or whose identity fields are not strings — without which a Symbol carrying no `id` has nothing to collide with and derives a Slice anchored on `undefined` several stages later.
 
-The entry-point check is scoped to identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule. #19 (Unicode normalisation) changes the answer, because matching compares raw strings and an NFD id on one side misses the NFC spelling of the same name on the other. #11 (array ordering) changes it too, through §5.2: an array delta pairs elements positionally, so two IRs whose `effects[]` disagree only in order report a modification. Neither is enforced here because the diff has no standing to rewrite its inputs, not because they are harmless — and note that #11 no longer reaches *matching*, which §3.8 makes independent of array order.
+The entry-point check is scoped to identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule. #19 (Unicode normalisation) changes the answer, because matching compares raw strings and an NFD id on one side misses the NFC spelling of the same name on the other. #11 (array ordering) changes it too, through §5.2: an array delta pairs elements by line within a window, so two IRs whose `rules[]` disagree only in the order of two same-typed rules twenty lines apart report two modifications rather than nothing. Neither is enforced here because the diff has no standing to rewrite its inputs, not because they are harmless — and note that #11 no longer reaches *matching*, which §3.8 makes independent of array order.
 
 ### 3.8 Choosing among candidate pairings
 
@@ -470,55 +470,78 @@ For each array, **three kinds of delta** are computed:
 - `removed[]`: elements in base but not in head
 - `modified[]`: elements present in both but with differing content (e.g., a rule where only `condition` changed)
 
-Element identity criteria:
-- Rule: identified by `(type, line)` (line fuzzed with a tolerance of ±2, §5.2.1)
-- Effect: identified by `(id, target)`
-- Call: `(target, line)` (line fuzz)
-- Decorator: identified by `(name)`
+Element identity criteria — the key that makes two elements *candidates*; choosing among
+several candidates is §5.2.0:
+- Rule: `(type)`, with the line fuzzed to ±2 (§5.2.1)
+- Effect: `(id, target)`, with no line window at all
+- Call: `(target)`, line fuzzed
+- Decorator: `(name)`, line fuzzed (§5.2.2)
 
 ##### 5.2.0 Choosing among elements that share a key
 
 A key does not identify one element. A Symbol routinely holds two `guard` rules, two calls to
-one target, two `@Get` — so which base element a head element takes is a choice, and it is made
-in two passes:
+one target, two `@Get` — so which base element a head element takes is a choice.
+
+It is made in two passes, and each pass chooses a **set** of pairings rather than one at a
+time:
 
 ```
 for contentMustAgree in [true, false]:
-  for h in head, in order:
-    if h is already paired: continue
-    b = the unclaimed base element of the same key, nearest in line, within lineFuzz,
-        and (if contentMustAgree) whose content also equals h's
-        # ties go to the lower base index
-    if b exists: pair them
+  admissible(b, h) = same key
+                     and |b.line - h.line| <= lineFuzz
+                     and (content equal, if contentMustAgree)
+  take the best set of admissible pairings over the elements still free, where
+    - the pairings do not cross: i1 < i2 implies j1 < j2
+    - more pairings beats fewer
+    - among sets of equal size, less total |b.line - h.line| wins
 
 unpaired head -> added
 unpaired base -> removed
-paired, contents differ -> modified
+paired, contents differ -> modified   (the head element is the one emitted)
 ```
 
 The first pass is what makes the answer readable. An element nothing touched has an exact
-counterpart, so it is claimed by that counterpart before an edited or deleted neighbour can
-take it; whatever is left over is then paired with what is nearest, which is where a genuine
-edit lands.
+counterpart, so the pass that only considers exact counterparts claims it before an edited or
+deleted neighbour can; whatever is left over is then paired by proximity, which is where a
+genuine edit lands.
 
-Neither half is sufficient alone:
+**Why non-crossing.** ir-schema §14 #11 orders these arrays by line, so `i < j` means element
+`i` sits above element `j` in the file. Two pairings that crossed would have an element move
+above one it was below — not a line shift but a different element. The constraint is also what
+makes the best set reachable by a suffix recurrence rather than by a general assignment
+algorithm, and what settles ties: between two otherwise indistinguishable candidates the one
+that keeps the pairings in order is the one taken.
 
-| base | head | first key hit | nearest line | two passes |
+**Why a set and not one element at a time.** A greedy pass takes the pairing in front of it,
+and a nearer pairing can cost a farther one its only partner:
+
+| base | head | first key hit | nearest line, greedy | this rule |
 |---|---|---|---|---|
-| `guard@1 "!user"`, `guard@3 "!invoice"` | `guard@3 "!invoice"` | removed `!invoice`, **and** modified `!invoice` | removed `!user` | removed `!user` |
+| `guard@1 "!user"`, `guard@3 "!invoice"` | `guard@3 "!invoice"` | removed **and** modified `!invoice` | removed `!user` | removed `!user` |
 | `guard@1 "!a"`, `guard@2 "!b"` | `guard@2 "!a"`, `guard@3 "!b"` | nothing | modified `!a`, modified `!b` | nothing |
+| `guard@1 "!a"`, `guard@2 "!a"` | `guard@3 "!a"`, `guard@4 "!a"` | nothing | added `!a`, removed `!a` | nothing |
 
-The first row is a deleted guard: taking the first key hit inside the window let the surviving
-guard claim the deleted one's slot, so an untouched element was reported as `removed` and
-`modified` at once, under contradictory buckets, and the element actually deleted appeared
-nowhere. The second row is two guards shifted down a line together with nothing edited — the
-noise line fuzz exists to suppress, which pairing by proximity alone reintroduces.
+Row 1 is a deleted guard: taking the first key hit inside the window let the surviving guard
+claim the deleted one's slot, so an untouched element was reported as `removed` and `modified`
+at once, under contradictory buckets, and the element actually deleted appeared nowhere.
 
-Ties are settled on the lower base index rather than left to enumeration order, for §3.8's
-reason: the delta is a function of the two Documents, not of how their arrays happen to be
-written.
+Row 2 is two guards shifted down a line together with nothing edited — the noise line fuzz
+exists to suppress, which pairing by proximity alone reintroduces.
 
-##### 5.2.1 Rationale for line fuzz
+Row 3 is the same shift where the two guards are also *identical*, so the exact pass cannot
+tell them apart either. Greedily, the first head element is nearest the **second** base
+element; claiming it strands the other head outside the window, and a block that moved intact
+comes back as an add and a remove. Choosing the pair of pairings together costs one more line
+of total movement and reports nothing, which is the right answer. Two calls to one target and
+two copies of one decorator are the ordinary way this arises.
+
+**What is not promised.** The result depends on the order of the arrays, and cannot not: it
+pairs by line, and #11 is what fixes that order. Reversing an array produces a different
+answer — and a non-canonical Document. §3.8 achieves order-independence for Symbol pairing
+because ids give it a total order that comes from content; §5.2 has no counterpart, and
+§3.7 records the distinction.
+
+##### 5.2.1 Rationale for line fuzz##### 5.2.1 Rationale for line fuzz
 
 Line numbers shift slightly under manual edits, so treating rules with the same `(type, condition)` as the same rule makes the delta more readable. By default a difference of up to ±2 lines is tolerated; beyond that they are treated as distinct rules.
 
