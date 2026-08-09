@@ -14,6 +14,15 @@
  * The result is de-duplicated so `InvoiceService.createInvoice` collapses to
  * `["invoice", "service", "create"]` — Jaccard similarity relies on set semantics, so
  * repeated tokens must not double-count.
+ *
+ * **The camel boundary is ASCII.** `isCamelBoundary` compares code points against `a`–`z`,
+ * `A`–`Z` and `0`–`9`, so a name written in a script with no ASCII case boundary and no
+ * separator comes back whole: `获取用户信息` and `ユーザー情報を取得する` are one token each,
+ * and so is `получитьПользователя` — its camel hump does not register. A separator still
+ * splits (`ユーザー.取得` gives two), and a mixed name splits on its ASCII half.
+ *
+ * That makes the token count a poor measure of how much such a name says, which matters
+ * wherever a count is read as a proxy for that — see §3.4.3's admissibility rule.
  */
 export function tokenizeName(input: string): string[] {
   const seen = new Set<string>()
