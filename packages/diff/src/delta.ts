@@ -81,10 +81,23 @@ interface Identified<T> {
 }
 
 /**
- * Two-index diff: build key-indexed maps for both sides, then classify each key into
- * `added` / `removed` / `modified`. Line-fuzzed identities are matched within tolerance
- * so cosmetic line shifts do not produce added/removed noise. `modified` only fires when
- * the identity key stays the same but the content differs.
+ * §5.2 — pair the two sides by identity key within ±`lineFuzz`, then classify each element
+ * into `added` / `removed` / `modified`. `modified` fires only when a pairing holds and the
+ * content differs, so a cosmetic line shift produces nothing.
+ *
+ * Several elements of one Symbol routinely share a key — two `guard` rules, two calls to one
+ * target, two `@Get` — so which base element a head element takes is a real choice. Two
+ * passes make it: first the elements whose key **and content** agree, then whatever is left.
+ * An untouched element is therefore claimed by its own counterpart before an edited or
+ * deleted neighbour can take it, and the remainder pairs by proximity — where a genuine edit
+ * lands. Taking the first key hit instead reported a deleted `guard@1` by removing its
+ * untouched `guard@3` neighbour *and* listing that same neighbour as modified.
+ *
+ * Each pass is an order-preserving assignment rather than a per-element search, because a
+ * greedy pass takes a pairing that leaves a better set unreachable. Two identical guards
+ * shifted down two lines are the smallest case: the first head element is nearest to the
+ * *second* base element, and claiming it strands the other head outside the window, so a
+ * block that moved intact comes back as an `added` and a `removed`.
  */
 function differentiate<T>(
   base: readonly Identified<T>[],
@@ -92,37 +105,109 @@ function differentiate<T>(
   isEqual: (a: T, b: T) => boolean,
   lineFuzz: number,
 ): ArrayDelta {
-  const added: T[] = []
-  const removed: T[] = []
-  const modified: T[] = []
-  const consumedBase = new Set<number>()
-  for (const h of head) {
-    let matchIdx = -1
-    for (let j = 0; j < base.length; j++) {
-      if (consumedBase.has(j)) continue
-      const b = base[j]
-      if (b === undefined) continue
-      if (b.key !== h.key) continue
-      if (Math.abs(b.line - h.line) > lineFuzz) continue
-      matchIdx = j
-      break
+  const freeBase = new Set(base.map((_, index) => index))
+  const freeHead = new Set(head.map((_, index) => index))
+  const partnerOf = new Map<number, Identified<T>>()
+  for (const contentMustAgree of [true, false]) {
+    const admits = (b: Identified<T>, h: Identified<T>): boolean =>
+      b.key === h.key &&
+      Math.abs(b.line - h.line) <= lineFuzz &&
+      (!contentMustAgree || isEqual(b.item, h.item))
+    for (const [baseIndex, headIndex] of assignInOrder(base, head, freeBase, freeHead, admits)) {
+      freeBase.delete(baseIndex)
+      freeHead.delete(headIndex)
+      const counterpart = base[baseIndex]
+      if (counterpart !== undefined) partnerOf.set(headIndex, counterpart)
     }
-    if (matchIdx === -1) {
-      added.push(h.item)
+  }
+
+  const added: T[] = []
+  const modified: T[] = []
+  for (const [index, h] of head.entries()) {
+    const counterpart = partnerOf.get(index)
+    if (counterpart === undefined) added.push(h.item)
+    else if (!isEqual(counterpart.item, h.item)) modified.push(h.item)
+  }
+  const removed = base.filter((_, index) => freeBase.has(index)).map((b) => b.item)
+  return { added, removed, modified }
+}
+
+/** How good an assignment is: more pairings first, then less total line movement. */
+interface Quality {
+  pairs: number
+  distance: number
+}
+
+const NO_PAIRINGS: Quality = { pairs: 0, distance: 0 }
+
+/** `a` is preferred over `b`: more pairings wins, and among equals the tighter one does. */
+function better(a: Quality, b: Quality): boolean {
+  return a.pairs !== b.pairs ? a.pairs > b.pairs : a.distance < b.distance
+}
+
+/**
+ * The best set of non-crossing pairings between the still-free elements of `base` and `head`,
+ * as `[baseIndex, headIndex]` in ascending order — most pairings first, then least total line
+ * movement.
+ *
+ * Non-crossing is the whole content of the rule, and ir-schema §14 #11 is what licenses it:
+ * these arrays are ordered by line, so `i < j` means element `i` sits above element `j` in the
+ * file. Two pairings that cross would have an element move above one it was below, which is
+ * not a line shift — it is a different element. Restricting to non-crossing sets also makes
+ * the optimum reachable by a suffix recurrence rather than by a general assignment algorithm.
+ *
+ * Maximising the count before minimising distance is what stops a near pairing from being
+ * taken at the cost of a far one that would otherwise have no partner at all.
+ */
+function assignInOrder<T>(
+  base: readonly Identified<T>[],
+  head: readonly Identified<T>[],
+  freeBase: ReadonlySet<number>,
+  freeHead: ReadonlySet<number>,
+  admits: (b: Identified<T>, h: Identified<T>) => boolean,
+): Array<[number, number]> {
+  // best[i][j] is the quality of the best assignment over base[i..] and head[j..].
+  const best: Quality[][] = Array.from({ length: base.length + 1 }, () =>
+    Array.from({ length: head.length + 1 }, () => NO_PAIRINGS),
+  )
+  const pairingAt = (i: number, j: number): Quality | null => {
+    const b = base[i]
+    const h = head[j]
+    if (b === undefined || h === undefined) return null
+    if (!freeBase.has(i) || !freeHead.has(j) || !admits(b, h)) return null
+    const rest = best[i + 1]?.[j + 1] ?? NO_PAIRINGS
+    return { pairs: rest.pairs + 1, distance: rest.distance + Math.abs(b.line - h.line) }
+  }
+  for (let i = base.length - 1; i >= 0; i--) {
+    for (let j = head.length - 1; j >= 0; j--) {
+      const skipBase = best[i + 1]?.[j] ?? NO_PAIRINGS
+      const skipHead = best[i]?.[j + 1] ?? NO_PAIRINGS
+      let winner = better(skipBase, skipHead) ? skipBase : skipHead
+      const paired = pairingAt(i, j)
+      if (paired !== null && better(paired, winner)) winner = paired
+      const row = best[i]
+      if (row !== undefined) row[j] = winner
+    }
+  }
+
+  // Walk the table back down, taking a pairing wherever it is what the optimum was built from.
+  const chosen: Array<[number, number]> = []
+  let i = 0
+  let j = 0
+  while (i < base.length && j < head.length) {
+    const here = best[i]?.[j] ?? NO_PAIRINGS
+    const paired = pairingAt(i, j)
+    if (paired !== null && paired.pairs === here.pairs && paired.distance === here.distance) {
+      chosen.push([i, j])
+      i++
+      j++
       continue
     }
-    consumedBase.add(matchIdx)
-    const bmatch = base[matchIdx]
-    if (bmatch === undefined) continue
-    if (!isEqual(bmatch.item, h.item)) modified.push(h.item)
+    const skipBase = best[i + 1]?.[j] ?? NO_PAIRINGS
+    if (skipBase.pairs === here.pairs && skipBase.distance === here.distance) i++
+    else j++
   }
-  for (let j = 0; j < base.length; j++) {
-    if (consumedBase.has(j)) continue
-    const b = base[j]
-    if (b === undefined) continue
-    removed.push(b.item)
-  }
-  return { added, removed, modified }
+  return chosen
 }
 
 function diffRules(base: readonly Rule[], head: readonly Rule[], lineFuzz: number): ArrayDelta {
@@ -148,9 +233,13 @@ function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDel
   const mapper = (e: Effect): Identified<Effect> => ({
     item: e,
     key: `${e.id}::${e.target}`,
-    // Propagated entries (effect-propagation.md §5.1) omit `line`; the diff
-    // matcher tolerates missing lines by treating them as position-0. Effect
-    // pairing here uses lineFuzz=Infinity anyway, so any placeholder is safe.
+    // Propagated entries (effect-propagation.md §5.1) omit `line`. An infinite fuzz admits
+    // every same-key candidate, so no placeholder can put an effect outside the window — but
+    // §5.2.0 ranks the admitted candidates by distance, so `0` does read as "at the top of
+    // the Symbol" and a propagated effect prefers the earliest local one carrying its key.
+    // Effects are already keyed by `(id, target)`, which is the whole of their identity in
+    // ir-schema §7, so a tie only arises between two entries that agree on it; the choice
+    // between those is what §5.2.0's exact-content pass settles.
     line: e.line ?? 0,
   })
   return differentiate(base.map(mapper), head.map(mapper), effectsEqual, Number.POSITIVE_INFINITY)
@@ -244,6 +333,13 @@ function diffSignature(base: Signature | null, head: Signature | null): Signatur
       ),
     }
   }
+  /**
+   * Parameters are positional, so the index is part of the identity and the fuzz below is 0.
+   * That makes each key unique within its list, so §5.2.0 never has a choice to make here and
+   * both of its passes reduce to the same positional comparison. Dropping the index from the
+   * key would make two same-named parameters ambiguous and hand the choice back to §5.2.0,
+   * which is not what a positional list wants.
+   */
   const inputMapper = (
     input: { name: string; type: string },
     index: number,
