@@ -1,8 +1,6 @@
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageNameSignature } from "../src"
-import { LOWEST_THRESHOLD, SHORT_NAME_CEILING } from "../src/match"
-import { nameSimilarity } from "../src/similarity"
 import { fp, makeIR, makeSymbol, sig } from "./fixtures"
 
 /**
@@ -14,12 +12,13 @@ import { fp, makeIR, makeSymbol, sig } from "./fixtures"
  * `moved+changed`, which is what `--fail-on moved` gates on.
  *
  * The demand the row wanted to make is off the top of the scale, so it is not a threshold.
- * It is an admissibility rule, alongside the signature-less one: a head whose qualified name
+ * It is an admissibility rule, alongside the signature-less one: a Symbol whose qualified name
  * carries a single distinct token is not paired in stage 4 at all.
  *
- * The count is over the **qualified name**, which is what the score reads — not over the
- * last segment, which is what the threshold table reads. `UserRepo.get` has one token in its
- * last segment and three in its name, and it goes on pairing.
+ * The count is over the **qualified name**, which is the whole of what §3.4 reads about a
+ * Symbol's identity — not over the last segment alone, which is what the threshold table
+ * reads. `UserRepo.get` has one token in its last segment and three in its name, and it goes
+ * on pairing.
  */
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
@@ -77,9 +76,8 @@ describe("a one-token name is not evidence of identity", () => {
   })
 
   it("counts distinct tokens, so an owner that repeats the last segment adds nothing", () => {
-    // `Main.main` tokenises to `{main}`: the token sets the score is built from are deduped,
-    // so the formula reads this name and a bare `main` identically — same nameSimilarity,
-    // same ownerSimilarity of 1. The shield counts what the score can see.
+    // `Main.main` tokenises to `{main}`: the token sets are deduped, so an owner that repeats
+    // its member name adds nothing a Jaccard can see. The rule counts what the score can.
     expect(
       pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
     ).toEqual([])
@@ -203,27 +201,25 @@ describe("a script with no ASCII case boundary is one token, whatever it says", 
   })
 })
 
-describe("the rule is scoped to the head, and to stage 4", () => {
-  it("keeps the ceiling that argument rests on below the table", () => {
-    // Reading the head and not the base is licensed by `SHORT_NAME_CEILING < LOWEST_THRESHOLD`
-    // — a relation between the axis weights and §3.4.3's table, not a fact about either. The
-    // margin is 0.10, and §3.4.4 has a configurable threshold on the roadmap, so the relation
-    // is asserted rather than left to the prose that states it three times.
-    expect(SHORT_NAME_CEILING).toBeLessThan(LOWEST_THRESHOLD)
+describe("the rule is scoped to a pairing, and to stage 4", () => {
+  it("reads the base as well as the head", () => {
+    // The property belongs to a pairing. This was once read off the head alone, on the
+    // arithmetic that one token against two or more is a Jaccard of at most 1/2 and so caps
+    // the total at 0.75 whichever side is short. That held while the name axis read the whole
+    // qualified name. §3.4.6's gate moved the axis to the last segment, and a one-token base
+    // reaches the top of the scale again: `Main.main` clears the gate against `Mainly.main`
+    // on an abbreviated owner, and their member names are identical.
+    expect(
+      pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Mainly.main", "bbb")]),
+    ).toEqual([])
+    // And the mirror, which is a separate skip in a separate loop: the short name on the head
+    // reaches an admissible base the same way round.
+    expect(
+      pairs([method("src/a.ts", "Mainly.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
+    ).toEqual([])
   })
 
-  it("derives that ceiling from the axis weights it claims to", () => {
-    // The 1/2 the ceiling is built on: one distinct token against two is a Jaccard of 1/2,
-    // and against more it is smaller. Granting the other two axes in full gives the rest.
-    expect(nameSimilarity("main", "mainRunner")).toBe(0.5)
-    expect(nameSimilarity("main", "mainRunnerEntry")).toBeLessThan(0.5)
-    expect(0.5 * 0.5 + 0.3 + 0.2).toBe(SHORT_NAME_CEILING)
-  })
-
-  it("needs no base-side twin, because a short name on either side already caps the score", () => {
-    // The ceiling in the diff: each head below is admissible and shares `main`, and each is
-    // reported as added + removed rather than moved. Only a pairing short on both sides reads
-    // 1.0 on the name axis — which is why moving the check to the base changes nothing.
+  it("still refuses the heads a short base could never have reached anyway", () => {
     expect(pairs([fn("src/a.ts", "main", "aaa")], [fn("src/b.ts", "mainRunner", "bbb")])).toEqual(
       [],
     )

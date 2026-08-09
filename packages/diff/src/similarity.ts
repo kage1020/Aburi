@@ -115,39 +115,113 @@ export function nameSimilarity(baseName: string, headName: string): number {
 }
 
 /**
- * §3.4.6 — owner similarity: same as nameSimilarity but restricted to everything **before**
- * the last segment. Compensates for the R-8 same-name-different-class collision, where
- * `UserRepo.getUser` should not be pair-swapped with `AdminRepo.getUser`.
+ * §3.4.1 — Jaccard over the tokens of the **last segment**: the member name with its owner
+ * removed. What §3.4's composite reads, because §3.4.6 decides the owner separately and
+ * reading it on both axes charges for it twice.
+ */
+export function memberSimilarity(baseName: string, headName: string): number {
+  return memberFormula(tokenizeEveryTime, baseName, headName)
+}
+
+/**
+ * §3.4.6 (R-8) — whether two Symbols are close enough in *scope* to be the same Symbol: the
+ * same owner, or one whose owner was renamed. A gate rather than a score, because grading the
+ * owner cannot do what R-8 asks. `UserRepo.getUser` and `AdminRepo.getUser` agree on their
+ * member name and their signature, so at any weight small enough to leave the name axis
+ * meaning something, a shared `Repo` token carries them over the threshold — while
+ * `UsersRepository`, which *is* the rename, shares no token at all and scores below them.
  *
  * Owner extraction:
  * - `Class::method` → `Class`
  * - `A.B.C.method` → `A.B.C`
  * - `topLevel`     → `` (empty)
  *
- * When both owners are empty (top-level functions), returns 1.0 because both live in the
- * same "no-owner" bucket. When one is empty and the other is not, returns 0.0 because the
- * two Symbols live in structurally different scopes.
+ * Two empty owners are compatible: top-level Symbols share the one outer scope. One empty and
+ * one not are never compatible — the two live at different depths.
+ *
+ * Otherwise every token on each side must find a distinct partner on the other, where a
+ * partner is the same token or one it abbreviates: `repo`/`repository`, `user`/`users`. Both
+ * sides must be covered, so `UserRepo` and `UserRepoV2` are two classes rather than one
+ * renamed — an added token is as much evidence of a sibling as of a rename, and R-8's business
+ * is refusing the collision.
  */
-export function ownerSimilarity(baseName: string, headName: string): number {
-  return ownerFormula(tokenizeEveryTime, baseName, headName)
+export function ownersAreCompatible(baseName: string, headName: string): boolean {
+  return ownerGate(tokenizeEveryTime, baseName, headName)
+}
+
+/**
+ * The shortest prefix that counts as an abbreviation. Two characters match far too much to be
+ * evidence — `id` opens `identity`, `identifier` and `idempotent` alike — so `IdMap` and
+ * `IdentityMap` are left unpaired rather than guessed at.
+ */
+const MIN_ABBREVIATION = 3
+
+function abbreviates(a: string, b: string): boolean {
+  if (a === b) return true
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a]
+  return short.length >= MIN_ABBREVIATION && long.startsWith(short)
 }
 
 function nameFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
   return jaccardSets(setOf(baseName), setOf(headName))
 }
 
-function ownerFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
-  const baseOwner = extractOwner(baseName)
-  const headOwner = extractOwner(headName)
-  if (baseOwner === "" && headOwner === "") return 1
-  if (baseOwner === "" || headOwner === "") return 0
-  return jaccardSets(setOf(baseOwner), setOf(headOwner))
+function memberFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
+  return jaccardSets(setOf(lastSegment(baseName)), setOf(lastSegment(headName)))
 }
 
-/** The two similarity formulas of §3.4, over a token table shared for one matching pass. */
+function ownerGate(setOf: TokenSetOf, baseName: string, headName: string): boolean {
+  const baseOwner = extractOwner(baseName)
+  const headOwner = extractOwner(headName)
+  if (baseOwner === "" && headOwner === "") return true
+  if (baseOwner === "" || headOwner === "") return false
+  return coversBothWays(setOf(baseOwner), setOf(headOwner))
+}
+
+/**
+ * Whether the two token sets admit a perfect matching under `abbreviates`.
+ *
+ * Sizes must agree, after which an injection from one side is a bijection — so only one
+ * direction is searched. The search is augmenting-path rather than greedy, because a greedy
+ * pass can strand a token a different choice would have matched: over `{user, users}` and
+ * `{user, userx}`, taking the identical pair first leaves `users` with nothing, though
+ * `user`→`userx` with `users`→`user` covers both. Owners run to a handful of tokens, so the
+ * exact answer costs nothing worth saving.
+ */
+function coversBothWays(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false
+  const right = [...b]
+  const partnerOf = new Map<string, string>()
+  for (const token of a) {
+    if (!augment(token, right, partnerOf, new Set())) return false
+  }
+  return true
+}
+
+/** Kuhn's step: claim a free partner for `token`, or displace one that can move on. */
+function augment(
+  token: string,
+  right: readonly string[],
+  partnerOf: Map<string, string>,
+  visited: Set<string>,
+): boolean {
+  for (const candidate of right) {
+    if (visited.has(candidate) || !abbreviates(token, candidate)) continue
+    visited.add(candidate)
+    const holder = partnerOf.get(candidate)
+    if (holder === undefined || augment(holder, right, partnerOf, visited)) {
+      partnerOf.set(candidate, token)
+      return true
+    }
+  }
+  return false
+}
+
+/** The formulas §3.4 reads, over a token table shared for one matching pass. */
 export interface NameScorer {
   name(baseName: string, headName: string): number
-  owner(baseName: string, headName: string): number
+  member(baseName: string, headName: string): number
+  ownersCompatible(baseName: string, headName: string): boolean
 }
 
 /**
@@ -169,7 +243,8 @@ export function createNameScorer(): NameScorer {
   }
   return {
     name: (baseName, headName) => nameFormula(setOf, baseName, headName),
-    owner: (baseName, headName) => ownerFormula(setOf, baseName, headName),
+    member: (baseName, headName) => memberFormula(setOf, baseName, headName),
+    ownersCompatible: (baseName, headName) => ownerGate(setOf, baseName, headName),
   }
 }
 

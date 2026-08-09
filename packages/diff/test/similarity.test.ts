@@ -3,8 +3,9 @@ import {
   jaccard,
   jaccardTokens,
   lastSegment,
+  memberSimilarity,
   nameSimilarity,
-  ownerSimilarity,
+  ownersAreCompatible,
   tokenizeName,
 } from "../src"
 import { createNameScorer } from "../src/similarity"
@@ -42,25 +43,42 @@ describe("nameSimilarity", () => {
   })
 })
 
-describe("ownerSimilarity", () => {
-  it("R-8: distinguishes UserRepo.getUser and AdminRepo.getUser", () => {
-    const s = ownerSimilarity("UserRepo.getUser", "AdminRepo.getUser")
-    expect(s).toBeLessThan(1)
-    expect(s).toBeGreaterThan(0)
+describe("memberSimilarity", () => {
+  it("reads the last segment, leaving the owner to the gate", () => {
+    // The double count §3.4.6 used to carry: the whole-name Jaccard is depressed by a renamed
+    // owner, and the owner axis then charged for the same difference again.
+    expect(memberSimilarity("UserRepo.getUser", "UsersRepository.getUser")).toBe(1)
+    expect(nameSimilarity("UserRepo.getUser", "UsersRepository.getUser")).toBeCloseTo(0.4, 5)
   })
-  it("resolves same-owner references to full similarity", () => {
-    // The R-8 scenario the design guards against: two Class-scoped methods with the
-    // same short name. Owner-jaccard drops the score for cross-class collisions.
-    const sameOwner = ownerSimilarity("UserRepo.getUser", "UserRepo.deleteUser")
-    expect(sameOwner).toBe(1)
-    const crossOwner = ownerSimilarity("UserRepo.getUser", "AdminRepo.getUser")
-    expect(crossOwner).toBeLessThan(1)
+  it("still separates two member names under one owner", () => {
+    expect(memberSimilarity("UserRepo.getUser", "UserRepo.getUsers")).toBeCloseTo(1 / 3, 5)
   })
-  it("returns 1.0 for two top-level functions (no owner on either side)", () => {
-    expect(ownerSimilarity("foo", "bar")).toBe(1)
+  it("is the whole name when there is no owner", () => {
+    expect(memberSimilarity("getUser", "getUsers")).toBe(nameSimilarity("getUser", "getUsers"))
   })
-  it("returns 0 when one side has an owner and the other does not", () => {
-    expect(ownerSimilarity("foo", "Cls.foo")).toBe(0)
+})
+
+describe("ownersAreCompatible", () => {
+  it("R-8: keeps UserRepo.getUser and AdminRepo.getUser apart", () => {
+    expect(ownersAreCompatible("UserRepo.getUser", "AdminRepo.getUser")).toBe(false)
+  })
+  it("admits the same owner, and an owner that was renamed", () => {
+    expect(ownersAreCompatible("UserRepo.getUser", "UserRepo.deleteUser")).toBe(true)
+    expect(ownersAreCompatible("UserRepo.getUser", "UsersRepository.getUser")).toBe(true)
+  })
+  it("admits two top-level functions, which share the empty owner", () => {
+    expect(ownersAreCompatible("foo", "bar")).toBe(true)
+  })
+  it("refuses one owner against none", () => {
+    expect(ownersAreCompatible("foo", "Cls.foo")).toBe(false)
+  })
+  it("needs a partner for every token on both sides", () => {
+    expect(ownersAreCompatible("UserRepo.x", "UserRepoV2.x")).toBe(false)
+  })
+  it("finds a matching a greedy pass would strand", () => {
+    // `user` takes `userx` so `users` can take `user`. Taking the identical pair first leaves
+    // `users` with nothing, which is why the search backtracks.
+    expect(ownersAreCompatible("UserUsers.x", "UserUserx.x")).toBe(true)
   })
 })
 
@@ -108,8 +126,11 @@ describe("createNameScorer", () => {
         if (scorer.name(base, head) !== nameSimilarity(base, head)) {
           disagreements.push(`name(${base}, ${head})`)
         }
-        if (scorer.owner(base, head) !== ownerSimilarity(base, head)) {
-          disagreements.push(`owner(${base}, ${head})`)
+        if (scorer.member(base, head) !== memberSimilarity(base, head)) {
+          disagreements.push(`member(${base}, ${head})`)
+        }
+        if (scorer.ownersCompatible(base, head) !== ownersAreCompatible(base, head)) {
+          disagreements.push(`ownersCompatible(${base}, ${head})`)
         }
       }
     }

@@ -142,11 +142,12 @@ for h in remainingHead:
   if tokenize(h.name).length <= 1: continue               # §3.4.3, inadmissible
   bucket = buckets.get((h.kind, 'has-sig'))
   if !bucket: continue
-  threshold = thresholdFor(h)                             # §3.4.3
+  threshold = thresholdFor(h.name)                        # §3.4.3
   for b in bucket:
-    score = 0.5 * nameSimilarity(b.name, h.name)
+    if not ownersAreCompatible(b.name, h.name): continue  # §3.4.6, the owner gate
+    score = 0.5 * memberSimilarity(b.name, h.name)        # §3.4.1, the last segment
           + 0.3 * signatureSimilarity(b.signature, h.signature)
-          + 0.2 * ownerSimilarity(b.name, h.name)         # §3.4.6
+          + 0.2 * 1.0                                     # §3.4.6, satisfied by the gate
     if score >= threshold:
       candidates.append((b, h, score))
 
@@ -160,12 +161,14 @@ Stage 4 implemented as O(K^2) drops below practical speed at K=500 (heavy use of
 As a bucket pre-filter, hash-partition by the combination `(kind, signature === null ? 'no-sig' : 'has-sig')` and evaluate each head linearly only within its corresponding bucket.
 The effective complexity becomes the square of the per-bucket size of K — typically ≤ a few dozen — so it is near-linear.
 
-#### 3.4.3 Per-symbol-kind thresholds
+#### 3.4.3 Thresholds by name token count
 
-To avoid false positives on short names (1–2 token names like `getUser` vs `getUsers`), the threshold is adjusted by symbol kind and name token count.
+To avoid false positives on short names (1–2 token names like `getUser` vs `getUsers`), the threshold is adjusted by the token count of the head's last name segment.
+
+The symbol kind does not enter into it. This section was headed "per-symbol-kind thresholds" and its pseudocode took a `kind` parameter that neither it nor the implementation ever read; §3.4.6 then quoted "for kind=method the threshold is 0.85" for a two-token name the table gives 0.95. Kind already does the work it can do in §3.4.0's bucket key, which stops a class body from being compared against a function at all.
 
 ```
-thresholdFor(kind, headName):
+thresholdFor(headName):
   tokenCount = tokenize(lastSegment(headName)).length
   if tokenCount <= 1:
     return 1.0                  # an exact match on all three axes
@@ -191,11 +194,9 @@ if tokenize(h.name).length <= 1:    skip the head entirely, leave for added/remo
 
 The count is over the **whole qualified name**, which is what the score reads — not over the last segment, which is what `thresholdFor` reads. `UserRepo.get` supplies three tokens and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
 
-The rule is stated on the head, and needs no base-side twin, because a one-token name on **either** side already caps the score below the table. One token against two or more is a `jaccard` of at most `1 / 2`, so even a perfect signature and a perfect owner reach only `0.5 * 0.5 + 0.3 + 0.2 = 0.75` — and a name of no tokens at all scores 0 on the axis and caps lower still.
+The rule reads **both sides**, because the property belongs to a pairing rather than to one end of it.
 
-Which means the rule changes an answer in exactly one case: **both** sides one token, where the axis reads 1.0 instead and the total reaches the top of the scale. Reading the head is therefore a choice about cost, not about meaning — a head is skipped once, where a base would be tested once per candidate.
-
-That licence is a relation, not a fact about either side of it: `0.75` is fixed by the axis weights, `0.85` by the table's last row, and the margin between them is 0.10. §3.4.4 has a configurable threshold on the roadmap, and below 0.75 the rule would need a base-side twin. The two constants are named in the code (`SHORT_NAME_CEILING`, `LOWEST_THRESHOLD`) and their ordering is asserted by a test, so the premise fails loudly rather than the conclusion failing silently.
+It once read the head alone, on an arithmetic licence: a one-token name on either side capped the score at `0.5 * 0.5 + 0.3 + 0.2 = 0.75`, under the table's lowest row, so a one-token base was unreachable without a check of its own. That held while the name axis was a Jaccard over the whole qualified name. §3.4.6's gate moved the axis to the last segment, and the ceiling went with it: `Main.main` clears the gate against `Mainly.main` on an abbreviated owner, and their member names are identical, so the pair scores 1.0. Reading both sides costs one test per Symbol and needs no licence.
 
 **What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged. What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
 
@@ -255,10 +256,11 @@ tokenize("UserRepo.取得")          = ["user", "repo", "取得"]       (3 — t
 
 Jaccard is unharmed by this: two names that tokenise whole still score 1.0 against each other and 0 against anything else, which is the right answer for identical and for unrelated names alike. What it does harm is any reading of the **count** as a measure of how much a name says — §3.4.3's admissibility rule is the one place that does, and it states the cost there.
 
-#### 3.4.6 ownerSimilarity (R-8: avoiding same-name method collisions)
+#### 3.4.6 The owner gate (R-8: avoiding same-name method collisions)
 
-If similarity were computed on `shortName` (last segment) alone, a method whose class was renamed (`UserRepo.getUser` → `UsersRepository.getUser`) could be mis-paired with a same-named method of a different class (`AdminRepo.getUser`).
-To prevent this, an **owner-segment similarity** is added to the score formula with weight 0.2:
+Two things must hold at once. A method whose class was renamed (`UserRepo.getUser` → `UsersRepository.getUser`) must pair, and a same-named method of a *different* class (`AdminRepo.getUser`) must not.
+
+The owner is therefore a **gate**, not a term in the score: a pair whose owners are incompatible is never scored.
 
 ```
 ownerOf(qname):
@@ -269,18 +271,33 @@ ownerOf(qname):
   # 'A.B.C.method'  → 'A.B.C'
   # 'topLevel'      → ''   (empty)
 
-ownerSimilarity(baseName, headName):
+ownersAreCompatible(baseName, headName):
   baseOwner = ownerOf(baseName)
   headOwner = ownerOf(headName)
-  if baseOwner === '' && headOwner === '': return 1.0   # top-level functions
-  if baseOwner === '' || headOwner === '': return 0.0
-  return jaccardTokens(baseOwner, headOwner)
+  if baseOwner === '' && headOwner === '': return true    # both top-level: one shared scope
+  if baseOwner === '' || headOwner === '': return false   # different depths
+  # every token on each side needs a distinct partner on the other, where a partner is the
+  # same token or one it abbreviates (>= 3 characters, and a prefix)
+  return perfectMatching(tokenize(baseOwner), tokenize(headOwner), abbreviates)
 ```
 
 As a result:
-- `UserRepo.getUser` vs `AdminRepo.getUser` → name=1.0, sig=1.0, owner=jaccard("UserRepo", "AdminRepo")≈0.33 → total 0.5+0.3+0.066=0.866 (for kind=method the threshold is 0.85, barely passes — an edge case that only occurs when stage 1 has already consumed UserRepo.getUser)
-- `UserRepo.getUser` vs `UsersRepository.getUser` (class rename) → owner=jaccard("UserRepo", "UsersRepository")≈0.5 → total 0.5+0.3+0.1=0.9 → passes (as intended)
-- `UserRepo.findById` vs `UsersRepository.findById` (class rename, method kept) → total 0.9 → passes
+
+| pair | owners | verdict |
+|---|---|---|
+| `UserRepo.getUser` vs `UsersRepository.getUser` | `user`→`users`, `repo`→`repository` | compatible → scored, 1.0, **pairs** |
+| `UserRepo.findById` vs `UsersRepository.findById` | as above | compatible → scored, 1.0, **pairs** |
+| `UserRepo.getUser` vs `AdminRepo.getUser` | `user` has no partner | **refused** |
+
+**Why a gate and not a weight.** The previous design added `0.2 * jaccardTokens(baseOwner, headOwner)` to the score, and could satisfy neither requirement.
+
+It could not pair the rename, because the owner was counted twice. §3.4.1's name axis is a Jaccard over the *whole* qualified name, so a renamed owner already depressed the name term, and the owner term then charged for the same difference again: `UserRepo.getUser` vs `UsersRepository.getUser` scored `0.5*0.4 + 0.3 + 0.2*0 = 0.5`, not the 0.9 this section claimed. End to end, renaming a class and keeping three methods with edited bodies reported `added: 3 / removed: 3`.
+
+And it could not refuse the collision, because a weight cannot outvote a perfect name and a perfect signature. Reading the name axis on the last segment fixes the double count but inverts the ordering: `AdminRepo` *shares* the `repo` token where `UsersRepository` shares none, so the pair R-8 must reject scores 0.8667 and the pairs it must accept score 0.8. Raising the owner weight only moves the problem — two three-token class names sharing two tokens reach exactly 0.85, the lowest row in the table. There is no weight at which "different class" reliably loses, because the quantity being weighed is not evidence of degree.
+
+Past the gate there is no owner left to grade, so the owner axis is satisfied in full and the composite keeps the 0.5/0.3/0.2 shape §3.4.3's rows are calibrated against. Dropping the term and renormalising would move every threshold without changing what any of them means.
+
+**What the gate costs.** It is deliberately strict in one direction: both token sets must be covered, so `UserRepo` and `UserRepoV2` are two classes rather than one renamed — an added token is as much evidence of a sibling as of a rename. Abbreviations shorter than three characters are not read as such either, so `IdMap` → `IdentityMap` is a real rename left unpaired rather than guessed at; `id` opens `identity`, `identifier` and `idempotent` alike. Both cases fall through to `added` + `removed`, which is R-8's preferred direction of error.
 
 #### 3.4.2 signatureSimilarity
 
