@@ -382,19 +382,35 @@ export function matchStageNameSignature(
   remainingBase: IRSymbol[]
   remainingHead: IRSymbol[]
 } {
-  const buckets = new Map<string, IRSymbol[]>()
+  const buckets = new Map<string, Bucket>()
   for (const b of remainingBase) {
     if (b.dropped) continue
     // §3.4.3 — see `saysEnoughToPair`. Read on the base as well as the head: the property
     // belongs to a pairing, and either end being short is enough to make the score unearned.
     if (!saysEnoughToPair(b.name)) continue
     const key = bucketKey(b)
-    const bucket = buckets.get(key) ?? []
-    bucket.push(b)
+    const bucket: Bucket = buckets.get(key) ?? {
+      members: [],
+      byToken: new Map(),
+      visited: EMPTY_VISITS,
+      everyPosition: [],
+    }
+    const position = bucket.members.length
+    bucket.members.push(b)
+    for (const token of memberTokens(b.name)) {
+      const sharing = bucket.byToken.get(token) ?? []
+      sharing.push(position)
+      bucket.byToken.set(token, sharing)
+    }
     buckets.set(key, bucket)
+  }
+  for (const bucket of buckets.values()) {
+    bucket.visited = new Int32Array(bucket.members.length)
+    bucket.everyPosition = bucket.members.map((_, position) => position)
   }
   const scorer = createNameScorer()
   const candidates: ScoredPair[] = []
+  let visitCount = 0
   for (const h of remainingHead) {
     if (h.dropped) continue
     // §3.4.3 tail — `signatureSimilarity(null, null)` is 1.0, so a signature-less head would
@@ -409,20 +425,45 @@ export function matchStageNameSignature(
     const bucket = buckets.get(bucketKey(h))
     if (bucket === undefined) continue
     const threshold = thresholdFor(h.name)
-    for (const b of bucket) {
-      // §3.4.6 — the owner is a gate, not a term. Two Symbols in unrelated scopes are not
-      // the same Symbol however well their member names and signatures agree, and grading
-      // that agreement cannot outweigh them. Past the gate the owner axis is satisfied in
-      // full, which is what keeps the composite on the scale §3.4.3's table is written for.
-      if (!scorer.ownersCompatible(b.name, h.name)) continue
-      const score =
-        0.5 * scorer.member(b.name, h.name) +
-        0.3 * signatureSimilarity(b.signature ?? null, h.signature ?? null) +
-        0.2 * OWNER_AXIS_SATISFIED
-      // Filtering here rather than after the sweep keeps the candidate list to the pairings
-      // that could actually be accepted; the threshold belongs to the head, so a pair below
-      // it is never acceptable however the rest of the group resolves.
-      if (score >= threshold) candidates.push({ base: b, head: h, score })
+    // §3.4.0 — the least a member name can score and still leave the threshold reachable,
+    // granting the other two axes in full. Read before the gate because it is the cheapest of
+    // the three and refuses the most: most bases sharing one token of two sit far below it.
+    const memberFloor = lowestUsefulMember(threshold)
+    // A base is reached once per token it shares, so a head whose postings add up to the
+    // whole bucket pays for the index rather than saving on it — every Symbol named
+    // `handleRequest` puts the entire bucket under both of its tokens. Walking the members
+    // straight through in that case keeps the index a strict improvement rather than a trade.
+    const tokens = memberTokens(h.name)
+    let reach = 0
+    for (const token of tokens) reach += bucket.byToken.get(token)?.length ?? 0
+    const wholeBucket = reach >= bucket.members.length
+    visitCount++
+    for (const token of wholeBucket ? ONE_PASS : tokens) {
+      const postings = wholeBucket ? bucket.everyPosition : (bucket.byToken.get(token) ?? [])
+      for (const position of postings) {
+        if (!wholeBucket) {
+          if (bucket.visited[position] === visitCount) continue
+          bucket.visited[position] = visitCount
+        }
+        const b = bucket.members[position]
+        if (b === undefined) continue
+        // §3.4.6's gate and §3.4.3's floor, cheapest test first, because either can be the
+        // selective one: identical owners settle the gate on a string compare, and the member
+        // floor then refuses most of what a shared token admitted. Only what survives both
+        // pays for extracting and matching two owners.
+        const sameOwner = scorer.sameOwner(b.name, h.name)
+        const member = scorer.member(b.name, h.name)
+        if (member < memberFloor) continue
+        if (!sameOwner && !scorer.ownersCompatible(b.name, h.name)) continue
+        const score =
+          0.5 * member +
+          0.3 * signatureSimilarity(b.signature ?? null, h.signature ?? null) +
+          0.2 * OWNER_AXIS_SATISFIED
+        // Filtering here rather than after the sweep keeps the candidate list to the pairings
+        // that could actually be accepted; the threshold belongs to the head, so a pair below
+        // it is never acceptable however the rest of the group resolves.
+        if (score >= threshold) candidates.push({ base: b, head: h, score })
+      }
     }
   }
   const accepted = acceptInScoreOrder(candidates)
@@ -440,6 +481,69 @@ export function matchStageNameSignature(
 function bucketKey(s: IRSymbol): string {
   const sig = s.signature === null || s.signature === undefined ? "no-sig" : "has-sig"
   return `${s.kind}::${sig}`
+}
+
+/**
+ * §3.4.0 — the least `memberSimilarity` that leaves `threshold` reachable.
+ *
+ * `0.5 * member + 0.3 * signature + 0.2 * 1` must reach the threshold, and the signature axis
+ * is worth at most 0.3, so `member >= 2 * (threshold - 0.5)`. Refusing below this is exact
+ * rather than approximate: nothing the other two axes can do rescues a pair under it.
+ *
+ * Reading it first is what keeps stage 4 off the cross-product. §3.4.6's gate splits and
+ * tokenises two owners; the member axis is one Jaccard over token sets the pass has already
+ * built, and it refuses most of what a shared token admits.
+ */
+function lowestUsefulMember(threshold: number): number {
+  return 2 * (threshold - 0.5)
+}
+
+/**
+ * One `(kind, signatureNullness)` bucket: its base Symbols, an index from each token a member
+ * name carries to the positions holding it, and a scratch stamp for de-duplicating a head's
+ * reach across its several tokens.
+ *
+ * The stamp is per bucket rather than per head because a head reaching every base would
+ * otherwise allocate a set the size of the bucket, once per head — which is the cross-product
+ * the index exists to avoid, moved from the scorer into the allocator.
+ */
+
+/** One iteration, for the branch that walks a bucket's members rather than its postings. */
+const ONE_PASS = [""] as const
+
+/** Stands in until a bucket is sized; never indexed, because a bucket is sized before use. */
+const EMPTY_VISITS = new Int32Array(0)
+
+/**
+ * One `(kind, signatureNullness)` bucket: its base Symbols, and an index from each token a
+ * member name carries to the positions holding it.
+ */
+interface Bucket {
+  members: IRSymbol[]
+  byToken: Map<string, number[]>
+  /** `[0, 1, ... members.length)`, built once so the whole-bucket branch allocates nothing. */
+  everyPosition: number[]
+  /**
+   * Which head the entry at each position was last offered to, so a head reaching one base
+   * through two of its tokens scores it once. Sized after the bucket is complete — until
+   * then it is the shared empty placeholder below.
+   */
+  visited: Int32Array
+}
+
+/**
+ * §3.4.0 — the token that stands in for a member name carrying none.
+ *
+ * `Foo.Bar.` has an empty last segment and two tokens in its qualified name, so it is
+ * admissible, and two such Symbols score 1.0 on an axis comparing two empty sets. They have
+ * no token to be indexed under and cannot pair with anything that has one, so they share a
+ * key of their own. A real token cannot collide with it: `tokenizeName` never emits a space.
+ */
+const NO_MEMBER_TOKENS = " none"
+
+function memberTokens(qname: string): readonly string[] {
+  const tokens = tokenizeName(lastSegment(qname))
+  return tokens.length === 0 ? [NO_MEMBER_TOKENS] : tokens
 }
 
 /**

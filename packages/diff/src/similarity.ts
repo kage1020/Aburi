@@ -292,11 +292,47 @@ function augment(
   return false
 }
 
+/**
+ * §3.4.6 — a necessary condition on two non-empty owners, cheaper than the full gate: their
+ * first segments must correspond, since segments are compared positionally. Answering `true`
+ * says only that the gate has to be asked.
+ */
+function firstSegmentsCouldAgree(baseOwner: string, headOwner: string, setOf: TokenSetOf): boolean {
+  const baseFirst = baseOwner.slice(0, dotOrEnd(baseOwner))
+  const headFirst = headOwner.slice(0, dotOrEnd(headOwner))
+  if (baseFirst === headFirst) return true
+  const baseTokens = setOf(baseFirst)
+  const headTokens = setOf(headFirst)
+  if (baseTokens.size !== headTokens.size) return false
+  for (const token of baseTokens) {
+    let partnered = false
+    for (const candidate of headTokens) {
+      if (sameWord(token, candidate)) {
+        partnered = true
+        break
+      }
+    }
+    if (!partnered) return false
+  }
+  return true
+}
+
+function dotOrEnd(owner: string): number {
+  const dot = owner.indexOf(".")
+  return dot < 0 ? owner.length : dot
+}
+
 /** The formulas §3.4 reads, over a token table shared for one matching pass. */
 export interface NameScorer {
   name(baseName: string, headName: string): number
   member(baseName: string, headName: string): number
   ownersCompatible(baseName: string, headName: string): boolean
+  /**
+   * The two qualified names have the same owner, which is the common case §3.4.6's gate
+   * short-circuits on and the one a bucket of methods on one class hits every time. Exposed
+   * so stage 4 can settle it without extracting owners at all.
+   */
+  sameOwner(baseName: string, headName: string): boolean
 }
 
 /**
@@ -316,10 +352,46 @@ export function createNameScorer(): NameScorer {
     sets.set(value, built)
     return built
   }
+  const owners = new Map<string, string>()
+  const ownerOf = (qname: string): string => {
+    const cached = owners.get(qname)
+    if (cached !== undefined) return cached
+    const built = extractOwner(qname)
+    owners.set(qname, built)
+    return built
+  }
+  /**
+   * §3.4.6's gate, with the segment split and the matching skipped where they can be.
+   *
+   * The gate is the costliest thing stage 4 asks per candidate — it splits both owners into
+   * segments, tokenises each and runs an augmenting-path matching. Two shortcuts, in order of
+   * how much they save:
+   *
+   * - **Identical owners.** A bucket of methods on one class asks about the same owner over
+   *   and over, and `ownerGate` already answers those on a string compare; doing it here skips
+   *   the two `extractOwner` calls as well, which are substrings on every candidate.
+   * - **A different first segment.** Segments correspond positionally, so owners whose first
+   *   segments cannot be the same word are incompatible whatever the rest says. The check is
+   *   one `sameWord` over two token sets the table already holds, against a full matching over
+   *   every segment.
+   *
+   * Not memoised on the pair. A bulk rename produces as many distinct owner pairs as
+   * candidates, so a table keyed on them grows with the cross-product — enough to exceed
+   * V8's Map limit on the very input this is meant to make fast.
+   */
+  const compatible = (baseName: string, headName: string): boolean => {
+    const baseOwner = ownerOf(baseName)
+    const headOwner = ownerOf(headName)
+    if (baseOwner === headOwner) return true
+    if (baseOwner === "" || headOwner === "") return false
+    if (!firstSegmentsCouldAgree(baseOwner, headOwner, setOf)) return false
+    return ownerGate(setOf, baseName, headName)
+  }
   return {
     name: (baseName, headName) => nameFormula(setOf, baseName, headName),
     member: (baseName, headName) => memberFormula(setOf, baseName, headName),
-    ownersCompatible: (baseName, headName) => ownerGate(setOf, baseName, headName),
+    ownersCompatible: compatible,
+    sameOwner: (baseName, headName) => ownerOf(baseName) === ownerOf(headName),
   }
 }
 
