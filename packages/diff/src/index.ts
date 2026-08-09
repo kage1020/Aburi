@@ -33,8 +33,9 @@ export {
   jaccard,
   jaccardTokens,
   lastSegment,
+  memberSimilarity,
   nameSimilarity,
-  ownerSimilarity,
+  ownersAreCompatible,
   tokenizeName,
 } from "./similarity"
 export {

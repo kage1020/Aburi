@@ -344,20 +344,29 @@ function closestNameTo(
  * `signatureNullness` distinguishes symbols with no signature (`interface`, `type`,
  * `class`) from callable ones so that a class body is never paired against a function.
  *
- * The composite score:
- *   0.5 * nameSimilarity + 0.3 * signatureSimilarity + 0.2 * ownerSimilarity
+ * §3.4.6's owner gate runs before the score: a pair whose owners are not the same class, or
+ * one a rename of the other, is not the same Symbol however well the rest agrees, and no
+ * weight small enough to leave the name axis meaning something can outvote a matching member
+ * name and signature.
+ *
+ * The composite score, over the pairs that clear it:
+ *   0.5 * memberSimilarity + 0.3 * signatureSimilarity + 0.2 * OWNER_AXIS_SATISFIED
+ *
+ * `memberSimilarity` reads the last segment, not the whole qualified name: the gate has
+ * already settled the owner, and reading it again on the name axis charges for it twice —
+ * which is what kept a renamed class from ever pairing (§3.4.6).
  *
  * §3.4.3 threshold table, applied per head by the token count of its last name segment:
- * - 1 token  → 1.0 (an exact match on all three axes)
+ * - 1 token  → 1.0 (an exact match on both remaining axes)
  * - 2 tokens → 0.95 (strict, avoids `getUser` vs `getUsers`)
  * - default  → 0.85
  *
- * §3.4.3 also names two heads the stage does not read at all, because for them the score is
+ * §3.4.3 also names two Symbols the stage does not read at all, because for them the score is
  * high on evidence it does not have rather than on a resemblance: one whose signature is
  * null, since `signatureSimilarity(null, null)` is 1.0 and the bucket key restricts it to
  * candidates that are equally signature-less; and one whose qualified name carries a single
- * distinct token, since that is the whole of what the name and owner axes read. Neither can
- * be expressed as a threshold — the second wants a bar above the top of the scale.
+ * distinct token, since that is the whole of what its identity amounts to. Neither can be
+ * expressed as a threshold — the second wants a bar above the top of the scale.
  *
  * Every pairing in a bucket that clears its head’s threshold becomes a candidate, and the
  * candidates are settled in score order rather than one head at a time — see
@@ -376,6 +385,9 @@ export function matchStageNameSignature(
   const buckets = new Map<string, IRSymbol[]>()
   for (const b of remainingBase) {
     if (b.dropped) continue
+    // §3.4.3 — see `saysEnoughToPair`. Read on the base as well as the head: the property
+    // belongs to a pairing, and either end being short is enough to make the score unearned.
+    if (!saysEnoughToPair(b.name)) continue
     const key = bucketKey(b)
     const bucket = buckets.get(key) ?? []
     bucket.push(b)
@@ -398,10 +410,15 @@ export function matchStageNameSignature(
     if (bucket === undefined) continue
     const threshold = thresholdFor(h.name)
     for (const b of bucket) {
+      // §3.4.6 — the owner is a gate, not a term. Two Symbols in unrelated scopes are not
+      // the same Symbol however well their member names and signatures agree, and grading
+      // that agreement cannot outweigh them. Past the gate the owner axis is satisfied in
+      // full, which is what keeps the composite on the scale §3.4.3's table is written for.
+      if (!scorer.ownersCompatible(b.name, h.name)) continue
       const score =
-        0.5 * scorer.name(b.name, h.name) +
+        0.5 * scorer.member(b.name, h.name) +
         0.3 * signatureSimilarity(b.signature ?? null, h.signature ?? null) +
-        0.2 * scorer.owner(b.name, h.name)
+        0.2 * OWNER_AXIS_SATISFIED
       // Filtering here rather than after the sweep keeps the candidate list to the pairings
       // that could actually be accepted; the threshold belongs to the head, so a pair below
       // it is never acceptable however the rest of the group resolves.
@@ -427,28 +444,22 @@ function bucketKey(s: IRSymbol): string {
 
 /**
  * §3.4.3 — the composite score a pair must reach, by how many tokens the head's last name
- * segment has. A one-token segment still asks for the whole scale, which a pair reaches only
- * on an identical name, signature and owner: `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754.
+ * segment has. A one-token segment still asks for the whole scale, which a pair reaches on an
+ * identical member name and signature past §3.4.6's gate: `0.5 + 0.3 + 0.2`, exactly 1 in
+ * IEEE 754. The owner need not be identical, only compatible — `UserRepo.get` and
+ * `UserRepos.get` reach it.
  */
 const EXACT_MATCH_ONLY = 1
 const TWO_TOKEN_THRESHOLD = 0.95
 const DEFAULT_THRESHOLD = 0.85
 
-/** The lowest score §3.4.3 will accept, whichever row of the table applies. */
-export const LOWEST_THRESHOLD = DEFAULT_THRESHOLD
-
 /**
- * §3.4.3 — the most a pairing short on one side alone can score: `0.5 * (1/2) + 0.3 + 0.2`.
- * One distinct token against two or more is a Jaccard of at most a half, and the other two
- * axes are granted in full.
- *
- * `saysEnoughToPair` reads the head and not the base because this sits under
- * `LOWEST_THRESHOLD`, which makes a one-token base unreachable without a check of its own.
- * That is a relation between the axis weights and the table, not a fact about either, and
- * `single-token-name.test.ts` asserts it — the margin is 0.10, and §3.4.4 has a configurable
- * threshold on the roadmap.
+ * §3.4.6 — what the owner axis is worth to a pair that clears its gate, which is every pair
+ * that reaches the score. Written as a value rather than folded into the weights so the
+ * composite keeps the 0.5/0.3/0.2 shape §3.4.3's rows are calibrated against: dropping the
+ * term and renormalising would move every threshold without changing what any of them means.
  */
-export const SHORT_NAME_CEILING = 0.75
+const OWNER_AXIS_SATISFIED = 1
 
 function thresholdFor(qname: string): number {
   const tokens = tokenizeName(lastSegment(qname)).length
@@ -458,7 +469,7 @@ function thresholdFor(qname: string): number {
 }
 
 /**
- * §3.4.3 — whether a head's qualified name says enough for stage 4 to read it at all.
+ * §3.4.3 — whether a Symbol's qualified name says enough for stage 4 to read it at all.
  *
  * The score is built from three things the name supplies: its tokens, its owner's tokens,
  * and a signature. A name of one distinct token supplies one word and an owner that either
@@ -473,9 +484,12 @@ function thresholdFor(qname: string): number {
  * measure `thresholdFor` uses, and the wrong one for this question. Tokens are deduped, so
  * `Main.main` supplies one and does not.
  *
- * Read off the head only, though the property belongs to a pairing: a short name on either
- * side caps the score at `SHORT_NAME_CEILING`, so the only pairing this changes is one short
- * on both, and skipping the head costs one test rather than one per candidate.
+ * Read off both sides, because the property belongs to a pairing. It was once read off the
+ * head alone, on the arithmetic that a short name anywhere capped the score at 0.75 — true
+ * while the name axis read the whole qualified name, and false since §3.4.6 became a gate and
+ * the axis moved to the last segment. `Main.main` is one deduped token and clears the gate
+ * against `Mains.main`, whose member name is identical, so the pair reaches the top of the
+ * scale from a name saying one word.
  *
  * The count stands in for how much the name says, and `tokenizeName` splits on ASCII case
  * boundaries, so a name written in a script that has none is one token however long it is:

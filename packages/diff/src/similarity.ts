@@ -115,39 +115,188 @@ export function nameSimilarity(baseName: string, headName: string): number {
 }
 
 /**
- * §3.4.6 — owner similarity: same as nameSimilarity but restricted to everything **before**
- * the last segment. Compensates for the R-8 same-name-different-class collision, where
- * `UserRepo.getUser` should not be pair-swapped with `AdminRepo.getUser`.
+ * §3.4.1 — Jaccard over the tokens of the **last segment**: the member name with its owner
+ * removed. What §3.4's composite reads, because §3.4.6 decides the owner separately and
+ * reading it on both axes charges for it twice.
+ */
+export function memberSimilarity(baseName: string, headName: string): number {
+  return memberFormula(tokenizeEveryTime, baseName, headName)
+}
+
+/**
+ * §3.4.6 (R-8) — whether two Symbols are close enough in *scope* to be the same Symbol: the
+ * same owner, or one whose owner was renamed. A gate rather than a score, because grading the
+ * owner cannot do what R-8 asks. `UserRepo.findById` and `AdminRepo.findById` agree on their
+ * member name and their signature, so a shared `Repo` token at weight 0.2 carries them to
+ * 0.8667 against a 0.85 threshold — while `UsersRepository.findById`, which *is* the rename,
+ * shares no owner token and scores 0.8000. The collision outscores the rename, and raising the
+ * weight only moves both: at 0.3 two three-token class names sharing two tokens land on
+ * exactly 0.85.
  *
  * Owner extraction:
  * - `Class::method` → `Class`
  * - `A.B.C.method` → `A.B.C`
  * - `topLevel`     → `` (empty)
  *
- * When both owners are empty (top-level functions), returns 1.0 because both live in the
- * same "no-owner" bucket. When one is empty and the other is not, returns 0.0 because the
- * two Symbols live in structurally different scopes.
+ * Two empty owners are compatible: top-level Symbols share the one outer scope. One empty and
+ * one not are never compatible — the two live at different depths.
+ *
+ * Otherwise the owners must correspond segment for segment, and within a segment every token
+ * on each side must find a distinct partner on the other under `sameWord`. Both sides must be
+ * covered, so `UserRepo` and `UserRepoV2` are two classes rather than one renamed — an added
+ * token is as much evidence of a sibling as of a rename, and R-8's business is refusing the
+ * collision.
  */
-export function ownerSimilarity(baseName: string, headName: string): number {
-  return ownerFormula(tokenizeEveryTime, baseName, headName)
+export function ownersAreCompatible(baseName: string, headName: string): boolean {
+  return ownerGate(tokenizeEveryTime, baseName, headName)
+}
+
+/**
+ * §3.4.6 — the tokens `a` and `b` name the same thing.
+ *
+ * Equal, or the same word inflected: `user`/`users`, `entity`/`entities`. Nothing else, and
+ * that is the whole of the rule rather than a first approximation.
+ *
+ * A bare prefix test is the obvious generalisation and it cannot be made to work. It admits
+ * `repo`/`report`, `cache`/`cached`, `con`/`controller` — two distinct classes, which is
+ * exactly the collision R-8 exists to refuse. Every measure that might separate those from a
+ * real rename fails, because the two populations interleave rather than sitting on opposite
+ * sides of anything:
+ *
+ * ```
+ *                              dice    levenshtein
+ *   accept  UserRepo/UsersRepository   0.571   7
+ *   reject  RepoManager/ReportManager  0.818   2
+ *   accept  Repo/Repository            0.500   6
+ *   reject  CacheStore/CachedStore     0.842   1
+ * ```
+ *
+ * The renames to accept score *lower* than the collisions to refuse, on both. There is no
+ * threshold, and a length-growth rule fares no better: `con`→`controller` grows by 7 and
+ * `user`→`users` by 1, so anything admitting the second admits the first.
+ *
+ * Inflection is not on that spectrum. It is a closed, mechanical relation between two spellings
+ * of one word, so it can be recognised rather than estimated — and it covers the case a plain
+ * equality test misses most often, a class pluralised in place.
+ *
+ * What this gives up is the abbreviation family: `UserRepo` → `UsersRepository` no longer
+ * clears the gate on `repo`/`repository`. That is a real rename reported as `added` +
+ * `removed`, and §3.4.6 records it as the price of refusing `repo`/`report`, which no rule
+ * over the two strings alone can tell apart. The evidence that would settle it is not in the
+ * strings: the owner is itself a Symbol, and whether *it* paired is the question being
+ * guessed at here.
+ */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a]
+  return pluralises(short, long)
+}
+
+/**
+ * The longest owner segment the matching will search.
+ *
+ * `augment` is Kuhn's, so the search is cubic in the token count and recursive with it. A
+ * class name is a handful of words; anything past this is not a name the gate has an opinion
+ * about, and `buildDiff` takes IR JSON from a caller rather than only from `aburi scan`, so
+ * the bound is what turns an adversarial 1600-token identifier from a hang into an answer.
+ * Refusing is the safe direction: the pair falls to `added` + `removed`.
+ */
+const MAX_OWNER_SEGMENT_TOKENS = 32
+
+/** English noun inflection, which is what a pluralised class name goes through. */
+function pluralises(singular: string, plural: string): boolean {
+  if (plural === `${singular}s` || plural === `${singular}es`) return true
+  return singular.endsWith("y") && plural === `${singular.slice(0, -1)}ies`
 }
 
 function nameFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
   return jaccardSets(setOf(baseName), setOf(headName))
 }
 
-function ownerFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
-  const baseOwner = extractOwner(baseName)
-  const headOwner = extractOwner(headName)
-  if (baseOwner === "" && headOwner === "") return 1
-  if (baseOwner === "" || headOwner === "") return 0
-  return jaccardSets(setOf(baseOwner), setOf(headOwner))
+function memberFormula(setOf: TokenSetOf, baseName: string, headName: string): number {
+  return jaccardSets(setOf(lastSegment(baseName)), setOf(lastSegment(headName)))
 }
 
-/** The two similarity formulas of §3.4, over a token table shared for one matching pass. */
+function ownerGate(setOf: TokenSetOf, baseName: string, headName: string): boolean {
+  const baseOwner = extractOwner(baseName)
+  const headOwner = extractOwner(headName)
+  if (baseOwner === "" && headOwner === "") return true
+  if (baseOwner === "" || headOwner === "") return false
+  // The common case, and the one a bucket of methods on one class hits every time.
+  if (baseOwner === headOwner) return true
+  return segmentsCorrespond(baseOwner, headOwner, setOf)
+}
+
+/**
+ * §3.4.6 — the two owners name the same scope: segment for segment, token for token.
+ *
+ * Compared per segment rather than over the owner as a whole, because `tokenizeName` dedups
+ * and an owner is a *path*. `Users.UserRepo` collapses to `{users, user, repo}` while
+ * `Users.UsersRepository` collapses to `{users, repository}` — the namespace and the class
+ * share a word, so one side loses a token and the two stop being comparable before any
+ * spelling is looked at. Segment by segment they line up: `Users`/`Users`, then
+ * `UserRepo`/`UsersRepository`.
+ *
+ * A rename changes what a class is called, not how deeply it is nested, so a differing segment
+ * count is a differing scope.
+ */
+function segmentsCorrespond(baseOwner: string, headOwner: string, setOf: TokenSetOf): boolean {
+  const baseSegments = baseOwner.split(".")
+  const headSegments = headOwner.split(".")
+  if (baseSegments.length !== headSegments.length) return false
+  return baseSegments.every((segment, index) => {
+    const counterpart = headSegments[index]
+    if (counterpart === undefined) return false
+    if (segment === counterpart) return true
+    return coversBothWays(setOf(segment), setOf(counterpart))
+  })
+}
+
+/**
+ * Whether the two token sets admit a perfect matching under `sameWord`.
+ *
+ * Sizes must agree, after which an injection from one side is a bijection — so only one
+ * direction is searched. The search is augmenting-path rather than greedy, because a greedy
+ * pass can strand a token a different choice would have matched: over `{user, users}` and
+ * `{user, userx}`, taking the identical pair first leaves `users` with nothing, though
+ * `user`→`userx` with `users`→`user` covers both. One segment runs to a handful of tokens, so
+ * the exact answer costs nothing worth saving.
+ */
+function coversBothWays(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false
+  if (a.size > MAX_OWNER_SEGMENT_TOKENS) return false
+  const right = [...b]
+  const partnerOf = new Map<string, string>()
+  for (const token of a) {
+    if (!augment(token, right, partnerOf, new Set())) return false
+  }
+  return true
+}
+
+/** Kuhn's step: claim a free partner for `token`, or displace one that can move on. */
+function augment(
+  token: string,
+  right: readonly string[],
+  partnerOf: Map<string, string>,
+  visited: Set<string>,
+): boolean {
+  for (const candidate of right) {
+    if (visited.has(candidate) || !sameWord(token, candidate)) continue
+    visited.add(candidate)
+    const holder = partnerOf.get(candidate)
+    if (holder === undefined || augment(holder, right, partnerOf, visited)) {
+      partnerOf.set(candidate, token)
+      return true
+    }
+  }
+  return false
+}
+
+/** The formulas §3.4 reads, over a token table shared for one matching pass. */
 export interface NameScorer {
   name(baseName: string, headName: string): number
-  owner(baseName: string, headName: string): number
+  member(baseName: string, headName: string): number
+  ownersCompatible(baseName: string, headName: string): boolean
 }
 
 /**
@@ -169,7 +318,8 @@ export function createNameScorer(): NameScorer {
   }
   return {
     name: (baseName, headName) => nameFormula(setOf, baseName, headName),
-    owner: (baseName, headName) => ownerFormula(setOf, baseName, headName),
+    member: (baseName, headName) => memberFormula(setOf, baseName, headName),
+    ownersCompatible: (baseName, headName) => ownerGate(setOf, baseName, headName),
   }
 }
 
