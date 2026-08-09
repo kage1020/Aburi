@@ -207,15 +207,15 @@ describe("the rule is scoped to a pairing, and to stage 4", () => {
     // arithmetic that one token against two or more is a Jaccard of at most 1/2 and so caps
     // the total at 0.75 whichever side is short. That held while the name axis read the whole
     // qualified name. §3.4.6's gate moved the axis to the last segment, and a one-token base
-    // reaches the top of the scale again: `Main.main` clears the gate against `Mainly.main`
-    // on an abbreviated owner, and their member names are identical.
+    // reaches the top of the scale again: `Main.main` is one deduped token, it clears the gate
+    // against `Mains.main` by inflection, and their member names are identical.
     expect(
-      pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Mainly.main", "bbb")]),
+      pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Mains.main", "bbb")]),
     ).toEqual([])
     // And the mirror, which is a separate skip in a separate loop: the short name on the head
     // reaches an admissible base the same way round.
     expect(
-      pairs([method("src/a.ts", "Mainly.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
+      pairs([method("src/a.ts", "Mains.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
     ).toEqual([])
   })
 

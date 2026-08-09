@@ -37,13 +37,8 @@ What is unchanged:
   name, so a `main` that moved file unchanged is still a move. Only the stage that reasons
   *from the name* stopped reasoning from one word.
 
-The rule reads the head, though the property belongs to a pairing, and that is a cost choice
-rather than a semantic one: one token against two or more is a Jaccard of at most 1/2, capping
-the total at `0.5 * 0.5 + 0.3 + 0.2 = 0.75` — under the lowest threshold left — so the only
-pairing this changes is one short on both sides. Skipping the head costs one test; testing
-the base would cost one per candidate. Both numbers are now named (`SHORT_NAME_CEILING`,
-`LOWEST_THRESHOLD`) with their ordering asserted, since the licence is a relation between
-them and §3.4.4 has a configurable threshold on the roadmap.
+The rule reads both sides of a pairing, since either end being short is enough to make the
+score unearned.
 
 **What this gives up.** A one-token name that moved file *and* changed body is reported as
 `added` + `removed` where it was one `moved+changed`. The band is narrow — stage 1 takes it if

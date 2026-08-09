@@ -385,6 +385,8 @@ export function matchStageNameSignature(
   const buckets = new Map<string, IRSymbol[]>()
   for (const b of remainingBase) {
     if (b.dropped) continue
+    // §3.4.3 — see `saysEnoughToPair`. Read on the base as well as the head: the property
+    // belongs to a pairing, and either end being short is enough to make the score unearned.
     if (!saysEnoughToPair(b.name)) continue
     const key = bucketKey(b)
     const bucket = buckets.get(key) ?? []
@@ -442,8 +444,10 @@ function bucketKey(s: IRSymbol): string {
 
 /**
  * §3.4.3 — the composite score a pair must reach, by how many tokens the head's last name
- * segment has. A one-token segment still asks for the whole scale, which a pair reaches only
- * on an identical name, signature and owner: `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754.
+ * segment has. A one-token segment still asks for the whole scale, which a pair reaches on an
+ * identical member name and signature past §3.4.6's gate: `0.5 + 0.3 + 0.2`, exactly 1 in
+ * IEEE 754. The owner need not be identical, only compatible — `UserRepo.get` and
+ * `UserRepos.get` reach it.
  */
 const EXACT_MATCH_ONLY = 1
 const TWO_TOKEN_THRESHOLD = 0.95
@@ -465,7 +469,7 @@ function thresholdFor(qname: string): number {
 }
 
 /**
- * §3.4.3 — whether a head's qualified name says enough for stage 4 to read it at all.
+ * §3.4.3 — whether a Symbol's qualified name says enough for stage 4 to read it at all.
  *
  * The score is built from three things the name supplies: its tokens, its owner's tokens,
  * and a signature. A name of one distinct token supplies one word and an owner that either
@@ -483,8 +487,9 @@ function thresholdFor(qname: string): number {
  * Read off both sides, because the property belongs to a pairing. It was once read off the
  * head alone, on the arithmetic that a short name anywhere capped the score at 0.75 — true
  * while the name axis read the whole qualified name, and false since §3.4.6 became a gate and
- * the axis moved to the last segment. `Main.main` against `Mainly.main` now clears the gate on
- * an abbreviated owner and scores the member names at 1.0.
+ * the axis moved to the last segment. `Main.main` is one deduped token and clears the gate
+ * against `Mains.main`, whose member name is identical, so the pair reaches the top of the
+ * scale from a name saying one word.
  *
  * The count stands in for how much the name says, and `tokenizeName` splits on ASCII case
  * boundaries, so a name written in a script that has none is one token however long it is:

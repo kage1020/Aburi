@@ -135,6 +135,7 @@ Dropped symbols all share the fingerprint `"000000000000"`, so they would collid
 # Bucket pre-filter (O(N) hash bucketing) suppresses K^2
 buckets = group remainingBase by (kind, signatureNullness)
         → { (kind, sigNull): [base symbols] }
+        skipping any base with tokenize(b.name).length <= 1     # §3.4.3, inadmissible
 
 candidates = []
 for h in remainingHead:
@@ -171,32 +172,32 @@ The symbol kind does not enter into it. This section was headed "per-symbol-kind
 thresholdFor(headName):
   tokenCount = tokenize(lastSegment(headName)).length
   if tokenCount <= 1:
-    return 1.0                  # an exact match on all three axes
+    return 1.0                  # an exact match on both remaining axes
   if tokenCount == 2:
-    return 0.95                 # strict (e.g. 'getUser' vs 'getUsers' scores 0.5 → does not pass)
+    return 0.95                 # strict (e.g. 'getUser' vs 'getUsers' scores 1/3 → does not pass)
   return 0.85                   # default
 ```
 
-1.0 is the top of the scale and a reachable score: an identical qualified name with an identical signature and an identical owner gives `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. The comparison is `score >= threshold`, so the first row pairs an unchanged `UserRepo.get` that moved file with an edited body — which stage 3 does not catch — and nothing else. Making it `>` would empty the row rather than tighten it.
+1.0 is the top of the scale and a reachable score: an identical member name and signature, past §3.4.6's gate, give `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. The comparison is `score >= threshold`, so the first row pairs an unchanged `UserRepo.get` that moved file with an edited body — which stage 3 does not catch. The owner need not be identical, only compatible, so `UserRepo.get` → `UserRepos.get` reaches it too. Making it `>` would empty the row rather than tighten it.
 
-##### Heads stage 4 does not read
+##### Symbols stage 4 does not read
 
-Two kinds of head are skipped before any threshold applies, because for them a high score means the evidence is missing rather than that the two names resemble each other. Neither is expressible as a threshold, and one of them wants a bar above the top of the scale:
+Two kinds of Symbol are skipped before any threshold applies, because for them a high score means the evidence is missing rather than that the two names resemble each other. Neither is expressible as a threshold, and one of them wants a bar above the top of the scale:
 
 ```
 if h.signature === null:            skip the head entirely, leave for added/removed
-if tokenize(h.name).length <= 1:    skip the head entirely, leave for added/removed
+if tokenize(s.name).length <= 1:    skip the Symbol, either side, leave for added/removed
 ```
 
 **A null signature** makes `signatureSimilarity(null, null)` return 1.0 against every candidate. The bucket key partitions by signature nullness, so a signature-less head only ever sees signature-less candidates — there is nothing in its bucket it could legitimately pair with, and the rule needs no condition on them.
 
-**A one-token qualified name** is the whole of what the name and owner axes have to read. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
+**A one-token qualified name** is the whole of what §3.4 has to read about that Symbol's identity. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
 
-The count is over the **whole qualified name**, which is what the score reads — not over the last segment, which is what `thresholdFor` reads. `UserRepo.get` supplies three tokens and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
+The count is over the **whole qualified name** — the member and its owner together, which is everything §3.4 knows a Symbol by — and not over the last segment alone, which is what `thresholdFor` reads. `UserRepo.get` supplies three tokens and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
 
 The rule reads **both sides**, because the property belongs to a pairing rather than to one end of it.
 
-It once read the head alone, on an arithmetic licence: a one-token name on either side capped the score at `0.5 * 0.5 + 0.3 + 0.2 = 0.75`, under the table's lowest row, so a one-token base was unreachable without a check of its own. That held while the name axis was a Jaccard over the whole qualified name. §3.4.6's gate moved the axis to the last segment, and the ceiling went with it: `Main.main` clears the gate against `Mainly.main` on an abbreviated owner, and their member names are identical, so the pair scores 1.0. Reading both sides costs one test per Symbol and needs no licence.
+It once read the head alone, on an arithmetic licence: a one-token name on either side capped the score at `0.5 * 0.5 + 0.3 + 0.2 = 0.75`, under the table's lowest row, so a one-token base was unreachable without a check of its own. That held while the name axis was a Jaccard over the whole qualified name. §3.4.6's gate moved the axis to the last segment, and the ceiling went with it: `Main.main` is one deduped token, it clears the gate against `Mains.main` by inflection, and their member names are identical, so the pair scores 1.0. Reading both sides costs one test per Symbol and needs no licence.
 
 **What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged. What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
 
@@ -206,7 +207,7 @@ Stage 3 is untouched by all of this: an identical logic fingerprint is proof on 
 
 #### 3.4.4 Tuning via configuration
 
-`config.diff.nameSignatureThreshold` (default: `null` = automatic per symbol kind) overriding the global threshold is planned — see the [roadmap](../roadmap.md). Currently the threshold is automatic only.
+`config.diff.nameSignatureThreshold` (default: `null` = automatic, by the token count of §3.4.3's table) overriding the global threshold is planned — see the [roadmap](../roadmap.md). Currently the threshold is automatic only.
 
 #### 3.4.5 Stage 4.5: dedicated weak matcher for dropped
 
@@ -264,9 +265,9 @@ The owner is therefore a **gate**, not a term in the score: a pair whose owners 
 
 ```
 ownerOf(qname):
-  byColon = qname.split('::')[0..-2]               # the Class:: portion of a static method
-  byDot   = qname.split('.')[0..-2]                # the nested.namespace.Class portion
-  return all but last segment, joined back
+  if '::' in qname: return qname[:first index of '::']    # the Class:: portion of a static method
+  if '.'  in qname: return qname[:last index of '.']      # the nested.namespace.Class portion
+  return ''
   # 'Class::method' → 'Class'
   # 'A.B.C.method'  → 'A.B.C'
   # 'topLevel'      → ''   (empty)
@@ -276,28 +277,66 @@ ownersAreCompatible(baseName, headName):
   headOwner = ownerOf(headName)
   if baseOwner === '' && headOwner === '': return true    # both top-level: one shared scope
   if baseOwner === '' || headOwner === '': return false   # different depths
-  # every token on each side needs a distinct partner on the other, where a partner is the
-  # same token or one it abbreviates (>= 3 characters, and a prefix)
-  return perfectMatching(tokenize(baseOwner), tokenize(headOwner), abbreviates)
+  if baseOwner === headOwner: return true                 # the common case
+
+  # an owner is a path, so it corresponds segment by segment; within a segment every token on
+  # each side needs a distinct partner on the other, under sameWord
+  baseSegments = baseOwner.split('.')
+  headSegments = headOwner.split('.')
+  if len(baseSegments) != len(headSegments): return false
+  return all(seg == cnt or perfectMatching(tokenize(seg), tokenize(cnt), sameWord)
+             for seg, cnt in zip(baseSegments, headSegments))
+
+sameWord(a, b):
+  return a == b or inflectionOf(a, b)     # user/users, entity/entities. Nothing else.
 ```
 
 As a result:
 
 | pair | owners | verdict |
 |---|---|---|
-| `UserRepo.getUser` vs `UsersRepository.getUser` | `user`→`users`, `repo`→`repository` | compatible → scored, 1.0, **pairs** |
-| `UserRepo.findById` vs `UsersRepository.findById` | as above | compatible → scored, 1.0, **pairs** |
+| `UserRepo.getUser` vs `UserRepos.getUser` | `repo` -> `repos` | compatible, scored 1.0, **pairs** |
+| `EntityStore.findById` vs `EntitiesStore.findById` | `entity` -> `entities` | compatible, **pairs** |
+| `Users.UserRepo.getUser` vs `Users.UserRepos.getUser` | segment by segment | compatible, **pairs** |
 | `UserRepo.getUser` vs `AdminRepo.getUser` | `user` has no partner | **refused** |
+| `RepoManager.load` vs `ReportManager.load` | `repo` is not `report` inflected | **refused** |
 
 **Why a gate and not a weight.** The previous design added `0.2 * jaccardTokens(baseOwner, headOwner)` to the score, and could satisfy neither requirement.
 
 It could not pair the rename, because the owner was counted twice. §3.4.1's name axis is a Jaccard over the *whole* qualified name, so a renamed owner already depressed the name term, and the owner term then charged for the same difference again: `UserRepo.getUser` vs `UsersRepository.getUser` scored `0.5*0.4 + 0.3 + 0.2*0 = 0.5`, not the 0.9 this section claimed. End to end, renaming a class and keeping three methods with edited bodies reported `added: 3 / removed: 3`.
 
-And it could not refuse the collision, because a weight cannot outvote a perfect name and a perfect signature. Reading the name axis on the last segment fixes the double count but inverts the ordering: `AdminRepo` *shares* the `repo` token where `UsersRepository` shares none, so the pair R-8 must reject scores 0.8667 and the pairs it must accept score 0.8. Raising the owner weight only moves the problem — two three-token class names sharing two tokens reach exactly 0.85, the lowest row in the table. There is no weight at which "different class" reliably loses, because the quantity being weighed is not evidence of degree.
+And it could not refuse the collision, because a weight cannot outvote a perfect member name and signature. Reading the name axis on the last segment fixes the double count but inverts the ordering — `AdminRepo` *shares* the `repo` token where `UsersRepository` shares none:
+
+| pair, both `.findById` | owner Jaccard | w=0.2 | w=0.3 | threshold |
+|---|---|---|---|---|
+| `UserRepo` vs `AdminRepo` — must refuse | 0.333 | 0.8667 | 0.8000 | 0.85 |
+| `UserRepo` to `UsersRepository` — must pair | 0 | 0.8000 | 0.7000 | 0.85 |
+| `UserRepoService` vs `AdminRepoService` — must refuse | 0.5 | 0.9000 | 0.8500 | 0.85 |
+
+The collision outscores the rename at either weight, and the three-token collision passes at both. There is no weight at which "different class" reliably loses, because the quantity being weighed is not evidence of degree.
 
 Past the gate there is no owner left to grade, so the owner axis is satisfied in full and the composite keeps the 0.5/0.3/0.2 shape §3.4.3's rows are calibrated against. Dropping the term and renormalising would move every threshold without changing what any of them means.
 
-**What the gate costs.** It is deliberately strict in one direction: both token sets must be covered, so `UserRepo` and `UserRepoV2` are two classes rather than one renamed — an added token is as much evidence of a sibling as of a rename. Abbreviations shorter than three characters are not read as such either, so `IdMap` → `IdentityMap` is a real rename left unpaired rather than guessed at; `id` opens `identity`, `identifier` and `idempotent` alike. Both cases fall through to `added` + `removed`, which is R-8's preferred direction of error.
+**Why inflection and nothing looser.** A prefix test is the obvious way to admit `repo` -> `repository`, and it cannot be made to work: it admits `repo`/`report`, `cache`/`cached`, `con`/`controller` — distinct classes, which is the collision this section exists to refuse. Nor is there a threshold to find, because the two populations interleave:
+
+| | dice | levenshtein |
+|---|---|---|
+| accept `UserRepo`/`UsersRepository` | 0.571 | 7 |
+| refuse `RepoManager`/`ReportManager` | 0.818 | 2 |
+| accept `Repo`/`Repository` | 0.500 | 6 |
+| refuse `CacheStore`/`CachedStore` | 0.842 | 1 |
+
+The renames to accept score *lower* than the collisions to refuse, on both measures. A length-growth rule fares no better: `con` -> `controller` grows by 7 and `user` -> `users` by 1, so anything admitting the second admits the first.
+
+Inflection is not on that spectrum. It is a closed, mechanical relation between two spellings of one word, so it can be recognised rather than estimated, and it covers the rename a plain equality test misses most often — a class pluralised in place.
+
+**What the gate costs.** Three things, all falling through to `added` + `removed`, which is R-8's preferred direction of error:
+
+- **The abbreviation family.** `UserRepo` -> `UsersRepository`, this section's original headline example, no longer clears the gate. That is the price of refusing `repo`/`report`, which no rule over the two strings alone can tell apart.
+- **An added or dropped token.** `UserRepo` and `UserRepoV2` are two classes rather than one renamed; an added token is as much evidence of a sibling as of a rename.
+- **A changed nesting depth.** A rename changes what a class is called, not where it lives, so `Services.UserRepo` and `UserRepo` are different scopes.
+
+The evidence that would settle the first is not in the strings. The owner is itself a Symbol in the IR, so "was this class paired as a rename" is a question the stage could ask rather than guess at — which would mean stage 4 consuming its own output, and is the direction a future revision should take rather than a looser string rule.
 
 #### 3.4.2 signatureSimilarity
 
