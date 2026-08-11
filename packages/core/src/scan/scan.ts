@@ -63,7 +63,10 @@ export interface ScanResult {
   /**
    * Files that contributed no Symbols for a reason other than a parse failure — over-size
    * or unreadable at discovery, unroutable or over its `parseTimeoutMs` budget afterwards.
-   * Surfaced separately from parseErrors, which are about files that were read.
+   *
+   * Separate from `parseErrors`, which says what a file that *was* read had wrong with it,
+   * but not disjoint from it: a file slow enough to be abandoned is often slow because it is
+   * broken, and it appears in both.
    */
   skipped: readonly SkippedFile[]
   /** Rich timeout observations for logging / CI signals. Aggregated into `ir.stats` too. */

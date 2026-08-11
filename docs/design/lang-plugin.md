@@ -453,6 +453,7 @@ Every language plugin must pass the following tests.
 | LP14 | `@Post('/x') method()` | decorators[0] = { name: "Post", raw: "Post('/x')", arguments: ["'/x'"], boundary: `<determined by the framework plugin>`, line: ... } |
 | LP15 | two decorators | 2 entries in decorators[], ascending by line |
 | LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
+| LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in line order — a comment is written wherever the author put it and does not end the run |
 
 ### 9.4 Body walk
 
