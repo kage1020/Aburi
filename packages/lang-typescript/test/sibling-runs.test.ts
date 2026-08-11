@@ -83,6 +83,13 @@ describe("leading comment run", () => {
     expect(byId(symbols, "#C.m").signature?.throws).toEqual(["E"])
   })
 
+  it("steps over the decorator without absorbing its text", async () => {
+    // Skipping and collecting are one line apart. A decorator argument that happens to
+    // mention `@throws` is the difference: it is source, not documentation.
+    const symbols = await symbolsOf('class C {\n  @Doc("@throws NotAThrow")\n  m() {}\n}\n')
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+  })
+
   it("does not let stepping over a decorator reach the previous member's comment", async () => {
     const symbols = await symbolsOf(
       [
