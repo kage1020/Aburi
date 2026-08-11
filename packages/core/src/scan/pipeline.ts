@@ -29,7 +29,12 @@ import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
 import { decideSymbolDrop } from "./drop-b"
 import type { DropCFilter } from "./drop-c"
-import { type ClassifyTimeoutEvent, classifyWithTimeout } from "./timeout"
+import {
+  type ClassifyTimeoutEvent,
+  classifyWithTimeout,
+  type ParseTimeoutEvent,
+  startParseDeadline,
+} from "./timeout"
 
 /**
  * Per-file pipeline output. The Symbols carry finalized fingerprints and are already
@@ -47,6 +52,14 @@ export interface FilePipelineResult {
    * this flag; those files are still counted as parsed even when they carry warnings.
    */
   terminalParseFailure: boolean
+  /**
+   * Set when the file overran `config.parseTimeoutMs` and was abandoned. Every other
+   * field is then empty: an abandoned file contributes nothing to the IR, because the
+   * alternative — keeping whichever Symbols it managed to produce first — would make the
+   * Document depend on how fast the machine was that day. The caller records the file as
+   * skipped and excludes it from `parsedFiles`.
+   */
+  parseTimeout: ParseTimeoutEvent | null
   /** POSIX-relative path of the file. */
   path: string
   /**
@@ -68,6 +81,8 @@ export interface FilePipelineInput {
   dropCFilter: DropCFilter
   log: Logger
   classifyTimeoutMs?: number
+  /** `config.parseTimeoutMs`. Omitted means the lang-plugin.md §7.1.2 default. */
+  parseTimeoutMs?: number
 }
 
 /**
@@ -89,11 +104,34 @@ export interface FilePipelineInput {
  *      `Symbol.calls[]`, classified calls move to `Symbol.effects[]`.
  *   7. `normalizeAst` + `computeSymbolFingerprint` — locks the Symbol against later
  *      churn.
+ *
+ * Steps 1, 2 and each iteration of 3-7 are separated by a read of the file's
+ * `parseTimeoutMs` budget (lang-plugin.md §7.1.2). Those are the only points at which
+ * control is back here — the plugin calls in between are synchronous — so they are where
+ * a file that has run out of budget is abandoned.
  */
 export async function runFilePipeline(input: FilePipelineInput): Promise<FilePipelineResult> {
   const { file, language, frameworks, effects, registry, config, dropCFilter, log } = input
 
+  const deadline = startParseDeadline(input.parseTimeoutMs)
+  const abandon = (): FilePipelineResult => ({
+    symbols: [],
+    imports: [],
+    parseErrors: [],
+    timeoutEvents: [],
+    terminalParseFailure: false,
+    parseTimeout: {
+      file: file.path,
+      budgetMs: deadline.budgetMs,
+      elapsedMs: deadline.elapsedMs(),
+    },
+    path: file.path,
+    dynamicCallSites: [],
+  })
+
   const parseResult = await language.parseFile(file)
+  if (deadline.expired()) return abandon()
+
   const parseErrors = parseResult.errors
   const timeoutEvents: ClassifyTimeoutEvent[] = []
   // Normalized before the early return as well: a terminal parse failure still hands its
@@ -107,6 +145,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       parseErrors,
       timeoutEvents,
       terminalParseFailure: true,
+      parseTimeout: null,
       path: file.path,
       dynamicCallSites: [],
     }
@@ -117,10 +156,14 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     parseResult.tree,
     extractCtx,
   ) as SymbolCandidate<OpaqueAstNode>[]
+  if (deadline.expired()) return abandon()
+
   const symbols: IRSymbol[] = []
   const dynamicCallSites: string[] = []
 
   for (const raw of candidates) {
+    if (deadline.expired()) return abandon()
+
     const { candidate, confidence } = mergeFrameworkClassification(
       normalizeCandidateStrings(raw),
       frameworks,
@@ -181,6 +224,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     parseErrors,
     timeoutEvents,
     terminalParseFailure: false,
+    parseTimeout: null,
     path: file.path,
     dynamicCallSites,
   }

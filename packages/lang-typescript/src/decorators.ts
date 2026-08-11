@@ -30,6 +30,13 @@ export function readDecorators(declaration: Node): Decorator[] {
 /**
  * Return the decorator nodes belonging to `declaration`, in source order. Handles the
  * "wrapped in export_statement" and the "sibling to member" cases separately.
+ *
+ * The sibling case walks backwards from the declaration rather than reading the parent's
+ * child list and searching it for the declaration's own position. The two agree on the
+ * answer, but the parent of a top-level declaration is the whole program, and
+ * `namedChildren` unmarshals every child into a JS object — so reading it once per
+ * declaration costs a file of N declarations O(N²), while the walk costs the length of
+ * the decorator run, which is nearly always zero.
  */
 function collectDecoratorNodes(declaration: Node): Node[] {
   const parent = declaration.parent
@@ -37,19 +44,13 @@ function collectDecoratorNodes(declaration: Node): Node[] {
     // Wrapped export — decorators are field children of the wrapper itself.
     return parent.namedChildren.filter((c): c is Node => c !== null && c.type === "decorator")
   }
-  if (parent === null) return []
-  const siblings = parent.namedChildren
-  const anchorIndex = siblings.findIndex((s) => s !== null && s.id === declaration.id)
-  if (anchorIndex <= 0) return []
   const out: Node[] = []
-  for (let i = anchorIndex - 1; i >= 0; i--) {
-    const sibling = siblings[i]
-    if (sibling === null || sibling === undefined) continue
-    if (sibling.type === "decorator") {
-      out.push(sibling)
-      continue
-    }
-    break
+  for (
+    let sibling = declaration.previousNamedSibling;
+    sibling !== null && sibling.type === "decorator";
+    sibling = sibling.previousNamedSibling
+  ) {
+    out.push(sibling)
   }
   return out.reverse()
 }

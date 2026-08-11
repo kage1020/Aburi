@@ -76,7 +76,7 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
 
   // Resource limits for parsing/extraction
   "maxFileSizeBytes": 2097152,        // 2 MB (default); files exceeding this are skipped
-  "parseTimeoutMs": 5000              // per-file parse timeout (default 5s)
+  "parseTimeoutMs": 5000              // per-file parse+extract+walk budget (default 5s); an over-budget file is skipped whole — lang-plugin.md §7.1.2
 }
 ```
 

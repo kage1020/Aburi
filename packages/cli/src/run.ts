@@ -373,7 +373,7 @@ function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream):
   }
   if (report.skipped.length > 0) {
     stderr.write(
-      `⚠ ${report.skipped.length} file(s) were skipped during discovery: ${summariseSkipped(report.skipped)}\n`,
+      `⚠ ${report.skipped.length} file(s) contributed no Symbols: ${summariseSkipped(report.skipped)}\n`,
     )
   }
   const lsp = report.lspEnrichment

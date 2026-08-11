@@ -337,8 +337,16 @@ Files whose size exceeds `config.maxFileSizeBytes` (default: `2 * 1024 * 1024` =
 
 ### 7.1.2 Timeout
 
-If the total of parse + extractSymbols + walkBody for one file exceeds `config.parseTimeoutMs` (default: `5000` = 5 seconds), abort, skip that file, and warn.
+If the total of parse + extractSymbols + walkBody for one file exceeds `config.parseTimeoutMs` (default: `5000` = 5 seconds; the config schema's minimum is 100 and it has no maximum), abort, skip that file, and warn.
 This prevents a broken grammar or pathological source (deep nesting, etc.) from stalling the whole run.
+
+The budget is **cooperative**, for the reason §5.1.1 gives for the classify budget: `extractSymbols` and `walkBody` are synchronous plugin calls, and nothing can interrupt one that has already started. It is read at the three points where control is back in the core — after `parseFile`, after `extractSymbols`, and before each candidate's `walkBody` — so what it guarantees is that an over-budget file is handed no *further* work. A file costs at most its budget plus one stage, and one enormous candidate can still overrun by however long that candidate takes. A per-candidate hang is not something a wall-clock budget can catch; it is what `--strict` and a bug report are for.
+
+An aborted file contributes **nothing**: no Symbols, no import edges, no parse errors. Keeping whichever Symbols it produced before the budget ran out would make the Document depend on how fast the machine was that day, so the outcome is binary per file. It is recorded in `ScanResult.skipped` with `reason: "parse-timeout"` and excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`.
+
+- warning stderr: `Skipped <file>: extraction reached <elapsed>ms, exceeding parseTimeoutMs (<budget>ms). Override with config.parseTimeoutMs.`
+
+A file being skipped on wall clock does mean the IR can differ between a fast machine and a slow one, at file granularity. That is inherent in asking for a time budget; a run that wants reproducibility across machines sets `parseTimeoutMs` high enough that nothing reaches it.
 
 ### 7.2 Extraction exceptions
 
@@ -398,6 +406,17 @@ Each plugin must follow these conventions:
    - In a future release, switching to native bindings (e.g. the `tree-sitter` Node bindings) may be added via flags such as `capabilities.preferNative` (see the [roadmap](../roadmap.md))
    - Currently only WASM is implemented; no native fallback is provided
 
+### 8.2 Cost convention for WASM node access
+
+The same heap boundary has a cost consequence that is easy to miss, because the JS surface hides it. A getter like `node.children` or `node.namedChildren` is not a field read: it unmarshals **every** child across the WASM boundary into a fresh JS object, and the array it returns is cached on that JS wrapper only — the next `node.parent` hands back a new wrapper and pays for the list again.
+
+So a per-node question must be asked of the node, never of its container:
+
+- **Ask the node**: `previousSibling`, `previousNamedSibling`, `nextSibling`, `childForFieldName`. Each crosses the boundary once, and a backwards walk over a run of siblings stops as soon as the run ends.
+- **Do not ask the container**: reading the parent's whole child list to find the node's own index in it. It answers the same question, but a top-level declaration's parent is the entire file. Doing it once per declaration makes a file of N declarations cost O(N²) — the shape a generated API client or a Prisma type file has, comfortably inside `maxFileSizeBytes` and minutes long to extract.
+
+Reading the container is right when the container is what the question is about: every member of a class body, every argument of a call. It is the *per-node* use that has to be avoided.
+
 ## 9. Verifiable Properties (Test Criteria)
 
 Every language plugin must pass the following tests.
@@ -431,6 +450,7 @@ Every language plugin must pass the following tests.
 |---|---|---|
 | LP14 | `@Post('/x') method()` | decorators[0] = { name: "Post", raw: "Post('/x')", arguments: ["'/x'"], boundary: `<determined by the framework plugin>`, line: ... } |
 | LP15 | two decorators | 2 entries in decorators[], ascending by line |
+| LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
 
 ### 9.4 Body walk
 

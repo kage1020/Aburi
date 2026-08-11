@@ -105,3 +105,56 @@ function clampTimeout(ms: number): number {
   if (ms > CLASSIFY_TIMEOUT_MAX_MS) return CLASSIFY_TIMEOUT_MAX_MS
   return ms
 }
+
+/** Default per-file extraction budget in milliseconds, per lang-plugin.md §7.1.2. */
+export const DEFAULT_PARSE_TIMEOUT_MS = 5000
+
+/**
+ * Lower bound enforced by the config schema. Unlike the classify budget there is no upper
+ * one: a caller who wants a whole minute for a pathological file is entitled to it, and
+ * the value that matters for CI is the default.
+ */
+export const PARSE_TIMEOUT_MIN_MS = 100
+
+/**
+ * One file abandoned for overrunning its budget. `budgetMs` is the clamped budget that was
+ * in effect; `elapsedMs` is the wall clock the file had actually spent when the pipeline
+ * next looked, which is always at least the budget and usually more — see
+ * `startParseDeadline` for why the two differ.
+ */
+export interface ParseTimeoutEvent {
+  file: string
+  budgetMs: number
+  elapsedMs: number
+}
+
+/**
+ * A per-file wall-clock budget covering parse + extract + walk, per lang-plugin.md §7.1.2.
+ *
+ * The deadline is cooperative. `extractSymbols` and `walkBody` are synchronous plugin
+ * calls, so nothing can interrupt one that has already started — the same constraint
+ * `classifyWithTimeout` documents for `classify`. What the budget buys is that the
+ * pipeline stops handing a file *more* work once the budget is spent: it is read after
+ * the parse, after extraction, and before each candidate's walk. A file therefore costs
+ * at most its budget plus one stage, and a single monster candidate can still overrun by
+ * as much as that candidate takes.
+ */
+export interface ParseDeadline {
+  /** The clamped budget in effect for this file. */
+  readonly budgetMs: number
+  /** Wall clock spent since the deadline started. */
+  elapsedMs(): number
+  /** True once the budget is spent. */
+  expired(): boolean
+}
+
+export function startParseDeadline(timeoutMs?: number): ParseDeadline {
+  const configured = timeoutMs ?? DEFAULT_PARSE_TIMEOUT_MS
+  const budgetMs = configured < PARSE_TIMEOUT_MIN_MS ? PARSE_TIMEOUT_MIN_MS : configured
+  const start = performance.now()
+  return {
+    budgetMs,
+    elapsedMs: () => performance.now() - start,
+    expired: () => performance.now() - start >= budgetMs,
+  }
+}

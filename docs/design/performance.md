@@ -45,6 +45,8 @@ The roadmap target is measured against a specific benchmark corpus so CI can reg
 
 The corpus itself is stored under `benchmarks/perf-1k/` (added in a follow-up PR that also adds the CI job). The corpus is generated deterministically from templates so its structure is reproducible without vendoring 1,200 files.
 
+The corpus is deliberately many small files, which is the shape the pool exists for — and it is therefore blind to the opposite shape. A single generated file holding thousands of declarations sits inside `maxFileSizeBytes`, occupies exactly one shard, and no amount of concurrency touches it: it is bounded by whatever the language plugin's per-file cost is in the number of declarations ([lang-plugin.md](./lang-plugin.md) §8.2). A wall-time regression on the corpus and a wall-time regression on one large file are separate measurements, and passing PF1 says nothing about the second.
+
 ## 3. Worker model — decision
 
 | Option | Adopted | Rejected, and why |

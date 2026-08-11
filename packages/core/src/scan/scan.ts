@@ -60,7 +60,11 @@ export interface ScanInput {
 export interface ScanResult {
   ir: IR
   parseErrors: readonly ParseErrorRecord[]
-  /** Files skipped during discovery (over-size, unreadable). Surfaced separately from parseErrors. */
+  /**
+   * Files that contributed no Symbols for a reason other than a parse failure — over-size
+   * or unreadable at discovery, unroutable or over its `parseTimeoutMs` budget afterwards.
+   * Surfaced separately from parseErrors, which are about files that were read.
+   */
   skipped: readonly SkippedFile[]
   /** Rich timeout observations for logging / CI signals. Aggregated into `ir.stats` too. */
   timeoutEvents: readonly ClassifyTimeoutEvent[]
@@ -164,7 +168,28 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       ...(input.config.classifyTimeoutMs !== undefined
         ? { classifyTimeoutMs: input.config.classifyTimeoutMs }
         : {}),
+      ...(input.config.parseTimeoutMs !== undefined
+        ? { parseTimeoutMs: input.config.parseTimeoutMs }
+        : {}),
     })
+
+    if (result.parseTimeout !== null) {
+      const { budgetMs, elapsedMs } = result.parseTimeout
+      const spent = Math.round(elapsedMs)
+      additionalSkipped.push({
+        path: discoveredFile.path,
+        reason: "parse-timeout",
+        detail: `${spent}ms exceeds ${budgetMs}ms`,
+      })
+      logger.warn(
+        `Skipped ${discoveredFile.path}: extraction reached ${spent}ms, exceeding parseTimeoutMs (${budgetMs}ms). Override with config.parseTimeoutMs.`,
+      )
+      // The file's source text is dropped along with its Symbols. LSP enrichment reads
+      // `fileContents` to build its documents, and a file with no Symbols in the IR has
+      // nothing for it to enrich.
+      fileContents.delete(sourceFile.path)
+      continue
+    }
 
     if (result.parseErrors.length > 0) {
       parseErrors.push({ file: discoveredFile.path, errors: result.parseErrors })
