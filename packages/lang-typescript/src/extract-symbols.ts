@@ -488,15 +488,17 @@ function currentFile(ctx: ExtractionContext): string {
  * comment and a declaration means the comment is not attached to it — a stray `;` in a class
  * body separates the two, and reading past it would hand the member a JSDoc block written
  * about nothing.
+ *
+ * A decorator is stepped over rather than ending the run, which is the mirror of the comment
+ * a decorator run steps over in `readDecorators`: `/** doc *\/ @Get() handler() {}` is
+ * idiomatic, and the decorator belongs to the member rather than separating anything from it.
  */
 function readLeadingJsDoc(node: Node): string | null {
   const anchor = outerStatementWrapper(node)
   const collected: string[] = []
-  for (
-    let sibling = anchor.previousSibling;
-    sibling !== null && sibling.type === "comment";
-    sibling = sibling.previousSibling
-  ) {
+  for (let sibling = anchor.previousSibling; sibling !== null; sibling = sibling.previousSibling) {
+    if (sibling.type === "decorator") continue
+    if (sibling.type !== "comment") break
     collected.push(sibling.text)
   }
   if (collected.length === 0) return null

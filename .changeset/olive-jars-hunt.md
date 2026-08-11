@@ -49,8 +49,7 @@ declaration's own preceding siblings and the named walk steps over the keywords 
 them; the sweep-filter that used to handle it separately was doing the same job less
 precisely.
 
-Two placements the walk does not reach, unchanged and now pinned by tests: a decorator on a
-declaration with no wrapper to hold it (`@A() class C {}` at top level, or
-`export @A() class C {}`) is parsed as a *child* of the declaration rather than a sibling, so
-it is not read. Closing that gap would newly attach decorators to Symbols that have none
-today and move every fingerprint that reads `extKind`, so it wants its own change.
+Two placements the walk does not reach, pinned by tests here and closed in the change that
+follows: a decorator on a declaration with no wrapper to hold it (`@A() class C {}` at top
+level, or `export @A() class C {}`) is parsed as a *child* of the declaration rather than a
+sibling, so it is not read.

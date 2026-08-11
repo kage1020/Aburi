@@ -70,14 +70,33 @@ describe("leading comment run", () => {
     expect(byId(symbols, "#f").signature?.throws).toEqual(["WrappedError"])
   })
 
-  it("stops at a decorator, so a JSDoc written above one is not read", async () => {
-    // `/** doc */ @Get() handler() {}` is idiomatic and its JSDoc plainly documents the
-    // method, so this is a gap rather than a rule — the mirror of the comment a decorator
-    // run has to skip. Pinned rather than closed here: `signature.throws` feeds the api and
-    // logic fingerprints, so widening it reclassifies Symbols across a whole corpus on
-    // upgrade, which is a decision of its own and not one a performance change should make.
+  it("steps over a decorator, because a JSDoc above one still documents the member", async () => {
+    // `/** doc */ @Get() handler() {}` is idiomatic, and the decorator belongs to the member
+    // rather than separating anything from it — the mirror of the comment a decorator run
+    // has to skip.
     const symbols = await symbolsOf("class C {\n  /** @throws E */\n  @A()\n  m() {}\n}\n")
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual(["E"])
+  })
+
+  it("reads a comment written between the decorator and the member", async () => {
+    const symbols = await symbolsOf("class C {\n  @A()\n  /** @throws E */\n  m() {}\n}\n")
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual(["E"])
+  })
+
+  it("does not let stepping over a decorator reach the previous member's comment", async () => {
+    const symbols = await symbolsOf(
+      [
+        "class C {",
+        "  /** @throws OwnedByFirst */",
+        "  first() {}",
+        "  @A()",
+        "  m() {}",
+        "}",
+        "",
+      ].join("\n"),
+    )
     expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+    expect(byId(symbols, "#C.first").signature?.throws).toEqual(["OwnedByFirst"])
   })
 })
 
@@ -137,21 +156,57 @@ describe("decorator run", () => {
   })
 })
 
-describe("decorators the walk does not reach", () => {
+describe("decorators parented inside the declaration", () => {
   /**
-   * A decorator with no wrapper to hold it is parsed as the first *child* of the
-   * declaration, not as a sibling — so neither the walk nor the child-list scan it replaced
-   * finds it. These pin the answer as it stands rather than endorse it: closing the gap
-   * would newly attach decorators to Symbols that have none today, moving `extKind` and
-   * every fingerprint that reads it, which wants its own change.
+   * When nothing else owns the declaration, the grammar makes the decorator a `decorator:`
+   * field child of the declaration itself rather than a preceding sibling. Same decorator,
+   * same meaning, different parent — so both placements have to be read.
    */
-  it("misses a decorator on a declaration that is not exported", async () => {
+  it("reads one on a declaration that is not exported", async () => {
     const symbols = await symbolsOf("@Injectable()\nclass C {}\n")
-    expect(byId(symbols, "#C").decorators).toEqual([])
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
   })
 
-  it("misses a decorator written after the `export` keyword", async () => {
+  it("reads one written after the `export` keyword", async () => {
     const symbols = await symbolsOf("export @Injectable() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("reads one written after `export default`", async () => {
+    const symbols = await symbolsOf("export default @Injectable() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("reads one on an abstract class, which is a different node type", async () => {
+    const symbols = await symbolsOf("@Injectable()\nabstract class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("keeps several in source order", async () => {
+    const symbols = await symbolsOf("@A()\n@B()\n@Cee()\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B", "Cee"])
+  })
+
+  it("is not ended by a comment, matching the sibling side", async () => {
+    const symbols = await symbolsOf("@A()\n// note\n@B()\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B"])
+  })
+
+  it("merges with the sibling run when a declaration is decorated on both sides", async () => {
+    // `@A()` sits in the export wrapper, `@B()` inside the class. Both decorate `C`.
+    const symbols = await symbolsOf("@A()\nexport @B() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B"])
+  })
+
+  it("does not read a parameter's decorator as the method's", async () => {
+    // A parameter decorator is a child of the parameter, not of the method, and the method
+    // does not field-tag it. This is the negative the widening could plausibly break.
+    const symbols = await symbolsOf("class C {\n  m(@P() x: number) {}\n}\n")
+    expect(byId(symbols, "#C.m").decorators).toEqual([])
+  })
+
+  it("does not read a member's parameter decorator as the class's", async () => {
+    const symbols = await symbolsOf("class C {\n  m(@P() x: number) {}\n}\n")
     expect(byId(symbols, "#C").decorators).toEqual([])
   })
 })

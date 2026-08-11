@@ -454,6 +454,9 @@ Every language plugin must pass the following tests.
 | LP15 | two decorators | 2 entries in decorators[], ascending by line |
 | LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
 | LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in line order — a comment is written wherever the author put it and does not end the run |
+| LP15c | a decorator the grammar parents *inside* the declaration rather than beside it (`export @A() class C {}`, `@A() class C {}`, `@A() abstract class C {}`) | read the same as a preceding one; a declaration decorated in both positions reports both |
+| LP15d | a **parameter** decorator (`m(@P() x)`) | not among the method's decorators, nor the owning class's — it decorates the parameter |
+| LP15e | a JSDoc block above a decorator (`/** @throws E */ @A() m() {}`) | read as the member's; the decorator does not end the comment run |
 
 ### 9.4 Body walk
 
