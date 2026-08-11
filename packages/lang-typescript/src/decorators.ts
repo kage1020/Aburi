@@ -5,40 +5,58 @@ import type { Node } from "web-tree-sitter"
  * Read every decorator attached to a specific declaration node.
  *
  * A decorator always belongs to the declaration it precedes. Tree-sitter-typescript parents
- * it in one of two places depending on whether anything else owns that declaration, and both
- * have to be read:
+ * it in one of two places, decided by **where it is written relative to the `export`
+ * keyword**, and both have to be read:
  *
- * - **Beside the declaration.** A class member (`class C { @A() m() {} }`) has its
- *   decorators as preceding siblings inside the class body; a declaration wrapped for export
- *   (`@A() export class C {}`) has them as preceding siblings inside the `export_statement`,
- *   whose rule is `decorator* 'export' ['default'] declaration`.
+ * - **Beside the declaration**, when nothing separates the two. A class member
+ *   (`class C { @A() m() {} }`) has its decorators as preceding siblings inside the class
+ *   body, and a decorator written *before* `export` has them as preceding siblings inside the
+ *   `export_statement`, whose rule is `decorator* 'export' ['default'] declaration`.
  *
- * - **Inside the declaration.** With no wrapper to hold it — `@A() class C {}`,
- *   `export @A() class C {}`, `export default @A() class C {}`, `@A() abstract class C {}` —
- *   the decorator is a `decorator:` field child of the declaration node itself.
+ * - **Inside the declaration**, when the wrapper's rule cannot hold it. A decorator written
+ *   *after* the keyword (`export @A() class C {}`, `export default @A() class C {}`) has
+ *   nowhere in the wrapper to go, and one on a declaration that is not exported at all
+ *   (`@A() class C {}`, `@A() abstract class C {}`) has no wrapper. Both become a
+ *   `decorator:` field child of the declaration node itself.
  *
- * One declaration can have both at once: in `@A() export @B() class C {}`, `A` is the
- * wrapper's sibling and `B` is the class's child, and both decorate `C`. The two sources are
- * disjoint by construction, so the union needs no deduplication, and the line sort below puts
- * them back in source order.
+ * The two sources cannot overlap: a node has one parent, so a preceding sibling of the
+ * declaration is never also its child. That is why the union needs no deduplication.
+ *
+ * Both positions at once — `@A() export @B() class C {}` — is what TypeScript rejects as
+ * TS8038, but the grammar accepts it, so it does reach here from a half-edited file. Reading
+ * the union rather than one side means such a file loses no decorator on the way to being
+ * reported.
  *
  * A **parameter** decorator (`m(@P() x)`) is deliberately out of reach of both: it is a child
  * of the parameter, and the method does not field-tag it.
  */
 export function readDecorators(declaration: Node): Decorator[] {
-  const found = collectDecoratorNodes(declaration)
-  const decorators = found.map(readDecorator).filter((d): d is Decorator => d !== null)
-  decorators.sort((a, b) => a.line - b.line || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-  return decorators
-}
-
-/** The decorator nodes belonging to `declaration`, from both placements, unordered. */
-function collectDecoratorNodes(declaration: Node): Node[] {
-  return [...precedingDecorators(declaration), ...declaration.childrenForFieldName("decorator")]
+  return collectDecoratorNodes(declaration)
+    .map(readDecorator)
+    .filter((d): d is Decorator => d !== null)
 }
 
 /**
- * The run of decorators written immediately before `declaration`, as siblings.
+ * The decorator nodes belonging to `declaration`, in source order.
+ *
+ * Ordered on `startIndex` rather than on the line each one starts, because two decorators
+ * can share a line and `Decorator` carries no column: `@UseGuards(G) @Controller("x")` would
+ * otherwise fall back on whatever tiebreak the caller chose, and the order is a contract —
+ * `framework-nestjs` resolves a class with several recognised decorators by taking the first
+ * in source order. A byte offset is total and agrees with the line ordering that integrity
+ * invariant #11 checks, so one sort satisfies both.
+ */
+function collectDecoratorNodes(declaration: Node): Node[] {
+  const found = [
+    ...precedingDecorators(declaration),
+    ...declaration.childrenForFieldName("decorator"),
+  ]
+  return found.sort((a, b) => a.startIndex - b.startIndex)
+}
+
+/**
+ * The run of decorators written immediately before `declaration`, as siblings, nearest one
+ * first — the walk's own order, which the caller sorts.
  *
  * The walk goes backwards from the declaration rather than reading the parent's child list
  * and searching it for the declaration's own position. Both find the same run, but the
@@ -76,8 +94,10 @@ function precedingDecorators(declaration: Node): Node[] {
 
 function readDecorator(node: Node): Decorator | null {
   // The decorator wraps either a call_expression (@Foo(...)) or a bare identifier / member
-  // access (@Foo, @Ns.Foo). The first named child is the inner expression.
-  const inner = node.namedChild(0)
+  // access (@Foo, @Ns.Foo). A comment may be written between the `@` and the expression —
+  // `@/* why */ Foo()` parses — and `leafIdentifier` falls back to a node's text, so taking
+  // the first named child unconditionally would name the decorator after the comment.
+  const inner = firstExpression(node)
   if (inner === null) return null
   const line = node.startPosition.row + 1
 
@@ -104,6 +124,14 @@ function readDecorator(node: Node): Decorator | null {
     boundary: false,
     line,
   }
+}
+
+function firstExpression(node: Node): Node | null {
+  for (const child of node.namedChildren) {
+    if (child === null || child.type === "comment") continue
+    return child
+  }
+  return null
 }
 
 function leafIdentifier(node: Node): string {

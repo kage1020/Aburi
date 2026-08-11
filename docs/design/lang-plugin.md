@@ -414,7 +414,7 @@ The same heap boundary has a cost consequence that is easy to miss, because the 
 
 So a per-node question must be asked of the node, never of its container:
 
-- **Ask the node**: `previousSibling`, `previousNamedSibling`, `nextSibling`, `childForFieldName`. Each crosses the boundary once, and a backwards walk over a run of siblings stops as soon as the run ends.
+- **Ask the node**: `previousSibling`, `previousNamedSibling`, `nextSibling`, `childForFieldName`, `childrenForFieldName`. Each crosses the boundary once per node it returns, and a backwards walk over a run of siblings stops as soon as the run ends. `childrenForFieldName` is bounded by the node's own children — a handful for a declaration — and unmarshals only the ones the grammar tagged, so it is a question about the node even though it returns a list.
 - **Do not ask the container**: reading the parent's whole child list to find the node's own index in it. It answers the same question, but a top-level declaration's parent is the entire file. Doing it once per declaration makes a file of N declarations cost O(N²) — the shape a generated API client or a Prisma type file has, comfortably inside `maxFileSizeBytes` and minutes long to extract.
 
 Reading the container is right when the container is what the question is about: every member of a class body, every argument of a call. It is the *per-node* use that has to be avoided.
@@ -451,12 +451,13 @@ Every language plugin must pass the following tests.
 | ID | Input | Expected |
 |---|---|---|
 | LP14 | `@Post('/x') method()` | decorators[0] = { name: "Post", raw: "Post('/x')", arguments: ["'/x'"], boundary: `<determined by the framework plugin>`, line: ... } |
-| LP15 | two decorators | 2 entries in decorators[], ascending by line |
+| LP15 | two decorators | 2 entries in decorators[], **ascending by source position** — not by line, which two on one line share, and never by name, which would make a consumer that reads the first one depend on the alphabet |
 | LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
-| LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in line order — a comment is written wherever the author put it and does not end the run |
-| LP15c | a decorator the grammar parents *inside* the declaration rather than beside it (`export @A() class C {}`, `@A() class C {}`, `@A() abstract class C {}`) | read the same as a preceding one; a declaration decorated in both positions reports both |
+| LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in source order — a comment is written wherever the author put it and does not end the run |
+| LP15c | a decorator the grammar parents *inside* the declaration rather than beside it (`@A() class C {}`, `export @A() class C {}`, `export default @A() class C {}`, `@A() abstract class C {}`) | read the same as a preceding one — where a decorator is written must not change what the Symbol reports |
 | LP15d | a **parameter** decorator (`m(@P() x)`) | not among the method's decorators, nor the owning class's — it decorates the parameter |
 | LP15e | a JSDoc block above a decorator (`/** @throws E */ @A() m() {}`) | read as the member's; the decorator does not end the comment run |
+| LP15f | a decorator on both sides of `export` (`@A() export @B() class C {}`) | both. TypeScript rejects the source as TS8038, but a grammar that accepts it hands the extractor a half-edited file, and reading one side would drop a decorator from it silently |
 
 ### 9.4 Body walk
 

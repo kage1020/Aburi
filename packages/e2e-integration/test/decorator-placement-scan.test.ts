@@ -9,10 +9,14 @@ import type { IRSymbol } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 /**
- * The symptom that made the decorator-placement gap worth fixing: `@Controller` written on
- * the far side of `export` left the class unclassified, so the IR carried framework routes
- * under an owner with no boundary. This is the whole chain — parse, extract, classify — not
- * `readDecorators` in isolation.
+ * Where a decorator is written must not change what the Symbol is classified as. `@Controller`
+ * on the far side of `export` is the case that makes this visible: read it and the class is a
+ * controller, miss it and the IR carries framework routes under an owner with no boundary.
+ * Two decorators sharing a line is the other: `classifyClass` takes the first in source order,
+ * so an order that does not survive extraction is a different `extKind`, not a cosmetic
+ * difference.
+ *
+ * This is the whole chain — parse, extract, classify — not `readDecorators` in isolation.
  */
 
 let workRoot: string
@@ -75,14 +79,53 @@ describe("scan — decorator placement through @aburi/framework-nestjs", () => {
     expect(byName(symbols, "AController.list").extKind).toBe("framework:nestjs:route")
   })
 
-  it("classifies one decorated before the keyword the same way", async () => {
+  it("takes the first class-level decorator in source order when two share a line", async () => {
+    // `classifyClass` resolves a class carrying several recognised decorators by taking the
+    // first in source order. Two on one line have no line number to separate them, so the
+    // extracted order is the whole of the contract, and getting it wrong here is not a
+    // reordering — it is a different `extKind`, at `confidence: "high"`.
     await writeSource(
       "src/b.controller.ts",
       [
-        `import { Controller, Get } from "@nestjs/common"`,
+        `import { Controller, Injectable, Catch } from "@nestjs/common"`,
         ``,
-        `@Controller("b")`,
-        `export class BController {`,
+        `@Injectable() @Catch(Error) class BFilter {}`,
+        ``,
+        `export { BFilter }`,
+        ``,
+      ].join("\n"),
+    )
+
+    const symbols = await scanWorkspace()
+    expect(byName(symbols, "BFilter").extKind).toBe("framework:nestjs:provider")
+  })
+
+  it("gives the same classification whether the decorators share a line or not", async () => {
+    await writeSource(
+      "src/b2.controller.ts",
+      [
+        `import { Injectable, Catch } from "@nestjs/common"`,
+        ``,
+        `@Injectable()`,
+        `@Catch(Error)`,
+        `class B2Filter {}`,
+        ``,
+        `export { B2Filter }`,
+        ``,
+      ].join("\n"),
+    )
+
+    const symbols = await scanWorkspace()
+    expect(byName(symbols, "B2Filter").extKind).toBe("framework:nestjs:provider")
+  })
+
+  it("reads a route's decorators in source order past the `export` keyword", async () => {
+    await writeSource(
+      "src/c.controller.ts",
+      [
+        `import { Controller, Get, UseGuards } from "@nestjs/common"`,
+        ``,
+        `export @UseGuards(AuthGuard) @Controller("c") class CController {`,
         `  @Get()`,
         `  list() { return [] }`,
         `}`,
@@ -91,7 +134,9 @@ describe("scan — decorator placement through @aburi/framework-nestjs", () => {
     )
 
     const symbols = await scanWorkspace()
-    expect(byName(symbols, "BController").extKind).toBe("framework:nestjs:controller")
+    const controller = byName(symbols, "CController")
+    expect(controller.extKind).toBe("framework:nestjs:controller")
+    expect(controller.decorators.map((d) => d.name)).toEqual(["UseGuards", "Controller"])
   })
 
   it("classifies an injectable that is not exported at all", async () => {
