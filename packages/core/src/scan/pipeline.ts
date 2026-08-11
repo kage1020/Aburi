@@ -9,6 +9,7 @@ import type {
   EffectPlugin,
   ExtKind,
   ExtractionContext,
+  FrameworkClassifyContext,
   FrameworkPlugin,
   ImportEdge,
   Symbol as IRSymbol,
@@ -107,7 +108,9 @@ export interface FilePipelineInput {
  *   2. `extractSymbols` — the raw SymbolCandidate list.
  *   3. framework `classifySymbol` — first non-null result wins; the returned extKind
  *      and decoratorBoundaries are merged into the Candidate before walkBody sees it,
- *      so downstream effect classifiers can key on `owner.extKind`.
+ *      so downstream effect classifiers can key on `owner.extKind`. The classifiers see
+ *      the file's import edges alongside the Candidate, which is what lets a decorator
+ *      renamed on import still be recognized and one from a foreign package be doubted.
  *   4. shape drop check (Cat B / language `symbolDropHint`) — a Symbol that ends up
  *      dropped keeps its identity in the IR but skips walkBody / fingerprint work.
  *   5. `walkBody` — rules + CallCandidate[]. Category C `keep`/`suppress` filtering
@@ -182,13 +185,18 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const symbols: IRSymbol[] = []
   const dynamicCallSites: string[] = []
 
+  // Built once for the file rather than per candidate: every Symbol in a file is classified
+  // against the same import list, and a decorator-driven framework plugin reads it for every
+  // one of them.
+  const frameworkCtx: FrameworkClassifyContext = { ...extractCtx, imports }
+
   for (const raw of candidates) {
     if (deadline.expired()) return abandon()
 
     const { candidate, confidence } = mergeFrameworkClassification(
       normalizeCandidateStrings(raw),
       frameworks,
-      extractCtx,
+      frameworkCtx,
     )
     const dropReason = decideDropReason(candidate, language, extractCtx)
 
@@ -262,7 +270,7 @@ interface FrameworkMergeResult {
 function mergeFrameworkClassification(
   candidate: SymbolCandidate<OpaqueAstNode>,
   frameworks: readonly FrameworkPlugin[],
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): FrameworkMergeResult {
   for (const framework of frameworks) {
     const result = framework.classifySymbol(candidate, ctx) as SymbolClassification | null

@@ -206,6 +206,27 @@ export interface WalkContext<TNode = OpaqueAstNode> extends ExtractionContext {
   symbol: SymbolCandidate<TNode>
 }
 
+/**
+ * What a framework plugin classifies against: the extraction context plus the file's own
+ * import edges.
+ *
+ * The edges are what let a decorator-driven plugin resolve `import { Controller as Ctrl }`
+ * back to `Controller`, and tell a `@Controller` that came from the framework's own package
+ * apart from one that came from a competing library. Matching on the written identifier
+ * alone gets both wrong in opposite directions — it misses the alias and it claims the
+ * stranger.
+ *
+ * `imports` is the same list `ParseResult.imports` produced for the file, normalized. That
+ * includes re-export edges (`export { X } from './y'`), which name a symbol without binding
+ * it locally; a plugin reading the list is asking "what does this file say about this
+ * name", not "what is lexically in scope".
+ *
+ * Effect plugins get the same information through `ClassifyContext.file.imports`.
+ */
+export interface FrameworkClassifyContext extends ExtractionContext {
+  imports: ImportEdge[]
+}
+
 // --- Effect classification context ---
 
 export interface OwnerSummary {
@@ -363,9 +384,14 @@ export interface FrameworkPlugin<TNode = OpaqueAstNode> {
   init(ctx: PluginContext): Promise<void>
   cleanup?(): Promise<void>
 
+  /**
+   * `ctx` widened from `ExtractionContext` to carry the file's import edges. A plugin that
+   * has no use for them may still declare the parameter as the narrower `ExtractionContext`
+   * and satisfy this interface.
+   */
   classifySymbol(
     symbol: SymbolCandidate<TNode>,
-    ctx: ExtractionContext,
+    ctx: FrameworkClassifyContext,
   ): SymbolClassification | null
 }
 

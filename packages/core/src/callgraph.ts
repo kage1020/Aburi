@@ -10,6 +10,7 @@ import type {
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
 import { trySymbolId } from "./id"
+import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
 import { makeReceiverHintKey } from "./lsp/enrich"
 
@@ -738,21 +739,6 @@ function resolveInWorkspaceScope(
 function splitTargetSegments(target: string): string[] {
   if (target.length === 0) return []
   return target.split(".").filter((s) => s.length > 0)
-}
-
-/**
- * Handle the `import { X as Alias } from './y'` form. The language plugin emits
- * the raw string as it appeared in source (`"X as Alias"` or `"X"`), so recover
- * both names here. `imported` is the exported name in the source module,
- * `local` is what the caller writes at the call site.
- */
-function splitAliasedImportName(raw: string): { imported: string; local: string } {
-  const marker = " as "
-  const idx = raw.indexOf(marker)
-  if (idx < 0) return { imported: raw, local: raw }
-  const imported = raw.slice(0, idx).trim()
-  const local = raw.slice(idx + marker.length).trim()
-  return { imported, local }
 }
 
 function isRelativeSpecifier(specifier: string): boolean {

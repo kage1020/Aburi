@@ -91,6 +91,23 @@ export function assertNonEmptySegments(
 }
 
 /**
+ * Reject an import edge the language plugin should never have emitted: a module specifier
+ * of zero length. Nothing downstream can act on it — it names no module, so a provenance
+ * check would silently answer "not from my package" and an unresolved-import diagnostic
+ * would name nothing.
+ *
+ * Callers that walk the edge list themselves must call this on every edge **before**
+ * answering, not just on the ones they end up using: an answer that depends on which edges
+ * a predicate happened to reach makes the throw depend on import order.
+ */
+export function assertImportEdgeSource(edge: ImportEdge, origin: PluginInputOrigin): void {
+  if (edge.source.length > 0) return
+  throw new Error(
+    `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.source is empty — language plugin emitted an unnormalized import edge`,
+  )
+}
+
+/**
  * True when any import edge's module specifier satisfies `matches`, after every edge has
  * been checked for an empty `source`.
  *
@@ -111,12 +128,6 @@ export function hasMatchingImport(
   origin: PluginInputOrigin,
   matches: (source: string) => boolean,
 ): boolean {
-  for (const edge of imports) {
-    if (edge.source.length === 0) {
-      throw new Error(
-        `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.source is empty — language plugin emitted an unnormalized import edge`,
-      )
-    }
-  }
+  for (const edge of imports) assertImportEdgeSource(edge, origin)
   return imports.some((edge) => matches(edge.source))
 }

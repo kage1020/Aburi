@@ -128,21 +128,38 @@ Classifies a `SymbolCandidate` into a framework-owned `extKind` and optionally
 overrides decorator boundaries.
 
 ```ts
-import type { FrameworkPlugin, SymbolClassification } from "@aburi/types"
+import { splitAliasedImportName } from "@aburi/core"
+import type { FrameworkClassifyContext, ImportEdge, SymbolClassification } from "@aburi/types"
+
+/** Written identifier → the name its module exports it under, from the file's imports. */
+function importedNames(imports: readonly ImportEdge[]): Map<string, string> {
+  const names = new Map<string, string>()
+  for (const edge of imports) {
+    if (edge.symbols === "*") continue
+    for (const raw of edge.symbols) {
+      const { imported, local } = splitAliasedImportName(raw)
+      names.set(local, imported)
+    }
+  }
+  return names
+}
 
 class MyFrameworkPlugin implements FrameworkPlugin {
   readonly manifest = myFrameworkManifest
 
   async init() {}
 
-  classifySymbol(candidate, ctx): SymbolClassification | null {
+  classifySymbol(candidate, ctx: FrameworkClassifyContext): SymbolClassification | null {
+    const names = importedNames(ctx.imports)
+    const hit = candidate.decorators.find((d) => (names.get(d.name) ?? d.name) === "Widget")
     // Return null to abstain; the next framework plugin gets a turn.
-    if (!candidate.decorators.some((d) => d.name === "Widget")) return null
+    if (hit === undefined) return null
     return {
       extKind: "framework:mytool:widget",
       derivedBy: "framework:mytool:widget",
-      // Optional: flip boundary flag for specific decorators.
-      decoratorBoundaries: { Widget: true },
+      // Keyed on the name the source wrote — that is what the pipeline matches against
+      // `Decorator.name`. Optional: flip boundary flag for specific decorators.
+      decoratorBoundaries: { [hit.name]: true },
     }
   }
 }
@@ -156,6 +173,14 @@ Contracts:
   splits them into individual `derivedBy[]` entries.
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
+- Match a decorator on the name it was **imported** under, not the one the source
+  wrote, and read `ImportEdge.source` for provenance. Matching the written name
+  alone loses `import { Widget as W }` and claims a `@Widget` that came from some
+  other library. When the edges attribute the name to a module you do not own,
+  classify at `confidence: "medium"` rather than refusing — a project-local
+  re-export barrel looks exactly like a foreign package. See
+  [`lang-plugin.md` §5.2.2](./design/lang-plugin.md) and
+  [`packages/framework-nestjs/src/imports.ts`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/src/imports.ts).
 
 Decorator-free classification (name / shape / body signals) is also supported:
 see [`packages/framework-react`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react)

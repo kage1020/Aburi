@@ -214,6 +214,27 @@ describe("runFilePipeline — framework classifySymbol dispatch", () => {
     expect(fw2Calls).toEqual([])
   })
 
+  it("hands the file's import edges to the classifier alongside the candidate", async () => {
+    const seen: (readonly ImportEdge[])[] = []
+    const fw: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-imports"),
+      init: async () => {},
+      classifySymbol: (_symbol, ctx): SymbolClassification | null => {
+        seen.push(ctx.imports)
+        return null
+      },
+    }
+    const imports: ImportEdge[] = [
+      { source: "@nestjs/common", symbols: ["Controller as Ctrl"], line: 1, dynamic: false },
+    ]
+
+    const result = await runPipelineWithStubs({ frameworks: [fw], imports })
+
+    // The same edges the result reports: a classifier that resolved a decorator against a
+    // different list than the one the IR records would be unfalsifiable from the outside.
+    expect(seen).toEqual([result.imports])
+  })
+
   it("falls through to the next framework when the first returns null", async () => {
     const fw1: FrameworkPlugin = {
       manifest: frameworkManifest("framework-null"),
