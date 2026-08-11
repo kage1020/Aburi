@@ -148,16 +148,20 @@ describe("config.parseTimeoutMs", () => {
     expect(caller?.calls.every((c: { resolved: string | null }) => c.resolved === null)).toBe(true)
   })
 
-  it("charges the budget per file rather than across the run", async () => {
-    // Each file spends 80 ms against a 200 ms budget. Together they are over it; alone
-    // neither is, and both must survive.
-    await writeSource("a.ts", "export function alpha() { return 1 }\n")
-    await writeSource("b.ts", "export function beta() { return 2 }\n")
+  it("starts a fresh budget for the file after a timed-out one", async () => {
+    // Discovery hands files over in path order, so the slow one is scanned first and has
+    // already blown the budget by the time the quick one starts. A budget charged across
+    // the run rather than per file would take the second file down with the first.
+    //
+    // Both margins here are wide on purpose: the slow file is over by 150 ms and the quick
+    // one spends nothing, so neither direction turns on how loaded the machine is.
+    await writeSource("a-slow.ts", "export function slowOne() { return 1 }\n")
+    await writeSource("z-quick.ts", "export function quickOne() { return 2 }\n")
 
-    const { result } = await runScan(slowFor(["a.ts", "b.ts"], 80), { parseTimeoutMs: 200 })
+    const { result } = await runScan(slowFor(["a-slow.ts"], 250), { parseTimeoutMs: 100 })
 
-    expect(result.skipped).toEqual([])
-    expect(result.ir.symbols.map((s: IRSymbol) => s.name).sort()).toEqual(["alpha", "beta"])
+    expect(result.skipped.map((s) => s.path)).toEqual(["a-slow.ts"])
+    expect(result.ir.symbols.map((s: IRSymbol) => s.name)).toEqual(["quickOne"])
   })
 
   it("leaves an ordinary scan alone when no file is near the budget", async () => {
