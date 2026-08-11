@@ -124,17 +124,65 @@ describe("a member name with no tokens is indexed too", () => {
   })
 })
 
-describe("a base is reachable through every token of its member name", () => {
-  it("finds one whose shared token is not the first it carries", () => {
-    // A bucket wide enough that the whole-bucket fallback cannot fire, and a head sharing only
-    // a later token of its counterpart. Indexing a base under its first token alone — or under
-    // the tokens of its whole qualified name — would leave this pairing unreachable.
-    const distractors = Array.from({ length: 8 }, (_, i) =>
-      method(`src/d${i}.ts`, `Repo.parseHeader${i}`, `d${i}`),
-    )
-    const base = [...distractors, method("src/a.ts", "Repo.emitConfigFile", "a")]
-    const head = [method("src/b.ts", "Repo.emitConfigFile", "b")]
-    expect(pairs(base, head)).toEqual(["Repo.emitConfigFile -> Repo.emitConfigFile"])
+/**
+ * Most of the cases above sit in a one-base bucket, where `reach` — which counts a base once
+ * per shared token — already meets the bucket size and the whole-bucket fallback runs. These
+ * are the ones wide enough that the postings walk is what answers, which is where the index
+ * and its de-duplication stamp are observable at all.
+ */
+describe("the postings walk finds what the fallback would have", () => {
+  /** Bases sharing no member token with anything else, to make a bucket too wide to fall back. */
+  const filler = (count: number): IRSymbol[] =>
+    Array.from({ length: count }, (_, i) => method(`src/f${i}.ts`, `Repo.zeta${i}Alpha`, `f${i}`))
+
+  it("reaches a base whose shared tokens exclude its first", () => {
+    // `{load, config, file, async}` against `{config, file, async}` — 3/4 = 0.75, a composite of
+    // 0.875 over the 0.85 row. The head carries none of `load`, so a base indexed under its
+    // first token alone is unreachable, and the bucket is too wide for the fallback to rescue
+    // it. This is the shape a same-name pair cannot test, because that shares every token.
+    const base = [...filler(8), method("src/a.ts", "Repo.loadConfigFileAsync", "a")]
+    const head = [method("src/b.ts", "Repo.configFileAsync", "b")]
+    expect(pairs(base, head)).toEqual(["Repo.loadConfigFileAsync -> Repo.configFileAsync"])
+  })
+
+  it("reaches a base whose shared tokens exclude the head's first", () => {
+    // The mirror of the case above, and a separate skip: the head's postings are consulted in
+    // its own token order, so a head that carries `load` where the base does not must still
+    // find it through `config`.
+    const base = [...filler(8), method("src/a.ts", "Repo.configFileAsync", "a")]
+    const head = [method("src/b.ts", "Repo.loadConfigFileAsync", "b")]
+    expect(pairs(base, head)).toEqual(["Repo.configFileAsync -> Repo.loadConfigFileAsync"])
+  })
+
+  it("keeps several heads apart through one bucket's stamp", () => {
+    // Two heads walking the same postings lists in one pass, each reaching its base through
+    // more than one token. The stamp is per bucket and advances per head, so a stale one would
+    // make the second head skip a base the first had visited — a lost pairing, which is the
+    // direction that shows. Counting a base twice does not: §3.8 claims each side once.
+    const base = [
+      ...filler(8),
+      method("src/a1.ts", "Repo.loadConfigFile", "a1"),
+      method("src/a2.ts", "Repo.parseHeaderValue", "a2"),
+    ]
+    const head = [
+      method("src/b1.ts", "Repo.loadConfigFile", "b1"),
+      method("src/b2.ts", "Repo.parseHeaderValue", "b2"),
+    ]
+    expect(pairs(base, head).sort()).toEqual([
+      "Repo.loadConfigFile -> Repo.loadConfigFile",
+      "Repo.parseHeaderValue -> Repo.parseHeaderValue",
+    ])
+  })
+
+  it("pairs a bulk rename through the index rather than the fallback", () => {
+    // The case the change exists for, padded so the bucket is wider than any head's reach.
+    const members = ["loadConfigFile", "saveConfigFile", "resetConfigFile", "watchConfigFile"]
+    const base = [
+      ...filler(12),
+      ...members.map((m, i) => method(`src/old/m${i}.ts`, `Store.${m}`, `a${i}`)),
+    ]
+    const head = members.map((m, i) => method(`src/new/m${i}.ts`, `Store.${m}`, `b${i}`))
+    expect(pairs(base, head).sort()).toEqual(members.map((m) => `Store.${m} -> Store.${m}`).sort())
   })
 })
 
@@ -142,15 +190,6 @@ describe("the shortcuts answer as the rule they stand in for", () => {
   // Reaching a base through several of its tokens, and answering §3.4.6's gate without running
   // it, are optimisations. Each has to give the answer the long way round gives, and these are
   // the shapes where a wrong shortcut is visible.
-
-  it("scores a base reached through two shared tokens once", () => {
-    // `{load, config}` on both sides, so the postings list is walked twice over the same base.
-    // Counting it twice would offer §3.8 the same pairing twice.
-    const base = [method("src/a.ts", "Repo.loadConfig", "a")]
-    const head = [method("src/b.ts", "Repo.loadConfig", "b")]
-    expect(pairs(base, head)).toEqual(["Repo.loadConfig -> Repo.loadConfig"])
-    expect(matchStageNameSignature(base, head).matched).toHaveLength(1)
-  })
 
   it("pairs a namespaced class whose namespace is unchanged", () => {
     // The first-segment shortcut is consulted here rather than short-circuited: the owners are
@@ -194,7 +233,9 @@ describe("the shortcuts answer as the rule they stand in for", () => {
     ).toEqual([])
   })
 
-  it("pairs a top-level function, which has no owner to shortcut", () => {
+  it("pairs two top-level functions, which the identical-owner branch settles", () => {
+    // Both owners extract to the empty string, so they are identical and the gate answers
+    // there — the first-segment check and the matching are never reached.
     const top = (file: string, name: string, seed: string): IRSymbol =>
       makeSymbol({
         id: `ts:${file}#${name}`,
@@ -209,8 +250,10 @@ describe("the shortcuts answer as the rule they stand in for", () => {
   })
 })
 
-describe("the narrowing does not change what a bulk rename reports", () => {
+describe("the fallback path answers a bulk rename the same way", () => {
   it("pairs every method of a renamed directory", () => {
+    // A four-base bucket, so every head's reach meets it and the members are walked directly.
+    // The indexed version of this is in the postings-walk block above.
     const members = ["loadConfig", "saveConfig", "resetConfig", "watchConfig"]
     const base = members.map((m, i) => method(`src/old/mod${i}.ts`, `Store.${m}`, `a${i}`))
     const head = members.map((m, i) => method(`src/new/mod${i}.ts`, `Store.${m}`, `b${i}`))

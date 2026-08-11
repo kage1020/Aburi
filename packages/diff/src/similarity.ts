@@ -294,8 +294,12 @@ function augment(
 
 /**
  * §3.4.6 — a necessary condition on two non-empty owners, cheaper than the full gate: their
- * first segments must correspond, since segments are compared positionally. Answering `true`
- * says only that the gate has to be asked.
+ * first segments must correspond, since segments are compared positionally.
+ *
+ * A filter, not a decision. It relaxes `coversBothWays`' perfect matching to "every token
+ * finds some partner", so it can only ever admit more than the gate does; answering `true`
+ * says the gate has to be asked. Loosening it further costs correctness nothing and speed a
+ * little — refusing something the gate would accept is the direction that would break recall.
  */
 function firstSegmentsCouldAgree(baseOwner: string, headOwner: string, setOf: TokenSetOf): boolean {
   const baseFirst = baseOwner.slice(0, dotOrEnd(baseOwner))
@@ -304,6 +308,10 @@ function firstSegmentsCouldAgree(baseOwner: string, headOwner: string, setOf: To
   const baseTokens = setOf(baseFirst)
   const headTokens = setOf(headFirst)
   if (baseTokens.size !== headTokens.size) return false
+  // Still a necessary condition at the ceiling, because `coversBothWays` refuses a segment
+  // this wide outright — and refusing here keeps that an O(1) answer rather than an all-pairs
+  // scan run ahead of it, which is the adversarial input the ceiling exists for.
+  if (baseTokens.size > MAX_OWNER_SEGMENT_TOKENS) return false
   for (const token of baseTokens) {
     let partnered = false
     for (const candidate of headTokens) {
@@ -327,12 +335,6 @@ export interface NameScorer {
   name(baseName: string, headName: string): number
   member(baseName: string, headName: string): number
   ownersCompatible(baseName: string, headName: string): boolean
-  /**
-   * The two qualified names have the same owner, which is the common case §3.4.6's gate
-   * short-circuits on and the one a bucket of methods on one class hits every time. Exposed
-   * so stage 4 can settle it without extracting owners at all.
-   */
-  sameOwner(baseName: string, headName: string): boolean
 }
 
 /**
@@ -385,13 +387,12 @@ export function createNameScorer(): NameScorer {
     if (baseOwner === headOwner) return true
     if (baseOwner === "" || headOwner === "") return false
     if (!firstSegmentsCouldAgree(baseOwner, headOwner, setOf)) return false
-    return ownerGate(setOf, baseName, headName)
+    return segmentsCorrespond(baseOwner, headOwner, setOf)
   }
   return {
     name: (baseName, headName) => nameFormula(setOf, baseName, headName),
     member: (baseName, headName) => memberFormula(setOf, baseName, headName),
     ownersCompatible: compatible,
-    sameOwner: (baseName, headName) => ownerOf(baseName) === ownerOf(headName),
   }
 }
 

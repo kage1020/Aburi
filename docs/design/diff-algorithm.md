@@ -161,7 +161,7 @@ for (b, h, score) in acceptInScoreOrder(candidates):      # §3.8
 Stage 4 implemented as O(K^2) drops below practical speed at K=500 (heavy use of the Repository pattern / Zod schemas).
 As a bucket pre-filter, hash-partition by the combination `(kind, signature === null ? 'no-sig' : 'has-sig')` and evaluate each head only within its corresponding bucket.
 
-**That key alone is not a partition of anything.** A directory rename with no git rename information — the §9.4 plugin-difference and §11.5 shallow-clone situations — leaves every method of the codebase in one bucket, so "a few dozen per bucket" describes the easy case rather than the hard one. Measured at 4000 symbols in one bucket, stage 4 took 64 s against §8.3's 2 s target.
+**That key alone is not a partition of anything.** A directory rename with no git rename information — the §9.4 plugin-difference and §11.5 shallow-clone situations — leaves every method of the codebase in one bucket, so "a few dozen per bucket" describes the easy case rather than the hard one. Measured at 4000 symbols in one bucket, stage 4 took 64 s against §8.3's 2 s target when that was reported. Two later changes to the per-comparison cost — a per-pass token memo, and settling candidates in one sweep rather than per head — brought it to 14 s, which is what the table below measures against.
 
 So within a bucket the bases are indexed by the tokens of their **member** names, and a head is offered only the bases sharing one:
 
@@ -179,15 +179,11 @@ for each head:
 Two details the rule needs:
 
 - **A member name with no tokens** is indexed under a key of its own. `Foo.Bar.` has an empty last segment and two tokens in its qualified name, so §3.4.3 admits it, and two such Symbols score 1.0 on an axis comparing two empty sets. Without a key they would be unreachable — a pairing lost to the index rather than to the score.
-- **A head whose postings cover the bucket** is walked over the bucket directly. A base is reached once per token it shares, so a head whose postings add up to at least the whole bucket pays for the index instead of saving on it: every Symbol named `handleRequest` puts the entire bucket under both of its tokens. Falling back keeps the index a strict improvement rather than a trade.
+- **A head whose postings cover the bucket** is walked over the bucket directly. A base is reached once per token it shares, so a head whose postings add up to at least the whole bucket is not being narrowed — only charged for the overlap: every Symbol named `handleRequest` puts the entire bucket under both of its tokens. This is a bound, not a promise of the cheaper branch, since the sum double-counts and a head can trip it while covering far less than the bucket. What it guarantees is that the index never costs more than not having one.
 
-The order the three tests run in matters as much as the index, because either of the first two can be the selective one:
+The member floor is read **before** §3.4.6's gate, and on a corpus of varied names that is worth as much as the index. The floor is one Jaccard over token sets the pass already holds; the gate splits both owners into segments, tokenises each and runs an augmenting-path matching. It is the only early exit — the gate short-circuits internally on identical owners and on first segments that cannot correspond, and hoisting either into the loop buys nothing, because the gate reaches them on the same two lookups.
 
-1. `sameOwner` — a string compare, and true for every method of one class
-2. the member floor above — one Jaccard over token sets the pass already holds
-3. §3.4.6's gate — splits both owners into segments, tokenises each, runs an augmenting-path matching
-
-Reading them cheapest-first is worth more than the index on a corpus where the members agree and the owners do not. The gate also answers early where it can: identical owners, and owners whose *first* segments cannot correspond, are settled without the matching.
+The reverse order suits the opposite corpus, where the member names are identical and the owners differ: there the gate is the selective test and the floor refuses nothing. Neither order dominates, and this one favours the case the index cannot already help with.
 
 Measured on a directory rename with an edited body, no git rename information, everything in one bucket:
 

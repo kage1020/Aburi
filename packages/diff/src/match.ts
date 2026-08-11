@@ -389,12 +389,7 @@ export function matchStageNameSignature(
     // belongs to a pairing, and either end being short is enough to make the score unearned.
     if (!saysEnoughToPair(b.name)) continue
     const key = bucketKey(b)
-    const bucket: Bucket = buckets.get(key) ?? {
-      members: [],
-      byToken: new Map(),
-      visited: EMPTY_VISITS,
-      everyPosition: [],
-    }
+    const bucket: Bucket = buckets.get(key) ?? { members: [], byToken: new Map() }
     const position = bucket.members.length
     bucket.members.push(b)
     for (const token of memberTokens(b.name)) {
@@ -404,10 +399,8 @@ export function matchStageNameSignature(
     }
     buckets.set(key, bucket)
   }
-  for (const bucket of buckets.values()) {
-    bucket.visited = new Int32Array(bucket.members.length)
-    bucket.everyPosition = bucket.members.map((_, position) => position)
-  }
+  const visitsOf = new Map<Bucket, Int32Array>()
+  for (const bucket of buckets.values()) visitsOf.set(bucket, new Int32Array(bucket.members.length))
   const scorer = createNameScorer()
   const candidates: ScoredPair[] = []
   let visitCount = 0
@@ -426,43 +419,32 @@ export function matchStageNameSignature(
     if (bucket === undefined) continue
     const threshold = thresholdFor(h.name)
     // §3.4.0 — the least a member name can score and still leave the threshold reachable,
-    // granting the other two axes in full. Read before the gate because it is the cheapest of
-    // the three and refuses the most: most bases sharing one token of two sit far below it.
+    // granting the other two axes in full.
     const memberFloor = lowestUsefulMember(threshold)
-    // A base is reached once per token it shares, so a head whose postings add up to the
-    // whole bucket pays for the index rather than saving on it — every Symbol named
-    // `handleRequest` puts the entire bucket under both of its tokens. Walking the members
-    // straight through in that case keeps the index a strict improvement rather than a trade.
+    // A base is reached once per token it shares, so a head whose postings add up to at least
+    // the whole bucket is not being narrowed by the index — only charged for the overlap.
+    // Every Symbol named `handleRequest` puts the entire bucket under both of its tokens.
+    // Walking the members straight through covers that without the de-duplication, and keeps
+    // the index from costing more than not having one. A bound rather than a promise of the
+    // cheaper branch: `reach` double-counts, so a head can trip it while covering much less.
     const tokens = memberTokens(h.name)
     let reach = 0
     for (const token of tokens) reach += bucket.byToken.get(token)?.length ?? 0
-    const wholeBucket = reach >= bucket.members.length
+    if (reach >= bucket.members.length) {
+      for (const b of bucket.members) {
+        collectCandidate(b, h, scorer, memberFloor, threshold, candidates)
+      }
+      continue
+    }
+    const visited = visitsOf.get(bucket)
+    if (visited === undefined) continue
     visitCount++
-    for (const token of wholeBucket ? ONE_PASS : tokens) {
-      const postings = wholeBucket ? bucket.everyPosition : (bucket.byToken.get(token) ?? [])
-      for (const position of postings) {
-        if (!wholeBucket) {
-          if (bucket.visited[position] === visitCount) continue
-          bucket.visited[position] = visitCount
-        }
+    for (const token of tokens) {
+      for (const position of bucket.byToken.get(token) ?? []) {
+        if (visited[position] === visitCount) continue
+        visited[position] = visitCount
         const b = bucket.members[position]
-        if (b === undefined) continue
-        // §3.4.6's gate and §3.4.3's floor, cheapest test first, because either can be the
-        // selective one: identical owners settle the gate on a string compare, and the member
-        // floor then refuses most of what a shared token admitted. Only what survives both
-        // pays for extracting and matching two owners.
-        const sameOwner = scorer.sameOwner(b.name, h.name)
-        const member = scorer.member(b.name, h.name)
-        if (member < memberFloor) continue
-        if (!sameOwner && !scorer.ownersCompatible(b.name, h.name)) continue
-        const score =
-          0.5 * member +
-          0.3 * signatureSimilarity(b.signature ?? null, h.signature ?? null) +
-          0.2 * OWNER_AXIS_SATISFIED
-        // Filtering here rather than after the sweep keeps the candidate list to the pairings
-        // that could actually be accepted; the threshold belongs to the head, so a pair below
-        // it is never acceptable however the rest of the group resolves.
-        if (score >= threshold) candidates.push({ base: b, head: h, score })
+        if (b !== undefined) collectCandidate(b, h, scorer, memberFloor, threshold, candidates)
       }
     }
   }
@@ -478,6 +460,40 @@ export function matchStageNameSignature(
   }
 }
 
+/**
+ * §3.4 — score one candidate pairing and keep it if it clears the head's threshold.
+ *
+ * A plain function rather than a closure over the head loop: both branches of the walk need
+ * it, and a closure built per head is the cross-product moved into the allocator — measurably
+ * so, at around 1.6x on a bucket the index cannot narrow.
+ *
+ * §3.4.3's floor is read before §3.4.6's gate and is the only early exit here. It is one
+ * Jaccard over token sets the pass already holds, where the gate splits both owners into
+ * segments, tokenises each and runs an augmenting-path matching. The gate short-circuits
+ * internally on identical owners and on first segments that cannot correspond, so there is
+ * nothing left worth hoisting out of it.
+ */
+function collectCandidate(
+  base: IRSymbol,
+  head: IRSymbol,
+  scorer: NameScorer,
+  memberFloor: number,
+  threshold: number,
+  candidates: ScoredPair[],
+): void {
+  const member = scorer.member(base.name, head.name)
+  if (member < memberFloor) return
+  if (!scorer.ownersCompatible(base.name, head.name)) return
+  const score =
+    0.5 * member +
+    0.3 * signatureSimilarity(base.signature ?? null, head.signature ?? null) +
+    0.2 * OWNER_AXIS_SATISFIED
+  // Filtering here rather than after the sweep keeps the candidate list to the pairings that
+  // could actually be accepted; the threshold belongs to the head, so a pair below it is never
+  // acceptable however the rest of the group resolves.
+  if (score >= threshold) candidates.push({ base, head, score })
+}
+
 function bucketKey(s: IRSymbol): string {
   const sig = s.signature === null || s.signature === undefined ? "no-sig" : "has-sig"
   return `${s.kind}::${sig}`
@@ -490,45 +506,27 @@ function bucketKey(s: IRSymbol): string {
  * is worth at most 0.3, so `member >= 2 * (threshold - 0.5)`. Refusing below this is exact
  * rather than approximate: nothing the other two axes can do rescues a pair under it.
  *
- * Reading it first is what keeps stage 4 off the cross-product. §3.4.6's gate splits and
- * tokenises two owners; the member axis is one Jaccard over token sets the pass has already
- * built, and it refuses most of what a shared token admits.
+ * Reading it before §3.4.6's gate is what keeps stage 4 off the cross-product. The gate splits
+ * and tokenises two owners; this is one Jaccard over token sets the pass has already built,
+ * and it refuses most of what a shared token admits.
  */
 function lowestUsefulMember(threshold: number): number {
   return 2 * (threshold - 0.5)
 }
 
 /**
- * One `(kind, signatureNullness)` bucket: its base Symbols, an index from each token a member
- * name carries to the positions holding it, and a scratch stamp for de-duplicating a head's
- * reach across its several tokens.
- *
- * The stamp is per bucket rather than per head because a head reaching every base would
- * otherwise allocate a set the size of the bucket, once per head — which is the cross-product
- * the index exists to avoid, moved from the scorer into the allocator.
- */
-
-/** One iteration, for the branch that walks a bucket's members rather than its postings. */
-const ONE_PASS = [""] as const
-
-/** Stands in until a bucket is sized; never indexed, because a bucket is sized before use. */
-const EMPTY_VISITS = new Int32Array(0)
-
-/**
  * One `(kind, signatureNullness)` bucket: its base Symbols, and an index from each token a
  * member name carries to the positions holding it.
+ *
+ * The de-duplication stamp lives beside the bucket rather than in it, in `visitsOf`, and is
+ * sized once the bucket is complete — a half-built bucket is then not representable, and the
+ * stamp cannot be indexed out of range. It is per bucket rather than per head because a head
+ * reaching every base would otherwise allocate a set the size of the bucket once per head,
+ * which is the cross-product the index exists to avoid moved into the allocator.
  */
 interface Bucket {
   members: IRSymbol[]
   byToken: Map<string, number[]>
-  /** `[0, 1, ... members.length)`, built once so the whole-bucket branch allocates nothing. */
-  everyPosition: number[]
-  /**
-   * Which head the entry at each position was last offered to, so a head reaching one base
-   * through two of its tokens scores it once. Sized after the bucket is complete — until
-   * then it is the shared empty placeholder below.
-   */
-  visited: Int32Array
 }
 
 /**
