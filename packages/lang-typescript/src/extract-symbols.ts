@@ -477,23 +477,27 @@ function currentFile(ctx: ExtractionContext): string {
  * Wrapper handling: if the declaration is inside an `export_statement` (`export function
  * f() {}`), the JSDoc lives before the export wrapper, not before the declaration itself.
  * Walk up to the outermost wrapper before scanning siblings.
+ *
+ * The scan walks backwards from the anchor rather than reading the parent's child list and
+ * searching it for the anchor's own position — see lang-plugin.md §8.2 for why a per-node
+ * question has to be asked of the node: at module level that list is every statement in the
+ * file, and materializing it once per declaration is what made a large single file
+ * quadratic.
+ *
+ * `previousSibling`, not `previousNamedSibling`, because an anonymous token between a
+ * comment and a declaration means the comment is not attached to it — a stray `;` in a class
+ * body separates the two, and reading past it would hand the member a JSDoc block written
+ * about nothing.
  */
 function readLeadingJsDoc(node: Node): string | null {
   const anchor = outerStatementWrapper(node)
-  const parent = anchor.parent
-  if (parent === null) return null
-  const siblings = parent.children
-  const index = siblings.findIndex((s) => s !== null && s.id === anchor.id)
-  if (index <= 0) return null
   const collected: string[] = []
-  for (let i = index - 1; i >= 0; i--) {
-    const sibling = siblings[i]
-    if (sibling === null || sibling === undefined) continue
-    if (sibling.type === "comment") {
-      collected.push(sibling.text)
-      continue
-    }
-    break
+  for (
+    let sibling = anchor.previousSibling;
+    sibling !== null && sibling.type === "comment";
+    sibling = sibling.previousSibling
+  ) {
+    collected.push(sibling.text)
   }
   if (collected.length === 0) return null
   return collected.reverse().join("\n")

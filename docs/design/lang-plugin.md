@@ -332,13 +332,23 @@ Files whose size exceeds `config.maxFileSizeBytes` (default: `2 * 1024 * 1024` =
 
 - Normal code does not exceed 2MB (only generated bundles / minified files do)
 - Large files exhaust the WASM heap and make parse time explode
-- Skipped files will be recorded in `stats.skippedFiles[]` (planned — see the [roadmap](../roadmap.md)); currently only a warning is emitted
+- Skipped files are returned on `ScanResult.skipped` with `reason: "over-size"`; a per-file entry in `stats.skippedFiles[]` is still planned (see the [roadmap](../roadmap.md)), so the IR itself does not name them
 - warning stderr: `Skipped <file>: <size>MB exceeds maxFileSizeBytes (2MB). Override with config.maxFileSizeBytes.`
 
 ### 7.1.2 Timeout
 
-If the total of parse + extractSymbols + walkBody for one file exceeds `config.parseTimeoutMs` (default: `5000` = 5 seconds), abort, skip that file, and warn.
+If the total of parse + extractSymbols + walkBody for one file exceeds `config.parseTimeoutMs` (default: `5000` = 5 seconds; the config schema's minimum is 100 and it has no maximum), abort, skip that file, and warn.
 This prevents a broken grammar or pathological source (deep nesting, etc.) from stalling the whole run.
+
+The budget is **cooperative**, for the reason [effect-plugin.md](./effect-plugin.md) §5.1.1 gives for the classify budget: `extractSymbols` and `walkBody` are synchronous plugin calls, and nothing can interrupt one that has already started. It is read at the three points that bound the work still to come — after `parseFile`, after `extractSymbols`, and before each candidate's `walkBody` — so what it guarantees is that an over-budget file is handed no *further* work. A file costs at most its budget plus one stage, and one enormous candidate can still overrun by however long that candidate takes. A hang inside a single call is not something a wall-clock budget can catch at all.
+
+An aborted file contributes **nothing to the IR**: no Symbols, no import edges, and no `stats.effectClassifyTimeouts` entries accumulated from the candidates it did finish. Keeping whichever Symbols it produced before the budget ran out would make the Document depend on how fast the machine was that day, so the outcome is binary per file. It is recorded in `ScanResult.skipped` with `reason: "parse-timeout"`, repeated on `ScanResult.parseTimeouts` with the budget and the elapsed, and excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`.
+
+Its **parse errors are still reported**. They are diagnostic rather than IR, and they are what a slow file most needs to keep: backtracking over malformed input is a common reason for a slow parse, so a run that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is the syntax. A file that is both broken and slow appears in `parseErrors` and in `parseTimeouts` — but never in both `parseTimeouts` and the terminal-failure count, which subtract from `parsedFiles` separately; a file that returned no tree at all is §7.1's, not this section's.
+
+- warning stderr: `Skipped <file>: extraction reached <elapsed>ms, exceeding parseTimeoutMs (<budget>ms). Override with config.parseTimeoutMs.`
+
+A file being skipped on wall clock does mean the IR can differ between a fast machine and a slow one, at file granularity. That is inherent in asking for a time budget; a run that wants reproducibility across machines sets `parseTimeoutMs` high enough that nothing reaches it.
 
 ### 7.2 Extraction exceptions
 
@@ -398,6 +408,17 @@ Each plugin must follow these conventions:
    - In a future release, switching to native bindings (e.g. the `tree-sitter` Node bindings) may be added via flags such as `capabilities.preferNative` (see the [roadmap](../roadmap.md))
    - Currently only WASM is implemented; no native fallback is provided
 
+### 8.2 Cost convention for WASM node access
+
+The same heap boundary has a cost consequence that is easy to miss, because the JS surface hides it. A getter like `node.children` or `node.namedChildren` is not a field read: it unmarshals **every** child across the WASM boundary into a fresh JS object, and the array it returns is cached on that JS wrapper only — the next `node.parent` hands back a new wrapper and pays for the list again.
+
+So a per-node question must be asked of the node, never of its container:
+
+- **Ask the node**: `previousSibling`, `previousNamedSibling`, `nextSibling`, `childForFieldName`. Each crosses the boundary once, and a backwards walk over a run of siblings stops as soon as the run ends.
+- **Do not ask the container**: reading the parent's whole child list to find the node's own index in it. It answers the same question, but a top-level declaration's parent is the entire file. Doing it once per declaration makes a file of N declarations cost O(N²) — the shape a generated API client or a Prisma type file has, comfortably inside `maxFileSizeBytes` and minutes long to extract.
+
+Reading the container is right when the container is what the question is about: every member of a class body, every argument of a call. It is the *per-node* use that has to be avoided.
+
 ## 9. Verifiable Properties (Test Criteria)
 
 Every language plugin must pass the following tests.
@@ -431,6 +452,8 @@ Every language plugin must pass the following tests.
 |---|---|---|
 | LP14 | `@Post('/x') method()` | decorators[0] = { name: "Post", raw: "Post('/x')", arguments: ["'/x'"], boundary: `<determined by the framework plugin>`, line: ... } |
 | LP15 | two decorators | 2 entries in decorators[], ascending by line |
+| LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
+| LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in line order — a comment is written wherever the author put it and does not end the run |
 
 ### 9.4 Body walk
 

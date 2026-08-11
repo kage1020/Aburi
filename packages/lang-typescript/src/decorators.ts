@@ -4,21 +4,23 @@ import type { Node } from "web-tree-sitter"
 /**
  * Read every decorator attached to a specific declaration node.
  *
- * Tree-sitter-typescript places decorators in two different positions depending on where
- * the declaration sits:
+ * Tree-sitter-typescript puts a decorator in one of two places, and only one of them is
+ * what this reads:
  *
- * 1. Methods and free-standing top-level declarations: decorators are named siblings of
- *    the declaration inside the shared parent (class body or program). Only siblings that
- *    sit directly before *this* declaration belong to it — walking every decorator in the
- *    container would attach every one to every member.
+ * - **Beside the declaration.** A class member (`class C { @A() m() {} }`) has its
+ *   decorators as preceding siblings inside the class body; an exported declaration
+ *   (`@A() export class C {}`) has them as preceding siblings inside the
+ *   `export_statement`, whose rule is `decorator* 'export' ['default'] declaration`. Both
+ *   are the same question from the declaration's point of view, which is why one backwards
+ *   walk covers them.
  *
- * 2. Exported declarations wrapped in an `export_statement`: the wrapper is the parent,
- *    and decorators are `decorator:` field children of the wrapper (they precede the
- *    inner declaration in source but the grammar hoists them onto the export node). Read
- *    every decorator child of the wrapper.
- *
- * The two branches produce the same Decorator[] shape; the caller does not care which one
- * fired.
+ * - **Inside the declaration.** A decorator written where no wrapper takes it —
+ *   `@A() class C {}` at top level, or `export @A() class C {}` — is parsed as the *first
+ *   child* of the `class_declaration` itself. Those are not read, and the Symbol comes out
+ *   with `decorators: []`. That predates the walk (the child list the walk replaced did not
+ *   find them either) and `sibling-runs.test.ts` pins the current answer; closing it is a
+ *   separate change, because it would newly attach decorators to Symbols that have gone
+ *   without them, and `extKind` and the fingerprints move with them.
  */
 export function readDecorators(declaration: Node): Decorator[] {
   const found = collectDecoratorNodes(declaration)
@@ -28,28 +30,37 @@ export function readDecorators(declaration: Node): Decorator[] {
 }
 
 /**
- * Return the decorator nodes belonging to `declaration`, in source order. Handles the
- * "wrapped in export_statement" and the "sibling to member" cases separately.
+ * Return the decorator nodes belonging to `declaration`, in source order.
+ *
+ * The walk goes backwards from the declaration rather than reading the parent's child list
+ * and searching it for the declaration's own position. Both find the same run, but the
+ * parent of a top-level declaration is the whole program and `namedChildren` unmarshals
+ * every child into a JS object, so reading it once per declaration costs a file of N
+ * declarations O(N²). The walk pays for the run it collects plus tree-sitter's own cost to
+ * step back one sibling, and stops as soon as the run ends — for most declarations, before
+ * the first step returns anything.
+ *
+ * Anonymous tokens are stepped over for free, which is what lets one walk cover both
+ * placements: `export` and `default` sit between the decorators and the declaration in the
+ * wrapper, and `previousNamedSibling` does not see them.
+ *
+ * A comment is a different matter. It is a *named* node, and tree-sitter puts it wherever
+ * it was written — including between two decorators, or between the decorators and the
+ * `export` keyword. Ending the run there would let a `// biome-ignore` or a TODO detach a
+ * decorator from the class it decorates, which is silent: decorators feed
+ * `mergeFrameworkClassification`, so the Symbol comes out with the wrong `extKind` rather
+ * than with an error. Comments are skipped, the way `readCallArguments` skips them.
  */
 function collectDecoratorNodes(declaration: Node): Node[] {
-  const parent = declaration.parent
-  if (parent !== null && parent.type === "export_statement") {
-    // Wrapped export — decorators are field children of the wrapper itself.
-    return parent.namedChildren.filter((c): c is Node => c !== null && c.type === "decorator")
-  }
-  if (parent === null) return []
-  const siblings = parent.namedChildren
-  const anchorIndex = siblings.findIndex((s) => s !== null && s.id === declaration.id)
-  if (anchorIndex <= 0) return []
   const out: Node[] = []
-  for (let i = anchorIndex - 1; i >= 0; i--) {
-    const sibling = siblings[i]
-    if (sibling === null || sibling === undefined) continue
-    if (sibling.type === "decorator") {
-      out.push(sibling)
-      continue
-    }
-    break
+  for (
+    let sibling = declaration.previousNamedSibling;
+    sibling !== null;
+    sibling = sibling.previousNamedSibling
+  ) {
+    if (sibling.type === "comment") continue
+    if (sibling.type !== "decorator") break
+    out.push(sibling)
   }
   return out.reverse()
 }

@@ -108,6 +108,11 @@ export {
   type ClassifyWithTimeoutOptions,
   classifyWithTimeout,
   DEFAULT_CLASSIFY_TIMEOUT_MS,
+  DEFAULT_PARSE_TIMEOUT_MS,
+  PARSE_TIMEOUT_MIN_MS,
+  type ParseDeadline,
+  type ParseTimeoutEvent,
+  startParseDeadline,
 } from "./scan/timeout"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {
