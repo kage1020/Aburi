@@ -99,6 +99,7 @@ function langManifest(): LangManifest {
 
 interface StubTiming {
   parseMs?: number
+  extractMs?: number
   walkMsPerCandidate?: number
   candidates?: readonly string[]
   imports?: readonly ImportEdge[]
@@ -134,6 +135,7 @@ function stubPlugin(timing: StubTiming, calls: StubCalls): LanguagePlugin {
     },
     extractSymbols: (_tree: OpaqueAstNode, _ctx: ExtractionContext) => {
       calls.extract++
+      spend(timing.extractMs ?? 0)
       return names.map(candidate)
     },
     walkBody: (
@@ -198,6 +200,16 @@ describe("runFilePipeline — parse deadline", () => {
     expect(result.parseTimeout).not.toBeNull()
     expect(calls.extract).toBe(1)
     expect(calls.walk.length).toBeLessThan(4)
+  })
+
+  it("abandons a file whose extraction blew the budget and found nothing to walk", async () => {
+    // With no candidates the per-candidate check never runs, so this is the only reading
+    // that can catch a file that spent everything inside `extractSymbols`. Reported as a
+    // timeout rather than as a file that legitimately holds no Symbols.
+    const { result, calls } = await run({ candidates: [], extractMs: 250 }, 100)
+    expect(result.parseTimeout).not.toBeNull()
+    expect(calls.extract).toBe(1)
+    expect(calls.walk).toEqual([])
   })
 
   it("reports the file, the budget in effect and the wall clock it actually spent", async () => {

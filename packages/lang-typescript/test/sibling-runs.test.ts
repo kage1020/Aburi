@@ -55,6 +55,14 @@ describe("leading comment run", () => {
     expect(byId(symbols, "#f").signature?.throws).toEqual([])
   })
 
+  it("stops at an anonymous token, not only at the next named node", async () => {
+    // `{ comment ; method }` — the stray semicolon sits between the two, and it is an
+    // anonymous node. Stepping over it would hand `m` a comment that stops short of it,
+    // so the run reads every sibling rather than only the named ones.
+    const symbols = await symbolsOf("class C { /** @throws StrayError */ ; m() {} }\n")
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+  })
+
   it("anchors on the export wrapper, so a comment above `export` still counts", async () => {
     const symbols = await symbolsOf(
       ["/** @throws WrappedError */", "export function f() {}", ""].join("\n"),

@@ -4,21 +4,13 @@ import type { Node } from "web-tree-sitter"
 /**
  * Read every decorator attached to a specific declaration node.
  *
- * Tree-sitter-typescript places decorators in two different positions depending on where
- * the declaration sits:
- *
- * 1. Methods and free-standing top-level declarations: decorators are named siblings of
- *    the declaration inside the shared parent (class body or program). Only siblings that
- *    sit directly before *this* declaration belong to it — walking every decorator in the
- *    container would attach every one to every member.
- *
- * 2. Exported declarations wrapped in an `export_statement`: the wrapper is the parent,
- *    and decorators are `decorator:` field children of the wrapper (they precede the
- *    inner declaration in source but the grammar hoists them onto the export node). Read
- *    every decorator child of the wrapper.
- *
- * The two branches produce the same Decorator[] shape; the caller does not care which one
- * fired.
+ * Tree-sitter-typescript puts the decorators in a different parent depending on where the
+ * declaration sits: beside a method inside the class body, beside a bare declaration
+ * inside the program, and — for `@A() export class C {}` — inside the `export_statement`
+ * wrapper, where the grammar's rule is `decorator* 'export' declaration`. All three are
+ * the same shape from the declaration's point of view: the decorators are the siblings
+ * immediately before it. Only those siblings belong to it, which is why the run has to
+ * stop rather than sweep the whole container.
  */
 export function readDecorators(declaration: Node): Decorator[] {
   const found = collectDecoratorNodes(declaration)
@@ -28,22 +20,19 @@ export function readDecorators(declaration: Node): Decorator[] {
 }
 
 /**
- * Return the decorator nodes belonging to `declaration`, in source order. Handles the
- * "wrapped in export_statement" and the "sibling to member" cases separately.
+ * Return the decorator nodes belonging to `declaration`, in source order.
  *
- * The sibling case walks backwards from the declaration rather than reading the parent's
- * child list and searching it for the declaration's own position. The two agree on the
- * answer, but the parent of a top-level declaration is the whole program, and
- * `namedChildren` unmarshals every child into a JS object — so reading it once per
- * declaration costs a file of N declarations O(N²), while the walk costs the length of
- * the decorator run, which is nearly always zero.
+ * The walk goes backwards from the declaration rather than reading the parent's child list
+ * and searching it for the declaration's own position. Both find the same run, but the
+ * parent of a top-level declaration is the whole program and `namedChildren` unmarshals
+ * every child into a JS object, so reading it once per declaration costs a file of N
+ * declarations O(N²). The walk costs the length of the decorator run, which is nearly
+ * always zero.
+ *
+ * `previousNamedSibling` steps over the anonymous `export` token, which is what lets one
+ * walk cover the wrapped-export shape as well as the bare one.
  */
 function collectDecoratorNodes(declaration: Node): Node[] {
-  const parent = declaration.parent
-  if (parent !== null && parent.type === "export_statement") {
-    // Wrapped export — decorators are field children of the wrapper itself.
-    return parent.namedChildren.filter((c): c is Node => c !== null && c.type === "decorator")
-  }
   const out: Node[] = []
   for (
     let sibling = declaration.previousNamedSibling;
