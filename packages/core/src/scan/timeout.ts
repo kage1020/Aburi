@@ -110,17 +110,21 @@ function clampTimeout(ms: number): number {
 export const DEFAULT_PARSE_TIMEOUT_MS = 5000
 
 /**
- * Lower bound enforced by the config schema. Unlike the classify budget there is no upper
- * one: a caller who wants a whole minute for a pathological file is entitled to it, and
- * the value that matters for CI is the default.
+ * Lower bound the config schema states. Unlike the classify budget there is no upper one: a
+ * caller who wants a whole minute for a pathological file is entitled to it, and the value
+ * that matters for CI is the default.
+ *
+ * A config file cannot reach the clamp below — ajv rejects anything under this before the
+ * value gets here. The clamp is for `scan()`'s other callers, who build a `Config` in code
+ * and never meet the schema.
  */
 export const PARSE_TIMEOUT_MIN_MS = 100
 
 /**
  * One file abandoned for overrunning its budget. `budgetMs` is the clamped budget that was
  * in effect; `elapsedMs` is the wall clock the file had actually spent when the pipeline
- * next looked, which is always at least the budget and usually more — see
- * `startParseDeadline` for why the two differ.
+ * next looked, which is always at least the budget and usually more — `ParseDeadline` says
+ * why the two differ.
  */
 export interface ParseTimeoutEvent {
   file: string
@@ -129,15 +133,11 @@ export interface ParseTimeoutEvent {
 }
 
 /**
- * A per-file wall-clock budget covering parse + extract + walk, per lang-plugin.md §7.1.2.
- *
- * The deadline is cooperative. `extractSymbols` and `walkBody` are synchronous plugin
- * calls, so nothing can interrupt one that has already started — the same constraint
- * `classifyWithTimeout` documents for `classify`. What the budget buys is that the
- * pipeline stops handing a file *more* work once the budget is spent: it is read after
- * the parse, after extraction, and before each candidate's walk. A file therefore costs
- * at most its budget plus one stage, and a single monster candidate can still overrun by
- * as much as that candidate takes.
+ * A per-file wall-clock budget covering parse + extract + walk. Cooperative, because the
+ * plugin calls it spans are synchronous and cannot be interrupted once started — so the
+ * budget bounds the work still to come rather than the work already running, and `elapsedMs`
+ * at the moment of abandonment exceeds `budgetMs` by however long the last call took.
+ * lang-plugin.md §7.1.2 has the full statement of what that does and does not guarantee.
  */
 export interface ParseDeadline {
   /** The clamped budget in effect for this file. */

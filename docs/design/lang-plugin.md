@@ -332,7 +332,7 @@ Files whose size exceeds `config.maxFileSizeBytes` (default: `2 * 1024 * 1024` =
 
 - Normal code does not exceed 2MB (only generated bundles / minified files do)
 - Large files exhaust the WASM heap and make parse time explode
-- Skipped files will be recorded in `stats.skippedFiles[]` (planned — see the [roadmap](../roadmap.md)); currently only a warning is emitted
+- Skipped files are returned on `ScanResult.skipped` with `reason: "over-size"`; a per-file entry in `stats.skippedFiles[]` is still planned (see the [roadmap](../roadmap.md)), so the IR itself does not name them
 - warning stderr: `Skipped <file>: <size>MB exceeds maxFileSizeBytes (2MB). Override with config.maxFileSizeBytes.`
 
 ### 7.1.2 Timeout
@@ -340,9 +340,11 @@ Files whose size exceeds `config.maxFileSizeBytes` (default: `2 * 1024 * 1024` =
 If the total of parse + extractSymbols + walkBody for one file exceeds `config.parseTimeoutMs` (default: `5000` = 5 seconds; the config schema's minimum is 100 and it has no maximum), abort, skip that file, and warn.
 This prevents a broken grammar or pathological source (deep nesting, etc.) from stalling the whole run.
 
-The budget is **cooperative**, for the reason §5.1.1 gives for the classify budget: `extractSymbols` and `walkBody` are synchronous plugin calls, and nothing can interrupt one that has already started. It is read at the three points where control is back in the core — after `parseFile`, after `extractSymbols`, and before each candidate's `walkBody` — so what it guarantees is that an over-budget file is handed no *further* work. A file costs at most its budget plus one stage, and one enormous candidate can still overrun by however long that candidate takes. A per-candidate hang is not something a wall-clock budget can catch; it is what `--strict` and a bug report are for.
+The budget is **cooperative**, for the reason [effect-plugin.md](./effect-plugin.md) §5.1.1 gives for the classify budget: `extractSymbols` and `walkBody` are synchronous plugin calls, and nothing can interrupt one that has already started. It is read at the three points that bound the work still to come — after `parseFile`, after `extractSymbols`, and before each candidate's `walkBody` — so what it guarantees is that an over-budget file is handed no *further* work. A file costs at most its budget plus one stage, and one enormous candidate can still overrun by however long that candidate takes. A hang inside a single call is not something a wall-clock budget can catch at all.
 
-An aborted file contributes **nothing**: no Symbols, no import edges, no parse errors. Keeping whichever Symbols it produced before the budget ran out would make the Document depend on how fast the machine was that day, so the outcome is binary per file. It is recorded in `ScanResult.skipped` with `reason: "parse-timeout"` and excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`.
+An aborted file contributes **nothing to the IR**: no Symbols, no import edges, and no `stats.effectClassifyTimeouts` entries accumulated from the candidates it did finish. Keeping whichever Symbols it produced before the budget ran out would make the Document depend on how fast the machine was that day, so the outcome is binary per file. It is recorded in `ScanResult.skipped` with `reason: "parse-timeout"`, repeated on `ScanResult.parseTimeouts` with the budget and the elapsed, and excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`.
+
+Its **parse errors are still reported**. They are diagnostic rather than IR, and they are what a slow file most needs to keep: backtracking over malformed input is a common reason for a slow parse, so a run that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is the syntax. A file that is both broken and slow appears in `parseErrors` and in `parseTimeouts` — but never in both `parseTimeouts` and the terminal-failure count, which subtract from `parsedFiles` separately; a file that returned no tree at all is §7.1's, not this section's.
 
 - warning stderr: `Skipped <file>: extraction reached <elapsed>ms, exceeding parseTimeoutMs (<budget>ms). Override with config.parseTimeoutMs.`
 

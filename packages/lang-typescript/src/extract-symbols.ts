@@ -479,11 +479,15 @@ function currentFile(ctx: ExtractionContext): string {
  * Walk up to the outermost wrapper before scanning siblings.
  *
  * The scan walks backwards from the anchor rather than reading the parent's child list and
- * searching it for the anchor's own position, for the reason `collectDecoratorNodes` gives:
- * at module level that list is every statement in the file, and materializing it once per
- * declaration is what made a large single file quadratic. `previousSibling` rather than
- * `previousNamedSibling` because the list this replaces was `parent.children`, which
- * includes the anonymous tokens between statements.
+ * searching it for the anchor's own position — see lang-plugin.md §8.2 for why a per-node
+ * question has to be asked of the node: at module level that list is every statement in the
+ * file, and materializing it once per declaration is what made a large single file
+ * quadratic.
+ *
+ * `previousSibling`, not `previousNamedSibling`, because an anonymous token between a
+ * comment and a declaration means the comment is not attached to it — a stray `;` in a class
+ * body separates the two, and reading past it would hand the member a JSDoc block written
+ * about nothing.
  */
 function readLeadingJsDoc(node: Node): string | null {
   const anchor = outerStatementWrapper(node)

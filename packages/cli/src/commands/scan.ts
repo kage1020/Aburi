@@ -66,9 +66,11 @@ export interface ScanReport {
   parseErrorCount: number
   timeoutCount: number
   /**
-   * Files that never made it into the IR (over-size, unreadable, unroutable). Surfaced
-   * separately from `parseErrorCount` because a discovery-time drop is silent by design
-   * in `@aburi/core` — it belongs on the CLI report so `aburi scan` can warn on stderr.
+   * Files that never made it into the IR: over-size or unreadable at discovery,
+   * unroutable or over `parseTimeoutMs` afterwards. Surfaced separately from
+   * `parseErrorCount` because `@aburi/core` returns these rather than printing them — a
+   * discovery-time drop writes nothing at all, and only `parse-timeout` also logs per
+   * file. Warning on stderr is the CLI's job either way.
    */
   skipped: readonly { path: string; reason: string; detail?: string }[]
   /**

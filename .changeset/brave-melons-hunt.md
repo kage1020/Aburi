@@ -18,11 +18,17 @@ before each candidate's walk — so what it guarantees is that an over-budget fi
 further work. A file costs at most its budget plus one stage, and a single enormous candidate
 can still overrun by however long that candidate takes.
 
-An over-budget file contributes nothing: no Symbols, no import edges, no parse errors. Keeping
+An over-budget file contributes nothing to the IR: no Symbols, no import edges. Keeping
 whichever Symbols it finished first would make the Document depend on how fast the machine was
-that day, so the outcome is binary per file. It lands in `ScanResult.skipped` under a new
-`reason: "parse-timeout"`, is left out of `stats.parsedFiles` while still counting toward
-`stats.totalFiles`, and warns in the shape §7.1.1 uses:
+that day, so the outcome is binary per file. Its **parse errors are still reported**, because
+they are diagnostic rather than IR and because backtracking over malformed input is a common
+reason for a slow parse — a run that swallowed them would send the reader to raise the budget
+when the fix is the syntax.
+
+Such a file lands in `ScanResult.skipped` under a new `reason: "parse-timeout"` and again on
+`ScanResult.parseTimeouts` with the budget and the elapsed beside it, is left out of
+`stats.parsedFiles` while still counting toward `stats.totalFiles`, and warns in the shape
+lang-plugin.md §7.1.1 uses for the size cap:
 
 ```
 Skipped src/generated/client.ts: extraction reached 7413ms, exceeding parseTimeoutMs (5000ms). Override with config.parseTimeoutMs.
@@ -35,6 +41,7 @@ it. The tests accordingly never assert that something finished in time — a stu
 deliberately spends the budget, so the over-budget cases can only fail in the direction of a
 machine spending more.
 
-`@aburi/core` also exports `startParseDeadline`, `DEFAULT_PARSE_TIMEOUT_MS` and
-`PARSE_TIMEOUT_MIN_MS`. The CLI's skip summary no longer says "skipped during discovery": two
-of the four reasons are decided after it.
+`@aburi/core` also exports `startParseDeadline`, `ParseDeadline`, `ParseTimeoutEvent`,
+`DEFAULT_PARSE_TIMEOUT_MS` and `PARSE_TIMEOUT_MIN_MS`. `SkippedFile.reason` gains a fourth
+member, so an exhaustive `switch` over it needs a new arm. The CLI's skip summary no longer
+says "skipped during discovery": two of the four reasons are decided after it.

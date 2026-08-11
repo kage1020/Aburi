@@ -87,10 +87,10 @@ export interface DiscoveredFile {
 }
 
 /**
- * A file that produced no Symbols and was not a parse failure. The first two reasons are
- * decided during discovery; `unroutable` and `parse-timeout` are decided by the scan
- * orchestrator afterwards and merged into the same list, because from the reader's side
- * they answer the same question — why is this file missing from the IR?
+ * A file that produced no Symbols and was not a parse failure. `over-size` and `unreadable`
+ * are decided here during discovery; `unroutable` and `parse-timeout` are decided by the
+ * scan orchestrator afterwards and merged into the same list, because from the reader's
+ * side they answer the same question — why is this file missing from the IR?
  */
 export interface SkippedFile {
   path: string

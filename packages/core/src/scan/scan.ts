@@ -32,7 +32,7 @@ import { type DiscoveredFile, discoverFiles, type SkippedFile } from "./discover
 import { buildDropCFilter } from "./drop-c"
 import { runFilePipeline } from "./pipeline"
 import { buildLanguageRouter } from "./route"
-import type { ClassifyTimeoutEvent } from "./timeout"
+import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
 
 export interface ScanInput {
   /** Absolute workspace root. Every relative path in the IR is measured against this. */
@@ -68,6 +68,16 @@ export interface ScanResult {
   skipped: readonly SkippedFile[]
   /** Rich timeout observations for logging / CI signals. Aggregated into `ir.stats` too. */
   timeoutEvents: readonly ClassifyTimeoutEvent[]
+  /**
+   * One record per file abandoned for exceeding `config.parseTimeoutMs`, in scan order.
+   * These files also appear in `skipped` under `reason: "parse-timeout"`, which is what a
+   * reader wanting the count consults; this carries the budget and the wall clock beside
+   * it, so a caller can report how far over the file went without parsing a message.
+   *
+   * Deliberately not in `ir.stats`: unlike `effectClassifyTimeouts`, which records a
+   * decision the Document embodies, this records a file the Document does not mention.
+   */
+  parseTimeouts: readonly ParseTimeoutEvent[]
   /**
    * One record per call the resolver left `resolved: null`, with the §8.1
    * bucket that explains why. Counts are aggregated into
@@ -132,6 +142,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const parseErrors: ParseErrorRecord[] = []
   const timeoutEvents: ClassifyTimeoutEvent[] = []
   const additionalSkipped: SkippedFile[] = []
+  const parseTimeouts: ParseTimeoutEvent[] = []
   const importsByFile = new Map<string, readonly ImportEdge[]>()
   const fileContents = new Map<string, string>()
   const dynamicCallSites = new Set<string>()
@@ -154,7 +165,6 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     }
 
     const sourceFile = await loadSourceFile(input.workspaceRoot, discoveredFile)
-    fileContents.set(sourceFile.path, sourceFile.content)
 
     const result = await runFilePipeline({
       file: sourceFile,
@@ -173,27 +183,32 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         : {}),
     })
 
-    if (result.parseTimeout !== null) {
-      const { budgetMs, elapsedMs } = result.parseTimeout
-      const spent = Math.round(elapsedMs)
-      additionalSkipped.push({
-        path: discoveredFile.path,
-        reason: "parse-timeout",
-        detail: `${spent}ms exceeds ${budgetMs}ms`,
-      })
-      logger.warn(
-        `Skipped ${discoveredFile.path}: extraction reached ${spent}ms, exceeding parseTimeoutMs (${budgetMs}ms). Override with config.parseTimeoutMs.`,
-      )
-      // The file's source text is dropped along with its Symbols. LSP enrichment reads
-      // `fileContents` to build its documents, and a file with no Symbols in the IR has
-      // nothing for it to enrich.
-      fileContents.delete(sourceFile.path)
-      continue
-    }
-
+    // Reported for every file that got as far as a parse, abandoned or not: a file that
+    // was slow *because* it was broken needs to say so, or the reader is sent to raise the
+    // budget when the fix is the syntax.
     if (result.parseErrors.length > 0) {
       parseErrors.push({ file: discoveredFile.path, errors: result.parseErrors })
     }
+
+    if (result.parseTimeout !== null) {
+      const spent = Math.round(result.parseTimeout.elapsedMs)
+      const budget = result.parseTimeout.budgetMs
+      parseTimeouts.push(result.parseTimeout)
+      additionalSkipped.push({
+        path: discoveredFile.path,
+        reason: "parse-timeout",
+        detail: "extraction exceeded parseTimeoutMs",
+      })
+      logger.warn(
+        `Skipped ${discoveredFile.path}: extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms). Override with config.parseTimeoutMs.`,
+      )
+      continue
+    }
+
+    // Held for LSP enrichment, and only for files that reached the IR: the pass builds one
+    // document per file it has Symbols for, so a withdrawn file's text would never be read.
+    fileContents.set(sourceFile.path, sourceFile.content)
+
     if (result.terminalParseFailure) terminalParseFailures++
     timeoutEvents.push(...result.timeoutEvents)
     symbols.push(...result.symbols)
@@ -256,8 +271,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   // parsedFiles counts every file the pipeline successfully parsed. Files with
   // recoverable parse errors still count as parsed (a non-null tree survived); only
-  // terminal parse failures (null tree) are excluded. Unroutable files never reach
-  // the pipeline and are recorded on `skipped` instead.
+  // terminal parse failures (null tree) are excluded. `attempted` nets out both kinds of
+  // `additionalSkipped`: an unroutable file never reaches the pipeline, and one over its
+  // parse budget reaches it but withdraws — neither is a file the run parsed.
   const attempted = discovered.files.length - additionalSkipped.length
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
@@ -296,7 +312,14 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   )
-  return { ir, parseErrors, skipped, timeoutEvents, unresolvedCalls: callGraph.diagnostics }
+  return {
+    ir,
+    parseErrors,
+    skipped,
+    timeoutEvents,
+    parseTimeouts,
+    unresolvedCalls: callGraph.diagnostics,
+  }
 }
 
 /**

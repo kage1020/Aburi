@@ -69,6 +69,16 @@ describe("leading comment run", () => {
     )
     expect(byId(symbols, "#f").signature?.throws).toEqual(["WrappedError"])
   })
+
+  it("stops at a decorator, so a JSDoc written above one is not read", async () => {
+    // `/** doc */ @Get() handler() {}` is idiomatic and its JSDoc plainly documents the
+    // method, so this is a gap rather than a rule — the mirror of the comment a decorator
+    // run has to skip. Pinned rather than closed here: `signature.throws` feeds the api and
+    // logic fingerprints, so widening it reclassifies Symbols across a whole corpus on
+    // upgrade, which is a decision of its own and not one a performance change should make.
+    const symbols = await symbolsOf("class C {\n  /** @throws E */\n  @A()\n  m() {}\n}\n")
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+  })
 })
 
 describe("decorator run", () => {
@@ -94,10 +104,54 @@ describe("decorator run", () => {
     expect(byId(symbols, "#C.second").decorators).toEqual([])
   })
 
-  it("reads an exported declaration's decorators off the export wrapper", async () => {
-    // The grammar hoists decorators onto the `export_statement`, so they are children of
-    // the wrapper rather than siblings of the class — a different branch from the run.
+  it("reaches an exported declaration's decorators inside the export wrapper", async () => {
+    // The grammar's rule is `decorator* 'export' declaration`, so the decorators sit in the
+    // wrapper with two anonymous tokens between them and the class. The named walk steps
+    // over those, which is the only reason one walk covers both placements.
     const symbols = await symbolsOf("@Injectable()\nexport class C {}\n")
     expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("reaches them past `export default` too", async () => {
+    const symbols = await symbolsOf("@Injectable()\nexport default class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("does not let a comment detach a decorator from what it decorates", async () => {
+    // A comment is a named node and lands wherever it was written, so it can sit between
+    // the decorator and the `export` keyword. Ending the run there loses the decorator
+    // silently — decorators feed the framework classifier, so the Symbol comes out with
+    // the wrong extKind rather than with an error.
+    const symbols = await symbolsOf("@Injectable()\n// keep this one\nexport class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("does not let a comment split a decorator run in half", async () => {
+    const symbols = await symbolsOf("@A()\n// note\n@B()\nexport class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B"])
+  })
+
+  it("skips a comment inside a class member's run as well", async () => {
+    const symbols = await symbolsOf("class C {\n  @A()\n  // note\n  m() {}\n}\n")
+    expect(byId(symbols, "#C.m").decorators.map((d) => d.name)).toEqual(["A"])
+  })
+})
+
+describe("decorators the walk does not reach", () => {
+  /**
+   * A decorator with no wrapper to hold it is parsed as the first *child* of the
+   * declaration, not as a sibling — so neither the walk nor the child-list scan it replaced
+   * finds it. These pin the answer as it stands rather than endorse it: closing the gap
+   * would newly attach decorators to Symbols that have none today, moving `extKind` and
+   * every fingerprint that reads it, which wants its own change.
+   */
+  it("misses a decorator on a declaration that is not exported", async () => {
+    const symbols = await symbolsOf("@Injectable()\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators).toEqual([])
+  })
+
+  it("misses a decorator written after the `export` keyword", async () => {
+    const symbols = await symbolsOf("export @Injectable() class C {}\n")
+    expect(byId(symbols, "#C").decorators).toEqual([])
   })
 })

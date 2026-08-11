@@ -6,6 +6,7 @@ import type {
   LanguagePlugin,
   Logger,
   OpaqueAstNode,
+  ParseError,
   ParseResult,
   SourceFile,
   SymbolCandidate,
@@ -13,6 +14,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import configSchema from "../../../../schema/aburi.config.v1.json" with { type: "json" }
 import {
   buildDropCFilter,
   DEFAULT_PARSE_TIMEOUT_MS,
@@ -103,6 +105,9 @@ interface StubTiming {
   walkMsPerCandidate?: number
   candidates?: readonly string[]
   imports?: readonly ImportEdge[]
+  parseErrors?: readonly ParseError[]
+  /** Return no tree at all, the way a plugin reports a file it could not parse. */
+  noTree?: boolean
 }
 
 interface StubCalls {
@@ -131,7 +136,11 @@ function stubPlugin(timing: StubTiming, calls: StubCalls): LanguagePlugin {
     init: async () => {},
     parseFile: async (_file: SourceFile): Promise<ParseResult> => {
       spend(timing.parseMs ?? 0)
-      return { tree: {} as OpaqueAstNode, errors: [], imports: [...(timing.imports ?? [])] }
+      return {
+        tree: timing.noTree === true ? null : ({} as OpaqueAstNode),
+        errors: [...(timing.parseErrors ?? [])],
+        imports: [...(timing.imports ?? [])],
+      }
     },
     extractSymbols: (_tree: OpaqueAstNode, _ctx: ExtractionContext) => {
       calls.extract++
@@ -169,14 +178,21 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
 }
 
 describe("parse deadline budget", () => {
-  it("defaults to the 5000 ms the config schema documents", () => {
+  // Against the schema rather than against a literal: the constants exist to mirror it, so
+  // a test that repeated the numbers would be a third copy and would stay green while the
+  // two that matter drifted apart.
+  const spec = configSchema.properties.parseTimeoutMs
+
+  it("defaults to what the config schema documents", () => {
     expect(startParseDeadline(undefined).budgetMs).toBe(DEFAULT_PARSE_TIMEOUT_MS)
-    expect(DEFAULT_PARSE_TIMEOUT_MS).toBe(5000)
+    expect(DEFAULT_PARSE_TIMEOUT_MS).toBe(spec.default)
   })
 
   it("clamps a value below the schema minimum up to it", () => {
+    // Only reachable programmatically — ajv refuses a config file that says less than this
+    // long before `startParseDeadline` sees it.
     expect(startParseDeadline(1).budgetMs).toBe(PARSE_TIMEOUT_MIN_MS)
-    expect(PARSE_TIMEOUT_MIN_MS).toBe(100)
+    expect(PARSE_TIMEOUT_MIN_MS).toBe(spec.minimum)
   })
 
   it("takes a configured value above the minimum as written", () => {
@@ -192,14 +208,36 @@ describe("runFilePipeline — parse deadline", () => {
     expect(calls.walk).toEqual([])
   })
 
-  it("stops walking partway through the candidate list", async () => {
+  it("stops walking partway through the candidate list, and keeps nothing it walked", async () => {
     const { result, calls } = await run(
       { candidates: ["one", "two", "three", "four"], walkMsPerCandidate: 60 },
       100,
     )
     expect(result.parseTimeout).not.toBeNull()
     expect(calls.extract).toBe(1)
-    expect(calls.walk.length).toBeLessThan(4)
+    // 60 ms a candidate against 100: the check before the third is the first that can
+    // find the budget spent, and a slower machine only finds it sooner.
+    expect(calls.walk.length).toBeLessThanOrEqual(2)
+    // The Symbols already built go with the rest. This is the contract that makes the
+    // outcome binary rather than a function of how fast the machine was.
+    expect(result.symbols).toEqual([])
+    expect(result.imports).toEqual([])
+  })
+
+  it("keeps the parse errors of a file it abandons", async () => {
+    const parseErrors: readonly ParseError[] = [
+      { message: "unexpected token", line: 1, column: 1, recoverable: true },
+    ]
+    const { result } = await run({ parseMs: 250, parseErrors }, 100)
+    expect(result.parseTimeout).not.toBeNull()
+    expect(result.parseErrors).toEqual(parseErrors)
+  })
+
+  it("reports a file with no tree as a parse failure rather than as a timeout", async () => {
+    // Both feed `parsedFiles` by different subtractions, so they must not both be set.
+    const { result } = await run({ parseMs: 250, noTree: true }, 100)
+    expect(result.terminalParseFailure).toBe(true)
+    expect(result.parseTimeout).toBeNull()
   })
 
   it("abandons a file whose extraction blew the budget and found nothing to walk", async () => {
@@ -226,7 +264,6 @@ describe("runFilePipeline — parse deadline", () => {
     const { result } = await run({ parseMs: 250, imports }, 100)
     expect(result.symbols).toEqual([])
     expect(result.imports).toEqual([])
-    expect(result.parseErrors).toEqual([])
   })
 
   it("leaves a file that finishes inside its budget untouched", async () => {

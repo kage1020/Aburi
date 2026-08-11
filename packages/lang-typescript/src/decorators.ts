@@ -4,13 +4,23 @@ import type { Node } from "web-tree-sitter"
 /**
  * Read every decorator attached to a specific declaration node.
  *
- * Tree-sitter-typescript puts the decorators in a different parent depending on where the
- * declaration sits: beside a method inside the class body, beside a bare declaration
- * inside the program, and — for `@A() export class C {}` — inside the `export_statement`
- * wrapper, where the grammar's rule is `decorator* 'export' declaration`. All three are
- * the same shape from the declaration's point of view: the decorators are the siblings
- * immediately before it. Only those siblings belong to it, which is why the run has to
- * stop rather than sweep the whole container.
+ * Tree-sitter-typescript puts a decorator in one of two places, and only one of them is
+ * what this reads:
+ *
+ * - **Beside the declaration.** A class member (`class C { @A() m() {} }`) has its
+ *   decorators as preceding siblings inside the class body; an exported declaration
+ *   (`@A() export class C {}`) has them as preceding siblings inside the
+ *   `export_statement`, whose rule is `decorator* 'export' ['default'] declaration`. Both
+ *   are the same question from the declaration's point of view, which is why one backwards
+ *   walk covers them.
+ *
+ * - **Inside the declaration.** A decorator written where no wrapper takes it —
+ *   `@A() class C {}` at top level, or `export @A() class C {}` — is parsed as the *first
+ *   child* of the `class_declaration` itself. Those are not read, and the Symbol comes out
+ *   with `decorators: []`. That predates the walk (the child list the walk replaced did not
+ *   find them either) and `sibling-runs.test.ts` pins the current answer; closing it is a
+ *   separate change, because it would newly attach decorators to Symbols that have gone
+ *   without them, and `extKind` and the fingerprints move with them.
  */
 export function readDecorators(declaration: Node): Decorator[] {
   const found = collectDecoratorNodes(declaration)
@@ -26,19 +36,30 @@ export function readDecorators(declaration: Node): Decorator[] {
  * and searching it for the declaration's own position. Both find the same run, but the
  * parent of a top-level declaration is the whole program and `namedChildren` unmarshals
  * every child into a JS object, so reading it once per declaration costs a file of N
- * declarations O(N²). The walk costs the length of the decorator run, which is nearly
- * always zero.
+ * declarations O(N²). The walk pays for the run it collects plus tree-sitter's own cost to
+ * step back one sibling, and stops as soon as the run ends — for most declarations, before
+ * the first step returns anything.
  *
- * `previousNamedSibling` steps over the anonymous `export` token, which is what lets one
- * walk cover the wrapped-export shape as well as the bare one.
+ * Anonymous tokens are stepped over for free, which is what lets one walk cover both
+ * placements: `export` and `default` sit between the decorators and the declaration in the
+ * wrapper, and `previousNamedSibling` does not see them.
+ *
+ * A comment is a different matter. It is a *named* node, and tree-sitter puts it wherever
+ * it was written — including between two decorators, or between the decorators and the
+ * `export` keyword. Ending the run there would let a `// biome-ignore` or a TODO detach a
+ * decorator from the class it decorates, which is silent: decorators feed
+ * `mergeFrameworkClassification`, so the Symbol comes out with the wrong `extKind` rather
+ * than with an error. Comments are skipped, the way `readCallArguments` skips them.
  */
 function collectDecoratorNodes(declaration: Node): Node[] {
   const out: Node[] = []
   for (
     let sibling = declaration.previousNamedSibling;
-    sibling !== null && sibling.type === "decorator";
+    sibling !== null;
     sibling = sibling.previousNamedSibling
   ) {
+    if (sibling.type === "comment") continue
+    if (sibling.type !== "decorator") break
     out.push(sibling)
   }
   return out.reverse()

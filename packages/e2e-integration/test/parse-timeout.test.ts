@@ -1,15 +1,16 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type ScanResult, scan } from "@aburi/core"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { VocabRegistry } from "@aburi/plugin-registry"
 import type { Config, IRSymbol, LanguagePlugin, Logger } from "@aburi/types"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 /**
  * `config.parseTimeoutMs` at the scan boundary: what a timed-out file does to the IR, to
- * `ScanResult.skipped`, to `stats`, and to the files beside it.
+ * `ScanResult.skipped` and `ScanResult.parseTimeouts`, to `stats`, and to the files beside
+ * it.
  *
  * The language plugin is the real TypeScript one wrapped in a delay, so the IR that comes
  * out of the surviving files is a real IR and `assertIRIntegrity` runs on it exactly as it
@@ -18,18 +19,34 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
  * the direction that keeps them true.
  */
 
+const WARM_SOURCE = "export function warm() {}\n"
+
 let workRoot: string
 
+/**
+ * `init()` is a no-op and the plugin defers its WASM and grammar load to the first
+ * `parseFile`, which costs about 20 ms against budgets of 100. Discovery hands files over in
+ * path order, so without this the file that is meant to *survive* pays that cost whenever it
+ * sorts first. Parsing one throwaway file up front takes the term out of every budget below
+ * without widening any of them.
+ */
+beforeAll(async () => {
+  await langTypescriptPlugin.parseFile({ path: "warm.ts", content: WARM_SOURCE })
+})
+
 beforeEach(async () => {
-  workRoot = join(tmpdir(), `aburi-parse-timeout-${Math.floor(performance.now() * 1000)}`)
-  await mkdir(workRoot, { recursive: true })
+  workRoot = await mkdtemp(join(tmpdir(), "aburi-parse-timeout-"))
 })
 
 afterEach(async () => {
   await rm(workRoot, { recursive: true, force: true })
 })
 
-/** Spend `ms` of wall clock. The point is that the time is really gone. */
+/**
+ * Spend `ms` of wall clock. The point is that the time is really gone — the counter and the
+ * unreachable throw are there so the loop has an observable effect and cannot be optimised,
+ * or later "simplified", into nothing.
+ */
 function spend(ms: number): void {
   const until = performance.now() + ms
   let spins = 0
@@ -43,7 +60,9 @@ function spend(ms: number): void {
  *
  * The plugin is a class instance, so its methods live on the prototype and a spread would
  * copy the fields and lose the behaviour. `Object.create` keeps the original as the
- * prototype and shadows the one method being delayed.
+ * prototype and shadows the one method being delayed. That is sound only because the plugin
+ * holds no instance state — every method forwards to a module-level function — so `init()`
+ * running with `this === wrapped` and `extractSymbols` with `this === base` cannot diverge.
  */
 function slowFor(paths: readonly string[], ms: number): LanguagePlugin {
   const slow = new Set(paths)
@@ -102,7 +121,7 @@ describe("config.parseTimeoutMs", () => {
     expect(names).not.toContain("slowOne")
   })
 
-  it("records the file once in skipped, with the elapsed and the budget", async () => {
+  it("records the file once in skipped, and its numbers on parseTimeouts", async () => {
     await writeSource("slow.ts", "export function slowOne() { return 1 }\n")
 
     const { result } = await runScan(slowFor(["slow.ts"], 250), { parseTimeoutMs: 100 })
@@ -111,7 +130,27 @@ describe("config.parseTimeoutMs", () => {
     const [entry] = result.skipped
     expect(entry?.path).toBe("slow.ts")
     expect(entry?.reason).toBe("parse-timeout")
-    expect(entry?.detail).toMatch(/^\d+ms exceeds 100ms$/)
+
+    // The numbers live on `parseTimeouts`, not inside the prose — a caller that wants to
+    // report how far over the file went should not have to parse a message to find out.
+    expect(result.parseTimeouts).toHaveLength(1)
+    const [event] = result.parseTimeouts
+    expect(event?.file).toBe("slow.ts")
+    expect(event?.budgetMs).toBe(100)
+    expect(event?.elapsedMs).toBeGreaterThanOrEqual(100)
+  })
+
+  it("still reports the parse errors of a file that is broken as well as slow", async () => {
+    // Backtracking over malformed input is a common reason for a slow parse, so the two
+    // arrive together. Reporting only the budget would send the reader to raise
+    // `parseTimeoutMs` when the fix is the syntax.
+    await writeSource("broken.ts", "export function ( { { {\n")
+
+    const { result } = await runScan(slowFor(["broken.ts"], 250), { parseTimeoutMs: 100 })
+
+    expect(result.parseTimeouts.map((t) => t.file)).toEqual(["broken.ts"])
+    expect(result.parseErrors.map((e) => e.file)).toEqual(["broken.ts"])
+    expect(result.parseErrors[0]?.errors.length).toBeGreaterThan(0)
   })
 
   it("counts the file as discovered but not as parsed", async () => {
@@ -170,6 +209,7 @@ describe("config.parseTimeoutMs", () => {
     const { result, warnings } = await runScan(langTypescriptPlugin, { parseTimeoutMs: 600_000 })
 
     expect(result.skipped).toEqual([])
+    expect(result.parseTimeouts).toEqual([])
     expect(warnings).toEqual([])
     expect(result.ir.symbols.map((s: IRSymbol) => s.name)).toEqual(["quickOne"])
   })

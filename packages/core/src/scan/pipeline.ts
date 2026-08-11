@@ -53,11 +53,23 @@ export interface FilePipelineResult {
    */
   terminalParseFailure: boolean
   /**
-   * Set when the file overran `config.parseTimeoutMs` and was abandoned. Every other
-   * field is then empty: an abandoned file contributes nothing to the IR, because the
-   * alternative — keeping whichever Symbols it managed to produce first — would make the
-   * Document depend on how fast the machine was that day. The caller records the file as
-   * skipped and excludes it from `parsedFiles`.
+   * Set when the file overran `config.parseTimeoutMs` and was abandoned. Every other field
+   * is then empty: an abandoned file contributes nothing to the IR, because the alternative
+   * — keeping whichever Symbols it managed to produce first — would make the Document
+   * depend on how fast the machine was that day. The caller records the file as skipped and
+   * excludes it from `parsedFiles`.
+   *
+   * Two exceptions to "every other field is empty". `parseErrors` survives, because it is
+   * diagnostic rather than IR and because a slow parse is often a slow parse *of broken
+   * input* — a reader told only about the budget would go raise it instead of fixing the
+   * syntax. `imports` does not, which is the one place this differs from a terminal parse
+   * failure: that path keeps its edges, because a file that could not be parsed at all still
+   * told us truthfully what it imports, whereas here the file is being withdrawn
+   * deliberately, and an import list is only ever consulted on behalf of the calls in its
+   * own file — of which an abandoned file has none.
+   *
+   * Never set together with `terminalParseFailure`. Both feed `parsedFiles`, by different
+   * subtractions, so a file carrying both would be counted out of it twice.
    */
   parseTimeout: ParseTimeoutEvent | null
   /** POSIX-relative path of the file. */
@@ -105,19 +117,24 @@ export interface FilePipelineInput {
  *   7. `normalizeAst` + `computeSymbolFingerprint` — locks the Symbol against later
  *      churn.
  *
- * Steps 1, 2 and each iteration of 3-7 are separated by a read of the file's
- * `parseTimeoutMs` budget (lang-plugin.md §7.1.2). Those are the only points at which
- * control is back here — the plugin calls in between are synchronous — so they are where
- * a file that has run out of budget is abandoned.
+ * The file's `parseTimeoutMs` budget (lang-plugin.md §7.1.2) is read after step 1, after
+ * step 2, and before each iteration of 3-7. A plugin call cannot be interrupted once it has
+ * started, so a budget can only be enforced between them; these three are the readings that
+ * bound the work still to come, and a file found over budget at one of them is abandoned.
  */
 export async function runFilePipeline(input: FilePipelineInput): Promise<FilePipelineResult> {
   const { file, language, frameworks, effects, registry, config, dropCFilter, log } = input
 
   const deadline = startParseDeadline(input.parseTimeoutMs)
+  // Everything the file produced is withdrawn except its parse errors. Those are the one
+  // output that is diagnostic rather than IR, and the one a slow file most needs to keep:
+  // backtracking over malformed input is a common reason for a slow parse, so a timeout
+  // that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is
+  // the syntax. `parseErrors` is in scope at every call — the parse has always returned.
   const abandon = (): FilePipelineResult => ({
     symbols: [],
     imports: [],
-    parseErrors: [],
+    parseErrors,
     timeoutEvents: [],
     terminalParseFailure: false,
     parseTimeout: {
@@ -130,14 +147,16 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   })
 
   const parseResult = await language.parseFile(file)
-  if (deadline.expired()) return abandon()
-
   const parseErrors = parseResult.errors
   const timeoutEvents: ClassifyTimeoutEvent[] = []
   // Normalized before the early return as well: a terminal parse failure still hands its
   // import edges to the caller, and dependency extraction compares them the same way.
   const imports = parseResult.imports.map(normalizeImportEdge)
 
+  // Read before the budget. A file with no tree at all is already excluded from
+  // `parsedFiles` by the count it feeds, and the two flags must not both be set or the
+  // caller would subtract the same file twice. Between the two claims the parse failure is
+  // the one that names a fix.
   if (parseResult.tree === null) {
     return {
       symbols: [],
@@ -150,6 +169,8 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       dynamicCallSites: [],
     }
   }
+
+  if (deadline.expired()) return abandon()
 
   const extractCtx: ExtractionContext = { file, registry, config }
   const candidates = language.extractSymbols(
