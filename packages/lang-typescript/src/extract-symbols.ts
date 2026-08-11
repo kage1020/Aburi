@@ -472,7 +472,15 @@ function currentFile(ctx: ExtractionContext): string {
 }
 
 /**
- * Read the `/** ... *\/` comment immediately preceding a declaration, if any.
+ * Read the JSDoc blocks written above a declaration, joined in source order, or `null` when
+ * there are none. Only `/**`-opening comments count — an ordinary `/* … *\/` block and a `//`
+ * line are not documentation, and the one consumer of this string (`readThrows`, which scans
+ * it for `@throws`) has no way to tell them apart once they are in it.
+ *
+ * That distinction is what keeps the run safe now that it steps over decorators. The space
+ * between a decorator and its member is where `// biome-ignore`, ticket references and
+ * commented-out decorators are written, and a `@throws` mentioned in one of those is prose
+ * about the code, not a declaration of what the member throws.
  *
  * Wrapper handling: if the declaration is inside an `export_statement` (`export function
  * f() {}`), the JSDoc lives before the export wrapper, not before the declaration itself.
@@ -484,19 +492,23 @@ function currentFile(ctx: ExtractionContext): string {
  * file, and materializing it once per declaration is what made a large single file
  * quadratic.
  *
- * `previousSibling`, not `previousNamedSibling`, because an anonymous token between a
- * comment and a declaration means the comment is not attached to it — a stray `;` in a class
- * body separates the two, and reading past it would hand the member a JSDoc block written
- * about nothing.
+ * What the walk does at each kind of sibling:
+ *
+ * - a `/**` comment is **collected**;
+ * - any other comment, and a decorator, is **stepped over**. A decorator belongs to the
+ *   member rather than separating anything from it (`/** doc *\/ @Get() handler() {}` is
+ *   idiomatic), and a note written among them does not detach the block above it either;
+ * - anything else **ends the run**, including an anonymous token. A stray `;` in a class body
+ *   separates a comment from the member below it, and reading past one would hand that
+ *   member a block written about nothing.
  */
 function readLeadingJsDoc(node: Node): string | null {
   const anchor = outerStatementWrapper(node)
   const collected: string[] = []
-  for (
-    let sibling = anchor.previousSibling;
-    sibling !== null && sibling.type === "comment";
-    sibling = sibling.previousSibling
-  ) {
+  for (let sibling = anchor.previousSibling; sibling !== null; sibling = sibling.previousSibling) {
+    if (sibling.type === "decorator") continue
+    if (sibling.type !== "comment") break
+    if (!sibling.text.startsWith("/**")) continue
     collected.push(sibling.text)
   }
   if (collected.length === 0) return null

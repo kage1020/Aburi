@@ -5,16 +5,19 @@ import { extractSymbols, parseTypescriptFile } from "../src/index"
 import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
 
 /**
- * The leading JSDoc block and the decorator list are both read as a *run of siblings
- * immediately before a declaration*. Reading them from the node backwards rather than by
- * searching the parent's child list for the node is what keeps a file of N declarations
- * from costing O(N) per declaration — but the two readings only agree while the run's
- * boundaries are the same, so these pin the boundaries rather than the cost.
+ * What belongs to a declaration and what merely sits near it, for the two things read from
+ * the nodes around one: its JSDoc and its decorators.
  *
- * A run is observable in two places:
- *   - the comment run through `signature.throws`, which unions the `@throws` tags of the
- *     whole leading block (signature.ts `readThrows`);
- *   - the decorator run through `decorators[]`.
+ * Neither is a plain run of preceding siblings. The decorators are the preceding-sibling run
+ * *and* the declaration's own `decorator:` field children, since the grammar parents them on
+ * one side or the other depending on where they were written relative to `export`. The JSDoc
+ * run steps over decorators and over comments that are not documentation. So the boundaries
+ * are a set of decisions rather than one rule, and these pin them.
+ *
+ * They are observable in two places:
+ *   - the JSDoc run through `signature.throws`, which unions the `@throws` tags of the
+ *     collected blocks (signature.ts `readThrows`);
+ *   - the decorators through `decorators[]`, in source order.
  */
 
 async function symbolsOf(source: string): Promise<SymbolCandidate<Node>[]> {
@@ -70,13 +73,117 @@ describe("leading comment run", () => {
     expect(byId(symbols, "#f").signature?.throws).toEqual(["WrappedError"])
   })
 
-  it("stops at a decorator, so a JSDoc written above one is not read", async () => {
-    // `/** doc */ @Get() handler() {}` is idiomatic and its JSDoc plainly documents the
-    // method, so this is a gap rather than a rule — the mirror of the comment a decorator
-    // run has to skip. Pinned rather than closed here: `signature.throws` feeds the api and
-    // logic fingerprints, so widening it reclassifies Symbols across a whole corpus on
-    // upgrade, which is a decision of its own and not one a performance change should make.
+  it("steps over a decorator, because a JSDoc above one still documents the member", async () => {
+    // `/** doc */ @Get() handler() {}` is idiomatic, and the decorator belongs to the member
+    // rather than separating anything from it — the mirror of the comment a decorator run
+    // has to skip.
     const symbols = await symbolsOf("class C {\n  /** @throws E */\n  @A()\n  m() {}\n}\n")
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual(["E"])
+  })
+
+  it("reads a comment written between the decorator and the member", async () => {
+    const symbols = await symbolsOf("class C {\n  @A()\n  /** @throws E */\n  m() {}\n}\n")
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual(["E"])
+  })
+
+  it("steps over the decorator without absorbing its text", async () => {
+    // Skipping and collecting are one line apart. A decorator argument that happens to
+    // mention `@throws` is the difference: it is source, not documentation.
+    const symbols = await symbolsOf('class C {\n  @Doc("@throws NotAThrow")\n  m() {}\n}\n')
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+  })
+
+  it("does not let stepping over a decorator reach the previous member's comment", async () => {
+    const symbols = await symbolsOf(
+      [
+        "class C {",
+        "  /** @throws OwnedByFirst */",
+        "  first() {}",
+        "  @A()",
+        "  m() {}",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+    expect(byId(symbols, "#C.first").signature?.throws).toEqual(["OwnedByFirst"])
+  })
+
+  it("does not read a note left after the previous member as the next one's", async () => {
+    // The comment sits *after* `first` and before `m`'s decorator, which is where a reader
+    // writes about the member above. Stepping over the decorator makes it reachable; only
+    // its not being a JSDoc block keeps it out.
+    const symbols = await symbolsOf(
+      [
+        "class C {",
+        "  first() { return 1 }",
+        "  // NOTE: first() can @throws Trailing in legacy mode",
+        "  @Get()",
+        "  m() { return 2 }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+    expect(byId(symbols, "#C.first").signature?.throws).toEqual([])
+  })
+
+  it("does not read a lint suppression written among the decorators", async () => {
+    const symbols = await symbolsOf(
+      [
+        "class C {",
+        "  @A()",
+        "  // biome-ignore lint/x: @throws Sneaky",
+        "  @B()",
+        "  m() {}",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
+  })
+
+  it("reads only `/**` blocks, not every comment", async () => {
+    // The one consumer scans the joined text for `@throws`, and cannot tell prose from a
+    // declaration once both are in it. `//` and `/* */` are prose.
+    const line = await symbolsOf("class C {\n  // @throws Legacy\n  m() {}\n}\n")
+    expect(byId(line, "#C.m").signature?.throws).toEqual([])
+    const block = await symbolsOf("class C {\n  /* @throws Blocky */\n  m() {}\n}\n")
+    expect(byId(block, "#C.m").signature?.throws).toEqual([])
+  })
+
+  it("steps over a note between two JSDoc blocks rather than stopping at it", async () => {
+    const symbols = await symbolsOf(
+      [
+        "class C {",
+        "  /** @throws Outer */",
+        "  // an aside",
+        "  /** @throws Inner */",
+        "  m() {}",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual(["Inner", "Outer"])
+  })
+
+  it("collects two blocks a decorator sits between", async () => {
+    const symbols = await symbolsOf(
+      [
+        "class C {",
+        "  /** @throws One */",
+        "  @A()",
+        "  /** @throws Two */",
+        "  m() {}",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    expect(byId(symbols, "#C.m").signature?.throws).toEqual(["One", "Two"])
+  })
+
+  it("still stops at an anonymous token when a decorator follows it", async () => {
+    const symbols = await symbolsOf("class C { /** @throws Stray */ ; @A() m() {} }\n")
     expect(byId(symbols, "#C.m").signature?.throws).toEqual([])
   })
 })
@@ -137,21 +244,121 @@ describe("decorator run", () => {
   })
 })
 
-describe("decorators the walk does not reach", () => {
+describe("decorators parented inside the declaration", () => {
   /**
-   * A decorator with no wrapper to hold it is parsed as the first *child* of the
-   * declaration, not as a sibling — so neither the walk nor the child-list scan it replaced
-   * finds it. These pin the answer as it stands rather than endorse it: closing the gap
-   * would newly attach decorators to Symbols that have none today, moving `extKind` and
-   * every fingerprint that reads it, which wants its own change.
+   * When nothing else owns the declaration, the grammar makes the decorator a `decorator:`
+   * field child of the declaration itself rather than a preceding sibling. Same decorator,
+   * same meaning, different parent — so both placements have to be read.
    */
-  it("misses a decorator on a declaration that is not exported", async () => {
+  it("reads one on a declaration that is not exported", async () => {
     const symbols = await symbolsOf("@Injectable()\nclass C {}\n")
-    expect(byId(symbols, "#C").decorators).toEqual([])
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
   })
 
-  it("misses a decorator written after the `export` keyword", async () => {
+  it("reads one written after the `export` keyword", async () => {
     const symbols = await symbolsOf("export @Injectable() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("reads one written after `export default`", async () => {
+    const symbols = await symbolsOf("export default @Injectable() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("reads one on an abstract class, which is a different node type", async () => {
+    const symbols = await symbolsOf("@Injectable()\nabstract class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("keeps several in source order", async () => {
+    const symbols = await symbolsOf("@A()\n@B()\n@Cee()\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B", "Cee"])
+  })
+
+  it("is not ended by a comment, matching the sibling side", async () => {
+    const symbols = await symbolsOf("@A()\n// note\n@B()\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B"])
+  })
+
+  it("merges with the sibling run when a declaration is decorated on both sides", async () => {
+    // `@A()` sits in the export wrapper, `@B()` inside the class. TypeScript rejects this as
+    // TS8038 — decorators may not appear on both sides of `export` — but the grammar accepts
+    // it, so it reaches the extractor from a half-edited file. Reading the union rather than
+    // one side means such a file loses no decorator on the way to being reported.
+    const symbols = await symbolsOf("@A()\nexport @B() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["A", "B"])
+  })
+
+  it("reads a bare decorator with no call as well", async () => {
+    const symbols = await symbolsOf("@Injectable\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Injectable"])
+  })
+
+  it("names a decorator after its expression, not after a comment inside it", async () => {
+    // `@/* why */ Foo()` parses, and `leafIdentifier` falls back to a node's own text, so
+    // taking the first named child unconditionally names the decorator "/* why */".
+    const symbols = await symbolsOf("@/* why */ Foo()\nclass C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Foo"])
+  })
+
+  it("does not read a parameter's decorator as the method's", async () => {
+    // A parameter decorator is a child of the parameter, not of the method, and the method
+    // does not field-tag it. This is the negative that reading the field children could
+    // plausibly break.
+    const symbols = await symbolsOf("class C {\n  m(@P() x: number) {}\n}\n")
+    expect(byId(symbols, "#C.m").decorators).toEqual([])
+  })
+
+  it("does not read a constructor parameter's decorator as the constructor's", async () => {
+    const symbols = await symbolsOf("class C {\n  constructor(@Inject() private a: string) {}\n}\n")
+    expect(byId(symbols, "#C.constructor").decorators).toEqual([])
+  })
+
+  it("does not read a member's parameter decorator as the class's", async () => {
+    const symbols = await symbolsOf("class C {\n  m(@P() x: number) {}\n}\n")
     expect(byId(symbols, "#C").decorators).toEqual([])
+  })
+})
+
+/**
+ * `framework-nestjs` resolves a class carrying several recognised decorators by taking the
+ * first in source order, so the order is a contract rather than a presentation choice. Two
+ * decorators can share a line and `Decorator` has no column, so anything that falls back on
+ * the line number has to break the tie some other way — and any tie-break that reads the
+ * decorator's *name* makes the classification depend on the alphabet.
+ */
+describe("decorator order", () => {
+  it("keeps two on one line in source order, not in name order", async () => {
+    const symbols = await symbolsOf("@Zed() @Alpha() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["Zed", "Alpha"])
+  })
+
+  it("gives the same order whether or not they share a line", async () => {
+    const oneLine = await symbolsOf("@Injectable() @Catch(E) class F {}\n")
+    const twoLines = await symbolsOf("@Injectable()\n@Catch(E)\nclass F {}\n")
+    expect(byId(oneLine, "#F").decorators.map((d) => d.name)).toEqual(["Injectable", "Catch"])
+    expect(byId(twoLines, "#F").decorators.map((d) => d.name)).toEqual(["Injectable", "Catch"])
+  })
+
+  it("keeps a class member's in source order on one line", async () => {
+    const symbols = await symbolsOf("class C { @UseGuards(G) @Get() m() {} }\n")
+    expect(byId(symbols, "#C.m").decorators.map((d) => d.name)).toEqual(["UseGuards", "Get"])
+  })
+
+  it("keeps one written after `export` in source order on one line", async () => {
+    const symbols = await symbolsOf('export @UseGuards(G) @Controller("x") class C {}\n')
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["UseGuards", "Controller"])
+  })
+
+  it("keeps two of the same name on one line in source order", async () => {
+    // Same line and same name: nothing but the source position separates these, and
+    // `@ApiResponse(...) @ApiResponse(...)` is an ordinary way to write them.
+    const symbols = await symbolsOf('class C { @A("one") @A("two") m() {} }\n')
+    expect(byId(symbols, "#C.m").decorators.map((d) => d.raw)).toEqual(['A("one")', 'A("two")'])
+  })
+
+  it("orders the sibling run ahead of the field children", async () => {
+    const symbols = await symbolsOf("@First()\nexport @Second() class C {}\n")
+    expect(byId(symbols, "#C").decorators.map((d) => d.name)).toEqual(["First", "Second"])
   })
 })
