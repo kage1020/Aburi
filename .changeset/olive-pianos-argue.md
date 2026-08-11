@@ -78,6 +78,19 @@ its routes, and `boundary: true` on the decorators, where it previously had none
 takes matching vocabulary from a module outside the scope keeps its `extKind` and drops to
 `Symbol.confidence: "medium"`.
 
+One direction **loses** a classification. Because the match moved to the imported name, a
+decorator whose local name only happens to spell vocabulary no longer counts as it:
+
+```ts
+import { Thing as Controller } from "./thing"
+@Controller()
+export class C {}                   // was framework:nestjs:controller; now null
+```
+
+That is the change working — the file states outright that `Controller` here is `Thing` — but it
+is the one case where a Symbol drops its `extKind` and its decorator boundary flags with no source
+change, so it lands as diff noise the same way the gains do.
+
 `derivedBy` now carries the imported name (`framework:nestjs:route:Get` for a `@Fetch()` that was
 `import { Get as Fetch }`), because it is a closed vocabulary that filters and diffs read and a
 rename changes nothing about the route. `Decorator.name` and `.raw` keep the spelling the source
