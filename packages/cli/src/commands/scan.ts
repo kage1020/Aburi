@@ -66,13 +66,21 @@ export interface ScanReport {
   parseErrorCount: number
   timeoutCount: number
   /**
-   * Files that never made it into the IR: over-size or unreadable at discovery,
-   * unroutable or over `parseTimeoutMs` afterwards. Surfaced separately from
-   * `parseErrorCount` because `@aburi/core` returns these rather than printing them — a
-   * discovery-time drop writes nothing at all, and only `parse-timeout` also logs per
-   * file. Warning on stderr is the CLI's job either way.
+   * Files that never made it into the IR: over-size or unreadable at discovery, and
+   * unroutable, over `parseTimeoutMs`, or lost to a plugin exception afterwards. Surfaced
+   * separately from `parseErrorCount` because `@aburi/core` returns these rather than
+   * printing them — a discovery-time drop writes nothing at all, and only `parse-timeout`
+   * and `extraction-failed` also log per file. Warning on stderr is the CLI's job either
+   * way.
    */
   skipped: readonly { path: string; reason: string; detail?: string }[]
+  /**
+   * Files a plugin threw on, with what it said. A subset of `skipped`, kept apart because
+   * it is the one reason that means something in the run is *broken* rather than merely
+   * large, slow, or in a language no plugin claims — which is why it is also the one that
+   * moves the exit code.
+   */
+  extractionFailures: readonly { file: string; message: string }[]
   /**
    * Present when the LSP enrichment pass ran (config.lsp.enabled = true and at
    * least one server was configured). Absent when LSP was skipped entirely.
@@ -186,12 +194,20 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       if (s.detail !== undefined) entry.detail = s.detail
       return entry
     }),
+    extractionFailures: scanResult.extractionFailures.map((f) => ({ ...f })),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
     callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
     configSource: loaded.source,
     workspaceRoot,
-    exitCode: EXIT.SUCCESS,
+    // A file lost to a plugin exception is the one incident that says the run is broken
+    // rather than merely partial, so it is the one that gates. `cli-spec.md` §5.4 assigns 3
+    // to a plugin error for `scan`, and the IR is still written — a reviewer gets both the
+    // partial output and a non-zero code, where before the guard fired they got neither.
+    //
+    // The other skip reasons keep exiting 0. Whether an over-size or timed-out file should
+    // gate, and behind what threshold, is a separate open decision.
+    exitCode: scanResult.extractionFailures.length > 0 ? EXIT.GATE : EXIT.SUCCESS,
   }
 }
 

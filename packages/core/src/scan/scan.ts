@@ -62,7 +62,8 @@ export interface ScanResult {
   parseErrors: readonly ParseErrorRecord[]
   /**
    * Files that contributed no Symbols for a reason other than a parse failure — over-size
-   * or unreadable at discovery, unroutable or over its `parseTimeoutMs` budget afterwards.
+   * or unreadable at discovery, and unroutable, over its `parseTimeoutMs` budget, or lost to
+   * a plugin exception afterwards.
    *
    * Separate from `parseErrors`, which says what a file that *was* read had wrong with it,
    * but not disjoint from it: a file slow enough to be abandoned is often slow because it is
@@ -89,6 +90,30 @@ export interface ScanResult {
    * `aburi explain --debug-resolution`.
    */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
+  /**
+   * One record per file withdrawn because a plugin threw while extracting it, in scan order.
+   * These files also appear in `skipped` under `reason: "extraction-failed"`, which is what
+   * a reader wanting the count consults; this carries the message beside it, the way
+   * `parseTimeouts` carries the numbers `skipped` has nowhere to put.
+   *
+   * Non-empty means something in the run is broken — a plugin bug, or source the plugins
+   * cannot express — rather than merely large or slow, which is why the CLI gates on it and
+   * not on `skipped` as a whole.
+   */
+  extractionFailures: readonly ExtractionFailure[]
+}
+
+/**
+ * A file the scan withdrew because extracting it threw.
+ *
+ * `message` is the thrown error's message, or the value stringified when a plugin threw
+ * something that was not an `Error`. There is no stack: the caller needs to know which file
+ * to look at and what the plugin said about it, and a stack across a dynamically loaded
+ * plugin boundary points at the plugin's own dist rather than at anything actionable.
+ */
+export interface ExtractionFailure {
+  file: string
+  message: string
 }
 
 export interface ParseErrorRecord {
@@ -146,6 +171,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const timeoutEvents: ClassifyTimeoutEvent[] = []
   const additionalSkipped: SkippedFile[] = []
   const parseTimeouts: ParseTimeoutEvent[] = []
+  const extractionFailures: ExtractionFailure[] = []
   const importsByFile = new Map<string, readonly ImportEdge[]>()
   const fileContents = new Map<string, string>()
   const dynamicCallSites = new Set<string>()
@@ -167,24 +193,60 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       continue
     }
 
-    const sourceFile = await loadSourceFile(input.workspaceRoot, discoveredFile)
+    let sourceFile: SourceFile
+    try {
+      sourceFile = await loadSourceFile(input.workspaceRoot, discoveredFile)
+    } catch (error) {
+      // The same condition discovery already has a reason for: the file was there when it
+      // was listed and could not be read when it was wanted.
+      additionalSkipped.push({
+        path: discoveredFile.path,
+        reason: "unreadable",
+        detail: describeThrown(error),
+      })
+      logger.warn(`Skipped ${discoveredFile.path}: could not read it — ${describeThrown(error)}`)
+      continue
+    }
 
-    const result = await runFilePipeline({
-      file: sourceFile,
-      language,
-      frameworks: input.frameworks,
-      effects: input.effects,
-      registry: input.registry,
-      config: input.config,
-      dropCFilter,
-      log: logger,
-      ...(input.config.classifyTimeoutMs !== undefined
-        ? { classifyTimeoutMs: input.config.classifyTimeoutMs }
-        : {}),
-      ...(input.config.parseTimeoutMs !== undefined
-        ? { parseTimeoutMs: input.config.parseTimeoutMs }
-        : {}),
-    })
+    // The per-file exception boundary (lang-plugin.md §7.2). Every plugin call for this file
+    // happens inside `runFilePipeline`, which returns its whole result at once — so a throw
+    // leaves the accumulators below untouched and there is no partial state to unwind. The
+    // catch lives here rather than in the pipeline because a pipeline that swallowed the
+    // exception would need a third way to say "this file contributed nothing", beside
+    // `terminalParseFailure` and `parseTimeout`.
+    let result: Awaited<ReturnType<typeof runFilePipeline>>
+    try {
+      result = await runFilePipeline({
+        file: sourceFile,
+        language,
+        frameworks: input.frameworks,
+        effects: input.effects,
+        registry: input.registry,
+        config: input.config,
+        dropCFilter,
+        log: logger,
+        ...(input.config.classifyTimeoutMs !== undefined
+          ? { classifyTimeoutMs: input.config.classifyTimeoutMs }
+          : {}),
+        ...(input.config.parseTimeoutMs !== undefined
+          ? { parseTimeoutMs: input.config.parseTimeoutMs }
+          : {}),
+      })
+    } catch (error) {
+      if (isPluginSetMisconfigured(error)) throw error
+      const message = describeThrown(error)
+      // Unlike a timed-out file, this one loses its recoverable parse errors: the result
+      // never materialized, so there is nothing to carry them. The thrown message is the
+      // diagnostic in their place.
+      additionalSkipped.push({
+        path: discoveredFile.path,
+        reason: "extraction-failed",
+        detail: message,
+      })
+      extractionFailures.push({ file: discoveredFile.path, message })
+      logger.warn(`Skipped ${discoveredFile.path}: extraction threw — ${message}`)
+      continue
+    }
 
     // Reported for every file that got as far as a parse, abandoned or not: a file that
     // was slow *because* it was broken needs to say so, or the reader is sent to raise the
@@ -322,6 +384,49 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     timeoutEvents,
     parseTimeouts,
     unresolvedCalls: callGraph.diagnostics,
+    extractionFailures,
+  }
+}
+
+/**
+ * True for the one thrown value the per-file boundary refuses to absorb.
+ *
+ * `scan-plugin-misconfigured` says the plugin *set* is wrong, not that this file is: an
+ * effect plugin whose `classify` returns a Promise, a language plugin emitting Symbol ids
+ * with no language prefix. Both are properties of the wiring, so both repeat for every file
+ * — absorbing them per file would turn "your plugins are misconfigured" into "every file
+ * mysteriously vanished", and the count would be the file count.
+ *
+ * Every other `CoreError` code reachable from a plugin call describes the file instead:
+ * `anonymous-symbol-id-attempted` and `invalid-symbol-id` come from what a declaration is
+ * named, `non-posix-path` from where it lives. Those are per-file faults and are absorbed.
+ *
+ * A plugin-wide bug outside this one code therefore presents as one failure per file rather
+ * than as one crash. That is the intended shape: the files are named, the messages are
+ * identical, and the count is the whole workspace, which reads as "the plugin is broken"
+ * rather than hiding it.
+ */
+function isPluginSetMisconfigured(error: unknown): boolean {
+  return error instanceof CoreError && error.code === "scan-plugin-misconfigured"
+}
+
+/**
+ * The message to record for a thrown value.
+ *
+ * A plugin is under no obligation to throw an `Error` — it is ordinary JavaScript loaded by
+ * ref — so a thrown string, or an object with no message, still has to name itself in the
+ * incident list rather than arriving as `undefined` or `[object Object]`.
+ */
+function describeThrown(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error !== "object" || error === null) return String(error)
+  try {
+    return JSON.stringify(error) ?? String(error)
+  } catch {
+    // `JSON.stringify` throws on a circular structure or a BigInt. This function is the
+    // last thing standing between an unusual throw and the boundary that is supposed to
+    // absorb it, so it cannot be the thing that throws.
+    return String(error)
   }
 }
 

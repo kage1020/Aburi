@@ -376,6 +376,14 @@ function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream):
       `⚠ ${report.skipped.length} file(s) contributed no Symbols: ${summariseSkipped(report.skipped)}\n`,
     )
   }
+  if (report.extractionFailures.length > 0) {
+    // Named on its own line rather than left inside the skip summary: this is the reason
+    // that decides the exit code, and a reader given a non-zero status needs to know which
+    // of the counts above earned it.
+    stderr.write(
+      `⚠ ${report.extractionFailures.length} file(s) were dropped because a plugin threw while extracting them.\n`,
+    )
+  }
   const lsp = report.lspEnrichment
   if (lsp !== undefined) {
     if (lsp.filesFellBack > 0) {

@@ -82,6 +82,8 @@ Summary: the 6 fields `{ target, line, argumentCount, inAwait, inNew, literalArg
 
 A violation raised by these guards is **not** a classification outcome, so it is exempt from the EP3 degradation in §10: a classifier that throws while deciding is a plugin bug the run can absorb by treating the call as unclassified, whereas an unnormalized callee means every downstream classification of that file was computed from a value the pipeline promised could not exist. Degrading it to `null` would turn an upstream parser bug into a quietly under-populated IR — the one outcome the guards exist to prevent. See EP3a.
 
+What the throw costs is the **file**, not the run: the core's per-file boundary (lang-plugin.md §7.2) withdraws it, names it in `ScanResult.skipped` and `ScanResult.extractionFailures`, logs a warning, and makes `aburi scan` exit non-zero. That is not the degradation this section rules out — a degraded call is silent and a withdrawn file is counted, named, and quoted back with what the guard said.
+
 ### 4.3 `ClassifyContext`
 
 ```ts
@@ -336,7 +338,7 @@ export const plugin: EffectPlugin = {
 | EP1 | returning an effectId not in the manifest | extraction-time error (detected by the registry) |
 | EP2 | classify returns the same output for the same input | purity (no side effects, no held state) |
 | EP3 | classify throws from its own classification logic | warning log, treated as null |
-| EP3a | classify throws an input-contract violation (§4.2) | propagates; the scan fails rather than degrading to an unclassified call |
+| EP3a | classify throws an input-contract violation (§4.2) | propagates out of classification rather than degrading to an unclassified call; the core's per-file boundary (lang-plugin.md §7.2) then withdraws the file, names it in `skipped` / `extractionFailures`, and `aburi scan` exits non-zero |
 | EP4 | 2 plugins classify the same call | the first in config order wins (first-match-wins) |
 | EP5 | classify returns null | the call stays in `Symbol.calls[]` |
 | EP6 | classify returns an EffectClassification | the call moves to `Symbol.effects[]` and does not stay in `Symbol.calls[]` |

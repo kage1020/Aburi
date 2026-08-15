@@ -162,7 +162,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | 0 | Extraction succeeded |
 | 1 | Extraction error (file access, cascade of unrecoverable parse errors) |
 | 2 | Config error (schema violation, resolution failure) |
-| 3 | Plugin error (load failure, manifest violation, undeclared vocab detected in strict mode) |
+| 3 | Plugin error (load failure, manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode) |
 
 ### 5.5 stdout Example
 
@@ -190,7 +190,13 @@ With `--quiet`, only the final line:
 ```
 ⚠ Plugin "effects-prisma" emitted undeclared id "x-prisma:bulk-delete" (use --discover to record)
 ⚠ Parse failed (recoverable): apps/legacy/old.ts:42 — Unexpected token
+⚠ 1 file(s) were dropped because a plugin threw while extracting them.
 ```
+
+The last line is the one that also moves the exit code to `3` (§5.4). It is printed apart from
+the "contributed no Symbols" summary because the other reasons in that count — over-size,
+unroutable, over the parse budget — leave the exit code at `0`, and a reader handed a non-zero
+status needs to know which incident earned it.
 
 ## 6. `aburi diff`
 

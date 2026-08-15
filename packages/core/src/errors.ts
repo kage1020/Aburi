@@ -32,7 +32,15 @@ export type CoreErrorCode =
   | "workspace-root-outside"
   /** Two language plugins claim the same file extension — a plugin-registry misconfiguration. */
   | "language-routing-collision"
-  /** A caller supplied a plugin list that violates the manifest-registry contract at scan wiring time. */
+  /**
+   * A plugin violated its own interface in a way that is a property of the plugin rather
+   * than of any one file — an effect plugin returning a Promise from the synchronous
+   * `classify`, a language plugin emitting Symbol ids with no language prefix. Raised from
+   * inside the per-file path, and the one code `scan()`'s per-file exception boundary
+   * re-throws instead of absorbing (`lang-plugin.md` §7.2): the fault repeats for every
+   * file, so withdrawing files one at a time would report the workspace as broken instead
+   * of the plugin.
+   */
   | "scan-plugin-misconfigured"
   /** `.gitignore` exists but could not be read (I/O error, permission, symlink loop). Missing file is silently ignored. */
   | "scan-gitignore-unreadable"
