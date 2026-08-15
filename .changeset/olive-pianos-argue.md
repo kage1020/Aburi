@@ -40,7 +40,7 @@ either: their context was `ExtractionContext`, which has no imports.
 the file's `ImportEdge[]`, the same list `parseFile` produced. This mirrors what effect plugins
 already get through `ClassifyContext.file.imports`.
 
-A plugin that has no use for the edges needs no change: declaring the parameter as the narrower
+A plugin that has no use for the edges needs no change: declaring the parameter as the supertype
 `ExtractionContext` still satisfies the interface. `framework-express`, `framework-next` and
 `framework-react` do no name matching against a package's vocabulary and are untouched.
 
@@ -111,6 +111,12 @@ export class C {}                   // was framework:nestjs:controller; now null
 That is the change working — the file states outright that `Controller` here is `Thing` — but it
 is the one case where a Symbol drops its `extKind` and its decorator boundary flags with no source
 change, so it lands as diff noise the same way the gains do.
+
+The downgrade is a record rather than a signal: nothing downstream reads a Symbol's `confidence`
+today. The diff compares it only on effects, and the Markdown projection's badge renders only on
+effect rows, so a `medium` Symbol is visible in the IR document and nowhere else. That is why the
+tier costs no diff churn, and equally why it cannot yet be acted on. The projection side is a
+pre-existing gap against `ir-schema.md` §5.4 and is tracked separately.
 
 `derivedBy` now carries the imported name (`framework:nestjs:route:Get` for a `@Fetch()` that was
 `import { Get as Fetch }`), because it is a closed vocabulary that filters and diffs read and a
