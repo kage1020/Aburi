@@ -129,16 +129,22 @@ overrides decorator boundaries.
 
 ```ts
 import { splitAliasedImportName } from "@aburi/core"
-import type { FrameworkClassifyContext, ImportEdge, SymbolClassification } from "@aburi/types"
+import { assertImportBinding, assertImportEdgeSource } from "@aburi/plugin-registry/plugin-input"
+import type { Confidence, FrameworkClassifyContext, ImportEdge, SymbolClassification } from "@aburi/types"
 
-/** Written identifier → the name its module exports it under, from the file's imports. */
-function importedNames(imports: readonly ImportEdge[]): Map<string, string> {
-  const names = new Map<string, string>()
+/** Written identifier → the exported name it resolves to, and whether you own the module. */
+function importedNames(imports: readonly ImportEdge[], filePath: string) {
+  const origin = { plugin: "framework-mytool", filePath }
+  const names = new Map<string, { imported: string; mine: boolean }>()
   for (const edge of imports) {
+    // Validate every edge before answering, or the throw depends on import order.
+    assertImportEdgeSource(edge, origin)
     if (edge.symbols === "*") continue
+    const mine = edge.source.startsWith("@mytool/")
     for (const raw of edge.symbols) {
-      const { imported, local } = splitAliasedImportName(raw)
-      names.set(local, imported)
+      const binding = splitAliasedImportName(raw)
+      assertImportBinding(binding, raw, edge, origin)
+      names.set(binding.local, { imported: binding.imported, mine })
     }
   }
   return names
@@ -150,8 +156,17 @@ class MyFrameworkPlugin implements FrameworkPlugin {
   async init() {}
 
   classifySymbol(candidate, ctx: FrameworkClassifyContext): SymbolClassification | null {
-    const names = importedNames(ctx.imports)
-    const hit = candidate.decorators.find((d) => (names.get(d.name) ?? d.name) === "Widget")
+    const names = importedNames(ctx.imports, ctx.file.path)
+    let confidence: Confidence = "high"
+    const hit = candidate.decorators.find((d) => {
+      const origin = names.get(d.name)
+      // No edge mentions it: nothing to resolve, so the written name stands.
+      if (origin === undefined) return d.name === "Widget"
+      if (origin.imported !== "Widget") return false
+      // Same name, someone else's module — classify, but say you are less sure.
+      confidence = origin.mine ? "high" : "medium"
+      return true
+    })
     // Return null to abstain; the next framework plugin gets a turn.
     if (hit === undefined) return null
     return {
@@ -160,10 +175,16 @@ class MyFrameworkPlugin implements FrameworkPlugin {
       // Keyed on the name the source wrote — that is what the pipeline matches against
       // `Decorator.name`. Optional: flip boundary flag for specific decorators.
       decoratorBoundaries: { [hit.name]: true },
+      // Omit the key for `high`: the pipeline reads an absent `confidence` as exactly that.
+      ...(confidence === "high" ? {} : { confidence }),
     }
   }
 }
 ```
+
+`framework-nestjs` is the same shape with the duplicate-binding rule and the per-file
+memo filled in; read [`packages/framework-nestjs/src/imports.ts`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/src/imports.ts)
+before shipping a plugin that matches names against a package's vocabulary.
 
 Contracts:
 
@@ -179,8 +200,9 @@ Contracts:
   other library. When the edges attribute the name to a module you do not own,
   classify at `confidence: "medium"` rather than refusing — a project-local
   re-export barrel looks exactly like a foreign package. See
-  [`lang-plugin.md` §5.2.2](./design/lang-plugin.md) and
-  [`packages/framework-nestjs/src/imports.ts`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/src/imports.ts).
+  [`lang-plugin.md` §5.2.2](./design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
+- `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
+  Read it, memoize on its identity if you like, and never mutate it.
 
 Decorator-free classification (name / shape / body signals) is also supported:
 see [`packages/framework-react`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react)

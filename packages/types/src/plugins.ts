@@ -222,9 +222,15 @@ export interface WalkContext<TNode = OpaqueAstNode> extends ExtractionContext {
  * name", not "what is lexically in scope".
  *
  * Effect plugins get the same information through `ClassifyContext.file.imports`.
+ *
+ * `readonly` because the pipeline hands over the live array rather than a copy: the same
+ * instance is what it reports as the file's imports and what call resolution reads. A plugin
+ * that sorted or spliced it would rewrite the IR from inside a classifier. The element
+ * objects are still shared, which the type cannot express without a deep-readonly `ImportEdge`
+ * that every language plugin would then have to build around.
  */
 export interface FrameworkClassifyContext extends ExtractionContext {
-  imports: ImportEdge[]
+  imports: readonly ImportEdge[]
 }
 
 // --- Effect classification context ---
@@ -386,7 +392,7 @@ export interface FrameworkPlugin<TNode = OpaqueAstNode> {
 
   /**
    * `ctx` widened from `ExtractionContext` to carry the file's import edges. A plugin that
-   * has no use for them may still declare the parameter as the narrower `ExtractionContext`
+   * has no use for them may still declare the parameter as the supertype `ExtractionContext`
    * and satisfy this interface.
    */
   classifySymbol(

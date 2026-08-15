@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 import type { ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
+  assertImportBinding,
   assertNonEmptySegments,
   hasMatchingImport,
   type PluginInputOrigin,
@@ -105,6 +106,60 @@ describe("hasMatchingImport", () => {
       return false
     })
     expect(seen).toEqual(["react", "example-orm"])
+  })
+})
+
+describe("assertImportBinding", () => {
+  const named = (symbols: string[], line = 1): ImportEdge => ({
+    source: "example-orm",
+    symbols,
+    line,
+    dynamic: false,
+  })
+
+  it("accepts an unaliased entry", () => {
+    expect(() =>
+      assertImportBinding({ imported: "Thing", local: "Thing" }, "Thing", named(["Thing"]), ORIGIN),
+    ).not.toThrow()
+  })
+
+  it("accepts an aliased entry", () => {
+    expect(() =>
+      assertImportBinding(
+        { imported: "Thing", local: "T" },
+        "Thing as T",
+        named(["Thing as T"]),
+        ORIGIN,
+      ),
+    ).not.toThrow()
+  })
+
+  it("rejects an entry whose exported half is empty", () => {
+    // `" as T"`. The local half survives, so a caller that only guards `local` indexes the
+    // name against an empty canonical — which matches no vocabulary table and drops the
+    // classification with nothing recording that anything was skipped.
+    expect(() =>
+      assertImportBinding({ imported: "", local: "T" }, " as T", named([" as T"], 4), ORIGIN),
+    ).toThrow(
+      /effects-example \(src\/service\.ts, line 4\).*ImportEdge\.symbols entry " as T" has an empty half/,
+    )
+  })
+
+  it("rejects an entry whose local half is empty", () => {
+    expect(() =>
+      assertImportBinding(
+        { imported: "Thing", local: "" },
+        "Thing as ",
+        named(["Thing as "], 6),
+        ORIGIN,
+      ),
+    ).toThrow(/line 6.*"Thing as " has an empty half/)
+  })
+
+  it("rejects an entry that is empty outright", () => {
+    expect(() =>
+      assertImportBinding({ imported: "", local: "" }, "", named([""], 2), ORIGIN),
+    ).toThrow(/line 2.*"" has an empty half/)
   })
 })
 

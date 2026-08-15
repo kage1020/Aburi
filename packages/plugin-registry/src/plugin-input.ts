@@ -108,6 +108,46 @@ export function assertImportEdgeSource(edge: ImportEdge, origin: PluginInputOrig
 }
 
 /**
+ * The two halves of one `ImportEdge.symbols` entry, as the caller recovered them.
+ *
+ * Taken as a parameter rather than split here: the wire format's parser lives in
+ * `@aburi/core` (`splitAliasedImportName`), and importing a value from it would fold this
+ * module back into the barrel's graph — the one thing the header forbids. Callers already
+ * hold the split, so passing it costs nothing and keeps the format's definition in one place.
+ */
+export interface ImportBindingHalves {
+  readonly imported: string
+  readonly local: string
+}
+
+/**
+ * Reject a `symbols` entry whose exported or local half is empty — `" as Y"`, `"X as "`, or
+ * an entry that is empty outright.
+ *
+ * An empty half is not a name, and a plugin that matches names against a vocabulary table
+ * will look up `""`, miss every entry, and drop the classification with nothing recording
+ * that anything was skipped. That is the same disappearing act `assertImportEdgeSource`
+ * refuses for a module specifier, arriving through the other field of the same edge — and
+ * unlike a specifier, an empty half can take a whole class's `extKind` with it, because the
+ * decorator it belongs to stops matching.
+ *
+ * Guarding only the local half is not enough. The exported half is the one that reaches the
+ * table, and a caller that skips an entry on an empty local name hands the written name back
+ * to its own "no edge mentions this" branch, which is generally the most trusting one.
+ */
+export function assertImportBinding(
+  binding: ImportBindingHalves,
+  raw: string,
+  edge: ImportEdge,
+  origin: PluginInputOrigin,
+): void {
+  if (binding.imported.length > 0 && binding.local.length > 0) return
+  throw new Error(
+    `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.symbols entry "${raw}" has an empty half — language plugin emitted an unnormalized import edge`,
+  )
+}
+
+/**
  * True when any import edge's module specifier satisfies `matches`, after every edge has
  * been checked for an empty `source`.
  *

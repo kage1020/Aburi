@@ -41,6 +41,23 @@ describe("splitAliasedImportName", () => {
     expect(splitAliasedImportName("a as b as c")).toEqual({ imported: "a", local: "b as c" })
   })
 
+  it("trims a bare name too, which the resolver's private version did not", () => {
+    expect(splitAliasedImportName("  Controller  ")).toEqual({
+      imported: "Controller",
+      local: "Controller",
+    })
+  })
+
+  it.each([
+    ["Controller as ", { imported: "Controller", local: "" }],
+    [" as Ctrl", { imported: "", local: "Ctrl" }],
+    ["", { imported: "", local: "" }],
+  ])("reports an empty half rather than repairing it: %o", (raw, expected) => {
+    // No language plugin emits these — `assertImportBinding` is where a consumer rejects
+    // them. Pinned here so the guard downstream reads as a guard against something.
+    expect(splitAliasedImportName(raw)).toEqual(expected)
+  })
+
   it("treats a bare name that merely contains 'as' as unaliased", () => {
     expect(splitAliasedImportName("classify")).toEqual({
       imported: "classify",

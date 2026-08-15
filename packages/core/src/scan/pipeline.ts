@@ -343,6 +343,13 @@ interface ClassifyCallsInput {
  *   segment to decide that a parameter shadows a Symbol of the same name
  *   (call-resolution.md §4.2). Missing that comparison emits an edge to an unrelated
  *   Symbol, which then carries effects through propagation.
+ * - `decorators[].name`, which a framework plugin resolves against `ImportEdge.symbols` —
+ *   already normalized by `normalizeImportEdge` below. Leaving this side alone makes a
+ *   decorator renamed on import fail to resolve on a file that spells its identifiers
+ *   decomposed, which is the silent miss `readImportedNames` exists to prevent.
+ *
+ * `decorators[].raw` is left alone for the reason the signature's type strings are: it is a
+ * quotation of source text (§1.2), not a value anything matches against.
  *
  * `id` is deliberately not touched: it is constructed rather than read, `makeSymbolId`
  * normalizes it there, and quietly repairing one asserted by hand would hide the plugin bug
@@ -357,8 +364,29 @@ function normalizeCandidateStrings(
 ): SymbolCandidate<OpaqueAstNode> {
   const file = candidate.source.file.normalize("NFC")
   const signature = normalizeSignatureStrings(candidate.signature)
-  if (file === candidate.source.file && signature === candidate.signature) return candidate
-  return { ...candidate, source: { ...candidate.source, file }, signature }
+  const decorators = normalizeDecoratorNames(candidate.decorators)
+  if (
+    file === candidate.source.file &&
+    signature === candidate.signature &&
+    decorators === candidate.decorators
+  ) {
+    return candidate
+  }
+  return { ...candidate, source: { ...candidate.source, file }, signature, decorators }
+}
+
+/** Only `name` is normalized; `raw` and `arguments` are quotations of source text (§1.2). */
+function normalizeDecoratorNames(
+  decorators: SymbolCandidate<OpaqueAstNode>["decorators"],
+): SymbolCandidate<OpaqueAstNode>["decorators"] {
+  let changed = false
+  const next = decorators.map((decorator) => {
+    const name = decorator.name.normalize("NFC")
+    if (name === decorator.name) return decorator
+    changed = true
+    return { ...decorator, name }
+  })
+  return changed ? next : decorators
 }
 
 /**

@@ -2,6 +2,7 @@ import { CoreError } from "@aburi/core"
 import type {
   Confidence,
   FrameworkClassifyContext,
+  ImportEdge,
   OpaqueAstNode,
   SymbolCandidate,
   SymbolClassification,
@@ -38,9 +39,9 @@ const ROUTE_EXT_KIND = "framework:nestjs:route"
  *
  * The tables are matched against the name a decorator's binding was **imported** under, not
  * the one the source wrote, so `import { Controller as Ctrl }` still resolves (see
- * `./imports`). The index is built per Symbol and only when there is a decorator to
- * resolve — the sibling effects plugins walk the same list once per call, and a method
- * without decorators is the common case.
+ * `./imports`). The index over those edges is read only when there is a decorator to
+ * resolve — a member without decorators is the common case, and it must not pay for the
+ * file's import list.
  */
 export function classifyNestjsSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -49,9 +50,34 @@ export function classifyNestjsSymbol(
   if (symbol.kind !== "class" && symbol.kind !== "method") return null
   if (symbol.decorators.length === 0) return null
 
-  const names = readImportedNames(ctx.imports, ctx.file.path)
+  const names = importedNamesFor(ctx)
   if (symbol.kind === "class") return classifyClass(symbol, names)
   return classifyMethod(symbol, names)
+}
+
+/**
+ * The file's import index, built once per file rather than once per decorated Symbol.
+ *
+ * Every Symbol in a file resolves against the same edges, so rebuilding the index for each
+ * one charges the file (declarations × import entries) to answer a question whose answer
+ * cannot change — the shape `performance.md` §2 names as the corpus's blind spot, since a
+ * single large file belongs to one shard and no amount of concurrency touches it.
+ *
+ * Keyed on the identity of the array the pipeline built for the file (`scan/pipeline.ts`
+ * constructs one `FrameworkClassifyContext` per file and hands the classifier the same
+ * `imports` reference for every candidate), so this is a memo of a pure function and not
+ * plugin state: two files never collide, and an entry becomes collectable as soon as the
+ * pipeline moves on. A caller that synthesizes a fresh array per call — a test, or a future
+ * pipeline that stops sharing — gets the uncached path and the same answer.
+ */
+const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedNames>()
+
+function importedNamesFor(ctx: FrameworkClassifyContext): ImportedNames {
+  const cached = importedNamesByFile.get(ctx.imports)
+  if (cached !== undefined) return cached
+  const names = readImportedNames(ctx.imports, ctx.file.path)
+  importedNamesByFile.set(ctx.imports, names)
+  return names
 }
 
 /**
@@ -117,6 +143,11 @@ function classifyClass(
  * vocabulary that downstream filters and diffs read, and it would otherwise change meaning
  * with a rename that changed nothing about the route. `Decorator.name` and `.raw` keep the
  * spelling the source used.
+ *
+ * Confidence follows the slot that decided the answer, the same rule classifyClass states:
+ * a method carrying both a route decorator and a handler decorator reports the route's
+ * provenance and discards the handler's, because the route is what the extKind claims. Both
+ * still contribute their boundary flags.
  */
 function classifyMethod(
   symbol: SymbolCandidate<OpaqueAstNode>,

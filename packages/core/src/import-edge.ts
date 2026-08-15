@@ -10,10 +10,17 @@
 /**
  * The two names a single `ImportEdge.symbols` entry carries.
  *
- * `imported` is the name the source module exports; `local` is the binding the importing
- * file writes. They are equal for an unaliased import, and for a default import
- * (`import Foo from './x'`), which the wire format cannot distinguish from a named one —
- * both are a bare identifier.
+ * `imported` is the name the source module exports it under **as far as the wire format can
+ * tell**; `local` is the binding the importing file writes. They are equal for an unaliased
+ * import, and for a default import (`import Foo from './x'`) — where the module in fact
+ * exports `default`, not `Foo`. Both shapes reach this format as a bare identifier and
+ * nothing distinguishes them, so a consumer matching a vocabulary table reads a default
+ * import as a named one.
+ *
+ * Neither half is guaranteed non-empty: `" as Y"` and `"X as "` are not shapes a language
+ * plugin should emit, and this parser reports them rather than repairing them. A consumer
+ * that looks names up in a table wants `assertImportBinding` from
+ * `@aburi/plugin-registry/plugin-input`, because an empty half misses every entry silently.
  */
 export interface ImportBinding {
   imported: string
@@ -24,9 +31,9 @@ export interface ImportBinding {
  * Split one `ImportEdge.symbols` entry into its exported and local names.
  *
  * `"X as Y"` → `{ imported: "X", local: "Y" }`; `"X"` → `{ imported: "X", local: "X" }`.
- * Surrounding whitespace is trimmed, because the separator is matched on the first ` as `
- * rather than by re-tokenizing, and a plugin is free to have written the entry with the
- * spacing of the source.
+ * Surrounding whitespace is trimmed on both branches, because a plugin is free to have
+ * written the entry with the spacing of the source and the separator is matched on the first
+ * ` as ` rather than by re-tokenizing.
  */
 export function splitAliasedImportName(raw: string): ImportBinding {
   const marker = " as "

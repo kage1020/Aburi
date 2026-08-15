@@ -66,7 +66,28 @@ separately.
 The last row is the status quo, and is what a decorator reached through a namespace import
 (`import * as nest from "@nestjs/common"` → `@nest.Controller()`) falls into: the language plugin
 hands over the leaf identifier and `Decorator` carries no qualifier to tie it back to the
-namespace binding.
+namespace binding. That makes it the one row not ordered by how much the file disclosed — a
+namespace import from a *competing* library also lands here, and is therefore trusted further
+than the named import of the same decorator would be.
+
+Two further shapes stay at `high` that the table above does not obviously cover, both because a
+re-export names a symbol without binding it in local scope:
+
+```ts
+import { Controller } from "routing-controllers"   // the binding the file actually uses
+export { Controller } from "@nestjs/common"        // binds nothing; re-publishes the name
+@Controller() export class C {}                    // → nestjs:controller, high
+```
+
+The duplicate rule prefers the NestJS edge, so a non-binding edge displaces a real one and skips
+the middle tier. And an aliased re-export (`export { X as Y } from './z'`) reaches the plugin as
+`"X"` alone — the language plugin composes `" as "` on imports but not on re-exports — so the name
+the file publishes is not the name that gets indexed. Both are pinned by tests rather than left to
+be rediscovered.
+
+Duplicate bindings resolve NestJS-over-foreign in either order; every other duplicate (two foreign
+edges, or two NestJS edges disagreeing on the exported name) is settled by write order, which is
+arbitrary rather than reasoned.
 
 Provenance is tested against the `@nestjs/` scope rather than a package list — `@nestjs/common`,
 `@nestjs/microservices` and `@nestjs/websockets` all supply vocabulary today and the set grows.
@@ -103,6 +124,25 @@ folds the classification back onto the Symbol.
 format, which now has two readers — the call-graph resolver and the framework plugins — so it is
 no longer private to the resolver.
 
+Its unaliased branch now trims, which it did not while it was private to the resolver, so
+`"  Controller  "` resolves where it previously matched nothing.
+
 `assertImportEdgeSource` is exported from `@aburi/plugin-registry/plugin-input`, factored out of
 `hasMatchingImport` so a plugin that walks the edge list itself rejects an empty module specifier
-the same way and with the same message.
+the same way and with the same message. `assertImportBinding` joins it for the other field of the
+same edge: a `symbols` entry with an empty half (`" as Y"`, `"X as "`) names nothing, and a
+consumer that looked it up in a vocabulary table would miss every entry and drop the
+classification silently — with a decorator, taking the owning class's `extKind` with it.
+
+`Decorator.name` is now NFC-normalized alongside the other strings this boundary collapses
+(`scan/pipeline.ts`). `ImportEdge.symbols` was already normalized, so leaving the decorator alone
+left the two halves of the new comparison in different spellings, and an alias silently failed to
+resolve on a file that spells its identifiers decomposed. `Decorator.raw` is untouched — it is a
+quotation of source.
+
+`FrameworkClassifyContext.imports` is `readonly`. The pipeline hands over the live array, not a
+copy: it is the same instance reported as the file's imports and read by call resolution, so a
+plugin that sorted or spliced it would rewrite the IR from inside a classifier. `framework-nestjs`
+memoizes its name index on that array's identity, which makes the index per file rather than per
+decorated Symbol — the difference between linear and (declarations × import entries) on a large
+controller.

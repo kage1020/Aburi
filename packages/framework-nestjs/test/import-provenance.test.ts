@@ -77,6 +77,16 @@ describe("aliased decorators resolve through the import edge", () => {
     )
     expect(result).toBeNull()
   })
+
+  it("takes a method's classification away the same way", () => {
+    // The class case above pins the loss on the class side. `Controller` is not method
+    // vocabulary, so resolving `@Get` to it drops the route rather than renaming it.
+    const result = classifyNestjsSymbol(
+      makeCandidate({ kind: "method", name: "C.list", decorators: [makeDecorator("Get")] }),
+      makeCtx({ imports: [makeImport(NEST, ["Controller as Get"])] }),
+    )
+    expect(result).toBeNull()
+  })
 })
 
 describe("provenance decides how far the classification is trusted", () => {
@@ -196,6 +206,67 @@ describe("provenance decides how far the classification is trusted", () => {
     )
     expect(foreignFirst?.extKind).toBe("framework:nestjs:provider")
     expect(foreignFirst?.confidence).toBe("medium")
+    // The decorator that lost still contributes its boundary flag, whatever its provenance.
+    expect(foreignFirst?.decoratorBoundaries).toEqual({ Injectable: true, Controller: true })
+  })
+
+  it.each([
+    [
+      "route decorator from a foreign module",
+      [makeDecorator("UseGuards", [], 1), makeDecorator("Get", [], 2)],
+      [makeImport(NEST, ["UseGuards"], 1), makeImport("./local", ["Get"], 2)],
+      "medium",
+    ],
+    [
+      "handler decorator from a foreign module",
+      [makeDecorator("Get", [], 1), makeDecorator("UseGuards", [], 2)],
+      [makeImport(NEST, ["Get"], 1), makeImport("./local", ["UseGuards"], 2)],
+      undefined,
+    ],
+  ] as const)("takes a method's confidence from the route slot, not the handler slot (%s)", (_label, decorators, imports, confidence) => {
+    // `classifyMethod` fills two winner slots and the route one decides the answer, so the
+    // handler's provenance must not reach the result in either direction.
+    const result = classifyNestjsSymbol(
+      makeCandidate({ kind: "method", name: "C.list", decorators: [...decorators] }),
+      makeCtx({ imports: [...imports] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:route")
+    expect(result?.derivedBy).toBe("framework:nestjs:route:Get")
+    expect(result?.confidence).toBe(confidence)
+    expect(result?.decoratorBoundaries).toEqual({ Get: true, UseGuards: true })
+  })
+
+  it("trusts a namespace import from a competing library, which is the limit of this reading", () => {
+    // `import * as rc from "routing-controllers"` + `@rc.Controller()`. The named-import form
+    // of the same decorator downgrades to `medium`; this one cannot, because the edge binds
+    // only the namespace object and `Decorator` carries no qualifier to tie the leaf back to
+    // it. Pinned as the accepted limit rather than left to be rediscovered as a bug.
+    const result = classifyNestjsSymbol(
+      makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),
+      makeCtx({
+        imports: [{ ...makeImport("routing-controllers", "*"), namespaceBinding: "rc" }],
+      }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it("resolves each file against its own edges when one plugin classifies many files", () => {
+    // The index is derived from `ctx.imports`; deriving it once per file must not let one
+    // file's answer stand in for another's.
+    const candidate = makeCandidate({
+      kind: "class",
+      name: "C",
+      decorators: [makeDecorator("Ctrl")],
+    })
+    const aliased = classifyNestjsSymbol(
+      candidate,
+      makeCtx({ path: "src/one.ts", imports: [makeImport(NEST, ["Controller as Ctrl"])] }),
+    )
+    const unbound = classifyNestjsSymbol(candidate, makeCtx({ path: "src/two.ts", imports: [] }))
+
+    expect(aliased?.extKind).toBe("framework:nestjs:controller")
+    expect(unbound).toBeNull()
   })
 
   it("refuses an import edge whose module specifier is empty", () => {
@@ -205,6 +276,32 @@ describe("provenance decides how far the classification is trusted", () => {
         makeCtx({ imports: [makeImport("", ["Controller"], 7)] }),
       ),
     ).toThrow(/framework-nestjs \(src\/a\.ts, line 7\).*ImportEdge\.source is empty/)
+  })
+
+  it("refuses a broken edge sitting behind one that would have answered", () => {
+    // The whole list is indexed before any name is resolved, so the throw cannot depend on
+    // where the broken edge sits relative to the one that satisfies the lookup.
+    expect(() =>
+      classifyNestjsSymbol(
+        makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),
+        makeCtx({ imports: [makeImport(NEST, ["Controller"], 1), makeImport("", ["X"], 9)] }),
+      ),
+    ).toThrow(/line 9.*ImportEdge\.source is empty/)
+  })
+
+  it.each([
+    [" as Ctrl", "an empty exported half"],
+    ["Controller as ", "an empty local half"],
+  ])("refuses a symbols entry with %s", (entry) => {
+    // Either half empty means a canonical name that matches no table, which would drop the
+    // classification silently — the failure `assertDecoratorName` already refuses to allow
+    // from the written-name side.
+    expect(() =>
+      classifyNestjsSymbol(
+        makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Ctrl")] }),
+        makeCtx({ imports: [makeImport(NEST, [entry], 3)] }),
+      ),
+    ).toThrow(/framework-nestjs \(src\/a\.ts, line 3\).*has an empty half/)
   })
 
   it("does not read the import list for a Symbol that carries no decorators", () => {

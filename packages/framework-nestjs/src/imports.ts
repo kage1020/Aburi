@@ -1,5 +1,9 @@
 import { splitAliasedImportName } from "@aburi/core"
-import { assertImportEdgeSource, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
+import {
+  assertImportBinding,
+  assertImportEdgeSource,
+  type PluginInputOrigin,
+} from "@aburi/plugin-registry/plugin-input"
 import type { Confidence, ImportEdge } from "@aburi/types"
 import { FRAMEWORK_NESTJS_PLUGIN_NAME } from "./manifest"
 
@@ -38,21 +42,34 @@ export type ImportedNames = ReadonlyMap<string, NameOrigin>
 /**
  * Index the file's import edges by the local name each one binds.
  *
- * Every edge is validated, and the whole list is walked, so the result never depends on
- * which entries a later lookup happens to reach.
+ * Every edge and every entry is validated, and the whole list is walked, so *whether this
+ * throws* never depends on which entries a later lookup happens to reach.
  *
- * A namespace edge (`symbols: "*"`) binds no individual name and contributes nothing: the
- * language plugin hands a qualified decorator over as its leaf identifier (`@nest.Controller()`
- * arrives as `Controller`), and the qualifier that would connect it to the namespace binding
- * is not carried on `Decorator` at all. Such a decorator is therefore resolved as unbound.
+ * A namespace edge (`symbols: "*"`) binds no individually imported name and contributes
+ * nothing — the local name it does carry (`namespaceBinding`) is the namespace object, not
+ * any of the module's exports. The language plugin hands a qualified decorator over as its
+ * leaf identifier (`@nest.Controller()` arrives as `Controller`), and the qualifier that
+ * would connect it to the namespace binding is not carried on `Decorator` at all, so such a
+ * decorator is resolved as unbound. The cost is that a namespace import from a competing
+ * library is trusted further than the named import of the same decorator would be, which is
+ * the limit of what the edges can settle here.
  *
- * Re-export edges (`export { X } from './y'`) are in the list too. They name a symbol
- * without binding it in local scope, which is the right reading here anyway — the question
- * this map answers is what the file says about a name, not what is lexically visible.
+ * Re-export edges (`export { X } from './y'`) are in the list too, and for the unaliased
+ * form treating them as evidence is the right reading — the question this map answers is
+ * what the file says about a name, not what is lexically visible. The aliased form reaches
+ * here as its source-side name alone (`export { X as Y }` arrives as `"X"`; the language
+ * plugin composes `" as "` on imports but not on re-exports), so the name the file actually
+ * publishes is not what gets indexed. Nothing on `ImportEdge` distinguishes the two kinds.
  *
- * When two edges bind the same name, the NestJS one wins. Anything else would make the
- * answer depend on import order, and no ordering of a duplicate binding is more truthful
- * than the other.
+ * Duplicate bindings resolve as follows, and only the first row is order-independent:
+ *
+ * - **NestJS against non-NestJS** — the NestJS edge wins, in either order.
+ * - **anything else** — two foreign edges, or two NestJS edges disagreeing on the exported
+ *   name, are settled by write order. No ordering of a duplicate binding is more truthful
+ *   than the other, so the tiebreak is arbitrary rather than reasoned.
+ *
+ * Duplicates are reachable at all only because re-export edges name without binding: a name
+ * bound twice in local scope is a `TS2300` the file would not compile with.
  */
 export function readImportedNames(imports: readonly ImportEdge[], filePath: string): ImportedNames {
   const origin: PluginInputOrigin = { plugin: FRAMEWORK_NESTJS_PLUGIN_NAME, filePath }
@@ -63,10 +80,10 @@ export function readImportedNames(imports: readonly ImportEdge[], filePath: stri
     if (edge.symbols === "*") continue
     const fromNestjs = isNestjsModule(edge.source)
     for (const raw of edge.symbols) {
-      const { imported, local } = splitAliasedImportName(raw)
-      if (local.length === 0) continue
-      if (names.get(local)?.fromNestjs === true) continue
-      names.set(local, { imported, fromNestjs })
+      const binding = splitAliasedImportName(raw)
+      assertImportBinding(binding, raw, edge, origin)
+      if (names.get(binding.local)?.fromNestjs === true) continue
+      names.set(binding.local, { imported: binding.imported, fromNestjs })
     }
   }
 
@@ -98,7 +115,9 @@ export interface ResolvedDecoratorName {
  *   a competing library still classifies, at `medium` rather than `high`.
  * - **not mentioned by any edge** — nothing to resolve, so the written name is taken as
  *   canonical at full confidence. This is the reading for a decorator reached through a
- *   namespace import, and for a file that declares no imports at all.
+ *   namespace import, and for a file that declares no imports at all. It is also the one
+ *   place the tiers are not ordered by how much the file told us: a namespace import from a
+ *   competing library lands here, above the named import of the same decorator.
  */
 export function resolveDecoratorName(written: string, names: ImportedNames): ResolvedDecoratorName {
   const origin = names.get(written)
