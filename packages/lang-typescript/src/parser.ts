@@ -130,9 +130,11 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
       }
     }
     try {
-      const errors = collectParseErrors(tree)
-      const imports = extractImports(tree, file.content)
-      return { tree, errors, imports }
+      const syntaxErrors = collectParseErrors(tree)
+      // An import site the reader refused reports through the same channel a syntax error
+      // does: both leave a usable tree and both are the author's to fix.
+      const { edges, errors: importErrors } = extractImports(tree, file.content)
+      return { tree, errors: [...syntaxErrors, ...importErrors], imports: edges }
     } catch (postParseError) {
       // Release the tree before propagating; otherwise the WASM handle leaks because the
       // caller never receives it.

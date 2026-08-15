@@ -94,12 +94,21 @@ describe("C8: dynamic import specifier shapes", () => {
     expect(edge?.source).toBe("./x")
   })
 
-  it("silently ignores a non-literal specifier (documented behavior)", async () => {
-    const imports = await importsOf("export async function f(p: string) { await import(p) }")
-    // Only the top-level exports produce edges; a variable specifier does not yield an
+  it.each([
+    ["a variable", "export async function f(p: string) { await import(p) }"],
+    ["a concatenation", 'export async function f(x: string) { await import("" + x) }'],
+    ["a template literal", "export async function f() { await import(`./x`) }"],
+  ])("silently ignores a non-literal specifier — %s", async (_label, source) => {
+    // Only the top-level exports produce edges; a computed specifier does not yield an
     // edge because static dependency analysis has nothing to record. The pipeline can
     // enrich this later once symbol resolution is available.
-    expect(imports.every((e) => !e.dynamic)).toBe(true)
+    const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
+    expect(result.imports.every((e) => !e.dynamic)).toBe(true)
+    // *Silently* is the load-bearing half, and it is what separates "this reader does not
+    // follow computed specifiers" from "this specifier is empty". Collapsing those two
+    // answers into one `null` is a one-line edit that no other assertion notices, and it
+    // would report a fault against perfectly good code.
+    expect(result.errors).toEqual([])
   })
 })
 
