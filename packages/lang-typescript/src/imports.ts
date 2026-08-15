@@ -1,5 +1,18 @@
-import type { ImportEdge } from "@aburi/types"
+import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
+
+/**
+ * The import sites a file declares, and what was wrong with the ones that could not become
+ * edges.
+ *
+ * The two travel together because an edge withdrawn without a diagnostic is indistinguishable
+ * from a file that never had the import — and a specifier the reader refuses is exactly the
+ * case where the author needs to hear about it.
+ */
+export interface ImportExtraction {
+  edges: ImportEdge[]
+  errors: ParseError[]
+}
 
 /**
  * Walk the top level of the parsed module and produce an ImportEdge per import site.
@@ -13,26 +26,30 @@ import type { Node, Tree } from "web-tree-sitter"
  * separate value and type edges, and downstream consumers can use component / language
  * information if they need to filter.
  */
-export function extractImports(tree: Tree, _source: string): ImportEdge[] {
+export function extractImports(tree: Tree, _source: string): ImportExtraction {
   const edges: ImportEdge[] = []
+  const errors: ParseError[] = []
   const root = tree.rootNode
-  if (root === null) return edges
+  if (root === null) return { edges, errors }
 
   for (const child of root.namedChildren) {
     if (child === null) continue
     if (child.type === "import_statement") {
-      for (const edge of readImportStatement(child)) edges.push(edge)
+      for (const edge of readImportStatement(child, errors)) edges.push(edge)
     } else if (child.type === "export_statement") {
-      const edge = readReExport(child)
+      const edge = readReExport(child, errors)
       if (edge !== null) edges.push(edge)
     }
   }
 
   // Dynamic imports can appear anywhere in the tree, so scan the whole thing separately.
-  walkForDynamicImports(root, edges)
+  walkForDynamicImports(root, edges, errors)
 
   edges.sort((a, b) => a.line - b.line || cmpString(a.source, b.source))
-  return dedupeEdges(edges)
+  // Errors are deliberately not deduplicated the way edges are: two identical broken imports
+  // collapse into one edge that would have said the same thing twice, but they are two lines
+  // for the author to go and fix.
+  return { edges: dedupeEdges(edges), errors }
 }
 
 /**
@@ -45,8 +62,8 @@ export function extractImports(tree: Tree, _source: string): ImportEdge[] {
  * Missing clauses (bare `import './side-effect'`) still produce a `"*"` edge so the
  * dependency relationship is visible in the IR.
  */
-function readImportStatement(node: Node): ImportEdge[] {
-  const source = readStringLiteral(node.childForFieldName("source"))
+function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
+  const source = readModuleSpecifier(node.childForFieldName("source"), errors)
   if (source === null) return []
   const line = node.startPosition.row + 1
   const clause = node.childForFieldName("import_clause") ?? findChildByType(node, "import_clause")
@@ -129,8 +146,8 @@ function readImportClauseParts(clause: Node): {
  * `export { X } from './y'` — a re-export is functionally a dependency on `./y`, so surface
  * it as a static ImportEdge. `export * from './y'` collapses to `"*"`.
  */
-function readReExport(node: Node): ImportEdge | null {
-  const source = readStringLiteral(node.childForFieldName("source"))
+function readReExport(node: Node, errors: ParseError[]): ImportEdge | null {
+  const source = readModuleSpecifier(node.childForFieldName("source"), errors)
   if (source === null) return null
   const line = node.startPosition.row + 1
 
@@ -156,7 +173,7 @@ function readReExport(node: Node): ImportEdge | null {
  * Dynamic imports use the `import(...)` grammar (a call expression whose callee is the
  * `import` keyword). Walk the tree and emit an edge for every one we find.
  */
-function walkForDynamicImports(root: Node, out: ImportEdge[]): void {
+function walkForDynamicImports(root: Node, out: ImportEdge[], errors: ParseError[]): void {
   const stack: Node[] = [root]
   while (stack.length > 0) {
     const node = stack.pop()
@@ -165,7 +182,7 @@ function walkForDynamicImports(root: Node, out: ImportEdge[]): void {
       const callee = node.childForFieldName("function")
       if (callee !== null && callee.type === "import") {
         const args = node.childForFieldName("arguments")
-        const specifier = args !== null ? readStringLiteral(args.namedChild(0)) : null
+        const specifier = args !== null ? readModuleSpecifier(args.namedChild(0), errors) : null
         if (specifier !== null) {
           out.push({
             source: specifier,
@@ -183,13 +200,47 @@ function walkForDynamicImports(root: Node, out: ImportEdge[]): void {
 }
 
 /**
+ * Read the module specifier an import site names, or `null` when there is none to use.
+ *
+ * The two ways there can be none are kept apart, because only one of them is the author's
+ * doing. A `null` from `readStringLiteral` means no string node was there at all — a shape
+ * this reader does not model, and nothing to report. A literal that *is* there and is empty
+ * is something someone wrote, and it names no module: `ImportEdge.source` is a non-empty
+ * specifier (`lang-plugin.md` §4.4) and the shared guards in
+ * `@aburi/plugin-registry/plugin-input` throw on one that is not, so no edge can carry it.
+ *
+ * Withdrawing the edge silently would leave the file looking as though the import had never
+ * been written. It goes out as a recoverable parse error instead — the file keeps its
+ * Symbols (only `recoverable: false` withdraws a file) and the incident channel carries the
+ * line to go and fix.
+ *
+ * The test is emptiness, not blankness: `" "` is a module name that will not resolve, which
+ * is the type checker's business rather than this reader's.
+ */
+function readModuleSpecifier(node: Node | null, errors: ParseError[]): string | null {
+  if (node === null) return null
+  const specifier = readStringLiteral(node)
+  if (specifier === null) return null
+  if (specifier.length > 0) return specifier
+  errors.push({
+    message: "empty module specifier; an import must name a module",
+    line: node.startPosition.row + 1,
+    column: node.startPosition.column + 1,
+    recoverable: true,
+  })
+  return null
+}
+
+/**
  * Read a `string` node's contents, stripping the surrounding quotes. Tree-sitter's
  * TypeScript grammar exposes the raw quoted text on `.text` and named children carry the
  * string fragments; we only need the concatenated fragments so template-like strings
  * degrade gracefully.
+ *
+ * Returns `null` when the node is not a string literal — a shape this reader does not model.
+ * An empty literal returns `""`, which is a different answer and is the caller's to judge.
  */
-function readStringLiteral(node: Node | null): string | null {
-  if (node === null) return null
+function readStringLiteral(node: Node): string | null {
   if (node.type !== "string") return null
   // Named children of a string node are fragments (`string_fragment`, `escape_sequence`).
   // Concatenating their text reconstructs the raw specifier without the enclosing quotes.

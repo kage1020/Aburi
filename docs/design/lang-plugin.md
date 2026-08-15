@@ -191,11 +191,19 @@ Whitespace is not part of the rule: a segment or specifier is rejected when it i
 not when it is blank. `"prisma. .create"` satisfies the contract as written — plugins are
 free to be stricter, but the shared guards are not.
 
-Consumers enforce this rather than work around it. `assertNonEmptySegments` and
-`hasMatchingImport` in `@aburi/plugin-registry/plugin-input` are the shared guards. They
-throw, and a violation propagates rather than degrading to an unclassified call
+Consumers enforce this rather than work around it. `assertNonEmptySegments`,
+`assertImportEdgeSource`, `assertImportBinding` and `hasMatchingImport` in
+`@aburi/plugin-registry/plugin-input` are the shared guards. They throw, and a violation
+propagates rather than degrading to an unclassified call
 ([`effect-plugin.md`](./effect-plugin.md) §10, EP3a), so an unnormalized callee surfaces
 as a failed scan instead of a silently miscategorized effect.
+
+Because the guards throw, the producing side has to hold the line rather than pass the
+problem on. A source construct that would yield an empty specifier is legal to write —
+`import x from ""` parses, and `tsc` rejects it at resolution as TS2307 — so the plugin
+emits no edge for it and records a **recoverable** `ParseError` at the specifier's position.
+The file keeps its Symbols, the author gets a line to fix, and the guard stays a signal that
+something upstream is genuinely broken.
 
 #### `dynamicReceiver`
 
@@ -511,6 +519,10 @@ Every language plugin must pass the following tests.
 | LP24 | `import { X } from './y'` | imports = [{source: "./y", symbols: ["X"], line: 1, dynamic: false}] |
 | LP25 | `import * as Y from 'z'` | imports = [{source: "z", symbols: "*", line: 1, dynamic: false}] |
 | LP26 | `await import('./x')` | imports = [{source: "./x", symbols: "*", dynamic: true}] |
+| LP26a | an empty specifier, in any written form — `import a from ""`, `import ""`, `export * from ""`, `export { X } from ""`, `import type { B } from ''`, `import("")` | no edge, and one recoverable `ParseError` at the literal's line and column. The specifier names no module, so no edge can carry it (§4.4), and a silent drop would leave the file looking as though the import were never written |
+| LP26b | an empty specifier beside a valid one | only the broken edge is withdrawn |
+| LP26c | the same empty specifier twice | two errors — edges are deduplicated, diagnostics are per occurrence |
+| LP26d | a blank specifier (`import a from " "`) | an ordinary edge. §4.4 rejects empty, not blank |
 
 ### 9.7 Error recovery
 
