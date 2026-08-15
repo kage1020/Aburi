@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@aburi/core": "workspace:*",
+    "@aburi/plugin-registry": "workspace:*",
     "@aburi/types": "workspace:*"
   },
   "devDependencies": {

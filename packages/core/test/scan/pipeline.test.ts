@@ -214,6 +214,30 @@ describe("runFilePipeline — framework classifySymbol dispatch", () => {
     expect(fw2Calls).toEqual([])
   })
 
+  it("hands the file's import edges to the classifier alongside the candidate", async () => {
+    const seen: (readonly ImportEdge[])[] = []
+    const fw: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-imports"),
+      init: async () => {},
+      classifySymbol: (_symbol, ctx): SymbolClassification | null => {
+        seen.push(ctx.imports)
+        return null
+      },
+    }
+    const imports: ImportEdge[] = [
+      { source: "@nestjs/common", symbols: ["Controller as Ctrl"], line: 1, dynamic: false },
+    ]
+
+    const result = await runPipelineWithStubs({ frameworks: [fw], imports })
+
+    // The same edges the result reports: a classifier that resolved a decorator against a
+    // different list than the one the IR records would be unfalsifiable from the outside.
+    // Identity rather than equality — a plugin is entitled to memoize per file on it, and
+    // `framework-nestjs` does.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBe(result.imports)
+  })
+
   it("falls through to the next framework when the first returns null", async () => {
     const fw1: FrameworkPlugin = {
       manifest: frameworkManifest("framework-null"),
@@ -490,6 +514,32 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
     }
     const result = await runPipelineWithStubs({ candidate })
     expect(result.symbols[0]?.signature?.inputs.map((i) => i.name)).toEqual([composed])
+  })
+
+  it("normalizes decorators[].name, which a framework plugin matches against the edges", async () => {
+    // A decorator-driven framework plugin resolves the written name against
+    // `ImportEdge.symbols`, and this boundary already normalizes those. Leaving the decorator
+    // alone means the two halves of that comparison arrive in different spellings, so the
+    // alias silently fails to resolve on a file that spells its identifiers decomposed.
+    const candidate = {
+      ...baseCandidate(),
+      decorators: [
+        { name: decomposed, raw: `@${decomposed}()`, arguments: [], boundary: false, line: 1 },
+      ],
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.decorators.map((d) => d.name)).toEqual([composed])
+  })
+
+  it("leaves decorators[].raw alone, because it is a quotation of source", async () => {
+    const candidate = {
+      ...baseCandidate(),
+      decorators: [
+        { name: decomposed, raw: `@${decomposed}()`, arguments: [], boundary: false, line: 1 },
+      ],
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.decorators[0]?.raw).toBe(`@${decomposed}()`)
   })
 
   it("leaves the signature type strings alone, because they are quotations of source", async () => {

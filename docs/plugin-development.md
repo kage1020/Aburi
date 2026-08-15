@@ -128,25 +128,63 @@ Classifies a `SymbolCandidate` into a framework-owned `extKind` and optionally
 overrides decorator boundaries.
 
 ```ts
-import type { FrameworkPlugin, SymbolClassification } from "@aburi/types"
+import { splitAliasedImportName } from "@aburi/core"
+import { assertImportBinding, assertImportEdgeSource } from "@aburi/plugin-registry/plugin-input"
+import type { Confidence, FrameworkClassifyContext, ImportEdge, SymbolClassification } from "@aburi/types"
+
+/** Written identifier → the exported name it resolves to, and whether you own the module. */
+function importedNames(imports: readonly ImportEdge[], filePath: string) {
+  const origin = { plugin: "framework-mytool", filePath }
+  const names = new Map<string, { imported: string; mine: boolean }>()
+  for (const edge of imports) {
+    // Validate every edge before answering, or the throw depends on import order.
+    assertImportEdgeSource(edge, origin)
+    if (edge.symbols === "*") continue
+    const mine = edge.source.startsWith("@mytool/")
+    for (const raw of edge.symbols) {
+      const binding = splitAliasedImportName(raw)
+      assertImportBinding(binding, raw, edge, origin)
+      names.set(binding.local, { imported: binding.imported, mine })
+    }
+  }
+  return names
+}
 
 class MyFrameworkPlugin implements FrameworkPlugin {
   readonly manifest = myFrameworkManifest
 
   async init() {}
 
-  classifySymbol(candidate, ctx): SymbolClassification | null {
+  classifySymbol(candidate, ctx: FrameworkClassifyContext): SymbolClassification | null {
+    const names = importedNames(ctx.imports, ctx.file.path)
+    let confidence: Confidence = "high"
+    const hit = candidate.decorators.find((d) => {
+      const origin = names.get(d.name)
+      // No edge mentions it: nothing to resolve, so the written name stands.
+      if (origin === undefined) return d.name === "Widget"
+      if (origin.imported !== "Widget") return false
+      // Same name, someone else's module — classify, but say you are less sure.
+      confidence = origin.mine ? "high" : "medium"
+      return true
+    })
     // Return null to abstain; the next framework plugin gets a turn.
-    if (!candidate.decorators.some((d) => d.name === "Widget")) return null
+    if (hit === undefined) return null
     return {
       extKind: "framework:mytool:widget",
       derivedBy: "framework:mytool:widget",
-      // Optional: flip boundary flag for specific decorators.
-      decoratorBoundaries: { Widget: true },
+      // Keyed on the name the source wrote — that is what the pipeline matches against
+      // `Decorator.name`. Optional: flip boundary flag for specific decorators.
+      decoratorBoundaries: { [hit.name]: true },
+      // Omit the key for `high`: the pipeline reads an absent `confidence` as exactly that.
+      ...(confidence === "high" ? {} : { confidence }),
     }
   }
 }
 ```
+
+`framework-nestjs` is the same shape with the duplicate-binding rule and the per-file
+memo filled in; read [`packages/framework-nestjs/src/imports.ts`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/src/imports.ts)
+before shipping a plugin that matches names against a package's vocabulary.
 
 Contracts:
 
@@ -156,6 +194,15 @@ Contracts:
   splits them into individual `derivedBy[]` entries.
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
   `extKindPrefixes` / `derivedByPrefixes`.
+- Match a decorator on the name it was **imported** under, not the one the source
+  wrote, and read `ImportEdge.source` for provenance. Matching the written name
+  alone loses `import { Widget as W }` and claims a `@Widget` that came from some
+  other library. When the edges attribute the name to a module you do not own,
+  classify at `confidence: "medium"` rather than refusing — a project-local
+  re-export barrel looks exactly like a foreign package. See
+  [`lang-plugin.md` §5.2.2](./design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
+- `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
+  Read it, memoize on its identity if you like, and never mutate it.
 
 Decorator-free classification (name / shape / body signals) is also supported:
 see [`packages/framework-react`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react)

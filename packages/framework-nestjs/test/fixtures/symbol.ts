@@ -1,7 +1,8 @@
 import type {
   Config,
   Decorator,
-  ExtractionContext,
+  FrameworkClassifyContext,
+  ImportEdge,
   SourceFile,
   SymbolCandidate,
   SymbolId,
@@ -26,9 +27,29 @@ const noopRegistry: VocabRegistry = {
 
 const emptyConfig: Config = {}
 
-export function makeCtx(path = "src/a.ts", content = ""): ExtractionContext {
-  const file: SourceFile = { path, content }
-  return { file, registry: noopRegistry, config: emptyConfig }
+export interface CtxOverrides {
+  path?: string
+  content?: string
+  imports?: ImportEdge[]
+}
+
+export function makeCtx(overrides: CtxOverrides = {}): FrameworkClassifyContext {
+  const file: SourceFile = { path: overrides.path ?? "src/a.ts", content: overrides.content ?? "" }
+  return {
+    file,
+    registry: noopRegistry,
+    config: emptyConfig,
+    imports: overrides.imports ?? [],
+  }
+}
+
+/**
+ * A static named-import edge, the shape `@aburi/lang-typescript` emits. `symbols` entries
+ * follow the `ImportEdge.symbols` wire format, so an aliased import is written the way the
+ * source wrote it: `"Controller as Ctrl"`.
+ */
+export function makeImport(source: string, symbols: string[] | "*", line = 1): ImportEdge {
+  return { source, symbols, line, dynamic: false }
 }
 
 export function makeCandidate(

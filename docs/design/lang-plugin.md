@@ -205,7 +205,7 @@ Normalization is lossy here in a way only the plugin can repair: `getRepo().save
 
 Do **not** set it for `this.save()` / `super.save()` — §4.7 already keeps those unresolved through a separate rule, and the resolver buckets them itself. Be conservative: a receiver shape the plugin does not model (a non-null assertion, a type assertion) is not evidence of dynamic dispatch, and over-reporting would make the bucket useless. The flag never affects which calls resolve — it only decides which diagnostic bucket an already-unresolved call lands in.
 
-### 4.5 `ExtractionContext` / `WalkContext`
+### 4.5 `ExtractionContext` / `WalkContext` / `FrameworkClassifyContext`
 
 ```ts
 interface ExtractionContext {
@@ -217,7 +217,15 @@ interface ExtractionContext {
 interface WalkContext extends ExtractionContext {
   symbol: SymbolCandidate
 }
+
+interface FrameworkClassifyContext extends ExtractionContext {
+  imports: readonly ImportEdge[]               // the same edges parseFile produced for the file
+}
 ```
+
+`FrameworkClassifyContext` is what a framework plugin's `classifySymbol` receives (§5.2). A plugin with no use for the edges may declare the parameter as the supertype `ExtractionContext` and still satisfy the interface.
+
+The array is the live one, not a copy — the same instance the pipeline reports as the file's imports and hands to call resolution — hence `readonly`. A plugin may memoize per file on its identity; it must not mutate it.
 
 ### 4.6 `DropHint`
 
@@ -268,6 +276,7 @@ This avoids ambiguous states such as "the same class is recognized as both a Nes
 
 A framework plugin receives the following inputs:
 - the `SymbolCandidate` (including decorators)
+- the file's `ImportEdge[]`, on `FrameworkClassifyContext` (§4.5)
 - the framework declaration of the owning component
 
 Against these it may:
@@ -276,6 +285,24 @@ Against these it may:
 - provide a Category B drop exclusion hint (e.g. a class carrying only `@Module` must not be treated as a pure DTO)
 
 The detailed interface is deferred to a future `framework-plugin.md` (this document only reserves the contract surface).
+
+#### 5.2.2 Matching a decorator against the import edges
+
+The language plugin reports a decorator under the identifier the source wrote. That identifier is not reliable evidence on its own, in either direction: `import { Controller as Ctrl }` writes a framework boundary under a name no table holds, and a `@Controller` from a competing library writes a foreign name that every table holds. A plugin that matches names against its vocabulary resolves the identifier through `ctx.imports` first:
+
+| What the edges say about the written name | Match against | Confidence |
+|---|---|---|
+| imported from a module the plugin owns | the imported name | `high` |
+| imported from any other module | the imported name | `medium` |
+| not named on any edge | the written name | `high` |
+
+The middle row **downgrades rather than refuses**. Re-exporting a framework's vocabulary through a project-local barrel is ordinary practice, and a barrel reached through a build-tool path alias (`@app/common`) is indistinguishable from a foreign package without reading the build config — so refusing would take the boundary off a whole project's worth of Symbols to close a narrower false positive. `medium` is the `confidence` criterion for an identifier match (`ir-schema.md` §5.4), which is exactly what is left when provenance is unknown.
+
+Two consequences follow for the plugin's outputs. `SymbolClassification.decoratorBoundaries` is keyed on the **written** name, because that is what the core matches against `Decorator.name` when it folds the result back in. `derivedBy` carries the **imported** name, because it is a closed vocabulary that diffs and filters read, and renaming an import changes nothing about what the decorator does.
+
+A qualified decorator (`@nest.Controller()`) reaches the plugin as its leaf identifier; `Decorator` carries no qualifier, so it cannot be tied back to a namespace edge and falls in the last row. That row is therefore the one place the table is not ordered by how much the file disclosed: a namespace import from a competing library is trusted further than the named import of the same decorator, and nothing available at this layer can separate them.
+
+Two shapes reach the edge list without binding anything in local scope, and a plugin matching names should know both. A re-export (`export { X } from './y'`) names a symbol the file republishes rather than uses — and its aliased form arrives as the source-side name alone, since the language plugin composes `" as "` on imports but not on re-exports. Because re-exports do not bind, a name can appear on two edges in a file that compiles, so a plugin needs a duplicate rule and should say which of its outcomes are order-independent.
 
 ### 5.3 Extraction order
 

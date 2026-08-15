@@ -1,6 +1,12 @@
 import type { FrameworkManifest } from "@aburi/types"
 
 /**
+ * Plugin ref. Doubles as the attribution prefix on the errors this plugin raises about the
+ * values a language plugin handed it, so the two can never drift apart.
+ */
+export const FRAMEWORK_NESTJS_PLUGIN_NAME = "framework-nestjs"
+
+/**
  * Manifest for `@aburi/framework-nestjs`. The registry validates this at load time; the
  * shape is locked to `FrameworkManifest` so a mismatch shows up as a compile-time error
  * rather than at run time.
@@ -14,7 +20,7 @@ import type { FrameworkManifest } from "@aburi/types"
  */
 export const frameworkNestjsManifest: FrameworkManifest = {
   $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
-  name: "framework-nestjs",
+  name: FRAMEWORK_NESTJS_PLUGIN_NAME,
   version: "0.0.0",
   type: "framework",
   engines: { aburi: "*" },

@@ -362,6 +362,9 @@ importers:
       '@aburi/core':
         specifier: workspace:*
         version: link:../core
+      '@aburi/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@aburi/types':
         specifier: workspace:*
         version: link:../types

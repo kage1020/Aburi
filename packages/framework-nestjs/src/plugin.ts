@@ -1,5 +1,5 @@
 import type {
-  ExtractionContext,
+  FrameworkClassifyContext,
   FrameworkPlugin,
   OpaqueAstNode,
   PluginContext,
@@ -14,10 +14,13 @@ import { frameworkNestjsManifest } from "./manifest"
  * walkBody, inspecting `SymbolCandidate.decorators` and returning a
  * `SymbolClassification` that the framework pipeline folds back into the Symbol.
  *
- * `init` and `classifySymbol` are both pure with respect to plugin state — the
- * classifier is a decorator-table lookup with no lazy resources — so repeated
- * invocations against the same Symbol produce identical results without any reset
- * step.
+ * `init` and `classifySymbol` are both pure with respect to plugin state — the classifier is
+ * a decorator-table lookup over the Symbol and the file's import edges, with no lazy
+ * resources — so repeated invocations against the same Symbol produce identical results
+ * without any reset step. The one cache it keeps (the per-file import index, see
+ * `./classify`) is keyed on the identity of the edge array it was derived from, so it
+ * memoizes a pure function rather than holding state: it cannot answer for a file it was not
+ * built from, and it survives no longer than that file's context.
  */
 class NestjsFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkNestjsManifest
@@ -28,7 +31,7 @@ class NestjsFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 
   classifySymbol(
     symbol: SymbolCandidate<OpaqueAstNode>,
-    ctx: ExtractionContext,
+    ctx: FrameworkClassifyContext,
   ): SymbolClassification | null {
     return classifyNestjsSymbol(symbol, ctx)
   }

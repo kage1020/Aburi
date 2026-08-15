@@ -2,7 +2,7 @@ import {
   extractSymbols as extractTypescriptSymbols,
   parseTypescriptFile,
 } from "@aburi/lang-typescript"
-import type { ExtractionContext, SourceFile } from "@aburi/types"
+import type { FrameworkClassifyContext, SourceFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { classifyNestjsSymbol } from "../src/index"
 
@@ -11,6 +11,10 @@ import { classifyNestjsSymbol } from "../src/index"
  * `classifyNestjsSymbol` on every SymbolCandidate the language plugin emits, and confirm
  * that the framework plugin correctly assigns extKinds and boundary flags. Locks the wire
  * between decorator extraction in the language plugin and framework classification here.
+ *
+ * The import edges come from the same parse as the Symbols, so a case that writes an
+ * `import` statement is exercising the real `ImportEdge.symbols` encoding rather than a
+ * fixture's idea of it.
  */
 
 async function classifyEach(source: string) {
@@ -18,8 +22,9 @@ async function classifyEach(source: string) {
   const tree = parseResult.tree
   if (tree === null) throw new Error("parse returned null")
   const file: SourceFile = { path: "src/x.ts", content: source }
-  const ctx: ExtractionContext = {
+  const ctx: FrameworkClassifyContext = {
     file,
+    imports: parseResult.imports,
     registry: {
       findEffect: () => null,
       findExtKind: () => null,
@@ -111,6 +116,54 @@ describe("integration — lang-typescript → framework-nestjs", () => {
     expect(cls?.classification?.extKind).toBe("framework:nestjs:filter")
     expect(cls?.classification?.decoratorBoundaries).toEqual({ Catch: true })
     expect(cls?.classification?.derivedBy).toBe("framework:nestjs:filter")
+  })
+
+  it("classifies decorators renamed on import, through the real ImportEdge encoding", async () => {
+    const results = await classifyEach(
+      [
+        'import { Controller as Ctrl, Get as Fetch } from "@nestjs/common"',
+        '@Ctrl("/b")',
+        "export class BController {",
+        '  @Fetch("/list")',
+        "  list() {}",
+        "}",
+      ].join("\n"),
+    )
+    const cls = results.find((r) => r.id.endsWith("#BController"))
+    const method = results.find((r) => r.id.endsWith("#BController.list"))
+    expect(cls?.classification?.extKind).toBe("framework:nestjs:controller")
+    expect(cls?.classification?.decoratorBoundaries).toEqual({ Ctrl: true })
+    expect(method?.classification?.extKind).toBe("framework:nestjs:route")
+    expect(method?.classification?.decoratorBoundaries).toEqual({ Fetch: true })
+    expect(method?.classification?.derivedBy).toBe("framework:nestjs:route:Get")
+  })
+
+  it("doubts a decorator the file attributes to a competing library", async () => {
+    const results = await classifyEach(
+      'import { Controller } from "routing-controllers"\n@Controller("/x")\nexport class C {}',
+    )
+    const cls = results.find((r) => r.id.endsWith("#C"))
+    expect(cls?.classification?.extKind).toBe("framework:nestjs:controller")
+    expect(cls?.classification?.confidence).toBe("medium")
+  })
+
+  it("lets a re-export edge from @nestjs/* outrank the binding the file actually uses", async () => {
+    // A re-export names a symbol without binding it, so this compiles: `Controller` resolves
+    // to `routing-controllers`, while the `@nestjs/common` edge only re-publishes the name.
+    // The duplicate rule prefers the NestJS edge, so the competing library's decorator is
+    // claimed at full confidence — the one way past the middle tier, pinned so a later change
+    // to that rule shows up here rather than in someone's IR.
+    const results = await classifyEach(
+      [
+        'import { Controller } from "routing-controllers"',
+        'export { Controller } from "@nestjs/common"',
+        '@Controller("/x")',
+        "export class C {}",
+      ].join("\n"),
+    )
+    const cls = results.find((r) => r.id.endsWith("#C"))
+    expect(cls?.classification?.extKind).toBe("framework:nestjs:controller")
+    expect(cls?.classification?.confidence).toBeUndefined()
   })
 
   it("hybrid class with both @Controller and @Injectable flags both boundaries", async () => {
