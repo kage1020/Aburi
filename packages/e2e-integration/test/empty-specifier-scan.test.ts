@@ -8,17 +8,16 @@ import { VocabRegistry } from "@aburi/plugin-registry"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 /**
- * One `import x from ""` used to end the run.
+ * One `import x from ""` must not end the run.
  *
  * `ImportEdge.source` is contractually non-empty, and the guards a plugin uses to read the
- * edge list throw when it is not. The language plugin produced such an edge anyway, so the
- * throw fired on syntax a user can legally write — and because it fires inside a classifier,
- * it takes the whole scan with it, discarding every other file's Symbols along with the
- * offending one's.
+ * edge list throw when it is not. So an edge carrying an empty specifier turns syntax a user
+ * can legally write into an exception raised inside a classifier — which no part of the scan
+ * catches, taking every other file's Symbols down with the offending one's.
  *
- * The reach of that grew: a decorator-driven framework plugin now walks the edge list for
- * every file holding a decorated class or method, where before the throw needed an effect
- * plugin and a call candidate in the same file.
+ * A decorator-driven framework plugin walks the edge list for every file holding a decorated
+ * class or method, which is why the fixture below is a controller: it is the cheapest shape
+ * that reaches the guard.
  */
 
 let workRoot: string
@@ -99,9 +98,11 @@ describe("scan — a file with an empty module specifier", () => {
         recoverable: true,
       },
     ])
-    // Recoverable, so the file is not withdrawn — `skipped` is for files that contributed
-    // nothing, and this one contributed two Symbols.
-    expect(result.skipped.map((s) => s.path)).not.toContain("src/a.controller.ts")
+    // Reporting and withdrawing are separate outcomes, and the file having Symbols in the
+    // previous case is what shows this one did not withdraw it. `skipped` cannot show it:
+    // its four reasons are all discovery-side or budget-side, and a file whose parse
+    // returned no tree is counted rather than listed.
+    expect(result.ir.symbols.some((s) => s.source.file === "src/a.controller.ts")).toBe(true)
   })
 
   it("still resolves the decorators the surviving edges describe", async () => {

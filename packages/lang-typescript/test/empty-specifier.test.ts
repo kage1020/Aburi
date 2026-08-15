@@ -25,29 +25,31 @@ function emptySpecifierErrors(errors: readonly ParseError[]): ParseError[] {
 
 describe("an empty module specifier produces no edge and one recoverable error", () => {
   it.each([
-    ["default import", 'import a from ""', 15],
-    ["bare side-effect import", 'import ""', 8],
-    ["namespace re-export", 'export * from ""', 15],
-    ["named re-export", 'export { X } from ""', 19],
-    ["type-only import", "import type { B } from ''", 24],
-    ["dynamic import", 'const p = import("")', 18],
-  ])("%s", async (_label, source, column) => {
+    ["default import", 'import a from ""', 15, "import"],
+    ["bare side-effect import", 'import ""', 8, "import"],
+    ["namespace re-export", 'export * from ""', 15, "re-export"],
+    ["named re-export", 'export { X } from ""', 19, "re-export"],
+    ["type-only import", "import type { B } from ''", 24, "import"],
+    ["dynamic import", 'const p = import("")', 18, "dynamic import"],
+  ])("LP26a: %s", async (_label, source, column, site) => {
     const { imports, errors, tree } = await parse(source)
     expect(imports).toEqual([])
     expect(emptySpecifierErrors(errors)).toEqual([
       {
-        message: expect.stringContaining("empty module specifier"),
+        // The construct is named, because `export * from ""` is not an import and being told
+        // it is sends the author looking at the wrong line.
+        message: expect.stringContaining(`this ${site} names no module`),
         line: 1,
         column,
         recoverable: true,
       },
     ])
-    // The file is kept: only `recoverable: false` withdraws it from the run, and one
+    // The file is kept. What withdraws one is a parse that returned no tree at all, and one
     // mid-edit import line is not a reason to discard everything else in the file.
     expect(tree).not.toBeNull()
   })
 
-  it("withdraws only the broken edge, not the file's other imports", async () => {
+  it("LP26b: withdraws only the broken edge, not the file's other imports", async () => {
     const { imports, errors } = await parse(
       ['import { A } from "./a"', 'import b from ""', 'import { C } from "./c"'].join("\n"),
     )
@@ -59,15 +61,21 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(emptySpecifierErrors(errors)[0]?.line).toBe(2)
   })
 
-  it("reports each occurrence, where the edges would have been deduplicated", async () => {
-    // `extractImports` dedupes identical edges, so two empty specifiers would have collapsed
-    // into one. The diagnostics are per occurrence — there are two lines to go and fix.
-    const { imports, errors } = await parse(['import a from ""', 'import b from ""'].join("\n"))
+  it("LP26c: reports each occurrence, including the two an edge dedupe would have merged", async () => {
+    // `dedupeEdges` keys on the line among other things, so the only pair it can collapse is
+    // two writings on one line — which is exactly this input, and which is still two places
+    // for the author to go and fix. Columns rather than lines are what tell them apart.
+    const { imports, errors } = await parse('import a from ""; import a from ""')
     expect(imports).toEqual([])
+    expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([15, 33])
+  })
+
+  it("LP26c: reports an occurrence per line as well", async () => {
+    const { errors } = await parse(['import a from ""', 'import b from ""'].join("\n"))
     expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
   })
 
-  it("keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
+  it("LP26d: keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
     const { imports, errors } = await parse('import a from " "')
     expect(imports).toEqual([{ source: " ", symbols: ["a"], line: 1, dynamic: false }])
     expect(emptySpecifierErrors(errors)).toEqual([])
@@ -78,5 +86,30 @@ describe("an empty module specifier produces no edge and one recoverable error",
     expect(emptySpecifierErrors(errors)).toHaveLength(1)
     expect(errors.length).toBeGreaterThan(1)
     expect(errors.every((e) => e.recoverable)).toBe(true)
+  })
+})
+
+describe("the diagnostics come out in source order", () => {
+  // The dynamic-import pass is a LIFO stack walk, so it visits siblings back to front. Its
+  // edges were already sorted; its errors were not, and three broken dynamic imports on one
+  // line handed the reader their columns counting down.
+  it("orders several dynamic specifiers on one line by column", async () => {
+    const { errors } = await parse(
+      'const a = import(""); const b = import(""); const c = import("")',
+    )
+    expect(emptySpecifierErrors(errors).map((e) => e.column)).toEqual([18, 40, 62])
+  })
+
+  it("interleaves the dynamic pass with the statement pass by line", async () => {
+    const { errors } = await parse(['import a from ""', 'const q = import("")'].join("\n"))
+    expect(emptySpecifierErrors(errors).map((e) => [e.line, e.column])).toEqual([
+      [1, 15],
+      [2, 18],
+    ])
+  })
+
+  it("orders a dynamic specifier written before a static one", async () => {
+    const { errors } = await parse(['const q = import("")', 'import a from ""'].join("\n"))
+    expect(emptySpecifierErrors(errors).map((e) => e.line)).toEqual([1, 2])
   })
 })

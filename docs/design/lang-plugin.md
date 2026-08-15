@@ -202,8 +202,9 @@ Because the guards throw, the producing side has to hold the line rather than pa
 problem on. A source construct that would yield an empty specifier is legal to write —
 `import x from ""` parses, and `tsc` rejects it at resolution as TS2307 — so the plugin
 emits no edge for it and records a **recoverable** `ParseError` at the specifier's position.
-The file keeps its Symbols, the author gets a line to fix, and the guard stays a signal that
-something upstream is genuinely broken.
+The file keeps its Symbols (a file is withdrawn when its parse returns no tree, which this
+is not), the diagnostic carries a line to fix, and the guard stays a signal that something
+upstream is genuinely broken.
 
 #### `dynamicReceiver`
 
@@ -519,10 +520,11 @@ Every language plugin must pass the following tests.
 | LP24 | `import { X } from './y'` | imports = [{source: "./y", symbols: ["X"], line: 1, dynamic: false}] |
 | LP25 | `import * as Y from 'z'` | imports = [{source: "z", symbols: "*", line: 1, dynamic: false}] |
 | LP26 | `await import('./x')` | imports = [{source: "./x", symbols: "*", dynamic: true}] |
-| LP26a | an empty specifier, in any written form — `import a from ""`, `import ""`, `export * from ""`, `export { X } from ""`, `import type { B } from ''`, `import("")` | no edge, and one recoverable `ParseError` at the literal's line and column. The specifier names no module, so no edge can carry it (§4.4), and a silent drop would leave the file looking as though the import were never written |
+| LP26a | an empty specifier on a form the reader already produces an edge for — `import a from ""`, `import ""`, `export * from ""`, `export { X } from ""`, `import type { B } from ''`, `import("")` | no edge, and one recoverable `ParseError` at the literal's line and column, naming which construct it belongs to. The specifier names no module, so no edge can carry it (§4.4), and a silent drop would leave the file looking as though the import were never written |
 | LP26b | an empty specifier beside a valid one | only the broken edge is withdrawn |
-| LP26c | the same empty specifier twice | two errors — edges are deduplicated, diagnostics are per occurrence |
+| LP26c | two empty specifiers, on one line or on two | two errors. Edges are deduplicated on `(line, source, dynamic, symbols)`, so the only pair that could ever have merged is two writings on one line; diagnostics are per occurrence either way |
 | LP26d | a blank specifier (`import a from " "`) | an ordinary edge. §4.4 rejects empty, not blank |
+| LP26e | a computed specifier — `import(p)`, `import("" + x)`, ``import(`./x`)`` | no edge and **no diagnostic**. The reader does not follow computed specifiers, which is not a fault in the source |
 
 ### 9.7 Error recovery
 
