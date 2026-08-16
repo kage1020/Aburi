@@ -1,6 +1,7 @@
 ---
 "@aburi/core": minor
 "@aburi/cli": minor
+"@aburi/types": patch
 ---
 
 Withdraw a file its language plugin refused to parse
@@ -33,8 +34,9 @@ tree **or** reported any error marked non-recoverable:
 - no Symbols reach the IR, and `extractSymbols` / `walkBody` / `normalizeAst` are never
   called for it;
 - `ScanResult.skipped` gains an entry with `reason: "parse-failed"`, whose `detail` quotes
-  the refusing error's message and position — or names the missing tree, when nothing
-  explains it;
+  the refusing error's message and position. With no tree and no such error it quotes the
+  first recoverable one instead, because a withdrawn file is excluded from the CLI's
+  recoverable-error count and this line is then the only place its errors can be read;
 - `stats.parsedFiles` excludes it while `stats.totalFiles` still counts it;
 - the core logs a warning.
 
@@ -55,13 +57,22 @@ it did implement*: a file with no tree was excluded from `parsedFiles` and other
 invisible — no `skipped` entry, no warning. Both now happen for both conditions, so
 `ScanResult.skipped` finally answers "why is this file missing from the IR" exhaustively.
 
-That makes the count derivable from the list, so the counter beside it is gone:
-`parsedFiles` is `discovered.files.length - skipped.length`, one subtraction. A withdrawn
-file that were both listed and counted would be netted out twice, reporting two files lost
-for one.
+That makes the count derivable from the list, so the counter beside it is gone. On the public
+surface the identity is now `stats.parsedFiles = stats.totalFiles - ScanResult.skipped.length`:
+one subtraction, where before a withdrawn file was both listed and counted and would have been
+netted out twice, reporting two files lost for one.
+
+What the length has to mean is *at most one entry per file*, which rests on every branch that
+records a skip ending the file's turn in the loop.
 
 `SkippedFile.reason` widens by one member, which is breaking for an exhaustive `switch`
-over it.
+over it. `ScanReport.skipped[].reason` is narrowed from `string` to that union, so the CLI
+report now fails to compile if a member is renamed rather than silently reporting zero.
+
+`ParseError.recoverable` is read as exactly `false`, not as a falsy value. Plugins arrive as
+plain JavaScript through a `PluginRef`, and a plugin that simply omits the key would otherwise
+have every file it reported any parse error on withdrawn, silently and at exit `0`. Read
+literally, such a plugin is left where it was before the field was read at all.
 
 ## The CLI stopped calling a refusal recoverable
 
@@ -74,8 +85,11 @@ counts are split:
 ⚠ 1 file(s) could not be parsed and were left out of the IR.
 ```
 
-`ScanReport.parseErrorCount` counts only files that reached the IR; the new
-`ScanReport.parseFailureCount` counts the withdrawn ones.
+`ScanReport.parseErrorCount` counts files whose errors the plugin called recoverable; the new
+`ScanReport.parseFailureCount` counts the ones it refused. The split is by what the plugin
+said rather than by what reached the IR — a file abandoned on its `parseTimeoutMs` budget is
+counted on the first line and is not in the document, because its errors really are all
+recoverable and they are the reason that path keeps them.
 
 `aburi scan` stays at exit `0`. An unparseable file is a property of the source, like an
 over-size or timed-out one; `extraction-failed` remains the only reason that gates

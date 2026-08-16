@@ -61,10 +61,15 @@ export interface ScanResult {
   ir: IR
   parseErrors: readonly ParseErrorRecord[]
   /**
-   * Every file that contributed no Symbols, and why. `over-size` and `unroutable` are
+   * Every file the scan stopped working on, and why. `over-size` and `unroutable` are
    * decided before anything is read, `unreadable` can be raised by either discovery or the
    * read this function does just before extraction, and `parse-failed`, `parse-timeout` and
    * `extraction-failed` are decided during extraction.
+   *
+   * Not the same as "contributed no Symbols": a file that parses cleanly and declares
+   * nothing — an empty file, one that is all imports — is absent from this list and counted
+   * in `parsedFiles`, which is correct. What the list is exhaustive over is the set of files
+   * the scan gave up on, which is what makes `parsedFiles` derivable from its length.
    *
    * Separate from `parseErrors`, which says what a file that *was* read had wrong with it,
    * but not disjoint from it: a file withdrawn by its parse, or slow enough to be abandoned
@@ -296,6 +301,11 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       // Its import edges are kept, which is the one place this differs from a timed-out
       // file: a file whose contents could not be used still told us truthfully what it
       // imports, whereas an abandoned file is being withdrawn deliberately.
+      //
+      // Nothing reads them yet. `resolveCallGraph` looks this map up by the file a Symbol
+      // came from, and a withdrawn file has no Symbols, so the entry is inert until the
+      // dependency-extraction pass exists. It is written anyway because dropping it here
+      // would silently discard what `runFilePipeline` is documented and tested to hand over.
       importsByFile.set(result.path, result.imports)
       continue
     }
@@ -373,6 +383,11 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   // One subtraction, therefore, and no counter beside it. A withdrawn file that were both
   // listed and counted would be netted out twice, reporting two files lost for one.
   //
+  // What the length has to mean is *at most one entry per file*, and what holds it is that
+  // every branch pushing to `additionalSkipped` ends its iteration — the pushes and their
+  // `continue`s are adjacent for that reason. A push left to fall through would subtract a
+  // file the loop went on to extract, silently.
+  //
   // `discovered.skipped` is not netted out here: those files were never candidates, and they
   // are added to `totalFiles` instead.
   const stats = buildStats({
@@ -424,22 +439,33 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 }
 
 /**
- * What to record beside a file the parse withdrew.
+ * What to record beside a file the parse withdrew. Called only when
+ * `FilePipelineResult.terminalParseFailure` is set — handed a healthy file's empty error
+ * list it would confidently report a missing tree.
  *
  * Two conditions reach here and a reader needs them apart: a plugin that could not build a
  * tree at all, and one that built a tree and then refused it. The second is the plugin
  * exercising the `recoverable: false` contract, and its message is the only account of why
- * — so it is quoted, with the position, rather than replaced by a summary. The first has no
- * message to quote, and saying so is more useful than an empty quotation.
+ * — so it is quoted, with the position, rather than replaced by a summary.
  *
- * Only the first non-recoverable error is named. A parse that gave up has usually reported
- * the same collapse several times, and the skip list is one line per file by construction;
- * the rest are still on `ScanResult.parseErrors`, in full.
+ * The first has no such message, but it often has recoverable ones, and they are the only
+ * thing in the run that says *where* the parse came apart. They are appended rather than
+ * dropped, because a withdrawn file is excluded from the CLI's recoverable-error count by
+ * construction: this line is the last place they can be read.
+ *
+ * One error either way. A parse that gave up has usually reported the same collapse several
+ * times, and the skip list is one line per file; the rest are on `ScanResult.parseErrors`.
  */
 function describeParseFailure(errors: readonly ParseError[]): string {
-  const fatal = errors.find((error) => !error.recoverable)
-  if (fatal === undefined) return "the language plugin returned no tree"
-  return `parse reported a non-recoverable error at ${fatal.line}:${fatal.column} — ${fatal.message}`
+  const fatal = errors.find((error) => error.recoverable === false)
+  if (fatal !== undefined) return `parse reported a non-recoverable error at ${quote(fatal)}`
+  const first = errors[0]
+  if (first === undefined) return "the language plugin returned no tree"
+  return `the language plugin returned no tree; first error at ${quote(first)}`
+}
+
+function quote(error: ParseError): string {
+  return `${error.line}:${error.column} — ${error.message}`
 }
 
 /**

@@ -234,8 +234,20 @@ describe("runFilePipeline — parse deadline", () => {
   })
 
   it("reports a file with no tree as a parse failure rather than as a timeout", async () => {
-    // Both feed `parsedFiles` by different subtractions, so they must not both be set.
+    // The caller records one skip entry per file, so a file carrying both flags would be
+    // labelled by whichever it tests first.
     const { result } = await run({ parseMs: 250, noTree: true }, 100)
+    expect(result.terminalParseFailure).toBe(true)
+    expect(result.parseTimeout).toBeNull()
+  })
+
+  it("reports a refused file as a parse failure even when the parse also blew the budget", async () => {
+    // The other half of the same exclusion. Reported as a timeout, a plugin's outright
+    // refusal would send the reader to raise a budget that was never the problem.
+    const parseErrors: readonly ParseError[] = [
+      { message: "wrong dialect", line: 1, column: 1, recoverable: false },
+    ]
+    const { result } = await run({ parseMs: 250, parseErrors }, 100)
     expect(result.terminalParseFailure).toBe(true)
     expect(result.parseTimeout).toBeNull()
   })

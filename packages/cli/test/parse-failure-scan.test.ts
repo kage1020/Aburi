@@ -25,9 +25,13 @@ class MemStream extends Writable {
  * workspace and names it by relative path, which is a ref form the loader supports and
  * exactly how a third-party plugin would arrive.
  *
- * Three files, because the subject is a split: `bad.stub` is refused, `warn.stub` carries a
- * recoverable error and stays, and `ok.stub` is clean. A run containing only the refused
- * one would be satisfied by a report that had merged the two counts the wrong way.
+ * Four files, because the subject is a split and the counts have to be wrong separately:
+ * `bad.stub` is refused, `notree.stub` comes back with no tree *and no errors*, `warn.stub`
+ * carries a recoverable error and stays, `ok.stub` is clean.
+ *
+ * `notree.stub` is what separates the per-file filter from arithmetic. It is withdrawn but
+ * contributes nothing to `parseErrors`, so `parseErrorCount = parseErrors.length -
+ * parseFailureCount` would report one file too few while the filter reports the truth.
  */
 
 const STUB_PLUGIN = `
@@ -81,6 +85,9 @@ export const plugin = {
         imports: [],
       }
     }
+    if (file.path === "notree.stub") {
+      return { tree: null, errors: [], imports: [] }
+    }
     return { tree, errors: [], imports: [] }
   },
   extractSymbols: (tree, ctx) => {
@@ -131,6 +138,7 @@ beforeEach(async () => {
   )
   await writeFile(resolve(scratch, "lang-stub.mjs"), STUB_PLUGIN, "utf8")
   await writeFile(resolve(scratch, "bad.stub"), "bad", "utf8")
+  await writeFile(resolve(scratch, "notree.stub"), "notree", "utf8")
   await writeFile(resolve(scratch, "warn.stub"), "warn", "utf8")
   await writeFile(resolve(scratch, "ok.stub"), "ok", "utf8")
 })
@@ -144,13 +152,17 @@ describe("runScan — a file the language plugin refused", () => {
     return runScan({ cwd: scratch, outputDir: resolve(scratch, "out"), format: "json" })
   }
 
-  it("names it in skipped, and counts it apart from the file that kept its warnings", async () => {
+  it("names both in skipped, and counts them apart from the file that kept its warnings", async () => {
     const scan = await report()
-    expect(scan.skipped.map((s) => [s.path, s.reason])).toEqual([["bad.stub", "parse-failed"]])
-    expect(scan.parseFailureCount).toBe(1)
-    // `warn.stub` and nothing else. The withdrawn file's error is on
-    // `ScanResult.parseErrors` too — it is the account of why the file went — but counting
-    // it here would call it recoverable, which is the opposite of what it said.
+    expect(scan.skipped.map((s) => [s.path, s.reason])).toEqual([
+      ["bad.stub", "parse-failed"],
+      ["notree.stub", "parse-failed"],
+    ])
+    expect(scan.parseFailureCount).toBe(2)
+    // `warn.stub` and nothing else. `bad.stub`'s error is on `ScanResult.parseErrors` too —
+    // it is the account of why the file went — but counting it here would call it
+    // recoverable, which is the opposite of what it said. `notree.stub` contributes no
+    // error at all, which is what makes this count a filter rather than a subtraction.
     expect(scan.parseErrorCount).toBe(1)
   })
 
@@ -159,10 +171,10 @@ describe("runScan — a file the language plugin refused", () => {
     expect(scan.exitCode).toBe(0)
     expect(scan.extractionFailures).toEqual([])
     expect(scan.keptSymbols).toBe(2)
-    expect(scan.totalFiles).toBe(3)
+    expect(scan.totalFiles).toBe(4)
   })
 
-  it("gives the withdrawal its own stderr line, apart from the recoverable count", async () => {
+  it("gives the withdrawals their own stderr line, apart from the recoverable count", async () => {
     const stdout = new MemStream()
     const stderr = new MemStream()
     const code = await runCli({
@@ -174,6 +186,6 @@ describe("runScan — a file the language plugin refused", () => {
     })
     expect(code).toBe(0)
     expect(stderr.text()).toContain("1 file(s) had recoverable parse errors.")
-    expect(stderr.text()).toContain("1 file(s) could not be parsed and were left out of the IR.")
+    expect(stderr.text()).toContain("2 file(s) could not be parsed and were left out of the IR.")
   })
 })

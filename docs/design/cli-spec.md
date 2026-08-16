@@ -188,7 +188,7 @@ With `--quiet`, only the final line:
 ### 5.6 stderr (Warnings)
 
 ```
-⚠ Plugin "effects-prisma" emitted undeclared id "x-prisma:bulk-delete" (use --discover to record)
+⚠ Config /repo/apps/web/aburi.json sits below the workspace root /repo. …
 ⚠ 3 file(s) had recoverable parse errors.
 ⚠ 1 file(s) could not be parsed and were left out of the IR.
 ⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
@@ -196,11 +196,20 @@ With `--quiet`, only the final line:
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
 
-The two parse lines are counted apart rather than summed. A file with recoverable errors is *in*
-the IR with warnings against it; a withdrawn one is not in it at all, and that is the difference a
-reader is reading the count for. A withdrawn file's errors appear on `ScanResult.parseErrors` all
-the same — they are the account of why it went — so summing the two would call them recoverable,
-which is the opposite of what the plugin said.
+The two parse lines are counted apart rather than summed. The first counts files whose errors the
+plugin called recoverable; the second counts files the parse refused. A withdrawn file's errors
+appear on `ScanResult.parseErrors` all the same — they are the account of why it went — so summing
+the two would call them recoverable, which is the opposite of what the plugin said.
+
+The split is by what the plugin said, not by what reached the IR: a file abandoned on its
+`parseTimeoutMs` budget is counted on the first line and is not in the document. That is
+deliberate. Its errors really are all recoverable — a refusal is decided before the first deadline
+reading — and lang-plugin.md §7.1.2 keeps them precisely so a slow parse of broken input does not
+send the reader to raise a budget that was never the problem.
+
+The first line was previously the only account of an unparseable file's errors, so a withdrawn
+file's skip detail carries one of them: the refusal when there is one, otherwise the first
+recoverable error with its position.
 
 The last line is the one that also moves the exit code to `3` (§5.4), and every reason other
 than `extraction-failed` leaves it at `0`. That is why it is printed apart from the "contributed

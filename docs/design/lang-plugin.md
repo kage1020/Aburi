@@ -105,7 +105,7 @@ interface SourceFile {
 }
 
 interface ParseResult {
-  tree: ParsedTree                             // plugin-internal type (opaque)
+  tree: ParsedTree | null                      // plugin-internal type (opaque); null → parse produced nothing
   errors: ParseError[]
   imports: ImportEdge[]
 }
@@ -124,6 +124,8 @@ interface ImportEdge {
   dynamic: boolean                             // true for import()
 }
 ```
+
+`tree` is nullable so a plugin can report a parse that produced nothing without fabricating a tree its own type would refuse. It and `recoverable: false` are companion signals: a plugin that has no tree is expected to say why in `errors[]` too, and §7.1 reads the two as one condition, so a plugin that sets only one still gets the withdrawal it asked for.
 
 ### 4.3 `SymbolCandidate`
 
@@ -360,12 +362,12 @@ If a framework plugin requires decorator-based extraction from a language with `
 ### 7.1 Parse errors
 
 - `recoverable: true` → the core proceeds to Symbol extraction (tree-sitter is normally recoverable)
-- `recoverable: false` → the core **withdraws the file**: no Symbols reach the IR, it is recorded in `ScanResult.skipped` with `reason: "parse-failed"` and a detail quoting the error's message and position, it is excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`, and the core logs a warning.
+- `recoverable: false` → the core **withdraws the file**: no Symbols reach the IR, it is recorded in `ScanResult.skipped` with `reason: "parse-failed"` and a detail quoting the error's message and position, it is excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`, and the core logs a warning. Read as exactly `false`, not as falsiness: plugins arrive as plain JavaScript, and a plugin that omits the key gets the behaviour it had before the field was read at all rather than having every file it warned about withdrawn.
 - A `tree` of `null` withdraws the file on the same terms, and is expected to carry a `recoverable: false` error beside it (§4.2). The two are read as one condition, so a plugin that sets only one still gets what it asked for — and a plugin that built a usable tree and then decided the file must not be used (a wrong dialect, a generated blob) does not have to discard the tree to say so.
 - Its **parse errors are still reported** on `ScanResult.parseErrors`, for the reason §7.1.2 gives: they are diagnostic rather than IR, and here they are the entire account of why the file went.
-- Its **import edges are kept**. A file whose contents could not be used still told us truthfully what it imports — the one place this differs from a file abandoned on its `parseTimeoutMs` budget, which is being withdrawn deliberately.
+- Its **import edges are kept** — the one place this differs from a file abandoned on its `parseTimeoutMs` budget, which is being withdrawn deliberately. A file whose contents could not be used still told us truthfully what it imports. Nothing consumes them yet: call resolution looks the list up by the file a Symbol came from, and a withdrawn file has none, so the entry waits for the dependency-extraction pass.
 - `aburi scan` stays at exit `0`. An unparseable file is a property of the source, like an over-size or timed-out one; only `extraction-failed` moves the code (§7.2, cli-spec.md §5.4).
-- warning stderr: `Skipped <file>: parse reported a non-recoverable error at <line>:<column> — <message>`, or `Skipped <file>: the language plugin returned no tree` when nothing explains the missing tree.
+- warning stderr: `Skipped <file>: parse reported a non-recoverable error at <line>:<column> — <message>`. With no tree and no such error, the first recoverable one is quoted instead — `Skipped <file>: the language plugin returned no tree; first error at <line>:<column> — <message>` — because a withdrawn file is excluded from the CLI's recoverable-error count and this line is then the only place its errors can be read. `Skipped <file>: the language plugin returned no tree` when there were none at all.
 
 ### 7.1.1 Large-file skip
 
@@ -385,7 +387,7 @@ The budget is **cooperative**, for the reason [effect-plugin.md](./effect-plugin
 
 An aborted file contributes **nothing to the IR**: no Symbols, no import edges, and no `stats.effectClassifyTimeouts` entries accumulated from the candidates it did finish. Keeping whichever Symbols it produced before the budget ran out would make the Document depend on how fast the machine was that day, so the outcome is binary per file. It is recorded in `ScanResult.skipped` with `reason: "parse-timeout"`, repeated on `ScanResult.parseTimeouts` with the budget and the elapsed, and excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`.
 
-Its **parse errors are still reported**. They are diagnostic rather than IR, and they are what a slow file most needs to keep: backtracking over malformed input is a common reason for a slow parse, so a run that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is the syntax. A file that is both broken and slow appears in `parseErrors` and in `parseTimeouts` — but never in both `parseTimeouts` and the terminal-failure count, which subtract from `parsedFiles` separately; a file that returned no tree at all is §7.1's, not this section's.
+Its **parse errors are still reported**. They are diagnostic rather than IR, and they are what a slow file most needs to keep: backtracking over malformed input is a common reason for a slow parse, so a run that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is the syntax. A file that is both broken and slow appears in `parseErrors` and in `parseTimeouts` — but never in both `parseTimeouts` and a §7.1 withdrawal. The withdrawal is decided before the first deadline reading, and the two would compete for the one `skipped` entry the file gets: a plugin's outright refusal reported as a file that was merely slow sends the reader to raise a budget that was never the problem.
 
 - warning stderr: `Skipped <file>: extraction reached <elapsed>ms, exceeding parseTimeoutMs (<budget>ms). Override with config.parseTimeoutMs.`
 

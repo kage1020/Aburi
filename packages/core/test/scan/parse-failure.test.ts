@@ -227,6 +227,28 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
     expect(result.terminalParseFailure).toBe(true)
     expect(reached).toEqual(noReach())
   })
+
+  it("withdraws a null tree whose errors are all recoverable", async () => {
+    // The tree is the whole signal here. An implementation that read only `errors` — or
+    // only whether the list was empty — would extract this file from nothing.
+    const { result, reached } = await run({
+      tree: null,
+      errors: [{ message: "stray token", line: 1, column: 1, recoverable: true }],
+    })
+    expect(result.terminalParseFailure).toBe(true)
+    expect(reached).toEqual(noReach())
+  })
+
+  it("keeps a file whose plugin omitted `recoverable` altogether", async () => {
+    // `recoverable` is required by the type, but a plugin is plain JavaScript loaded by ref
+    // and can simply not write it. Read as falsiness, a missing key would withdraw every
+    // file such a plugin reported any error on — silently, and at exit 0. Read literally,
+    // the plugin gets what it had before the field was read at all.
+    const errors = [{ message: "stray token", line: 1, column: 1 } as ParseError]
+    const { result, reached } = await run({ errors })
+    expect(result.terminalParseFailure).toBe(false)
+    expect(reached.extractSymbols).toEqual(["bad.stub"])
+  })
 })
 
 describe("scan — a withdrawn file is named, warned about, and subtracted once", () => {
@@ -275,6 +297,20 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
     ])
   })
 
+  it("picks the refusing error out of a list that starts with a recoverable one", async () => {
+    // The detail names the error as non-recoverable, so quoting whichever came first would
+    // put that label on an error that said the opposite.
+    const { result } = await runScanWith({
+      errors: [
+        { message: "stray token", line: 1, column: 1, recoverable: true },
+        nonRecoverable("unterminated string", 12, 4),
+      ],
+    })
+    expect(result.skipped[0]?.detail).toBe(
+      "parse reported a non-recoverable error at 12:4 — unterminated string",
+    )
+  })
+
   it("names a missing tree for what it is when no error explains it", async () => {
     const { result } = await runScanWith({ tree: null, errors: [] })
     expect(result.skipped).toEqual([
@@ -284,6 +320,18 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
         detail: "the language plugin returned no tree",
       },
     ])
+  })
+
+  it("quotes a recoverable error beside the missing tree rather than dropping it", async () => {
+    // This file is excluded from the CLI's recoverable-error count by construction, so the
+    // skip detail is the last place the position it collapsed at can be read.
+    const { result } = await runScanWith({
+      tree: null,
+      errors: [{ message: "stray token", line: 8, column: 2, recoverable: true }],
+    })
+    expect(result.skipped[0]?.detail).toBe(
+      "the language plugin returned no tree; first error at 8:2 — stray token",
+    )
   })
 
   it("warns once, with the same sentence", async () => {
@@ -318,6 +366,47 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
   it("records no extraction failure, because nothing threw", async () => {
     const { result } = await runScanWith({ errors: [nonRecoverable("unterminated string")] })
     expect(result.extractionFailures).toEqual([])
+  })
+
+  it("counts one file lost per reason when several reasons meet in one run", async () => {
+    // The PR that added `parse-failed` rewrote the `parsedFiles` expression itself, so the
+    // arithmetic is worth pinning where every kind of loss is present at once: a discovery
+    // skip (which is added to `totalFiles` rather than netted out), a withdrawal, a throw,
+    // and one healthy file.
+    await writeFile(join(workRoot, "big.stub"), "x".repeat(2000), "utf8")
+    await writeFile(join(workRoot, "boom.stub"), "boom", "utf8")
+    await rm(join(workRoot, "c.stub"))
+
+    const language = stubLanguage(
+      { on: "bad.stub", errors: [nonRecoverable("refused")] },
+      noReach(),
+    )
+    const throwing = {
+      ...language,
+      parseFile: async (file: SourceFile) => {
+        if (file.path === "boom.stub") throw new Error("stub parseFile exploded")
+        return language.parseFile(file)
+      },
+    } as unknown as LanguagePlugin
+
+    const result = await scan({
+      workspaceRoot: workRoot,
+      config: { maxFileSizeBytes: 1024 },
+      languages: [throwing],
+      frameworks: [],
+      effects: [],
+      registry: noopRegistry,
+      logger: silent,
+    })
+
+    expect(result.ir.stats.totalFiles).toBe(4)
+    expect(result.ir.stats.parsedFiles).toBe(1)
+    expect(result.skipped.map((s) => [s.path, s.reason])).toEqual([
+      ["bad.stub", "parse-failed"],
+      ["big.stub", "over-size"],
+      ["boom.stub", "extraction-failed"],
+    ])
+    expect(result.ir.symbols.map((s) => s.source.file)).toEqual(["a.stub"])
   })
 
   it("leaves a healthy workspace with an empty skip list", async () => {

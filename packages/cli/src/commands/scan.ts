@@ -9,6 +9,7 @@ import {
   makeComponentId,
   makeLanguageId,
   posixWorkspaceRelativeViolation,
+  type SkippedFile,
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -64,10 +65,16 @@ export interface ScanReport {
   keptSymbols: number
   droppedSymbols: number
   /**
-   * Files that carried parse errors **and still reached the IR** — the ones whose errors
-   * were all recoverable. A file the parse withdrew is counted by `parseFailureCount`
-   * instead and deliberately not by both: the stderr line built from this number calls its
-   * errors recoverable, and a withdrawn file's were not.
+   * Files carrying parse errors the plugin called recoverable — every file on
+   * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error, which
+   * `parseFailureCount` counts instead. The stderr line built from this number says
+   * "recoverable", and a withdrawn file's error said the opposite.
+   *
+   * Not the same as "still reached the IR". A file abandoned on its `parseTimeoutMs` budget
+   * is counted here and is not in the IR — deliberately, because its errors really are all
+   * recoverable (the withdrawal check runs before the first deadline reading) and they are
+   * the reason `lang-plugin.md` §7.1.2 keeps them: a slow parse is often a slow parse of
+   * broken input, and a reader told only about the budget would go and raise it.
    */
   parseErrorCount: number
   /**
@@ -89,7 +96,7 @@ export interface ScanReport {
    * printing them, and a discovery-time drop is not logged at all. Warning on stderr is the
    * CLI's job either way.
    */
-  skipped: readonly { path: string; reason: string; detail?: string }[]
+  skipped: readonly { path: string; reason: SkippedFile["reason"]; detail?: string }[]
   /**
    * Files a plugin threw on, with what it said and the error's own code where it had one.
    * The same files appear in `skipped` under `reason: "extraction-failed"`; this is where
@@ -212,7 +219,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     parseFailureCount: withdrawnByParse.size,
     timeoutCount: scanResult.timeoutEvents.length,
     skipped: scanResult.skipped.map((s) => {
-      const entry: { path: string; reason: string; detail?: string } = {
+      const entry: { path: string; reason: SkippedFile["reason"]; detail?: string } = {
         path: s.path,
         reason: s.reason,
       }
