@@ -11,6 +11,7 @@ import type {
   SymbolId,
   SymbolMoved,
   SymbolMovedChanged,
+  SymbolUnknown,
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
 import { compareStrings, isSymbolIdEndpoint, requireDropReason } from "./format"
@@ -37,6 +38,7 @@ export function projectDiff(diff: DiffResult): string {
   appendSection(lines, "## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols))
   appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
   appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
+  appendSection(lines, "## ❔ Unknown", renderUnknown(buckets.unknown))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
   appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
   appendSection(lines, "## 🧱 Component changes", renderComponentChanges(diff))
@@ -58,7 +60,11 @@ export function projectDiffSummaryLine(diff: DiffResult): string {
 
 function summaryLine(diff: DiffResult): string {
   const s = diff.summary
-  return `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`
+  const base = `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`
+  // Appended only when there are any, so the line a reader has learned to skim does not
+  // grow a permanent `?0`. When there are, it belongs on the same line as the counts it
+  // qualifies: the added and removed beside it are smaller than the truth by this much.
+  return s.unknown === undefined || s.unknown === 0 ? base : `${base} · ?${s.unknown} unknown`
 }
 
 interface Buckets {
@@ -70,6 +76,7 @@ interface Buckets {
   moved: SymbolMoved[]
   droppedToggled: SymbolDroppedToggled[]
   syntaxOnly: (SymbolChanged | SymbolMovedChanged)[]
+  unknown: SymbolUnknown[]
 }
 
 /**
@@ -94,6 +101,7 @@ function partition(changes: readonly SymbolChange[]): Buckets {
     moved: [],
     droppedToggled: [],
     syntaxOnly: [],
+    unknown: [],
   }
   for (const c of changes) {
     switch (c.status) {
@@ -115,6 +123,9 @@ function partition(changes: readonly SymbolChange[]): Buckets {
         break
       case "dropped-toggled":
         out.droppedToggled.push(c)
+        break
+      case "unknown":
+        out.unknown.push(c)
         break
     }
   }
@@ -463,6 +474,34 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
   return rows
 }
 
+/**
+ * §6.2a — the Symbols neither document can speak for.
+ *
+ * Rendered apart from Added and Removed rather than inside them, because the reader's next
+ * action is different: an entry here is not a change to review but a gap to close, and the
+ * reason says how. `parse-timeout` is a property of the machine that ran the scan and
+ * usually clears on a re-run; the rest describe the file and clear only when it is fixed.
+ */
+function renderUnknown(items: readonly SymbolUnknown[]): string[] {
+  if (items.length === 0) return []
+  const rows: string[] = []
+  for (const item of [...items].sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))) {
+    const s = item.symbol
+    rows.push(`### \`${s.name}\` *(${s.kind})*`)
+    rows.push(`**File**: \`${s.source.file}:${s.source.startLine}\``)
+    rows.push(`**Why**: ${unknownExplanation(item)}`)
+    rows.push(...renderSymbolBlock(s).slice(1))
+    rows.push("")
+  }
+  return rows
+}
+
+function unknownExplanation(item: SymbolUnknown): string {
+  const side = item.absentFrom
+  const fate = side === "head" ? "may still exist" : "may not be new"
+  return `the ${side} scan skipped \`${item.symbol.source.file}\` (${item.reason}), so this Symbol ${fate}`
+}
+
 function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   if (items.length === 0) return []
   const rows: string[] = []
@@ -703,6 +742,7 @@ function symbolForMember(change: SymbolChange): IRSymbol {
   switch (change.status) {
     case "added":
     case "removed":
+    case "unknown":
       return change.symbol
     case "changed":
     case "moved+changed":
@@ -726,6 +766,8 @@ function renderMemberFollowup(change: SymbolChange): string {
       return deltaAxisSummary(change.delta)
     case "dropped-toggled":
       return `dropped-toggled: ${change.direction}`
+    case "unknown":
+      return `unknown: the ${change.absentFrom} scan skipped this file (${change.reason})`
   }
 }
 
@@ -745,6 +787,7 @@ function indexChangesById(symbols: readonly SymbolChange[]): Map<SymbolId, Symbo
     switch (change.status) {
       case "added":
       case "removed":
+      case "unknown":
         map.set(change.symbol.id, change)
         break
       case "changed":

@@ -1,5 +1,5 @@
 import { reconstructCallEdgesFromIR, type SerializeOptions, serializeCanonical } from "@aburi/core"
-import type { DiffResult, IR, IRRef, Summary, SymbolChange } from "@aburi/types"
+import type { DiffResult, IR, IRRef, Summary, SymbolChange, SymbolUnknown } from "@aburi/types"
 import {
   DEPENDENCY_IDENTITY_FIELDS,
   dependencyIdentity,
@@ -83,6 +83,10 @@ export function buildDiff(input: DiffInput): DiffResult {
     depsAdded: 0,
     depsRemoved: 0,
   }
+  // Counted locally: `Summary.unknown` is optional so a diff written before the counter
+  // existed stays schema-valid, and `summary.unknown++` on an optional number does not
+  // type-check. Assigned once, below, where the other totals are.
+  let unknown = 0
 
   const symbols: SymbolChange[] = []
   for (const pair of pairs) {
@@ -135,19 +139,40 @@ export function buildDiff(input: DiffInput): DiffResult {
   const finalRemainingHead = stage4_5.remainingHead
   const finalRemainingBase = stage4_5.remainingBase
 
+  // Read after the five matching stages, never before them. A Symbol that moved out of a
+  // file the other document lost into a file it has is matched by stage 3 or 4 and is
+  // genuinely `moved` — the other side holds real evidence for it. Only the leftovers are
+  // absences, and only an absence in a file that was never analysed is unexplained.
+  const lostByHead = lostFiles(input.headIR)
+  const lostByBase = lostFiles(input.baseIR)
+
   for (const h of finalRemainingHead) {
-    if (h.dropped) summary.droppedAdded++
-    else {
-      summary.added++
-      symbols.push({ status: "added", symbol: h })
+    if (h.dropped) {
+      summary.droppedAdded++
+      continue
     }
+    const reason = lostByBase.get(h.source.file)
+    if (reason !== undefined) {
+      unknown++
+      symbols.push({ status: "unknown", symbol: h, absentFrom: "base", reason })
+      continue
+    }
+    summary.added++
+    symbols.push({ status: "added", symbol: h })
   }
   for (const b of finalRemainingBase) {
-    if (b.dropped) summary.droppedRemoved++
-    else {
-      summary.removed++
-      symbols.push({ status: "removed", symbol: b })
+    if (b.dropped) {
+      summary.droppedRemoved++
+      continue
     }
+    const reason = lostByHead.get(b.source.file)
+    if (reason !== undefined) {
+      unknown++
+      symbols.push({ status: "unknown", symbol: b, absentFrom: "head", reason })
+      continue
+    }
+    summary.removed++
+    symbols.push({ status: "removed", symbol: b })
   }
 
   const components = diffComponents(input.baseIR.components, input.headIR.components)
@@ -158,6 +183,7 @@ export function buildDiff(input: DiffInput): DiffResult {
   const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies)
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
+  summary.unknown = unknown
 
   symbols.sort(compareSymbolChange)
 
@@ -365,8 +391,25 @@ function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
 }
 
 function referenceId(change: SymbolChange): string {
-  if (change.status === "added" || change.status === "removed") return change.symbol.id
+  if (change.status === "added" || change.status === "removed" || change.status === "unknown") {
+    return change.symbol.id
+  }
   return change.after.id
+}
+
+/**
+ * The files a document's scan never analysed, by path, with why.
+ *
+ * `stats.skippedFiles` is Class B: absent means the writer predates the field, not that
+ * nothing was lost. An empty map is the honest answer either way — with no enumeration
+ * there is no absence this function can explain, and guessing from
+ * `totalFiles > parsedFiles` would attach a reason to whichever Symbols happened to be
+ * missing. The CLI says so on stderr instead; a diff cannot invent the list.
+ */
+function lostFiles(ir: IR): Map<string, SymbolUnknown["reason"]> {
+  const lost = new Map<string, SymbolUnknown["reason"]>()
+  for (const file of ir.stats.skippedFiles ?? []) lost.set(file.path, file.reason)
+  return lost
 }
 
 /**

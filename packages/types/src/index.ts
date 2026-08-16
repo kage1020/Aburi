@@ -41,6 +41,7 @@ export type {
   SymbolMoved,
   SymbolMovedChanged,
   SymbolRemoved,
+  SymbolUnknown,
 } from "./generated/diff"
 // ---------- IR (canonical runtime model) ----------
 // Disambiguating alias so callers can keep the global `Symbol` in scope.
@@ -68,6 +69,7 @@ export type {
   Rule,
   RuleType,
   Signature,
+  SkippedFile,
   SourceRange,
   Stats,
   Symbol,

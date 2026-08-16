@@ -225,6 +225,10 @@ effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
 lspEnrichment?: LspEnrichmentStats
 callResolution?: CallResolutionStats
+/**
+ * Every file the scan gave up on, and why. Class B per ir-schema.md §1.1: writers omit the key when nothing was lost rather than emitting []. Without it the only trace of a loss is totalFiles > parsedFiles, which names no file — so a diff against a document that lost one reports its Symbols as deliberately deleted API. Sorted by path; invariant #21 holds the length to totalFiles - parsedFiles.
+ */
+skippedFiles?: SkippedFile[]
 }
 export interface EffectClassifyTimeout {
 /**
@@ -332,4 +336,17 @@ ambiguous: number
  * No candidate was found at all — a typo, or a callee that is neither imported nor present in the workspace.
  */
 noMatch: number
+}
+/**
+ * No `detail`. The scan carries one on `ScanResult.skipped` — the size, the elapsed, the message a plugin refused the file with — but an `unreadable` detail is a Node error message containing the absolute path, and a canonical document whose bytes depend on where the repository is checked out is not byte-stable.
+ */
+export interface SkippedFile {
+/**
+ * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses.
+ */
+path: string
+/**
+ * Why the scan stopped working on this file. `over-size` and `unroutable` are decided before it was read, `unreadable` by either discovery or the read before extraction, and `parse-failed` / `parse-timeout` / `extraction-failed` during extraction. A reader distinguishes them because they call for different actions: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
+ */
+reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
 }

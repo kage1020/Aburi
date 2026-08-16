@@ -131,6 +131,7 @@ export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   checkDependencyTupleUniqueness(ir, violations)
   checkCallGraphProjectionAgrees(ir, violations)
   checkCallResolutionStatsCensus(ir, violations)
+  checkSkippedFilesCensus(ir, violations)
   checkSymbolIdNamespace(ir, violations)
   checkIdGrammar(ir, violations)
   checkWorkspaceLanguages(ir, violations)
@@ -335,6 +336,13 @@ function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
       reportUnnormalized(dep[role], `dependencies[${role}=${dep[role]}]`, role, out)
     }
   }
+  for (const file of ir.stats.skippedFiles ?? []) {
+    // Ordered by this string, and matched against `symbols[].source.file` by `buildDiff` to
+    // decide which absences are losses rather than deletions. Two spellings there make a
+    // withdrawn file's Symbols look deliberately deleted, which is the failure the array
+    // exists to prevent.
+    reportUnnormalized(file.path, `stats.skippedFiles[path=${file.path}]`, "path", out)
+  }
 }
 
 function reportUnnormalized(
@@ -503,6 +511,9 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
       pathSites.push({ subject: `workspace.managers[tool=${manager.tool}].roots`, path: root })
     }
   }
+  for (const file of ir.stats.skippedFiles ?? []) {
+    pathSites.push({ subject: `stats.skippedFiles[path=${file.path}]`, path: file.path })
+  }
 
   for (const site of pathSites) {
     const violation = posixWorkspaceRelativeViolation(site.path)
@@ -521,6 +532,12 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   assertSorted(
     ir.symbols.map((s) => s.id),
     "symbols[]",
+    (a, b) => compareCodeUnit(a, b),
+    out,
+  )
+  assertSorted(
+    (ir.stats.skippedFiles ?? []).map((f) => f.path),
+    "stats.skippedFiles[]",
     (a, b) => compareCodeUnit(a, b),
     out,
   )
@@ -826,6 +843,48 @@ function dependencyKey(from: string, to: string): string {
  * incremented on a path the IR does not reflect — which would send reviewers
  * hunting for unresolved calls that are not there, or hide the ones that are.
  */
+/**
+ * Invariant #21 (ir-schema.md §14): when `stats.skippedFiles` is present it accounts for
+ * every file the scan did not parse — its length is exactly `totalFiles - parsedFiles`.
+ *
+ * The two sides come from different places. `parsedFiles` is a subtraction the scan performs
+ * over its own bookkeeping; `skippedFiles` is the list of what it gave up on. They agree only
+ * if every file the scan stopped working on produced exactly one entry, which is the property
+ * the whole array rests on: `buildDiff` reads it to decide that an absent Symbol is a loss
+ * rather than a deletion, and a list missing an entry sends it back to reporting a deletion
+ * that did not happen.
+ *
+ * Conditional on presence. A document written before the field existed has no way to satisfy
+ * this and is not wrong for that — the absence is what tells a reader the enumeration is
+ * unavailable, and reporting it as a violation would make every archived IR unreadable.
+ */
+function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
+  const skippedFiles = ir.stats.skippedFiles
+  if (skippedFiles === undefined) return
+
+  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
+  if (skippedFiles.length !== unparsed) {
+    out.push({
+      invariant: 21,
+      subject: "stats.skippedFiles",
+      message: `stats.skippedFiles names ${skippedFiles.length} file(s) but totalFiles - parsedFiles is ${unparsed}`,
+    })
+  }
+
+  const seen = new Set<string>()
+  for (const file of skippedFiles) {
+    if (seen.has(file.path)) {
+      out.push({
+        invariant: 21,
+        subject: "stats.skippedFiles",
+        message: `stats.skippedFiles names "${file.path}" more than once; one file is skipped for one reason`,
+      })
+      continue
+    }
+    seen.add(file.path)
+  }
+}
+
 function checkCallResolutionStatsCensus(ir: IR, out: IntegrityViolation[]): void {
   const stats = ir.stats.callResolution
   if (stats === undefined) return

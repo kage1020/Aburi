@@ -3,7 +3,7 @@
 // Run `pnpm --filter @aburi/types codegen` to regenerate.
 import type { Component, Dependency, Symbol, SymbolId } from "./ir"
 export type { Component, Dependency, Symbol, SymbolId } from "./ir"
-export type SymbolChange = (SymbolAdded | SymbolRemoved | SymbolMoved | SymbolChanged | SymbolMovedChanged | SymbolDroppedToggled)
+export type SymbolChange = (SymbolAdded | SymbolRemoved | SymbolMoved | SymbolChanged | SymbolMovedChanged | SymbolDroppedToggled | SymbolUnknown)
 export type MatchRationale = ("id-match" | "git-rename" | "logic-fingerprint" | "logic-fingerprint+name-disambiguation" | "name-signature" | "dropped-weak-match")
 /**
  * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer.
@@ -55,6 +55,10 @@ componentsRemoved: number
 componentsChanged: number
 depsAdded: number
 depsRemoved: number
+/**
+ * Symbols whose fate could not be determined because one document never analysed their file. Optional rather than required so a diff written before the counter existed stays valid; absence means "this document predates the counter", not "nothing was unknown".
+ */
+unknown?: number
 }
 export interface SymbolAdded {
 status: "added"
@@ -113,6 +117,21 @@ status: "dropped-toggled"
 before: Symbol
 after: Symbol
 direction: ("to-dropped" | "to-kept")
+}
+/**
+ * `symbol` is the entry as the document that does have it records it. A Symbol present in one document and absent from the other, where the absent side never analysed the file it lives in — `stats.skippedFiles[]` names that file. Not `added` or `removed`: nothing was written or deleted, the evidence is missing. Reporting it as either is the failure this status exists to prevent, because a scan that dropped a file would otherwise produce a confident report of API the author never touched.
+ */
+export interface SymbolUnknown {
+status: "unknown"
+symbol: Symbol
+/**
+ * Which document lacks it, which is the same document that lost the file. `head` reads as "this may still exist", `base` as "this may not be new".
+ */
+absentFrom: ("base" | "head")
+/**
+ * Why that document skipped the file, copied from its `stats.skippedFiles[]`. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
+ */
+reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
 }
 export interface ComponentDiff {
 added: Component[]

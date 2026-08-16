@@ -380,12 +380,25 @@ Both non-null →
 - set match ratio of throws (order-insensitive)
 averaged.
 
-### 3.5 Stage 5: the remainder is added / removed
+### 3.5 Stage 5: the remainder is added / removed / unknown
 
 Symbols not paired by this point are finalized:
 
 - `remainingHead` → status: `added`
 - `remainingBase` → status: `removed`
+- …unless the *other* document never analysed the file the Symbol lives in, in which case the status is `unknown` (§3.5.1)
+
+#### 3.5.1 `unknown`: the other document could not look
+
+A leftover Symbol whose `source.file` appears in the other document's `stats.skippedFiles[]` is not evidence of an addition or a deletion. That document did not read the file, so it cannot say whether the Symbol is there. The entry carries `absentFrom` (`base` or `head` — the document that lost the file, so `head` reads as "this may still exist" and `base` as "this may not be new") and the skip `reason`, which is what decides the reader's next move: `parse-timeout` depends on how loaded the machine was and usually clears on a re-run, while `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the file and clear only when something is fixed.
+
+Three properties this rests on:
+
+- **Read after all five stages, never before.** A Symbol that moved *out of* a lost file into a file the other document has is matched by stage 3 or 4, and that document holds real evidence for it — it is `moved`. Filtering the base list up front would throw that answer away.
+- **Both directions.** A file fine at head and withdrawn at base makes phantom `added` entries exactly as a file withdrawn at head makes phantom `removed` ones.
+- **`dropped` leftovers keep their counters.** They produce no `symbols[]` entry on either side today and nothing gates on them, so they stay in `droppedAdded` / `droppedRemoved` rather than becoming `unknown` entries where there were none.
+
+When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.7).
 
 ### 3.6 Handling dropped symbols
 
@@ -479,6 +492,10 @@ Treating `dropped-toggled` as an independent status means:
 - delta (`apiChanged`, etc.) is **not computed** (always treated as false)
 - The Markdown projection stores these in a dedicated collapsed section, "Drop rule changes"
 - `--fail-on dropped-toggled` can make it an explicit CI gate
+
+### 4.2 Why the `unknown` status exists
+
+The alternatives were both silence of a kind. Suppressing the entry hides a Symbol that may genuinely have been deleted; keeping `removed` and adding a flag beside it shows an API deletion to every reader that does not know to look for the flag — including `--fail-on removed`, which is the reason the phantom mattered. A status of its own makes `--fail-on removed` mean what it says and gives a strict pipeline `--fail-on unknown` to catch the case where the answer is missing.
 
 ## 5. Delta computation (changed / moved+changed only)
 

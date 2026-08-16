@@ -14,6 +14,7 @@ export type FailOnStatus =
   | "dropped-toggled"
   | "dropped-toggled:to-dropped"
   | "dropped-toggled:to-kept"
+  | "unknown"
 
 /** Comparison operator when a numeric threshold is attached (e.g. `changed:>10`). */
 export type FailOnComparator = ">" | ">=" | "==" | "<="
@@ -117,6 +118,11 @@ function observedCount(
       return summary.movedChanged
     case "dropped-toggled":
       return summary.droppedToggled
+    case "unknown":
+      // Absent on a diff written before the counter existed. Zero is the only answer
+      // available then, and it is the right one for a gate: a document that cannot report
+      // unknowns must not be failed for having them.
+      return summary.unknown ?? 0
     case "dropped-toggled:to-dropped":
       return requireBreakdown(droppedToggledBreakdown, status).toDropped
     case "dropped-toggled:to-kept":

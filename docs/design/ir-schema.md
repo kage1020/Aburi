@@ -47,6 +47,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `stats.effectClassifyTimeouts` | no | B | omitted when no classification timed out |
 | `stats.lspEnrichment` | no | B | omitted when the LSP pass did not run |
 | `stats.callResolution` | no | B | always emitted by the current pipeline; absence means the document predates the counter |
+| `stats.skippedFiles` | no | B | omitted when the scan lost nothing; absence with `totalFiles > parsedFiles` means the document predates the field |
 | `Component.publicApi` | no | B | omitted when empty |
 | `Component.frameworks` | no | B | omitted when empty |
 | `Component.description` | **yes** | **A** | always emitted; `null` when the component carries no description |
@@ -143,7 +144,10 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
       "unresolved": {
         "localScope": 0, "external": 6, "dynamic": 4, "ambiguous": 0, "noMatch": 1
       }
-    }
+    },
+    "skippedFiles": [                         // Class B (§1.1); omitted when nothing was lost
+      { "path": "src/route.ts", "reason": "parse-failed" }
+    ]
   }
 }
 ```
@@ -153,6 +157,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 - `workspace.root`: always `"."`. Never write absolute paths (IR portability)
 - `workspace.managers[].tool`: runtime-independent string. Representative values: `pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`/`pip`/`cargo`/`go`/`mvn`/`gradle`/`hatch`/`pixi`. Unknown values are not rejected (so that adding a new tool never requires a schema revision)
 - `stats`: for human/CI logs. Excluded from fingerprint
+- `stats.skippedFiles`: every file the scan gave up on, and why — the projection of `ScanResult.skipped` into the Document. Sorted by path; invariant #21 holds the length to `totalFiles - parsedFiles`. Without it the only trace of a loss is `totalFiles > parsedFiles`, which names no file and is equally true of an over-size file, a timed-out one and a withdrawn one — so `aburi diff` reads a Symbol's absence as a deletion and reports API nobody removed. Optional so documents produced before the field existed remain valid v1; the current pipeline always emits it when anything was lost, so absence with `totalFiles > parsedFiles` means "this IR predates the field", not "nothing was lost". **No `detail`**: the scan carries one per entry, but the `unreadable` detail is an OS error message containing the absolute path, and a canonical document whose bytes depend on where the repository was checked out is not byte-stable
 - `stats.callResolution`: the call-resolution census of [`call-resolution.md`](./call-resolution.md) §8.1 — how many call sites the resolver saw, how many it identified, and why the rest stayed `null`. Optional so documents produced before the field existed remain valid v1; the current scan pipeline always emits it, so absence means "this IR predates the counter", not "nothing was unresolved". The per-call reasons behind these counts are deliberately **not** persisted — see §8.1
 
 ## 3. Symbol ID Convention
@@ -565,6 +570,7 @@ Guaranteed by Aburi internals. Item 20 restates the schema's own structural requ
 18. `workspace.languages` is non-empty, every entry satisfies the `LanguageId` grammar of §3.1, and every `symbols[].language` appears in it. The Document declares which languages it covers, so a Symbol in a language the Document does not list means either an incomplete declaration or a Symbol that does not belong to this scan
 19. Every string the Document orders or identifies by is in Unicode NFC. §1.2 defines the rule, the fields it covers, and the two categories it deliberately excludes
 20. The Document has the shape `aburi.ir.v1` requires: every field the schema lists as `required`, of the declared kind, at every depth. This one is different in kind from the nineteen above — they relate fields to each other, this one establishes that the fields are there to relate. The scope is the schema's requirements rather than "whatever the other invariants happen to read", because `readIR` brands its result `IR` on the strength of this check alone: a narrower check would hand `@aburi/diff` a Document with no `fingerprint` and let it fail outside anyone's error handling. When #20 fails it is reported **alone** — the nineteen are statements about a Document, and a value that fails #20 is not one. The restatement is kept honest by a test that reads `schema/aburi.ir.v1.json` and fails on a `required` entry with no counterpart
+21. When `stats.skippedFiles` is present, its length is exactly `stats.totalFiles - stats.parsedFiles` and no path appears twice. The two sides are produced independently — `parsedFiles` is the scan's own subtraction, `skippedFiles` is the list of what it gave up on — and they agree only if every file the scan stopped working on produced exactly one entry. That is the property the array rests on: `aburi diff` reads it to decide that an absent Symbol is a loss rather than a deletion, and a list missing an entry sends it back to reporting a deletion nobody made. Conditional on presence, because a document written before the field existed has no way to satisfy it and its absence is itself the answer — the enumeration is unavailable
 
 An invariant violation is a **fatal error**, not a warning.
 

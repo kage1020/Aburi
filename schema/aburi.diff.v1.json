@@ -99,7 +99,8 @@
         "componentsRemoved": { "type": "integer", "minimum": 0 },
         "componentsChanged": { "type": "integer", "minimum": 0 },
         "depsAdded":         { "type": "integer", "minimum": 0 },
-        "depsRemoved":       { "type": "integer", "minimum": 0 }
+        "depsRemoved":       { "type": "integer", "minimum": 0 },
+        "unknown":           { "type": "integer", "minimum": 0, "description": "Symbols whose fate could not be determined because one document never analysed their file. Optional rather than required so a diff written before the counter existed stays valid; absence means \"this document predates the counter\", not \"nothing was unknown\"." }
       }
     },
 
@@ -110,8 +111,35 @@
         { "$ref": "#/$defs/SymbolMoved" },
         { "$ref": "#/$defs/SymbolChanged" },
         { "$ref": "#/$defs/SymbolMovedChanged" },
-        { "$ref": "#/$defs/SymbolDroppedToggled" }
+        { "$ref": "#/$defs/SymbolDroppedToggled" },
+        { "$ref": "#/$defs/SymbolUnknown" }
       ]
+    },
+
+    "SymbolUnknown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["absentFrom", "reason", "status", "symbol"],
+      "description": "`symbol` is the entry as the document that does have it records it. A Symbol present in one document and absent from the other, where the absent side never analysed the file it lives in — `stats.skippedFiles[]` names that file. Not `added` or `removed`: nothing was written or deleted, the evidence is missing. Reporting it as either is the failure this status exists to prevent, because a scan that dropped a file would otherwise produce a confident report of API the author never touched.",
+      "properties": {
+        "status": { "const": "unknown" },
+        "symbol": { "$ref": "#/$defs/Symbol" },
+        "absentFrom": {
+          "enum": ["base", "head"],
+          "description": "Which document lacks it, which is the same document that lost the file. `head` reads as \"this may still exist\", `base` as \"this may not be new\"."
+        },
+        "reason": {
+          "enum": [
+            "over-size",
+            "unreadable",
+            "unroutable",
+            "parse-failed",
+            "parse-timeout",
+            "extraction-failed"
+          ],
+          "description": "Why that document skipped the file, copied from its `stats.skippedFiles[]`. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something."
+        }
+      }
     },
 
     "SymbolDroppedToggled": {

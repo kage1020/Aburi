@@ -43,6 +43,14 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   lines.push(...renderDependencies(ir))
   lines.push("")
 
+  const skipped = renderSkippedFiles(ir)
+  if (skipped.length > 0) {
+    lines.push("## Files not analysed")
+    lines.push("")
+    lines.push(...skipped)
+    lines.push("")
+  }
+
   const effectSurface = renderEffectSurface(ir)
   if (effectSurface.length > 0) {
     lines.push(`## Effect surface (top ${EFFECT_SURFACE_TOP_N} by count)`)
@@ -55,6 +63,42 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd()}\n`
+}
+
+/**
+ * The files the scan gave up on, grouped by why.
+ *
+ * A reader holding only `workspace.md` otherwise sees `keptSymbols … across N files` and no
+ * hint that some of those N produced nothing — and every consumer downstream, `aburi diff`
+ * included, would read the absence of a Symbol as a deletion. The counts come first because
+ * the shape (one file, or all of them) is the thing to notice, and the paths follow so the
+ * reader can go and look.
+ *
+ * Absent from documents written before `stats.skippedFiles` existed, and the section is then
+ * omitted rather than rendered empty: "this run lost nothing" and "this writer could not say"
+ * are different answers.
+ */
+function renderSkippedFiles(ir: IR): string[] {
+  const skipped = ir.stats.skippedFiles ?? []
+  if (skipped.length === 0) return []
+
+  const byReason = new Map<string, string[]>()
+  for (const file of skipped) {
+    const paths = byReason.get(file.reason)
+    if (paths === undefined) byReason.set(file.reason, [file.path])
+    else paths.push(file.path)
+  }
+
+  const rows: string[] = [
+    `${skipped.length} of ${ir.stats.totalFiles} file(s) produced no Symbols.`,
+    "",
+  ]
+  for (const reason of [...byReason.keys()].sort(compareStrings)) {
+    const paths = byReason.get(reason) ?? []
+    rows.push(`- **${reason}** (${paths.length}):`)
+    for (const path of paths) rows.push(`  - \`${path}\``)
+  }
+  return rows
 }
 
 function renderManagers(ir: IR): string {

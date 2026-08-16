@@ -171,6 +171,8 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       `⚠ head IR has no stats.callResolution, so the call-resolution census is unavailable for this diff. Re-run \`aburi scan\` on the head revision to record it (call-resolution.md §8.1).`,
     )
   }
+  warnOnUnenumerableLosses(baseIR, "base", warn)
+  warnOnUnenumerableLosses(headIR, "head", warn)
   return {
     diffJsonPath,
     diffMdPath,
@@ -180,6 +182,29 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     triggered: firstTriggered,
     exitCode,
   }
+}
+
+/**
+ * An IR that dropped files but predates `stats.skippedFiles` cannot say which ones.
+ *
+ * `buildDiff` needs the paths to tell a loss from a deletion, so with only the counts it
+ * leaves every leftover classified as `added` / `removed` — which is the pre-`skippedFiles`
+ * behaviour, and is exactly the confident-but-wrong report the field exists to prevent. It
+ * cannot invent the list: guessing from `totalFiles > parsedFiles` would attach the doubt to
+ * whichever Symbols happened to be missing.
+ *
+ * So the diff says nothing wrong and the CLI says what it could not check. Both sides are
+ * examined, because a base written by an older scan makes phantom `added` entries the same
+ * way a head makes phantom `removed` ones.
+ */
+function warnOnUnenumerableLosses(ir: IR, side: "base" | "head", warn: (m: string) => void): void {
+  if (ir.stats.skippedFiles !== undefined) return
+  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
+  if (unparsed <= 0) return
+  const consequence = side === "head" ? "removed" : "added"
+  warn(
+    `⚠ ${side} IR reports ${unparsed} file(s) it did not parse but has no stats.skippedFiles to name them, so this diff cannot tell a lost file from a deleted one. Symbols from those files are reported as ${consequence}. Re-run \`aburi scan\` on the ${side} revision to record the list.`,
+  )
 }
 
 /** Trigger phrasing so the CLI wrapper can pipe it to stderr. */

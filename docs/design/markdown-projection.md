@@ -327,12 +327,13 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ```md
 # Aburi diff: <base.ref>..<head.ref>
 
-**Summary**: +5 added · -3 removed · ~12 changed · 2 moved · 1 moved+changed
+**Summary**: +5 added · -3 removed · ~12 changed · 2 moved · 1 moved+changed · ?2 unknown
 
 ## ⚠ API changes
 ## 🔧 Logic changes
 ## ➕ Added
 ## ➖ Removed
+## ❔ Unknown
 ## 🔀 Moved + Changed
 ## 🔀 Moved
 ## 🧱 Component changes
@@ -342,6 +343,8 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ```
 
 The section order is fixed, **highest importance → lowest**. The bottom 3 sections (**Moved / Dropped / Syntax-only**) are folded in `<details>`. Moved+Changed is not folded because it contains semantic changes.
+
+The `· ?N unknown` suffix on the Summary line appears only when `summary.unknown` is non-zero, so the line a reviewer skims on every PR does not carry a permanent `?0`. It qualifies the counts beside it: added and removed are both smaller than the truth by that much.
 
 ### 6.2 Display form of each section
 
@@ -389,6 +392,18 @@ Full symbol rendering (same as §5.2):
 - guard: `!invoice.canRefund` (L110)
 - throw: `new RefundNotAllowed()` (L111)
 ```
+
+#### ❔ Unknown
+
+Entries with `status: "unknown"` — a Symbol one document has and the other never analysed the file for ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.1). Rendered directly after Removed, because a reader who scrolled to Removed needs to see what is missing from it; rendered *apart* from it because the next action is different — an entry here is not a change to review but a gap to close.
+
+```md
+### `handleRequest` *(function)*
+**File**: `apps/web/src/route.ts:12`
+**Why**: the head scan skipped `apps/web/src/route.ts` (parse-failed), so this Symbol may still exist
+```
+
+`absentFrom: "base"` reads `may not be new` instead. The `reason` is quoted because it decides the next move: `parse-timeout` usually clears on a re-run, the rest clear only when the file is fixed.
 
 #### 🔀 Moved + Changed
 

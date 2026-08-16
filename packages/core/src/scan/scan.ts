@@ -390,9 +390,17 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   //
   // `discovered.skipped` is not netted out here: those files were never candidates, and they
   // are added to `totalFiles` instead.
+  //
+  // Derived from the two arrays rather than from `skipped.length` below, though the numbers
+  // are the same. Integrity invariant #21 compares this subtraction against that length, and
+  // a check whose two sides are the same expression checks nothing.
+  const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  )
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
     parsedFiles: discovered.files.length - additionalSkipped.length,
+    skipped,
     symbols: resolvedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
@@ -424,9 +432,6 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   assertIRIntegrity(ir)
 
-  const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-  )
   return {
     ir,
     parseErrors,
@@ -611,6 +616,7 @@ async function loadSourceFile(
 interface BuildStatsInput {
   totalFiles: number
   parsedFiles: number
+  skipped: readonly SkippedFile[]
   symbols: readonly IR["symbols"][number][]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
   propagation: PropagationStats
@@ -643,6 +649,18 @@ function buildStats(input: BuildStatsInput): Stats {
   }
   if (input.lspEnrichment !== undefined) {
     stats.lspEnrichment = input.lspEnrichment
+  }
+  // Class B: the key is absent when nothing was lost, so its presence alone answers "did
+  // this run drop anything" without a reader having to compare two counters — and a
+  // document that omits it while `totalFiles > parsedFiles` is one written before the field
+  // existed, which is a distinction `[]` would erase.
+  //
+  // `detail` is deliberately not carried across. The scan holds one per entry, but the
+  // `unreadable` details are Node error messages containing the absolute path, and a
+  // canonical document whose bytes depend on where the repository was checked out is not
+  // the byte-stable artifact the rest of the pipeline assumes.
+  if (input.skipped.length > 0) {
+    stats.skippedFiles = input.skipped.map((file) => ({ path: file.path, reason: file.reason }))
   }
   return stats
 }

@@ -343,7 +343,7 @@ Mid-size project with custom drops:
 
 Marking every symbol of a file as `dropped: true` would bloat the IR (including all of node_modules would mean hundreds of thousands of entries). Excluding them from stats as well makes it clear they are "outside Aburi's concern".
 
-If a per-file drop history ever becomes necessary, a separate mechanism (`stats.skippedFiles[]` etc.) will be considered.
+If a per-file drop history ever becomes necessary, a separate mechanism will be considered. `stats.skippedFiles[]` is not it: that array names files the scan never analysed, while a Category A drop is a deliberate exclusion from the field of view, and folding the two together would have `aburi diff` treat every ignored file as a gap in its evidence.
 
 ### 10.3 Why "pure DTO" is dropped
 

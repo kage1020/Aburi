@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
+import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
 import { toPosixRelative } from "../id"
@@ -100,16 +101,13 @@ export interface DiscoveredFile {
  * `unreadable` is the one reason both sides can raise: discovery hits it when it cannot stat
  * or read a candidate, and the orchestrator hits it when the read it does just before
  * extraction fails.
+ *
+ * The reason union comes from the IR schema rather than being spelled again here, because
+ * the two must agree: `stats.skippedFiles[]` is this list projected into the Document, and a
+ * reason that existed on only one side would be a member the reader of a diff cannot name.
+ * `detail` is what the scan adds and the Document does not take — see the schema for why.
  */
-export interface SkippedFile {
-  path: string
-  reason:
-    | "over-size"
-    | "unreadable"
-    | "unroutable"
-    | "parse-failed"
-    | "parse-timeout"
-    | "extraction-failed"
+export interface SkippedFile extends SkippedFileRecord {
   detail?: string
 }
 
