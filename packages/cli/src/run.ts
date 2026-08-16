@@ -376,6 +376,15 @@ function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream):
   if (report.parseErrorCount > 0) {
     stderr.write(`⚠ ${report.parseErrorCount} file(s) had recoverable parse errors.\n`)
   }
+  if (report.parseFailureCount > 0) {
+    // Apart from the line above rather than folded into it: those files are in the IR with
+    // warnings against them, these are not in it at all, and the difference is the whole
+    // reason a reader is reading the count. The skip summary below names them too, among
+    // every other reason a file went missing; this says which of them are unparseable.
+    stderr.write(
+      `⚠ ${report.parseFailureCount} file(s) could not be parsed and were left out of the IR.\n`,
+    )
+  }
   if (report.timeoutCount > 0) {
     stderr.write(
       `⚠ ${report.timeoutCount} effect classification(s) hit the per-call timeout budget.\n`,

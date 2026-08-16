@@ -9,6 +9,7 @@ import {
   makeComponentId,
   makeLanguageId,
   posixWorkspaceRelativeViolation,
+  type SkippedFile,
   scan,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -63,16 +64,39 @@ export interface ScanReport {
   totalFiles: number
   keptSymbols: number
   droppedSymbols: number
+  /**
+   * Files carrying parse errors the plugin called recoverable — every file on
+   * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error, which
+   * `parseFailureCount` counts instead. The stderr line built from this number says
+   * "recoverable", and a withdrawn file's error said the opposite.
+   *
+   * Not the same as "still reached the IR". A file abandoned on its `parseTimeoutMs` budget
+   * is counted here and is not in the IR — deliberately, because its errors really are all
+   * recoverable (the withdrawal check runs before the first deadline reading) and they are
+   * the reason `lang-plugin.md` §7.1.2 keeps them: a slow parse is often a slow parse of
+   * broken input, and a reader told only about the budget would go and raise it.
+   */
   parseErrorCount: number
+  /**
+   * Files withdrawn because the parse produced nothing usable — a null tree, or a
+   * `ParseError` the language plugin marked `recoverable: false`. The same files appear in
+   * `skipped` under `reason: "parse-failed"`.
+   *
+   * This does not move the exit code. Unlike `extractionFailures`, it describes the source
+   * rather than the plugin set: an unparseable file is a fact about the workspace, the way
+   * an over-size or timed-out one is.
+   */
+  parseFailureCount: number
   timeoutCount: number
   /**
    * Files that never made it into the IR. `over-size` and `unroutable` are decided before
-   * anything is read; `unreadable` can come from either side; `parse-timeout` and
-   * `extraction-failed` are decided during extraction. Surfaced separately from
-   * `parseErrorCount` because `@aburi/core` returns these rather than printing them, and a
-   * discovery-time drop is not logged at all. Warning on stderr is the CLI's job either way.
+   * anything is read; `unreadable` can come from either side; `parse-failed`,
+   * `parse-timeout` and `extraction-failed` are decided during extraction. Surfaced
+   * separately from `parseErrorCount` because `@aburi/core` returns these rather than
+   * printing them, and a discovery-time drop is not logged at all. Warning on stderr is the
+   * CLI's job either way.
    */
-  skipped: readonly { path: string; reason: string; detail?: string }[]
+  skipped: readonly { path: string; reason: SkippedFile["reason"]; detail?: string }[]
   /**
    * Files a plugin threw on, with what it said and the error's own code where it had one.
    * The same files appear in `skipped` under `reason: "extraction-failed"`; this is where
@@ -177,6 +201,13 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     }
   }
 
+  // A withdrawn file's parse errors are still reported — they are the account of why it was
+  // withdrawn — so the two counts below would otherwise both include it, and one of them
+  // would call its errors recoverable.
+  const withdrawnByParse = new Set(
+    scanResult.skipped.filter((s) => s.reason === "parse-failed").map((s) => s.path),
+  )
+
   return {
     irPath,
     workspaceMdPath,
@@ -184,10 +215,11 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     totalFiles: scanResult.ir.stats.totalFiles,
     keptSymbols: scanResult.ir.stats.keptSymbols,
     droppedSymbols: scanResult.ir.stats.droppedSymbols,
-    parseErrorCount: scanResult.parseErrors.length,
+    parseErrorCount: scanResult.parseErrors.filter((p) => !withdrawnByParse.has(p.file)).length,
+    parseFailureCount: withdrawnByParse.size,
     timeoutCount: scanResult.timeoutEvents.length,
     skipped: scanResult.skipped.map((s) => {
-      const entry: { path: string; reason: string; detail?: string } = {
+      const entry: { path: string; reason: SkippedFile["reason"]; detail?: string } = {
         path: s.path,
         reason: s.reason,
       }

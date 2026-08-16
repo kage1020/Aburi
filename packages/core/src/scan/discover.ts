@@ -87,11 +87,15 @@ export interface DiscoveredFile {
 }
 
 /**
- * A file that produced no Symbols and was not a parse failure. `over-size` and `unreadable`
- * are decided here during discovery; `unroutable`, `parse-timeout` and `extraction-failed`
- * are decided by the scan orchestrator afterwards and merged into the same list, because
- * from the reader's side they answer the same question — why is this file missing from the
- * IR?
+ * A file that produced no Symbols. `over-size` and `unreadable` are decided here during
+ * discovery; `unroutable`, `parse-failed`, `parse-timeout` and `extraction-failed` are
+ * decided by the scan orchestrator afterwards and merged into the same list, because from
+ * the reader's side they answer the same question — why is this file missing from the IR?
+ *
+ * The list is exhaustive over the files the scan *gave up on*, which is what lets
+ * `stats.parsedFiles` be derived from its length rather than from a counter per reason. A
+ * file that parses cleanly and declares nothing is not one of those: it is absent from the
+ * list and counted as parsed, which is correct.
  *
  * `unreadable` is the one reason both sides can raise: discovery hits it when it cannot stat
  * or read a candidate, and the orchestrator hits it when the read it does just before
@@ -99,7 +103,13 @@ export interface DiscoveredFile {
  */
 export interface SkippedFile {
   path: string
-  reason: "over-size" | "unreadable" | "unroutable" | "parse-timeout" | "extraction-failed"
+  reason:
+    | "over-size"
+    | "unreadable"
+    | "unroutable"
+    | "parse-failed"
+    | "parse-timeout"
+    | "extraction-failed"
   detail?: string
 }
 

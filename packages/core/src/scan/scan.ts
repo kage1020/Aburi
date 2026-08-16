@@ -61,14 +61,19 @@ export interface ScanResult {
   ir: IR
   parseErrors: readonly ParseErrorRecord[]
   /**
-   * Files that contributed no Symbols for a reason other than a parse failure. `over-size`
-   * and `unroutable` are decided before anything is read, `unreadable` can be raised by
-   * either discovery or the read this function does just before extraction, and
-   * `parse-timeout` and `extraction-failed` are decided during extraction.
+   * Every file the scan stopped working on, and why. `over-size` and `unroutable` are
+   * decided before anything is read, `unreadable` can be raised by either discovery or the
+   * read this function does just before extraction, and `parse-failed`, `parse-timeout` and
+   * `extraction-failed` are decided during extraction.
+   *
+   * Not the same as "contributed no Symbols": a file that parses cleanly and declares
+   * nothing — an empty file, one that is all imports — is absent from this list and counted
+   * in `parsedFiles`, which is correct. What the list is exhaustive over is the set of files
+   * the scan gave up on, which is what makes `parsedFiles` derivable from its length.
    *
    * Separate from `parseErrors`, which says what a file that *was* read had wrong with it,
-   * but not disjoint from it: a file slow enough to be abandoned is often slow because it is
-   * broken, and it appears in both.
+   * but not disjoint from it: a file withdrawn by its parse, or slow enough to be abandoned
+   * because it was broken, appears in both.
    */
   skipped: readonly SkippedFile[]
   /** Rich timeout observations for logging / CI signals. Aggregated into `ir.stats` too. */
@@ -183,14 +188,12 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const importsByFile = new Map<string, readonly ImportEdge[]>()
   const fileContents = new Map<string, string>()
   const dynamicCallSites = new Set<string>()
-  // Discovery's `languageExtensions` filter already narrowed the file list to
-  // extensions the router recognizes. If `route()` still returns null here it means
-  // the extension filter and the router disagree — the discovered file survived the
-  // filter but the plugin dispatcher rejected it. That is a contract bug worth
-  // recording rather than silently dropping.
-  let terminalParseFailures = 0
-
   for (const discoveredFile of discovered.files) {
+    // Discovery's `languageExtensions` filter already narrowed the file list to extensions
+    // the router recognizes. If `route()` still returns null here it means the extension
+    // filter and the router disagree — the discovered file survived the filter but the
+    // plugin dispatcher rejected it. That is a contract bug worth recording rather than
+    // silently dropping.
     const language = router.route(discoveredFile.path)
     if (language === null) {
       additionalSkipped.push({
@@ -291,11 +294,26 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       continue
     }
 
+    if (result.terminalParseFailure) {
+      const detail = describeParseFailure(result.parseErrors)
+      additionalSkipped.push({ path: discoveredFile.path, reason: "parse-failed", detail })
+      logger.warn(`Skipped ${discoveredFile.path}: ${detail}`)
+      // Its import edges are kept, which is the one place this differs from a timed-out
+      // file: a file whose contents could not be used still told us truthfully what it
+      // imports, whereas an abandoned file is being withdrawn deliberately.
+      //
+      // Nothing reads them yet. `resolveCallGraph` looks this map up by the file a Symbol
+      // came from, and a withdrawn file has no Symbols, so the entry is inert until the
+      // dependency-extraction pass exists. It is written anyway because dropping it here
+      // would silently discard what `runFilePipeline` is documented and tested to hand over.
+      importsByFile.set(result.path, result.imports)
+      continue
+    }
+
     // Held for LSP enrichment, and only for files that reached the IR: the pass builds one
     // document per file it has Symbols for, so a withdrawn file's text would never be read.
     fileContents.set(sourceFile.path, sourceFile.content)
 
-    if (result.terminalParseFailure) terminalParseFailures++
     timeoutEvents.push(...result.timeoutEvents)
     symbols.push(...result.symbols)
     importsByFile.set(result.path, result.imports)
@@ -355,19 +373,26 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   )
   const resolvedSymbols = propagatedSymbols
 
-  // `parsedFiles` counts the files that reached the end of the pipeline with a tree. Stated
-  // as an invariant rather than as a list of reasons, because the list has grown twice and
-  // the arithmetic is the same each time: every entry `additionalSkipped` holds is a file
-  // this loop stopped working on, whatever stopped it, and every terminal parse failure is a
-  // file it worked on that produced no tree. A recoverable parse error is neither — the tree
-  // survived — so such a file still counts as parsed.
+  // `parsedFiles` counts the files that reached the end of the pipeline with a usable tree.
+  // Stated as an invariant rather than as a list of reasons, because the list has grown
+  // three times and the arithmetic is the same each time: every entry `additionalSkipped`
+  // holds is a file this loop stopped working on, whatever stopped it, and nothing else is.
+  // A recoverable parse error stops nothing — the tree survived — so such a file still
+  // counts as parsed.
+  //
+  // One subtraction, therefore, and no counter beside it. A withdrawn file that were both
+  // listed and counted would be netted out twice, reporting two files lost for one.
+  //
+  // What the length has to mean is *at most one entry per file*, and what holds it is that
+  // every branch pushing to `additionalSkipped` ends its iteration — the pushes and their
+  // `continue`s are adjacent for that reason. A push left to fall through would subtract a
+  // file the loop went on to extract, silently.
   //
   // `discovered.skipped` is not netted out here: those files were never candidates, and they
   // are added to `totalFiles` instead.
-  const attempted = discovered.files.length - additionalSkipped.length
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
-    parsedFiles: attempted - terminalParseFailures,
+    parsedFiles: discovered.files.length - additionalSkipped.length,
     symbols: resolvedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
@@ -411,6 +436,36 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     unresolvedCalls: callGraph.diagnostics,
     extractionFailures,
   }
+}
+
+/**
+ * What to record beside a file the parse withdrew. Called only when
+ * `FilePipelineResult.terminalParseFailure` is set — handed a healthy file's empty error
+ * list it would confidently report a missing tree.
+ *
+ * Two conditions reach here and a reader needs them apart: a plugin that could not build a
+ * tree at all, and one that built a tree and then refused it. The second is the plugin
+ * exercising the `recoverable: false` contract, and its message is the only account of why
+ * — so it is quoted, with the position, rather than replaced by a summary.
+ *
+ * The first has no such message, but it often has recoverable ones, and they are the only
+ * thing in the run that says *where* the parse came apart. They are appended rather than
+ * dropped, because a withdrawn file is excluded from the CLI's recoverable-error count by
+ * construction: this line is the last place they can be read.
+ *
+ * One error either way. A parse that gave up has usually reported the same collapse several
+ * times, and the skip list is one line per file; the rest are on `ScanResult.parseErrors`.
+ */
+function describeParseFailure(errors: readonly ParseError[]): string {
+  const fatal = errors.find((error) => error.recoverable === false)
+  if (fatal !== undefined) return `parse reported a non-recoverable error at ${quote(fatal)}`
+  const first = errors[0]
+  if (first === undefined) return "the language plugin returned no tree"
+  return `the language plugin returned no tree; first error at ${quote(first)}`
+}
+
+function quote(error: ParseError): string {
+  return `${error.line}:${error.column} — ${error.message}`
 }
 
 /**
