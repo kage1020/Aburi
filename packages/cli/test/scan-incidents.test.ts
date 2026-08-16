@@ -534,7 +534,13 @@ describe("aburi diff — both scans it ran for you", () => {
     expect(report.faultedScans).toEqual(["base"])
     expect(report.triggered).toBeNull()
     expect(report.exitCode).toBe(EXIT.GATE)
-    expect(warnings.join("\n")).toContain("exits 3")
+    // The gate is `exitCode !== SUCCESS`, which does not by itself say a plugin threw, so the
+    // wording is derived from `extractionFailures` — count included. Otherwise the day a second
+    // reason gates, the code stays right and only the diagnosis lies.
+    expect(warnings).toContain(
+      "⚠ A plugin exception withdrew 1 file(s) during the base scan, so this run exits 3 even though " +
+        "the diff was written. Fix it, or the comparison is against a workspace one side could not read.",
+    )
   })
 
   it("names both sides when both scans faulted", async () => {
@@ -612,6 +618,27 @@ describe("aburi diff — both scans it ran for you", () => {
     // `parseErrorCount` lives on the scan report, never in the IR, so this mode cannot know
     // whether either document was written from a clean parse.
     expect(warnings.join("\n")).not.toContain("recoverable parse errors")
+  })
+
+  it("attributes a recorded fault to the document that holds it", async () => {
+    // Base and head must differ, or reading one document twice would satisfy any attribution.
+    const baseWorkspace = resolve(scratch, "base-src")
+    await populate(baseWorkspace, ["boom.stub", "ok.stub"])
+    await populate(scratch, ["ok.stub"])
+    const baseOut = resolve(scratch, "base-out")
+    const headOut = resolve(scratch, "head-out")
+    await runScan({ cwd: baseWorkspace, outputDir: baseOut, format: "json" })
+    await runScan({ cwd: scratch, outputDir: headOut, format: "json" })
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      base: resolve(baseOut, "aburi.ir.json"),
+      head: resolve(headOut, "aburi.ir.json"),
+      outputDir: resolve(scratch, "diff-out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(warnings.join("\n")).toContain("base IR records 1 file(s) a plugin threw on")
+    expect(warnings.join("\n")).not.toContain("head IR records")
   })
 
   it("stays quiet in file mode for documents no plugin threw on", async () => {
