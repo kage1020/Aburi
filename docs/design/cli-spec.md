@@ -160,9 +160,9 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | code | Meaning |
 |---|---|
 | 0 | Extraction succeeded |
-| 1 | Extraction error (file access, cascade of unrecoverable parse errors) |
+| 1 | Extraction error (file access, cascade of unrecoverable parse errors). A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day |
 | 2 | Config error (schema violation, resolution failure) |
-| 3 | Plugin error (load failure, manifest violation, undeclared vocab detected in strict mode) |
+| 3 | Plugin error (load failure, manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode) |
 
 ### 5.5 stdout Example
 
@@ -190,7 +190,14 @@ With `--quiet`, only the final line:
 ```
 ⚠ Plugin "effects-prisma" emitted undeclared id "x-prisma:bulk-delete" (use --discover to record)
 ⚠ Parse failed (recoverable): apps/legacy/old.ts:42 — Unexpected token
+⚠ 1 file(s) were dropped because a plugin threw while extracting them.
 ```
+
+The last line is the one that also moves the exit code to `3` (§5.4), and every reason other
+than `extraction-failed` leaves it at `0`. That is why it is printed apart from the "contributed
+no Symbols" summary, and why it is the only incident whose files are listed individually (capped,
+with a "…and N more" tail): a reader handed a non-zero status needs to know which incident earned
+it and which files it was.
 
 ## 6. `aburi diff`
 

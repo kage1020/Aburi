@@ -222,3 +222,161 @@ describe("runScan — config-supplied publicApi", () => {
     expect(ir.components[0]?.publicApi).toEqual([`src/${decomposed.normalize("NFC")}.ts`])
   })
 })
+
+/**
+ * A file a plugin throws on is withdrawn rather than fatal (`lang-plugin.md` §7.2), and the
+ * IR is still written — so the exit code is the only thing left to tell a CI job that
+ * something in the run is broken rather than merely partial.
+ *
+ * `export const { GET, POST } = handlers` is the reachable trigger with real plugins: the
+ * text of the destructuring pattern reaches `makeSymbolId` as a qualified name and the id
+ * grammar refuses it.
+ */
+describe("runScan — a file a plugin threw on", () => {
+  beforeEach(async () => {
+    await mkdir(resolve(scratch, "src"), { recursive: true })
+    await writeFile(
+      resolve(scratch, "src", "route.ts"),
+      "const handlers = { GET: 1, POST: 2 }\nexport const { GET, POST } = handlers\n",
+      "utf8",
+    )
+    await writeFile(
+      resolve(scratch, "src", "ok.ts"),
+      "export function ok() {\n  return 1\n}\n",
+      "utf8",
+    )
+  })
+
+  it("exits GATE, and still writes the IR the surviving files produced", async () => {
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.exitCode).toBe(3)
+    expect(report.irPath).not.toBeNull()
+    expect(report.keptSymbols).toBeGreaterThan(0)
+  })
+
+  it("names the file on the report, in skipped and in extractionFailures", async () => {
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.extractionFailures).toEqual([
+      {
+        file: "src/route.ts",
+        message: expect.stringContaining("{ GET, POST }"),
+        code: "anonymous-symbol-id-attempted",
+      },
+    ])
+    expect(report.skipped.map((s) => [s.path, s.reason])).toEqual([
+      ["src/route.ts", "extraction-failed"],
+    ])
+  })
+
+  it("warns on stderr about the drop, on its own line", async () => {
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(code).toBe(3)
+    expect(stderr.text()).toContain("1 file(s) were dropped because a plugin threw")
+  })
+
+  it("caps the list, because a broken plugin rejects every file", async () => {
+    // A plugin broken enough to reject one file usually rejects them all, and the
+    // untruncated list is then the whole workspace — which on CI scrolls every other
+    // warning out of the log it was meant to appear in.
+    const bad = ["const h = { GET: 1, POST: 2 }", "export const { GET, POST } = h", ""].join("\n")
+    for (let i = 0; i < 14; i++) {
+      await writeFile(resolve(scratch, "src", `r${i}.ts`), bad, "utf8")
+    }
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    const listed = stderr
+      .text()
+      .split("\n")
+      .filter((l) => l.startsWith("    src/"))
+    expect(listed).toHaveLength(10)
+    expect(stderr.text()).toContain("…and 5 more")
+  })
+
+  it("names the file and the reason, not just the count", async () => {
+    // The core logs the same per file, but through its own sink: it disappears at
+    // `ABURI_LOG_LEVEL=error` and never reaches an injected stream, so a caller reading
+    // this one would otherwise be told a number and nothing else.
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(stderr.text()).toContain("src/route.ts: ")
+    expect(stderr.text()).toContain("{ GET, POST }")
+  })
+})
+
+describe("runScan — a workspace whose files all extract", () => {
+  it("exits SUCCESS with an empty extractionFailures", async () => {
+    await mkdir(resolve(scratch, "src"), { recursive: true })
+    await writeFile(
+      resolve(scratch, "src", "ok.ts"),
+      "export function ok() {\n  return 1\n}\n",
+      "utf8",
+    )
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.exitCode).toBe(0)
+    expect(report.extractionFailures).toEqual([])
+  })
+
+  it("stays SUCCESS when files were skipped for a reason that is not a plugin throw", async () => {
+    // A file over `maxFileSizeBytes` is skipped, and skipping it says nothing is broken —
+    // it is a deterministic budget doing its job. Gating on `skipped` as a whole rather than
+    // on `extractionFailures` would turn every repository with one large generated file red.
+    await mkdir(resolve(scratch, "src"), { recursive: true })
+    await writeFile(
+      resolve(scratch, "src", "ok.ts"),
+      "export function ok() {\n  return 1\n}\n",
+      "utf8",
+    )
+    await writeFile(resolve(scratch, "src", "big.ts"), `// ${"x".repeat(4000)}\n`, "utf8")
+    await writeFile(
+      resolve(scratch, "aburi.json"),
+      JSON.stringify({
+        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        languages: ["lang-typescript"],
+        maxFileSizeBytes: 1024,
+      }),
+      "utf8",
+    )
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.skipped.map((s) => [s.path, s.reason])).toEqual([["src/big.ts", "over-size"]])
+    expect(report.extractionFailures).toEqual([])
+    expect(report.exitCode).toBe(0)
+  })
+})
