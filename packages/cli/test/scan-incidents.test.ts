@@ -214,6 +214,10 @@ describe("runScan — the report goes to the caller's sink", () => {
     ])
   })
 
+  // Exact bytes, where `parse-failure-scan.test.ts` asserts two of these lines by substring.
+  // The subjects differ: that test pins the split between recoverable and refused, this one
+  // pins that moving the reporting into `runScan` changed nothing a reader already sees —
+  // which needs the whole stream, in order, including the lines it is not about.
   it("keeps the scan command's stderr as it was", async () => {
     await populate(scratch, ["bad.stub", "boom.stub", "warn.stub", "ok.stub"])
     const stdout = new MemStream()
