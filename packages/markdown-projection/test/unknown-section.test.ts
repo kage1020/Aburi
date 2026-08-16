@@ -110,4 +110,18 @@ describe("projectWorkspace — the files not analysed", () => {
     const md = projectWorkspace(irWith({}))
     expect(md).not.toContain("Files not analysed")
   })
+
+  it("says so in the header when files went missing and cannot be named", () => {
+    // The section above is the only other place this would show, and it is correctly absent.
+    // Without the header saying it, a document that lost three files renders byte-identically
+    // to a clean scan of the same workspace — and a pure projection has no stderr to fall
+    // back on the way `aburi diff` does.
+    expect(projectWorkspace(irWith({}))).toContain("(across 1 of 4 files; 3 produced no Symbols)")
+  })
+
+  it("keeps the plain header for a scan that parsed everything", () => {
+    expect(projectWorkspace(irWith({ totalFiles: 4, parsedFiles: 4 }))).toContain(
+      "(across 4 files)",
+    )
+  })
 })
