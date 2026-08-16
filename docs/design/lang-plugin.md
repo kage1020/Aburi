@@ -114,7 +114,7 @@ interface ParseError {
   message: string
   line: number                                 // 1-based
   column: number                               // 1-based
-  recoverable: boolean                         // false → the core skips this file
+  recoverable: boolean                         // false → the core withdraws this file (§7.1)
 }
 
 interface ImportEdge {
@@ -360,7 +360,12 @@ If a framework plugin requires decorator-based extraction from a language with `
 ### 7.1 Parse errors
 
 - `recoverable: true` → the core proceeds to Symbol extraction (tree-sitter is normally recoverable)
-- `recoverable: false` → the file is skipped, excluded from stats.parsedFiles, warning log
+- `recoverable: false` → the core **withdraws the file**: no Symbols reach the IR, it is recorded in `ScanResult.skipped` with `reason: "parse-failed"` and a detail quoting the error's message and position, it is excluded from `stats.parsedFiles` while still counting toward `stats.totalFiles`, and the core logs a warning.
+- A `tree` of `null` withdraws the file on the same terms, and is expected to carry a `recoverable: false` error beside it (§4.2). The two are read as one condition, so a plugin that sets only one still gets what it asked for — and a plugin that built a usable tree and then decided the file must not be used (a wrong dialect, a generated blob) does not have to discard the tree to say so.
+- Its **parse errors are still reported** on `ScanResult.parseErrors`, for the reason §7.1.2 gives: they are diagnostic rather than IR, and here they are the entire account of why the file went.
+- Its **import edges are kept**. A file whose contents could not be used still told us truthfully what it imports — the one place this differs from a file abandoned on its `parseTimeoutMs` budget, which is being withdrawn deliberately.
+- `aburi scan` stays at exit `0`. An unparseable file is a property of the source, like an over-size or timed-out one; only `extraction-failed` moves the code (§7.2, cli-spec.md §5.4).
+- warning stderr: `Skipped <file>: parse reported a non-recoverable error at <line>:<column> — <message>`, or `Skipped <file>: the language plugin returned no tree` when nothing explains the missing tree.
 
 ### 7.1.1 Large-file skip
 
@@ -534,7 +539,8 @@ Every language plugin must pass the following tests.
 | ID | Input | Expected |
 |---|---|---|
 | LP27 | file containing a syntax error | returns a recoverable error, extracts Symbols where possible |
-| LP28 | completely broken file | returns a non-recoverable error, the core skips it |
+| LP28 | completely broken file | returns a non-recoverable error and a null tree, the core withdraws it |
+| LP28a | a file the plugin parsed but refuses — a usable tree paired with a `recoverable: false` error | the core withdraws it on the same terms as LP28. The tree is never handed to `extractSymbols`, `walkBody` or `normalizeAst`, and the refusal is quoted in `ScanResult.skipped` |
 
 ### 9.8 Symbol id construction
 

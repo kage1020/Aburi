@@ -160,7 +160,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | code | Meaning |
 |---|---|
 | 0 | Extraction succeeded |
-| 1 | Extraction error (file access, cascade of unrecoverable parse errors). A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day |
+| 1 | Extraction error — a file the scan could not read. A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) |
 | 2 | Config error (schema violation, resolution failure) |
 | 3 | Plugin error (load failure, manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode) |
 
@@ -189,9 +189,18 @@ With `--quiet`, only the final line:
 
 ```
 ⚠ Plugin "effects-prisma" emitted undeclared id "x-prisma:bulk-delete" (use --discover to record)
-⚠ Parse failed (recoverable): apps/legacy/old.ts:42 — Unexpected token
+⚠ 3 file(s) had recoverable parse errors.
+⚠ 1 file(s) could not be parsed and were left out of the IR.
+⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
 ⚠ 1 file(s) were dropped because a plugin threw while extracting them.
+    src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
+
+The two parse lines are counted apart rather than summed. A file with recoverable errors is *in*
+the IR with warnings against it; a withdrawn one is not in it at all, and that is the difference a
+reader is reading the count for. A withdrawn file's errors appear on `ScanResult.parseErrors` all
+the same — they are the account of why it went — so summing the two would call them recoverable,
+which is the opposite of what the plugin said.
 
 The last line is the one that also moves the exit code to `3` (§5.4), and every reason other
 than `extraction-failed` leaves it at `0`. That is why it is printed apart from the "contributed

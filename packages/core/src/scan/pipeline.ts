@@ -48,9 +48,20 @@ export interface FilePipelineResult {
   parseErrors: readonly ParseError[]
   timeoutEvents: readonly ClassifyTimeoutEvent[]
   /**
-   * True when the language plugin's `parseFile` returned a null tree — the file could
-   * not be parsed at all. Recoverable errors (non-null tree + errors[]) do not flip
-   * this flag; those files are still counted as parsed even when they carry warnings.
+   * True when the parse produced nothing the rest of the pipeline may use — either the
+   * language plugin returned a null tree, or it reported a `ParseError` with
+   * `recoverable: false`.
+   *
+   * The two are one condition rather than two flags because `ParseResult` documents them
+   * as companions: a plugin that cannot build a tree is expected to say so in `errors[]`
+   * as well. Reading only the tree left the other half unimplemented — a plugin that
+   * followed the documented contract, returning the partial tree it managed to build and
+   * marking the error non-recoverable, had its instruction silently ignored. Honouring the
+   * flag also lets a plugin reject a file it *could* parse (a wrong-dialect source, a
+   * generated blob) without fabricating a null tree to be heard.
+   *
+   * Errors that are all recoverable do not flip this: those files are still counted as
+   * parsed, carrying their warnings.
    */
   terminalParseFailure: boolean
   /**
@@ -103,8 +114,9 @@ export interface FilePipelineInput {
  * docs/design/lang-plugin.md §5.3 (extraction order) and effect-plugin.md §5.1
  * (first-match-wins) in order:
  *
- *   1. parse the file — a null tree is a terminal parse failure, everything else is
- *      surfaced as a recoverable error and we keep going.
+ *   1. parse the file — a null tree, or any error the plugin marked non-recoverable, is a
+ *      terminal parse failure; everything else is surfaced as a recoverable error and we
+ *      keep going.
  *   2. `extractSymbols` — the raw SymbolCandidate list.
  *   3. framework `classifySymbol` — first non-null result wins; the returned extKind
  *      and decoratorBoundaries are merged into the Candidate before walkBody sees it,
@@ -156,11 +168,11 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   // import edges to the caller, and dependency extraction compares them the same way.
   const imports = parseResult.imports.map(normalizeImportEdge)
 
-  // Read before the budget. A file with no tree at all is already excluded from
-  // `parsedFiles` by the count it feeds, and the two flags must not both be set or the
+  // Read before the budget. A file the parse withdrew is already excluded from
+  // `parsedFiles` by the skip entry it feeds, and the two flags must not both be set or the
   // caller would subtract the same file twice. Between the two claims the parse failure is
   // the one that names a fix.
-  if (parseResult.tree === null) {
+  if (parseResult.tree === null || parseErrors.some((error) => !error.recoverable)) {
     return {
       symbols: [],
       imports,

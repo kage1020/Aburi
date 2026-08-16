@@ -63,14 +63,31 @@ export interface ScanReport {
   totalFiles: number
   keptSymbols: number
   droppedSymbols: number
+  /**
+   * Files that carried parse errors **and still reached the IR** — the ones whose errors
+   * were all recoverable. A file the parse withdrew is counted by `parseFailureCount`
+   * instead and deliberately not by both: the stderr line built from this number calls its
+   * errors recoverable, and a withdrawn file's were not.
+   */
   parseErrorCount: number
+  /**
+   * Files withdrawn because the parse produced nothing usable — a null tree, or a
+   * `ParseError` the language plugin marked `recoverable: false`. The same files appear in
+   * `skipped` under `reason: "parse-failed"`.
+   *
+   * This does not move the exit code. Unlike `extractionFailures`, it describes the source
+   * rather than the plugin set: an unparseable file is a fact about the workspace, the way
+   * an over-size or timed-out one is.
+   */
+  parseFailureCount: number
   timeoutCount: number
   /**
    * Files that never made it into the IR. `over-size` and `unroutable` are decided before
-   * anything is read; `unreadable` can come from either side; `parse-timeout` and
-   * `extraction-failed` are decided during extraction. Surfaced separately from
-   * `parseErrorCount` because `@aburi/core` returns these rather than printing them, and a
-   * discovery-time drop is not logged at all. Warning on stderr is the CLI's job either way.
+   * anything is read; `unreadable` can come from either side; `parse-failed`,
+   * `parse-timeout` and `extraction-failed` are decided during extraction. Surfaced
+   * separately from `parseErrorCount` because `@aburi/core` returns these rather than
+   * printing them, and a discovery-time drop is not logged at all. Warning on stderr is the
+   * CLI's job either way.
    */
   skipped: readonly { path: string; reason: string; detail?: string }[]
   /**
@@ -177,6 +194,13 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     }
   }
 
+  // A withdrawn file's parse errors are still reported — they are the account of why it was
+  // withdrawn — so the two counts below would otherwise both include it, and one of them
+  // would call its errors recoverable.
+  const withdrawnByParse = new Set(
+    scanResult.skipped.filter((s) => s.reason === "parse-failed").map((s) => s.path),
+  )
+
   return {
     irPath,
     workspaceMdPath,
@@ -184,7 +208,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     totalFiles: scanResult.ir.stats.totalFiles,
     keptSymbols: scanResult.ir.stats.keptSymbols,
     droppedSymbols: scanResult.ir.stats.droppedSymbols,
-    parseErrorCount: scanResult.parseErrors.length,
+    parseErrorCount: scanResult.parseErrors.filter((p) => !withdrawnByParse.has(p.file)).length,
+    parseFailureCount: withdrawnByParse.size,
     timeoutCount: scanResult.timeoutEvents.length,
     skipped: scanResult.skipped.map((s) => {
       const entry: { path: string; reason: string; detail?: string } = {

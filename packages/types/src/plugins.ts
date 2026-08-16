@@ -39,7 +39,14 @@ export interface ParseError {
   line: number
   /** 1-based. */
   column: number
-  /** false → core skips this file. */
+  /**
+   * `false` withdraws the file: no Symbols, no `stats.parsedFiles`, an entry in
+   * `ScanResult.skipped` under `reason: "parse-failed"` quoting this message, and a warning.
+   *
+   * Independent of `tree`. A plugin that built a usable tree and then decided the file must
+   * not be used — a wrong-dialect source, a generated blob — says so here rather than
+   * discarding the tree to be heard, and one that could not build a tree at all sets both.
+   */
   recoverable: boolean
 }
 
