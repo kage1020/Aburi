@@ -57,24 +57,33 @@ export interface ScanOptions {
    */
   logLevel?: LogLevel
   /**
-   * Where this scan's incidents go (§5.6). Omit it and they go nowhere — an embedded scan
-   * that only wants the report stays silent, which is what every caller before this option
-   * existed got by accident.
+   * Where this scan's incident report goes (§5.6), and what to call this scan in it. Omit it
+   * and the report goes nowhere.
+   *
+   * It is one option rather than two because the label means nothing without the sink;
+   * separate optionals would let a caller pass a label and get silence.
+   *
+   * Not the same as silence. The run's `Logger` is a separate channel — per file rather than
+   * per run, governed by `ABURI_LOG_LEVEL`, and still defaulting to `process.stderr` — so a
+   * scan with no sink here is quiet, not mute. Routing that channel to a caller-injected
+   * stream is a known gap and is not this option.
    *
    * The reporting lives here rather than in the command wrapper because three commands scan
-   * and only one of them was doing it. A caller that forgets the sink now loses the warnings
-   * for its own scan; a caller that forgot to call a separate reporter used to lose them
-   * while the scan looked handled.
+   * and only one of them was doing it. A caller that forgets the sink now loses the report for
+   * its own scan; a caller that forgot to call a separate reporter used to lose it while the
+   * scan looked handled.
    */
-  warn?: WarnFn
-  /**
-   * Names this scan in its own incident lines — `base ref "main"`, `head (working tree)`.
-   *
-   * `aburi diff` runs two scans and the same incident means different things at each: a file
-   * withdrawn at base makes phantom `added` entries, the same file withdrawn at head makes
-   * phantom `removed` ones. Omitted when only one scan ran, where a label would be noise.
-   */
-  incidentLabel?: string
+  incidents?: {
+    warn: WarnFn
+    /**
+     * Names this scan in its own lines — `base ref "main"`, `head (working tree)`.
+     *
+     * `aburi diff` runs two scans and the same incident means different things at each: a file
+     * withdrawn at base makes phantom `added` entries, the same file withdrawn at head makes
+     * phantom `removed` ones. Omitted when only one scan ran, where a label would be noise.
+     */
+    label?: string
+  }
 }
 
 export interface ScanReport {
@@ -156,10 +165,12 @@ export interface ScanReport {
  * §5 — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
  * writes IR JSON and per-Component Markdown into `--output-dir` (default `out/`).
  *
- * The function touches neither process stream: summaries are the CLI wrapper's to print,
- * and incidents go to `options.warn` if the caller supplied one. Integration tests still
- * assert on the returned report, and now also on the exact lines, without either being
- * swallowed by a real stream.
+ * The function writes nothing to the process streams of its own accord: summaries are the CLI
+ * wrapper's to print, and the incident report goes to `options.incidents.warn` if a caller
+ * supplied one. The run's `Logger` is not covered by that — it still defaults to
+ * `process.stderr`, so a caller that injects streams hears the per-run report on its own sink
+ * and the per-file log lines on the real one. Integration tests can therefore assert on the
+ * report and on the exact incident lines, but a captured stream is not the whole of stderr.
  */
 export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const cwd = options.cwd ?? process.cwd()
@@ -263,8 +274,17 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     // gate, and behind what threshold, is a separate open decision.
     exitCode: scanResult.extractionFailures.length > 0 ? EXIT.GATE : EXIT.SUCCESS,
   }
-  if (options.warn !== undefined) {
-    reportScanIncidents(report, options.warn, options.incidentLabel ?? null)
+  const incidents = options.incidents
+  if (incidents !== undefined) {
+    try {
+      reportScanIncidents(report, incidents.warn, incidents.label ?? null)
+    } catch {
+      // The report is complete and the IR is on disk by now, so the exit code must not depend
+      // on whether the channel that describes them survived. A sink writing to a closed pipe
+      // — `aburi scan 2>&1 | head -1` — would otherwise turn a gate into a runtime error and
+      // send a reader looking for a fault that is not there. There is nowhere to report the
+      // failure of the reporting channel, which is why this is the one swallow in the file.
+    }
   }
   return report
 }
@@ -285,8 +305,9 @@ const MAX_LISTED_EXTRACTION_FAILURES = 10
  * each clause below fires only on a non-empty incident.
  *
  * `label` names the scan when more than one ran in the same command. It goes inside the
- * line, after the glyph, so `⚠` still starts every warning; the indented per-file listing
- * carries no label because it belongs to the line above it.
+ * line, after the glyph, so `⚠` starts every line that stands on its own. The only lines
+ * without it are the indented per-file listing and its `…and N more` tail, which belong to
+ * the line above them and are attributed by it.
  */
 export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: string | null): void {
   const say = (line: string): void => {
@@ -337,8 +358,11 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
       say(`LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.`)
     }
     if (lsp.requestsTimedOut > 0 || lsp.requestsFailed > 0) {
-      warn(
-        `  LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.`,
+      // Its own line, not a detail of the two above: it has its own condition and fires when
+      // neither of them did. Left indented and glyphless it was the one warning `⚠` did not
+      // start, and in a two-scan `diff` it was the one nothing could attribute to a side.
+      say(
+        `LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.`,
       )
     }
   }

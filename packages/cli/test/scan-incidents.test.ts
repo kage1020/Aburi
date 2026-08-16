@@ -2,8 +2,19 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
+import { makeLanguageId } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, type GitRunner, runCli, runDiff, runExplain, runScan } from "../src"
+import {
+  EXIT,
+  formatFailOnMessage,
+  type GitRunner,
+  reportScanIncidents,
+  runCli,
+  runDiff,
+  runExplain,
+  runScan,
+  type ScanReport,
+} from "../src"
 
 /**
  * Every command that scans reports what the scan lost.
@@ -168,7 +179,10 @@ afterEach(async () => {
 })
 
 describe("runScan — the report goes to the caller's sink", () => {
-  it("says nothing without one, so embedding a scan stays silent", async () => {
+  it("returns the report and emits no incident line when no sink was given", async () => {
+    // Not the same as silence, and the option's docblock says so: the run's `Logger` is a
+    // separate channel that still writes per-file lines to the real `process.stderr`. What is
+    // asserted here is that the per-run report is the caller's to ask for.
     await populate(scratch, ["bad.stub", "boom.stub", "ok.stub"])
     const report = await runScan({
       cwd: scratch,
@@ -179,6 +193,25 @@ describe("runScan — the report goes to the caller's sink", () => {
     expect(report.skipped).toHaveLength(2)
   })
 
+  it("cannot let a broken sink change the exit code", async () => {
+    // `aburi scan 2>&1 | head -1` reaches this: the pipe closes, the write throws, and the
+    // report — already complete, with the IR already on disk — would come back as a runtime
+    // error instead of the gate it is.
+    await populate(scratch, ["boom.stub", "ok.stub"])
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: {
+        warn: () => {
+          throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" })
+        },
+      },
+    })
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(report.extractionFailures).toHaveLength(1)
+  })
+
   it("emits the same lines the scan command printed, in the same order", async () => {
     await populate(scratch, ["bad.stub", "boom.stub", "warn.stub", "ok.stub"])
     const lines: string[] = []
@@ -186,7 +219,7 @@ describe("runScan — the report goes to the caller's sink", () => {
       cwd: scratch,
       outputDir: resolve(scratch, "out"),
       format: "json",
-      warn: (m) => lines.push(m),
+      incidents: { warn: (m: string) => lines.push(m) },
     })
     expect(lines).toEqual([
       "⚠ 1 file(s) had recoverable parse errors.",
@@ -204,8 +237,7 @@ describe("runScan — the report goes to the caller's sink", () => {
       cwd: scratch,
       outputDir: resolve(scratch, "out"),
       format: "json",
-      warn: (m) => lines.push(m),
-      incidentLabel: 'base ref "main"',
+      incidents: { warn: (m: string) => lines.push(m), label: 'base ref "main"' },
     })
     expect(lines).toEqual([
       '⚠ base ref "main": 1 file(s) contributed no Symbols: extraction-failed=1',
@@ -216,8 +248,11 @@ describe("runScan — the report goes to the caller's sink", () => {
 
   // Exact bytes, where `parse-failure-scan.test.ts` asserts two of these lines by substring.
   // The subjects differ: that test pins the split between recoverable and refused, this one
-  // pins that moving the reporting into `runScan` changed nothing a reader already sees —
-  // which needs the whole stream, in order, including the lines it is not about.
+  // pins that moving the reporting into `runScan` changed nothing a reader already sees.
+  //
+  // "Everything on the injected stream", not "everything on stderr" — the run's `Logger` writes
+  // its per-file lines to the real `process.stderr` and lands outside this capture. That gap is
+  // older than this test and is why the CLI prints the extraction failures itself.
   it("keeps the scan command's stderr as it was", async () => {
     await populate(scratch, ["bad.stub", "boom.stub", "warn.stub", "ok.stub"])
     const stdout = new MemStream()
@@ -237,6 +272,131 @@ describe("runScan — the report goes to the caller's sink", () => {
         "⚠ 1 file(s) were dropped because a plugin threw while extracting them.\n" +
         "    boom.stub: plugin exploded\n",
     )
+  })
+
+  it("puts the warnings above the summary they qualify, not below it", async () => {
+    // The sink fires inside `runScan` now, so in any merged view the warnings precede the
+    // stdout summary where they used to follow it. Per-stream bytes are identical, which is
+    // exactly why the assertion above cannot see this. Pinned rather than left to drift: the
+    // last thing on screen is now the kept / dropped line and the paths, which is the part a
+    // reader acts on.
+    await populate(scratch, ["boom.stub", "ok.stub"])
+    const merged = new MemStream()
+    await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout: merged,
+      stderr: merged,
+      env: {},
+      cwd: scratch,
+    })
+    const lines = merged.text().trimEnd().split("\n")
+    expect(lines[0]).toContain("contributed no Symbols")
+    expect(lines.findIndex((l) => l.includes("kept ·"))).toBeGreaterThan(
+      lines.findIndex((l) => l.includes("a plugin threw")),
+    )
+  })
+})
+
+describe("reportScanIncidents — the lines a real scan cannot be made to produce", () => {
+  function reportWith(overrides: Partial<ScanReport>): ScanReport {
+    return {
+      irPath: null,
+      workspaceMdPath: null,
+      componentMdPaths: [],
+      totalFiles: 0,
+      keptSymbols: 0,
+      droppedSymbols: 0,
+      parseErrorCount: 0,
+      parseFailureCount: 0,
+      timeoutCount: 0,
+      skipped: [],
+      extractionFailures: [],
+      lspEnrichment: undefined,
+      callResolutionLine: "",
+      unresolvedCalls: [],
+      configSource: null,
+      workspaceRoot: "/repo",
+      exitCode: EXIT.SUCCESS,
+      ...overrides,
+    }
+  }
+
+  function linesFrom(report: ScanReport, label: string | null): string[] {
+    const lines: string[] = []
+    reportScanIncidents(report, (m) => lines.push(m), label)
+    return lines
+  }
+
+  it("names the effect-classify timeout budget", () => {
+    expect(linesFrom(reportWith({ timeoutCount: 4 }), null)).toEqual([
+      "⚠ 4 effect classification(s) hit the per-call timeout budget.",
+    ])
+  })
+
+  it("gives every LSP line the glyph and the label, including the request census", () => {
+    // The census line used to be indented and glyphless. It has its own condition and fires
+    // when neither line above it did, so in a two-scan diff nothing could attribute it.
+    const lines = linesFrom(
+      reportWith({
+        lspEnrichment: {
+          enabled: true,
+          filesEnriched: 8,
+          filesFellBack: 2,
+          languagesDisabled: [makeLanguageId("ts")],
+          requestsIssued: 40,
+          requestsTimedOut: 3,
+          requestsFailed: 1,
+        },
+      }),
+      "head (working tree)",
+    )
+    expect(lines).toEqual([
+      "⚠ head (working tree): LSP enrichment fell back for 2 file(s); IR field values in those files remain at the untyped tier.",
+      "⚠ head (working tree): LSP disabled mid-run for language(s): ts.",
+      "⚠ head (working tree): LSP requests: 40 issued · 3 timed out · 1 failed.",
+    ])
+  })
+
+  it("emits the census alone when nothing fell back and no language was disabled", () => {
+    const lines = linesFrom(
+      reportWith({
+        lspEnrichment: {
+          enabled: true,
+          filesEnriched: 10,
+          filesFellBack: 0,
+          languagesDisabled: [],
+          requestsIssued: 10,
+          requestsTimedOut: 0,
+          requestsFailed: 2,
+        },
+      }),
+      null,
+    )
+    expect(lines).toEqual(["⚠ LSP requests: 10 issued · 0 timed out · 2 failed."])
+  })
+
+  it("caps the per-file listing and leaves the tail unlabelled with the rest of it", () => {
+    const failures = Array.from({ length: 12 }, (_, i) => ({
+      file: `src/f${i}.ts`,
+      message: "plugin exploded",
+    }))
+    const lines = linesFrom(reportWith({ extractionFailures: failures }), 'base ref "main"')
+    expect(lines[0]).toBe(
+      '⚠ base ref "main": 12 file(s) were dropped because a plugin threw while extracting them.',
+    )
+    expect(lines.slice(1, 11)).toEqual(
+      failures.slice(0, 10).map((f) => `    ${f.file}: ${f.message}`),
+    )
+    expect(lines.at(-1)).toBe("    …and 2 more")
+  })
+
+  it("names a config that sits below the workspace root, labelled like the rest", () => {
+    const lines = linesFrom(
+      reportWith({ configSource: "/repo/apps/web/aburi.json", workspaceRoot: "/repo" }),
+      'base ref "main"',
+    )
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('⚠ base ref "main": Config /repo/apps/web/aburi.json sits below')
   })
 })
 
@@ -290,6 +450,21 @@ describe("aburi explain — the scan it ran for you", () => {
     expect(code).toBe(EXIT.GATE)
   })
 
+  it("exits 3 rather than 2 when the candidate list may itself be short", async () => {
+    await populate(scratch, ["boom.stub", "ok.stub", "ok2.stub"])
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({
+      argv: ["explain", "ok"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(stdout.text()).toContain("Multiple matches")
+    expect(code).toBe(EXIT.GATE)
+  })
+
   it("says nothing about incidents when it read an IR off disk", async () => {
     await populate(scratch, ["boom.stub", "ok.stub"])
     await runScan({ cwd: scratch, outputDir: resolve(scratch, "out"), format: "json" })
@@ -304,6 +479,23 @@ describe("aburi explain — the scan it ran for you", () => {
     })
     // No scan ran, so there is no incident to report and no exit code to inherit. The live
     // signal fired when `aburi scan` wrote the file.
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(stderr.text()).toBe("")
+  })
+
+  it("says nothing for an explicit --ir either, for the same reason", async () => {
+    await populate(scratch, ["boom.stub", "ok.stub"])
+    const out = resolve(scratch, "pinned")
+    await runScan({ cwd: scratch, outputDir: out, format: "json" })
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({
+      argv: ["explain", "ok_stub", "--ir", resolve(out, "aburi.ir.json")],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
     expect(code).toBe(EXIT.SUCCESS)
     expect(stderr.text()).toBe("")
   })
@@ -395,7 +587,7 @@ describe("aburi diff — both scans it ran for you", () => {
     expect(warnings.join("\n")).not.toContain("exits 3")
   })
 
-  it("reports no scan incidents in --base/--head mode, because it ran no scan", async () => {
+  it("names a fault the documents remember, without gating on someone else's run", async () => {
     await populate(scratch, ["boom.stub", "ok.stub"])
     const out = resolve(scratch, "out")
     await runScan({ cwd: scratch, outputDir: out, format: "json" })
@@ -407,31 +599,57 @@ describe("aburi diff — both scans it ran for you", () => {
       outputDir: resolve(scratch, "diff-out"),
       warn: (m) => warnings.push(m),
     })
-    expect(report.faultedScans).toEqual([])
+    // No scan ran here, which is not the same answer as two clean scans.
+    expect(report.faultedScans).toBeNull()
+    // `stats.skippedFiles[].reason` persists `extraction-failed`, so this mode can see that a
+    // plugin threw when the documents were written even though it never watched it happen.
+    expect(warnings.join("\n")).toContain("base IR records 1 file(s) a plugin threw on")
+    expect(warnings.join("\n")).toContain("head IR records 1 file(s) a plugin threw on")
+    expect(warnings.join("\n")).toContain("boom.stub")
+    // Warned, not gated: the fault already had its exit code in the run that hit it, and these
+    // are documents the caller pinned deliberately.
     expect(report.exitCode).toBe(EXIT.SUCCESS)
-    expect(warnings.join("\n")).not.toContain("plugin threw")
     // `parseErrorCount` lives on the scan report, never in the IR, so this mode cannot know
     // whether either document was written from a clean parse.
     expect(warnings.join("\n")).not.toContain("recoverable parse errors")
   })
 
-  it("still exits 3 with the clause message when a gate trips alongside a fault", async () => {
+  it("stays quiet in file mode for documents no plugin threw on", async () => {
+    await populate(scratch, ["bad.stub", "ok.stub"])
+    const out = resolve(scratch, "out")
+    await runScan({ cwd: scratch, outputDir: out, format: "json" })
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: resolve(out, "aburi.ir.json"),
+      head: resolve(out, "aburi.ir.json"),
+      outputDir: resolve(scratch, "diff-out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    expect(warnings.join("\n")).not.toContain("a plugin threw on")
+  })
+
+  it("keeps the clause alongside the fault, so neither hides the other", async () => {
     await populate(scratch, ["ok.stub"])
-    const stdout = new MemStream()
-    const stderr = new MemStream()
+    const warnings: string[] = []
     const report = await runDiff({
       cwd: scratch,
       refSpec: "main..HEAD",
       git: gitWith(["boom.stub", "ok.stub", "extra.stub"]),
       outputDir: resolve(scratch, "out"),
       failOn: "removed",
-      warn: (m) => stderr.write(`${m}\n`),
+      warn: (m) => warnings.push(m),
     })
-    expect(stdout.text()).toBe("")
-    expect(report.triggered).not.toBeNull()
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    expect(stderr.text()).toContain("dropped because a plugin threw")
+    expect(warnings.join("\n")).toContain("dropped because a plugin threw")
+    // Rendering the clause is the CLI wrapper's job, so what is pinned here is that the fault
+    // did not swallow it: `triggered` survives, and it still formats as the gate that tripped.
+    const triggered = report.triggered
+    expect(triggered).not.toBeNull()
+    if (triggered === null) return
+    expect(formatFailOnMessage(triggered)).toContain("removed")
   })
 })
 

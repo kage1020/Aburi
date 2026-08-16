@@ -61,7 +61,9 @@ export type ExplainOutcome =
  *
  * When the substring match hits more than one Symbol the caller receives an
  * `ambiguous` outcome (exit 2) so they can add more of the qualified name. Zero hits
- * become `not-found` (exit 1). Every "single" / "file" outcome carries the resolved
+ * become `not-found` (exit 1). Both codes are overridden by `withScanFault` when the scan this
+ * command ran did not exit clean — §7.6 — because the answer is then unsafe whichever of the
+ * three it was. Every "single" / "file" outcome carries the resolved
  * `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
  * stdout mirror (avoiding the "output to file *and* stdout" behaviour the design
  * intentionally rules out).
@@ -75,14 +77,17 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
 }
 
 /**
- * A scan that a plugin exception broke outranks whatever the lookup concluded.
+ * A scan that did not exit clean outranks whatever the lookup concluded.
  *
- * Every outcome is suspect in that state, including the successful ones: the file a plugin
- * threw on is absent from the IR, so a `single` answer may have had a competing candidate
- * that would have made it `ambiguous`, and a `not-found` may be describing the withdrawal
- * rather than the workspace. Reporting `0` for the first and `1` for the second would let a
- * broken toolchain look like a clean answer, which is the state §5.4 already refuses to call
- * green for `aburi scan`; the command asking the question does not change that.
+ * Every outcome is suspect in that state, including the successful ones: a file the scan
+ * withdrew is absent from the IR, so a `single` answer may have had a competing candidate that
+ * would have made it `ambiguous`, and a `not-found` may be describing the withdrawal rather
+ * than the workspace. Reporting `0` for the first and `1` for the second would let a broken
+ * toolchain look like a clean answer, which is the state §5.6 already refuses to call green for
+ * `aburi scan`; the command asking the question does not change that.
+ *
+ * The condition is the scan's own exit code rather than a named incident, so a second reason to
+ * gate — `runScan` says outright that there may be one — arrives here without an edit.
  */
 function withScanFault(outcome: ExplainOutcome, scanFaulted: boolean): ExplainOutcome {
   if (!scanFaulted) return outcome
@@ -219,7 +224,7 @@ async function resolveIR(
     cwd,
     format: "json",
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
-    ...(options.warn === undefined ? {} : { warn: options.warn }),
+    ...(options.warn === undefined ? {} : { incidents: { warn: options.warn } }),
   }
   const report = await runScan(scanOptions)
   if (report.irPath === null) {

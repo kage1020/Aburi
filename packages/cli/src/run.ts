@@ -146,8 +146,10 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.lsp === undefined ? {} : { lsp: cmdOptions.lsp }),
             ...(env.logLevel === null ? {} : { logLevel: env.logLevel }),
             ...withConfigPath(cmdOptions.config, env),
-            warn: (message: string) => {
-              stderr.write(`${message}\n`)
+            incidents: {
+              warn: (message: string) => {
+                stderr.write(`${message}\n`)
+              },
             },
           })
           stdout.write(

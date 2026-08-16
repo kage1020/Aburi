@@ -123,12 +123,13 @@ is always scanned from the working tree — its ref label is used only for the
 report. Rename collection failures warn on stderr instead of silently downgrading
 `moved` to `removed + added`.
 
-**File mode** — read two IR files and jump straight to `buildDiff`. Skips git, and reports no
-scan incidents, because it ran no scan.
+**File mode** — read two IR files and jump straight to `buildDiff`. Skips git, so there are no
+scan incidents to report. It still names the files each document records a plugin as having
+thrown on, and does not gate on them: that fault had its exit code in the run that hit it.
 
-A plugin exception during either scan exits `3` even with no `--fail-on` clause. The counts are
-not the reason — a withdrawn file's Symbols come out as `unknown`, not as deletions — the reason
-is that a workspace `aburi scan` refuses to call green must not go green here instead.
+In ref mode a scan that did not exit clean exits `3` even with no `--fail-on` clause. The counts
+are not the reason — a withdrawn file's Symbols come out as `unknown`, not as deletions — the
+reason is that a workspace `aburi scan` refuses to call green must not go green here instead.
 
 | Flag | Effect |
 |---|---|
@@ -193,8 +194,9 @@ Three-arm dispatch:
 Ambiguous substring hits exit `2` (`EXIT.INPUT_ERROR`) with the candidate list on
 stdout so the operator can requalify. Zero hits exit `1` (`EXIT.RUNTIME`).
 
-A plugin exception during the rescan exits `3` whichever of those the lookup concluded: the
-withdrawn file could have held the match, or a second candidate for it.
+A rescan that did not exit clean exits `3` whichever of those the lookup concluded: the withdrawn
+file could have held the match, or a second candidate for it. Reading an existing IR (`--ir`, or
+an `out/aburi.ir.json` already on disk) runs no scan and leaves the code alone.
 
 **Examples:**
 
