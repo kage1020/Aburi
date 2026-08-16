@@ -5,7 +5,7 @@ import type { DiffResult, SymbolChange, SymbolChanged, SymbolMovedChanged } from
  * driver can accept a comma-separated list without branching per family.
  *
  * Status family (raw `SymbolChange["status"]` plus direction subtypes):
- *   added / removed / changed / moved / moved+changed / dropped-toggled
+ *   added / removed / changed / moved / moved+changed / dropped-toggled / unknown
  *   dropped-toggled:to-dropped / dropped-toggled:to-kept
  *
  * Delta axis family (subtype of `status: "changed" | "moved+changed"`):
@@ -24,6 +24,7 @@ export type FailOnStatusToken =
   | "dropped-toggled"
   | "dropped-toggled:to-dropped"
   | "dropped-toggled:to-kept"
+  | "unknown"
 
 export type FailOnDeltaAxis = "api-changed" | "logic-changed" | "syntax-changed"
 
@@ -44,6 +45,7 @@ const STATUS_TOKENS: ReadonlySet<FailOnStatusToken> = new Set([
   "dropped-toggled",
   "dropped-toggled:to-dropped",
   "dropped-toggled:to-kept",
+  "unknown",
 ])
 
 const DELTA_TOKENS: ReadonlySet<FailOnDeltaAxis> = new Set([
@@ -184,6 +186,16 @@ function countMatches(token: FailOnToken, diff: DiffResult): number {
     case "dropped-toggled:to-kept":
       return diff.symbols.filter((s) => s.status === "dropped-toggled" && s.direction === "to-kept")
         .length
+    case "unknown":
+      // Counted off the entries rather than off `summary.unknown`, which is optional: a
+      // diff written before the counter existed carries neither, and one written after
+      // carries both. Reading the list keeps the gate answering about what is in the
+      // document rather than about which writer produced it.
+      //
+      // `@aburi/markdown-projection`'s `observedCount` reads the counter instead, because it
+      // is handed only a `Summary`. The two agree for anything `buildDiff` wrote; nothing
+      // enforces that they agree for a document written by hand.
+      return diff.symbols.filter((s) => s.status === "unknown").length
     case "api-changed":
       return countDeltaAxis(diff.symbols, "apiChanged")
     case "logic-changed":

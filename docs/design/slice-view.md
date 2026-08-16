@@ -79,10 +79,11 @@ A Symbol is a Node in the clustering graph iff its diff `status` is one of:
 | `changed` | yes | semantic change; `delta.apiChanged` / `logicChanged` / `syntaxChanged` may distinguish severity in the projection but do not gate Node inclusion |
 | `moved+changed` | yes | both a rename and a semantic change |
 | `dropped-toggled` | yes | drop-list or plugin-configuration change; the Symbol crossed the visibility boundary of the IR |
+| `unknown` | yes | one document never analysed the Symbol's file ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.1), so whether it changed is an open question — and an open question is most useful read beside the callers that still reference it |
 | `moved` (pure) | **no** | pure moves carry no semantic change ([`diff-algorithm.md`](./diff-algorithm.md) §4 — `moved` has no fingerprint delta), so surfacing them in the vertical-slice view would be noise. They remain in the flat "Moved (no semantic change)" fold of §7.2 |
 | `unchanged` | **no** | already excluded from `pairedSymbols` per §3 precondition 1 |
 
-The identity of a Node is the Symbol id (`<language>:<file>#<qname>` per [`ir-schema.md`](./ir-schema.md) §3), taken from the **head** side of the pair when both are present, from **base** when only `removed` (`head` is absent), and from **head** when only `added` (`base` is absent).
+The identity of a Node is the Symbol id (`<language>:<file>#<qname>` per [`ir-schema.md`](./ir-schema.md) §3), taken from the **head** side of the pair when both are present, from **base** when only `removed` (`head` is absent), and from **head** when only `added` (`base` is absent). An `unknown` Symbol exists on one side only by construction, and its id comes from that side.
 
 Rationale for using head-side ids as the primary identity: the reviewer navigates the head codebase after the PR merges. Ids they see in Slice View must be clickable in the head — the version they will `git checkout` and read.
 

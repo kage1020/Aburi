@@ -375,7 +375,7 @@ Files whose size exceeds `config.maxFileSizeBytes` (default: `2 * 1024 * 1024` =
 
 - Normal code does not exceed 2MB (only generated bundles / minified files do)
 - Large files exhaust the WASM heap and make parse time explode
-- Skipped files are returned on `ScanResult.skipped` with `reason: "over-size"`; a per-file entry in `stats.skippedFiles[]` is still planned (see the [roadmap](../roadmap.md)), so the IR itself does not name them
+- Skipped files are returned on `ScanResult.skipped` with `reason: "over-size"` and named in the Document at `stats.skippedFiles[]` (ir-schema.md §2), so a later `aburi diff` can tell a file that was never read from one whose API was deleted
 - warning stderr: `Skipped <file>: <size>MB exceeds maxFileSizeBytes (2MB). Override with config.maxFileSizeBytes.`
 
 ### 7.1.2 Timeout

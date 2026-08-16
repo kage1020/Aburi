@@ -39,7 +39,7 @@ function changes(baseSymbols: IRSymbol[], headSymbols: IRSymbol[]): string[] {
     head: IR_REF,
   })
   return diff.symbols.map((change) =>
-    change.status === "added" || change.status === "removed"
+    change.status === "added" || change.status === "removed" || change.status === "unknown"
       ? `${change.status} ${change.symbol.id}`
       : `${change.status} ${change.before.id} -> ${change.after.id}`,
   )
@@ -508,7 +508,7 @@ describe("stage 2 does not depend on input order", () => {
         head: IR_REF,
         gitRenames,
       }).symbols.map((change) =>
-        change.status === "added" || change.status === "removed"
+        change.status === "added" || change.status === "removed" || change.status === "unknown"
           ? `${change.status} ${change.symbol.id}`
           : `${change.status} ${change.before.id} -> ${change.after.id}`,
       )

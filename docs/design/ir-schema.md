@@ -15,6 +15,7 @@ The JSON Schema at `schema/aburi.ir.v1.json` is the single source of truth; this
   - `symbols[]`: ascending by `id`
   - `dependencies[]`: lexicographic by (`from`, `to`, `via`)
   - `publicApi[]` within a Component: ascending by value
+  - `stats.skippedFiles[]`: ascending by `path`
   - `decorators[]` / `rules[]` / `effects[]` / `calls[]` within a Symbol: ascending by `line` (source order within the same line). Propagated effects are the one exception and sit in their own segment, ordered by (`id`, `target`) - see section 9.4
 
 Every string ordering above is by **UTF-16 code unit**, not by locale and not "alphabetical". Within the Basic Multilingual Plane that coincides with codepoint order; astral-plane strings differ, but the serializer, the integrity checker and every consumer using the default `<` / `>` operators or `Array.prototype.sort` all agree on it, which is what matters.
@@ -47,6 +48,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `stats.effectClassifyTimeouts` | no | B | omitted when no classification timed out |
 | `stats.lspEnrichment` | no | B | omitted when the LSP pass did not run |
 | `stats.callResolution` | no | B | always emitted by the current pipeline; absence means the document predates the counter |
+| `stats.skippedFiles` | no | B | omitted when the scan lost nothing; absence with `totalFiles > parsedFiles` means the document predates the field |
 | `Component.publicApi` | no | B | omitted when empty |
 | `Component.frameworks` | no | B | omitted when empty |
 | `Component.description` | **yes** | **A** | always emitted; `null` when the component carries no description |
@@ -75,7 +77,7 @@ Most of the table is convention that the schema cannot express, and the two rows
 
 The rule is load-bearing rather than tidy, for two reasons.
 
-**Ordering.** Five of §1's orderings are on strings: `components[]` and `symbols[]` by `id`, `dependencies[]` by (`from`, `to`, `via`), `publicApi[]` by value, and the propagated segment of `effects[]` by (`id`, `target`) per §9.4. Every ordering decision in the pipeline compares the string held in memory, while the serializer writes the normalized one. Where the two differ, a Document satisfies the sort rule in memory and lands on disk violating it — `é` written as one codepoint and as `e` plus a combining acute sort on opposite sides of `z`, and are the same name.
+**Ordering.** Six of §1's orderings are on strings: `components[]` and `symbols[]` by `id`, `dependencies[]` by (`from`, `to`, `via`), `publicApi[]` by value, `stats.skippedFiles[]` by `path`, and the propagated segment of `effects[]` by (`id`, `target`) per §9.4. Every ordering decision in the pipeline compares the string held in memory, while the serializer writes the normalized one. Where the two differ, a Document satisfies the sort rule in memory and lands on disk violating it — `é` written as one codepoint and as `e` plus a combining acute sort on opposite sides of `z`, and are the same name.
 
 **Identity.** Two spellings of one value are two entries: two Symbol ids for one construct, two effect targets for one table, a rename degraded into a delete plus an add. Which spelling a string arrives in is decided by how the text was created — an archive, an HFS+ volume, a `git` checkout of a name someone typed on a Mac — and it survives copying to any platform, so one source tree can hand back both.
 
@@ -143,7 +145,10 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
       "unresolved": {
         "localScope": 0, "external": 6, "dynamic": 4, "ambiguous": 0, "noMatch": 1
       }
-    }
+    },
+    "skippedFiles": [                         // Class B (§1.1); omitted when nothing was lost
+      { "path": "src/route.ts", "reason": "parse-failed" }
+    ]
   }
 }
 ```
@@ -153,6 +158,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 - `workspace.root`: always `"."`. Never write absolute paths (IR portability)
 - `workspace.managers[].tool`: runtime-independent string. Representative values: `pnpm`/`npm`/`yarn`/`bun`/`uv`/`poetry`/`pip`/`cargo`/`go`/`mvn`/`gradle`/`hatch`/`pixi`. Unknown values are not rejected (so that adding a new tool never requires a schema revision)
 - `stats`: for human/CI logs. Excluded from fingerprint
+- `stats.skippedFiles`: every file the scan gave up on, and why — the projection of `ScanResult.skipped` into the Document. Sorted by path; invariant #21 holds the length to `totalFiles - parsedFiles`. Without it the only trace of a loss is `totalFiles > parsedFiles`, which names no file and is equally true of an over-size file, a timed-out one and a withdrawn one — so `aburi diff` reads a Symbol's absence as a deletion and reports API nobody removed. Optional so documents produced before the field existed remain valid v1; the current pipeline always emits it when anything was lost, so absence with `totalFiles > parsedFiles` means "this IR predates the field", not "nothing was lost". **No `detail`**: the scan carries one per entry, but the `unreadable` detail is an OS error message containing the absolute path, and a canonical document whose bytes depend on where the repository was checked out is not byte-stable
 - `stats.callResolution`: the call-resolution census of [`call-resolution.md`](./call-resolution.md) §8.1 — how many call sites the resolver saw, how many it identified, and why the rest stayed `null`. Optional so documents produced before the field existed remain valid v1; the current scan pipeline always emits it, so absence means "this IR predates the counter", not "nothing was unresolved". The per-call reasons behind these counts are deliberately **not** persisted — see §8.1
 
 ## 3. Symbol ID Convention
@@ -565,6 +571,7 @@ Guaranteed by Aburi internals. Item 20 restates the schema's own structural requ
 18. `workspace.languages` is non-empty, every entry satisfies the `LanguageId` grammar of §3.1, and every `symbols[].language` appears in it. The Document declares which languages it covers, so a Symbol in a language the Document does not list means either an incomplete declaration or a Symbol that does not belong to this scan
 19. Every string the Document orders or identifies by is in Unicode NFC. §1.2 defines the rule, the fields it covers, and the two categories it deliberately excludes
 20. The Document has the shape `aburi.ir.v1` requires: every field the schema lists as `required`, of the declared kind, at every depth. This one is different in kind from the nineteen above — they relate fields to each other, this one establishes that the fields are there to relate. The scope is the schema's requirements rather than "whatever the other invariants happen to read", because `readIR` brands its result `IR` on the strength of this check alone: a narrower check would hand `@aburi/diff` a Document with no `fingerprint` and let it fail outside anyone's error handling. When #20 fails it is reported **alone** — the nineteen are statements about a Document, and a value that fails #20 is not one. The restatement is kept honest by a test that reads `schema/aburi.ir.v1.json` and fails on a `required` entry with no counterpart
+21. When `stats.skippedFiles` is present, its length is exactly `stats.totalFiles - stats.parsedFiles` and no path appears twice. A **read-side** check: inside Aburi's own scan both sides reduce to the same sum of the same two counts, so the census clause cannot fire on a document it wrote. What it guards is a document arriving from disk or from another generator, which `aburi diff` is about to read to decide that an absent Symbol is a loss rather than a deletion — a list short by one entry sends it back to reporting a deletion nobody made. It does not, and cannot, cover a file that parsed successfully and yielded no Symbols: that file is counted in `parsedFiles`, appears in no array, and satisfies the check. Conditional on presence, because a document written before the field existed has no way to satisfy it and its absence is itself the answer — the enumeration is unavailable
 
 An invariant violation is a **fatal error**, not a warning.
 

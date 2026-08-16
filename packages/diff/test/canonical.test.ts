@@ -34,7 +34,9 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
     const head = makeIR({ symbols: [s1, s2] })
     const result = buildDiff({ baseIR: base, headIR: head, base: IR_REF, head: IR_REF })
     const idsInOrder = result.symbols.map((c) =>
-      c.status === "added" || c.status === "removed" ? c.symbol.id : c.after.id,
+      c.status === "added" || c.status === "removed" || c.status === "unknown"
+        ? c.symbol.id
+        : c.after.id,
     )
     expect(idsInOrder).toEqual([...idsInOrder].sort())
   })

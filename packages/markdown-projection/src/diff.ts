@@ -11,6 +11,7 @@ import type {
   SymbolId,
   SymbolMoved,
   SymbolMovedChanged,
+  SymbolUnknown,
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
 import { compareStrings, isSymbolIdEndpoint, requireDropReason } from "./format"
@@ -37,6 +38,7 @@ export function projectDiff(diff: DiffResult): string {
   appendSection(lines, "## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols))
   appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
   appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
+  appendSection(lines, "## ❔ Unknown", renderUnknown(buckets.unknown))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
   appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
   appendSection(lines, "## 🧱 Component changes", renderComponentChanges(diff))
@@ -53,12 +55,31 @@ export function projectDiff(diff: DiffResult): string {
 /** §6.3 — one-line CLI stdout summary. */
 export function projectDiffSummaryLine(diff: DiffResult): string {
   const s = diff.summary
-  return `+${s.added} -${s.removed} ~${s.changed} ↔${s.moved} ⤴${s.movedChanged}`
+  return withUnknown(`+${s.added} -${s.removed} ~${s.changed} ↔${s.moved} ⤴${s.movedChanged}`, diff)
 }
 
 function summaryLine(diff: DiffResult): string {
   const s = diff.summary
-  return `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`
+  return withUnknown(
+    `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`,
+    diff,
+  )
+}
+
+/**
+ * Append the unknown count to a summary line, when there is one.
+ *
+ * Both summary lines carry it, and for the same reason: the added and removed counts beside
+ * it are smaller than the truth by exactly this much, so a line that omitted it would be a
+ * confident understatement. The glyph line is the one every CI job prints and the only
+ * output a `--quiet` run produces, which is where a silent understatement costs most.
+ *
+ * Appended rather than always present, so the line a reader has learned to skim does not
+ * grow a permanent `?0` on the overwhelming majority of diffs where nothing was lost.
+ */
+function withUnknown(line: string, diff: DiffResult): string {
+  const unknown = diff.summary.unknown ?? 0
+  return unknown === 0 ? line : `${line} · ?${unknown} unknown`
 }
 
 interface Buckets {
@@ -70,6 +91,7 @@ interface Buckets {
   moved: SymbolMoved[]
   droppedToggled: SymbolDroppedToggled[]
   syntaxOnly: (SymbolChanged | SymbolMovedChanged)[]
+  unknown: SymbolUnknown[]
 }
 
 /**
@@ -81,8 +103,8 @@ interface Buckets {
  *   2. `logicChanged` only  → Logic changes  (api MUST be false to reach here)
  *   3. `syntaxChanged` only → Syntax-only (both api and logic MUST be false)
  *
- * Non-overlapping buckets (added / removed / moved-only / moved+changed / droppedToggled)
- * are routed by the `status` tag alone.
+ * Non-overlapping buckets (added / removed / unknown / moved-only / moved+changed /
+ * droppedToggled) are routed by the `status` tag alone.
  */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
@@ -94,6 +116,7 @@ function partition(changes: readonly SymbolChange[]): Buckets {
     moved: [],
     droppedToggled: [],
     syntaxOnly: [],
+    unknown: [],
   }
   for (const c of changes) {
     switch (c.status) {
@@ -116,9 +139,21 @@ function partition(changes: readonly SymbolChange[]): Buckets {
       case "dropped-toggled":
         out.droppedToggled.push(c)
         break
+      case "unknown":
+        out.unknown.push(c)
+        break
+      default:
+        // Every other renderer is a function whose return type forces the switch to be
+        // exhaustive. This one accumulates and returns `out`, so a status added later would
+        // simply vanish from every section of `diff.md` with nothing to catch it.
+        return assertNeverChange(c)
     }
   }
   return out
+}
+
+function assertNeverChange(change: never): never {
+  throw new Error(`Unhandled SymbolChange status: ${JSON.stringify(change)}`)
 }
 
 function routeChanged(
@@ -463,6 +498,36 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
   return rows
 }
 
+/**
+ * §6.2 — the Symbols one document has and the other never looked for.
+ *
+ * Rendered apart from Added and Removed rather than inside them, because the reader's next
+ * action is different: an entry here is not a change to review but a gap to close, and the
+ * reason says how. `parse-timeout` and `unreadable` are properties of the machine and the
+ * moment — a wall clock, a file deleted mid-scan, a transient permission — and usually clear
+ * on a re-run. `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the
+ * file or the plugin set and clear only when one of those is changed.
+ */
+function renderUnknown(items: readonly SymbolUnknown[]): string[] {
+  if (items.length === 0) return []
+  const rows: string[] = []
+  for (const item of [...items].sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))) {
+    const s = item.symbol
+    rows.push(`### \`${s.name}\` *(${s.kind})*`)
+    rows.push(`**File**: \`${s.source.file}:${s.source.startLine}\``)
+    rows.push(`**Why**: ${unknownExplanation(item)}`)
+    rows.push(...renderSymbolBlock(s).slice(1))
+    rows.push("")
+  }
+  return rows
+}
+
+function unknownExplanation(item: SymbolUnknown): string {
+  const side = item.absentFrom
+  const fate = side === "head" ? "may still exist" : "may not be new"
+  return `the ${side} scan skipped \`${item.symbol.source.file}\` (${item.reason}), so this Symbol ${fate}`
+}
+
 function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   if (items.length === 0) return []
   const rows: string[] = []
@@ -703,6 +768,7 @@ function symbolForMember(change: SymbolChange): IRSymbol {
   switch (change.status) {
     case "added":
     case "removed":
+    case "unknown":
       return change.symbol
     case "changed":
     case "moved+changed":
@@ -726,6 +792,8 @@ function renderMemberFollowup(change: SymbolChange): string {
       return deltaAxisSummary(change.delta)
     case "dropped-toggled":
       return `dropped-toggled: ${change.direction}`
+    case "unknown":
+      return `unknown: the ${change.absentFrom} scan skipped this file (${change.reason})`
   }
 }
 
@@ -745,6 +813,7 @@ function indexChangesById(symbols: readonly SymbolChange[]): Map<SymbolId, Symbo
     switch (change.status) {
       case "added":
       case "removed":
+      case "unknown":
         map.set(change.symbol.id, change)
         break
       case "changed":

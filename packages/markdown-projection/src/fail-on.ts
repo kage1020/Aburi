@@ -14,6 +14,24 @@ export type FailOnStatus =
   | "dropped-toggled"
   | "dropped-toggled:to-dropped"
   | "dropped-toggled:to-kept"
+  | "unknown"
+
+/**
+ * Every member, as a value. Exported for the tests that walk the union: a matrix written by
+ * hand does not break when the union grows, which is how the `unknown` row came to be missing
+ * from an "all 8 branches" test that had nine to cover.
+ */
+export const FAIL_ON_STATUSES = [
+  "added",
+  "removed",
+  "changed",
+  "moved",
+  "moved+changed",
+  "dropped-toggled",
+  "dropped-toggled:to-dropped",
+  "dropped-toggled:to-kept",
+  "unknown",
+] as const satisfies readonly FailOnStatus[]
 
 /** Comparison operator when a numeric threshold is attached (e.g. `changed:>10`). */
 export type FailOnComparator = ">" | ">=" | "==" | "<="
@@ -117,6 +135,18 @@ function observedCount(
       return summary.movedChanged
     case "dropped-toggled":
       return summary.droppedToggled
+    case "unknown":
+      // Read off the summary because that is all this function is given — unlike the CLI's
+      // `evaluateFailOn`, which holds the whole `DiffResult` and counts the entries. The two
+      // agree because `buildDiff` is the only writer of both and there is no diff-side
+      // integrity layer tying them together; a hand-authored `diff.json` can disagree, and
+      // then this answers about the counter while the CLI answers about the document.
+      //
+      // `?? 0` rather than the `requireBreakdown` treatment below, which throws for a caller
+      // that failed to supply data it could have: absence here is not a caller mistake but a
+      // diff written before the counter existed, and a document that cannot report unknowns
+      // must not be failed for having them.
+      return summary.unknown ?? 0
     case "dropped-toggled:to-dropped":
       return requireBreakdown(droppedToggledBreakdown, status).toDropped
     case "dropped-toggled:to-kept":

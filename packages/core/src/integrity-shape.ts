@@ -183,6 +183,11 @@ const CALL_RESOLUTION_STATS: RecordSpec = {
   unresolved: record(UNRESOLVED_CALL_BUCKETS),
 }
 
+const SKIPPED_FILE: RecordSpec = {
+  path: str,
+  reason: str,
+}
+
 const STATS: RecordSpec = {
   totalFiles: num,
   parsedFiles: num,
@@ -192,6 +197,7 @@ const STATS: RecordSpec = {
   effectClassifyTimeouts: optional(recordArray(EFFECT_CLASSIFY_TIMEOUT)),
   lspEnrichment: optional(record(LSP_ENRICHMENT_STATS)),
   callResolution: optional(record(CALL_RESOLUTION_STATS)),
+  skippedFiles: optional(recordArray(SKIPPED_FILE)),
 }
 
 const DOCUMENT: RecordSpec = {
@@ -232,6 +238,7 @@ export const DOCUMENT_SHAPE: Readonly<Record<string, RecordSpec>> = {
   LspEnrichmentStats: LSP_ENRICHMENT_STATS,
   CallResolutionStats: CALL_RESOLUTION_STATS,
   UnresolvedCallBuckets: UNRESOLVED_CALL_BUCKETS,
+  SkippedFile: SKIPPED_FILE,
 }
 
 export function checkDocumentShape(document: unknown): IntegrityViolation[] {

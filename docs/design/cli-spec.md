@@ -322,6 +322,12 @@ The second line is the head IR's `stats.callResolution` ([`call-resolution.md`](
 
 A head IR produced before the counter existed cannot be back-filled, so the line is omitted rather than printed as zeroes — zeroes would assert a clean call graph the run never observed. Omitting it silently would be its own failure, though: the reviewer would read the Slice View without knowing the signal that explains a suspicious singleton is absent. A one-line note therefore goes to **stderr** (§18.2 — stdout carries result data only), naming the cause and pointing at a re-scan of the head revision.
 
+The `unknown` count is appended to the first line when there is one — `+5 -3 ~12 ↔2 ⤴1 · ?2 unknown` — and omitted otherwise, so the line a reviewer skims on every PR does not grow a permanent `?0`. It qualifies the counts beside it: the added and removed totals are smaller than the truth by that much.
+
+A file skipped by **both** scans produces no `unknown` entry — there are no Symbols from it in either document, so the matcher has no leftover to classify — and the diff is then silent about a file it never compared. Those paths are named on stderr, capped like the other per-file listings. Representing them inside `diff.json` is an open question: the diff has nothing to say about the file beyond "neither side read it", and that is a statement about the run rather than about a Symbol.
+
+An IR that dropped files but predates `stats.skippedFiles` reports the count without the list, and `aburi diff` cannot then tell a lost file from a deleted one — it classifies every leftover as `added` / `removed`, which is the pre-field behaviour, and warns on **stderr** for each side that is in that state. It does not guess: inferring the list from `totalFiles > parsedFiles` would attach the doubt to whichever Symbols happened to be missing.
+
 `--quiet`:
 ```
 +5 -3 ~12 ↔2 ⤴1
@@ -340,7 +346,7 @@ aburi diff main..HEAD --fail-on changed,removed
 
 | Kind | Values |
 |---|---|
-| Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` |
+| Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` / `unknown` |
 | Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` |
 | Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` |
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |

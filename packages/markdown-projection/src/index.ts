@@ -12,6 +12,7 @@ export { type ProjectSymbolExplainContext, projectSymbolExplain } from "./explai
 export {
   type DroppedToggledBreakdown,
   evaluateFailOn,
+  FAIL_ON_STATUSES,
   type FailOnClause,
   type FailOnComparator,
   type FailOnStatus,

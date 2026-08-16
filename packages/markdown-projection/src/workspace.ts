@@ -23,9 +23,7 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   lines.push("")
   lines.push(`**Languages**: ${[...ir.workspace.languages].sort().join(", ")}`)
   lines.push(`**Managers**: ${renderManagers(ir)}`)
-  lines.push(
-    `**Symbols**: ${ir.stats.keptSymbols} kept · ${ir.stats.droppedSymbols} dropped (across ${ir.stats.totalFiles} files)`,
-  )
+  lines.push(`**Symbols**: ${renderSymbolCounts(ir)}`)
   if (!options.suppressTimestamp && ir.generatedAt !== undefined) {
     lines.push(`**Generated**: ${ir.generator.name} ${ir.generator.version} at ${ir.generatedAt}`)
   } else {
@@ -43,6 +41,14 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   lines.push(...renderDependencies(ir))
   lines.push("")
 
+  const skipped = renderSkippedFiles(ir)
+  if (skipped.length > 0) {
+    lines.push("## Files not analysed")
+    lines.push("")
+    lines.push(...skipped)
+    lines.push("")
+  }
+
   const effectSurface = renderEffectSurface(ir)
   if (effectSurface.length > 0) {
     lines.push(`## Effect surface (top ${EFFECT_SURFACE_TOP_N} by count)`)
@@ -55,6 +61,59 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd()}\n`
+}
+
+/**
+ * The header line, which has to distinguish three states rather than two.
+ *
+ * `across N files` alone reads as "all N were analysed", which is a claim the document is in
+ * no position to make whenever `parsedFiles` is lower. The section below names the files when
+ * the document can, but a document written before `stats.skippedFiles` existed cannot — and
+ * that is precisely the case where the header would otherwise render byte-identically to a
+ * clean scan. `aburi diff` warns on stderr in that state; a pure projection has no stderr, so
+ * the distinction has to be in the bytes.
+ */
+function renderSymbolCounts(ir: IR): string {
+  const { keptSymbols, droppedSymbols, totalFiles, parsedFiles } = ir.stats
+  const counts = `${keptSymbols} kept · ${droppedSymbols} dropped`
+  if (parsedFiles >= totalFiles) return `${counts} (across ${totalFiles} files)`
+  return `${counts} (across ${parsedFiles} of ${totalFiles} files; ${totalFiles - parsedFiles} produced no Symbols)`
+}
+
+/**
+ * The files the scan gave up on, grouped by why.
+ *
+ * A reader holding only `workspace.md` otherwise sees `keptSymbols … across N files` and no
+ * hint that some of those N produced nothing — and every consumer downstream, `aburi diff`
+ * included, would read the absence of a Symbol as a deletion. The counts come first because
+ * the shape (one file, or all of them) is the thing to notice, and the paths follow so the
+ * reader can go and look.
+ *
+ * Absent from documents written before `stats.skippedFiles` existed, and the section is then
+ * omitted rather than rendered empty: "this run lost nothing" and "this writer could not say"
+ * are different answers. The header line above keeps the second from reading as the first.
+ */
+function renderSkippedFiles(ir: IR): string[] {
+  const skipped = ir.stats.skippedFiles ?? []
+  if (skipped.length === 0) return []
+
+  const byReason = new Map<string, string[]>()
+  for (const file of skipped) {
+    const paths = byReason.get(file.reason)
+    if (paths === undefined) byReason.set(file.reason, [file.path])
+    else paths.push(file.path)
+  }
+
+  const rows: string[] = [
+    `${skipped.length} of ${ir.stats.totalFiles} file(s) produced no Symbols.`,
+    "",
+  ]
+  for (const reason of [...byReason.keys()].sort(compareStrings)) {
+    const paths = byReason.get(reason) ?? []
+    rows.push(`- **${reason}** (${paths.length}):`)
+    for (const path of paths) rows.push(`  - \`${path}\``)
+  }
+  return rows
 }
 
 function renderManagers(ir: IR): string {

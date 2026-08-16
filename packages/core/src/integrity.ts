@@ -104,10 +104,10 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * function assert the very thing it is being asked to establish — and it did, until a
  * Document missing `workspace` reached it and produced a `TypeError` instead of an answer.
  *
- * #20 runs first and, when it finds anything, is returned alone. The nineteen below are
- * statements about a Document; a value that fails #20 is not one, so their answers would
- * be about something else — and where the missing field is one they read, they would crash
- * rather than answer at all.
+ * #20 runs first and, when it finds anything, is returned alone. The rest are statements
+ * about a Document; a value that fails #20 is not one, so their answers would be about
+ * something else — and where the missing field is one they read, they would crash rather
+ * than answer at all. Stated without a count, because the count has now been wrong once.
  */
 export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   const shape = checkDocumentShape(document)
@@ -131,6 +131,7 @@ export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   checkDependencyTupleUniqueness(ir, violations)
   checkCallGraphProjectionAgrees(ir, violations)
   checkCallResolutionStatsCensus(ir, violations)
+  checkSkippedFilesCensus(ir, violations)
   checkSymbolIdNamespace(ir, violations)
   checkIdGrammar(ir, violations)
   checkWorkspaceLanguages(ir, violations)
@@ -304,6 +305,10 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
  * applied to them: #17 does not look at them, #4 only checks the Symbol-shaped ones, and #11
  * orders on `(from, to, via)` — so a Component-shaped endpoint is ordered on a string
  * nothing else validates.
+ *
+ * `stats.skippedFiles[].path` is ordered by (#11) and matched against `symbols[].source.file`
+ * by `buildDiff`, which is the comparison that decides whether an absent Symbol is a loss or
+ * a deletion. Two spellings there put the answer back to "deletion", silently.
  */
 function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
   for (const component of ir.components) {
@@ -334,6 +339,13 @@ function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
     for (const role of ["from", "to"] as const) {
       reportUnnormalized(dep[role], `dependencies[${role}=${dep[role]}]`, role, out)
     }
+  }
+  for (const file of ir.stats.skippedFiles ?? []) {
+    // Ordered by this string, and matched against `symbols[].source.file` by `buildDiff` to
+    // decide which absences are losses rather than deletions. Two spellings there make a
+    // withdrawn file's Symbols look deliberately deleted, which is the failure the array
+    // exists to prevent.
+    reportUnnormalized(file.path, `stats.skippedFiles[path=${file.path}]`, "path", out)
   }
 }
 
@@ -503,6 +515,9 @@ function checkPathsArePosix(ir: IR, out: IntegrityViolation[]): void {
       pathSites.push({ subject: `workspace.managers[tool=${manager.tool}].roots`, path: root })
     }
   }
+  for (const file of ir.stats.skippedFiles ?? []) {
+    pathSites.push({ subject: `stats.skippedFiles[path=${file.path}]`, path: file.path })
+  }
 
   for (const site of pathSites) {
     const violation = posixWorkspaceRelativeViolation(site.path)
@@ -521,6 +536,12 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   assertSorted(
     ir.symbols.map((s) => s.id),
     "symbols[]",
+    (a, b) => compareCodeUnit(a, b),
+    out,
+  )
+  assertSorted(
+    (ir.stats.skippedFiles ?? []).map((f) => f.path),
+    "stats.skippedFiles[]",
     (a, b) => compareCodeUnit(a, b),
     out,
   )
@@ -811,6 +832,56 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
         message: `via:"call" Dependency ${from} -> ${to} has no matching Symbol.calls[].resolved entry`,
       })
     }
+  }
+}
+
+/**
+ * Invariant #21 (ir-schema.md §14): when `stats.skippedFiles` is present, its length is
+ * exactly `totalFiles - parsedFiles` and no path appears twice.
+ *
+ * **A read-side check.** Inside `scan()` both sides reduce to the same sum of the same two
+ * array lengths, so the census clause cannot fire on a document Aburi wrote, however the
+ * operands are spelled; the two source arrays are drawn from disjoint file sets, so the
+ * uniqueness clause is unreachable there too. What it guards is a document arriving through
+ * `readIR` — hand-edited, or from another generator — that `buildDiff` is about to read to
+ * decide an absent Symbol is a loss rather than a deletion. A list short by one entry sends
+ * it back to reporting a deletion nobody made.
+ *
+ * What it does **not** cover, and cannot: a file the pipeline parsed successfully that
+ * yielded no Symbols is counted in `parsedFiles`, appears in no array, and satisfies this
+ * check while its Symbols are still reported as removed. Withdrawal takes a plugin saying so,
+ * so a plugin that swallows its own error and returns an empty Symbol list withdraws nothing.
+ * This checks that the list is arithmetically complete, not that the pipeline noticed
+ * everything it lost.
+ *
+ * Conditional on presence. A document written before the field existed has no way to satisfy
+ * this and is not wrong for that — the absence is what tells a reader the enumeration is
+ * unavailable, and reporting it as a violation would make every archived IR unreadable.
+ */
+function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
+  const skippedFiles = ir.stats.skippedFiles
+  if (skippedFiles === undefined) return
+
+  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
+  if (skippedFiles.length !== unparsed) {
+    out.push({
+      invariant: 21,
+      subject: "stats.skippedFiles",
+      message: `stats.skippedFiles names ${skippedFiles.length} file(s) but totalFiles - parsedFiles is ${unparsed}`,
+    })
+  }
+
+  const seen = new Set<string>()
+  for (const file of skippedFiles) {
+    if (seen.has(file.path)) {
+      out.push({
+        invariant: 21,
+        subject: "stats.skippedFiles",
+        message: `stats.skippedFiles names "${file.path}" more than once; one file is skipped for one reason`,
+      })
+      continue
+    }
+    seen.add(file.path)
   }
 }
 

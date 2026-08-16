@@ -278,6 +278,12 @@ function nodeIdOf(change: SymbolChange): SymbolId | null {
     case "removed":
       // §4.1 — removed uses base-side id because there is no head symbol.
       return change.symbol.id
+    case "unknown":
+      // The one side that exists carries the id, as for added / removed. An unknown entry
+      // is a thing a reviewer has to look at, so it belongs in the cluster its neighbours
+      // are in — a Symbol whose file went missing is most useful read beside the callers
+      // that still reference it.
+      return change.symbol.id
     case "changed":
     case "moved+changed":
     case "dropped-toggled":
