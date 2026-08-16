@@ -25,8 +25,9 @@ class MemStream extends Writable {
  * workspace and names it by relative path, which is a ref form the loader supports and
  * exactly how a third-party plugin would arrive.
  *
- * `bad.stub` is the one the plugin refuses; `ok.stub` parses, so the run has something to
- * put in the IR and the report is not degenerate.
+ * Three files, because the subject is a split: `bad.stub` is refused, `warn.stub` carries a
+ * recoverable error and stays, and `ok.stub` is clean. A run containing only the refused
+ * one would be satisfied by a report that had merged the two counts the wrong way.
  */
 
 const STUB_PLUGIN = `
@@ -70,6 +71,13 @@ export const plugin = {
       return {
         tree,
         errors: [{ message: "unterminated string", line: 12, column: 4, recoverable: false }],
+        imports: [],
+      }
+    }
+    if (file.path === "warn.stub") {
+      return {
+        tree,
+        errors: [{ message: "stray token", line: 2, column: 1, recoverable: true }],
         imports: [],
       }
     }
@@ -123,6 +131,7 @@ beforeEach(async () => {
   )
   await writeFile(resolve(scratch, "lang-stub.mjs"), STUB_PLUGIN, "utf8")
   await writeFile(resolve(scratch, "bad.stub"), "bad", "utf8")
+  await writeFile(resolve(scratch, "warn.stub"), "warn", "utf8")
   await writeFile(resolve(scratch, "ok.stub"), "ok", "utf8")
 })
 
@@ -135,24 +144,25 @@ describe("runScan — a file the language plugin refused", () => {
     return runScan({ cwd: scratch, outputDir: resolve(scratch, "out"), format: "json" })
   }
 
-  it("names it in skipped, and counts it apart from the recoverable errors", async () => {
+  it("names it in skipped, and counts it apart from the file that kept its warnings", async () => {
     const scan = await report()
     expect(scan.skipped.map((s) => [s.path, s.reason])).toEqual([["bad.stub", "parse-failed"]])
     expect(scan.parseFailureCount).toBe(1)
-    // The withdrawn file's error is on `ScanResult.parseErrors` — it is the account of why
-    // the file went — but calling it recoverable would be the opposite of what it said.
-    expect(scan.parseErrorCount).toBe(0)
+    // `warn.stub` and nothing else. The withdrawn file's error is on
+    // `ScanResult.parseErrors` too — it is the account of why the file went — but counting
+    // it here would call it recoverable, which is the opposite of what it said.
+    expect(scan.parseErrorCount).toBe(1)
   })
 
   it("keeps the exit code at 0: an unparseable file describes the source", async () => {
     const scan = await report()
     expect(scan.exitCode).toBe(0)
     expect(scan.extractionFailures).toEqual([])
-    expect(scan.keptSymbols).toBe(1)
-    expect(scan.totalFiles).toBe(2)
+    expect(scan.keptSymbols).toBe(2)
+    expect(scan.totalFiles).toBe(3)
   })
 
-  it("says on stderr that the file was left out, without calling its error recoverable", async () => {
+  it("gives the withdrawal its own stderr line, apart from the recoverable count", async () => {
     const stdout = new MemStream()
     const stderr = new MemStream()
     const code = await runCli({
@@ -163,7 +173,7 @@ describe("runScan — a file the language plugin refused", () => {
       cwd: scratch,
     })
     expect(code).toBe(0)
+    expect(stderr.text()).toContain("1 file(s) had recoverable parse errors.")
     expect(stderr.text()).toContain("1 file(s) could not be parsed and were left out of the IR.")
-    expect(stderr.text()).not.toContain("recoverable parse errors")
   })
 })
