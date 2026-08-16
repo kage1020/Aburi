@@ -265,7 +265,11 @@ describe("runScan — a file a plugin threw on", () => {
       format: "json",
     })
     expect(report.extractionFailures).toEqual([
-      { file: "src/route.ts", message: expect.stringContaining("{ GET, POST }") },
+      {
+        file: "src/route.ts",
+        message: expect.stringContaining("{ GET, POST }"),
+        code: "anonymous-symbol-id-attempted",
+      },
     ])
     expect(report.skipped.map((s) => [s.path, s.reason])).toEqual([
       ["src/route.ts", "extraction-failed"],
@@ -284,6 +288,23 @@ describe("runScan — a file a plugin threw on", () => {
     })
     expect(code).toBe(3)
     expect(stderr.text()).toContain("1 file(s) were dropped because a plugin threw")
+  })
+
+  it("names the file and the reason, not just the count", async () => {
+    // The core logs the same per file, but through its own sink: it disappears at
+    // `ABURI_LOG_LEVEL=error` and never reaches an injected stream, so a caller reading
+    // this one would otherwise be told a number and nothing else.
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(stderr.text()).toContain("src/route.ts: ")
+    expect(stderr.text()).toContain("{ GET, POST }")
   })
 })
 

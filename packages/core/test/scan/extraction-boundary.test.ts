@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
@@ -368,39 +368,80 @@ describe("what the caller is told", () => {
   })
 })
 
-describe("a file that vanishes between discovery and the read", () => {
-  it("records it as unreadable rather than as an extraction failure", async () => {
+describe("a file the read cannot reach", () => {
+  /** A plugin whose `parseFile` removes `victim` from disk while the scan is running. */
+  function deleting(victim: string): LanguagePlugin {
+    const language: LanguagePlugin = Object.create(stubLanguage())
+    language.parseFile = async (file: SourceFile) => {
+      if (file.path === "a.stub") await rm(join(workRoot, victim))
+      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+    }
+    return language
+  }
+
+  it("skips one that vanished, rather than calling it an extraction failure", async () => {
     // Discovery lists the workspace up front and the loop reads each file when it reaches
     // it, so anything removing files while a scan runs — a concurrent build, a watch-mode
     // clean — puts a listed path out of reach. That is the condition discovery's own
     // `unreadable` already names, and it is not the plugin's doing.
-    const base = stubLanguage()
-    const language: LanguagePlugin = Object.create(base)
-    language.parseFile = async (file: SourceFile) => {
-      if (file.path === "a.stub") await rm(join(workRoot, "c.stub"))
-      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
-    }
-    const { result } = await run({ language })
+    const { result } = await run({ language: deleting("c.stub") })
     expect(result.skipped).toEqual([
       { path: "c.stub", reason: "unreadable", detail: expect.stringContaining("ENOENT") },
     ])
     expect(result.extractionFailures).toEqual([])
     expect(result.ir.symbols.map((s) => s.source.file)).toEqual(["a.stub", "bad.stub"])
   })
+
+  it("does not gate the run on it", async () => {
+    // A file that is gone is gone the same way on every machine, and a rerun is the fix.
+    // Only `extractionFailures` moves the exit code, and this is not one.
+    const { result } = await run({ language: deleting("c.stub") })
+    expect(result.extractionFailures).toEqual([])
+  })
+
+  it("still ends the run for a read failure that is the machine's rather than the file's", async () => {
+    // `EACCES`, `EMFILE`, `EIO`: whether they happen depends on how loaded or how
+    // badly-checked-out the machine is, so absorbing them would let one commit produce a
+    // different Document on a different day and still exit 0.
+    const language: LanguagePlugin = Object.create(stubLanguage())
+    language.parseFile = async (file: SourceFile) => {
+      if (file.path === "a.stub") {
+        // Replace `bad.stub` with a directory: reading it fails with EISDIR, not ENOENT.
+        await rm(join(workRoot, "bad.stub"))
+        await mkdir(join(workRoot, "bad.stub"))
+      }
+      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+    }
+    await expect(run({ language })).rejects.toThrow(/EISDIR|EPERM|EACCES/)
+  })
 })
 
-describe("a misconfigured plugin set is not a per-file fault", () => {
-  it("re-throws a CoreError that says the wiring is wrong", async () => {
-    const error = new CoreError("effects plugin returned a Promise", {
-      code: "scan-plugin-misconfigured",
-      value: "effects-stub",
+describe("a fault in the plugin set is not a per-file fault", () => {
+  it.each([
+    ["scan-plugin-misconfigured", "effects plugin returned a Promise"],
+    ["invalid-language-id", 'Symbol id language "TS" violates the lowercase-ASCII pattern'],
+  ])("re-throws a coded %s, which repeats for every file", async (code, message) => {
+    const error = new CoreError(message, { code: code as never, value: "stub" })
+    await expect(
+      run({ language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error }) }),
+    ).rejects.toThrow(message)
+  })
+
+  it("re-throws a registry error about undeclared vocabulary", async () => {
+    // A `RegistryError`, not a `CoreError`, raised per file from `assertEffectDeclared` — so
+    // the predicate has to read the code rather than the class. `@aburi/core` does not
+    // depend on `@aburi/plugin-registry`, and absorbing this would replace one precise
+    // sentence about the manifest with a file count.
+    const error = Object.assign(new Error('Effect id "x-stripe:charge" is not declared'), {
+      name: "RegistryError",
+      code: "vocab-undeclared",
     })
     await expect(
       run({ language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error }) }),
-    ).rejects.toThrow(/returned a Promise/)
+    ).rejects.toThrow(/is not declared/)
   })
 
-  it("absorbs every other CoreError, which describes the file rather than the wiring", async () => {
+  it("absorbs a coded error that describes the file rather than the wiring", async () => {
     // `anonymous-symbol-id-attempted` is the reachable one: a declaration whose qualified
     // name the id grammar refuses. It is a property of what that file contains.
     const error = new CoreError('qualified name "{ GET, POST }" contains a non-identifier', {
@@ -412,5 +453,52 @@ describe("a misconfigured plugin set is not a per-file fault", () => {
     })
     expect(result.ir.symbols.map((s) => s.source.file)).toEqual(["a.stub", "c.stub"])
     expect(result.extractionFailures[0]?.file).toBe("bad.stub")
+  })
+
+  it("keeps the code beside the message, so a caller need not match on text", async () => {
+    // The difference between "this source is something the plugins cannot express" and "a
+    // plugin crashed" is the first thing a reader wants, and the message is prose.
+    const error = new CoreError('qualified name "{ GET, POST }" contains a non-identifier', {
+      code: "anonymous-symbol-id-attempted",
+      value: "{ GET, POST }",
+    })
+    const { result } = await run({
+      language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error }),
+    })
+    expect(result.extractionFailures[0]?.code).toBe("anonymous-symbol-id-attempted")
+  })
+
+  it("omits the code when the thrown value carries none", async () => {
+    const { result } = await run({
+      language: stubLanguage({ stage: "extractSymbols", on: "bad.stub" }),
+    })
+    expect(result.extractionFailures[0]).not.toHaveProperty("code")
+  })
+})
+
+describe("a throw that says nothing about itself", () => {
+  it.each([
+    ["an Error with no message", new Error(), /Error/],
+    ["a subclass with no message", new (class Abort extends Error {})(), /Error/],
+  ])("still names itself: %s", async (_label, error, pattern) => {
+    const { result } = await run({
+      language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error }),
+    })
+    // An empty `detail` is the same silence the boundary exists to replace, one step in.
+    expect(result.extractionFailures[0]?.message).toMatch(pattern)
+    expect(result.extractionFailures[0]?.message.length).toBeGreaterThan(0)
+  })
+
+  it("survives a value that cannot be stringified at all", async () => {
+    // Circular *and* null-prototype: `JSON.stringify` throws on the cycle and `String()`
+    // throws for want of a `toString`. A describe helper that threw here would escape the
+    // catch it is inside and take the run down with it.
+    const hostile: Record<string, unknown> = Object.create(null)
+    hostile.self = hostile
+    const { result } = await run({
+      language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error: hostile }),
+    })
+    expect(result.extractionFailures).toEqual([{ file: "bad.stub", message: "[object Object]" }])
+    expect(result.ir.symbols.map((s) => s.source.file)).toEqual(["a.stub", "c.stub"])
   })
 })

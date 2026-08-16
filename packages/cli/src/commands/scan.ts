@@ -66,21 +66,21 @@ export interface ScanReport {
   parseErrorCount: number
   timeoutCount: number
   /**
-   * Files that never made it into the IR: over-size or unreadable at discovery, and
-   * unroutable, over `parseTimeoutMs`, or lost to a plugin exception afterwards. Surfaced
-   * separately from `parseErrorCount` because `@aburi/core` returns these rather than
-   * printing them — a discovery-time drop writes nothing at all, and only `parse-timeout`
-   * and `extraction-failed` also log per file. Warning on stderr is the CLI's job either
-   * way.
+   * Files that never made it into the IR. `over-size` and `unroutable` are decided before
+   * anything is read; `unreadable` can come from either side; `parse-timeout` and
+   * `extraction-failed` are decided during extraction. Surfaced separately from
+   * `parseErrorCount` because `@aburi/core` returns these rather than printing them, and a
+   * discovery-time drop is not logged at all. Warning on stderr is the CLI's job either way.
    */
   skipped: readonly { path: string; reason: string; detail?: string }[]
   /**
-   * Files a plugin threw on, with what it said. A subset of `skipped`, kept apart because
-   * it is the one reason that means something in the run is *broken* rather than merely
-   * large, slow, or in a language no plugin claims — which is why it is also the one that
-   * moves the exit code.
+   * Files a plugin threw on, with what it said and the error's own code where it had one.
+   * The same files appear in `skipped` under `reason: "extraction-failed"`; this is where
+   * the message lives, and it is kept apart because it is the one reason that means
+   * something in the run is *broken* rather than merely large, slow, or in a language no
+   * plugin claims — which is why it is also the one that moves the exit code.
    */
-  extractionFailures: readonly { file: string; message: string }[]
+  extractionFailures: readonly { file: string; message: string; code?: string }[]
   /**
    * Present when the LSP enrichment pass ran (config.lsp.enabled = true and at
    * least one server was configured). Absent when LSP was skipped entirely.

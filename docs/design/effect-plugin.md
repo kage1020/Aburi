@@ -337,7 +337,7 @@ export const plugin: EffectPlugin = {
 |---|---|---|
 | EP1 | returning an effectId not in the manifest | extraction-time error (detected by the registry) |
 | EP2 | classify returns the same output for the same input | purity (no side effects, no held state) |
-| EP3 | classify throws from its own classification logic | warning log, treated as null |
+| EP3 | classify throws from its own classification logic | **not implemented.** Nothing between the classifier and the core's per-file boundary catches a throw, and the boundary cannot tell a classification bug from the EP3a violation below — both arrive as a plain `Error` — so this behaves as EP3a and withdraws the file. Degrading it instead needs the two to be distinguishable, which means a coded error from the guards |
 | EP3a | classify throws an input-contract violation (§4.2) | propagates out of classification rather than degrading to an unclassified call; the core's per-file boundary (lang-plugin.md §7.2) then withdraws the file, names it in `skipped` / `extractionFailures`, and `aburi scan` exits non-zero |
 | EP4 | 2 plugins classify the same call | the first in config order wins (first-match-wins) |
 | EP5 | classify returns null | the call stays in `Symbol.calls[]` |

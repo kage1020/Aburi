@@ -357,6 +357,16 @@ function warnOnConfigOutsideWorkspaceRoot(report: ScanReport, stderr: NodeJS.Wri
 }
 
 /**
+ * How many withdrawn files are named individually before the list is summarised.
+ *
+ * A plugin broken enough to reject one file usually rejects them all, so the untruncated
+ * list is the whole workspace — which on CI scrolls every other warning out of the log it
+ * was meant to appear in. Ten is enough to see the shape (one path, or many) and read the
+ * message, which is identical across them when the fault is the plugin's.
+ */
+const MAX_LISTED_EXTRACTION_FAILURES = 10
+
+/**
  * §5.6 — surface parse failures / soft timeouts / discovery-time skips on stderr so a
  * scan that ate 50 broken files still produces a visible signal. The main summary line
  * on stdout stays clean; this only fires when a non-empty incident list exists.
@@ -379,10 +389,17 @@ function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream):
   if (report.extractionFailures.length > 0) {
     // Named on its own line rather than left inside the skip summary: this is the reason
     // that decides the exit code, and a reader given a non-zero status needs to know which
-    // of the counts above earned it.
+    // of the counts above earned it — and, unlike the other reasons, which files and why.
+    // `@aburi/core` logs the same per file, but through its own sink, which disappears at
+    // `ABURI_LOG_LEVEL=error` and never reaches a caller that injected its own streams.
     stderr.write(
       `⚠ ${report.extractionFailures.length} file(s) were dropped because a plugin threw while extracting them.\n`,
     )
+    for (const failure of report.extractionFailures.slice(0, MAX_LISTED_EXTRACTION_FAILURES)) {
+      stderr.write(`    ${failure.file}: ${failure.message}\n`)
+    }
+    const hidden = report.extractionFailures.length - MAX_LISTED_EXTRACTION_FAILURES
+    if (hidden > 0) stderr.write(`    …and ${hidden} more\n`)
   }
   const lsp = report.lspEnrichment
   if (lsp !== undefined) {

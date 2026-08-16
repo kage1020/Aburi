@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
  */
 
 const BAD_SOURCE = [
-  "const handlers = { GET: 1, POST: 2 }",
+  "const handlers = { GET: () => 1, POST: () => 2 }",
   "export const { GET, POST } = handlers",
   "",
 ].join("\n")
@@ -79,7 +79,13 @@ describe("scan — a file the id grammar cannot express", () => {
   it("names the file and what the plugin said about it", async () => {
     const result = await scanWorkspace()
     expect(result.extractionFailures).toEqual([
-      { file: "src/route.ts", message: expect.stringContaining("{ GET, POST }") },
+      {
+        file: "src/route.ts",
+        message: expect.stringContaining("{ GET, POST }"),
+        // The code separates "this source is something the plugins cannot express" from "a
+        // plugin crashed" without matching on prose.
+        code: "anonymous-symbol-id-attempted",
+      },
     ])
     expect(result.skipped).toEqual([
       {
@@ -94,6 +100,38 @@ describe("scan — a file the id grammar cannot express", () => {
     const result = await scanWorkspace()
     expect(result.ir.stats.totalFiles).toBe(3)
     expect(result.ir.stats.parsedFiles).toBe(2)
+  })
+})
+
+describe("scan — a surviving file that references the withdrawn one", () => {
+  it("resolves what it can and leaves no dangling edge behind", async () => {
+    // The state the boundary newly creates: a partial IR that still contains references to
+    // a file no longer in it. Everything that reads those references — LSP enrichment, call
+    // resolution, dependency projection, the integrity check — runs *outside* the per-file
+    // boundary, so a throw there would take the whole run down after all.
+    await writeSource("src/route.ts", BAD_SOURCE)
+    await writeSource(
+      "src/app.ts",
+      [
+        'import { GET } from "./route"',
+        "",
+        "export function run() {",
+        "  return GET()",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    expect(result.ir.symbols.map((s) => s.name)).toEqual(["run"])
+    expect(() => assertIRIntegrity(result.ir)).not.toThrow()
+    // No edge may point at a Symbol the document does not contain.
+    const ids = new Set(result.ir.symbols.map((s) => s.id))
+    for (const dependency of result.ir.dependencies) {
+      expect(ids.has(dependency.to as (typeof result.ir.symbols)[number]["id"])).toBe(true)
+    }
+    // The call is reported as unresolved rather than silently dropped.
+    expect(result.unresolvedCalls.map((c) => [c.target, c.bucket])).toEqual([["GET", "no-match"]])
   })
 })
 
