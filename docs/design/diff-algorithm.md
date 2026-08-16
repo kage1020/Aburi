@@ -398,7 +398,7 @@ Three properties this rests on:
 - **Both directions.** A file fine at head and withdrawn at base makes phantom `added` entries exactly as a file withdrawn at head makes phantom `removed` ones.
 - **`dropped` leftovers keep their counters.** They produce no `symbols[]` entry on either side today and nothing gates on them, so they stay in `droppedAdded` / `droppedRemoved` rather than becoming `unknown` entries where there were none.
 
-When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.7).
+When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
 
 ### 3.6 Handling dropped symbols
 
@@ -495,7 +495,9 @@ Treating `dropped-toggled` as an independent status means:
 
 ### 4.2 Why the `unknown` status exists
 
-The alternatives were both silence of a kind. Suppressing the entry hides a Symbol that may genuinely have been deleted; keeping `removed` and adding a flag beside it shows an API deletion to every reader that does not know to look for the flag — including `--fail-on removed`, which is the reason the phantom mattered. A status of its own makes `--fail-on removed` mean what it says and gives a strict pipeline `--fail-on unknown` to catch the case where the answer is missing.
+The alternatives were both silence of a kind. Suppressing the entry hides a Symbol that may genuinely have been deleted; keeping `removed` and adding a flag beside it shows an API deletion to every reader that does not know to look for the flag — including `--fail-on removed`, which is the reason the phantom mattered. A status of its own makes `--fail-on removed` mean what it says and gives a strict pipeline `--fail-on unknown` to catch the case where the answer is missing on **one** side.
+
+It does not catch the case where both sides lost the same file. `unknown` is derived from the matcher's leftovers, and a file skipped in both revisions contributes Symbols to neither document, so there are no leftovers and the diff is silent about it — while looking exactly like a diff that compared the file and found it unchanged. Most skip reasons are deterministic properties of the file, which makes symmetric loss the ordinary case rather than the exceptional one. `aburi diff` names those files on stderr; representing them in the artifact is an open question (cli-spec.md §6.6).
 
 ## 5. Delta computation (changed / moved+changed only)
 

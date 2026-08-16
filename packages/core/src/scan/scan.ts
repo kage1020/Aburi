@@ -391,9 +391,11 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   // `discovered.skipped` is not netted out here: those files were never candidates, and they
   // are added to `totalFiles` instead.
   //
-  // Derived from the two arrays rather than from `skipped.length` below, though the numbers
-  // are the same. Integrity invariant #21 compares this subtraction against that length, and
-  // a check whose two sides are the same expression checks nothing.
+  // Merged and sorted here rather than at the return, because `buildStats` projects it into
+  // `stats.skippedFiles`. Integrity invariant #21 compares its length against
+  // `totalFiles - parsedFiles`, which for anything this function writes is the same sum of
+  // the same two array lengths — that check is for documents arriving through `readIR`, not
+  // for this one.
   const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   )

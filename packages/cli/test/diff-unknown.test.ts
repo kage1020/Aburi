@@ -194,6 +194,71 @@ describe("aburi diff — a file the head scan never read", () => {
     expect(warnings.join("\n")).toContain("reported as added")
   })
 
+  it("puts the count on the stdout summary line, where every CI job sees it", async () => {
+    // The stderr warning cannot fire here — `stats.skippedFiles` is present on both sides —
+    // so without this the whole incident is invisible to anyone who did not pass
+    // `--fail-on unknown`. It qualifies the counts beside it: they are that much short.
+    const { basePath, headPath } = await writePair(
+      makeIR([gone, kept]),
+      makeIR([kept], [{ path: "src/gone.ts", reason: "parse-failed" }]),
+    )
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: () => {},
+    })
+    expect(report.summaryLine).toBe("+0 -0 ~0 ↔0 ⤴0 · ?1 unknown")
+  })
+
+  it("leaves the summary line alone when nothing is unknown", async () => {
+    const { basePath, headPath } = await writePair(makeIR([gone, kept]), makeIR([kept]))
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: () => {},
+    })
+    expect(report.summaryLine).toBe("+0 -1 ~0 ↔0 ⤴0")
+  })
+
+  it("names the files both scans skipped, which no unknown entry can cover", async () => {
+    // Neither document holds Symbols from a file both sides dropped, so there is no leftover
+    // to classify and the diff is silent about a file it never compared.
+    const both = { path: "vendor/huge.ts", reason: "over-size" } as const
+    const { basePath, headPath } = await writePair(makeIR([kept], [both]), makeIR([kept], [both]))
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: (m) => warnings.push(m),
+    })
+    expect(report.summaryLine).toBe("+0 -0 ~0 ↔0 ⤴0")
+    expect(warnings.join("\n")).toContain(
+      "1 file(s) were skipped by both scans and are not represented in this diff: vendor/huge.ts",
+    )
+  })
+
+  it("says nothing about symmetric loss when only one side lost the file", async () => {
+    const { basePath, headPath } = await writePair(
+      makeIR([gone, kept]),
+      makeIR([kept], [{ path: "src/gone.ts", reason: "parse-failed" }]),
+    )
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: (m) => warnings.push(m),
+    })
+    expect(warnings.join("\n")).not.toContain("skipped by both scans")
+  })
+
   it("says nothing when both documents parsed everything they discovered", async () => {
     const { basePath, headPath } = await writePair(makeIR([gone, kept]), makeIR([gone, kept]))
     const warnings: string[] = []

@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
-import { formatCallResolutionLine, projectDiff } from "@aburi/markdown-projection"
+import {
+  formatCallResolutionLine,
+  projectDiff,
+  projectDiffSummaryLine,
+} from "@aburi/markdown-projection"
 import type { DiffResult, IR, IRRef } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../artifact-paths"
 import { CliError } from "../errors"
@@ -155,7 +159,9 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     await writeFile(diffMdPath, projectDiff(diff), "utf8")
   }
 
-  const summaryLine = renderSummaryLine(diff)
+  // §6.6, from `@aburi/markdown-projection` rather than from a local copy: the two were
+  // byte-identical, and a change to the format reached only one of them.
+  const summaryLine = projectDiffSummaryLine(diff)
   const { firstTriggered } = evaluateFailOn(failOn, diff)
   const exitCode: ExitCode = firstTriggered === null ? EXIT.SUCCESS : EXIT.GATE
 
@@ -173,6 +179,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   }
   warnOnUnenumerableLosses(baseIR, "base", warn)
   warnOnUnenumerableLosses(headIR, "head", warn)
+  warnOnSymmetricLosses(baseIR, headIR, warn)
   return {
     diffJsonPath,
     diffMdPath,
@@ -206,6 +213,41 @@ function warnOnUnenumerableLosses(ir: IR, side: "base" | "head", warn: (m: strin
     `⚠ ${side} IR reports ${unparsed} file(s) it did not parse but has no stats.skippedFiles to name them, so this diff cannot tell a lost file from a deleted one. Symbols from those files are reported as ${consequence}. Re-run \`aburi scan\` on the ${side} revision to record the list.`,
   )
 }
+
+/**
+ * Files neither revision analysed produce no `unknown` entry, so nothing in the diff mentions
+ * them.
+ *
+ * `unknown` is derived from the matcher's leftovers: a Symbol one document has and the other
+ * lacks. When a file is skipped on both sides there are no Symbols from it anywhere, no
+ * leftovers, and the diff is silent — while looking exactly like a diff that compared the
+ * file and found it unchanged. Most skip reasons are deterministic properties of the file, so
+ * symmetric loss is the *ordinary* case: a generated bundle over the size cap, a language no
+ * plugin claims, a file that has been unparseable since before the branch.
+ *
+ * Naming them is all this can do from here. Deciding what an artifact should say about a file
+ * neither side read is a change to the diff document, not to its cover note.
+ */
+function warnOnSymmetricLosses(baseIR: IR, headIR: IR, warn: (m: string) => void): void {
+  const inBase = new Set((baseIR.stats.skippedFiles ?? []).map((f) => f.path))
+  const both = (headIR.stats.skippedFiles ?? [])
+    .map((f) => f.path)
+    .filter((path) => inBase.has(path))
+    .sort()
+  if (both.length === 0) return
+  const listed = both.slice(0, MAX_LISTED_SYMMETRIC_LOSSES).join(", ")
+  const rest = both.length - MAX_LISTED_SYMMETRIC_LOSSES
+  warn(
+    `⚠ ${both.length} file(s) were skipped by both scans and are not represented in this diff: ${listed}${rest > 0 ? `, and ${rest} more` : ""}.`,
+  )
+}
+
+/**
+ * How many symmetrically-lost paths are named before the list is summarised. A workspace
+ * whose config drops a whole generated directory hits this on every diff, and the list is
+ * then the directory rather than a signal.
+ */
+const MAX_LISTED_SYMMETRIC_LOSSES = 10
 
 /** Trigger phrasing so the CLI wrapper can pipe it to stderr. */
 export function formatFailOnMessage(trig: NonNullable<DiffReport["triggered"]>): string {
@@ -410,11 +452,6 @@ async function collectRenames(
 
 function irRef(refName: string, ir: IR): IRRef {
   return { ref: refName, irSchema: ir.$schema }
-}
-
-function renderSummaryLine(diff: DiffResult): string {
-  const s = diff.summary
-  return `+${s.added} -${s.removed} ~${s.changed} ↔${s.moved} ⤴${s.movedChanged}`
 }
 
 function errorMessage(error: unknown): string {

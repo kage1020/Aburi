@@ -23,9 +23,7 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   lines.push("")
   lines.push(`**Languages**: ${[...ir.workspace.languages].sort().join(", ")}`)
   lines.push(`**Managers**: ${renderManagers(ir)}`)
-  lines.push(
-    `**Symbols**: ${ir.stats.keptSymbols} kept · ${ir.stats.droppedSymbols} dropped (across ${ir.stats.totalFiles} files)`,
-  )
+  lines.push(`**Symbols**: ${renderSymbolCounts(ir)}`)
   if (!options.suppressTimestamp && ir.generatedAt !== undefined) {
     lines.push(`**Generated**: ${ir.generator.name} ${ir.generator.version} at ${ir.generatedAt}`)
   } else {
@@ -66,6 +64,23 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
 }
 
 /**
+ * The header line, which has to distinguish three states rather than two.
+ *
+ * `across N files` alone reads as "all N were analysed", which is a claim the document is in
+ * no position to make whenever `parsedFiles` is lower. The section below names the files when
+ * the document can, but a document written before `stats.skippedFiles` existed cannot — and
+ * that is precisely the case where the header would otherwise render byte-identically to a
+ * clean scan. `aburi diff` warns on stderr in that state; a pure projection has no stderr, so
+ * the distinction has to be in the bytes.
+ */
+function renderSymbolCounts(ir: IR): string {
+  const { keptSymbols, droppedSymbols, totalFiles, parsedFiles } = ir.stats
+  const counts = `${keptSymbols} kept · ${droppedSymbols} dropped`
+  if (parsedFiles >= totalFiles) return `${counts} (across ${totalFiles} files)`
+  return `${counts} (across ${parsedFiles} of ${totalFiles} files; ${totalFiles - parsedFiles} produced no Symbols)`
+}
+
+/**
  * The files the scan gave up on, grouped by why.
  *
  * A reader holding only `workspace.md` otherwise sees `keptSymbols … across N files` and no
@@ -76,7 +91,7 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
  *
  * Absent from documents written before `stats.skippedFiles` existed, and the section is then
  * omitted rather than rendered empty: "this run lost nothing" and "this writer could not say"
- * are different answers.
+ * are different answers. The header line above keeps the second from reading as the first.
  */
 function renderSkippedFiles(ir: IR): string[] {
   const skipped = ir.stats.skippedFiles ?? []

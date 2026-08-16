@@ -104,10 +104,10 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * function assert the very thing it is being asked to establish — and it did, until a
  * Document missing `workspace` reached it and produced a `TypeError` instead of an answer.
  *
- * #20 runs first and, when it finds anything, is returned alone. The nineteen below are
- * statements about a Document; a value that fails #20 is not one, so their answers would
- * be about something else — and where the missing field is one they read, they would crash
- * rather than answer at all.
+ * #20 runs first and, when it finds anything, is returned alone. The rest are statements
+ * about a Document; a value that fails #20 is not one, so their answers would be about
+ * something else — and where the missing field is one they read, they would crash rather
+ * than answer at all. Stated without a count, because the count has now been wrong once.
  */
 export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   const shape = checkDocumentShape(document)
@@ -305,6 +305,10 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
  * applied to them: #17 does not look at them, #4 only checks the Symbol-shaped ones, and #11
  * orders on `(from, to, via)` — so a Component-shaped endpoint is ordered on a string
  * nothing else validates.
+ *
+ * `stats.skippedFiles[].path` is ordered by (#11) and matched against `symbols[].source.file`
+ * by `buildDiff`, which is the comparison that decides whether an absent Symbol is a loss or
+ * a deletion. Two spellings there put the answer back to "deletion", silently.
  */
 function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
   for (const component of ir.components) {
@@ -831,28 +835,24 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
   }
 }
 
-function dependencyKey(from: string, to: string): string {
-  return `${from}\t${to}`
-}
-
 /**
- * Invariant #15 (call-resolution.md §8.1): when `stats.callResolution` is
- * present it must be a faithful census of `Symbol.calls[]`. `totalCalls` counts
- * every call site, `resolvedCalls` counts the non-null ones, and the five
- * buckets account for the remainder. A drift here means a counter was
- * incremented on a path the IR does not reflect — which would send reviewers
- * hunting for unresolved calls that are not there, or hide the ones that are.
- */
-/**
- * Invariant #21 (ir-schema.md §14): when `stats.skippedFiles` is present it accounts for
- * every file the scan did not parse — its length is exactly `totalFiles - parsedFiles`.
+ * Invariant #21 (ir-schema.md §14): when `stats.skippedFiles` is present, its length is
+ * exactly `totalFiles - parsedFiles` and no path appears twice.
  *
- * The two sides come from different places. `parsedFiles` is a subtraction the scan performs
- * over its own bookkeeping; `skippedFiles` is the list of what it gave up on. They agree only
- * if every file the scan stopped working on produced exactly one entry, which is the property
- * the whole array rests on: `buildDiff` reads it to decide that an absent Symbol is a loss
- * rather than a deletion, and a list missing an entry sends it back to reporting a deletion
- * that did not happen.
+ * **A read-side check.** Inside `scan()` both sides reduce to the same sum of the same two
+ * array lengths, so the census clause cannot fire on a document Aburi wrote, however the
+ * operands are spelled; the two source arrays are drawn from disjoint file sets, so the
+ * uniqueness clause is unreachable there too. What it guards is a document arriving through
+ * `readIR` — hand-edited, or from another generator — that `buildDiff` is about to read to
+ * decide an absent Symbol is a loss rather than a deletion. A list short by one entry sends
+ * it back to reporting a deletion nobody made.
+ *
+ * What it does **not** cover, and cannot: a file the pipeline parsed successfully that
+ * yielded no Symbols is counted in `parsedFiles`, appears in no array, and satisfies this
+ * check while its Symbols are still reported as removed. Withdrawal takes a plugin saying so,
+ * so a plugin that swallows its own error and returns an empty Symbol list withdraws nothing.
+ * This checks that the list is arithmetically complete, not that the pipeline noticed
+ * everything it lost.
  *
  * Conditional on presence. A document written before the field existed has no way to satisfy
  * this and is not wrong for that — the absence is what tells a reader the enumeration is
@@ -885,6 +885,18 @@ function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
+function dependencyKey(from: string, to: string): string {
+  return `${from}\t${to}`
+}
+
+/**
+ * Invariant #15 (call-resolution.md §8.1): when `stats.callResolution` is
+ * present it must be a faithful census of `Symbol.calls[]`. `totalCalls` counts
+ * every call site, `resolvedCalls` counts the non-null ones, and the five
+ * buckets account for the remainder. A drift here means a counter was
+ * incremented on a path the IR does not reflect — which would send reviewers
+ * hunting for unresolved calls that are not there, or hide the ones that are.
+ */
 function checkCallResolutionStatsCensus(ir: IR, out: IntegrityViolation[]): void {
   const stats = ir.stats.callResolution
   if (stats === undefined) return

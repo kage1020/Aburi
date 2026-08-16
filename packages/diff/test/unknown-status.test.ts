@@ -1,7 +1,7 @@
 import type { IR, Symbol as IRSymbol, SkippedFile, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff } from "../src"
-import { makeIR, makeSymbol } from "./fixtures"
+import { fp, makeIR, makeSymbol } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
@@ -131,6 +131,71 @@ describe("buildDiff — a Symbol in a file the other side never analysed", () =>
 
     expect(result.summary.removed).toBe(1)
     expect(result.summary.unknown).toBe(0)
+  })
+
+  it("counts both directions in one diff", () => {
+    // Each direction alone leaves a missed increment on the single counter invisible, and
+    // says nothing about how the two sort against each other.
+    // Distinct fingerprints, or stage 3 pairs the two as one Symbol that moved.
+    const goneFromHead = makeSymbol({
+      id: "ts:src/a-gone.ts#fromBase",
+      name: "fromBase",
+      fingerprint: fp("one"),
+    })
+    const goneFromBase = makeSymbol({
+      id: "ts:src/b-gone.ts#fromHead",
+      name: "fromHead",
+      fingerprint: fp("two"),
+    })
+    const base = withSkipped(
+      makeIR({ symbols: [goneFromHead, kept] }),
+      [lost("src/b-gone.ts", "over-size")],
+      3,
+    )
+    const head = withSkipped(
+      makeIR({ symbols: [goneFromBase, kept] }),
+      [lost("src/a-gone.ts", "parse-failed")],
+      3,
+    )
+    const result = diffOf(base, head)
+
+    expect(result.summary.unknown).toBe(2)
+    expect(result.summary.added).toBe(0)
+    expect(result.summary.removed).toBe(0)
+    expect(unknowns(result.symbols).map((c) => [c.symbol.id, c.absentFrom, c.reason])).toEqual([
+      ["ts:src/a-gone.ts#fromBase", "head", "parse-failed"],
+      ["ts:src/b-gone.ts#fromHead", "base", "over-size"],
+    ])
+  })
+
+  it("sorts against the other statuses, not only against itself", () => {
+    // `symbols[]` is ordered by (status, reference id) and the file is byte-stable, so the
+    // position of a new status among the existing ones is a contract.
+    const addedSym = makeSymbol({
+      id: "ts:src/new.ts#fresh",
+      name: "fresh",
+      fingerprint: fp("three"),
+    })
+    const removedSym = makeSymbol({
+      id: "ts:src/old.ts#stale",
+      name: "stale",
+      fingerprint: fp("four"),
+    })
+    const base = withSkipped(makeIR({ symbols: [foo, removedSym] }), [lost("src/nothing.ts")], 3)
+    const head = withSkipped(makeIR({ symbols: [addedSym] }), [lost("src/gone.ts")], 3)
+    const statuses = diffOf(base, head).symbols.map((c) => c.status)
+
+    expect(statuses).toEqual(["added", "removed", "unknown"])
+  })
+
+  it("makes an unknown Symbol a Slice View node, as added and removed are", () => {
+    // `nodeIdOf` returning null for this status would drop it from every Slice silently and
+    // make the projection's unknown label dead code.
+    const base = makeIR({ symbols: [foo, kept] })
+    const head = withSkipped(makeIR({ symbols: [kept] }), [lost("src/gone.ts")])
+    const members = diffOf(base, head).slices.flatMap((s) => s.members)
+
+    expect(members).toContain("ts:src/gone.ts#foo")
   })
 
   it("sorts and serialises beside the other statuses", () => {

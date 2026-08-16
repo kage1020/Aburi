@@ -139,10 +139,15 @@ export function buildDiff(input: DiffInput): DiffResult {
   const finalRemainingHead = stage4_5.remainingHead
   const finalRemainingBase = stage4_5.remainingBase
 
-  // Read after the five matching stages, never before them. A Symbol that moved out of a
-  // file the other document lost into a file it has is matched by stage 3 or 4 and is
-  // genuinely `moved` — the other side holds real evidence for it. Only the leftovers are
-  // absences, and only an absence in a file that was never analysed is unexplained.
+  // Read after the five matching stages, never before them. A Symbol that crossed files
+  // between the two revisions is paired by stage 2, 3 or 4 and comes out `moved` or
+  // `moved+changed`, whichever end of the move sits in the lost file — the other document
+  // holds real evidence for it either way. Only the leftovers are absences, and only an
+  // absence in a file that was never analysed is unexplained.
+  //
+  // The two loops below read opposite ends: a base leftover is looked up by the file it
+  // came from, a head leftover by the file it arrived in. In both cases the question is the
+  // same — did the document that lacks this Symbol ever read the file it is in?
   const lostByHead = lostFiles(input.headIR)
   const lostByBase = lostFiles(input.baseIR)
 

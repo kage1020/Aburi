@@ -55,16 +55,31 @@ export function projectDiff(diff: DiffResult): string {
 /** §6.3 — one-line CLI stdout summary. */
 export function projectDiffSummaryLine(diff: DiffResult): string {
   const s = diff.summary
-  return `+${s.added} -${s.removed} ~${s.changed} ↔${s.moved} ⤴${s.movedChanged}`
+  return withUnknown(`+${s.added} -${s.removed} ~${s.changed} ↔${s.moved} ⤴${s.movedChanged}`, diff)
 }
 
 function summaryLine(diff: DiffResult): string {
   const s = diff.summary
-  const base = `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`
-  // Appended only when there are any, so the line a reader has learned to skim does not
-  // grow a permanent `?0`. When there are, it belongs on the same line as the counts it
-  // qualifies: the added and removed beside it are smaller than the truth by this much.
-  return s.unknown === undefined || s.unknown === 0 ? base : `${base} · ?${s.unknown} unknown`
+  return withUnknown(
+    `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`,
+    diff,
+  )
+}
+
+/**
+ * Append the unknown count to a summary line, when there is one.
+ *
+ * Both summary lines carry it, and for the same reason: the added and removed counts beside
+ * it are smaller than the truth by exactly this much, so a line that omitted it would be a
+ * confident understatement. The glyph line is the one every CI job prints and the only
+ * output a `--quiet` run produces, which is where a silent understatement costs most.
+ *
+ * Appended rather than always present, so the line a reader has learned to skim does not
+ * grow a permanent `?0` on the overwhelming majority of diffs where nothing was lost.
+ */
+function withUnknown(line: string, diff: DiffResult): string {
+  const unknown = diff.summary.unknown ?? 0
+  return unknown === 0 ? line : `${line} · ?${unknown} unknown`
 }
 
 interface Buckets {
@@ -88,8 +103,8 @@ interface Buckets {
  *   2. `logicChanged` only  → Logic changes  (api MUST be false to reach here)
  *   3. `syntaxChanged` only → Syntax-only (both api and logic MUST be false)
  *
- * Non-overlapping buckets (added / removed / moved-only / moved+changed / droppedToggled)
- * are routed by the `status` tag alone.
+ * Non-overlapping buckets (added / removed / unknown / moved-only / moved+changed /
+ * droppedToggled) are routed by the `status` tag alone.
  */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
@@ -127,9 +142,18 @@ function partition(changes: readonly SymbolChange[]): Buckets {
       case "unknown":
         out.unknown.push(c)
         break
+      default:
+        // Every other renderer is a function whose return type forces the switch to be
+        // exhaustive. This one accumulates and returns `out`, so a status added later would
+        // simply vanish from every section of `diff.md` with nothing to catch it.
+        return assertNeverChange(c)
     }
   }
   return out
+}
+
+function assertNeverChange(change: never): never {
+  throw new Error(`Unhandled SymbolChange status: ${JSON.stringify(change)}`)
 }
 
 function routeChanged(
@@ -475,12 +499,14 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
 }
 
 /**
- * §6.2a — the Symbols neither document can speak for.
+ * §6.2 — the Symbols one document has and the other never looked for.
  *
  * Rendered apart from Added and Removed rather than inside them, because the reader's next
  * action is different: an entry here is not a change to review but a gap to close, and the
- * reason says how. `parse-timeout` is a property of the machine that ran the scan and
- * usually clears on a re-run; the rest describe the file and clear only when it is fixed.
+ * reason says how. `parse-timeout` and `unreadable` are properties of the machine and the
+ * moment — a wall clock, a file deleted mid-scan, a transient permission — and usually clear
+ * on a re-run. `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the
+ * file or the plugin set and clear only when one of those is changed.
  */
 function renderUnknown(items: readonly SymbolUnknown[]): string[] {
   if (items.length === 0) return []

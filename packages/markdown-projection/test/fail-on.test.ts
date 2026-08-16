@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
   evaluateFailOn,
+  FAIL_ON_STATUSES,
   type FailOnClause,
+  type FailOnStatus,
   formatFailOnClause,
   formatFailOnTriggered,
 } from "../src"
@@ -136,28 +138,45 @@ describe("evaluateFailOn — comparator matrix", () => {
   })
 })
 
-describe("evaluateFailOn — observedCount status matrix (all 8 branches)", () => {
-  it("maps each FailOnStatus to the correct Summary/breakdown field", () => {
-    const summary = {
-      ...emptySummary(),
-      added: 1,
-      removed: 2,
-      changed: 3,
-      moved: 4,
-      movedChanged: 5,
-      droppedToggled: 7, // 4 to-dropped + 3 to-kept
-    }
-    const breakdown = { toDropped: 4, toKept: 3 }
-    const observe = (status: FailOnClause["status"]) =>
-      evaluateFailOn({ kind: "bare", status }, summary, breakdown).observed
-    expect(observe("added")).toBe(1)
-    expect(observe("removed")).toBe(2)
-    expect(observe("changed")).toBe(3)
-    expect(observe("moved")).toBe(4)
-    expect(observe("moved+changed")).toBe(5)
-    expect(observe("dropped-toggled")).toBe(7)
-    expect(observe("dropped-toggled:to-dropped")).toBe(4)
-    expect(observe("dropped-toggled:to-kept")).toBe(3)
+describe("evaluateFailOn — observedCount status matrix", () => {
+  const summary = {
+    ...emptySummary(),
+    added: 1,
+    removed: 2,
+    changed: 3,
+    moved: 4,
+    movedChanged: 5,
+    droppedToggled: 7, // 4 to-dropped + 3 to-kept
+    unknown: 9,
+  }
+  const breakdown = { toDropped: 4, toKept: 3 }
+  const observe = (status: FailOnClause["status"]) =>
+    evaluateFailOn({ kind: "bare", status }, summary, breakdown).observed
+
+  // Keyed by the exported union rather than listed by hand: a matrix written out longhand
+  // does not break when the union grows, which is how this test came to be named "all 8
+  // branches" while the switch it covers had nine.
+  const expected: Record<FailOnStatus, number> = {
+    added: 1,
+    removed: 2,
+    changed: 3,
+    moved: 4,
+    "moved+changed": 5,
+    "dropped-toggled": 7,
+    "dropped-toggled:to-dropped": 4,
+    "dropped-toggled:to-kept": 3,
+    unknown: 9,
+  }
+
+  it.each(FAIL_ON_STATUSES)("maps %s to the right field", (status) => {
+    expect(observe(status)).toBe(expected[status])
+  })
+
+  it("reports zero unknowns for a diff written before the counter existed", () => {
+    // Absence is a writer that predates the field, not an assertion that there were none —
+    // but a gate must not fail a document that cannot answer, so zero is the answer here.
+    const { unknown: _dropped, ...older } = summary
+    expect(evaluateFailOn({ kind: "bare", status: "unknown" }, older, breakdown).observed).toBe(0)
   })
 })
 

@@ -146,6 +146,16 @@ Fallback list:
 - billing → shared (via `import`)
 - pricing → shared (via `import`)
 
+## Files not analysed
+
+3 of 1234 file(s) produced no Symbols.
+
+- **over-size** (2):
+  - `apps/web/public/bundle.js`
+  - `packages/gen/schema.ts`
+- **parse-failed** (1):
+  - `apps/web/src/route.ts`
+
 ## Effect surface (top 10 by count)
 
 | effect | count | components |
@@ -156,6 +166,8 @@ Fallback list:
 | event.publish | 5 | billing |
 ...
 ````
+
+**Files not analysed** is emitted only when `stats.skippedFiles` is non-empty (`ir-schema.md` §2), grouped by reason because the shape — one file, or all of them — is the thing to notice before the paths are. A document that predates the field omits the section rather than rendering it empty: "this run lost nothing" and "this writer could not say" are different answers, and the **Symbols** header line above distinguishes them by reporting `parsedFiles` beside `totalFiles` whenever the two differ.
 
 ### 4.2 mermaid
 

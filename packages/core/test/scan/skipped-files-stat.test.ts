@@ -163,6 +163,18 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
     expect(stats.skippedFiles).toHaveLength(stats.totalFiles - stats.parsedFiles)
   })
 
+  it("passes its own integrity check, sort order included", async () => {
+    // `scan()` sorts with a raw `a.path < b.path` and `checkArraySortOrder` compares with
+    // `compareCodeUnit`; a document that satisfies one and not the other would be written
+    // and then refused on read.
+    for (const name of ["Z.stub", "a.stub", "\u00e9.stub", "b.stub"]) {
+      await writeFile(join(workRoot, name), "x".repeat(2000), "utf8")
+    }
+    const { ir } = await runScan({ maxFileSizeBytes: 1024 })
+    expect(ir.stats.skippedFiles).toHaveLength(4)
+    expect(checkIRIntegrity(ir)).toEqual([])
+  })
+
   it("omits the key entirely when nothing was lost", async () => {
     // Class B. `[]` would erase the distinction between "this run lost nothing" and "this
     // document predates the field", which is the one thing a reader of an old IR needs.
@@ -221,6 +233,44 @@ describe("integrity #21 — the list accounts for every unparsed file", () => {
       ],
     })
     expect(of21(ir)).toEqual([])
+  })
+
+  it("holds the paths to the rules every other path-bearing array obeys", () => {
+    // Unfiltered on purpose. #21 is not the only check this array joined, and a test that
+    // filters to it would stay green with paths that are unsorted, absolute, or decomposed
+    // — and the NFC one is load-bearing: an NFD spelling never matches
+    // `symbols[].source.file`, so the lost file's Symbols go back to being confidently
+    // reported as removed, which is the regression the array exists to prevent.
+    expect(
+      checkIRIntegrity(
+        documentWith({
+          skippedFiles: [
+            { path: "b.stub", reason: "over-size" },
+            { path: "a.stub", reason: "parse-failed" },
+          ],
+        }),
+      ).map((v) => v.invariant),
+    ).toContain(11)
+    expect(
+      checkIRIntegrity(
+        documentWith({
+          skippedFiles: [
+            { path: "/abs/a.stub", reason: "over-size" },
+            { path: "b.stub", reason: "parse-failed" },
+          ],
+        }),
+      ).map((v) => v.invariant),
+    ).toContain(10)
+    expect(
+      checkIRIntegrity(
+        documentWith({
+          skippedFiles: [
+            { path: "cafe\u0301.stub", reason: "over-size" },
+            { path: "z.stub", reason: "parse-failed" },
+          ],
+        }),
+      ).map((v) => v.invariant),
+    ).toContain(19)
   })
 
   it("fires when a file went missing from the list", () => {

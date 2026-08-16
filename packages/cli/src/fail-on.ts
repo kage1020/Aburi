@@ -191,6 +191,10 @@ function countMatches(token: FailOnToken, diff: DiffResult): number {
       // diff written before the counter existed carries neither, and one written after
       // carries both. Reading the list keeps the gate answering about what is in the
       // document rather than about which writer produced it.
+      //
+      // `@aburi/markdown-projection`'s `observedCount` reads the counter instead, because it
+      // is handed only a `Summary`. The two agree for anything `buildDiff` wrote; nothing
+      // enforces that they agree for a document written by hand.
       return diff.symbols.filter((s) => s.status === "unknown").length
     case "api-changed":
       return countDeltaAxis(diff.symbols, "apiChanged")

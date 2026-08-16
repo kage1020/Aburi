@@ -43,10 +43,17 @@ refused the file with — but the `unreadable` detail is an OS error message con
 checked out is not the byte-stable artifact everything downstream assumes.
 
 Integrity **invariant #21**: when present, `skippedFiles.length === totalFiles - parsedFiles`
-and no path appears twice. The two sides are derived independently — `parsedFiles` from the
-scan's own subtraction, the list from what it gave up on — so the check is a real one. It is
-conditional on presence, because a document that predates the field cannot satisfy it and its
+and no path appears twice. This is a **read-side** check — inside Aburi's own scan both sides
+reduce to the same sum of the same two counts, so it cannot fire on a document Aburi wrote.
+What it guards is a document arriving through `readIR`, hand-edited or from another generator,
+that `aburi diff` is about to read to decide an absent Symbol is a loss rather than a deletion.
+Conditional on presence, because a document that predates the field cannot satisfy it and its
 absence is itself the answer.
+
+It does not cover a file that parsed successfully and yielded no Symbols: counted in
+`parsedFiles`, in no array, satisfying the check, and its Symbols still reported as removed.
+Withdrawal takes a plugin saying so, so a plugin that swallows its own error and returns an
+empty Symbol list withdraws nothing.
 
 `workspace.md` gains a "Files not analysed" section grouping the paths by reason, so a reader
 holding only the Markdown sees the same thing.
@@ -92,12 +99,37 @@ happened to be missing — so it reports what it can see, and the CLI says what 
 check. Both sides are examined.
 
 `diff.md` gains an `❔ Unknown` section directly after Removed, naming the file, the side that
-lost it and why. The summary line grows `· ?N unknown` only when there is one, so the line
-skimmed on every PR does not carry a permanent `?0`.
+lost it and why. **Both** summary lines — the word form in `diff.md` and the glyph form on
+stdout — grow `· ?N unknown` when there is one, and neither carries a permanent `?0` when there
+is not. The glyph line matters most: with `stats.skippedFiles` present on both sides the stderr
+warning cannot fire, so it is the only place a run that lost a file says so without
+`--fail-on unknown`. `aburi diff` now renders it through
+`@aburi/markdown-projection`'s `projectDiffSummaryLine` rather than a byte-identical private
+copy, which is how the two came to disagree.
+
+`workspace.md`'s header reports `parsedFiles` beside `totalFiles` whenever they differ, so a
+document that lost files but predates `stats.skippedFiles` no longer renders byte-identically
+to a clean scan — the projection is a pure function with no stderr to fall back on.
+
+A file skipped by **both** scans produces no `unknown` entry: neither document holds Symbols
+from it, so the matcher has no leftover to classify. Most skip reasons are deterministic
+properties of the file, which makes symmetric loss the ordinary case rather than the
+exceptional one, and the diff would otherwise look exactly like one that compared the file and
+found it unchanged. `aburi diff` names those paths on stderr, capped. Representing them inside
+`diff.json` is left open: the only thing to say about such a file is that neither side read it,
+which is a statement about the run rather than about a Symbol.
 
 ## Not closed by this
 
 `aburi scan` still exits `0` when a plugin refuses every file in the workspace — the document
-now says so, but nothing gates on it. `aburi explain` and `aburi diff` still discard the scan
-incident report entirely; this delivers the artifact half of that for `diff` and none of it
-for `explain`. Both are tracked separately.
+now says so, but nothing gates on it.
+
+`aburi explain` and `aburi diff` still discard the incident report of the scans they run
+themselves, so a Symbol in a file the scan refused is answered with `No matches` rather than
+with a reason.
+
+`dependencies[]` is projected from the call graph, so a lost file's Symbols take their edges
+with them and `summary.depsRemoved` reports exactly the confidently-wrong deletion this change
+fixed for `symbols[]`. `unknown` is a `symbols[]` status only.
+
+Each of the three is tracked as its own issue.
