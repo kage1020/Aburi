@@ -290,6 +290,31 @@ describe("runScan — a file a plugin threw on", () => {
     expect(stderr.text()).toContain("1 file(s) were dropped because a plugin threw")
   })
 
+  it("caps the list, because a broken plugin rejects every file", async () => {
+    // A plugin broken enough to reject one file usually rejects them all, and the
+    // untruncated list is then the whole workspace — which on CI scrolls every other
+    // warning out of the log it was meant to appear in.
+    const bad = ["const h = { GET: 1, POST: 2 }", "export const { GET, POST } = h", ""].join("\n")
+    for (let i = 0; i < 14; i++) {
+      await writeFile(resolve(scratch, "src", `r${i}.ts`), bad, "utf8")
+    }
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    const listed = stderr
+      .text()
+      .split("\n")
+      .filter((l) => l.startsWith("    src/"))
+    expect(listed).toHaveLength(10)
+    expect(stderr.text()).toContain("…and 5 more")
+  })
+
   it("names the file and the reason, not just the count", async () => {
     // The core logs the same per file, but through its own sink: it disappears at
     // `ABURI_LOG_LEVEL=error` and never reaches an injected stream, so a caller reading

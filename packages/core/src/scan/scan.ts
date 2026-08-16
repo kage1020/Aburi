@@ -494,9 +494,10 @@ function describeThrown(error: unknown): string {
 
 function safeString(value: unknown): string {
   try {
-    const text = String(value)
-    return text.length > 0 ? text : Object.prototype.toString.call(value)
+    return String(value)
   } catch {
+    // A null-prototype object has no `toString`, and a Symbol refuses the conversion.
+    // `Object.prototype.toString` works on both because it never consults the value.
     return Object.prototype.toString.call(value)
   }
 }

@@ -105,7 +105,8 @@ siblings of `ir`, not part of it, so `out/aburi.ir.json` records only that `pars
 therefore reports the withdrawn file's Symbols as `removed`, and `--fail-on removed` trips with
 the wrong explanation. Before this change there was no IR to be misled by; now there is a
 complete-looking partial one, and the exit code is the only signal, which does not travel with
-the artifact. Tracked separately.
+the artifact. The other withdrawal reasons have the same hole and have had it all along.
+Tracked separately.
 
 `export const { GET, POST } = handlers` — an ordinary Auth.js route file — is a reachable trigger,
 so a repository containing one now exits 3 on every scan where it previously exited 1. The gate is
