@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import { type LoadedConfig, loadConfig, readConfigFile } from "@aburi/config"
 import {
   CoreError,
@@ -32,6 +32,7 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { createLogger } from "../logger"
 import { loadPlugins } from "../plugin-loader"
+import type { WarnFn } from "../warn"
 
 export interface ScanOptions {
   cwd?: string
@@ -55,6 +56,25 @@ export interface ScanOptions {
    * Defaults to `"warn"`, which is what the CLI has always printed.
    */
   logLevel?: LogLevel
+  /**
+   * Where this scan's incidents go (§5.6). Omit it and they go nowhere — an embedded scan
+   * that only wants the report stays silent, which is what every caller before this option
+   * existed got by accident.
+   *
+   * The reporting lives here rather than in the command wrapper because three commands scan
+   * and only one of them was doing it. A caller that forgets the sink now loses the warnings
+   * for its own scan; a caller that forgot to call a separate reporter used to lose them
+   * while the scan looked handled.
+   */
+  warn?: WarnFn
+  /**
+   * Names this scan in its own incident lines — `base ref "main"`, `head (working tree)`.
+   *
+   * `aburi diff` runs two scans and the same incident means different things at each: a file
+   * withdrawn at base makes phantom `added` entries, the same file withdrawn at head makes
+   * phantom `removed` ones. Omitted when only one scan ran, where a label would be noise.
+   */
+  incidentLabel?: string
 }
 
 export interface ScanReport {
@@ -134,10 +154,12 @@ export interface ScanReport {
 
 /**
  * §5 — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
- * writes IR JSON and per-Component Markdown into `--output-dir` (default `out/`). The
- * function is pure with respect to stdout/stderr — the CLI wrapper prints summaries. That
- * separation lets integration tests assert on the returned report without swallowing
- * stream output.
+ * writes IR JSON and per-Component Markdown into `--output-dir` (default `out/`).
+ *
+ * The function touches neither process stream: summaries are the CLI wrapper's to print,
+ * and incidents go to `options.warn` if the caller supplied one. Integration tests still
+ * assert on the returned report, and now also on the exact lines, without either being
+ * swallowed by a real stream.
  */
 export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const cwd = options.cwd ?? process.cwd()
@@ -208,7 +230,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     scanResult.skipped.filter((s) => s.reason === "parse-failed").map((s) => s.path),
   )
 
-  return {
+  const report: ScanReport = {
     irPath,
     workspaceMdPath,
     componentMdPaths,
@@ -241,6 +263,108 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     // gate, and behind what threshold, is a separate open decision.
     exitCode: scanResult.extractionFailures.length > 0 ? EXIT.GATE : EXIT.SUCCESS,
   }
+  if (options.warn !== undefined) {
+    reportScanIncidents(report, options.warn, options.incidentLabel ?? null)
+  }
+  return report
+}
+
+/**
+ * How many withdrawn files are named individually before the list is summarised.
+ *
+ * A plugin broken enough to reject one file usually rejects them all, so the untruncated
+ * list is the whole workspace — which on CI scrolls every other warning out of the log it
+ * was meant to appear in. Ten is enough to see the shape (one path, or many) and read the
+ * message, which is identical across them when the fault is the plugin's.
+ */
+const MAX_LISTED_EXTRACTION_FAILURES = 10
+
+/**
+ * §5.6 — surface parse failures / soft timeouts / discovery-time skips so a scan that ate 50
+ * broken files still produces a visible signal. The main summary line on stdout stays clean;
+ * each clause below fires only on a non-empty incident.
+ *
+ * `label` names the scan when more than one ran in the same command. It goes inside the
+ * line, after the glyph, so `⚠` still starts every warning; the indented per-file listing
+ * carries no label because it belongs to the line above it.
+ */
+export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: string | null): void {
+  const say = (line: string): void => {
+    warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
+  }
+  reportConfigOutsideWorkspaceRoot(report, say)
+  if (report.parseErrorCount > 0) {
+    say(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
+  }
+  if (report.parseFailureCount > 0) {
+    // Apart from the line above rather than folded into it: those files are in the IR with
+    // warnings against them, these are not in it at all, and the difference is the whole
+    // reason a reader is reading the count. The skip summary below names them too, among
+    // every other reason a file went missing; this says which of them are unparseable.
+    say(`${report.parseFailureCount} file(s) could not be parsed and were left out of the IR.`)
+  }
+  if (report.timeoutCount > 0) {
+    say(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
+  }
+  if (report.skipped.length > 0) {
+    say(
+      `${report.skipped.length} file(s) contributed no Symbols: ${summariseSkipped(report.skipped)}`,
+    )
+  }
+  if (report.extractionFailures.length > 0) {
+    // Named on its own line rather than left inside the skip summary: this is the reason
+    // that decides the exit code, and a reader given a non-zero status needs to know which
+    // of the counts above earned it — and, unlike the other reasons, which files and why.
+    // `@aburi/core` logs the same per file, but through its own sink, which disappears at
+    // `ABURI_LOG_LEVEL=error` and never reaches a caller that injected its own streams.
+    say(
+      `${report.extractionFailures.length} file(s) were dropped because a plugin threw while extracting them.`,
+    )
+    for (const failure of report.extractionFailures.slice(0, MAX_LISTED_EXTRACTION_FAILURES)) {
+      warn(`    ${failure.file}: ${failure.message}`)
+    }
+    const hidden = report.extractionFailures.length - MAX_LISTED_EXTRACTION_FAILURES
+    if (hidden > 0) warn(`    …and ${hidden} more`)
+  }
+  const lsp = report.lspEnrichment
+  if (lsp !== undefined) {
+    if (lsp.filesFellBack > 0) {
+      say(
+        `LSP enrichment fell back for ${lsp.filesFellBack} file(s); IR field values in those files remain at the untyped tier.`,
+      )
+    }
+    if (lsp.languagesDisabled.length > 0) {
+      say(`LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.`)
+    }
+    if (lsp.requestsTimedOut > 0 || lsp.requestsFailed > 0) {
+      warn(
+        `  LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.`,
+      )
+    }
+  }
+}
+
+/**
+ * Config discovery is anchored to `cwd`, everything inside the config to the workspace
+ * root. When the two directories differ — running inside a monorepo package that has its
+ * own `aburi.json` — a relative path in that file points somewhere other than where its
+ * author was looking, and the scan still covers the whole workspace. Both are deliberate
+ * (see `resolveConfig`), and neither is visible from the command line, so say it.
+ */
+function reportConfigOutsideWorkspaceRoot(report: ScanReport, say: (line: string) => void): void {
+  if (report.configSource === null) return
+  if (dirname(report.configSource) === report.workspaceRoot) return
+  say(
+    `Config ${report.configSource} sits below the workspace root ${report.workspaceRoot}. ` +
+      `Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, ` +
+      `and the scan covers the whole workspace.`,
+  )
+}
+
+function summariseSkipped(skipped: readonly { reason: string }[]): string {
+  const counts = new Map<string, number>()
+  for (const s of skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1)
+  return [...counts.entries()].map(([reason, n]) => `${reason}=${n}`).join(", ")
 }
 
 /**

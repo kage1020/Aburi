@@ -6,6 +6,7 @@ import type { IR, Symbol as IRSymbol, UnresolvedCallDiagnostic } from "@aburi/ty
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
+import type { WarnFn } from "../warn"
 import { runScan } from "./scan"
 
 export interface ExplainOptions {
@@ -22,6 +23,12 @@ export interface ExplainOptions {
    * answer the question.
    */
   debugResolution?: boolean
+  /**
+   * Sink for the incidents of the scan this command runs when no IR is on disk (§5.6).
+   * Reading an existing IR runs no scan and reports nothing — the live signal fired when
+   * `aburi scan` wrote the file.
+   */
+  warn?: WarnFn
 }
 
 export type ExplainOutcome =
@@ -64,6 +71,30 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
   assertDebugResolutionCombination(options)
   const resolved = await resolveIR(cwd, workspaceRoot, options)
+  return withScanFault(await locate(resolved, cwd, workspaceRoot, options), resolved.scanFaulted)
+}
+
+/**
+ * A scan that a plugin exception broke outranks whatever the lookup concluded.
+ *
+ * Every outcome is suspect in that state, including the successful ones: the file a plugin
+ * threw on is absent from the IR, so a `single` answer may have had a competing candidate
+ * that would have made it `ambiguous`, and a `not-found` may be describing the withdrawal
+ * rather than the workspace. Reporting `0` for the first and `1` for the second would let a
+ * broken toolchain look like a clean answer, which is the state §5.4 already refuses to call
+ * green for `aburi scan`; the command asking the question does not change that.
+ */
+function withScanFault(outcome: ExplainOutcome, scanFaulted: boolean): ExplainOutcome {
+  if (!scanFaulted) return outcome
+  return { ...outcome, exitCode: EXIT.GATE }
+}
+
+async function locate(
+  resolved: ResolvedIR,
+  cwd: string,
+  workspaceRoot: string,
+  options: ExplainOptions,
+): Promise<ExplainOutcome> {
   const ir = resolved.ir
   const explainContext: ProjectSymbolExplainContext = {
     dependencies: ir.dependencies,
@@ -150,6 +181,12 @@ interface ResolvedIR {
    * requested.
    */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[] | null
+  /**
+   * Whether the scan behind `ir` reported a fault of its own. `false` when the IR came off
+   * disk: that document is whatever the scan that wrote it produced, and its incidents were
+   * reported then.
+   */
+  scanFaulted: boolean
 }
 
 async function resolveIR(
@@ -161,11 +198,13 @@ async function resolveIR(
 
   if (!wantsDiagnostics) {
     const explicit = options.irPath === undefined ? null : resolve(cwd, options.irPath)
-    if (explicit !== null) return { ir: await readIR(explicit), unresolvedCalls: null }
+    if (explicit !== null) {
+      return { ir: await readIR(explicit), unresolvedCalls: null, scanFaulted: false }
+    }
 
     const defaultPath = resolve(workspaceRoot, "out/aburi.ir.json")
     if (await pathExistsStrict(defaultPath)) {
-      return { ir: await readIR(defaultPath), unresolvedCalls: null }
+      return { ir: await readIR(defaultPath), unresolvedCalls: null, scanFaulted: false }
     }
 
     if (options.noRescan) {
@@ -180,6 +219,7 @@ async function resolveIR(
     cwd,
     format: "json",
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    ...(options.warn === undefined ? {} : { warn: options.warn }),
   }
   const report = await runScan(scanOptions)
   if (report.irPath === null) {
@@ -188,6 +228,7 @@ async function resolveIR(
   return {
     ir: await readIR(report.irPath),
     unresolvedCalls: wantsDiagnostics ? report.unresolvedCalls : null,
+    scanFaulted: report.exitCode !== EXIT.SUCCESS,
   }
 }
 

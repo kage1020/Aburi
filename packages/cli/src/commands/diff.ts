@@ -15,10 +15,10 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
+import type { WarnFn } from "../warn"
 import { runScan, type ScanReport } from "./scan"
 
-/** Warning emitter for non-fatal diff-time observations (git errors, cleanup issues). */
-export type WarnFn = (message: string) => void
+export type { WarnFn }
 
 /**
  * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md §9).
@@ -96,8 +96,25 @@ export interface DiffReport {
    */
   callResolutionLine: string | null
   triggered: { clause: FailOnClause; observed: number } | null
+  /**
+   * Sides whose own scan reported a fault — `ScanReport.exitCode` other than success, which
+   * today means a plugin threw while extracting a file. Empty in `--base` / `--head` mode,
+   * where this command ran no scan and the documents' incidents were reported when they were
+   * written.
+   *
+   * A non-empty list forces `exitCode` to `EXIT.GATE` with `triggered` still `null`, so this
+   * is what a programmatic caller reads to tell the two causes apart instead of parsing
+   * warnings.
+   */
+  faultedScans: readonly DiffSide[]
   exitCode: ExitCode
 }
+
+/**
+ * Which revision a scan covered. The head is always the working tree, whatever the ref spec
+ * calls it (§6.4), so the two are not interchangeable with the ref names.
+ */
+export type DiffSide = "base" | "head"
 
 /**
  * `aburi diff` — two dispatch paths, both defined by `docs/design/cli-spec.md §6`:
@@ -123,7 +140,11 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
-  const [baseIR, headIR, baseRef, headRef, gitRenames] = await resolveIRs(options, cwd, warn)
+  const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
+    options,
+    cwd,
+    warn,
+  )
 
   const generator = await readGeneratorInfo()
   let diff: DiffResult
@@ -163,7 +184,10 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   // byte-identical, and a change to the format reached only one of them.
   const summaryLine = projectDiffSummaryLine(diff)
   const { firstTriggered } = evaluateFailOn(failOn, diff)
-  const exitCode: ExitCode = firstTriggered === null ? EXIT.SUCCESS : EXIT.GATE
+  const faultedScans =
+    scans === null ? [] : SIDES.filter((side) => scans[side].exitCode !== EXIT.SUCCESS)
+  const exitCode: ExitCode =
+    firstTriggered === null && faultedScans.length === 0 ? EXIT.SUCCESS : EXIT.GATE
 
   // An IR written before `stats.callResolution` existed cannot be back-filled,
   // and printing zeroes would claim a clean call graph the run never observed.
@@ -180,6 +204,8 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   warnOnUnenumerableLosses(baseIR, "base", warn)
   warnOnUnenumerableLosses(headIR, "head", warn)
   warnOnSymmetricLosses(baseIR, headIR, warn)
+  warnOnRecoverableParseErrors(scans, warn)
+  warnOnScanFault(faultedScans, warn)
   return {
     diffJsonPath,
     diffMdPath,
@@ -187,8 +213,53 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     callResolutionLine:
       callResolution === undefined ? null : formatCallResolutionLine(callResolution),
     triggered: firstTriggered,
+    faultedScans,
     exitCode,
   }
+}
+
+/** Iteration order for the two sides, and the order they are reported in. */
+const SIDES: readonly DiffSide[] = ["base", "head"]
+
+/**
+ * A file whose parse reported recoverable errors is in the IR, so nothing marks it.
+ *
+ * `stats.skippedFiles` covers the files that never arrived, and `buildDiff` turns their
+ * Symbols into `unknown` rather than into deletions. A file the plugin kept is in neither
+ * list — but a parse that reported errors may have skipped the declaration those errors were
+ * in, and the Symbol set is then short with no file having gone missing. That moves `added`
+ * and `removed` exactly like a real change, and no gate can tell the difference.
+ *
+ * Only the ref form can say this. `parseErrorCount` is a property of the scan, not of the
+ * document it wrote, so `--base` / `--head` mode has no way to ask.
+ */
+function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): void {
+  if (scans === null) return
+  const affected = SIDES.filter((side) => scans[side].parseErrorCount > 0)
+  if (affected.length === 0) return
+  const where = affected.map((side) => `${side} ${scans[side].parseErrorCount}`).join(", ")
+  warn(
+    `⚠ Files with recoverable parse errors (${where}) are in both documents, so nothing marks them as doubtful. ` +
+      `Their Symbol sets can be short, which moves added / removed without a file having been skipped.`,
+  )
+}
+
+/**
+ * A scan that broke makes the diff evidence of nothing, whichever side broke.
+ *
+ * The counts are not the problem — a withdrawn file is in `stats.skippedFiles`, so its
+ * Symbols already classify as `unknown` rather than as deletions. The problem is greenness: a
+ * plugin exception is the one incident `scan` refuses to exit `0` on (§5.4), and a run that
+ * cannot parse the workspace should not turn green by being asked for a diff instead of a
+ * scan. That covers the base side too, deliberately — a fault at the base ref reddens every
+ * diff taken against it, which is the intended reading of "this comparison has a broken half".
+ */
+function warnOnScanFault(faultedScans: readonly DiffSide[], warn: WarnFn): void {
+  if (faultedScans.length === 0) return
+  warn(
+    `⚠ A plugin exception withdrew file(s) during the ${faultedScans.join(" and ")} scan, so this run exits 3 ` +
+      `even though the diff was written. Fix the plugin, or the comparison is against a workspace neither scan could read.`,
+  )
 }
 
 /**
@@ -277,11 +348,19 @@ function parseRefSpec(spec: string): RefSpec {
   return { base, head }
 }
 
-async function resolveIRs(
-  options: DiffOptions,
-  cwd: string,
-  warn: WarnFn,
-): Promise<[IR, IR, string, string, GitRenameMap | null]> {
+type ScanPair = Record<DiffSide, ScanReport>
+
+interface ResolvedIRs {
+  baseIR: IR
+  headIR: IR
+  baseRef: string
+  headRef: string
+  gitRenames: GitRenameMap | null
+  /** The two scans this command ran, or `null` when both documents came off disk. */
+  scans: ScanPair | null
+}
+
+async function resolveIRs(options: DiffOptions, cwd: string, warn: WarnFn): Promise<ResolvedIRs> {
   if (options.refSpec !== undefined && options.refSpec !== null && options.refSpec.length > 0) {
     if (options.base !== undefined && options.base !== null) {
       throw new CliError(
@@ -302,7 +381,14 @@ async function resolveIRs(
   }
   const baseIR = await readIR(resolve(cwd, options.base))
   const headIR = await readIR(resolve(cwd, options.head))
-  return [baseIR, headIR, options.base, options.head, null]
+  return {
+    baseIR,
+    headIR,
+    baseRef: options.base,
+    headRef: options.head,
+    gitRenames: null,
+    scans: null,
+  }
 }
 
 async function resolveViaGit(
@@ -310,7 +396,7 @@ async function resolveViaGit(
   cwd: string,
   spec: RefSpec,
   warn: WarnFn,
-): Promise<[IR, IR, string, string, GitRenameMap | null]> {
+): Promise<ResolvedIRs> {
   const git = options.git ?? defaultGitRunner
   await assertRefResolvable(git, cwd, spec.base, "base")
   await assertRefResolvable(git, cwd, spec.head, "head")
@@ -322,20 +408,29 @@ async function resolveViaGit(
   const headOutputDir = resolve(tempParent, "head-out")
   let baseIR: IR
   let headIR: IR
+  let scans: ScanPair
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
-    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir)
+    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, {
+      label: `base ref "${spec.base}"`,
+    })
     if (baseReport.irPath === null) {
       throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
     }
     baseIR = await readIR(baseReport.irPath)
 
-    const headReport = await runScanInDir(cwd, options, headOutputDir)
+    // Labelled by what it read, not by `spec.head`: §6.4 scans the working tree as the head
+    // whatever the ref spec calls it, so `head ref "v1.1.0"` would name a revision this scan
+    // never opened.
+    const headReport = await runScanInDir(cwd, options, headOutputDir, warn, {
+      label: "head (working tree)",
+    })
     if (headReport.irPath === null) {
       throw new CliError("scan for head ref produced no IR file.", "runtime-error")
     }
     headIR = await readIR(headReport.irPath)
+    scans = { base: baseReport, head: headReport }
   } finally {
     try {
       await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
@@ -347,18 +442,29 @@ async function resolveViaGit(
     await rm(tempParent, { recursive: true, force: true })
   }
 
-  return [baseIR, headIR, spec.base, spec.head, renames]
+  return {
+    baseIR,
+    headIR,
+    baseRef: spec.base,
+    headRef: spec.head,
+    gitRenames: renames,
+    scans,
+  }
 }
 
 async function runScanInDir(
   cwd: string,
   options: DiffOptions,
   outputDir: string,
+  warn: WarnFn,
+  incident: { label: string },
 ): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
     cwd,
     outputDir,
     format: "json",
+    warn,
+    incidentLabel: incident.label,
     ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
     ...(options.compact === undefined ? {} : { compact: options.compact }),
   }

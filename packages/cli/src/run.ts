@@ -1,9 +1,8 @@
-import { dirname } from "node:path"
 import { Command, InvalidArgumentError } from "commander"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
 import { runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
-import { runScan, type ScanReport } from "./commands/scan"
+import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
 import { readEnv } from "./env"
 import { CliError } from "./errors"
@@ -147,6 +146,9 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.lsp === undefined ? {} : { lsp: cmdOptions.lsp }),
             ...(env.logLevel === null ? {} : { logLevel: env.logLevel }),
             ...withConfigPath(cmdOptions.config, env),
+            warn: (message: string) => {
+              stderr.write(`${message}\n`)
+            },
           })
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files\n`,
@@ -154,7 +156,6 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           stdout.write(`${report.callResolutionLine}\n`)
           if (report.irPath !== null) stdout.write(`→ ${report.irPath}\n`)
           if (report.workspaceMdPath !== null) stdout.write(`→ ${report.workspaceMdPath}\n`)
-          warnOnScanIncidents(report, stderr)
           return report.exitCode
         })(),
     )
@@ -244,6 +245,9 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               ? {}
               : { debugResolution: cmdOptions.debugResolution }),
             ...withConfigPath(cmdOptions.config, env),
+            warn: (message: string) => {
+              stderr.write(`${message}\n`)
+            },
           })
           switch (outcome.kind) {
             case "single":
@@ -337,101 +341,6 @@ function withConfigPath(
 ): { configPath?: string } {
   const resolved = resolveConfigPath(cliFlag, env)
   return resolved === undefined ? {} : { configPath: resolved }
-}
-
-/**
- * Config discovery is anchored to `cwd`, everything inside the config to the workspace
- * root. When the two directories differ — running inside a monorepo package that has its
- * own `aburi.json` — a relative path in that file points somewhere other than where its
- * author was looking, and the scan still covers the whole workspace. Both are deliberate
- * (see `resolveConfig`), and neither is visible from the command line, so say it.
- */
-function warnOnConfigOutsideWorkspaceRoot(report: ScanReport, stderr: NodeJS.WritableStream): void {
-  if (report.configSource === null) return
-  if (dirname(report.configSource) === report.workspaceRoot) return
-  stderr.write(
-    `⚠ Config ${report.configSource} sits below the workspace root ${report.workspaceRoot}. ` +
-      `Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, ` +
-      `and the scan covers the whole workspace.\n`,
-  )
-}
-
-/**
- * How many withdrawn files are named individually before the list is summarised.
- *
- * A plugin broken enough to reject one file usually rejects them all, so the untruncated
- * list is the whole workspace — which on CI scrolls every other warning out of the log it
- * was meant to appear in. Ten is enough to see the shape (one path, or many) and read the
- * message, which is identical across them when the fault is the plugin's.
- */
-const MAX_LISTED_EXTRACTION_FAILURES = 10
-
-/**
- * §5.6 — surface parse failures / soft timeouts / discovery-time skips on stderr so a
- * scan that ate 50 broken files still produces a visible signal. The main summary line
- * on stdout stays clean; this only fires when a non-empty incident list exists.
- */
-function warnOnScanIncidents(report: ScanReport, stderr: NodeJS.WritableStream): void {
-  warnOnConfigOutsideWorkspaceRoot(report, stderr)
-  if (report.parseErrorCount > 0) {
-    stderr.write(`⚠ ${report.parseErrorCount} file(s) had recoverable parse errors.\n`)
-  }
-  if (report.parseFailureCount > 0) {
-    // Apart from the line above rather than folded into it: those files are in the IR with
-    // warnings against them, these are not in it at all, and the difference is the whole
-    // reason a reader is reading the count. The skip summary below names them too, among
-    // every other reason a file went missing; this says which of them are unparseable.
-    stderr.write(
-      `⚠ ${report.parseFailureCount} file(s) could not be parsed and were left out of the IR.\n`,
-    )
-  }
-  if (report.timeoutCount > 0) {
-    stderr.write(
-      `⚠ ${report.timeoutCount} effect classification(s) hit the per-call timeout budget.\n`,
-    )
-  }
-  if (report.skipped.length > 0) {
-    stderr.write(
-      `⚠ ${report.skipped.length} file(s) contributed no Symbols: ${summariseSkipped(report.skipped)}\n`,
-    )
-  }
-  if (report.extractionFailures.length > 0) {
-    // Named on its own line rather than left inside the skip summary: this is the reason
-    // that decides the exit code, and a reader given a non-zero status needs to know which
-    // of the counts above earned it — and, unlike the other reasons, which files and why.
-    // `@aburi/core` logs the same per file, but through its own sink, which disappears at
-    // `ABURI_LOG_LEVEL=error` and never reaches a caller that injected its own streams.
-    stderr.write(
-      `⚠ ${report.extractionFailures.length} file(s) were dropped because a plugin threw while extracting them.\n`,
-    )
-    for (const failure of report.extractionFailures.slice(0, MAX_LISTED_EXTRACTION_FAILURES)) {
-      stderr.write(`    ${failure.file}: ${failure.message}\n`)
-    }
-    const hidden = report.extractionFailures.length - MAX_LISTED_EXTRACTION_FAILURES
-    if (hidden > 0) stderr.write(`    …and ${hidden} more\n`)
-  }
-  const lsp = report.lspEnrichment
-  if (lsp !== undefined) {
-    if (lsp.filesFellBack > 0) {
-      stderr.write(
-        `⚠ LSP enrichment fell back for ${lsp.filesFellBack} file(s); IR field values in those files remain at the untyped tier.\n`,
-      )
-    }
-    if (lsp.languagesDisabled.length > 0) {
-      stderr.write(`⚠ LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.\n`)
-    }
-    if (lsp.requestsTimedOut > 0 || lsp.requestsFailed > 0) {
-      stderr.write(
-        `  LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.\n`,
-      )
-    }
-  }
-}
-
-function summariseSkipped(skipped: readonly { reason: string }[]): string {
-  const counts = new Map<string, number>()
-  for (const s of skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1)
-  return [...counts.entries()].map(([reason, n]) => `${reason}=${n}`).join(", ")
 }
 
 function parseFormat(value: string): "json" | "md" | "both" {
