@@ -385,6 +385,10 @@ describe("aburi diff — both scans it ran for you", () => {
     // happened — which neither scan is in a position to know.
     expect(warnings.filter((m) => m.includes("contributed no Symbols"))).toHaveLength(2)
     expect(warnings.filter((m) => m.includes("skipped by both scans"))).toHaveLength(1)
+    // And no fourth. A refusal is not a recoverable error, and neither scan faulted, so the
+    // two lines that qualify the counts have nothing to say here.
+    expect(warnings.join("\n")).not.toContain("recoverable parse errors")
+    expect(warnings.join("\n")).not.toContain("exits 3")
   })
 
   it("reports no scan incidents in --base/--head mode, because it ran no scan", async () => {
