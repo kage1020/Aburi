@@ -118,9 +118,19 @@ Contracts to know:
 - `symbolDropHint` returns `{ reason, category: "B" | "C" }` or `null`. Category
   B drops mean "the Symbol never makes it into the IR" — use this for genuine
   boilerplate. Category C means "the Symbol is kept but its calls are pruned".
-- Errors from `parseFile` are recoverable — return the tree you built and add
-  the errors to `ParseResult.errors`. A `terminalParseFailure` (thrown) skips
-  the file entirely and surfaces in the CLI's `parseErrorCount`.
+- A syntax error in the source is not a reason to give up: return the tree you
+  built and add a `recoverable: true` entry to `ParseResult.errors`. The file is
+  extracted as usual and the CLI counts it in `parseErrorCount`.
+- To say a file must **not** be used, mark an error `recoverable: false`. The
+  core withdraws it — no Symbols, no `stats.parsedFiles`, an entry in
+  `ScanResult.skipped` under `reason: "parse-failed"` quoting your message, and
+  a line in the CLI's `parseFailureCount`. Returning `tree: null` withdraws the
+  file on the same terms; set both when you have no tree, and only the flag when
+  you have one but refuse it (a wrong-dialect source, a generated blob). The
+  exit code stays `0` either way — an unparseable file describes the source.
+- **Throwing** is a different thing again: the core withdraws the file under
+  `reason: "extraction-failed"`, records what you threw, and `aburi scan` exits
+  `3`. Throw when your plugin hit a bug, not when the source is unusable.
 
 ## Framework plugin
 

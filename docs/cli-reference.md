@@ -83,9 +83,11 @@ aburi scan [--output-dir <dir>] [--format json|md|both]
 | `--no-timestamp` | Omit `generatedAt` from the IR. Implicit when `CI` env is set. |
 | `--config <path>` | Alternate config file. |
 
-Non-fatal incidents are surfaced on stderr — recoverable parse errors, effect-classify
-timeouts, discovery-time skips. They do NOT change the exit code; they warn
-loudly so a scan that ate 50 broken files never looks green.
+Incidents are surfaced on stderr — recoverable parse errors, files a language plugin could
+not parse, effect-classify timeouts, discovery-time skips — so a scan that ate 50 broken
+files never looks green. All of those leave the exit code at `0`: they describe the source,
+not the run. The one that does not is a file a plugin **threw** on, which is named
+individually and moves the code to `3`.
 
 **Examples:**
 
