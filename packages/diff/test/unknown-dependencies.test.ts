@@ -130,6 +130,10 @@ describe("buildDiff — an edge into a file the other side never analysed", () =
   })
 
   it("leaves a component-level edge alone, because a Component has no file to lose", () => {
+    // `billing` is also the path of a file this scan skipped — the one arrangement that tells
+    // "endpoints are resolved through symbols[].source.file" apart from "the endpoint string is
+    // matched against skippedFiles". A Component id is not a path, and treating it as one would
+    // make an architectural edge disappear into the unknown group on a coincidence.
     const base = makeIR({
       symbols: [gone, kept],
       dependencies: [
@@ -137,9 +141,14 @@ describe("buildDiff — an edge into a file the other side never analysed", () =
         dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept"),
       ],
     })
-    const head = withSkipped(makeIR({ symbols: [kept], dependencies: [] }), [
-      { path: "src/gone.ts", reason: "parse-failed" },
-    ])
+    const head = withSkipped(
+      makeIR({ symbols: [kept], dependencies: [] }),
+      [
+        { path: "billing", reason: "unroutable" },
+        { path: "src/gone.ts", reason: "parse-failed" },
+      ],
+      4,
+    )
     const result = diffOf(base, head)
 
     expect(result.dependencies.removed).toEqual([dep("billing", "pricing", { via: "import" })])
