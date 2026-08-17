@@ -400,6 +400,8 @@ Three properties this rests on:
 
 When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
 
+`dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) rather than in the artifact.
+
 ### 3.6 Handling dropped symbols
 
 Symbols with `dropped: true` are **excluded** from matching in stages 3/4:
@@ -671,11 +673,28 @@ componentDiff = {
 ```
 dependencyDiff = {
   added:   [Dependency],
-  removed: [Dependency]
+  removed: [Dependency],
+  unknown: [{ dependency, absentFrom, lostFiles }]   // §6.2.1
 }
 ```
 
 Dependency identity is judged by (from, to, via). Changes to direction / effect are treated as an added+removed pair (no modified needed).
+
+#### 6.2.1 `unknown`: the other document could not have held this edge
+
+`dependencies[]` is projected from the resolved call graph, so a Symbol that never reached a document takes every edge it participated in with it. Comparing the two arrays by identity alone therefore reports those edges as deletions — the same confident-but-wrong report §3.5.1 exists to prevent, one array over, and the half that is easiest to miss is an edge whose *other* end survived: both revisions hold that Symbol, so the edge reads as a call the author removed.
+
+An edge one document holds is `unknown` when the other document never analysed the file an endpoint of it lives in. `absentFrom` names that document, on the same reading as §3.5.1 (`head` means "this may still exist", `base` means "this may not be new"), and `lostFiles[]` names the files with the reason each was skipped.
+
+Three properties, two of them differing from the Symbol side:
+
+- **The endpoint's file comes from the document that holds the edge.** An endpoint is matched against `symbols[].source.file` in that document, which is the same space `stats.skippedFiles[].path` is in and the same space §3.5.1 classifies Symbols by. Reading the file out of the id's path segment instead would be a second answer to the same question, and nothing in the schema forces the two to agree.
+- **`lostFiles` is a list, where `SymbolUnknown` carries one `reason`.** An edge has two endpoints: they can sit in two files skipped for two different reasons, one of which says re-run and the other says fix something. An intra-file edge collapses to the single file it lost.
+- **Component-level edges are never reclassified.** A Component is an aggregate over roots and has no file to lose, so a component endpoint is simply absent from the lookup. Stated rather than left to be inferred, because the asymmetry is otherwise invisible.
+
+A direction or effect flip stays an added + removed pair: both documents hold the triple, so neither lost an endpoint file.
+
+`dependencies.unknown[]` and `summary.depsUnknown` are optional in the schema only so a diff written before they existed stays valid. A current writer always emits both, empty array and zero included — unlike the IR's `stats.skippedFiles`, there is no arithmetic elsewhere in the document that would let a reader tell "nothing was unknown" from "this writer could not say".
 
 ## 7. Output formats
 
@@ -707,7 +726,9 @@ Dependency identity is judged by (from, to, via). Changes to direction / effect 
     "componentsRemoved": 0,
     "componentsChanged": 2,
     "depsAdded":     3,
-    "depsRemoved":   1
+    "depsRemoved":   1,
+    "unknown":       2,
+    "depsUnknown":   1
   },
   "symbols": [
     { "status": "added",   "symbol": { /* Symbol */ } },
@@ -724,7 +745,8 @@ Dependency identity is judged by (from, to, via). Changes to direction / effect 
   },
   "dependencies": {
     "added":   [ /* Dependency[] */ ],
-    "removed": [ /* Dependency[] */ ]
+    "removed": [ /* Dependency[] */ ],
+    "unknown": [ /* {dependency, absentFrom, lostFiles} — see §6.2.1 */ ]
   }
 }
 ```

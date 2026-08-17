@@ -154,6 +154,9 @@ function endpointsLostBy(
   const byPath = new Map<string, SkippedFile["reason"]>()
   for (const endpoint of [dep.from, dep.to]) {
     const file = holder.symbolFiles.get(endpoint)
+    // A Component endpoint, or — in a Document that never went through the integrity checker,
+    // whose invariant #4 forbids it — a Symbol endpoint with no Symbol behind it. Neither has
+    // a file this can ask about, so the edge keeps whatever the identity comparison said.
     if (file === undefined) continue
     const reason = absent.lostFiles.get(file)
     if (reason === undefined) continue
