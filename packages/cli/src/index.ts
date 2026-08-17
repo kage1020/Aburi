@@ -3,6 +3,7 @@ export {
   classifyDiffError,
   type DiffOptions,
   type DiffReport,
+  type DiffSide,
   formatFailOnMessage,
   type GitRunner,
   runDiff,
@@ -19,6 +20,7 @@ export {
   runInit,
 } from "./commands/init"
 export {
+  reportScanIncidents,
   runScan,
   type ScanOptions,
   type ScanReport,

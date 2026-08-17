@@ -13,7 +13,7 @@ document is the operator-facing reference.
 | `0` | `EXIT.SUCCESS` | Command finished; no `--fail-on` gate triggered. |
 | `1` | `EXIT.RUNTIME` | Unexpected runtime failure (IO, unhandled exception). |
 | `2` | `EXIT.INPUT_ERROR` | Bad argv, missing / malformed input file, unresolvable IR shape, ambiguous `aburi explain` target, `--fail-on` grammar mistake. |
-| `3` | `EXIT.GATE` | `--fail-on` clause triggered, or a plugin failed to load. This is the code CI pipelines gate on. |
+| `3` | `EXIT.GATE` | `--fail-on` clause triggered, a plugin failed to load, or a plugin exception withdrew a file during a scan the command ran. This is the code CI pipelines gate on. |
 
 ## Environment variables
 
@@ -89,6 +89,10 @@ files never looks green. All of those leave the exit code at `0`: they describe 
 not the run. The one that does not is a file a plugin **threw** on, which is named
 individually and moves the code to `3`.
 
+Every command that scans reports them the same way, because the reporting belongs to the scan.
+`aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.
+`aburi explain` reports the scan it ran for you, and nothing at all when it read an IR off disk.
+
 **Examples:**
 
 ```bash
@@ -119,7 +123,13 @@ is always scanned from the working tree — its ref label is used only for the
 report. Rename collection failures warn on stderr instead of silently downgrading
 `moved` to `removed + added`.
 
-**File mode** — read two IR files and jump straight to `buildDiff`. Skips git.
+**File mode** — read two IR files and jump straight to `buildDiff`. Skips git, so there are no
+scan incidents to report. It still names the files each document records a plugin as having
+thrown on, and does not gate on them: that fault had its exit code in the run that hit it.
+
+In ref mode a scan that did not exit clean exits `3` even with no `--fail-on` clause. The counts
+are not the reason — a withdrawn file's Symbols come out as `unknown`, not as deletions — the
+reason is that a workspace `aburi scan` refuses to call green must not go green here instead.
 
 | Flag | Effect |
 |---|---|
@@ -183,6 +193,10 @@ Three-arm dispatch:
 
 Ambiguous substring hits exit `2` (`EXIT.INPUT_ERROR`) with the candidate list on
 stdout so the operator can requalify. Zero hits exit `1` (`EXIT.RUNTIME`).
+
+A rescan that did not exit clean exits `3` whichever of those the lookup concluded: the withdrawn
+file could have held the match, or a second candidate for it. Reading an existing IR (`--ir`, or
+an `out/aburi.ir.json` already on disk) runs no scan and leaves the code alone.
 
 **Examples:**
 

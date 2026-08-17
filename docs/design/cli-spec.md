@@ -217,6 +217,33 @@ no Symbols" summary, and why it is the only incident whose files are listed indi
 with a "…and N more" tail): a reader handed a non-zero status needs to know which incident earned
 it and which files it was.
 
+Where the lines come from is part of the contract. `runScan` writes them to a sink its caller
+supplies, so all three commands that scan report them, rather than one command's wrapper
+printing them while the other two discard the report. A caller that supplies no sink gets no
+incident report.
+
+That is not the same as silence. The run's `Logger` is a separate channel — per file rather
+than per run, governed by `ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr`
+whatever streams the caller injected. An embedded scan with no sink is quiet, not mute, and
+routing that channel to the caller is a known gap rather than something this contract covers.
+It is also why the extraction failures above are listed by the CLI itself: at
+`ABURI_LOG_LEVEL=error` the per-file lines are gone, and the report is all that is left.
+
+A command that runs more than one scan labels them, after the glyph, with the scan the line
+came from:
+
+```
+⚠ base ref "main": 3 file(s) had recoverable parse errors.
+```
+
+`⚠` starts every line that stands on its own. The only lines without it are the indented
+per-file listing and its `…and N more` tail, which belong to the line above them and are
+attributed by it.
+
+The warnings precede the stdout summary in a merged view (a terminal, `2>&1`, an Actions log),
+where before the reporting moved they followed it. Deliberate: the last thing on screen is then
+the kept / dropped line and the artifact paths, which is the part a reader acts on.
+
 ## 6. `aburi diff`
 
 Compares two IRs.
@@ -307,7 +334,25 @@ Or `fetch-depth: 50` or more, at a depth that includes the base ref. The default
 | 0 | Diff computed successfully (regardless of whether differences exist) |
 | 1 | Computation error (invalid IR, git error) |
 | 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing) |
-| 3 | Changes matching `--fail-on` were detected (CI gate) |
+| 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
+
+The second cause is about greenness, not about counts. A file a plugin threw on is recorded in
+`stats.skippedFiles`, so its Symbols already classify as `unknown` rather than as deletions and
+the diff overstates nothing. The exit code is what would be wrong: the same workspace makes
+`aburi scan` exit `3`, and asking it for a diff instead must not turn it green.
+
+A fault at the **base** ref gates as well. That is a policy rather than a side effect, and it
+has a cost — a broken base reddens every diff taken against it until the base moves — but a
+comparison with a broken half is not evidence about the half that worked.
+
+It gates on the scan's exit code, not on a named incident. A plugin exception is the only reason
+that reaches it today and §5.4 leaves open that others may follow; the diagnostic wording is
+derived from what the scan actually reported, so a second reason arrives with the code right and
+the message still true.
+
+When a gate clause and a scan fault both apply the code is `3` either way, both messages are
+printed, and `DiffReport.faultedScans` names the sides so a programmatic caller does not have to
+read the warnings to tell the two apart.
 
 ### 6.6 stdout Example
 
@@ -327,6 +372,31 @@ The `unknown` count is appended to the first line when there is one — `+5 -3 ~
 A file skipped by **both** scans produces no `unknown` entry — there are no Symbols from it in either document, so the matcher has no leftover to classify — and the diff is then silent about a file it never compared. Those paths are named on stderr, capped like the other per-file listings. Representing them inside `diff.json` is an open question: the diff has nothing to say about the file beyond "neither side read it", and that is a statement about the run rather than about a Symbol.
 
 An IR that dropped files but predates `stats.skippedFiles` reports the count without the list, and `aburi diff` cannot then tell a lost file from a deleted one — it classifies every leftover as `added` / `removed`, which is the pre-field behaviour, and warns on **stderr** for each side that is in that state. It does not guess: inferring the list from `totalFiles > parsedFiles` would attach the doubt to whichever Symbols happened to be missing.
+
+Ref mode runs two scans, so both scans' incidents (§5.6) appear, labelled by side. The base is
+labelled by its ref; the head is labelled `head (working tree)` and never by the ref spec's head
+token, which §6.4 does not scan.
+
+A file lost on **both** sides therefore produces each scan's account of it and then the diff's:
+each scan saying what it failed to read, and the diff saying the comparison never happened. That
+is not duplication — neither scan is in a position to know the other lost the same file — and
+how many lines it comes to depends on the reason. A refusal costs two per scan (the withdrawal
+and the skip summary), an over-size file one.
+
+One line has no counterpart in the artifact at all. A file whose parse reported *recoverable*
+errors reached the IR rather than `stats.skippedFiles`, so nothing marks it and nothing about it
+becomes `unknown` — yet those errors may have cost it a declaration, leaving its Symbol set short
+and moving `added` / `removed` with no file having gone missing. `aburi diff` says so when either
+scan reported one, and only ref mode can: `parseErrorCount` is a property of the scan, not of the
+document it wrote, so `--base` / `--head` has nothing to read.
+
+`--base` / `--head` is not silent about faults, though. `stats.skippedFiles[].reason` persists
+`extraction-failed`, so file mode can see that a plugin threw when a document was written even
+though it never watched it happen; it names those paths per side. It does **not** gate on them:
+the fault already had its exit code in the run that hit it, and failing here would red a job for
+someone else's incident, on documents the caller pinned deliberately. `DiffReport.faultedScans`
+is `null` in this mode rather than empty, because "ran no scan" is not the same answer as "ran
+two clean scans".
 
 `--quiet`:
 ```
@@ -423,6 +493,10 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 3. Generate the Markdown projection ([`markdown-projection.md`](./markdown-projection.md) §7)
 4. Emit to stdout (or `--output`)
 
+When step 1 rescans, that scan's incidents (§5.6) go to stderr, unlabelled — only one scan ran.
+Reading an existing IR reports nothing: no scan happened here, and the incidents of the scan that
+wrote the file were reported when it did.
+
 ### 7.5 When Multiple Candidates Match
 
 ```
@@ -443,6 +517,13 @@ exit code: 2 (ambiguous).
 | 0 | Success |
 | 1 | The requested symbol was not found |
 | 2 | Multiple candidates; disambiguation required |
+| 3 | The scan this command ran did not exit clean (§5.6) |
+
+Exit `3` outranks the other three. Once a file is missing from the IR every answer is suspect: a
+`single` hit may have had a competing candidate in the withdrawn file and should have been `2`,
+and a `not-found` may be describing the withdrawal rather than the workspace — which is the case
+that matters most, because `No matches` is otherwise indistinguishable from "that Symbol does not
+exist". Reading an existing IR cannot reach this code, since no scan ran.
 
 ## 8. `aburi vocab`
 
@@ -501,6 +582,11 @@ Description: NestJS OnModuleInit hook
 | 3 | Plugin error / fail-on gate / strict violation |
 
 128+N is for fatal signals (Aburi itself does not use it).
+
+A plugin error means the same thing in every command that scans. `scan`, `diff` and `explain` all
+exit `3` when the scan they ran did not exit clean, whichever of them ran it. A command that ran
+no scan does not inherit a code from a document it merely read — it says what the document
+records and leaves the status alone.
 
 ## 10. stdout / stderr Conventions
 
@@ -623,6 +709,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL16 | `CI=true aburi scan` | Progress animation suppressed |
 | CL17 | `--log-level debug aburi diff` on error | Stack trace on stderr |
 | CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
+| CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
+| CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
 
 ## 18. Design Decisions
 
