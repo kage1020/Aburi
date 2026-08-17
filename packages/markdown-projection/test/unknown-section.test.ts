@@ -1,7 +1,7 @@
-import type { IR, SymbolUnknown } from "@aburi/types"
+import type { Dependency, IR, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectWorkspace } from "../src"
-import { emptySummary, languageId, makeDiff, makeSymbol } from "./fixtures"
+import { emptySummary, endpoint, languageId, makeDiff, makeSymbol } from "./fixtures"
 
 /**
  * The two documents a human reads have to say what the scan lost, or the exit code is the
@@ -54,6 +54,76 @@ describe("projectDiff — the Unknown section", () => {
     const md = projectDiff(makeDiff({ summary: { ...emptySummary(), removed: 2 } }))
     expect(md).not.toContain("unknown")
     expect(md).not.toContain("## ❔")
+  })
+})
+
+describe("projectDiff — the Unknown dependency group", () => {
+  const edge: Dependency = {
+    from: endpoint("ts:src/gone.ts#handleRequest"),
+    to: endpoint("ts:src/kept.ts#log"),
+    via: "call",
+    direction: "outbound",
+    effect: null,
+  }
+
+  it("names the edge, the side that lost the file, and why", () => {
+    const md = projectDiff(
+      makeDiff({
+        dependencies: {
+          added: [],
+          removed: [],
+          unknown: [
+            {
+              dependency: { ...edge },
+              absentFrom: "head",
+              lostFiles: [{ path: "src/gone.ts", reason: "parse-failed" }],
+            },
+          ],
+        },
+        summary: { ...emptySummary(), depsUnknown: 1 },
+      }),
+    )
+    expect(md).toContain("## 🔗 Dependency changes")
+    expect(md).toContain("### Unknown — the other revision never read one end")
+    expect(md).toContain(
+      "- `ts:src/gone.ts#handleRequest` → `ts:src/kept.ts#log` (via `call`) — " +
+        "the head scan skipped `src/gone.ts` (parse-failed)",
+    )
+    // Not in the removed group, which is the whole point: a reviewer reading that group is
+    // reading deletions, and this is not one.
+    expect(md).not.toContain("### Symbol-level removed")
+  })
+
+  it("names both files when the two endpoints went for different reasons", () => {
+    const md = projectDiff(
+      makeDiff({
+        dependencies: {
+          added: [],
+          removed: [],
+          unknown: [
+            {
+              dependency: { ...edge },
+              absentFrom: "base",
+              lostFiles: [
+                { path: "src/also.ts", reason: "parse-timeout" },
+                { path: "src/gone.ts", reason: "over-size" },
+              ],
+            },
+          ],
+        },
+        summary: { ...emptySummary(), depsUnknown: 1 },
+      }),
+    )
+    expect(md).toContain(
+      "the base scan skipped `src/also.ts` (parse-timeout), `src/gone.ts` (over-size)",
+    )
+  })
+
+  it("omits the group when nothing is unknown, and for a diff that predates the field", () => {
+    expect(projectDiff(makeDiff())).not.toContain("never read one end")
+    expect(projectDiff(makeDiff({ dependencies: { added: [], removed: [] } }))).not.toContain(
+      "never read one end",
+    )
   })
 })
 

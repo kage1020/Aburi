@@ -185,9 +185,16 @@ export function buildDiff(input: DiffInput): DiffResult {
   summary.componentsRemoved = components.removed.length
   summary.componentsChanged = components.changed.length
 
-  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies)
+  // The same `lostFiles` maps the Symbol loop above reads, and the same `source.file` space:
+  // an endpoint's file comes from the document that holds the Symbol, so a Symbol classified
+  // `unknown` and the edges it participated in cannot disagree about which file went missing.
+  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, {
+    base: { symbolFiles: symbolFilesOf(input.baseIR), lostFiles: lostByBase },
+    head: { symbolFiles: symbolFilesOf(input.headIR), lostFiles: lostByHead },
+  })
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
+  summary.depsUnknown = dependencies.unknown?.length ?? 0
   summary.unknown = unknown
 
   symbols.sort(compareSymbolChange)
@@ -415,6 +422,17 @@ function lostFiles(ir: IR): Map<string, SymbolUnknown["reason"]> {
   const lost = new Map<string, SymbolUnknown["reason"]>()
   for (const file of ir.stats.skippedFiles ?? []) lost.set(file.path, file.reason)
   return lost
+}
+
+/**
+ * Where each Symbol this document holds lives, keyed by the id a Dependency endpoint would
+ * name it with. Component endpoints are simply absent, which is what keeps component-level
+ * edges out of the loss check without a special case for them.
+ */
+function symbolFilesOf(ir: IR): Map<string, string> {
+  const files = new Map<string, string>()
+  for (const symbol of ir.symbols) files.set(symbol.id, symbol.source.file)
+  return files
 }
 
 /**

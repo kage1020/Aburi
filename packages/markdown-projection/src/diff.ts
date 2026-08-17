@@ -1,5 +1,6 @@
 import type {
   Dependency,
+  DependencyUnknown,
   DiffResult,
   Symbol as IRSymbol,
   SliceId,
@@ -879,6 +880,7 @@ function renderDependencyChanges(diff: DiffResult): string[] {
   appendDependencyGroup(rows, "Component-level removed", compRemoved)
   appendDependencyGroup(rows, "Symbol-level added", symAdded)
   appendDependencyGroup(rows, "Symbol-level removed", symRemoved)
+  appendUnknownDependencies(rows, diff.dependencies.unknown ?? [])
   return rows
 }
 
@@ -887,6 +889,27 @@ function appendDependencyGroup(rows: string[], heading: string, deps: readonly D
   rows.push(`### ${heading}`)
   for (const d of deps) {
     rows.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
+  }
+  rows.push("")
+}
+
+/**
+ * Edges neither revision deleted, listed apart from the ones they did.
+ *
+ * Not split by level the way the four groups above are: only a Symbol endpoint has a file to
+ * lose, so every entry here is a Symbol-level edge by construction. Each line names the file
+ * and the reason after the edge, because that is what tells a reviewer whether to re-run
+ * (`parse-timeout`) or to fix something (`parse-failed`, `extraction-failed`).
+ */
+function appendUnknownDependencies(rows: string[], unknown: readonly DependencyUnknown[]): void {
+  if (unknown.length === 0) return
+  rows.push("### Unknown — the other revision never read one end")
+  for (const entry of unknown) {
+    const d = entry.dependency
+    const lost = entry.lostFiles.map((f) => `\`${f.path}\` (${f.reason})`).join(", ")
+    rows.push(
+      `- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`) — the ${entry.absentFrom} scan skipped ${lost}`,
+    )
   }
   rows.push("")
 }

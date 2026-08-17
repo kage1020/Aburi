@@ -27,6 +27,51 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
     expect(result.summary.unchanged).toBe(0)
   })
 
+  it("serialises unknown edges byte-identically however the inputs are ordered", () => {
+    // The array is built by walking two Maps, so without the explicit sort its order follows
+    // insertion order and the same two revisions produce two different files.
+    const gone = makeSymbol({ id: "ts:src/gone.ts#gone", name: "gone" })
+    const also = makeSymbol({ id: "ts:src/also.ts#also", name: "also" })
+    const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
+    const edges = [
+      dependency({ from: "ts:src/kept.ts#kept", to: "ts:src/gone.ts#gone", via: "call" }),
+      dependency({ from: "ts:src/also.ts#also", to: "ts:src/kept.ts#kept", via: "call" }),
+    ]
+    const head = makeIR({
+      symbols: [kept],
+      stats: {
+        totalFiles: 3,
+        parsedFiles: 1,
+        keptSymbols: 1,
+        droppedSymbols: 0,
+        effectPropagation: {
+          sccCount: 0,
+          maxSccSize: 0,
+          propagatedEffectCount: 0,
+          symbolsWithPropagatedEffects: 0,
+        },
+        skippedFiles: [
+          { path: "src/also.ts", reason: "parse-failed" },
+          { path: "src/gone.ts", reason: "parse-failed" },
+        ],
+      },
+    })
+    const forward = buildDiff({
+      baseIR: makeIR({ symbols: [gone, also, kept], dependencies: edges }),
+      headIR: head,
+      base: IR_REF,
+      head: IR_REF,
+    })
+    const reversed = buildDiff({
+      baseIR: makeIR({ symbols: [kept, also, gone], dependencies: [...edges].reverse() }),
+      headIR: head,
+      base: IR_REF,
+      head: IR_REF,
+    })
+    expect(forward.dependencies.unknown).toHaveLength(2)
+    expect(writeCanonicalDiff(forward)).toBe(writeCanonicalDiff(reversed))
+  })
+
   it("sorts symbols[] by (status, reference-id) so ordering is stable", () => {
     const s1 = makeSymbol({ id: "ts:src/a.ts#Bar", name: "Bar" })
     const s2 = makeSymbol({ id: "ts:src/a.ts#Alpha", name: "Alpha" })

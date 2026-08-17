@@ -25,6 +25,7 @@ export type {
   ArrayDelta,
   ComponentDiff,
   DependencyDiff,
+  DependencyUnknown,
   DiffResult,
   Generator as DiffGenerator,
   IRRef,

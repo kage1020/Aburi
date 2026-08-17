@@ -59,6 +59,10 @@ depsRemoved: number
  * Symbols whose fate could not be determined because one document never analysed their file. Optional rather than required so a diff written before the counter existed stays valid; absence means "this document predates the counter", not "nothing was unknown".
  */
 unknown?: number
+/**
+ * Dependencies whose fate could not be determined, for the same reason and on the same terms as `unknown`. Counts `dependencies.unknown[]`, so `depsAdded` and `depsRemoved` exclude them.
+ */
+depsUnknown?: number
 }
 export interface SymbolAdded {
 status: "added"
@@ -149,6 +153,36 @@ frameworksChanged: boolean
 export interface DependencyDiff {
 added: Dependency[]
 removed: Dependency[]
+/**
+ * Edges one document holds that the other could not have, because it never analysed the file an endpoint lives in. Sorted by the same (from, to, via) key as added and removed. Optional only so a diff written before the field existed stays valid — a current writer always emits the key, empty array included, because 'nothing was unknown' and 'this writer could not say' are different answers and there is no arithmetic elsewhere in the document to tell them apart.
+ */
+unknown?: DependencyUnknown[]
+}
+/**
+ * A Dependency present in one document and absent from the other, where the absent side never analysed the file one of its endpoints lives in. Not `added` or `removed`: dependencies[] is projected from the resolved call graph, so a withdrawn file takes every edge it participated in with it — including edges whose other end survived. Reporting those as deletions is the same confident-but-wrong report SymbolUnknown exists to prevent, one array over.
+ */
+export interface DependencyUnknown {
+dependency: Dependency
+/**
+ * Which document lacks the edge, which is the same document that lost the file. `head` reads as "this may still exist", `base` as "this may not be new".
+ */
+absentFrom: ("base" | "head")
+/**
+ * The endpoint files that document skipped, sorted by path with no repeats. A list rather than the single `reason` SymbolUnknown carries, because an edge has two endpoints: they can live in two different files with two different reasons, and an intra-file edge collapses to one entry. Component-level endpoints never appear — a Component is an aggregate over roots and has no file to lose.
+ * 
+ * @minItems 1
+ */
+lostFiles: SkippedFile[]
+}
+/**
+ * A file a scan never analysed, copied from the IR's stats.skippedFiles[]. Redeclared here rather than referenced across schemas, the same way Symbol, Component and Dependency are.
+ */
+export interface SkippedFile {
+path: string
+/**
+ * Why that document skipped the file. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
+ */
+reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
 }
 export interface SliceRecord {
 id: SliceId

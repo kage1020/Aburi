@@ -1,4 +1,5 @@
 export {
+  type DependencySideView,
   diffComponents,
   diffDependencies,
 } from "./components"

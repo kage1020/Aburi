@@ -4,6 +4,8 @@ import type {
   ComponentId,
   Dependency,
   DependencyDiff,
+  DependencyUnknown,
+  SkippedFile,
 } from "@aburi/types"
 
 /**
@@ -62,15 +64,41 @@ export function diffComponents(
 }
 
 /**
+ * What one document knows about itself, for deciding whether the *other* document's silence
+ * about an edge is evidence.
+ *
+ * `symbolFiles` is keyed on the endpoint id exactly as `dependencies[]` spells it, and its
+ * values come from `symbols[].source.file` — the same space `stats.skippedFiles[].path` is in,
+ * and the same space `buildDiff` classifies Symbols by. Reading the file out of the id's path
+ * segment instead would introduce a second answer to "which file is this endpoint in", and
+ * nothing in the schema forces the two to agree; a Symbol reported `unknown` while its edges
+ * stayed `removed` is precisely the inconsistency this exists to remove.
+ *
+ * A Component endpoint is absent from the map, which is how it stays out of the reclassification
+ * without a special case: a Component is an aggregate over roots and has no file to lose.
+ */
+export interface DependencySideView {
+  /** `source.file` of every Symbol this document holds, by the id an endpoint would name. */
+  symbolFiles: ReadonlyMap<string, string>
+  /** Files this document never analysed, by path, with the reason it gave. */
+  lostFiles: ReadonlyMap<string, SkippedFile["reason"]>
+}
+
+/**
  * §6.2 — Dependency diff. Identity is the composite `(from, to, via)` triple; direction
  * and effect changes are surfaced as an added + removed pair so `modified` is not part of
  * the schema (§6.2 tail). Uniqueness of that triple is the caller's obligation on the same
  * terms as `diffComponents` above — a repeat here is indistinguishable in the output from
  * the flip it encodes.
+ *
+ * `sides` is what separates a deletion from a loss (§3.5.1, deps half). Without it every
+ * one-sided edge is `added` or `removed` as before, which is what a direct caller gets and
+ * what this function did before the parameter existed; `buildDiff` always supplies it.
  */
 export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
+  sides?: { base: DependencySideView; head: DependencySideView },
 ): DependencyDiff {
   const baseKeys = new Map<string, Dependency>()
   for (const d of base) baseKeys.set(dependencyKey(d), d)
@@ -78,23 +106,62 @@ export function diffDependencies(
   for (const d of head) headKeys.set(dependencyKey(d), d)
   const added: Dependency[] = []
   const removed: Dependency[] = []
+  const unknown: DependencyUnknown[] = []
   for (const [key, dep] of headKeys) {
     const b = baseKeys.get(key)
     if (b === undefined) {
-      added.push(dep)
+      // Held by head and not by base, so its endpoints resolve against head — the document
+      // that has the Symbols — and the question is whether base could have seen them.
+      const lostFiles = sides === undefined ? [] : endpointsLostBy(dep, sides.head, sides.base)
+      if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "base", lostFiles })
+      else added.push(dep)
       continue
     }
+    // A direction or effect flip: both documents hold the triple, so neither lost an endpoint
+    // file and the pair is a real change rather than a gap.
     if (b.direction !== dep.direction || (b.effect ?? null) !== (dep.effect ?? null)) {
       removed.push(b)
       added.push(dep)
     }
   }
   for (const [key, dep] of baseKeys) {
-    if (!headKeys.has(key)) removed.push(dep)
+    if (headKeys.has(key)) continue
+    const lostFiles = sides === undefined ? [] : endpointsLostBy(dep, sides.base, sides.head)
+    if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "head", lostFiles })
+    else removed.push(dep)
   }
   added.sort(compareDependencies)
   removed.sort(compareDependencies)
-  return { added, removed }
+  unknown.sort((a, b) => compareDependencies(a.dependency, b.dependency))
+  return { added, removed, unknown }
+}
+
+/**
+ * The endpoint files `absent` never analysed, read through `holder` because that is the
+ * document the edge — and therefore the Symbol behind each endpoint — actually comes from.
+ *
+ * Both endpoints are checked: an edge dies when *either* end's file goes, including one whose
+ * other end survived, and that half is the easiest to miss because the surviving Symbol is
+ * right there in both documents.
+ *
+ * Deduped and sorted by path, so an intra-file edge collapses to the one file it lost.
+ */
+function endpointsLostBy(
+  dep: Dependency,
+  holder: DependencySideView,
+  absent: DependencySideView,
+): SkippedFile[] {
+  const byPath = new Map<string, SkippedFile["reason"]>()
+  for (const endpoint of [dep.from, dep.to]) {
+    const file = holder.symbolFiles.get(endpoint)
+    if (file === undefined) continue
+    const reason = absent.lostFiles.get(file)
+    if (reason === undefined) continue
+    byPath.set(file, reason)
+  }
+  return [...byPath.entries()]
+    .map(([path, reason]) => ({ path, reason }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 }
 
 /**
