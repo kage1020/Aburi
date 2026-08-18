@@ -1,8 +1,9 @@
 import { reconstructCallEdgesFromIR, type SerializeOptions, serializeCanonical } from "@aburi/core"
-import type { DiffResult, IR, IRRef, Summary, SymbolChange, SymbolUnknown } from "@aburi/types"
+import type { DiffResult, IR, IRRef, Summary, SymbolChange } from "@aburi/types"
 import {
   DEPENDENCY_IDENTITY_FIELDS,
   dependencyIdentity,
+  dependencySideView,
   diffComponents,
   diffDependencies,
 } from "./components"
@@ -148,8 +149,14 @@ export function buildDiff(input: DiffInput): DiffResult {
   // The two loops below read opposite ends: a base leftover is looked up by the file it
   // came from, a head leftover by the file it arrived in. In both cases the question is the
   // same — did the document that lacks this Symbol ever read the file it is in?
-  const lostByHead = lostFiles(input.headIR)
-  const lostByBase = lostFiles(input.baseIR)
+  // One construction per side, shared with the Dependency diff below. The Symbol loops and
+  // `diffDependencies` therefore read the same two maps rather than two answers to the same
+  // question — which is what makes "a Symbol reported unknown and the edges it took with it
+  // cannot disagree about which file went missing" structural instead of aspirational.
+  const baseSide = dependencySideView(input.baseIR)
+  const headSide = dependencySideView(input.headIR)
+  const lostByHead = headSide.lostFiles
+  const lostByBase = baseSide.lostFiles
 
   for (const h of finalRemainingHead) {
     if (h.dropped) {
@@ -185,9 +192,15 @@ export function buildDiff(input: DiffInput): DiffResult {
   summary.componentsRemoved = components.removed.length
   summary.componentsChanged = components.changed.length
 
-  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies)
+  const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, {
+    base: baseSide,
+    head: headSide,
+  })
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
+  // No `?? 0`: `diffDependencies` declares `unknown` present when it is given side views, so
+  // absorbing an absence here would launder a mis-wiring into a confident `depsUnknown: 0`.
+  summary.depsUnknown = dependencies.unknown.length
   summary.unknown = unknown
 
   symbols.sort(compareSymbolChange)
@@ -411,12 +424,6 @@ function referenceId(change: SymbolChange): string {
  * `totalFiles > parsedFiles` would attach a reason to whichever Symbols happened to be
  * missing. The CLI says so on stderr instead; a diff cannot invent the list.
  */
-function lostFiles(ir: IR): Map<string, SymbolUnknown["reason"]> {
-  const lost = new Map<string, SymbolUnknown["reason"]>()
-  for (const file of ir.stats.skippedFiles ?? []) lost.set(file.path, file.reason)
-  return lost
-}
-
 /**
  * Byte-deterministic serialiser for a DiffResult. Delegates to `@aburi/core`
  * `serializeCanonical` so the sort order, NFC normalisation, and codepoint key sort are

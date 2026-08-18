@@ -463,7 +463,12 @@ Entries with `status: "unknown"` — a Symbol one document has and the other nev
 
 ### Removed
 - `billing` → `legacy-auth` (via `import`)
+
+### Unknown — the other revision never read one end
+- `ts:src/route.ts#handleRequest` → `ts:src/log.ts#log` (via `call`) — the head scan skipped `src/route.ts` (parse-failed)
 ```
+
+The Unknown group is not split by level the way the added and removed groups are. Only a Symbol endpoint has a file to lose ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1), so every entry in it is a symbol-level edge by construction. Each line names the file and the reason after the edge, because that is what decides the reviewer's next move — `parse-timeout` says re-run, `parse-failed` and `extraction-failed` say fix something.
 
 #### 💧 Dropped changes (folded)
 

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { diffComponents, diffDependencies } from "../src"
+import { type DependencySideView, diffComponents, diffDependencies } from "../src"
 import { component, dependency } from "./fixtures"
+
+/**
+ * Side views for two documents that skipped nothing. Every one of these tests is about
+ * identity comparison, not about loss, so the honest input is a pair that has no skip list to
+ * offer — which `diffDependencies` requires a caller to spell rather than default into.
+ */
+const NO_LOSSES: { base: DependencySideView; head: DependencySideView } = {
+  base: { symbolFiles: new Map(), lostFiles: new Map() },
+  head: { symbolFiles: new Map(), lostFiles: new Map() },
+}
 
 describe("diffComponents (I5)", () => {
   it("classifies unchanged components as no-op (not in added/removed/changed)", () => {
@@ -83,7 +93,7 @@ describe("diffDependencies (I5)", () => {
       via: "import",
       direction: "inbound",
     })
-    const result = diffDependencies([before], [after])
+    const result = diffDependencies([before], [after], NO_LOSSES)
     expect(result.added).toHaveLength(1)
     expect(result.removed).toHaveLength(1)
     expect(result.added[0]?.direction).toBe("inbound")
@@ -103,21 +113,21 @@ describe("diffDependencies (I5)", () => {
       via: "call",
       effect: "db.write",
     })
-    const result = diffDependencies([before], [after])
+    const result = diffDependencies([before], [after], NO_LOSSES)
     expect(result.added).toHaveLength(1)
     expect(result.removed).toHaveLength(1)
   })
 
   it("emits pure removed when the triple vanishes from head", () => {
     const before = dependency({ from: "a", to: "b" })
-    const result = diffDependencies([before], [])
+    const result = diffDependencies([before], [], NO_LOSSES)
     expect(result.removed).toHaveLength(1)
     expect(result.added).toEqual([])
   })
 
   it("emits pure added when the triple is new in head", () => {
     const after = dependency({ from: "a", to: "b" })
-    const result = diffDependencies([], [after])
+    const result = diffDependencies([], [after], NO_LOSSES)
     expect(result.added).toHaveLength(1)
     expect(result.removed).toEqual([])
   })
@@ -130,6 +140,7 @@ describe("diffDependencies (I5)", () => {
         dependency({ from: "a", to: "z" }),
         dependency({ from: "a", to: "b" }),
       ],
+      NO_LOSSES,
     )
     const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
     expect(keys).toEqual([...keys].sort())
@@ -143,7 +154,7 @@ describe("diffDependencies (I5)", () => {
       direction: "outbound",
       effect: null,
     })
-    const result = diffDependencies([], [after])
+    const result = diffDependencies([], [after], NO_LOSSES)
     expect(result.added).toHaveLength(1)
     expect(result.added[0]?.from).toBe("ts:src/a.ts#caller")
     expect(result.added[0]?.via).toBe("call")
@@ -162,7 +173,7 @@ describe("diffDependencies (I5)", () => {
       direction: "outbound",
       effect: null,
     })
-    const result = diffDependencies([], [symEdge, compEdge])
+    const result = diffDependencies([], [symEdge, compEdge], NO_LOSSES)
     expect(result.added).toHaveLength(2)
     const keys = result.added.map((d) => `${d.from}::${d.to}::${d.via}`)
     expect(keys).toEqual([...keys].sort())
@@ -181,7 +192,7 @@ describe("diffDependencies (I5)", () => {
       direction: "outbound",
       effect: null,
     })
-    const result = diffDependencies([before], [])
+    const result = diffDependencies([before], [], NO_LOSSES)
     expect(result.removed).toHaveLength(1)
     expect(result.added).toEqual([])
   })

@@ -1,7 +1,7 @@
-import type { IR, SymbolUnknown } from "@aburi/types"
+import type { Dependency, IR, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectWorkspace } from "../src"
-import { emptySummary, languageId, makeDiff, makeSymbol } from "./fixtures"
+import { emptySummary, endpoint, languageId, makeDiff, makeSymbol } from "./fixtures"
 
 /**
  * The two documents a human reads have to say what the scan lost, or the exit code is the
@@ -54,6 +54,112 @@ describe("projectDiff — the Unknown section", () => {
     const md = projectDiff(makeDiff({ summary: { ...emptySummary(), removed: 2 } }))
     expect(md).not.toContain("unknown")
     expect(md).not.toContain("## ❔")
+  })
+})
+
+describe("projectDiff — the Unknown dependency group", () => {
+  const edge: Dependency = {
+    from: endpoint("ts:src/gone.ts#handleRequest"),
+    to: endpoint("ts:src/kept.ts#log"),
+    via: "call",
+    direction: "outbound",
+    effect: null,
+  }
+
+  it("names the edge, the side that lost the file, and why", () => {
+    const md = projectDiff(
+      makeDiff({
+        dependencies: {
+          added: [],
+          removed: [],
+          unknown: [
+            {
+              dependency: { ...edge },
+              absentFrom: "head",
+              lostFiles: [{ path: "src/gone.ts", reason: "parse-failed" }],
+            },
+          ],
+        },
+        summary: { ...emptySummary(), depsUnknown: 1 },
+      }),
+    )
+    expect(md).toContain("## 🔗 Dependency changes")
+    expect(md).toContain("### Unknown — the other revision never read one end")
+    expect(md).toContain(
+      "- `ts:src/gone.ts#handleRequest` → `ts:src/kept.ts#log` (via `call`) — " +
+        "the head scan skipped `src/gone.ts` (parse-failed)",
+    )
+  })
+
+  it("keeps the unknown edge out of the group a reviewer reads as deletions", () => {
+    // With `removed: []` the absence of `### Symbol-level removed` proves nothing — the
+    // assertion could not fail whatever the projection did. A real removal has to be present
+    // for "it did not land in there" to be a claim about anything.
+    const deleted: Dependency = {
+      from: endpoint("ts:src/a.ts#caller"),
+      to: endpoint("ts:src/b.ts#callee"),
+      via: "call",
+      direction: "outbound",
+      effect: null,
+    }
+    const md = projectDiff(
+      makeDiff({
+        dependencies: {
+          added: [
+            { ...deleted, from: endpoint("billing"), to: endpoint("payments"), via: "import" },
+          ],
+          removed: [deleted],
+          unknown: [
+            {
+              dependency: { ...edge },
+              absentFrom: "head",
+              lostFiles: [{ path: "src/gone.ts", reason: "parse-failed" }],
+            },
+          ],
+        },
+        summary: { ...emptySummary(), depsAdded: 1, depsRemoved: 1, depsUnknown: 1 },
+      }),
+    )
+    const removedSection = md.slice(
+      md.indexOf("### Symbol-level removed"),
+      md.indexOf("### Unknown"),
+    )
+    expect(removedSection).toContain("`ts:src/a.ts#caller`")
+    expect(removedSection).not.toContain("handleRequest")
+    // And the four level groups plus Unknown coexist, Unknown last.
+    expect(md.indexOf("### Component-level added")).toBeLessThan(md.indexOf("### Unknown"))
+  })
+
+  it("names both files when the two endpoints went for different reasons", () => {
+    const md = projectDiff(
+      makeDiff({
+        dependencies: {
+          added: [],
+          removed: [],
+          unknown: [
+            {
+              dependency: { ...edge },
+              absentFrom: "base",
+              lostFiles: [
+                { path: "src/also.ts", reason: "parse-timeout" },
+                { path: "src/gone.ts", reason: "over-size" },
+              ],
+            },
+          ],
+        },
+        summary: { ...emptySummary(), depsUnknown: 1 },
+      }),
+    )
+    expect(md).toContain(
+      "the base scan skipped `src/also.ts` (parse-timeout), `src/gone.ts` (over-size)",
+    )
+  })
+
+  it("omits the group when nothing is unknown, and for a diff that predates the field", () => {
+    expect(projectDiff(makeDiff())).not.toContain("never read one end")
+    expect(projectDiff(makeDiff({ dependencies: { added: [], removed: [] } }))).not.toContain(
+      "never read one end",
+    )
   })
 })
 
