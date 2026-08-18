@@ -1,6 +1,6 @@
 import { Command, InvalidArgumentError } from "commander"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
-import { runExplain } from "./commands/explain"
+import { type CoverageDoubt, runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
@@ -270,7 +270,22 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               break
             case "not-found":
               stderr.write(`No matches for "${argument}".\n`)
+              if (outcome.coverage !== null) {
+                stderr.write(`${coverageLine(outcome.coverage)}\n`)
+              }
               break
+            case "unknown": {
+              // Not a match failure, so it does not start with `No matches`: the document
+              // holds no answer to give, and saying otherwise is the defect being fixed.
+              const trailer =
+                outcome.namedBy === "id"
+                  ? ", the file that id names, so it cannot say whether that Symbol exists."
+                  : ", so it cannot say what that file declares."
+              stderr.write(
+                `Cannot answer "${argument}": this IR never analysed ${outcome.skipped.path} (${outcome.skipped.reason})${trailer}\n`,
+              )
+              break
+            }
           }
           return outcome.exitCode
         })(),
@@ -288,6 +303,20 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     return handleError(error, stderr)
   }
   return outcome
+}
+
+/**
+ * The second line under `No matches` when the IR says it did not cover everything.
+ *
+ * Counted, not listed. The arms that name a file get a statement about that file; here the
+ * document only knows it has gaps, and printing the whole skip list would answer a question
+ * about one Symbol with an inventory of the run.
+ */
+function coverageLine(doubt: CoverageDoubt): string {
+  if (doubt.kind === "named-losses") {
+    return `⚠ This IR names ${doubt.fileCount} file(s) the scan never analysed in stats.skippedFiles, so a match may be in one of them.`
+  }
+  return `⚠ This IR reports ${doubt.fileCount} file(s) it did not parse but predates stats.skippedFiles, so it cannot name them; a match may be in one of them. Re-run \`aburi scan\` to record the list.`
 }
 
 function isCommanderError(value: unknown): value is { code: string; message: string } {

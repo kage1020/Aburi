@@ -48,6 +48,7 @@ export {
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
   type SymbolIdParts,
+  symbolIdFile,
   toPosixRelative,
   trySymbolId,
 } from "./id"

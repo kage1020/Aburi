@@ -1,8 +1,8 @@
 import { access, writeFile } from "node:fs/promises"
 import { relative, resolve } from "node:path"
-import { detectWorkspaceRoot } from "@aburi/core"
+import { detectWorkspaceRoot, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
-import type { IR, Symbol as IRSymbol, UnresolvedCallDiagnostic } from "@aburi/types"
+import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
@@ -47,23 +47,52 @@ export type ExplainOutcome =
       writtenTo: string | null
     }
   | { kind: "ambiguous"; candidates: readonly IRSymbol[]; exitCode: ExitCode }
-  | { kind: "not-found"; exitCode: ExitCode }
+  | { kind: "not-found"; exitCode: ExitCode; coverage: CoverageDoubt | null }
+  /**
+   * The question named a file, and the document says that file was never analysed. Not an
+   * absence: the answer is that this IR cannot have one.
+   */
+  | {
+      kind: "unknown"
+      exitCode: ExitCode
+      skipped: SkippedFile
+      /** Whether the file came from the argument itself or from the file segment of an id. */
+      namedBy: "id" | "path"
+    }
+
+/**
+ * What an IR says about its own coverage, attached to a lookup that found nothing.
+ *
+ * Only ever attached to a miss the document could not tie to a file — the arms that name one
+ * get `unknown` instead. A hit carries nothing: the document is speaking about a Symbol it
+ * holds, and an `over-size` file is skipped by every run of a workspace, so a caveat on hits
+ * would be a permanent one.
+ */
+export type CoverageDoubt =
+  /** `stats.skippedFiles` names the files, and one of them may hold the answer. */
+  | { kind: "named-losses"; fileCount: number }
+  /** The document predates `stats.skippedFiles`: it counts its losses but cannot name them. */
+  | { kind: "unnamed-losses"; fileCount: number }
 
 /**
  * `aburi explain <id-or-pattern>` — three-arm dispatch mirrored from
  * `docs/design/cli-spec.md §7.2`:
  *
  * - argument contains `#` → full Symbol id lookup.
- * - argument contains `/` but no `#` AND resolves to an existing file → all Symbols
- *   whose `source.file` matches (compared against the workspace-root-relative POSIX
- *   path so a run from a subdirectory still hits the right rows).
+ * - argument contains `/` but no `#` AND either resolves to an existing file or is named in
+ *   `stats.skippedFiles` → all Symbols whose `source.file` matches (compared against the
+ *   workspace-root-relative POSIX path so a run from a subdirectory still hits the right
+ *   rows). The second leg is what `--ir` / `--no-rescan` are for: a pinned artifact is read
+ *   in a tree that need not hold the file, and requiring it on disk would drop the question
+ *   into the substring arm.
  * - otherwise → case-sensitive substring match on `Symbol.name`.
  *
  * When the substring match hits more than one Symbol the caller receives an
  * `ambiguous` outcome (exit 2) so they can add more of the qualified name. Zero hits
- * become `not-found` (exit 1). Both codes are overridden by `withScanFault` when the scan this
- * command ran did not exit clean — §7.6 — because the answer is then unsafe whichever of the
- * three it was. Every "single" / "file" outcome carries the resolved
+ * become `not-found` (exit 1), or `unknown` (exit 3) when the question named a file the
+ * document says it never analysed — §7.6. Both codes are overridden by `withScanFault` when
+ * the scan this command ran did not exit clean, because the answer is then unsafe whichever
+ * of the three it was. Every "single" / "file" outcome carries the resolved
  * `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
  * stdout mirror (avoiding the "output to file *and* stdout" behaviour the design
  * intentionally rules out).
@@ -108,10 +137,16 @@ async function locate(
 
   const arg = options.argument
   const outputPath = options.outputPath === undefined ? null : resolve(cwd, options.outputPath)
+  const lost = new Map<string, SkippedFile>()
+  for (const file of ir.stats.skippedFiles ?? []) lost.set(file.path, file)
+  const coverage = coverageDoubt(ir)
 
   if (arg.includes("#")) {
     const hit = ir.symbols.find((s) => s.id === arg)
-    if (hit === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
+    if (hit === undefined) {
+      const claimed = symbolIdFile(arg)
+      return missed(claimed === null ? undefined : lost.get(claimed), "id", coverage)
+    }
     const markdown = projectSymbolExplain(hit, explainContext)
     if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
     return {
@@ -123,28 +158,34 @@ async function locate(
     }
   }
 
-  if (arg.includes("/") && (await pathExistsStrict(resolve(cwd, arg)))) {
+  if (arg.includes("/")) {
     const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/")
-    const inFile = ir.symbols.filter((s) => s.source.file === relPath)
-    if (inFile.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME }
-    const markdown = inFile.map((s) => projectSymbolExplain(s, explainContext)).join("\n---\n\n")
-    if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
-    return {
-      kind: "file",
-      markdown,
-      symbols: inFile,
-      exitCode: EXIT.SUCCESS,
-      writtenTo: outputPath,
+    // The skip list is consulted before the disk probe, not after: a file the document
+    // already describes needs no filesystem to answer for it, and `unreadable` is a reason
+    // whose file may well refuse the probe too.
+    const skipped = lost.get(relPath)
+    if (skipped !== undefined || (await pathExistsStrict(resolve(cwd, arg)))) {
+      const inFile = ir.symbols.filter((s) => s.source.file === relPath)
+      if (inFile.length === 0) return missed(skipped, "path", coverage)
+      const markdown = inFile.map((s) => projectSymbolExplain(s, explainContext)).join("\n---\n\n")
+      if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+      return {
+        kind: "file",
+        markdown,
+        symbols: inFile,
+        exitCode: EXIT.SUCCESS,
+        writtenTo: outputPath,
+      }
     }
   }
 
   const matches = ir.symbols.filter((s) => s.name.includes(arg))
-  if (matches.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME }
+  if (matches.length === 0) return { kind: "not-found", exitCode: EXIT.RUNTIME, coverage }
   if (matches.length > 1) {
     return { kind: "ambiguous", candidates: matches, exitCode: EXIT.INPUT_ERROR }
   }
   const only = matches[0]
-  if (only === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME }
+  if (only === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME, coverage }
   const markdown = projectSymbolExplain(only, explainContext)
   if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
   return {
@@ -154,6 +195,49 @@ async function locate(
     exitCode: EXIT.SUCCESS,
     writtenTo: outputPath,
   }
+}
+
+/**
+ * A lookup that found nothing, answered as precisely as the document allows.
+ *
+ * The split is between a doubt the document can attach to the question and one it can only
+ * state about the run. The id and file arms name a file, so `stats.skippedFiles` either holds
+ * it — in which case the document positively contradicts "not found", and the honest answer
+ * is that it has none — or it does not, and the miss stands as one, qualified by whatever
+ * else the run lost.
+ *
+ * Called on a miss only. A Symbol that is present is answered from the document, however its
+ * id reads: the id's file segment is where the Symbol was declared to live when the id was
+ * minted, and `source.file` is where the document says it is, so consulting the skip list
+ * first would let a re-exported or generated Symbol be reported as unanswerable while it sits
+ * in `symbols[]`.
+ */
+function missed(
+  skipped: SkippedFile | undefined,
+  namedBy: "id" | "path",
+  coverage: CoverageDoubt | null,
+): ExplainOutcome {
+  if (skipped === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME, coverage }
+  return { kind: "unknown", exitCode: EXIT.GATE, skipped, namedBy }
+}
+
+/**
+ * What the document knows about its own gaps, read straight out of `stats`.
+ *
+ * A present-but-empty `skippedFiles` is no doubt at all: the key is Class B and writers omit
+ * it when nothing was lost, but a document that spells the empty case out is still saying the
+ * scan covered everything. Absent, the arithmetic is the only trace left — `aburi diff` warns
+ * about the same shape per side — and it can be counted but not named.
+ */
+function coverageDoubt(ir: IR): CoverageDoubt | null {
+  const skippedFiles = ir.stats.skippedFiles
+  if (skippedFiles !== undefined) {
+    if (skippedFiles.length === 0) return null
+    return { kind: "named-losses", fileCount: skippedFiles.length }
+  }
+  const unnamed = ir.stats.totalFiles - ir.stats.parsedFiles
+  if (unnamed <= 0) return null
+  return { kind: "unnamed-losses", fileCount: unnamed }
 }
 
 /**
