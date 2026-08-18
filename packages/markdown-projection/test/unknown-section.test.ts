@@ -89,9 +89,45 @@ describe("projectDiff — the Unknown dependency group", () => {
       "- `ts:src/gone.ts#handleRequest` → `ts:src/kept.ts#log` (via `call`) — " +
         "the head scan skipped `src/gone.ts` (parse-failed)",
     )
-    // Not in the removed group, which is the whole point: a reviewer reading that group is
-    // reading deletions, and this is not one.
-    expect(md).not.toContain("### Symbol-level removed")
+  })
+
+  it("keeps the unknown edge out of the group a reviewer reads as deletions", () => {
+    // With `removed: []` the absence of `### Symbol-level removed` proves nothing — the
+    // assertion could not fail whatever the projection did. A real removal has to be present
+    // for "it did not land in there" to be a claim about anything.
+    const deleted: Dependency = {
+      from: endpoint("ts:src/a.ts#caller"),
+      to: endpoint("ts:src/b.ts#callee"),
+      via: "call",
+      direction: "outbound",
+      effect: null,
+    }
+    const md = projectDiff(
+      makeDiff({
+        dependencies: {
+          added: [
+            { ...deleted, from: endpoint("billing"), to: endpoint("payments"), via: "import" },
+          ],
+          removed: [deleted],
+          unknown: [
+            {
+              dependency: { ...edge },
+              absentFrom: "head",
+              lostFiles: [{ path: "src/gone.ts", reason: "parse-failed" }],
+            },
+          ],
+        },
+        summary: { ...emptySummary(), depsAdded: 1, depsRemoved: 1, depsUnknown: 1 },
+      }),
+    )
+    const removedSection = md.slice(
+      md.indexOf("### Symbol-level removed"),
+      md.indexOf("### Unknown"),
+    )
+    expect(removedSection).toContain("`ts:src/a.ts#caller`")
+    expect(removedSection).not.toContain("handleRequest")
+    // And the four level groups plus Unknown coexist, Unknown last.
+    expect(md.indexOf("### Component-level added")).toBeLessThan(md.indexOf("### Unknown"))
   })
 
   it("names both files when the two endpoints went for different reasons", () => {

@@ -4,12 +4,16 @@ import type {
   ComponentId,
   Dependency,
   DependencyDiff,
+  DependencyEndpoint,
   DependencyUnknown,
-  SkippedFile,
+  DiffSkippedFile,
+  IR,
+  RelativePath,
+  SkipReason,
 } from "@aburi/types"
 
 /**
- * §6.1 — Component diff. Assumes `components[].id` is unique on each side (ir-schema.md §14
+ * `docs/design/diff-algorithm.md` §6.1 — Component diff. Assumes `components[].id` is unique on each side (ir-schema.md §14
  * #2) and does not check it: `buildDiff` establishes that before calling, and a caller
  * reaching this export directly owns the obligation, because the lookup map here is
  * last-write-wins and a repeat is lost rather than reported.
@@ -17,7 +21,7 @@ import type {
  * Component identity is `id`; when a Component is present in both
  * base and head with the same id, the three delta booleans describe which axes actually
  * moved (roots reshuffle, public API globs, or framework hint list). `modified` deltas
- * are intentionally absent from this diff (§5.2.3): fields are reported as before/after
+ * are intentionally absent from this diff (diff-algorithm.md §5.2.3): fields are reported as before/after
  * pairs via the `changed[]` entries so consumers can render them without stringifying
  * arrays.
  */
@@ -78,28 +82,64 @@ export function diffComponents(
  * without a special case: a Component is an aggregate over roots and has no file to lose.
  */
 export interface DependencySideView {
-  /** `source.file` of every Symbol this document holds, by the id an endpoint would name. */
-  symbolFiles: ReadonlyMap<string, string>
-  /** Files this document never analysed, by path, with the reason it gave. */
-  lostFiles: ReadonlyMap<string, SkippedFile["reason"]>
+  /**
+   * `source.file` of every Symbol this document holds, by the id an endpoint would name it
+   * with. Keyed by `DependencyEndpoint` rather than `SymbolId` because that is the question
+   * being asked: the lookup happens with an endpoint whose kind is not yet known, and "absent"
+   * is the answer for a Component id. Demanding the kind up front would move that decision to
+   * the caller, where it would need a second Symbol-id silhouette test to make.
+   */
+  symbolFiles: ReadonlyMap<DependencyEndpoint, RelativePath>
+  /**
+   * Files this document never analysed, by path, with the reason it gave. `RelativePath` on
+   * both sides of the file space is what states the bridge these two maps exist to make — one
+   * map's values are the other's keys — though the alias is unbranded, so it is intent rather
+   * than enforcement.
+   */
+  lostFiles: ReadonlyMap<RelativePath, SkipReason>
 }
 
 /**
- * §6.2 — Dependency diff. Identity is the composite `(from, to, via)` triple; direction
- * and effect changes are surfaced as an added + removed pair so `modified` is not part of
- * the schema (§6.2 tail). Uniqueness of that triple is the caller's obligation on the same
+ * Build a side view from a document. The only construction site there is.
+ *
+ * `buildDiff` reads `lostFiles` for its own Symbol classification too, from this same object,
+ * so "a Symbol reported unknown and the edges it took with it cannot disagree about which file
+ * went missing" is a property of the wiring rather than a claim in a comment.
+ *
+ * Exported because `DependencySideView` is public and `diffDependencies` requires one: without
+ * a factory a caller would have to reproduce the `symbols[].source.file` keying and the
+ * `stats.skippedFiles` read, and the likeliest outcome of that is a caller who gets it wrong.
+ */
+export function dependencySideView(ir: IR): DependencySideView {
+  const symbolFiles = new Map<DependencyEndpoint, RelativePath>()
+  for (const symbol of ir.symbols) symbolFiles.set(symbol.id, symbol.source.file)
+  const lostFiles = new Map<RelativePath, SkipReason>()
+  for (const file of ir.stats.skippedFiles ?? []) lostFiles.set(file.path, file.reason)
+  return { symbolFiles, lostFiles }
+}
+
+/**
+ * `docs/design/diff-algorithm.md` §6.2 — Dependency diff. Identity is the composite
+ * `(from, to, via)` triple; direction and effect changes are surfaced as an added + removed
+ * pair so `modified` is not part of the schema (§6.2 tail). Uniqueness of that triple is the caller's obligation on the same
  * terms as `diffComponents` above — a repeat here is indistinguishable in the output from
  * the flip it encodes.
  *
- * `sides` is what separates a deletion from a loss (§3.5.1, deps half). Without it every
- * one-sided edge is `added` or `removed` as before, which is what a direct caller gets and
- * what this function did before the parameter existed; `buildDiff` always supplies it.
+ * `sides` is what separates a deletion from a loss (`docs/design/diff-algorithm.md` §6.2.1).
+ * It is required rather than optional: omitting it would classify every edge into a lost file
+ * as a deletion again — silently, and while still writing `unknown: []`, which this schema
+ * defines as "nothing was unknown" rather than "nobody looked". A caller with no skip list to
+ * offer says so by passing a side view whose `lostFiles` is empty, which is the honest spelling
+ * of an IR written before `stats.skippedFiles` existed.
+ *
+ * The return type declares `unknown` present, where the schema leaves it optional for documents
+ * that predate the field. A reader may find it missing; this function always writes it.
  */
 export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
-  sides?: { base: DependencySideView; head: DependencySideView },
-): DependencyDiff {
+  sides: { base: DependencySideView; head: DependencySideView },
+): DependencyDiff & { unknown: DependencyUnknown[] } {
   const baseKeys = new Map<string, Dependency>()
   for (const d of base) baseKeys.set(dependencyKey(d), d)
   const headKeys = new Map<string, Dependency>()
@@ -112,13 +152,15 @@ export function diffDependencies(
     if (b === undefined) {
       // Held by head and not by base, so its endpoints resolve against head — the document
       // that has the Symbols — and the question is whether base could have seen them.
-      const lostFiles = sides === undefined ? [] : endpointsLostBy(dep, sides.head, sides.base)
+      const lostFiles = endpointsLostBy(dep, sides.head, sides.base)
       if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "base", lostFiles })
       else added.push(dep)
       continue
     }
-    // A direction or effect flip: both documents hold the triple, so neither lost an endpoint
-    // file and the pair is a real change rather than a gap.
+    // A direction or effect flip. No loss check: both documents hold the edge, so neither is
+    // silent about it, and `unknown` exists only to explain a silence. That holds without
+    // appealing to any invariant — nothing forbids a path from being both a `source.file` and a
+    // skipped one, so "they both have it, therefore neither lost the file" would not be sound.
     if (b.direction !== dep.direction || (b.effect ?? null) !== (dep.effect ?? null)) {
       removed.push(b)
       added.push(dep)
@@ -126,7 +168,7 @@ export function diffDependencies(
   }
   for (const [key, dep] of baseKeys) {
     if (headKeys.has(key)) continue
-    const lostFiles = sides === undefined ? [] : endpointsLostBy(dep, sides.base, sides.head)
+    const lostFiles = endpointsLostBy(dep, sides.base, sides.head)
     if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "head", lostFiles })
     else removed.push(dep)
   }
@@ -150,13 +192,23 @@ function endpointsLostBy(
   dep: Dependency,
   holder: DependencySideView,
   absent: DependencySideView,
-): SkippedFile[] {
-  const byPath = new Map<string, SkippedFile["reason"]>()
+): DiffSkippedFile[] {
+  // Keyed by path, so an intra-file edge collapses to the one file it lost. Keying by reason
+  // instead would look identical on every fixture whose two endpoints were skipped for
+  // different reasons, and silently drop one of two files skipped for the same reason.
+  const byPath = new Map<RelativePath, SkipReason>()
   for (const endpoint of [dep.from, dep.to]) {
     const file = holder.symbolFiles.get(endpoint)
-    // A Component endpoint, or — in a Document that never went through the integrity checker,
-    // whose invariant #4 forbids it — a Symbol endpoint with no Symbol behind it. Neither has
-    // a file this can ask about, so the edge keeps whatever the identity comparison said.
+    // Normally a Component endpoint: an aggregate over roots, with no file to lose, which is
+    // why component-level edges need no special case to stay out of this.
+    //
+    // The other way to land here is a symbol-shaped endpoint with no Symbol behind it, which
+    // `ir-schema.md` §14 #4 forbids. `buildDiff` does not run the integrity checker, and the
+    // CLI cannot reach it because `readIR` rejects such a document first — so this is a library
+    // caller who assembled an IR by hand, and the edge quietly reverts to the misclassification
+    // this function exists to remove. Treated the same as a Component endpoint deliberately:
+    // there is no diagnostics channel here, and refusing would take down the legitimate case
+    // that shares the branch.
     if (file === undefined) continue
     const reason = absent.lostFiles.get(file)
     if (reason === undefined) continue
@@ -168,7 +220,7 @@ function endpointsLostBy(
 }
 
 /**
- * §6.2 — the fields Dependency identity is made of, in key order, and the join that turns
+ * `docs/design/diff-algorithm.md` §6.2 — the fields Dependency identity is made of, in key order, and the join that turns
  * them into one. Both halves are exported so the entry-point uniqueness check keys on
  * exactly what this file keys on — a check with its own notion of identity would let through
  * the duplicates that actually collide here, and a check that shared only the join would

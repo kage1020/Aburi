@@ -6,6 +6,10 @@ export type { Component, Dependency, Symbol, SymbolId } from "./ir"
 export type SymbolChange = (SymbolAdded | SymbolRemoved | SymbolMoved | SymbolChanged | SymbolMovedChanged | SymbolDroppedToggled | SymbolUnknown)
 export type MatchRationale = ("id-match" | "git-rename" | "logic-fingerprint" | "logic-fingerprint+name-disambiguation" | "name-signature" | "dropped-weak-match")
 /**
+ * Why a scan skipped a file, copied from the IR's stats.skippedFiles[].reason. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something. One definition for the two places this diff spells it — the cross-schema copy against aburi.ir.v1.json is a deliberate stance, the in-file one was not.
+ */
+export type SkipReason = ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
+/**
  * Cluster id: "slice:" + the anchor, which is members[0]. Derived, not independent: read members[0] for the anchor rather than stripping this prefix. The pattern checks the prefix only — the derivation itself has no JSON Schema equivalent and is enforced by the producer.
  */
 export type SliceId = string & { readonly __brand: "SliceId" }
@@ -132,10 +136,7 @@ symbol: Symbol
  * Which document lacks it, which is the same document that lost the file. `head` reads as "this may still exist", `base` as "this may not be new".
  */
 absentFrom: ("base" | "head")
-/**
- * Why that document skipped the file, copied from its `stats.skippedFiles[]`. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
- */
-reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
+reason: SkipReason
 }
 export interface ComponentDiff {
 added: Component[]
@@ -175,14 +176,14 @@ absentFrom: ("base" | "head")
 lostFiles: SkippedFile[]
 }
 /**
- * A file a scan never analysed, copied from the IR's stats.skippedFiles[]. Redeclared here rather than referenced across schemas, the same way Symbol, Component and Dependency are.
+ * A file a scan never analysed, copied from the IR's stats.skippedFiles[]. Validated strictly here, which is NOT how the other borrowed types work: Symbol, Component and Dependency below are deliberate stubs that defer validation to aburi.ir.v1.json, and the codegen replaces them with a re-export from the IR module. This one is spelled out because a diff reader has to be able to reject a malformed entry without fetching a second schema, and because the value is two scalars rather than a whole record. The precedent is SkipReason above, already spelled inline in this file for SymbolUnknown.
  */
 export interface SkippedFile {
-path: string
 /**
- * Why that document skipped the file. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
+ * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses. That is what puts it in the same space as symbols[].source.file, which is how an endpoint's file is matched against this list at all.
  */
-reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
+path: string
+reason: SkipReason
 }
 export interface SliceRecord {
 id: SliceId

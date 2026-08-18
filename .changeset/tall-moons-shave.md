@@ -41,10 +41,13 @@ the files with the reason each was skipped.
   the other saying fix something. An intra-file edge collapses to the single file it lost.
 - **Component-level edges are never reclassified.** A Component is an aggregate over roots and
   has no file to lose, so a component endpoint is simply absent from the lookup — no special
-  case, and now stated in §6.2.1 rather than left to be rediscovered as an asymmetry.
+  case, and now stated in `docs/design/diff-algorithm.md` §6.2.1 rather than left to be
+  rediscovered as an asymmetry.
 
-A direction or effect flip stays an added + removed pair: both documents hold the triple, so
-neither lost an endpoint file.
+A direction or effect flip stays an added + removed pair, with no loss check. Not because
+neither document lost an endpoint file — nothing forbids a path from being both a `source.file`
+and a skipped one — but because both documents *hold* the edge, so neither is silent about it,
+and `unknown` explains silences.
 
 `dependencies.unknown[]` and `summary.depsUnknown` are schema-optional only so a diff written
 before they existed stays valid. A current writer always emits both, empty array and zero
@@ -62,6 +65,20 @@ file **both** revisions skipped still produces nothing: neither document holds a
 so there is no leftover to classify, which is the deps-side face of a gap `aburi diff` reports on
 stderr and the artifact does not.
 
-Verification: 12 tests in `packages/diff/test/unknown-dependencies.test.ts`, three ajv instance
-tests, a canonical byte-stability case that reverses the input order, and three projection tests.
-`diffDependencies`' new parameter is optional, so a direct caller keeps the behaviour it had.
+`diffDependencies`' new `sides` parameter is **required**. Optional, it would have restored the
+defect silently: a two-argument call classifies every edge into a lost file as a deletion again
+while still writing `unknown: []`, which this schema defines as "nothing was unknown" rather than
+"nobody looked". A caller with no skip list says so by passing a side view whose `lostFiles` is
+empty. `dependencySideView(ir)` is exported to build one, and is the single construction site —
+`buildDiff` feeds the same object to its own Symbol classification, so the two cannot drift.
+
+For a direct caller the classification of any edge is unchanged when the side views carry no
+losses; the returned object gains an always-present `unknown` array it did not have before, which
+a deep-equal or a snapshot will see.
+
+Verification: 18 tests in `packages/diff/test/unknown-dependencies.test.ts`, four ajv instance
+tests, a canonical byte-stability case that reverses the input order, and four projection tests.
+Two of the diff tests exist because the rest of the file could not see the difference between
+resolving an endpoint through `source.file` and parsing its id: every other fixture has the two
+equal by construction, so they use a Symbol whose id says `src/old.ts` and whose `source.file`
+says `src/actual.ts`, in both directions.

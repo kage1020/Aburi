@@ -115,6 +115,16 @@ describe("aburi.diff.v1.json — DependencyUnknown instances", () => {
     expect(validateDiff(diff), report(validateDiff.errors)).toBe(true)
   })
 
+  it("validates a diff that predates the field, with no unknown key at all", () => {
+    // The counterpart of the Markdown side's "omits the group for a diff that predates the
+    // field". The two were asymmetric: nothing here showed that such a document still reads.
+    const diff = edgeDiff()
+    const { unknown: _dropped, ...dependencies } = diff.dependencies
+    const { depsUnknown: _counter, ...summary } = diff.summary
+    const older = { ...diff, dependencies, summary }
+    expect(validateDiff(older), report(validateDiff.errors)).toBe(true)
+  })
+
   it("refuses an entry whose lostFiles is empty", () => {
     // `minItems: 1` is the schema saying what the classification means: an entry exists
     // because a file went missing, so one with no file is a claim with nothing behind it.
@@ -146,17 +156,19 @@ describe("aburi.diff.v1.json — DependencyUnknown instances", () => {
 })
 
 describe("the schemas agree on what a skip reason is", () => {
-  it("enumerates the same values everywhere it is spelled", () => {
-    // The reason is spelled independently in `SkippedFile.reason` (IR), `SymbolUnknown.reason`
-    // and `SkippedFile.reason` (diff), and the only compile-time link between them fires when
-    // the *IR* side grows. A value added to one file alone leaves an unconstructible arm and a
-    // validator that accepts something nothing produces.
+  it("enumerates the same values as the IR", () => {
+    // Spelled independently in `SkippedFile.reason` (IR) and `SkipReason` (diff), and the only
+    // compile-time link between them fires when the *IR* side grows. A value added to the diff
+    // schema alone leaves an unconstructible arm and a validator that accepts something nothing
+    // produces. One comparison rather than one per use site: the diff schema hoisted the enum
+    // into a single `$def` that both `SymbolUnknown.reason` and `SkippedFile.reason` point at.
     const ofIR = [...irSchema.$defs.SkippedFile.properties.reason.enum].sort()
-    for (const [where, values] of [
-      ["SymbolUnknown.reason", diffSchema.$defs.SymbolUnknown.properties.reason.enum],
-      ["SkippedFile.reason", diffSchema.$defs.SkippedFile.properties.reason.enum],
-    ] as const) {
-      expect([...values].sort(), where).toEqual(ofIR)
-    }
+    expect([...diffSchema.$defs.SkipReason.enum].sort()).toEqual(ofIR)
+  })
+
+  it("points both of the diff's own uses at that one definition", () => {
+    const ref = { $ref: "#/$defs/SkipReason" }
+    expect(diffSchema.$defs.SymbolUnknown.properties.reason).toEqual(ref)
+    expect(diffSchema.$defs.SkippedFile.properties.reason).toEqual(ref)
   })
 })

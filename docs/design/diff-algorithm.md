@@ -688,11 +688,13 @@ An edge one document holds is `unknown` when the other document never analysed t
 
 Three properties, two of them differing from the Symbol side:
 
-- **The endpoint's file comes from the document that holds the edge.** An endpoint is matched against `symbols[].source.file` in that document, which is the same space `stats.skippedFiles[].path` is in and the same space §3.5.1 classifies Symbols by. Reading the file out of the id's path segment instead would be a second answer to the same question, and nothing in the schema forces the two to agree.
+- **The endpoint's file comes from the document that holds the edge.** An endpoint is matched against `symbols[].source.file` in that document, which is the same space `stats.skippedFiles[].path` is in and the same space §3.5.1 classifies Symbols by. Reading the file out of the id's path segment instead would be a second answer to the same question, and nothing in the schema forces the two to agree — a re-export or a generated file is where they come apart. Both sides read one `DependencySideView` per document, built once, so the agreement is a property of the wiring rather than a convention to be maintained.
 - **`lostFiles` is a list, where `SymbolUnknown` carries one `reason`.** An edge has two endpoints: they can sit in two files skipped for two different reasons, one of which says re-run and the other says fix something. An intra-file edge collapses to the single file it lost.
 - **Component-level edges are never reclassified.** A Component is an aggregate over roots and has no file to lose, so a component endpoint is simply absent from the lookup. Stated rather than left to be inferred, because the asymmetry is otherwise invisible.
 
-A direction or effect flip stays an added + removed pair: both documents hold the triple, so neither lost an endpoint file.
+A direction or effect flip stays an added + removed pair, and no loss check runs on it. The reason is not that neither document lost an endpoint file — nothing forbids a path from being both a `symbols[].source.file` and a skipped one, so that inference has no invariant behind it. It is that both documents *hold* the edge, so neither is silent about it, and `unknown` exists only to explain a silence.
+
+An edge touching a Symbol that **moved** can be `unknown` while the Symbol itself is confidently `moved`. If `S` goes `src/a.ts` → `src/b.ts` and head skipped `src/a.ts`, stage 2/3/4 pairs the Symbol from real evidence on both sides, while the base-only edge naming `ts:src/a.ts#S` has an endpoint in a file head never read. Erring toward `unknown` there is correct — the head has no edge to compare against — and it is the one case where the Symbol and dependency sides report different confidence about the same entity. "Cannot disagree about which file went missing" is a claim about file identity, not about the two classifications matching.
 
 `dependencies.unknown[]` and `summary.depsUnknown` are optional in the schema only so a diff written before they existed stays valid. A current writer always emits both, empty array and zero included — unlike the IR's `stats.skippedFiles`, there is no arithmetic elsewhere in the document that would let a reader tell "nothing was unknown" from "this writer could not say".
 
@@ -920,6 +922,7 @@ In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 - Adding a `MatchRationale` enum value is **breaking** (consumers' `--fail-on` settings depend on fixed values)
 - Adding a status enum value (`added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled`) is **breaking**
 - Adding a `summary` field is non-breaking
+- Adding an optional array to `componentDiff` / `dependencyDiff` is non-breaking on the same terms, and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed.
 
 ## 11. Design decisions
 

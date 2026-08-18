@@ -868,6 +868,10 @@ function renderComponentChanges(diff: DiffResult): string[] {
  * (`### Component-level added`, `### Symbol-level added`, ...) do the routing.
  * A group that has no entries collapses entirely — an empty section reads as
  * "nothing changed at this level", not as an intentional silence.
+ *
+ * The Unknown group appended last is the exception to both halves of that: it is not
+ * level-routed, because only a Symbol endpoint has a file to lose, and its emptiness means
+ * "nothing was unknown" rather than "nothing changed". See `appendUnknownDependencies`.
  */
 function renderDependencyChanges(diff: DiffResult): string[] {
   const compAdded = diff.dependencies.added.filter((d) => !isSymbolEdge(d))
@@ -880,6 +884,11 @@ function renderDependencyChanges(diff: DiffResult): string[] {
   appendDependencyGroup(rows, "Component-level removed", compRemoved)
   appendDependencyGroup(rows, "Symbol-level added", symAdded)
   appendDependencyGroup(rows, "Symbol-level removed", symRemoved)
+  // `?? []` for a `diff.json` produced before the field existed — the projection is handed
+  // documents it did not write. It flattens the distinction the schema asks readers to keep
+  // ("could not say" vs "nothing was unknown"), which is the right trade here and only here:
+  // the alternative is a section saying a diff might be incomplete on every document older
+  // than this field, for every diff, including the ones that lost nothing.
   appendUnknownDependencies(rows, diff.dependencies.unknown ?? [])
   return rows
 }

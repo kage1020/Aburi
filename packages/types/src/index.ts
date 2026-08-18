@@ -31,6 +31,8 @@ export type {
   IRRef,
   MatchRationale,
   SignatureDelta,
+  SkippedFile as DiffSkippedFile,
+  SkipReason,
   SliceId,
   SliceRecord,
   Summary,
