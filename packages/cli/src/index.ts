@@ -10,6 +10,7 @@ export {
   type WarnFn,
 } from "./commands/diff"
 export {
+  type CoverageDoubt,
   type ExplainOptions,
   type ExplainOutcome,
   runExplain,

@@ -30,8 +30,7 @@ of the id, the file arm reads the argument, and the pattern arm names no file at
 
 ```
 $ aburi explain src/route.ts --ir out/aburi.ir.json
-Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot
-say what that file declares.
+Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot say what that file declares.
 EXIT=3
 ```
 
@@ -67,8 +66,9 @@ prose: the wording lives in the CLI wrapper, which is the only layer that knows 
 a person. A caller switching exhaustively over `ExplainOutcome` sees the new member at compile
 time.
 
-Verification: 21 tests in `packages/cli/test/explain-coverage.test.ts`, covering each arm on
-both sides of the principle. Two of them exist for the miss-only rule — a Symbol whose id names
-a skipped file while its `source.file` names another must still be answered — and one pins that
+Verification: 24 tests in `packages/cli/test/explain-coverage.test.ts`, covering each arm on
+both sides of the principle. Two of them exist for the miss-only rule: a Symbol whose id names a
+skipped file while its `source.file` names another, and a listed path that still carries the
+Symbols it was asked for. One pins that
 a live scan which withdrew a file benignly, and therefore stayed green, still reaches the new
 exit 3, with a control case proving the scan was green.

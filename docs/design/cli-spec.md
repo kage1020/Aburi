@@ -517,7 +517,7 @@ exit code: 2 (ambiguous).
 
 ### 7.6 When the Document Does Not Cover the Question
 
-`stats.skippedFiles` ([`ir-schema.md`](./ir-schema.md) §7.1) names every file the scan gave up on
+`stats.skippedFiles` ([`ir-schema.md`](./ir-schema.md) §2) names every file the scan gave up on
 and why. A lookup that finds nothing is an assertion of absence, and that list can contradict it:
 the file that would have declared the Symbol was withdrawn, so the document does not know.
 
@@ -533,8 +533,7 @@ qualified, when the doubt is diffuse.**
 
 ```
 $ aburi explain src/route.ts --ir out/aburi.ir.json
-Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot
-say what that file declares.
+Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot say what that file declares.
 EXIT=3
 ```
 
@@ -638,9 +637,15 @@ Description: NestJS OnModuleInit hook
 128+N is for fatal signals (Aburi itself does not use it).
 
 A plugin error means the same thing in every command that scans. `scan`, `diff` and `explain` all
-exit `3` when the scan they ran did not exit clean, whichever of them ran it. A command that ran
-no scan does not inherit a code from a document it merely read — it says what the document
-records and leaves the status alone.
+exit `3` when the scan they ran did not exit clean, whichever of them ran it.
+
+Code `3` also covers the narrower statement "this answer would not be safe", which a command can
+reach without having scanned anything. `aburi explain` does when the document it read names the
+file the question asked about as one that scan never analysed (§7.6): the toolchain is fine and
+the document is intact, but the one question put to it is unanswerable, and reporting `1` would
+be an assertion of absence. What a command still does **not** do is inherit a status from a
+document it merely read — an IR that records losses irrelevant to the question is reported on
+and left at the code the answer itself earned.
 
 ## 10. stdout / stderr Conventions
 
