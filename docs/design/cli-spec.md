@@ -468,7 +468,7 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 
 `<id-or-pattern>` is one of:
 - **Full Symbol id** — the string contains `#` and matches the `<language>:<path>#<qname>` form → direct lookup
-- **File path** — the string contains `/`, contains no `#`, and is an existing file → show all Symbols in that file
+- **File path** — the string contains `/`, contains no `#`, and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
 
 #### 7.2.1 Exact Definition of Partial Matching
@@ -498,8 +498,9 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 4. Emit to stdout (or `--output`)
 
 When step 1 rescans, that scan's incidents (§5.6) go to stderr, unlabelled — only one scan ran.
-Reading an existing IR reports nothing: no scan happened here, and the incidents of the scan that
-wrote the file were reported when it did.
+Reading an existing IR reports nothing live: no scan happened here, and the incidents of the scan
+that wrote the file were reported when it did. What the document itself records about those
+incidents is a different matter, and step 2 reads it — see §7.6.
 
 ### 7.5 When Multiple Candidates Match
 
@@ -514,20 +515,72 @@ Specify the full id to disambiguate.
 
 exit code: 2 (ambiguous).
 
-### 7.6 Exit Codes
+### 7.6 When the Document Does Not Cover the Question
+
+`stats.skippedFiles` ([`ir-schema.md`](./ir-schema.md) §2) names every file the scan gave up on
+and why. A lookup that finds nothing is an assertion of absence, and that list can contradict it:
+the file that would have declared the Symbol was withdrawn, so the document does not know.
+
+One principle decides every case. **The answer is `unknown` (exit 3) when the document positively
+identifies the file the question named as one it never analysed; it stays "not found" (exit 1),
+qualified, when the doubt is diffuse.**
+
+| Arm | Names a file? | Miss becomes |
+|---|---|---|
+| Full id | yes — the `<path>` segment of the id | `unknown` when that path is in `stats.skippedFiles`; otherwise the diffuse answer below |
+| File path | yes — the argument | `unknown` when that path is in `stats.skippedFiles`; otherwise the diffuse answer below |
+| Pattern | no | always the diffuse answer below |
+
+The diffuse answer is `not found` (exit 1) with a line counting the files the document says it
+never analysed, and it attaches to **every** miss the document could not tie to the file the
+question named — including a miss in the two naming arms on a file that was analysed after all.
+
+```
+$ aburi explain src/route.ts --ir out/aburi.ir.json
+Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot say what that file declares.
+EXIT=3
+```
+
+Consequences of the principle, each of which is a case that would otherwise be argued separately:
+
+- **The file arm does not require the path to exist on disk.** A path named in
+  `stats.skippedFiles` reaches the arm as well. `--ir` and `--no-rescan` exist so a CI job can
+  question a pinned artifact from a tree that need not hold the same files, and demanding the
+  file locally would drop exactly the motivating case into the pattern arm.
+- **The check runs on a miss only, so a hit is never qualified.** A hit is the document speaking
+  about a Symbol it holds. An `over-size` file is skipped by every run of a workspace, so
+  caveating hits would caveat every answer that workspace ever gives — and where a hit really is
+  suspect because the *scan* broke, the §7.7 gate already covers it. This also settles the id
+  whose `<path>` segment and `symbols[].source.file` disagree, which a re-export or a generated
+  file produces: the Symbol is right there, and is answered.
+- **The id arm asks the id grammar, not the `#`.** Dispatch is a silhouette; the file segment is
+  only read out of a string that satisfies the whole Symbol-id grammar
+  ([`ir-schema.md`](./ir-schema.md) §3.1). A typo that happens to contain a skipped path names no
+  file, and gets the pattern arm's diffuse line rather than a positive claim about coverage.
+- **A document predating `stats.skippedFiles` can only ever give the diffuse answer.**
+  `totalFiles > parsedFiles` with no list says how many files were lost and nothing about which,
+  so it can never identify the file the question named, in any arm. `aburi diff` reports the same
+  shape per side (§6.6).
+
+The diffuse line is a count and a pointer at `stats.skippedFiles`, not a list: the question was
+about one Symbol, and answering it with an inventory of the run buries it.
+
+### 7.7 Exit Codes
 
 | code | Meaning |
 |---|---|
 | 0 | Success |
 | 1 | The requested symbol was not found |
 | 2 | Multiple candidates; disambiguation required |
-| 3 | The scan this command ran did not exit clean (§5.6) |
+| 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), or the document names the file the question asked about as one it never analysed (§7.6) |
 
-Exit `3` outranks the other three. Once a file is missing from the IR every answer is suspect: a
-`single` hit may have had a competing candidate in the withdrawn file and should have been `2`,
-and a `not-found` may be describing the withdrawal rather than the workspace — which is the case
-that matters most, because `No matches` is otherwise indistinguishable from "that Symbol does not
-exist". Reading an existing IR cannot reach this code, since no scan ran.
+Exit `3` outranks the other three, and the two routes to it are the same statement about
+different evidence. When the scan broke, every answer is suspect: a `single` hit may have had a
+competing candidate in the withdrawn file and should have been `2`, and a `not-found` may be
+describing the withdrawal rather than the workspace. When the document is intact but says it
+never read the file in question, only that question is unanswerable — which is the case that
+matters most, because `No matches` is otherwise indistinguishable from "that Symbol does not
+exist". Reading an existing IR reaches this code by the second route only; no scan ran.
 
 ## 8. `aburi vocab`
 
@@ -588,9 +641,15 @@ Description: NestJS OnModuleInit hook
 128+N is for fatal signals (Aburi itself does not use it).
 
 A plugin error means the same thing in every command that scans. `scan`, `diff` and `explain` all
-exit `3` when the scan they ran did not exit clean, whichever of them ran it. A command that ran
-no scan does not inherit a code from a document it merely read — it says what the document
-records and leaves the status alone.
+exit `3` when the scan they ran did not exit clean, whichever of them ran it.
+
+Code `3` also covers the narrower statement "this answer would not be safe", which a command can
+reach without having scanned anything. `aburi explain` does when the document it read names the
+file the question asked about as one that scan never analysed (§7.6): the toolchain is fine and
+the document is intact, but the one question put to it is unanswerable, and reporting `1` would
+be an assertion of absence. What a command still does **not** do is inherit a status from a
+document it merely read — an IR that records losses irrelevant to the question is reported on
+and left at the code the answer itself earned.
 
 ## 10. stdout / stderr Conventions
 
@@ -715,6 +774,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
 | CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
+| CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
+| CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
 
 ## 18. Design Decisions
 

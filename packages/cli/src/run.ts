@@ -1,6 +1,6 @@
 import { Command, InvalidArgumentError } from "commander"
 import { formatFailOnMessage, runDiff } from "./commands/diff"
-import { runExplain } from "./commands/explain"
+import { type CoverageDoubt, runExplain } from "./commands/explain"
 import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
@@ -270,7 +270,25 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               break
             case "not-found":
               stderr.write(`No matches for "${argument}".\n`)
+              if (outcome.coverage !== null) {
+                stderr.write(`${coverageLine(outcome.coverage)}\n`)
+              }
               break
+            case "unknown": {
+              // Not a match failure, so it does not start with `No matches`: the document
+              // holds no answer to give, and saying otherwise would assert an absence it
+              // cannot support.
+              const trailer =
+                outcome.namedBy === "id"
+                  ? ", the file that id names, so it cannot say whether that Symbol exists."
+                  : ", so it cannot say what that file declares."
+              stderr.write(
+                `Cannot answer "${argument}": this IR never analysed ${outcome.skipped.path} (${outcome.skipped.reason})${trailer}\n`,
+              )
+              break
+            }
+            default:
+              return assertNeverOutcome(outcome)
           }
           return outcome.exitCode
         })(),
@@ -288,6 +306,32 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     return handleError(error, stderr)
   }
   return outcome
+}
+
+/**
+ * The second line under `No matches`, on every miss the document could not tie to the file the
+ * question named — which includes the id and file arms when the path they name was analysed
+ * after all.
+ *
+ * Counted, not listed, even though `named-losses` carries the entries. The question was about
+ * one Symbol, and answering it with an inventory of the run buries it; the document is where
+ * the list lives, and the line says so. No per-reason next step here: the reasons call for
+ * different actions, and that mapping belongs in one place for the scan report and this line
+ * alike rather than being invented twice.
+ */
+function coverageLine(doubt: CoverageDoubt): string {
+  if (doubt.kind === "named-losses") {
+    return `⚠ This IR names ${doubt.files.length} file(s) the scan never analysed in stats.skippedFiles, so a match may be in one of them.`
+  }
+  return `⚠ This IR reports ${doubt.fileCount} file(s) it did not parse but predates stats.skippedFiles, so it cannot name them; a match may be in one of them. Re-run \`aburi scan\` to record the list.`
+}
+
+/**
+ * Compile-time guard on the `explain` outcome switch: a new `ExplainOutcome` member is a type
+ * error here rather than a command that exits on a code with nothing written to explain it.
+ */
+function assertNeverOutcome(outcome: never): never {
+  throw new Error(`Unhandled explain outcome: ${JSON.stringify(outcome)}`)
 }
 
 function isCommanderError(value: unknown): value is { code: string; message: string } {

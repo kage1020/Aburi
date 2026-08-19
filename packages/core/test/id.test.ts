@@ -13,6 +13,7 @@ import {
   makeSymbolId,
   makeTopLevelQname,
   RESERVED_LANGUAGE_IDS,
+  symbolIdFile,
   toPosixRelative,
   trySymbolId,
 } from "../src/index"
@@ -343,6 +344,34 @@ describe("id guards", () => {
     for (const value of rejected) {
       expect(isSymbolId(value), value).toBe(false)
       expect(() => makeSymbolId(splitForTest(value)), value).toThrowError(CoreError)
+    }
+  })
+
+  it("symbolIdFile answers with the path of a well-formed id", () => {
+    expect(symbolIdFile("ts:src/a.ts#foo")).toBe("src/a.ts")
+    expect(symbolIdFile("ts:src/nested/dir/a.ts#Cls.method")).toBe("src/nested/dir/a.ts")
+    expect(symbolIdFile("ts:src/index.ts#<default>")).toBe("src/index.ts")
+  })
+
+  it("symbolIdFile names no file for anything makeSymbolId would refuse", () => {
+    // The whole point of the function: a caller uses the answer to make a positive statement
+    // about a path ("this document never analysed it"), so a string that merely has the
+    // silhouette of an id must not produce one. Every entry here survives a split on the
+    // first `:` and the first `#`, which is what a later simplification would reach for.
+    const noFile = [
+      "slice:ts:src/a.ts#foo",
+      "ts:/abs/path.ts#foo",
+      "ts:../../etc/passwd#foo",
+      "ts:src\\a.ts#foo",
+      "ts:./src/a.ts#foo",
+      "ts:src/a.ts#3bad",
+      "ts:src/a.ts#foo bar",
+      "TS:src/a.ts#foo",
+      "#foo",
+      "src/a.ts",
+    ]
+    for (const value of noFile) {
+      expect(symbolIdFile(value), value).toBeNull()
     }
   })
 

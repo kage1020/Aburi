@@ -48,7 +48,7 @@ Examples: `--fail-on removed`, `--fail-on changed:>5`, `--fail-on dropped-toggle
 | `0` `SUCCESS` | Command finished, no gate tripped. |
 | `1` `RUNTIME` | Unexpected runtime failure (IO, unhandled exception). |
 | `2` `INPUT_ERROR` | Bad argv, missing / malformed input, ambiguous explain target, `--fail-on` grammar error. |
-| `3` `GATE` | `--fail-on` clause tripped, or a plugin failed to load. |
+| `3` `GATE` | `--fail-on` clause tripped, a plugin failed to load, a scan the command ran did not exit clean, or the answer would not be safe — `aburi explain` against an IR that names the file in question as one it never analysed. |
 
 ## Install
 

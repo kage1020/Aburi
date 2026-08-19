@@ -174,6 +174,24 @@ export function isSymbolId(value: string): value is SymbolId {
   return parts !== null && symbolIdViolation(parts) === null
 }
 
+/**
+ * The path segment of a Symbol id, or `null` when `value` is not a well-formed one.
+ *
+ * Answers "which file does this id claim its Symbol was declared in?" — a claim rather than a
+ * fact. `symbols[].source.file` is where the document says the Symbol is, and the two come
+ * apart for a re-export or a generated file, so a caller holding the Symbol reads `source.file`
+ * instead. This is for the caller that has only the id, because the Symbol it names is missing.
+ *
+ * Runs the full grammar rather than merely splitting on the first `:` and `#`, so a string that
+ * has only the silhouette of an id cannot hand back a path a caller would then make a statement
+ * about.
+ */
+export function symbolIdFile(value: string): string | null {
+  const parts = splitSymbolId(value)
+  if (parts === null || symbolIdViolation(parts) !== null) return null
+  return parts.file
+}
+
 /** Narrow an arbitrary string to a `ComponentId`. Counterpart of `isSymbolId`. */
 export function isComponentId(value: string): value is ComponentId {
   return COMPONENT_ID_PATTERN.test(value)
