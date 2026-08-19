@@ -276,7 +276,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               break
             case "unknown": {
               // Not a match failure, so it does not start with `No matches`: the document
-              // holds no answer to give, and saying otherwise is the defect being fixed.
+              // holds no answer to give, and saying otherwise would assert an absence it
+              // cannot support.
               const trailer =
                 outcome.namedBy === "id"
                   ? ", the file that id names, so it cannot say whether that Symbol exists."
@@ -286,6 +287,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               )
               break
             }
+            default:
+              return assertNeverOutcome(outcome)
           }
           return outcome.exitCode
         })(),
@@ -306,17 +309,29 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
 }
 
 /**
- * The second line under `No matches` when the IR says it did not cover everything.
+ * The second line under `No matches`, on every miss the document could not tie to the file the
+ * question named — which includes the id and file arms when the path they name was analysed
+ * after all.
  *
- * Counted, not listed. The arms that name a file get a statement about that file; here the
- * document only knows it has gaps, and printing the whole skip list would answer a question
- * about one Symbol with an inventory of the run.
+ * Counted, not listed, even though `named-losses` carries the entries. The question was about
+ * one Symbol, and answering it with an inventory of the run buries it; the document is where
+ * the list lives, and the line says so. No per-reason next step here: the reasons call for
+ * different actions, and that mapping belongs in one place for the scan report and this line
+ * alike rather than being invented twice.
  */
 function coverageLine(doubt: CoverageDoubt): string {
   if (doubt.kind === "named-losses") {
-    return `⚠ This IR names ${doubt.fileCount} file(s) the scan never analysed in stats.skippedFiles, so a match may be in one of them.`
+    return `⚠ This IR names ${doubt.files.length} file(s) the scan never analysed in stats.skippedFiles, so a match may be in one of them.`
   }
   return `⚠ This IR reports ${doubt.fileCount} file(s) it did not parse but predates stats.skippedFiles, so it cannot name them; a match may be in one of them. Re-run \`aburi scan\` to record the list.`
+}
+
+/**
+ * Compile-time guard on the `explain` outcome switch: a new `ExplainOutcome` member is a type
+ * error here rather than a command that exits on a code with nothing written to explain it.
+ */
+function assertNeverOutcome(outcome: never): never {
+  throw new Error(`Unhandled explain outcome: ${JSON.stringify(outcome)}`)
 }
 
 function isCommanderError(value: unknown): value is { code: string; message: string } {

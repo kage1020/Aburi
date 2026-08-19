@@ -836,8 +836,9 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
 }
 
 /**
- * Invariant #21 (ir-schema.md §14): when `stats.skippedFiles` is present, its length is
- * exactly `totalFiles - parsedFiles` and no path appears twice.
+ * Invariant #21 (ir-schema.md §14): `parsedFiles` never exceeds `totalFiles`, and when
+ * `stats.skippedFiles` is present its length is exactly the difference and no path appears
+ * twice.
  *
  * **A read-side check.** Inside `scan()` both sides reduce to the same sum of the same two
  * array lengths, so the census clause cannot fire on a document Aburi wrote, however the
@@ -854,15 +855,29 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
  * This checks that the list is arithmetically complete, not that the pipeline noticed
  * everything it lost.
  *
- * Conditional on presence. A document written before the field existed has no way to satisfy
- * this and is not wrong for that — the absence is what tells a reader the enumeration is
- * unavailable, and reporting it as a violation would make every archived IR unreadable.
+ * The census clause is conditional on presence. A document written before the field existed has
+ * no way to satisfy it and is not wrong for that — the absence is what tells a reader the
+ * enumeration is unavailable, and reporting it as a violation would make every archived IR
+ * unreadable. The ordering clause is not conditional, and cannot be: `totalFiles - parsedFiles`
+ * is the *only* trace of a loss such a document leaves, so a reader that reaches for it needs
+ * the subtraction to mean what it says. Left unchecked, `parsedFiles > totalFiles` passes every
+ * other invariant, and a reader taking the difference for a count of losses reads a negative
+ * one as "nothing was lost" — the assertion of absence the enumeration exists to prevent,
+ * arrived at from the other side.
  */
 function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
+  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
+  if (unparsed < 0) {
+    out.push({
+      invariant: 21,
+      subject: "stats.parsedFiles",
+      message: `stats.parsedFiles is ${ir.stats.parsedFiles} of ${ir.stats.totalFiles} total file(s); a scan cannot parse more files than it found`,
+    })
+  }
+
   const skippedFiles = ir.stats.skippedFiles
   if (skippedFiles === undefined) return
 
-  const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
   if (skippedFiles.length !== unparsed) {
     out.push({
       invariant: 21,

@@ -54,7 +54,11 @@ export type ExplainOutcome =
    */
   | {
       kind: "unknown"
-      exitCode: ExitCode
+      /**
+       * Always the gate. An answer the document cannot give must not be reportable as one of
+       * the codes that says it did, and the type is where that is cheapest to enforce.
+       */
+      exitCode: typeof EXIT.GATE
       skipped: SkippedFile
       /** Whether the file came from the argument itself or from the file segment of an id. */
       namedBy: "id" | "path"
@@ -63,14 +67,21 @@ export type ExplainOutcome =
 /**
  * What an IR says about its own coverage, attached to a lookup that found nothing.
  *
- * Only ever attached to a miss the document could not tie to a file — the arms that name one
- * get `unknown` instead. A hit carries nothing: the document is speaking about a Symbol it
- * holds, and an `over-size` file is skipped by every run of a workspace, so a caveat on hits
- * would be a permanent one.
+ * Attached to every miss, in every arm, that the document could not tie to a file. The id and
+ * file arms do name one, but naming it is not enough: the answer is `unknown` only when that
+ * path is in the skip list, and a miss on a file the document did analyse carries this doubt
+ * like any other. A hit carries nothing — the document is speaking about a Symbol it holds, and
+ * an `over-size` file is skipped by every run of a workspace, so a caveat on hits would be a
+ * permanent one.
  */
 export type CoverageDoubt =
-  /** `stats.skippedFiles` names the files, and one of them may hold the answer. */
-  | { kind: "named-losses"; fileCount: number }
+  /**
+   * `stats.skippedFiles` names the files, and one of them may hold the answer. The entries
+   * rather than a count, so the number cannot drift from the list it describes; non-empty,
+   * so "no doubt" cannot be spelled as a doubt over zero files. What to print out of them is
+   * the CLI wrapper's decision, not this type's.
+   */
+  | { kind: "named-losses"; files: readonly [SkippedFile, ...SkippedFile[]] }
   /** The document predates `stats.skippedFiles`: it counts its losses but cannot name them. */
   | { kind: "unnamed-losses"; fileCount: number }
 
@@ -159,7 +170,13 @@ async function locate(
   }
 
   if (arg.includes("/")) {
-    const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/")
+    // Normalised into the space the document is in: `stats.skippedFiles[].path` and
+    // `symbols[].source.file` are NFC by schema and by invariant #19, while the argument is
+    // whatever the shell handed over — and a name carrying a combining mark survives an
+    // archive or a rename in decomposed form. Both lookups below key on this string.
+    // Not `toPosixRelative`: it throws on `..` and on absolute paths, and an argument
+    // shaped like either has to fall through to the substring arm rather than error.
+    const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/").normalize("NFC")
     // The skip list is consulted before the disk probe, not after: a file the document
     // already describes needs no filesystem to answer for it, and `unreadable` is a reason
     // whose file may well refuse the probe too.
@@ -228,12 +245,18 @@ function missed(
  * it when nothing was lost, but a document that spells the empty case out is still saying the
  * scan covered everything. Absent, the arithmetic is the only trace left — `aburi diff` warns
  * about the same shape per side — and it can be counted but not named.
+ *
+ * The zero guard covers a scan that lost nothing, not a document that contradicts itself:
+ * invariant #21 holds `parsedFiles` to no more than `totalFiles` whether or not the list is
+ * present, so a subtraction that came back negative was refused by `readIR` before reaching
+ * here.
  */
 function coverageDoubt(ir: IR): CoverageDoubt | null {
   const skippedFiles = ir.stats.skippedFiles
   if (skippedFiles !== undefined) {
-    if (skippedFiles.length === 0) return null
-    return { kind: "named-losses", fileCount: skippedFiles.length }
+    const [first, ...rest] = skippedFiles
+    if (first === undefined) return null
+    return { kind: "named-losses", files: [first, ...rest] }
   }
   const unnamed = ir.stats.totalFiles - ir.stats.parsedFiles
   if (unnamed <= 0) return null

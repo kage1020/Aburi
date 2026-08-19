@@ -527,9 +527,13 @@ qualified, when the doubt is diffuse.**
 
 | Arm | Names a file? | Miss becomes |
 |---|---|---|
-| Full id | yes — the `<path>` segment of the id | `unknown` when that path is in `stats.skippedFiles` |
-| File path | yes — the argument | `unknown` when that path is in `stats.skippedFiles` |
-| Pattern | no | `not found`, plus a line counting the files the document says it never analysed |
+| Full id | yes — the `<path>` segment of the id | `unknown` when that path is in `stats.skippedFiles`; otherwise the diffuse answer below |
+| File path | yes — the argument | `unknown` when that path is in `stats.skippedFiles`; otherwise the diffuse answer below |
+| Pattern | no | always the diffuse answer below |
+
+The diffuse answer is `not found` (exit 1) with a line counting the files the document says it
+never analysed, and it attaches to **every** miss the document could not tie to the file the
+question named — including a miss in the two naming arms on a file that was analysed after all.
 
 ```
 $ aburi explain src/route.ts --ir out/aburi.ir.json
@@ -539,7 +543,7 @@ EXIT=3
 
 Consequences of the principle, each of which is a case that would otherwise be argued separately:
 
-- **The file arm no longer requires the path to exist on disk.** A path named in
+- **The file arm does not require the path to exist on disk.** A path named in
   `stats.skippedFiles` reaches the arm as well. `--ir` and `--no-rescan` exist so a CI job can
   question a pinned artifact from a tree that need not hold the same files, and demanding the
   file locally would drop exactly the motivating case into the pattern arm.
@@ -551,12 +555,12 @@ Consequences of the principle, each of which is a case that would otherwise be a
   file produces: the Symbol is right there, and is answered.
 - **The id arm asks the id grammar, not the `#`.** Dispatch is a silhouette; the file segment is
   only read out of a string that satisfies the whole Symbol-id grammar
-  ([`ir-schema.md`](./ir-schema.md) §3.5). A typo that happens to contain a skipped path names no
+  ([`ir-schema.md`](./ir-schema.md) §3.1). A typo that happens to contain a skipped path names no
   file, and gets the pattern arm's diffuse line rather than a positive claim about coverage.
-- **A document predating `stats.skippedFiles` gets the diffuse line in every arm.**
+- **A document predating `stats.skippedFiles` can only ever give the diffuse answer.**
   `totalFiles > parsedFiles` with no list says how many files were lost and nothing about which,
-  so it can never identify the file the question named. `aburi diff` reports the same shape per
-  side (§6.6).
+  so it can never identify the file the question named, in any arm. `aburi diff` reports the same
+  shape per side (§6.6).
 
 The diffuse line is a count and a pointer at `stats.skippedFiles`, not a list: the question was
 about one Symbol, and answering it with an inventory of the run buries it.

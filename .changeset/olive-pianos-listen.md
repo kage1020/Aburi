@@ -56,19 +56,36 @@ unanswerable.
 - **A document predating `stats.skippedFiles` gets the diffuse line in every arm.**
   `totalFiles > parsedFiles` with no list can be counted but never tied to the file that was
   asked about. `aburi diff` warns about the same shape per side.
+- **The file arm's key is normalised into the space the document is in.**
+  `stats.skippedFiles[].path` and `symbols[].source.file` are NFC by schema and by invariant
+  #19; the argument is whatever the shell handed over, and a name carrying a combining mark
+  survives an archive or a rename in decomposed form. Both of the arm's lookups key on that one
+  string, so the same fix ends the older defect where a decomposed argument found none of a
+  file's Symbols and was told it had no matches.
 
 The diffuse line is a count and a pointer at `stats.skippedFiles`, not a list. The question was
 about one Symbol; answering it with an inventory of the run buries it.
 
-**The library surface.** `ExplainOutcome` gains an `unknown` member, and `not-found` gains a
-`coverage` field carrying either the named-loss count or the unnameable one. Both are facts, not
-prose: the wording lives in the CLI wrapper, which is the only layer that knows it is talking to
-a person. A caller switching exhaustively over `ExplainOutcome` sees the new member at compile
-time.
+**The library surface.** `ExplainOutcome` gains an `unknown` member whose `exitCode` is typed
+to the gate alone, and `not-found` gains a `coverage` field carrying either the lost entries
+themselves or, for a document that cannot name them, a count. Facts rather than prose: the
+wording lives in the CLI wrapper, the only layer that knows it is talking to a person, and the
+non-empty entry list is what keeps the number it prints from drifting from the list it
+describes. The wrapper's switch is exhaustive, so a later member is a type error rather than a
+command that exits on a code with nothing written to explain it.
 
-Verification: 24 tests in `packages/cli/test/explain-coverage.test.ts`, covering each arm on
-both sides of the principle. Two of them exist for the miss-only rule: a Symbol whose id names a
+**`@aburi/core`.** `symbolIdFile` is new. Invariant #21 gains a clause that does not depend on
+`stats.skippedFiles` being present: `parsedFiles` never exceeds `totalFiles`. For a document
+that omits the list, the subtraction is the only trace of a loss there is — a reader taking a
+negative difference for a count reads it as "nothing was lost", which is the assertion of
+absence the enumeration exists to prevent, arrived at from the other side. A document with that
+shape is now refused by `readIR` instead of interpreted downstream; no Aburi scan can produce
+one.
+
+Verification: 28 tests in `packages/cli/test/explain-coverage.test.ts`, covering each arm on
+both sides of the principle, plus four in `@aburi/core` for `symbolIdFile`'s accept/reject table
+and the new invariant clause. Two exist for the miss-only rule: a Symbol whose id names a
 skipped file while its `source.file` names another, and a listed path that still carries the
-Symbols it was asked for. One pins that
-a live scan which withdrew a file benignly, and therefore stayed green, still reaches the new
-exit 3, with a control case proving the scan was green.
+Symbols it was asked for. One pins that a live scan which withdrew a file benignly, and
+therefore stayed green, still reaches the new exit 3, with a control case proving the scan was
+green.

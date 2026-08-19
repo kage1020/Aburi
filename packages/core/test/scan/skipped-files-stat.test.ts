@@ -293,4 +293,27 @@ describe("integrity #21 — the list accounts for every unparsed file", () => {
     // Reporting a violation would make every archived document unreadable.
     expect(of21(documentWith({}))).toEqual([])
   })
+
+  it("fires when more files were parsed than were found, list or no list", () => {
+    // The one clause that is not conditional on the key. For a document that omits it, the
+    // subtraction is the only trace of a loss there is, and a reader taking a negative
+    // difference for a count of losses reads it as "nothing was lost" — which is the
+    // assertion of absence the array exists to prevent, reached from the other side.
+    expect(of21(documentWith({ totalFiles: 1, parsedFiles: 2 }))[0]?.message).toContain(
+      "cannot parse more files than it found",
+    )
+    expect(
+      of21(
+        documentWith({
+          totalFiles: 1,
+          parsedFiles: 2,
+          skippedFiles: [{ path: "a.stub", reason: "over-size" }],
+        }),
+      ).map((v) => v.message),
+    ).toHaveLength(2)
+  })
+
+  it("stays silent when every file found was parsed", () => {
+    expect(of21(documentWith({ totalFiles: 2, parsedFiles: 2 }))).toEqual([])
+  })
 })

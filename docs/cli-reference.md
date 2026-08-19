@@ -13,7 +13,7 @@ document is the operator-facing reference.
 | `0` | `EXIT.SUCCESS` | Command finished; no `--fail-on` gate triggered. |
 | `1` | `EXIT.RUNTIME` | Unexpected runtime failure (IO, unhandled exception). |
 | `2` | `EXIT.INPUT_ERROR` | Bad argv, missing / malformed input file, unresolvable IR shape, ambiguous `aburi explain` target, `--fail-on` grammar mistake. |
-| `3` | `EXIT.GATE` | `--fail-on` clause triggered, a plugin failed to load, or a plugin exception withdrew a file during a scan the command ran. This is the code CI pipelines gate on. |
+| `3` | `EXIT.GATE` | `--fail-on` clause triggered, a plugin failed to load, a plugin exception withdrew a file during a scan the command ran, or the answer would not be safe — `aburi explain` when the IR it read names the file the question asked about as one that scan never analysed. This is the code CI pipelines gate on. |
 
 ## Environment variables
 
@@ -91,7 +91,7 @@ individually and moves the code to `3`.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.
-`aburi explain` reports the scan it ran for you, and nothing at all when it read an IR off disk.
+`aburi explain` reports the scan it ran for you, and nothing live when it read an IR off disk — what that document records about its own losses is a separate matter, and the lookup reads it.
 
 **Examples:**
 
@@ -180,8 +180,9 @@ aburi explain <id-or-pattern> [--ir <path>] [--output <path>] [--no-rescan] [--c
 Three-arm dispatch:
 
 1. **Contains `#`** → treated as a full Symbol id and looked up directly.
-2. **Contains `/` and exists on disk** → all Symbols whose `source.file` matches
-   the workspace-root-relative POSIX path.
+2. **Contains `/`, and either exists on disk or is named in the IR's `stats.skippedFiles`** →
+   all Symbols whose `source.file` matches the workspace-root-relative POSIX path. The second
+   leg is for a pinned artifact: `--ir` is read in a tree that need not hold the same files.
 3. **Otherwise** → case-sensitive substring match on `Symbol.name`.
 
 | Flag | Effect |
@@ -192,11 +193,22 @@ Three-arm dispatch:
 | `--config <path>` | Alternate config file. |
 
 Ambiguous substring hits exit `2` (`EXIT.INPUT_ERROR`) with the candidate list on
-stdout so the operator can requalify. Zero hits exit `1` (`EXIT.RUNTIME`).
+stdout so the operator can requalify. Zero hits exit `1` (`EXIT.RUNTIME`), with a line naming
+how many files the IR says it never analysed when there are any — a match may be in one of them.
 
-A rescan that did not exit clean exits `3` whichever of those the lookup concluded: the withdrawn
-file could have held the match, or a second candidate for it. Reading an existing IR (`--ir`, or
-an `out/aburi.ir.json` already on disk) runs no scan and leaves the code alone.
+Zero hits exit `3` instead when the question named a file and the IR names that same file in
+`stats.skippedFiles`. There is no answer to give: the file that would declare the Symbol was
+never read, and `No matches` would assert an absence the document cannot support.
+
+```
+$ aburi explain src/route.ts --ir out/aburi.ir.json
+Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot say what that file declares.
+```
+
+A rescan that did not exit clean also exits `3`, whichever of those the lookup concluded: the
+withdrawn file could have held the match, or a second candidate for it. Reading an existing IR
+(`--ir`, or an `out/aburi.ir.json` already on disk) runs no scan, so it reaches `3` only by the
+route above — from what the document says, never from a status inherited for having read one.
 
 **Examples:**
 

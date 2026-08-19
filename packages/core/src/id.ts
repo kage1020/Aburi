@@ -182,8 +182,8 @@ export function isSymbolId(value: string): value is SymbolId {
  * apart for a re-export or a generated file, so a caller holding the Symbol reads `source.file`
  * instead. This is for the caller that has only the id, because the Symbol it names is missing.
  *
- * Runs the full grammar rather than splitting on the first `:` and `#`, so a string that merely
- * has the silhouette of an id cannot hand back a path a caller would then make a statement
+ * Runs the full grammar rather than merely splitting on the first `:` and `#`, so a string that
+ * has only the silhouette of an id cannot hand back a path a caller would then make a statement
  * about.
  */
 export function symbolIdFile(value: string): string | null {

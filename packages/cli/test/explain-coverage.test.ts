@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
@@ -170,7 +170,7 @@ describe("runExplain — the id arm", () => {
     expect(outcome.kind).toBe("not-found")
     if (outcome.kind !== "not-found") throw new Error("unreachable")
     expect(outcome.exitCode).toBe(EXIT.RUNTIME)
-    expect(outcome.coverage).toEqual({ kind: "named-losses", fileCount: 1 })
+    expect(outcome.coverage).toEqual({ kind: "named-losses", files: [ROUTE_LOST] })
   })
 
   it("claims no file for an argument that is not a well-formed Symbol id", async () => {
@@ -186,7 +186,7 @@ describe("runExplain — the id arm", () => {
     expect(outcome.kind).toBe("not-found")
     if (outcome.kind !== "not-found") throw new Error("unreachable")
     expect(outcome.exitCode).toBe(EXIT.RUNTIME)
-    expect(outcome.coverage).toEqual({ kind: "named-losses", fileCount: 1 })
+    expect(outcome.coverage).toEqual({ kind: "named-losses", files: [ROUTE_LOST] })
   })
 })
 
@@ -214,13 +214,15 @@ describe("runExplain — the file arm", () => {
     expect(outcome.skipped).toEqual(ROUTE_LOST)
   })
 
-  it("stays diffuse for a path shaped argument that is neither on disk nor lost", async () => {
+  it("makes no positive claim about a path the document cannot tie to a loss", async () => {
+    // Which arm answered is not observable and is not the subject: a path-shaped argument the
+    // skip list does not hold gets the doubt about the run, never a statement about the file.
     await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
     const outcome = await runExplain({ cwd: scratch, argument: "src/never.ts", noRescan: true })
     expect(outcome.kind).toBe("not-found")
     if (outcome.kind !== "not-found") throw new Error("unreachable")
     expect(outcome.exitCode).toBe(EXIT.RUNTIME)
-    expect(outcome.coverage).toEqual({ kind: "named-losses", fileCount: 1 })
+    expect(outcome.coverage).toEqual({ kind: "named-losses", files: [ROUTE_LOST] })
   })
 
   it("answers from the Symbols a listed path still carries", async () => {
@@ -249,6 +251,51 @@ describe("runExplain — the file arm", () => {
     expect(outcome.skipped).toEqual(ROUTE_LOST)
   })
 
+  it("matches a decomposed argument against the composed path the document holds", async () => {
+    // `SkippedFile.path` is NFC by schema and by invariant #19, while the argument is
+    // whatever the shell handed over — a name carrying a combining mark survives an archive
+    // or a rename in decomposed form. Spelled as escapes here because the difference is one
+    // the editor is free to hide.
+    const composed = "src/caf\u00e9.ts"
+    const decomposed = "src/cafe\u0301.ts"
+    await writeIR({ symbols: [KEPT], skipped: [{ path: composed, reason: "parse-failed" }] })
+    const outcome = await runExplain({ cwd: scratch, argument: decomposed, noRescan: true })
+    expect(outcome.kind).toBe("unknown")
+    if (outcome.kind !== "unknown") throw new Error("unreachable")
+    expect(outcome.skipped.path).toBe(composed)
+  })
+
+  it("finds the Symbols of a decomposed argument the document composed", async () => {
+    // The file on disk carries the decomposed name, which is what an archive leaves behind,
+    // while the scan recorded it composed as §1.2 requires. The disk probe finds it under
+    // the name it was given; the comparison against `source.file` must not depend on that.
+    const composed = "src/caf\u00e9.ts"
+    const decomposed = "src/cafe\u0301.ts"
+    await put(decomposed, "export function read() {}\n")
+    await writeIR({ symbols: [makeSymbol(`ts:${composed}#read`, composed)] })
+    const outcome = await runExplain({ cwd: scratch, argument: decomposed, noRescan: true })
+    expect(outcome.kind).toBe("file")
+    if (outcome.kind !== "file") throw new Error("unreachable")
+    expect(outcome.symbols).toHaveLength(1)
+  })
+
+  it("leaves an --output file alone when it has no answer to write", async () => {
+    // A previous good answer sits in the file. `unknown` must not open it: truncating it would
+    // replace an answer with nothing at all, and the exit code is the only other signal.
+    const output = resolve(scratch, "out/explain.md")
+    await mkdir(resolve(scratch, "out"), { recursive: true })
+    await writeFile(output, "# a previous answer\n", "utf8")
+    await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/route.ts",
+      outputPath: output,
+      noRescan: true,
+    })
+    expect(outcome.kind).toBe("unknown")
+    expect(await readFile(output, "utf8")).toBe("# a previous answer\n")
+  })
+
   it("qualifies the run when the file is present but empty of Symbols", async () => {
     await put("src/empty.ts", "type Only = string\n")
     await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
@@ -256,7 +303,29 @@ describe("runExplain — the file arm", () => {
     expect(outcome.kind).toBe("not-found")
     if (outcome.kind !== "not-found") throw new Error("unreachable")
     expect(outcome.exitCode).toBe(EXIT.RUNTIME)
-    expect(outcome.coverage).toEqual({ kind: "named-losses", fileCount: 1 })
+    expect(outcome.coverage).toEqual({ kind: "named-losses", files: [ROUTE_LOST] })
+  })
+})
+
+describe("runExplain — a pinned artifact", () => {
+  it("answers out of an --ir document that is not the one scan writes", async () => {
+    // CL21 is written in terms of `--ir`, and `resolveIR` takes a different branch for it than
+    // for the default path every other case here uses.
+    const pinned = resolve(scratch, "pinned.ir.json")
+    await writeFile(
+      pinned,
+      JSON.stringify(makeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })),
+      "utf8",
+    )
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/route.ts",
+      irPath: pinned,
+    })
+    expect(outcome.kind).toBe("unknown")
+    if (outcome.kind !== "unknown") throw new Error("unreachable")
+    expect(outcome.exitCode).toBe(EXIT.GATE)
+    expect(outcome.skipped).toEqual(ROUTE_LOST)
   })
 })
 
@@ -270,7 +339,10 @@ describe("runExplain — the substring arm", () => {
     expect(outcome.kind).toBe("not-found")
     if (outcome.kind !== "not-found") throw new Error("unreachable")
     expect(outcome.exitCode).toBe(EXIT.RUNTIME)
-    expect(outcome.coverage).toEqual({ kind: "named-losses", fileCount: 2 })
+    expect(outcome.coverage).toEqual({
+      kind: "named-losses",
+      files: [{ path: "src/other.ts", reason: "parse-timeout" }, ROUTE_LOST],
+    })
   })
 
   it("attaches nothing when the document covered every file", async () => {
@@ -490,7 +562,9 @@ describe("aburi explain — what the user reads", () => {
     expect(code).toBe(EXIT.RUNTIME)
     expect(stderr.text()).toContain('No matches for "handleRequest".')
     expect(stderr.text()).toContain("1 file(s)")
-    expect(stderr.text()).toContain("names 1 file(s) the scan never analysed in stats.skippedFiles")
+    expect(stderr.text()).toContain("stats.skippedFiles")
+    // The discriminator between the two doubts, which is the contract; the sentence carrying
+    // it is the wrapper's to reword.
     expect(stderr.text()).not.toContain("predates")
   })
 
@@ -505,7 +579,8 @@ describe("aburi explain — what the user reads", () => {
     })
     expect(code).toBe(EXIT.RUNTIME)
     expect(stderr.text()).toContain('No matches for "handleRequest".')
-    expect(stderr.text()).toContain("predates stats.skippedFiles, so it cannot name them")
+    expect(stderr.text()).toContain("1 file(s)")
+    expect(stderr.text()).toContain("predates")
   })
 
   it("says exactly what it said before when the document covered everything", async () => {

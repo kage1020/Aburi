@@ -17,9 +17,11 @@ export const EXIT = {
    */
   INPUT_ERROR: 2,
   /**
-   * Plugin load failure, `--fail-on` clause tripped, or strict-mode violation. This is
-   * the code CI pipelines gate on ("aburi diff must exit 0 or 3 to be considered
-   * healthy").
+   * The run did not earn a clean answer: a plugin failed to load, a `--fail-on` clause
+   * tripped, strict mode was violated, or the answer itself would not be safe — a scan that
+   * did not exit clean, or, for `aburi explain`, a document that names the file the question
+   * asked about as one it never analysed. This is the code CI pipelines gate on ("aburi diff
+   * must exit 0 or 3 to be considered healthy").
    */
   GATE: 3,
 } as const
