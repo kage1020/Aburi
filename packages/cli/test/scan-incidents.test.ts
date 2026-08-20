@@ -445,17 +445,19 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   it("names every reason's files, with the detail the core wrote", () => {
     const lines = linesFrom(
       reportWith({
+        // Handed over in an order no rule produces — the order a walk of some workspace or
+        // other would have produced. What comes out must not depend on it.
         skipped: [
-          { path: "vendor/bundle.js", reason: "over-size", detail: "2100000 > 1048576" },
-          { path: "src/locked.ts", reason: "unreadable", detail: "EACCES: permission denied" },
+          { path: "src/route.ts", reason: "extraction-failed", detail: "plugin exploded" },
           { path: "src/x.weird", reason: "unroutable", detail: "no plugin claims it" },
-          { path: "src/broken.ts", reason: "parse-failed", detail: "unexpected token at 3:7" },
           {
             path: "src/slow.ts",
             reason: "parse-timeout",
             detail: "extraction reached 5123ms, exceeding parseTimeoutMs (5000ms)",
           },
-          { path: "src/route.ts", reason: "extraction-failed", detail: "plugin exploded" },
+          { path: "vendor/bundle.js", reason: "over-size", detail: "2100000 > 1048576" },
+          { path: "src/broken.ts", reason: "parse-failed", detail: "unexpected token at 3:7" },
+          { path: "src/locked.ts", reason: "unreadable", detail: "EACCES: permission denied" },
         ],
         extractionFailures: [{ file: "src/route.ts", message: "plugin exploded" }],
       }),

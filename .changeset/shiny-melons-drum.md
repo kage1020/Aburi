@@ -40,8 +40,10 @@ error among the recoverable ones would call it something the plugin did not.
 or a tree that was changing under the scan, `unroutable` at a bug in the plugin set, and the two
 extraction reasons at the source and at the plugin. The re-run / fix-something split is the one
 `SkippedFile.reason` already draws in the IR schema, rather than a second vocabulary. The advice
-is a `Record` over the reason union, so a reason added to the schema stops the build instead of
-printing a group with nothing to say.
+and the order both come from one `Record` over the reason union, so a reason added to the schema
+stops the build instead of printing a group with nothing to say — or, had the order been a list,
+compiling and quietly leaving that reason's files out of a report whose census still counted
+them.
 
 **Ten files per reason, not ten across the listing.** One shared budget belongs to whichever
 reason lost the most files, and that is not the reason a reader most needs named: a hundred
@@ -56,9 +58,10 @@ message to both `skipped[].detail` and `extractionFailures[].message` at a singl
 the exit code, and is still what the `diff` fault clause counts.
 
 **Reasons are reported in a fixed order** — `over-size`, `unreadable`, `unroutable`,
-`parse-failed`, `parse-timeout`, `extraction-failed` — in the census line and in the groups
-alike. Insertion order is scan order, so the census used to list its reasons in an order that
-depended on where in the workspace the losses happened to sit.
+`parse-failed`, `parse-timeout`, `extraction-failed`, the sequence the schema docstring itself
+uses — in the census line and in the groups alike. Insertion order is scan order, so the census
+used to list its reasons in an order that depended on where in the workspace the losses happened
+to sit.
 
 **In `@aburi/core`, a timed-out file's detail now names the numbers.** It read
 `extraction exceeded parseTimeoutMs`, a restatement of the reason, while the elapsed and the

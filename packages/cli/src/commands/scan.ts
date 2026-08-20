@@ -306,48 +306,53 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 const MAX_LISTED_PER_REASON = 10
 
 /**
- * The order the reasons are reported in, both in the histogram and in the groups under it.
+ * Where each reason sits in the report, and what to do about it.
  *
- * Fixed rather than the order the files arrived in, which is scan order and therefore
- * depends on where in the workspace the losses happened to sit. This is the order the
- * `SkippedFile.reason` schema docstring uses: decided before the file was read, then during
- * the read, then during extraction — so the list reads as the pipeline the files fell out
- * of, and the groups arrive in the order the histogram named them.
+ * `advice` is the whole difference between them, and the one line they used to share said
+ * none of it: `over-size` points at a budget, `parse-timeout` at a different budget and a
+ * re-run, `unreadable` at the filesystem or at a tree that was changing under the scan,
+ * `unroutable` at a bug report, and the two extraction reasons at the source and at the
+ * plugin respectively. The re-run / fix-something split is the one the reason's own schema
+ * docstring draws: `parse-timeout` depends on how loaded the machine was, everything else
+ * describes the file and clears only when something changes.
+ *
+ * `rank` fixes the order the census and the groups under it come out in, which would
+ * otherwise be the order the files arrived in — scan order, and so a function of where in
+ * the workspace the losses happened to sit. It follows the schema docstring's own sequence:
+ * decided before the file was read, then during the read, then during extraction.
+ *
+ * A `Record` over the union rather than a list, so a reason added to the schema stops the
+ * build here. A list would have compiled, and quietly left the new reason's files out of the
+ * report while the census above still counted them.
  */
-const REASON_ORDER = [
-  "over-size",
-  "unreadable",
-  "unroutable",
-  "parse-failed",
-  "parse-timeout",
-  "extraction-failed",
-] as const satisfies readonly SkippedFile["reason"][]
-
-/**
- * What to do about each reason, which is the whole difference between them: `over-size`
- * points at a budget, `parse-timeout` at a different budget and a re-run, `unreadable` at
- * the filesystem, `unroutable` at a bug report, and the two extraction reasons at the source
- * and the plugin respectively. One line for all six said none of that.
- *
- * The re-run / fix-something split is the one the reason's own schema docstring draws:
- * `parse-timeout` depends on how loaded the machine was, everything else describes the file
- * and clears only when something changes.
- *
- * A `Record` over the union rather than a switch with a fallback, so a reason added to the
- * schema stops the build here instead of printing a group with nothing to say.
- */
-const REASON_ADVICE: Record<SkippedFile["reason"], string> = {
-  "over-size": "larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.",
-  unreadable:
-    "could not be read. Check permissions, or re-run if the tree was changing while the scan ran.",
-  unroutable:
-    "discovery accepted the extension and no plugin claims it. That disagreement is a bug in the plugin set, not in the files.",
-  "parse-failed":
-    "the language plugin refused the source. Deterministic: fix the file, or the plugin.",
-  "parse-timeout":
-    "extraction ran past parseTimeoutMs. Machine-dependent: re-run, and raise the budget if it repeats.",
-  "extraction-failed":
-    "a plugin threw while extracting. This is the reason the run does not exit clean.",
+const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: string }> = {
+  "over-size": {
+    rank: 1,
+    advice: "larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.",
+  },
+  unreadable: {
+    rank: 2,
+    advice:
+      "could not be read. Check permissions, or re-run if the tree was changing while the scan ran.",
+  },
+  unroutable: {
+    rank: 3,
+    advice:
+      "discovery accepted the extension and no plugin claims it. That disagreement is a bug in the plugin set, not in the files.",
+  },
+  "parse-failed": {
+    rank: 4,
+    advice: "the language plugin refused the source. Deterministic: fix the file, or the plugin.",
+  },
+  "parse-timeout": {
+    rank: 5,
+    advice:
+      "extraction ran past parseTimeoutMs. Machine-dependent: re-run, and raise the budget if it repeats.",
+  },
+  "extraction-failed": {
+    rank: 6,
+    advice: "a plugin threw while extracting. This is the reason the run does not exit clean.",
+  },
 }
 
 /**
@@ -438,15 +443,20 @@ function reportSkipped(
   warn: WarnFn,
 ): void {
   if (skipped.length === 0) return
+  // Grouped from the files and then ordered, rather than walked reason by reason: every file
+  // handed over is in a group by construction, so the census below cannot come to more than
+  // the groups under it account for.
   const byReason = new Map<SkippedFile["reason"], ScanReport["skipped"][number][]>()
-  for (const reason of REASON_ORDER) {
-    const files = skipped.filter((s) => s.reason === reason)
-    if (files.length > 0) byReason.set(reason, files)
+  for (const file of skipped) {
+    const group = byReason.get(file.reason)
+    if (group === undefined) byReason.set(file.reason, [file])
+    else group.push(file)
   }
-  const census = [...byReason].map(([reason, files]) => `${reason}=${files.length}`).join(", ")
+  const groups = [...byReason].sort(([a], [b]) => REASON_REPORT[a].rank - REASON_REPORT[b].rank)
+  const census = groups.map(([reason, files]) => `${reason}=${files.length}`).join(", ")
   say(`${skipped.length} file(s) contributed no Symbols: ${census}`)
-  for (const [reason, files] of byReason) {
-    say(`${reason} (${files.length}) — ${REASON_ADVICE[reason]}`)
+  for (const [reason, files] of groups) {
+    say(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
     for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
       warn(file.detail === undefined ? `    ${file.path}` : `    ${file.path}: ${file.detail}`)
     }
