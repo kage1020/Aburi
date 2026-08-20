@@ -30,6 +30,7 @@ export type {
   Generator as DiffGenerator,
   IRRef,
   MatchRationale,
+  NotComparedFile,
   SignatureDelta,
   SkippedFile as DiffSkippedFile,
   SkipReason,

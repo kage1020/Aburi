@@ -155,6 +155,71 @@ describe("aburi.diff.v1.json — DependencyUnknown instances", () => {
   })
 })
 
+describe("aburi.diff.v1.json — notCompared instances", () => {
+  const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
+
+  function symmetricDiff(): DiffResult {
+    const skipped: SkippedFile[] = [{ path: "vendor/huge.ts", reason: "over-size" }]
+    return buildDiff({
+      baseIR: withSkipped(makeIR({ symbols: [kept] }), skipped, 2),
+      headIR: withSkipped(
+        makeIR({ symbols: [kept] }),
+        [{ path: "vendor/huge.ts", reason: "parse-timeout" }],
+        2,
+      ),
+      base: IR_REF,
+      head: IR_REF,
+    })
+  }
+
+  it("validates a diff naming a file neither scan read", () => {
+    const diff = symmetricDiff()
+    expect(diff.notCompared).toHaveLength(1)
+    expect(validateDiff(diff), report(validateDiff.errors)).toBe(true)
+  })
+
+  it("validates a diff that predates the field, with no key at all", () => {
+    const { notCompared: _dropped, ...older } = symmetricDiff()
+    expect(validateDiff(older), report(validateDiff.errors)).toBe(true)
+  })
+
+  it("refuses an entry that reports only one side's reason", () => {
+    // The pair is the point: a file that timed out on one revision and was over the cap on the
+    // other needs two different actions, and half the answer sends the reader to the wrong one.
+    const diff = symmetricDiff()
+    const broken = {
+      ...diff,
+      notCompared: [{ path: "vendor/huge.ts", baseReason: "over-size" }],
+    }
+    expect(validateDiff(broken)).toBe(false)
+  })
+
+  it("refuses a reason the IR could never have written", () => {
+    const diff = symmetricDiff()
+    const broken = {
+      ...diff,
+      notCompared: [{ path: "vendor/huge.ts", baseReason: "over-size", headReason: "gave-up" }],
+    }
+    expect(validateDiff(broken)).toBe(false)
+  })
+
+  it("refuses an entry carrying a field the schema does not know", () => {
+    const diff = symmetricDiff()
+    const broken = {
+      ...diff,
+      notCompared: [
+        {
+          path: "vendor/huge.ts",
+          baseReason: "over-size",
+          headReason: "parse-timeout",
+          detail: "3.2 MB",
+        },
+      ],
+    }
+    expect(validateDiff(broken)).toBe(false)
+  })
+})
+
 describe("the schemas agree on what a skip reason is", () => {
   it("enumerates the same values as the IR", () => {
     // Spelled independently in `SkippedFile.reason` (IR) and `SkipReason` (diff), and the only
@@ -166,9 +231,11 @@ describe("the schemas agree on what a skip reason is", () => {
     expect([...diffSchema.$defs.SkipReason.enum].sort()).toEqual(ofIR)
   })
 
-  it("points both of the diff's own uses at that one definition", () => {
+  it("points every one of the diff's own uses at that one definition", () => {
     const ref = { $ref: "#/$defs/SkipReason" }
     expect(diffSchema.$defs.SymbolUnknown.properties.reason).toEqual(ref)
     expect(diffSchema.$defs.SkippedFile.properties.reason).toEqual(ref)
+    expect(diffSchema.$defs.NotComparedFile.properties.baseReason).toEqual(ref)
+    expect(diffSchema.$defs.NotComparedFile.properties.headReason).toEqual(ref)
   })
 })

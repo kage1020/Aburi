@@ -346,6 +346,7 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ## ➕ Added
 ## ➖ Removed
 ## ❔ Unknown
+## 🚫 Not compared
 ## 🔀 Moved + Changed
 ## 🔀 Moved
 ## 🧱 Component changes
@@ -416,6 +417,19 @@ Entries with `status: "unknown"` — a Symbol one document has and the other nev
 ```
 
 `absentFrom: "base"` reads `may not be new` instead. The `reason` is quoted because it decides the next move: `parse-timeout` usually clears on a re-run, the rest clear only when the file is fixed.
+
+#### 🚫 Not compared
+
+`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown for the same reason Unknown sits beside Removed: a gap rather than a change. What separates the two is who can close it — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed.
+
+```md
+- `vendor/bundle.js` — over-size on both
+- `apps/web/src/route.ts` — parse-timeout at base, over-size at head
+```
+
+Both reasons, and only collapsed to one phrase when they agree. They can differ, and the pair is what says whether a re-run is enough.
+
+The section is omitted when the array is empty, and equally when the key is absent — a diff written before the field existed cannot say what it missed, and rendering the section over an assumed empty list would report "nothing was missed" on every archived document.
 
 #### 🔀 Moved + Changed
 

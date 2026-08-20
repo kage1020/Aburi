@@ -57,6 +57,63 @@ describe("projectDiff — the Unknown section", () => {
   })
 })
 
+describe("projectDiff — the Not compared section", () => {
+  it("names each file and what each revision said about it", () => {
+    const md = projectDiff(
+      makeDiff({
+        notCompared: [
+          { path: "vendor/huge.ts", baseReason: "parse-timeout", headReason: "over-size" },
+        ],
+      }),
+    )
+    expect(md).toContain("## 🚫 Not compared")
+    expect(md).toContain("`vendor/huge.ts`")
+    expect(md).toContain("parse-timeout at base, over-size at head")
+  })
+
+  it("says it once when both revisions gave the same reason", () => {
+    const md = projectDiff(
+      makeDiff({
+        notCompared: [
+          { path: "vendor/bundle.js", baseReason: "over-size", headReason: "over-size" },
+        ],
+      }),
+    )
+    expect(md).toContain("`vendor/bundle.js` — over-size on both")
+  })
+
+  it("sits beside Unknown rather than inside it", () => {
+    // Both are gaps rather than changes, and a reader scanning for what the diff does not
+    // cover should find them together — but who can close them differs, so they are not one
+    // section.
+    const md = projectDiff(
+      makeDiff({
+        symbols: [unknown()],
+        summary: { ...emptySummary(), unknown: 1 },
+        notCompared: [{ path: "vendor/huge.ts", baseReason: "over-size", headReason: "over-size" }],
+      }),
+    )
+    const unknownAt = md.indexOf("## ❔ Unknown")
+    const notComparedAt = md.indexOf("## 🚫 Not compared")
+    expect(unknownAt).toBeGreaterThan(-1)
+    expect(notComparedAt).toBeGreaterThan(unknownAt)
+    expect(md.slice(unknownAt, notComparedAt)).toContain("handleRequest")
+    expect(md.slice(unknownAt, notComparedAt)).not.toContain("vendor/huge.ts")
+  })
+
+  it("omits the section when the comparison covered everything", () => {
+    expect(projectDiff(makeDiff({ notCompared: [] }))).not.toContain("Not compared")
+  })
+
+  it("omits it for a document that predates the field, rather than claiming a clean run", () => {
+    // An older diff cannot say what it missed. Rendering the section over `?? []` would report
+    // "nothing was missed" on every archived document, which is the claim this whole field
+    // exists to stop making.
+    const { notCompared: _absent, ...older } = makeDiff({ notCompared: [] })
+    expect(projectDiff(older)).not.toContain("Not compared")
+  })
+})
+
 describe("projectDiff — the Unknown dependency group", () => {
   const edge: Dependency = {
     from: endpoint("ts:src/gone.ts#handleRequest"),

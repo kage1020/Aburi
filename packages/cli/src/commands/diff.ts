@@ -346,8 +346,10 @@ function warnOnUnenumerableLosses(ir: IR, side: "base" | "head", warn: (m: strin
  * symmetric loss is the *ordinary* case: a generated bundle over the size cap, a language no
  * plugin claims, a file that has been unparseable since before the branch.
  *
- * Naming them is all this can do from here. Deciding what an artifact should say about a file
- * neither side read is a change to the diff document, not to its cover note.
+ * The artifact carries them too, in `notCompared[]` — this is the cover note for the reader who
+ * is watching the command rather than reading the file it wrote. It is deliberately shorter
+ * than the document: a count, a capped list of paths, and no reasons, because a terminal line
+ * that grows with the size of a workspace's blind spot stops being read.
  */
 function warnOnSymmetricLosses(baseIR: IR, headIR: IR, warn: (m: string) => void): void {
   const inBase = new Set((baseIR.stats.skippedFiles ?? []).map((f) => f.path))

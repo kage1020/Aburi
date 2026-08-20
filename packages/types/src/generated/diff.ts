@@ -29,6 +29,10 @@ dependencies: DependencyDiff
  * Weakly-connected components of changed Symbols over the call graph (see docs/design/slice-view.md).
  */
 slices: SliceRecord[]
+/**
+ * Files neither revision analysed, so the comparison never covered them. A symbol-level status cannot carry this: `unknown` is derived from the matcher's leftovers, and a file skipped on both sides contributes no Symbols to either document and therefore no leftover — the diff would otherwise be silent about it, which reads exactly like a file that was compared and found unchanged. Most skip reasons are properties of the file rather than of the revision (a generated bundle over the size cap, a language no plugin claims, a file unparseable since before the branch), so this is the ordinary case rather than the exceptional one. Sorted by path. Optional only so a diff written before the field existed stays valid; a current writer always emits the key, empty array included, because nothing else in the document would let a reader tell "nothing was missed" from "this writer could not say".
+ */
+notCompared?: NotComparedFile[]
 }
 export interface Generator {
 name: string
@@ -193,4 +197,15 @@ id: SliceId
  * @minItems 1
  */
 members: SymbolId[]
+}
+/**
+ * One path both scans gave up on, with what each of them said. The two reasons are kept apart rather than collapsed because they can differ — `parse-timeout` at the base and `over-size` at the head is one file that needs a re-run on one side and a config change on the other — and because a reader deciding whether the gap is transient needs the pair, not either half.
+ */
+export interface NotComparedFile {
+/**
+ * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses. Both revisions name the file in that space, which is what makes the two skip lists comparable at all.
+ */
+path: string
+baseReason: SkipReason
+headReason: SkipReason
 }

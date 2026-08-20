@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { makeLanguageId } from "@aburi/core"
-import type { IR, SkippedFile } from "@aburi/types"
+import type { DiffResult, IR, SkippedFile } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runDiff } from "../src"
 import { symbolId } from "./fixtures"
@@ -241,6 +241,15 @@ describe("aburi diff — a file the head scan never read", () => {
     expect(warnings.join("\n")).toContain(
       "1 file(s) were skipped by both scans and are not represented in this diff: vendor/huge.ts",
     )
+    // stderr is the cover note; the artifact is what a bot or a pasted PR comment gets, and
+    // it used to carry no trace of the file at all.
+    const written = JSON.parse(await readFile(report.diffJsonPath ?? "", "utf8")) as DiffResult
+    expect(written.notCompared).toEqual([
+      { path: "vendor/huge.ts", baseReason: "over-size", headReason: "over-size" },
+    ])
+    const md = await readFile(report.diffMdPath ?? "", "utf8")
+    expect(md).toContain("## 🚫 Not compared")
+    expect(md).toContain("`vendor/huge.ts` — over-size on both")
   })
 
   it("says nothing about symmetric loss when only one side lost the file", async () => {
