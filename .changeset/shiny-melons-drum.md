@@ -20,7 +20,8 @@ structurally before the line was built. The same run now reads:
 ⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
 ⚠ over-size (3) — larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.
     vendor/bundle.js: 2100000 > 1048576
-    …
+    vendor/legacy.js: 1400000 > 1048576
+    public/data.js: 1100000 > 1048576
 ⚠ parse-failed (1) — the language plugin refused the source. Deterministic: fix the file, or the plugin.
     src/broken.ts: parse reported a non-recoverable error at 12:4 — unterminated string
 ⚠ extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.

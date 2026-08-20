@@ -128,10 +128,14 @@ export interface ScanReport {
   skipped: readonly { path: string; reason: SkippedFile["reason"]; detail?: string }[]
   /**
    * Files a plugin threw on, with what it said and the error's own code where it had one.
-   * The same files appear in `skipped` under `reason: "extraction-failed"`; this is where
-   * the message lives, and it is kept apart because it is the one reason that means
-   * something in the run is *broken* rather than merely large, slow, or in a language no
-   * plugin claims — which is why it is also the one that moves the exit code.
+   *
+   * The same files are in `skipped` under `reason: "extraction-failed"`, carrying the same
+   * message — the scan writes it to both at one site — so this is not where the message
+   * lives, and the incident report reads it from `skipped` with every other reason's. What
+   * is only here is the `code`, and the standing that goes with it: this is the one reason
+   * that means something in the run is *broken* rather than merely large, slow, or in a
+   * language no plugin claims, so it is what moves the exit code and what the `diff` fault
+   * clause counts.
    */
   extractionFailures: readonly { file: string; message: string; code?: string }[]
   /**
