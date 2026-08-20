@@ -131,6 +131,12 @@ In ref mode a scan that did not exit clean exits `3` even with no `--fail-on` cl
 are not the reason — a withdrawn file's Symbols come out as `unknown`, not as deletions — the
 reason is that a workspace `aburi scan` refuses to call green must not go green here instead.
 
+A file **both** scans skipped produces no `unknown` entry, because neither document holds Symbols
+from it. `diff.json` names it in `notCompared[]` with the reason each scan gave, and `diff.md`
+lists it under `## 🚫 Not compared`. Most skip reasons are properties of the file rather than of
+the revision — an over-size bundle, a language no plugin claims — so this is the ordinary case,
+and without it a standing blind spot reads as a comparison that found nothing to report.
+
 | Flag | Effect |
 |---|---|
 | `<base>..<head>` | Ref-spec dispatch (git). |

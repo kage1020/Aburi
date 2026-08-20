@@ -62,15 +62,22 @@ existed, and the Markdown section is omitted for those rather than reporting a c
 
 **Not in scope.** `--fail-on` gains no token. A workspace with a permanent over-size bundle would
 trip a bare one on every pull request, which is an argument for a threshold rather than a flag,
-and the same question is already open for the dependency side. And the ref form of `aburi diff`
-still discards both `ScanResult.skipped` lists after keeping `irPath`, so the richer per-file
-detail those carry is unavailable to the command that just produced them — that is its own
-issue, and this field needs only what `stats.skippedFiles` already persists.
+and the same question is already open for the dependency side.
+
+Nor does an entry carry a `detail`. Ref mode could supply one — it keeps both `ScanReport`s, and
+each `skipped` entry there has the size, the elapsed or the message a plugin refused the file
+with — but file mode runs no scans and never could, so the field would be present or absent for
+the same workspace depending on how the diff was invoked. It is also what the IR refuses to
+persist for the same reason (`ir-schema.md`, `SkippedFile`): an `unreadable` detail is an OS
+error message carrying an absolute path, and a canonical document whose bytes depend on where
+the repository was checked out is not byte-stable. This field carries exactly what
+`stats.skippedFiles` persists, which is what makes it available from both modes.
 
 Every `diff.json` gains the key, so a byte-exact or snapshot comparison against one written by an
 older version will differ.
 
-Verification: 9 tests in `packages/diff/test/not-compared.test.ts`, five ajv instance cases, five
-projection cases, and one CLI case asserting the written artifact rather than the return value.
-The primary fixture skips the same path for *different* reasons on the two sides, because every
+Verification: 9 cases in `packages/diff/test/not-compared.test.ts`, five ajv instance cases, one
+canonical byte-stability case that reverses both skip lists, five projection cases, and the CLI's
+symmetric-loss case extended to read the artifact it wrote rather than the value it returned. The
+primary fixture skips the same path for *different* reasons on the two sides, because every
 fixture where they agree is blind to the two being swapped.

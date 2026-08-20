@@ -72,6 +72,48 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
     expect(writeCanonicalDiff(forward)).toBe(writeCanonicalDiff(reversed))
   })
 
+  it("serialises notCompared byte-identically however the skip lists are ordered", () => {
+    // Same hazard as the unknown edges above: the array is built by walking a Map, so without
+    // the explicit sort its order follows whatever order the two scans happened to record
+    // their losses in, and one workspace produces two different files.
+    const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
+    const losses = [
+      { path: "z/last.ts", reason: "over-size" as const },
+      { path: "a/first.ts", reason: "parse-failed" as const },
+    ]
+    const withLosses = (skippedFiles: typeof losses) =>
+      makeIR({
+        symbols: [kept],
+        stats: {
+          totalFiles: 3,
+          parsedFiles: 1,
+          keptSymbols: 1,
+          droppedSymbols: 0,
+          effectPropagation: {
+            sccCount: 0,
+            maxSccSize: 0,
+            propagatedEffectCount: 0,
+            symbolsWithPropagatedEffects: 0,
+          },
+          skippedFiles,
+        },
+      })
+    const forward = buildDiff({
+      baseIR: withLosses(losses),
+      headIR: withLosses(losses),
+      base: IR_REF,
+      head: IR_REF,
+    })
+    const reversed = buildDiff({
+      baseIR: withLosses([...losses].reverse()),
+      headIR: withLosses([...losses].reverse()),
+      base: IR_REF,
+      head: IR_REF,
+    })
+    expect(forward.notCompared).toHaveLength(2)
+    expect(writeCanonicalDiff(forward)).toBe(writeCanonicalDiff(reversed))
+  })
+
   it("sorts symbols[] by (status, reference-id) so ordering is stable", () => {
     const s1 = makeSymbol({ id: "ts:src/a.ts#Bar", name: "Bar" })
     const s2 = makeSymbol({ id: "ts:src/a.ts#Alpha", name: "Alpha" })
