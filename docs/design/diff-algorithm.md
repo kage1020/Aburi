@@ -400,7 +400,7 @@ Three properties this rests on:
 
 When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
 
-`dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) rather than in the artifact.
+`dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) and in the artifact, in `notCompared[]` (§6.3).
 
 ### 3.6 Handling dropped symbols
 
@@ -499,7 +499,7 @@ Treating `dropped-toggled` as an independent status means:
 
 The alternatives were both silence of a kind. Suppressing the entry hides a Symbol that may genuinely have been deleted; keeping `removed` and adding a flag beside it shows an API deletion to every reader that does not know to look for the flag — including `--fail-on removed`, which is the reason the phantom mattered. A status of its own makes `--fail-on removed` mean what it says and gives a strict pipeline `--fail-on unknown` to catch the case where the answer is missing on **one** side.
 
-It does not catch the case where both sides lost the same file. `unknown` is derived from the matcher's leftovers, and a file skipped in both revisions contributes Symbols to neither document, so there are no leftovers and the diff is silent about it — while looking exactly like a diff that compared the file and found it unchanged. Most skip reasons are deterministic properties of the file, which makes symmetric loss the ordinary case rather than the exceptional one. `aburi diff` names those files on stderr; representing them in the artifact is an open question (cli-spec.md §6.6).
+It does not catch the case where both sides lost the same file, and no status could. `unknown` is derived from the matcher's leftovers, and a file skipped in both revisions contributes Symbols to neither document, so there is no leftover to carry a status at all. That loss is reported at document level instead — see §6.3.
 
 ## 5. Delta computation (changed / moved+changed only)
 
@@ -698,6 +698,39 @@ An edge touching a Symbol that **moved** can be `unknown` while the Symbol itsel
 
 `dependencies.unknown[]` and `summary.depsUnknown` are optional in the schema only so a diff written before they existed stays valid. A current writer always emits both, empty array and zero included — unlike the IR's `stats.skippedFiles`, there is no arithmetic elsewhere in the document that would let a reader tell "nothing was unknown" from "this writer could not say".
 
+### 6.3 Files neither revision analysed
+
+`notCompared[]` names every path both `stats.skippedFiles` lists hold, with the reason each
+scan gave. Sorted by path.
+
+It exists because the Symbol level cannot express the loss. A file skipped on **one** side
+leaves Symbols on the other, and those become `unknown` (§3.5.1); a file skipped on **both**
+leaves nothing anywhere, so the document said nothing about it — and a diff that says nothing
+about a path is exactly what a diff that compared it and found it unchanged looks like. Most
+skip reasons are properties of the file rather than of the revision (a generated bundle over
+the size cap, a language no plugin claims, a file unparseable since before the branch was cut),
+so this is the ordinary case: a workspace with a standing blind spot got a clean-looking diff
+on every pull request while a whole directory sat outside the comparison.
+
+**The intersection, not the union.** A one-sided loss is already reported as `unknown`, and
+listing it here as well would count one loss twice in two vocabularies that mean different
+things.
+
+**Both reasons, never one.** They can differ — `parse-timeout` at the base and `over-size` at
+the head is one file that timed out once and is permanently too large — and the pair is what
+tells a reader whether a re-run is enough.
+
+**No summary counter.** `unknown` and `depsUnknown` complete a census: they correct the
+counters beside them, which are undercounts by exactly that much. These files contributed no
+entry to any array on either side, so there is nothing to correct — the field scopes the
+document rather than qualifying a count. A gate written to mean "fail if this diff is
+incomplete" therefore sees neither this nor `dependencies.unknown`; `--fail-on` has no token
+for either (cli-spec.md §6.7).
+
+**A document that predates `stats.skippedFiles` produces nothing here.** It reports
+`totalFiles > parsedFiles` and no list, so no path can be named; `aburi diff` warns about that
+state per side (cli-spec.md §6.6) and the artifact does not invent it.
+
 ## 7. Output formats
 
 ### 7.1 Diff result JSON (`out/diff.json`)
@@ -749,7 +782,8 @@ An edge touching a Symbol that **moved** can be `unknown` while the Symbol itsel
     "added":   [ /* Dependency[] */ ],
     "removed": [ /* Dependency[] */ ],
     "unknown": [ /* {dependency, absentFrom, lostFiles} — see §6.2.1 */ ]
-  }
+  },
+  "notCompared": [ /* {path, baseReason, headReason} — see §6.3 */ ]
 }
 ```
 
@@ -894,7 +928,8 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 
 | ID | Input | Expected |
 |---|---|---|
-| DF1 | Feed the same IR as base/head | summary all 0, changes/components/dependencies all empty |
+| DF1 | Feed the same IR as base/head, with nothing in `stats.skippedFiles` | summary all 0, changes/components/dependencies/notCompared all empty |
+| DF1b | Feed the same IR as base/head, with a file in `stats.skippedFiles` | summary still all 0, but 1 entry in notCompared — the comparison covered less than the counts suggest |
 | DF2 | 1 new Symbol in head | added: 1, 1 entry in the Markdown Added section |
 | DF3 | 1 Symbol deleted from base | removed: 1 |
 | DF4 | Only a rule's condition changed | changed: 1, delta.logicChanged: true, delta.apiChanged: false |
@@ -922,7 +957,7 @@ In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 - Adding a `MatchRationale` enum value is **breaking** (consumers' `--fail-on` settings depend on fixed values)
 - Adding a status enum value (`added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled`) is **breaking**
 - Adding a `summary` field is non-breaking
-- Adding an optional array to `componentDiff` / `dependencyDiff` is non-breaking on the same terms, and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed.
+- Adding an optional array is non-breaking on the same terms — to `componentDiff` / `dependencyDiff` or to the document itself — and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed. This is where the diff parts company with the IR, whose Class B fields (ir-schema.md §1.1) are omitted when empty: an IR reader can fall back on `totalFiles - parsedFiles`, and a diff reader has nothing to fall back on.
 
 ## 11. Design decisions
 

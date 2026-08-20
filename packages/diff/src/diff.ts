@@ -1,5 +1,14 @@
 import { reconstructCallEdgesFromIR, type SerializeOptions, serializeCanonical } from "@aburi/core"
-import type { DiffResult, IR, IRRef, Summary, SymbolChange } from "@aburi/types"
+import type {
+  DiffResult,
+  IR,
+  IRRef,
+  NotComparedFile,
+  RelativePath,
+  SkipReason,
+  Summary,
+  SymbolChange,
+} from "@aburi/types"
 import {
   DEPENDENCY_IDENTITY_FIELDS,
   dependencyIdentity,
@@ -22,6 +31,19 @@ import { computeSlices } from "./slice"
 import { classifyStatus, dropDirection } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.dev/schema/aburi.diff.v1.json"
+
+/**
+ * The two counters `buildDiff` always writes, narrowed off `Summary`'s optionals.
+ *
+ * They are optional on the wire so a diff written before they existed stays valid, and that
+ * optionality is about *documents*, not about this function — a caller holding a value it just
+ * built should not have to re-decide what "absent" would have meant. Same reason
+ * `diffDependencies` declares its `unknown` array present.
+ */
+interface UnknownCounters {
+  unknown: number
+  depsUnknown: number
+}
 
 export interface DiffInput {
   baseIR: IR
@@ -46,7 +68,9 @@ const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
  * pipe the result through additional steps (Markdown projection, `--fail-on` gate) before
  * serialisation.
  */
-export function buildDiff(input: DiffInput): DiffResult {
+export function buildDiff(
+  input: DiffInput,
+): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & UnknownCounters } {
   assertDiffable(input.baseIR, "baseIR")
   assertDiffable(input.headIR, "headIR")
   ensureSchemasAgree(input.baseIR, input.headIR)
@@ -68,7 +92,12 @@ export function buildDiff(input: DiffInput): DiffResult {
     ...stage4_5.matched,
   ]
 
-  const summary: Summary = {
+  // Typed with the two counters present. They are optional on the wire, but this function
+  // writes both on every diff, and the local type is what carries that from here to the
+  // return without a cast.
+  const summary: Summary & UnknownCounters = {
+    unknown: 0,
+    depsUnknown: 0,
     added: 0,
     removed: 0,
     moved: 0,
@@ -84,9 +113,8 @@ export function buildDiff(input: DiffInput): DiffResult {
     depsAdded: 0,
     depsRemoved: 0,
   }
-  // Counted locally: `Summary.unknown` is optional so a diff written before the counter
-  // existed stays schema-valid, and `summary.unknown++` on an optional number does not
-  // type-check. Assigned once, below, where the other totals are.
+  // Counted locally and assigned once below, where the other totals are, so the increment
+  // sites do not have to reason about a counter that is optional on the wire.
   let unknown = 0
 
   const symbols: SymbolChange[] = []
@@ -226,7 +254,39 @@ export function buildDiff(input: DiffInput): DiffResult {
     components,
     dependencies,
     slices,
+    notCompared: filesNeitherSideRead(lostByBase, lostByHead),
   }
+}
+
+/**
+ * Paths both documents record as never analysed, with each side's own reason.
+ *
+ * This is the loss `unknown` cannot describe. That status is derived from the matcher's
+ * leftovers — a Symbol one document holds and the other lacks — and a file skipped on both
+ * sides contributes Symbols to neither, so it leaves no leftover to classify and the whole
+ * document falls silent about it. Silence is the one thing it must not do here: a diff with
+ * nothing to say about a path is exactly what a diff that compared it and found it unchanged
+ * looks like.
+ *
+ * The intersection, not the union. A one-sided loss has leftovers on the other side and is
+ * reported as `unknown` there; listing it here as well would count one loss twice, in two
+ * vocabularies that mean different things.
+ *
+ * Always returns an array, empty included. Optionality in the schema covers documents written
+ * before the field existed, and no arithmetic elsewhere in a diff would let a reader tell that
+ * case from a run that missed nothing (docs/design/diff-algorithm.md §10.1).
+ */
+function filesNeitherSideRead(
+  lostByBase: ReadonlyMap<RelativePath, SkipReason>,
+  lostByHead: ReadonlyMap<RelativePath, SkipReason>,
+): NotComparedFile[] {
+  const both: NotComparedFile[] = []
+  for (const [path, baseReason] of lostByBase) {
+    const headReason = lostByHead.get(path)
+    if (headReason === undefined) continue
+    both.push({ path, baseReason, headReason })
+  }
+  return both.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 }
 
 /** §9.1 — refuse to diff across schema versions. */

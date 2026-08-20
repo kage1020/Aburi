@@ -180,9 +180,9 @@ describe("buildDiff — an edge into a file the other side never analysed", () =
   })
 
   it("says nothing about a file both sides lost, because neither holds the edge", () => {
-    // The deps-side face of the gap `aburi diff` warns about on stderr: with no Symbols from
-    // the file in either document there is no edge to classify, so the diff is silent about a
-    // dependency it never compared.
+    // With no Symbols from the file in either document there is no edge to classify, so this
+    // array cannot describe the loss and does not try. The document does, one level up:
+    // `notCompared[]` names the path and what each scan said about it.
     const skipped = [{ path: "src/gone.ts", reason: "over-size" as const }]
     const base = withSkipped(makeIR({ symbols: [kept] }), skipped)
     const head = withSkipped(makeIR({ symbols: [kept] }), skipped)

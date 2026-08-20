@@ -3,6 +3,7 @@ import type {
   DependencyUnknown,
   DiffResult,
   Symbol as IRSymbol,
+  NotComparedFile,
   SliceId,
   SliceRecord,
   SymbolChange,
@@ -40,6 +41,10 @@ export function projectDiff(diff: DiffResult): string {
   appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
   appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
   appendSection(lines, "## ❔ Unknown", renderUnknown(buckets.unknown))
+  // `?? []` renders nothing for a diff that predates the field, which is the right answer:
+  // such a document cannot say what it missed, and a section built from an assumed empty list
+  // would report "nothing was missed" on every archived diff.
+  appendSection(lines, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
   appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
   appendSection(lines, "## 🧱 Component changes", renderComponentChanges(diff))
@@ -527,6 +532,34 @@ function unknownExplanation(item: SymbolUnknown): string {
   const side = item.absentFrom
   const fate = side === "head" ? "may still exist" : "may not be new"
   return `the ${side} scan skipped \`${item.symbol.source.file}\` (${item.reason}), so this Symbol ${fate}`
+}
+
+/**
+ * Files neither revision analysed, so nothing above says anything about them.
+ *
+ * Beside Unknown rather than inside it, and for the same reason Unknown sits apart from Added
+ * and Removed: an entry is not a change to review but a gap to close. What separates the two
+ * is who can close it. An Unknown Symbol needs one revision re-scanned; a file here was missed
+ * by both, so the reader is looking at a standing property of the workspace — a bundle over
+ * the size cap, a language no plugin claims — that every diff will keep missing until the
+ * cause is changed.
+ *
+ * Both reasons, never one. They can differ, and the pair is what says whether a re-run is
+ * enough: `parse-timeout` at the base and `over-size` at the head is one file that timed out
+ * once and is permanently too large, which neither half tells you on its own.
+ */
+function renderNotCompared(files: readonly NotComparedFile[]): string[] {
+  if (files.length === 0) return []
+  const rows: string[] = []
+  for (const file of files) {
+    const reasons =
+      file.baseReason === file.headReason
+        ? `${file.baseReason} on both`
+        : `${file.baseReason} at base, ${file.headReason} at head`
+    rows.push(`- \`${file.path}\` — ${reasons}`)
+  }
+  rows.push("")
+  return rows
 }
 
 function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {

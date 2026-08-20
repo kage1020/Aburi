@@ -8,7 +8,7 @@ import {
   projectDiff,
   projectDiffSummaryLine,
 } from "@aburi/markdown-projection"
-import type { DiffResult, IR, IRRef } from "@aburi/types"
+import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../artifact-paths"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -150,7 +150,10 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   )
 
   const generator = await readGeneratorInfo()
-  let diff: DiffResult
+  // The narrowed return of `buildDiff` rather than a bare `DiffResult`: this command writes
+  // the document, so it holds the fields the writer always emits, and re-widening here would
+  // put an `?? []` back in front of the array whose whole point is that it is never absent.
+  let diff: ReturnType<typeof buildDiff>
   try {
     diff = buildDiff({
       baseIR,
@@ -208,7 +211,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   }
   warnOnUnenumerableLosses(baseIR, "base", warn)
   warnOnUnenumerableLosses(headIR, "head", warn)
-  warnOnSymmetricLosses(baseIR, headIR, warn)
+  warnOnSymmetricLosses(diff.notCompared, warn)
   warnOnRecoverableParseErrors(scans, warn)
   if (scans === null) warnOnRecordedFaults({ base: baseIR, head: headIR }, warn)
   else warnOnScanFault(scans, faultedScans ?? [], warn)
@@ -336,30 +339,33 @@ function warnOnUnenumerableLosses(ir: IR, side: "base" | "head", warn: (m: strin
 }
 
 /**
- * Files neither revision analysed produce no `unknown` entry, so nothing in the diff mentions
- * them.
+ * Files neither revision analysed produce no `unknown` entry, so nothing at the Symbol level
+ * mentions them.
  *
  * `unknown` is derived from the matcher's leftovers: a Symbol one document has and the other
- * lacks. When a file is skipped on both sides there are no Symbols from it anywhere, no
- * leftovers, and the diff is silent — while looking exactly like a diff that compared the
- * file and found it unchanged. Most skip reasons are deterministic properties of the file, so
- * symmetric loss is the *ordinary* case: a generated bundle over the size cap, a language no
- * plugin claims, a file that has been unparseable since before the branch.
+ * lacks. When a file is skipped on both sides there are no Symbols from it anywhere and no
+ * leftovers, so no status can carry the loss. The document says it one level up, in
+ * `notCompared[]` (`diff-algorithm.md` §6.3), and this line is the cover note for the reader
+ * watching the command rather than reading the file it wrote.
  *
- * Naming them is all this can do from here. Deciding what an artifact should say about a file
- * neither side read is a change to the diff document, not to its cover note.
+ * Deliberately shorter than the artifact: a count, a capped list of paths, and no reasons,
+ * because a terminal line that grows with the size of a workspace's blind spot stops being
+ * read. It points at the field instead, which is where the pair of reasons lives.
+ *
+ * Reads the array the document carries rather than intersecting the two skip lists again.
+ * `buildDiff` computes it once from the side views its own Symbol classification uses, and a
+ * second implementation here would be a second answer to "which files did neither side read",
+ * with nothing to detect the two drifting apart.
  */
-function warnOnSymmetricLosses(baseIR: IR, headIR: IR, warn: (m: string) => void): void {
-  const inBase = new Set((baseIR.stats.skippedFiles ?? []).map((f) => f.path))
-  const both = (headIR.stats.skippedFiles ?? [])
+function warnOnSymmetricLosses(notCompared: readonly NotComparedFile[], warn: WarnFn): void {
+  if (notCompared.length === 0) return
+  const listed = notCompared
+    .slice(0, MAX_LISTED_SYMMETRIC_LOSSES)
     .map((f) => f.path)
-    .filter((path) => inBase.has(path))
-    .sort()
-  if (both.length === 0) return
-  const listed = both.slice(0, MAX_LISTED_SYMMETRIC_LOSSES).join(", ")
-  const rest = both.length - MAX_LISTED_SYMMETRIC_LOSSES
+    .join(", ")
+  const rest = notCompared.length - MAX_LISTED_SYMMETRIC_LOSSES
   warn(
-    `⚠ ${both.length} file(s) were skipped by both scans and are not represented in this diff: ${listed}${rest > 0 ? `, and ${rest} more` : ""}.`,
+    `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${listed}${rest > 0 ? `, and ${rest} more` : ""}.`,
   )
 }
 

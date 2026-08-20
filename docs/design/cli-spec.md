@@ -371,7 +371,7 @@ The `unknown` count is appended to the first line when there is one — `+5 -3 ~
 
 It counts Symbols only. `summary.depsUnknown` counts the same thing for `dependencies[]` ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1) and stays out of this line for the reason the dependency counts already do: the glyph line reports the Symbol-level shape of a change, and `depsAdded` / `depsRemoved` are not on it either. `depsAdded`, `depsRemoved` and `depsUnknown` all appear in `diff.json`; `diff.md` lists the corresponding edges under Dependency changes and prints no counts at all.
 
-A file skipped by **both** scans produces no `unknown` entry — there are no Symbols from it in either document, so the matcher has no leftover to classify — and the diff is then silent about a file it never compared. Those paths are named on stderr, capped like the other per-file listings. Representing them inside `diff.json` is an open question: the diff has nothing to say about the file beyond "neither side read it", and that is a statement about the run rather than about a Symbol.
+A file skipped by **both** scans produces no `unknown` entry — there are no Symbols from it in either document, so the matcher has no leftover to classify. It is reported at document level instead: `diff.json` carries the path and each scan's reason in `notCompared[]`, and `diff.md` lists it under `## 🚫 Not compared` ([`diff-algorithm.md`](./diff-algorithm.md) §6.3). The stderr line stays, deliberately shorter than the artifact — a count and a capped list of paths, no reasons — because it is the cover note for whoever is watching the command, and a terminal line that grows with the size of a workspace's blind spot stops being read.
 
 An IR that dropped files but predates `stats.skippedFiles` reports the count without the list, and `aburi diff` cannot then tell a lost file from a deleted one — it classifies every leftover as `added` / `removed`, which is the pre-field behaviour, and warns on **stderr** for each side that is in that state. It does not guess: inferring the list from `totalFiles > parsedFiles` would attach the doubt to whichever Symbols happened to be missing.
 
@@ -414,7 +414,7 @@ aburi diff main..HEAD --fail-on changed,removed
 # exit 3 if even one symbol has status "changed" or "removed"
 ```
 
-`unknown` counts Symbols only — it reads `symbols[]`, not `dependencies[]`. A gate written meaning "fail if this diff is incomplete" therefore does not catch dependency-side incompleteness, and no dependency token exists to pair it with ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1). Whether the gate vocabulary should grow a dependency family is an open decision.
+`unknown` counts Symbols only — it reads `symbols[]`, not `dependencies[]`, and not `notCompared[]`. A gate written meaning "fail if this diff is incomplete" therefore catches neither the dependency side ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1) nor a file both scans skipped (§6.3), and no token exists for either. A bare token for the second would be the wrong default in any case: a workspace with a permanent over-size bundle would trip it on every pull request, which is an argument for a threshold rather than a flag. Whether the gate vocabulary should grow either family is an open decision.
 
 #### Accepted Values
 
