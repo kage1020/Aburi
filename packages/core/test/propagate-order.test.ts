@@ -1,6 +1,12 @@
 import type { Confidence, Symbol as IRSymbol, SymbolId } from "@aburi/types"
 import { beforeAll, describe, expect, it } from "vitest"
-import { propagateEffects, reverseTopoOrder, type SccNode } from "../src/propagate"
+import type { CallEdge } from "../src/callgraph"
+import {
+  type PropagateInput,
+  propagateEffects,
+  reverseTopoOrder,
+  type SccNode,
+} from "../src/propagate"
 import { makeSymbol } from "./fixtures/ir"
 import { edge, effect } from "./fixtures/propagate"
 
@@ -166,46 +172,62 @@ describe("propagation through the sweep", () => {
 })
 
 /**
- * Out-degree-zero symbols are the ordinary case — most symbols call nothing — and they all
- * become ready at once, which is what decides how the ready set behaves. Re-sorting it on
- * every dequeue made the pass quadratic, and this is what stops that returning.
+ * The graph here is acyclic, so every symbol is its own SCC and the ready set holds one entry
+ * per symbol. Out-degree-zero SCCs are the ordinary case — most symbols call nothing — and
+ * they all become ready at once, which is what decides how the ready set behaves. Re-sorting
+ * it on every dequeue made the pass quadratic, and this is what stops that returning.
  *
  * **What is asserted is the shape, not the clock.** An elapsed-time budget measures the
- * machine as much as the algorithm: the same commit that runs in ~150 ms here took 6.4 s on
- * a loaded shared runner, which is a 42x deviation with no code behind it and is
- * indistinguishable at a glance from a real regression. Cost at two sizes cancels that —
- * a slow machine moves both measurements, a quadratic moves only the larger one.
+ * machine as much as the algorithm: the same commit that runs in ~150 ms here took 6.4 s on a
+ * loaded shared runner, a 42x deviation with no code behind it and indistinguishable at a
+ * glance from a real regression. Cost at two sizes cancels that — a slow machine moves both
+ * measurements, a quadratic moves only the larger one.
  *
  * The graphs are the same shape at both sizes (a fifth of the symbols call something, so the
  * ready set is exercised rather than drained in one pass), so at 8x the symbols an
- * `n log n` pass costs 8 x (log 80k / log 10k) ≈ 9.8x and a quadratic one ≈ 64x.
+ * `n log n` pass costs `8 x (log 80k / log 10k)` ≈ 9.8x, and the re-sorting implementation
+ * `propagate.ts` describes — `O(V² log V)` — costs `8² x (log 80k / log 10k)` ≈ 78x.
+ *
+ * **What this does not guard.** The fixture Symbols carry no effects, so the aggregation over
+ * `(entries x out-callees)` never runs and `maxSccSize` is always 1. What is measured is the
+ * SCC and topology machinery, which is where the regression was; seeding effects would make
+ * the cost model two-dimensional and the ratio no longer readable.
+ *
+ * **Why a ratio rather than a count.** Counting dequeues would remove timing from the
+ * assertion entirely, but the only thing `propagateEffects` returns besides Symbols is
+ * `EffectPropagationStats`, which is `stats.effectPropagation` of a frozen v1 IR — so the
+ * counter would either change that document or be computed for no reader but this file.
  */
 const SCALE = 8
 const SMALL = 10_000
 
 /**
- * Ratio above which the run is called a regression: the geometric midpoint of the two
- * measured populations rather than a figure from theory.
+ * Ratio above which the run is called a regression.
  *
- * The honest implementation was measured at medians of 8.1 to 16.8 over six runs of the full
- * package suite in parallel — the loaded regime the flake came from, not a quiet solo run —
- * with no single round above 21.5. Re-introducing the ready-set re-sort measured 95.4. The
- * midpoint of 16.8 and 95.4 is ~40, which leaves the honest path 2.4x of headroom and fails
- * the regression by the same factor.
+ * Both populations were measured with the estimator below, in the regime the flake came from
+ * — the full package suite in parallel, not a quiet solo run. The honest implementation gave
+ * medians of 8.9 to 14.8 over six runs, with no single round above 17.9. The ready-set
+ * re-sort gave 76.8, 81.2, 89.7 and 95.4 over four.
+ *
+ * 40 is about the geometric midpoint of the honest maximum (14.8) and the strongest
+ * regression (95.4). Stated against the weakest regression seen, 76.8, the margin is not
+ * symmetric: 2.7x above the honest maximum, 1.9x below the cheapest regression.
  */
 const MAX_RATIO = 40
 
 /**
- * Ratio at which a single round decides the run on its own. No honest round has been
- * measured above 21.5, in six full-suite runs, and the re-sorting implementation measured
- * 81.2 and 95.4 in two runs of its own — so 60 separates the two populations with room on
- * both sides, and the median assertion still stands behind it when a round lands between.
+ * Ratio at which a single round decides the run on its own, without waiting for a median:
+ * 3.4x above the highest honest round recorded on {@link MAX_RATIO} and 1.28x below the
+ * cheapest regression there.
+ *
+ * A trip is re-read before it counts, because one round deciding is exactly what the median
+ * exists to prevent — see the loop below.
  */
 const OBVIOUS_RATIO = 60
 
 /**
  * Explicit, and far above the honest path (~2 s here, and the slowest runner this suite has
- * met was 27x that). The package default of 30 s would let a loaded machine turn this into a
+ * met was 42x that). The package default of 30 s would let a loaded machine turn this into a
  * timeout, which is the same flake wearing a different costume; a regression reaches the
  * assertion and reports its ratio instead.
  *
@@ -216,32 +238,36 @@ const OBVIOUS_RATIO = 60
  */
 const TIMEOUT_MS = 300_000
 
-interface ScaleGraph {
-  symbols: IRSymbol[]
-  edges: ReturnType<typeof edge>[]
-}
-
-/** The fixture Symbols carry no effects, so every pass over one of these costs the same. */
-function scaleGraph(total: number): ScaleGraph {
-  const symbols = Array.from({ length: total }, (_, i) =>
-    makeSymbol(`ts:src/m${String(i).padStart(6, "0")}.ts#f`),
-  )
-  const edges = symbols
-    .filter((_, i) => i % 5 === 0 && i + 1 < total)
-    .map((s, i) => edge(s.id, symbols[(i * 5 + 1) % total]?.id ?? s.id))
+/**
+ * `total` symbols, an edge from every fifth to the one after it.
+ *
+ * Ids are built rather than looked up, so the shape is on the page: the callers are the
+ * multiples of five and the callees are their successors, none of which is itself a caller.
+ * No index can miss, and no fallback can quietly change the graph — a self-loop, the obvious
+ * fallback, is dropped as an intra-SCC edge and would shrink the graph instead.
+ */
+function scaleGraph(total: number): PropagateInput {
+  const idOf = (i: number): string => `ts:src/m${String(i).padStart(6, "0")}.ts#f`
+  const symbols = Array.from({ length: total }, (_, i) => makeSymbol(idOf(i)))
+  const edges: CallEdge[] = []
+  for (let i = 0; i + 1 < total; i += 5) edges.push(edge(idOf(i), idOf(i + 1)))
   return { symbols, edges }
 }
 
 /**
  * Mean cost of one pass over `input`.
  *
- * `reps` is what makes the two samples comparable: the small graph runs `SCALE` times, so
- * both samples span roughly the same wall time and a burst of interference lands on them
- * equally. Measuring one call each instead let the shorter sample's variance dominate the
- * ratio — it read 11 to 17 across runs where the paired form reads 8 to 17 under heavier
- * load.
+ * `reps` is what makes the two samples comparable: the small graph runs `SCALE` times, so both
+ * samples span roughly the same wall time and a burst of interference lands on them equally.
+ * The alternative — `min(large) / min(small)`, one call each — is biased upward, because the
+ * shorter sample's minimum is closer to its true cost than the longer one's. It read 11 to 15
+ * on an idle machine, where this form reads 8.9 to 14.8 with the whole suite running.
+ *
+ * The matching holds on the honest path only. Under a regression the large side is ~78x the
+ * small one and the samples are nothing alike — which biases the ratio further up, so the
+ * assertion is never the thing that loses by it.
  */
-function meanCost(input: ScaleGraph, reps: number): number {
+function meanCost(input: PropagateInput, reps: number): number {
   const started = performance.now()
   for (let i = 0; i < reps; i++) propagateEffects(input)
   return (performance.now() - started) / reps
@@ -250,44 +276,69 @@ function meanCost(input: ScaleGraph, reps: number): number {
 describe("propagation scale", () => {
   // Built once: the two graphs cost about a second to assemble, both cases need both, and
   // `propagateEffects` returns fresh Symbols rather than editing the ones it was handed.
-  let small: ScaleGraph
-  let large: ScaleGraph
+  let small: PropagateInput
+  let large: PropagateInput
   beforeAll(() => {
     small = scaleGraph(SMALL)
     large = scaleGraph(SMALL * SCALE)
   }, TIMEOUT_MS)
 
+  it("is built from the shape the cost model assumes", () => {
+    // Both cases below rest on a fifth of the symbols calling something, and nothing else
+    // checks it. The drift that matters is toward a chain: with ~1 entry in the ready set at
+    // a time, re-sorting a one-element array V times is linear, and the regression these
+    // measurements exist to catch would stop being visible while everything stayed green.
+    expect(small.edges).toHaveLength(SMALL / 5)
+    expect(propagateEffects(small).stats.sccCount).toBe(SMALL)
+  })
+
   it("grows with the log of the graph, not with its square", { timeout: TIMEOUT_MS }, () => {
-    // Warm-up on the small graph only: what settles is the JIT's view of the code, which
-    // does not depend on how much data it ran over. Warming on the large graph would put
-    // a whole extra pass of the most expensive size in front of every run, including a
-    // regressed one that cannot afford it.
+    // Warm-up on the small graph only. Round 0's large pass therefore pays first-touch heap
+    // growth and reads high — accepted, because warming on the large graph would put an extra
+    // pass of the most expensive size in front of every run, including a regressed one that
+    // cannot afford it. It is also why a tripped round is re-read rather than believed.
     meanCost(small, 2)
 
     const ratios: number[] = []
-    for (let round = 0; round < 3; round++) {
-      const ratio = meanCost(large, 1) / meanCost(small, SCALE)
-      // A round this far out is not the machine — it sits above every honest round ever
-      // measured and below the cheapest regressed one. Stopping here costs one round
-      // instead of three and says the ratio out loud, rather than leaving a timeout to
-      // be interpreted, which is the diagnosis this test exists to stop guessing at.
-      expect(ratio, `round ${round} cost ratio at ${SCALE}x the symbols`).toBeLessThan(
-        OBVIOUS_RATIO,
-      )
+    for (let round = 0; round < 4; round++) {
+      // The order alternates. Pairing cancels the level of background load but not its
+      // slope, and the slope has a direction here: sibling test files finish as the run
+      // proceeds, freeing cores, so a fixed large-then-small order would read high in every
+      // round — a bias the median cannot remove, because it is in all of them.
+      const largeFirst = round % 2 === 0
+      const measure = (): number => {
+        const first = largeFirst ? meanCost(large, 1) : meanCost(small, SCALE)
+        const second = largeFirst ? meanCost(small, SCALE) : meanCost(large, 1)
+        return largeFirst ? first / second : second / first
+      }
+
+      let ratio = measure()
+      if (ratio >= OBVIOUS_RATIO) {
+        // One round deciding is what the median exists to prevent, and this is the most
+        // fragile measurement in the test: the large side is a single unaveraged sample, so
+        // one de-scheduling lands on it undiluted. Read it again and keep the second reading
+        // — a spike that got excused should not then distort the median that excused it.
+        ratio = measure()
+        expect(ratio, `round ${round} cost ratio at ${SCALE}x the symbols, twice`).toBeLessThan(
+          OBVIOUS_RATIO,
+        )
+      }
       ratios.push(ratio)
     }
 
-    const median = [...ratios].sort((a, b) => a - b)[1] as number
+    const sorted = [...ratios].sort((a, b) => a - b)
+    const median = ((sorted[1] as number) + (sorted[2] as number)) / 2
     expect(
       median,
       `cost ratios at ${SCALE}x the symbols: ${ratios.map((r) => r.toFixed(1)).join(", ")}`,
     ).toBeLessThan(MAX_RATIO)
   })
 
-  it("returns every symbol at both sizes", { timeout: TIMEOUT_MS }, () => {
-    // The ratio says nothing about the answer being right, and a pass that dropped symbols
-    // on the floor would be fast.
-    expect(propagateEffects(small).symbols).toHaveLength(SMALL)
-    expect(propagateEffects(large).symbols).toHaveLength(SMALL * SCALE)
+  it("returns every symbol exactly once at both sizes", { timeout: TIMEOUT_MS }, () => {
+    // The ratio says nothing about the answer being right, and a pass that dropped symbols on
+    // the floor would be fast. Counted by id rather than by length, which a pass that emitted
+    // one symbol twice and lost another would satisfy.
+    expect(new Set(propagateEffects(small).symbols.map((sym) => sym.id)).size).toBe(SMALL)
+    expect(new Set(propagateEffects(large).symbols.map((sym) => sym.id)).size).toBe(SMALL * SCALE)
   })
 })
