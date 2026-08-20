@@ -192,7 +192,13 @@ With `--quiet`, only the final line:
 ⚠ 3 file(s) had recoverable parse errors.
 ⚠ 1 file(s) could not be parsed and were left out of the IR.
 ⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
-⚠ 1 file(s) were dropped because a plugin threw while extracting them.
+⚠ over-size (3) — larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.
+    vendor/bundle.js: 2100000 > 1048576
+    vendor/legacy.js: 1400000 > 1048576
+    public/data.js: 1100000 > 1048576
+⚠ parse-failed (1) — the language plugin refused the source. Deterministic: fix the file, or the plugin.
+    src/broken.ts: parse reported a non-recoverable error at 12:4 — unterminated string
+⚠ extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
 
@@ -211,11 +217,31 @@ The first line was previously the only account of an unparseable file's errors, 
 file's skip detail carries one of them: the refusal when there is one, otherwise the first
 recoverable error with its position.
 
-The last line is the one that also moves the exit code to `3` (§5.4), and every reason other
-than `extraction-failed` leaves it at `0`. That is why it is printed apart from the "contributed
-no Symbols" summary, and why it is the only incident whose files are listed individually (capped,
-with a "…and N more" tail): a reader handed a non-zero status needs to know which incident earned
-it and which files it was.
+The "contributed no Symbols" line is a census; under it each reason present gets a line of its
+own, saying what to do about it, and then its files with the detail `@aburi/core` recorded for
+each. The reasons want different responses — `over-size` points at `maxFileSizeBytes`,
+`parse-timeout` at `parseTimeoutMs` and a re-run, `unreadable` at permissions or a tree that was
+changing under the scan, `unroutable` at a bug in the plugin set, `parse-failed` at the source,
+`extraction-failed` at the plugin — and one neutral line said none of it. The re-run /
+fix-something split is the one `SkippedFile.reason` draws in the IR schema.
+
+Reasons appear in a fixed order — `over-size`, `unreadable`, `unroutable`, `parse-failed`,
+`parse-timeout`, `extraction-failed` — in the census and in the groups alike, so the groups
+arrive in the order the census named them and neither depends on where in the workspace the
+losses happened to sit.
+
+The listing is capped at ten files **per reason**, with a "…and N more" tail. Per reason rather
+than across the whole listing because one shared budget belongs to whichever reason lost the
+most files, and that is not the reason a reader most needs named: a hundred over-size files
+would push the one file a plugin threw on — the only reason that moves the exit code to `3`
+(§5.4) — inside the tail, leaving a non-zero status with nothing on screen to account for it.
+Every other reason leaves the code at `0`.
+
+`extraction-failed` is listed by that rule like any other reason rather than by one of its own.
+Its files were listed twice while it had its own clause: the message a plugin threw with is
+written to both `skipped[].detail` and `extractionFailures[].message` at a single site in the
+scan. `ScanReport.extractionFailures` is unchanged — it still carries the error's `code`, and it
+is still what decides the exit code and what the `diff` fault clause counts.
 
 Where the lines come from is part of the contract. `runScan` writes them to a sink its caller
 supplies, so all three commands that scan report them, rather than one command's wrapper
@@ -226,8 +252,10 @@ That is not the same as silence. The run's `Logger` is a separate channel — pe
 than per run, governed by `ABURI_LOG_LEVEL` (§11), and still writing to `process.stderr`
 whatever streams the caller injected. An embedded scan with no sink is quiet, not mute, and
 routing that channel to the caller is a known gap rather than something this contract covers.
-It is also why the extraction failures above are listed by the CLI itself: at
-`ABURI_LOG_LEVEL=error` the per-file lines are gone, and the report is all that is left.
+It is also why the files above are listed by the CLI itself rather than left to that channel:
+at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `unroutable` and an
+`unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
+before extraction and are not logged at all, so the report is their only account.
 
 A command that runs more than one scan labels them, after the glyph, with the scan the line
 came from:

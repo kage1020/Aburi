@@ -85,9 +85,12 @@ aburi scan [--output-dir <dir>] [--format json|md|both]
 
 Incidents are surfaced on stderr — recoverable parse errors, files a language plugin could
 not parse, effect-classify timeouts, discovery-time skips — so a scan that ate 50 broken
-files never looks green. All of those leave the exit code at `0`: they describe the source,
-not the run. The one that does not is a file a plugin **threw** on, which is named
-individually and moves the code to `3`.
+files never looks green. Files that contributed no Symbols are grouped by why: each reason
+gets a line saying what to do about it (`over-size` points at `maxFileSizeBytes`,
+`parse-timeout` at `parseTimeoutMs` and a re-run, and so on) and then its files with the
+detail the scan recorded, capped at ten per reason. All of those leave the exit code at `0`:
+they describe the source, not the run. The one that does not is a file a plugin **threw** on,
+which moves the code to `3`.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.
