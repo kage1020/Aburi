@@ -127,7 +127,7 @@ describe("notCompared — a path both scans gave up on", () => {
       withSkipped(makeIR({ symbols: [kept] }), [...paths].reverse(), 5),
       withSkipped(makeIR({ symbols: [kept] }), [...paths].reverse(), 5),
     )
-    expect(forward.notCompared?.map((f) => f.path)).toEqual(["a/first.ts", "z/last.ts"])
+    expect(forward.notCompared.map((f) => f.path)).toEqual(["a/first.ts", "z/last.ts"])
     expect(JSON.stringify(reversed.notCompared)).toBe(JSON.stringify(forward.notCompared))
   })
 
@@ -145,6 +145,49 @@ describe("notCompared — a path both scans gave up on", () => {
     expect(diff.notCompared).toEqual([
       { path: "vendor/bundle.js", baseReason: "over-size", headReason: "over-size" },
     ])
+  })
+
+  it("splits a symmetric loss from a one-sided one in the same diff", () => {
+    // The two vocabularies side by side, which two separate fixtures cannot show: one file
+    // neither scan read, one the head scan lost while the base still holds its Symbol. Each
+    // is reported once, in the array that can describe it.
+    const diff = diffOf(
+      withSkipped(
+        makeIR({ symbols: [kept, makeSymbol({ id: "ts:src/gone.ts#gone", name: "gone" })] }),
+        [{ path: "vendor/huge.ts", reason: "over-size" }],
+        5,
+      ),
+      withSkipped(
+        makeIR({ symbols: [kept] }),
+        [
+          { path: "src/gone.ts", reason: "parse-failed" },
+          { path: "vendor/huge.ts", reason: "over-size" },
+        ],
+        5,
+      ),
+    )
+    expect(diff.notCompared).toEqual([
+      { path: "vendor/huge.ts", baseReason: "over-size", headReason: "over-size" },
+    ])
+    expect(diff.summary.unknown).toBe(1)
+    expect(diff.symbols.filter((c) => c.status === "unknown")).toHaveLength(1)
+  })
+
+  it("reads the skip lists, even where a document contradicts its own", () => {
+    // A path in both skip lists while one document still holds Symbols from it: those Symbols
+    // are leftovers, so they are `unknown`, and the path is also a row here. Reported twice,
+    // deliberately — the two arrays answer different questions, and the document that says a
+    // file was never analysed while carrying its Symbols is the thing that is wrong. Aburi's
+    // own scan cannot produce it; invariant #21 checks the census, not this.
+    const inBoth = { path: "src/kept.ts", reason: "parse-failed" } as const
+    const diff = diffOf(
+      withSkipped(makeIR({ symbols: [kept] }), [inBoth]),
+      withSkipped(makeIR({ symbols: [] }), [inBoth]),
+    )
+    expect(diff.notCompared).toEqual([
+      { path: "src/kept.ts", baseReason: "parse-failed", headReason: "parse-failed" },
+    ])
+    expect(diff.summary.unknown).toBe(1)
   })
 
   it("stays empty when a document predates stats.skippedFiles", () => {

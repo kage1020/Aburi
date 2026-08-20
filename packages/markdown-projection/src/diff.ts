@@ -41,6 +41,9 @@ export function projectDiff(diff: DiffResult): string {
   appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
   appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
   appendSection(lines, "## ❔ Unknown", renderUnknown(buckets.unknown))
+  // `?? []` renders nothing for a diff that predates the field, which is the right answer:
+  // such a document cannot say what it missed, and a section built from an assumed empty list
+  // would report "nothing was missed" on every archived diff.
   appendSection(lines, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
   appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
@@ -544,9 +547,6 @@ function unknownExplanation(item: SymbolUnknown): string {
  * Both reasons, never one. They can differ, and the pair is what says whether a re-run is
  * enough: `parse-timeout` at the base and `over-size` at the head is one file that timed out
  * once and is permanently too large, which neither half tells you on its own.
- *
- * `?? []` for a diff that predates the field. Rendering "may be incomplete" over every older
- * document would be worse than saying nothing, which is what those documents already do.
  */
 function renderNotCompared(files: readonly NotComparedFile[]): string[] {
   if (files.length === 0) return []

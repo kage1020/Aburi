@@ -386,7 +386,7 @@
         "parse-timeout",
         "extraction-failed"
       ],
-      "description": "Why a scan skipped a file, copied from the IR's stats.skippedFiles[].reason. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something. One definition for the two places this diff spells it — the cross-schema copy against aburi.ir.v1.json is a deliberate stance, the in-file one was not."
+      "description": "Why a scan skipped a file, copied from the IR's stats.skippedFiles[].reason. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something. One definition for every place this diff spells it — the cross-schema copy against aburi.ir.v1.json is a deliberate stance, an in-file one would not be."
     },
 
     "SliceRecord": {

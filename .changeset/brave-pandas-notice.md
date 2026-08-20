@@ -53,8 +53,8 @@ pull request while a whole directory sat outside the comparison.
   entry to any array on either side, so there is nothing to correct — the field scopes the
   document rather than qualifying a count.
 
-**Emitted unconditionally, empty array included.** The issue proposed Class B (omit when empty),
-which is the IR's convention; the diff's is the opposite and this follows the diff's, per
+**Emitted unconditionally, empty array included.** The IR's convention for a field like this is
+Class B — omit the key when empty; the diff's is the opposite, per
 `docs/design/diff-algorithm.md` §10.1. An IR reader can fall back on `totalFiles - parsedFiles`
 to tell "nothing was lost" from "this writer could not say"; a diff reader has nothing to fall
 back on, so the writer says it. Schema-optionality covers only documents written before the field

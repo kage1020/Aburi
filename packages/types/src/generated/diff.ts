@@ -6,7 +6,7 @@ export type { Component, Dependency, Symbol, SymbolId } from "./ir"
 export type SymbolChange = (SymbolAdded | SymbolRemoved | SymbolMoved | SymbolChanged | SymbolMovedChanged | SymbolDroppedToggled | SymbolUnknown)
 export type MatchRationale = ("id-match" | "git-rename" | "logic-fingerprint" | "logic-fingerprint+name-disambiguation" | "name-signature" | "dropped-weak-match")
 /**
- * Why a scan skipped a file, copied from the IR's stats.skippedFiles[].reason. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something. One definition for the two places this diff spells it — the cross-schema copy against aburi.ir.v1.json is a deliberate stance, the in-file one was not.
+ * Why a scan skipped a file, copied from the IR's stats.skippedFiles[].reason. It decides what the reader does next: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something. One definition for every place this diff spells it — the cross-schema copy against aburi.ir.v1.json is a deliberate stance, an in-file one would not be.
  */
 export type SkipReason = ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
 /**

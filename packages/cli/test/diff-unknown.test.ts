@@ -17,8 +17,8 @@ import { symbolId } from "./fixtures"
 
 let scratch = ""
 
-function makeIR(symbols: IR["symbols"], skipped?: readonly SkippedFile[]): IR {
-  const totalFiles = 2
+function makeIR(symbols: IR["symbols"], skipped?: readonly SkippedFile[], discovered = 2): IR {
+  const totalFiles = discovered
   return {
     $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
@@ -238,8 +238,9 @@ describe("aburi diff — a file the head scan never read", () => {
       warn: (m) => warnings.push(m),
     })
     expect(report.summaryLine).toBe("+0 -0 ~0 ↔0 ⤴0")
+    // Not "are not represented in this diff" — they are, now, and the line points at where.
     expect(warnings.join("\n")).toContain(
-      "1 file(s) were skipped by both scans and are not represented in this diff: vendor/huge.ts",
+      "1 file(s) were skipped by both scans; see notCompared[] in diff.json: vendor/huge.ts",
     )
     // stderr is the cover note; the artifact is what a bot or a pasted PR comment gets, and
     // it used to carry no trace of the file at all.
@@ -250,6 +251,33 @@ describe("aburi diff — a file the head scan never read", () => {
     const md = await readFile(report.diffMdPath ?? "", "utf8")
     expect(md).toContain("## 🚫 Not compared")
     expect(md).toContain("`vendor/huge.ts` — over-size on both")
+  })
+
+  it("summarises the tail rather than printing a workspace's whole blind spot", async () => {
+    // The reason the line is shorter than the artifact. Eleven files: ten named, the rest
+    // counted, and `diff.json` carries all of them with their reasons.
+    const lost = Array.from({ length: 11 }, (_, i) => ({
+      path: `vendor/gen${String(i).padStart(2, "0")}.js`,
+      reason: "over-size" as const,
+    }))
+    const { basePath, headPath } = await writePair(
+      makeIR([kept], lost, 12),
+      makeIR([kept], lost, 12),
+    )
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      warn: (m) => warnings.push(m),
+    })
+    const line = warnings.join("\n")
+    expect(line).toContain("11 file(s) were skipped by both scans")
+    expect(line).toContain("vendor/gen09.js, and 1 more.")
+    expect(line).not.toContain("vendor/gen10.js")
+    const written = JSON.parse(await readFile(report.diffJsonPath ?? "", "utf8")) as DiffResult
+    expect(written.notCompared).toHaveLength(11)
   })
 
   it("says nothing about symmetric loss when only one side lost the file", async () => {

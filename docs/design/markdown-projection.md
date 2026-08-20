@@ -420,11 +420,11 @@ Entries with `status: "unknown"` — a Symbol one document has and the other nev
 
 #### 🚫 Not compared
 
-`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown for the same reason Unknown sits beside Removed: a gap rather than a change. What separates the two is who can close it — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed.
+`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown, and apart from it for the reason Unknown is itself apart from Removed: the next action differs. Both are gaps rather than changes, so a reader scanning for what the diff does not cover finds them together; what separates them is who can close one — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed.
 
 ```md
-- `vendor/bundle.js` — over-size on both
 - `apps/web/src/route.ts` — parse-timeout at base, over-size at head
+- `vendor/bundle.js` — over-size on both
 ```
 
 Both reasons, and only collapsed to one phrase when they agree. They can differ, and the pair is what says whether a re-run is enough.

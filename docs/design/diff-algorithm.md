@@ -400,7 +400,7 @@ Three properties this rests on:
 
 When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
 
-`dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) rather than in the artifact.
+`dependencies[]` gets the same treatment on its own terms — see §6.2.1. What stays outside both is a file **both** revisions skipped: neither document holds a Symbol or an edge from it, so there is no leftover to classify and the diff is silent about a file it never compared. That is a statement about the run rather than about any entry, and `aburi diff` makes it on stderr (cli-spec.md §6.6) and in the artifact, in `notCompared[]` (§6.3).
 
 ### 3.6 Handling dropped symbols
 
@@ -928,7 +928,8 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 
 | ID | Input | Expected |
 |---|---|---|
-| DF1 | Feed the same IR as base/head | summary all 0, changes/components/dependencies all empty |
+| DF1 | Feed the same IR as base/head, with nothing in `stats.skippedFiles` | summary all 0, changes/components/dependencies/notCompared all empty |
+| DF1b | Feed the same IR as base/head, with a file in `stats.skippedFiles` | summary still all 0, but 1 entry in notCompared — the comparison covered less than the counts suggest |
 | DF2 | 1 new Symbol in head | added: 1, 1 entry in the Markdown Added section |
 | DF3 | 1 Symbol deleted from base | removed: 1 |
 | DF4 | Only a rule's condition changed | changed: 1, delta.logicChanged: true, delta.apiChanged: false |

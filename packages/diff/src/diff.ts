@@ -32,6 +32,19 @@ import { classifyStatus, dropDirection } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.dev/schema/aburi.diff.v1.json"
 
+/**
+ * The two counters `buildDiff` always writes, narrowed off `Summary`'s optionals.
+ *
+ * They are optional on the wire so a diff written before they existed stays valid, and that
+ * optionality is about *documents*, not about this function — a caller holding a value it just
+ * built should not have to re-decide what "absent" would have meant. Same reason
+ * `diffDependencies` declares its `unknown` array present.
+ */
+interface UnknownCounters {
+  unknown: number
+  depsUnknown: number
+}
+
 export interface DiffInput {
   baseIR: IR
   headIR: IR
@@ -55,7 +68,9 @@ const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
  * pipe the result through additional steps (Markdown projection, `--fail-on` gate) before
  * serialisation.
  */
-export function buildDiff(input: DiffInput): DiffResult {
+export function buildDiff(
+  input: DiffInput,
+): DiffResult & { notCompared: NotComparedFile[]; summary: Summary & UnknownCounters } {
   assertDiffable(input.baseIR, "baseIR")
   assertDiffable(input.headIR, "headIR")
   ensureSchemasAgree(input.baseIR, input.headIR)
@@ -77,7 +92,12 @@ export function buildDiff(input: DiffInput): DiffResult {
     ...stage4_5.matched,
   ]
 
-  const summary: Summary = {
+  // Typed with the two counters present. They are optional on the wire, but this function
+  // writes both on every diff, and the local type is what carries that from here to the
+  // return without a cast.
+  const summary: Summary & UnknownCounters = {
+    unknown: 0,
+    depsUnknown: 0,
     added: 0,
     removed: 0,
     moved: 0,
@@ -93,9 +113,8 @@ export function buildDiff(input: DiffInput): DiffResult {
     depsAdded: 0,
     depsRemoved: 0,
   }
-  // Counted locally: `Summary.unknown` is optional so a diff written before the counter
-  // existed stays schema-valid, and `summary.unknown++` on an optional number does not
-  // type-check. Assigned once, below, where the other totals are.
+  // Counted locally and assigned once below, where the other totals are, so the increment
+  // sites do not have to reason about a counter that is optional on the wire.
   let unknown = 0
 
   const symbols: SymbolChange[] = []

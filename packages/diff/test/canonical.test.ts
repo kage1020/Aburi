@@ -72,6 +72,22 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
     expect(writeCanonicalDiff(forward)).toBe(writeCanonicalDiff(reversed))
   })
 
+  it("writes the empty notCompared array rather than dropping the key", () => {
+    // The reason the key is emitted at all: a reader must be able to tell "the comparison
+    // covered everything" from "this writer predates the field", and only the bytes on disk
+    // can carry that. A serialiser that pruned empty arrays would leave every unit test green
+    // and take the distinction with it.
+    const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
+    const clean = buildDiff({
+      baseIR: makeIR({ symbols: [kept] }),
+      headIR: makeIR({ symbols: [kept] }),
+      base: IR_REF,
+      head: IR_REF,
+    })
+    expect(clean.notCompared).toEqual([])
+    expect(writeCanonicalDiff(clean)).toContain('"notCompared": []')
+  })
+
   it("serialises notCompared byte-identically however the skip lists are ordered", () => {
     // Same hazard as the unknown edges above: the array is built by walking a Map, so without
     // the explicit sort its order follows whatever order the two scans happened to record
