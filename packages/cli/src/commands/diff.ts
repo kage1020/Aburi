@@ -16,7 +16,7 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
-import { runScan, type ScanReport } from "./scan"
+import { type CoverageFault, runScan, type ScanReport } from "./scan"
 
 export type { WarnFn }
 
@@ -263,22 +263,51 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
  * ref reddens every diff taken against it, which is the intended reading of "this comparison
  * has a broken half".
  *
- * The wording comes from `extractionFailures` rather than from the gate condition, which is
- * only `exitCode !== EXIT.SUCCESS`. A plugin exception is the sole reason that gates today and
- * `runScan` says outright that others may follow; naming it unconditionally would leave the
- * exit code right and the diagnosis wrong on the day a second one lands.
+ * The wording comes from what the scan reported rather than from the gate condition, which is
+ * only `exitCode !== EXIT.SUCCESS`. A plugin exception was the sole reason that gated when this
+ * was written and `runScan` said outright that others might follow; a second one has, so the
+ * clause reads both. Naming either unconditionally would leave the exit code right and the
+ * diagnosis wrong.
+ *
+ * A plugin exception is named first when both apply. It is the one that says something in the
+ * run is broken, and a scan that threw on every file has a coverage fault as a consequence of
+ * it rather than as a second finding.
  */
 function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], warn: WarnFn): void {
   if (faultedScans.length === 0) return
+  const sides = faultedScans.join(" and ")
   const thrown = faultedScans.reduce((n, side) => n + scans[side].extractionFailures.length, 0)
+  const starved = faultedScans
+    .map((side) => scans[side].coverageFault)
+    .find((fault) => fault !== null)
   const cause =
     thrown > 0
-      ? `A plugin exception withdrew ${thrown} file(s) during the ${faultedScans.join(" and ")} scan`
-      : `The ${faultedScans.join(" and ")} scan did not exit clean`
+      ? `A plugin exception withdrew ${thrown} file(s) during the ${sides} scan`
+      : starved === undefined
+        ? `The ${sides} scan did not exit clean`
+        : describeStarvedScan(sides, starved)
   warn(
     `⚠ ${cause}, so this run exits 3 even though the diff was written. ` +
       `Fix it, or the comparison is against a workspace one side could not read.`,
   )
+}
+
+/**
+ * The scan's own coverage finding, said from the diff's side of it.
+ *
+ * Shorter than the line `scan` prints: that one carries the consequence and where to look,
+ * and both scans' reports are already on this stderr above it (§5.6). This clause exists to
+ * account for the exit code, so it names the cause and stops.
+ */
+function describeStarvedScan(sides: string, fault: CoverageFault): string {
+  switch (fault.kind) {
+    case "nothing-discovered":
+      return `The ${sides} scan discovered no file to read`
+    case "nothing-parsed":
+      return `The ${sides} scan parsed none of the ${fault.totalFiles} file(s) it found`
+    case "below-floor":
+      return `The ${sides} scan parsed ${fault.parsedFiles} of ${fault.totalFiles} file(s), below the floor the workspace set`
+  }
 }
 
 /**

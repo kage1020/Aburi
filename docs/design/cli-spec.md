@@ -162,7 +162,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) |
 | 2 | Config error (schema violation, resolution failure) |
-| 3 | Plugin error (load failure, manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode) |
+| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, or a scan whose coverage collapsed (§5.7). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
 
@@ -273,6 +273,44 @@ The warnings precede the stdout summary in a merged view (a terminal, `2>&1`, an
 where before the reporting moved they followed it. Deliberate: the last thing on screen is then
 the kept / dropped line and the artifact paths, which is the part a reader acts on.
 
+### 5.7 Coverage
+
+A scan that read almost none of the workspace exits `3`. The shape it would otherwise produce is
+the dangerous one *because* it is a success: an IR with no Symbols diffs against another one as
+`+0 -0 ~0`, so every `--fail-on` gate downstream passes, and the run that lost the workspace is
+the one that looks healthiest.
+
+**`parsedFiles === 0` gates unconditionally.** Two lines, because the first move differs:
+
+```
+⚠ No file was discovered to scan. The IR is empty and will diff clean against any other empty IR. Check ignore and .gitignore, components[].roots, and whether a loaded language plugin claims any extension in this workspace.
+⚠ 1200 file(s) discovered, 0 parsed — 1200 as parse-failed. The IR is empty and will diff clean against any other empty IR.
+```
+
+Nothing discovered is a question about the config; nothing parsed is a question about whatever
+withdrew the files, so the second names the reason that took the most of them — ties broken by the
+reason enum's order, so the line is a function of the losses rather than of the walk. The line
+goes through the same sink as the rest of §5.6, above the census that is its evidence, so a
+two-scan `diff` labels it by side.
+
+**Anything above zero is the workspace's own call**, through `minParsedFileRatio`
+([`config.md`](./config.md)). Absent by default: where the line sits between "lost some files"
+and "lost the workspace" depends on the repository, and a default would red a build for a
+judgement nobody made. Set it and the scan gates when `parsedFiles / totalFiles` falls below it —
+`<`, not `<=`, the same reading `--fail-on`'s thresholds use.
+
+The floor counts **every** skip reason. `parse-timeout` is the reason whose loss varies by
+machine, and so the one a floor is usually reached for, but it is not the only one that hides a
+blind spot: which reason produced the loss decides the fix, not whether coverage collapsed. Each
+one is named per file directly below (§5.6) either way.
+
+`keptSymbols` plays no part. A file that parses cleanly and declares nothing is counted as
+parsed, which is correct — a repository of configuration and tests is not a failed scan — so a
+Symbol count says something about the code where `parsedFiles` says what this policy is about.
+
+The IR is still written under both gates, as it is for a plugin exception: a reviewer gets the
+partial artifact and a non-zero code rather than neither.
+
 ## 6. `aburi diff`
 
 Compares two IRs.
@@ -374,10 +412,13 @@ A fault at the **base** ref gates as well. That is a policy rather than a side e
 has a cost — a broken base reddens every diff taken against it until the base moves — but a
 comparison with a broken half is not evidence about the half that worked.
 
-It gates on the scan's exit code, not on a named incident. A plugin exception is the only reason
-that reaches it today and §5.4 leaves open that others may follow; the diagnostic wording is
-derived from what the scan actually reported, so a second reason arrives with the code right and
-the message still true.
+It gates on the scan's exit code, not on a named incident, and the diagnostic wording is derived
+from what the scan actually reported so that a second reason arrives with the code right and the
+message still true. A second one has: a scan whose coverage collapsed (§5.7) reddens a diff the
+same way a plugin exception does, and names itself — `The base scan parsed none of the 1200
+file(s) it found` — rather than falling back to "did not exit clean". A plugin exception is named
+first when both apply, because a scan that threw on every file has the coverage fault as a
+consequence of it rather than as a second finding.
 
 When a gate clause and a scan fault both apply the code is `3` either way, both messages are
 printed, and `DiffReport.faultedScans` names the sides so a programmatic caller does not have to

@@ -21,6 +21,7 @@ export {
   runInit,
 } from "./commands/init"
 export {
+  type CoverageFault,
   reportScanIncidents,
   runScan,
   type ScanOptions,

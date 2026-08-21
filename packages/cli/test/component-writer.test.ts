@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import Ajv2020 from "ajv/dist/2020.js"
@@ -36,6 +36,11 @@ beforeEach(async () => {
     JSON.stringify({ name: "component-writer-fixture", private: true }),
     "utf8",
   )
+  // A source file that parses and declares nothing. This file asserts on Components rather
+  // than Symbols, but a workspace where nothing parsed is a gate now, so the fixture has to
+  // be a workspace.
+  await mkdir(resolve(scratch, "src"), { recursive: true })
+  await writeFile(resolve(scratch, "src/quiet.ts"), "// declares nothing\n", "utf8")
 })
 
 afterEach(async () => {

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   EXIT,
   formatFailOnMessage,
-  type GitRunner,
   reportScanIncidents,
   runCli,
   runDiff,
@@ -15,6 +14,7 @@ import {
   runScan,
   type ScanReport,
 } from "../src"
+import { gitWith, populate } from "./stub-language"
 
 /**
  * Every command that scans reports what the scan lost.
@@ -55,134 +55,6 @@ class MemStream extends Writable {
   }
   text(): string {
     return this.chunks.join("")
-  }
-}
-
-/**
- * `bad.stub` is refused outright, `warn.stub` keeps a recoverable error and its Symbol,
- * `boom.stub` makes extraction throw, `ok.stub` is clean. Which of them exist is up to the
- * caller, so a fixture can differ between the base worktree and the working tree.
- */
-const STUB_PLUGIN = `
-const manifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
-  name: "lang-stub",
-  version: "0.0.0",
-  type: "lang",
-  engines: { aburi: "*" },
-  provides: {
-    effects: [],
-    effectPrefixes: [],
-    extKinds: [],
-    extKindPrefixes: [],
-    derivedByPrefixes: [],
-    frameworks: [],
-  },
-}
-
-export const plugin = {
-  manifest,
-  languageId: "stub",
-  fileExtensions: [".stub"],
-  capabilities: {
-    hasDecorators: false,
-    hasGenerics: false,
-    hasAsync: false,
-    hasMacros: false,
-    hasPatternMatching: false,
-    hasAbstractTypes: false,
-    hasModules: false,
-    hasNamespaces: false,
-    hasTypeParameters: false,
-    hasExplicitVisibility: false,
-    hasJsDoc: false,
-  },
-  init: async () => {},
-  parseFile: async (file) => {
-    const tree = { path: file.path }
-    if (file.path === "bad.stub") {
-      return {
-        tree,
-        errors: [{ message: "unterminated string", line: 12, column: 4, recoverable: false }],
-        imports: [],
-      }
-    }
-    if (file.path === "warn.stub") {
-      return {
-        tree,
-        errors: [{ message: "stray token", line: 2, column: 1, recoverable: true }],
-        imports: [],
-      }
-    }
-    return { tree, errors: [], imports: [] }
-  },
-  extractSymbols: (tree, ctx) => {
-    if (ctx.file.path === "boom.stub") throw new Error("plugin exploded")
-    const name = ctx.file.path.replace(/[^A-Za-z0-9]/g, "_")
-    return [
-      {
-        id: "stub:" + ctx.file.path + "#" + name,
-        kind: "function",
-        extKind: null,
-        name,
-        visibility: "public",
-        decorators: [],
-        signature: null,
-        source: {
-          file: ctx.file.path,
-          startLine: 1,
-          endLine: 2,
-          startColumn: null,
-          endColumn: null,
-        },
-        derivedBy: [],
-        bodyNode: tree,
-        fullNode: tree,
-      },
-    ]
-  },
-  walkBody: () => ({ rules: [], calls: [] }),
-  normalizeAst: () => "stub-ast",
-}
-`
-
-async function populate(dir: string, files: readonly string[]): Promise<void> {
-  await mkdir(dir, { recursive: true })
-  await writeFile(
-    resolve(dir, "package.json"),
-    JSON.stringify({ name: "scan-incidents-fixture", private: true }),
-    "utf8",
-  )
-  await writeFile(
-    resolve(dir, "aburi.json"),
-    JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
-      languages: ["./lang-stub.mjs"],
-    }),
-    "utf8",
-  )
-  await writeFile(resolve(dir, "lang-stub.mjs"), STUB_PLUGIN, "utf8")
-  for (const file of files) await writeFile(resolve(dir, file), file, "utf8")
-}
-
-/**
- * A `git` that materialises the base worktree for real, so the base scan has something to
- * scan. `makeGit`-style handlers taking no arguments cannot: the destination directory
- * arrives as `worktree add --detach <dir> <ref>`, and without creating it the base scan runs
- * against a path that does not exist.
- */
-function gitWith(baseFiles: readonly string[]): GitRunner {
-  return {
-    async run(args) {
-      const key = args.slice(0, 2).join(" ")
-      if (key === "worktree add") {
-        const dir = args[3]
-        if (dir === undefined) throw new Error("worktree add without a destination")
-        await populate(dir, baseFiles)
-      }
-      if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
-      return { stdout: "", stderr: "" }
-    },
   }
 }
 
@@ -327,6 +199,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       workspaceMdPath: null,
       componentMdPaths: [],
       totalFiles: 0,
+      parsedFiles: 0,
       keptSymbols: 0,
       droppedSymbols: 0,
       parseErrorCount: 0,
@@ -339,6 +212,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       unresolvedCalls: [],
       configSource: null,
       workspaceRoot: "/repo",
+      coverageFault: null,
       exitCode: EXIT.SUCCESS,
       ...overrides,
     }

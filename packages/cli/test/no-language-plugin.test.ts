@@ -72,6 +72,10 @@ describe("runScan — no language plugin", () => {
   })
 
   it("proceeds once a language plugin is configured", async () => {
+    // And once there is something for it to read. `src/m.py` is filtered out at discovery
+    // because no loaded plugin claims `.py`, so without this the scan discovers nothing and
+    // gates on coverage instead — a different refusal with a different fix.
+    await writeFile(resolve(scratch, "src/m.ts"), "export const m = 1\n", "utf8")
     await writeConfig({ languages: ["lang-typescript"] })
 
     const report = await runScan({

@@ -60,6 +60,10 @@ strict?: boolean
  */
 maxFileSizeBytes?: number
 /**
+ * Smallest share of discovered files a scan may parse and still exit 0. Absent by default: a scan that parsed at least one file passes whatever it lost. Set it and `aburi scan` exits 3 when parsedFiles / totalFiles falls below it, counting every skip reason. A workspace that discovers nothing, or parses nothing, exits 3 with or without this key.
+ */
+minParsedFileRatio?: number
+/**
  * Per-file parse timeout (parse + extract + walk combined). Files exceeding this are aborted and recorded as skipped. Default 5000 ms.
  */
 parseTimeoutMs?: number
