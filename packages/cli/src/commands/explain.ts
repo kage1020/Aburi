@@ -1,5 +1,5 @@
 import { access, writeFile } from "node:fs/promises"
-import { relative, resolve } from "node:path"
+import { relative, resolve, sep } from "node:path"
 import { detectWorkspaceRoot, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
@@ -182,7 +182,13 @@ async function locate(
     // archive or a rename in decomposed form. Both lookups below key on this string.
     // Not `toPosixRelative`: it throws on `..` and on absolute paths, and an argument
     // shaped like either has to fall through to the substring arm rather than error.
-    const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/").normalize("NFC")
+    //
+    // The separator conversion is conditional, the way `toRelativePosix` does it in the core.
+    // `relative` returns a native path, and only where the platform separator is a backslash
+    // is a backslash in it a separator — POSIX allows one in a filename, and rewriting it
+    // there turns the argument into a path naming a directory nobody has.
+    const native = relative(workspaceRoot, resolve(cwd, arg))
+    const relPath = (sep === "/" ? native : native.split(sep).join("/")).normalize("NFC")
     // The skip list is consulted before the disk probe, not after: a file the document
     // already describes needs no filesystem to answer for it, and `unreadable` is a reason
     // whose file may well refuse the probe too.

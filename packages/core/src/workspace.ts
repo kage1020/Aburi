@@ -379,6 +379,14 @@ async function readJson(path: string): Promise<unknown> {
  * Express `target` as a workspace-relative POSIX path, in the same spelling
  * `toDocumentPath` gives the file paths that sit beside it in the IR.
  *
+ * The one place a separator is converted, and the reason the conversion is guarded on `sep`
+ * rather than applied to every backslash: `relative` hands back a native path, and only where
+ * the platform separator *is* a backslash does a backslash in it mean a separator. On POSIX it
+ * is an ordinary filename character, and rewriting it renames the directory rather than
+ * describing it. Everything that takes a path already in POSIX form — the file walk, from
+ * `glob` — hands it to `toDocumentPath` unconverted, which is what lets the shared rule refuse
+ * the character instead of spending it.
+ *
  * The NFC step is the §1.2 entry point for roots (ir-schema.md): a root left in whatever
  * spelling the filesystem returned would disagree with a `symbols[].source.file` naming
  * the same directory, which is normalized at its own entry point.
