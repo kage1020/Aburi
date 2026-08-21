@@ -221,7 +221,7 @@ The "contributed no Symbols" line is a census; under it each reason present gets
 own, saying what to do about it, and then its files with the detail `@aburi/core` recorded for
 each. The reasons want different responses — `over-size` points at `maxFileSizeBytes`,
 `parse-timeout` at `parseTimeoutMs` and a re-run, `unreadable` at permissions or a tree that was
-changing under the scan, `unroutable` at a bug in the plugin set, `parse-failed` at the source,
+changing under the scan, `unroutable` at a bug in the plugin set or at a rename, `parse-failed` at the source,
 `extraction-failed` at the plugin — and one neutral line said none of it. The re-run /
 fix-something split is the one `SkippedFile.reason` draws in the IR schema.
 
@@ -540,7 +540,7 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 
 `<id-or-pattern>` is one of:
 - **Full Symbol id** — the string contains `#` and matches the `<language>:<path>#<qname>` form → direct lookup
-- **File path** — the string contains `/`, contains no `#`, and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file
+- **File path** — the string contains `/` and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file. A `#` in it does not disqualify it: the id form above is checked first and only claims the argument when it *is* one, and a file whose name holds an id separator is recorded in `stats.skippedFiles` precisely because no Symbol in it could be named
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
 
 #### 7.2.1 Exact Definition of Partial Matching

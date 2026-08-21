@@ -194,7 +194,8 @@ aburi explain <id-or-pattern> [--ir <path>] [--output <path>] [--no-rescan] [--c
 
 Three-arm dispatch:
 
-1. **Contains `#`** → treated as a full Symbol id and looked up directly.
+1. **Is a full Symbol id** (`<language>:<path>#<qname>`) → looked up directly. A `#` alone is
+   what makes this arm worth trying; a string that holds one without being an id falls through.
 2. **Contains `/`, and either exists on disk or is named in the IR's `stats.skippedFiles`** →
    all Symbols whose `source.file` matches the workspace-root-relative POSIX path. The second
    leg is for a pinned artifact: `--ir` is read in a tree that need not hold the same files.

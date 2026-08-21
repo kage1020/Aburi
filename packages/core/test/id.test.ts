@@ -14,6 +14,8 @@ import {
   makeTopLevelQname,
   RESERVED_LANGUAGE_IDS,
   symbolIdFile,
+  symbolIdSeparatorsIn,
+  toDocumentPath,
   toPosixRelative,
   trySymbolId,
 } from "../src/index"
@@ -239,6 +241,53 @@ describe("toPosixRelative", () => {
       expect(() => toPosixRelative(raw), raw).toThrowError(
         expect.objectContaining({ code: "non-posix-path" }),
       )
+    }
+  })
+})
+
+describe("toDocumentPath and symbolIdSeparatorsIn", () => {
+  it("admits the two characters the id rule refuses", () => {
+    // The Document records paths the id grammar would not accept \u2014 `stats.skippedFiles[].path`
+    // is one, and it is how a file no Symbol can name is still named. Integrity #10 holds it to
+    // this rule, so what this returns is what that check will accept.
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
+      expect(toDocumentPath(raw), raw).toBe(raw)
+      expect(() => toPosixRelative(raw), raw).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
+  })
+
+  it("still refuses a path that is not workspace-relative at all", () => {
+    // The half that stays fatal. There is nothing to record about a path from outside what the
+    // Document describes, so it is a caller error rather than one file to skip.
+    for (const raw of ["C:\\Users\\foo\\a.ts", "../outside.ts", ""]) {
+      expect(() => toDocumentPath(raw), raw).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
+  })
+
+  it("normalizes the same way, so a skip entry and a Symbol id spell one path", () => {
+    expect(toDocumentPath("src\\a\\b.ts")).toBe("src/a/b.ts")
+    expect(toDocumentPath("src/cafe\u0301.ts")).toBe("src/caf\u00e9.ts")
+  })
+
+  it("names which separators a path holds, in id order", () => {
+    expect(symbolIdSeparatorsIn("src/a.ts")).toEqual([])
+    expect(symbolIdSeparatorsIn("src/a#b.ts")).toEqual(["#"])
+    expect(symbolIdSeparatorsIn("src/a:b.ts")).toEqual([":"])
+    // Both, and `:` first however they sit in the path \u2014 the order is the id's, so the sentence
+    // a skip detail builds from it does not depend on where in the name they happen to be.
+    expect(symbolIdSeparatorsIn("src/a#b:c.ts")).toEqual([":", "#"])
+  })
+
+  it("is the same rule the id grammar enforces", () => {
+    // One source. A check that drifted from the reporter would let discovery pass a file on
+    // that `makeSymbolId` then refuses, which is the throw this whole split exists to remove.
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "src/a#b:c.ts"]) {
+      expect(symbolIdSeparatorsIn(raw).length, raw).toBeGreaterThan(0)
+      expect(() => toPosixRelative(raw), raw).toThrowError()
     }
   })
 })

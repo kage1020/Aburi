@@ -610,6 +610,10 @@ Shapes the schema would have if v1 were not frozen, recorded here so the reasoni
 
 Whether the promotion is worth doing in v2 at all is open. The §1.1 reader rule already makes an absent key and `null` indistinguishable to every conforming consumer, so promoting buys stricter validation of third-party producers and nothing else.
 
+- **Split `stats.skippedFiles[].reason: "unroutable"` into the two things it means.** Today it covers both "no loaded plugin claims this extension" and "this name holds `:` or `#`, so nothing in it can be given a Symbol id". The two want different fixes — a plugin, and a rename — and the skip detail is currently what tells them apart. A distinct value (`unnameable`, say) would put the distinction where a machine reads it.
+
+  Not v1: `reason` is a closed `enum` here and, by `$ref`, in `aburi.diff.v1.json`, so a document carrying a new value is rejected by any validating reader. §15.2 permits enum additions "only where consumers tolerate unknowns", and this is the same condition the `kind` enum fails — Aburi's own CLI maps the reason through a table that is total over the union by design.
+
 ## 16. Extension Points
 
 Places where Aburi can be extended without forking the core:

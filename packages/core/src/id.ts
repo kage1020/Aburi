@@ -250,18 +250,54 @@ export function isDefaultExportQname(qname: string): boolean {
 }
 
 /**
- * Normalize a filesystem path into the POSIX, workspace-relative form Symbol.id requires.
+ * Normalize a filesystem path into the POSIX, workspace-relative form every path the Document
+ * holds is in — `components[].roots`, `workspace.managers[].roots`, `stats.skippedFiles[].path`.
  *
- * This is where the paths the file walk produces enter the IR: what it returns becomes a
- * `symbols[].source.file` and the file segment of the id built alongside it, so it applies
- * the id rule and not only the shared path rule. Workspace and component roots take the
- * other entry point — `toRelativePosix` in `workspace.ts` — which normalizes the same way
- * and is checked against the same shared rule.
+ * The shared path rule only. It does **not** answer whether a Symbol from that file could be
+ * given an id: `:` and `#` are legal in a POSIX filename and legal in every path the Document
+ * records, and are refused by the id grammar alone. `toPosixRelative` is this plus that rule.
+ *
+ * The split exists because the two answers call for different responses. A path that is not
+ * workspace-relative at all is a caller handing over something from outside what the Document
+ * describes, and there is nothing to record. A path that merely cannot host an id is one file
+ * to skip, and the skip entry names it using exactly this rule.
  */
-export function toPosixRelative(rawPath: string): string {
+export function toDocumentPath(rawPath: string): string {
   // NFC as well as separator normalization: this is one of the entry points ir-schema.md
   // §1.2 names, and the id built from this path is spelled by the same string.
   const normalized = rawPath.replace(/\\/g, "/").normalize("NFC")
+  const violation = posixWorkspaceRelativeViolation(normalized)
+  if (violation !== null) {
+    throw new CoreError(violation.message, { code: violation.code, value: violation.value })
+  }
+  return normalized
+}
+
+/**
+ * The two characters a Symbol id is split on, held by this path, in id order.
+ *
+ * Non-throwing, and beside the grammar that enforces them so the two cannot drift — the same
+ * arrangement `symbolIdFile` has. Discovery needs the answer without an exception: a file whose
+ * name cannot host an id is one file to record, not the end of the walk, and the path itself is
+ * still recordable because `stats.skippedFiles[].path` is held to the shared rule.
+ *
+ * Empty when the path can host an id, which is the condition callers branch on.
+ */
+export function symbolIdSeparatorsIn(path: string): readonly string[] {
+  return SYMBOL_ID_SEPARATORS.filter((separator) => path.includes(separator))
+}
+
+const SYMBOL_ID_SEPARATORS = [":", "#"] as const
+
+/**
+ * Normalize a filesystem path into the POSIX, workspace-relative form Symbol.id requires.
+ *
+ * `toDocumentPath` plus the id rule: what this returns can be the file segment of a Symbol id,
+ * where what that returns can only be a path the Document records. Callers that produce
+ * `symbols[].source.file` take this one.
+ */
+export function toPosixRelative(rawPath: string): string {
+  const normalized = toDocumentPath(rawPath)
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -457,7 +493,7 @@ function symbolIdPathViolation(path: string): GrammarViolation | null {
       value: path,
     }
   }
-  if (path.includes(":") || path.includes("#")) {
+  if (symbolIdSeparatorsIn(path).length > 0) {
     return {
       code: "non-posix-path",
       message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,

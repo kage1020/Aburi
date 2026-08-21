@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
-import { toPosixRelative } from "../id"
+import { symbolIdSeparatorsIn, toDocumentPath } from "../id"
 
 /**
  * Category A drop patterns from drop-list.md §3.1. Kept here rather than embedded in a
@@ -89,9 +89,10 @@ export interface DiscoveredFile {
 
 /**
  * A file that produced no Symbols. `over-size` and `unreadable` are decided here during
- * discovery; `unroutable`, `parse-failed`, `parse-timeout` and `extraction-failed` are
- * decided by the scan orchestrator afterwards and merged into the same list, because from
- * the reader's side they answer the same question — why is this file missing from the IR?
+ * discovery, as is the half of `unroutable` that is about the file's name; the other half of
+ * `unroutable`, and `parse-failed`, `parse-timeout` and `extraction-failed`, are decided by the
+ * scan orchestrator afterwards and merged into the same list, because from the reader's side
+ * they answer the same question — why is this file missing from the IR?
  *
  * The list is exhaustive over the files the scan *gave up on*, which is what lets
  * `stats.parsedFiles` be derived from its length rather than from a counter per reason. A
@@ -154,8 +155,28 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
   const skipped: SkippedFile[] = []
 
   for (const rawPath of matches) {
-    const posix = toPosixRelative(rawPath)
+    const posix = toDocumentPath(rawPath)
     if (extensions.size > 0 && !hasKnownExtension(posix, extensions)) continue
+
+    // After the extension filter, so a file no plugin claims is filtered on that alone. A
+    // `notes:1.txt` in a TypeScript workspace was never a candidate, and recording it would be
+    // an incident about a file the scan was never going to read.
+    //
+    // Recorded rather than thrown on, which is what this used to do from inside the path
+    // normalizer. `:` and `#` are legal POSIX filename characters and are refused by the id
+    // grammar alone, so one of them anywhere in the tree ended the whole walk — six lines below,
+    // a file that cannot even be `stat`ed is recorded and the walk continues. The path is
+    // recordable because `stats.skippedFiles[].path` is held to the shared rule, so the Document
+    // names a file no Symbol in it could ever have named.
+    const separators = symbolIdSeparatorsIn(posix)
+    if (separators.length > 0) {
+      skipped.push({
+        path: posix,
+        reason: "unroutable",
+        detail: `its name contains ${separators.map((s) => `"${s}"`).join(" and ")}, which a Symbol id is split on, so nothing declared in it could be given an id`,
+      })
+      continue
+    }
 
     const absolute = resolve(workspaceRoot, posix)
     let size: number

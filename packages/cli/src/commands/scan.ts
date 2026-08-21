@@ -377,8 +377,8 @@ const MAX_LISTED_PER_REASON = 10
  * `advice` is the whole difference between them, and the one line they used to share said
  * none of it: `over-size` points at a budget, `parse-timeout` at a different budget and a
  * re-run, `unreadable` at the filesystem or at a tree that was changing under the scan,
- * `unroutable` at a bug report, and the two extraction reasons at the source and at the
- * plugin respectively. The re-run / fix-something split is the one the reason's own schema
+ * `unroutable` at a bug report or at a rename, and the two extraction reasons at the source
+ * and at the plugin respectively. The re-run / fix-something split is the one the reason's own schema
  * docstring draws: `parse-timeout` depends on how loaded the machine was, everything else
  * describes the file and clears only when something changes.
  *
@@ -411,7 +411,7 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   unroutable: {
     rank: 3,
     advice:
-      "discovery accepted the extension and no plugin claims it. That disagreement is a bug in the plugin set, not in the files.",
+      "no route into the IR exists for them, decided before either was read. Discovery accepted an extension no plugin claims \u2014 a bug in the plugin set \u2014 or the name holds a Symbol id separator, and renaming the file is the fix. Each detail says which.",
   },
   "parse-failed": {
     rank: 4,

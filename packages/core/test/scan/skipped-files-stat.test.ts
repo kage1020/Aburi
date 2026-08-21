@@ -183,6 +183,25 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
     expect(checkIRIntegrity(ir)).toEqual([])
   })
 
+  it("names a file no Symbol in it could have named", async () => {
+    // `#` is legal in a filename on every platform this runs on and is refused by the id
+    // grammar alone, so one of them used to end the walk from inside the path normalizer.
+    // `stats.skippedFiles[].path` is held to the shared path rule, which admits it \u2014 so the
+    // Document can say the file was never analysed even though nothing in it could have a id.
+    await writeFile(join(workRoot, "ok.stub"), "ok", "utf8")
+    await writeFile(join(workRoot, "od#d.stub"), "odd", "utf8")
+
+    const result = await runScan()
+
+    expect(result.ir.stats.totalFiles).toBe(2)
+    expect(result.ir.stats.parsedFiles).toBe(1)
+    expect(result.ir.stats.skippedFiles).toEqual([{ path: "od#d.stub", reason: "unroutable" }])
+    // #10 (path shape), #11 (sort), #19 (NFC) and #21 (census) all read this entry.
+    expect(checkIRIntegrity(result.ir)).toEqual([])
+    // And the rest of the workspace is in the document, which is the whole point.
+    expect(result.ir.symbols).toHaveLength(1)
+  })
+
   it("omits the key entirely when nothing was lost", async () => {
     // Class B. `[]` would erase the distinction between "this run lost nothing" and "this
     // document predates the field", which is the one thing a reader of an old IR needs.

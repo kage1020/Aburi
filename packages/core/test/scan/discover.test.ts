@@ -153,3 +153,65 @@ describe("discoverFiles", () => {
     expect(result.files.map((f) => f.path).sort()).toEqual(["src/keep.ts", "src/secret.ts"])
   })
 })
+
+/**
+ * A name Aburi cannot build an id from is one file, not the end of the walk.
+ *
+ * `#` rather than `:` in every fixture here: `:` is a legal POSIX filename character and the
+ * grammar refuses both, but NTFS reads it as an alternate-data-stream separator, so a `:` file
+ * would pass on Linux and macOS and silently be a different file on Windows. The grammar-level
+ * case covers `:` without touching a filesystem.
+ */
+describe("discoverFiles — a name no Symbol id can hold", () => {
+  it("records it and keeps walking", async () => {
+    await writeFileAt("src/a.ts", "1")
+    await writeFileAt("src/od#d.ts", "1")
+    await writeFileAt("src/z.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts", "src/z.ts"])
+    expect(result.skipped).toEqual([
+      {
+        path: "src/od#d.ts",
+        reason: "unroutable",
+        detail:
+          'its name contains "#", which a Symbol id is split on, so nothing declared in it could be given an id',
+      },
+    ])
+  })
+
+  it("leaves it out of the skip list when no plugin claims its extension anyway", async () => {
+    // The extension filter runs first. `notes#1.txt` in a TypeScript workspace was never a
+    // candidate, and an incident about a file the scan was never going to read is noise.
+    await writeFileAt("src/a.ts", "1")
+    await writeFileAt("notes#1.txt", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
+    expect(result.skipped).toEqual([])
+  })
+
+  it("counts it against the workspace, not against the plugin set", async () => {
+    // `unroutable` covers both producers now: the router refusing an extension, and the id
+    // grammar refusing a name. Same answer — no route into the Document exists for this file,
+    // decided before it was read — with `detail` saying which.
+    await writeFileAt("src/od#d.ts", "1")
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+    expect(result.skipped[0]?.detail).not.toContain("plugin")
+    expect(result.skipped[0]?.detail).not.toContain("Symbol id path")
+  })
+})

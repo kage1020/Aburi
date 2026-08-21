@@ -49,6 +49,8 @@ export {
   RESERVED_LANGUAGE_IDS,
   type SymbolIdParts,
   symbolIdFile,
+  symbolIdSeparatorsIn,
+  toDocumentPath,
   toPosixRelative,
   trySymbolId,
 } from "./id"
