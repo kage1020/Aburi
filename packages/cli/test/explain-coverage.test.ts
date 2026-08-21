@@ -637,3 +637,30 @@ describe("aburi explain — what the user reads", () => {
     expect(stderr.text()).toBe('No matches for "handleRequest".\n')
   })
 })
+// Windows has no filename that holds a backslash — the character is its path separator — so the
+// fixture can only exist on POSIX.
+const onPosix = it.skipIf(process.platform === "win32")
+
+describe("runExplain — the path arm converts a native path the way the core does", () => {
+  onPosix(
+    "does not answer for a different file when the argument's name holds a backslash",
+    async () => {
+      // The argument is a native path, and the conversion used to rewrite every backslash into a
+      // separator regardless of platform. Here that turns `weird\name.stub` — a real file — into
+      // `weird/name.stub`, which is a *different* real file the document does hold Symbols for,
+      // so the answer was another file's API with nothing saying so.
+      await put("weird/name.stub", "1")
+      await put("weird\\name.stub", "1")
+      await writeIR({ symbols: [makeSymbol("ts:weird/name.stub#neighbour", "weird/name.stub")] })
+
+      const outcome = await runExplain({
+        cwd: scratch,
+        argument: "weird\\name.stub",
+        noRescan: true,
+      })
+
+      expect(outcome.kind).not.toBe("single")
+      expect(JSON.stringify(outcome)).not.toContain("neighbour")
+    },
+  )
+})

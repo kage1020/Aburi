@@ -597,6 +597,24 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
   })
 
+  onPosix("outranks the fault it caused, when it took the whole candidate set", async () => {
+    // The other side of the guard. Every candidate unnameable means `totalFiles` is zero and
+    // the scan reports "discovered no file to read" — true, and the consequence rather than the
+    // cause. A reader sent to check `ignore` and `components[].roots` would find nothing wrong
+    // with either.
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(warnings.join("\n")).toContain("base: 1 file(s) have names no Document path can spell")
+    expect(warnings.join("\n")).not.toContain("base: it discovered no file to read")
+  })
+
   onPosix("reddens a diff taken over it, in its own words", async () => {
     await populate(scratch, ["ok.stub"])
     const warnings: string[] = []
