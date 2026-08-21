@@ -256,6 +256,40 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     expect(lines[1]).toContain("1200 file(s) contributed no Symbols")
   })
 
+  it("never prints a percentage as being below itself", () => {
+    // 899/1000 is 89.9% against a floor of 90%. Rounding both to nearest gives
+    // `parsed (90%), below the … floor of 90%`, which reads as a bug in the tool rather than
+    // as a finding about the workspace. Rounding away from each other keeps the sentence true
+    // for every pair that can reach this line.
+    const lines = linesFrom(
+      reportWith({
+        totalFiles: 1000,
+        parsedFiles: 899,
+        coverageFault: { kind: "below-floor", parsedFiles: 899, totalFiles: 1000, floor: 0.9 },
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines[0]).toBe(
+      "⚠ 899 of 1000 file(s) parsed (89%), below the minParsedFileRatio floor of 90%. " +
+        "Raise the coverage, or lower the floor if this is what the workspace looks like now.",
+    )
+  })
+
+  it("keeps the two apart at the top of the range too", () => {
+    // 199/200 against a floor of 1. Rounding to nearest prints `(100%), below … 100%`.
+    const lines = linesFrom(
+      reportWith({
+        totalFiles: 200,
+        parsedFiles: 199,
+        coverageFault: { kind: "below-floor", parsedFiles: 199, totalFiles: 200, floor: 1 },
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines[0]).toContain("parsed (99%), below the minParsedFileRatio floor of 100%")
+  })
+
   it("labels it like every other line it owns", () => {
     const lines = linesFrom(
       reportWith({
@@ -285,9 +319,9 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    // §6.7 says the wording is derived from what the scan actually reported "so a second
+    // §6.5 says the wording is derived from what the scan actually reported "so a second
     // reason arrives with the code right and the message still true". This is that reason.
-    expect(warnings.join("\n")).toContain("The base scan parsed none of the 1 file(s) it found")
+    expect(warnings.join("\n")).toContain("base: none of the 1 file(s) it found parsed")
     expect(warnings.join("\n")).not.toContain("plugin exception")
   })
 
@@ -301,7 +335,26 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnings.push(m),
     })
-    expect(warnings.join("\n")).toContain("A plugin exception withdrew 1 file(s)")
+    expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
+  })
+
+  it("says each faulted side's own cause rather than one side's about both", async () => {
+    // The base threw; the head found files and parsed none of them. A cross-side count, or the
+    // first side's fault, stated about "the base and head scan" is a false sentence — and this
+    // is the line a reader greps out of a CI log to account for the exit code.
+    await populate(scratch, ["bad.stub", "zz-bad.stub"])
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["boom.stub", "ok.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(report.faultedScans).toEqual(["base", "head"])
+    expect(warnings.join("\n")).toContain(
+      "⚠ base: a plugin exception withdrew 1 file(s); head: none of the 2 file(s) it found parsed.",
+    )
   })
 
   it("gives explain the code and the line for the scan it ran", async () => {

@@ -556,10 +556,11 @@ describe("aburi diff — both scans it ran for you", () => {
     expect(report.triggered).toBeNull()
     expect(report.exitCode).toBe(EXIT.GATE)
     // The gate is `exitCode !== SUCCESS`, which does not by itself say a plugin threw, so the
-    // wording is derived from `extractionFailures` — count included. Otherwise the day a second
-    // reason gates, the code stays right and only the diagnosis lies.
+    // wording is derived from what each side reported — count included, and attributed to the
+    // side that reported it. A second reason gates now, and a sentence about a joined list of
+    // sides would state one side's cause about both.
     expect(warnings).toContain(
-      "⚠ A plugin exception withdrew 1 file(s) during the base scan, so this run exits 3 even though " +
+      "⚠ base: a plugin exception withdrew 1 file(s). This run exits 3 even though " +
         "the diff was written. Fix it, or the comparison is against a workspace one side could not read.",
     )
   })

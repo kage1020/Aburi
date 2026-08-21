@@ -318,8 +318,9 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     configSource: loaded.source,
     workspaceRoot,
     coverageFault,
-    // Two gates, and the IR is written under both — a reviewer gets the partial output and a
-    // non-zero code, where before either guard existed they got neither.
+    // Two gates (`cli-spec.md` §5.4, §5.7), and neither withholds anything the run would
+    // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
+    // code, where before either guard existed they got the artifact and a green light.
     //
     // A file lost to a plugin exception says the run is broken rather than merely partial.
     // A scan that parsed nothing says the run described nothing, which is worse in the one
@@ -327,7 +328,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     // every `--fail-on` gate it is later compared through.
     //
     // Losing files while still parsing some keeps exiting 0 unless the workspace set
-    // `minParsedFileRatio`, which is the same clause by way of `coverageFault`.
+    // `minParsedFileRatio`, which reaches this line as a `coverageFault` like the other two
+    // rather than as a condition of its own.
     exitCode:
       scanResult.extractionFailures.length > 0 || coverageFault !== null ? EXIT.GATE : EXIT.SUCCESS,
   }
@@ -510,10 +512,16 @@ function reportCoverageFault(fault: CoverageFault | null, say: (line: string) =>
     )
     return
   }
-  const percent = Math.round((fault.parsedFiles / fault.totalFiles) * 100)
+  // Down for what was achieved and up for the floor, so the two never meet on one integer.
+  // Rounding both to nearest prints `899 of 1000 file(s) parsed (90%), below the floor of 90%`,
+  // which reads as a bug in the tool. Away from each other the sentence is true for every pair
+  // that reaches this line: the reading is strictly below the floor, so its floored percentage
+  // is strictly below the floor's ceilinged one. The cost is a digit of precision, on a line
+  // that already carries both exact counts.
+  const percent = Math.floor((fault.parsedFiles / fault.totalFiles) * 100)
   say(
     `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed (${percent}%), below the ` +
-      `minParsedFileRatio floor of ${Math.round(fault.floor * 100)}%. ` +
+      `minParsedFileRatio floor of ${Math.ceil(fault.floor * 100)}%. ` +
       "Raise the coverage, or lower the floor if this is what the workspace looks like now.",
   )
 }
@@ -631,8 +639,8 @@ function findCoverageFault(
  * The reason that took the most files, so a run that lost everything says what to look at.
  *
  * Ties go to the earlier reason in `REASON_REPORT`'s order, which makes the line a function of
- * the losses rather than of the order the walk happened to reach them in — the same reason the
- * groups below are ordered at all.
+ * the losses rather than of the order the walk happened to reach them in — the same reason
+ * `reportSkipped` orders its groups at all.
  *
  * Returns `null` for an empty list, which under `parsedFiles === 0` means nothing was found —
  * every file found and not parsed is on this list, so an empty one and a zero parse count

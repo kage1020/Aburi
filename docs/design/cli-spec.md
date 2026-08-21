@@ -160,7 +160,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | code | Meaning |
 |---|---|
 | 0 | Extraction succeeded |
-| 1 | Extraction error — a file the scan could not read. A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) |
+| 1 | Extraction error — a file the scan could not read. A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
 | 2 | Config error (schema violation, resolution failure) |
 | 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, or a scan whose coverage collapsed (§5.7). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
@@ -308,8 +308,10 @@ one is named per file directly below (§5.6) either way.
 parsed, which is correct — a repository of configuration and tests is not a failed scan — so a
 Symbol count says something about the code where `parsedFiles` says what this policy is about.
 
-The IR is still written under both gates, as it is for a plugin exception: a reviewer gets the
-partial artifact and a non-zero code rather than neither.
+Neither gate withholds anything the run would otherwise have written, as neither does for a
+plugin exception: a reviewer gets whatever `--format` asked for and a non-zero code rather than
+the artifact and a green light. `--format md` writes no IR either way, so "the IR is written" is
+a claim about what gating does not change rather than about what a gated run always produces.
 
 ## 6. `aburi diff`
 

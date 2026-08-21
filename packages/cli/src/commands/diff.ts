@@ -16,7 +16,7 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
-import { type CoverageFault, runScan, type ScanReport } from "./scan"
+import { runScan, type ScanReport } from "./scan"
 
 export type { WarnFn }
 
@@ -98,7 +98,9 @@ export interface DiffReport {
   triggered: { clause: FailOnClause; observed: number } | null
   /**
    * Sides whose own scan reported a fault — `ScanReport.exitCode` other than success, which
-   * today means a plugin threw while extracting a file.
+   * means a plugin threw while extracting a file, or the scan read too little of the workspace
+   * to be believed (`cli-spec.md` §5.7). The two can hold on different sides at once, which is
+   * why the warning built from this list says each side's cause rather than one about both.
    *
    * `null` in `--base` / `--head` mode, where this command ran no scan: that is not the same
    * answer as two clean scans, and an empty array would say it was. A document written by a
@@ -269,44 +271,50 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
  * clause reads both. Naming either unconditionally would leave the exit code right and the
  * diagnosis wrong.
  *
- * A plugin exception is named first when both apply. It is the one that says something in the
- * run is broken, and a scan that threw on every file has a coverage fault as a consequence of
- * it rather than as a second finding.
+ * One clause per faulted side, joined, rather than one sentence about a joined list of sides.
+ * While a plugin exception was the only reason, every faulted side had thrown at least once and
+ * a sentence about "the base and head scan" was true of both. It stopped being true the moment
+ * two sides could fault for different reasons: a cross-side count, or the first side's fault,
+ * stated about both is a false sentence — and this is the line a reader greps out of a CI log to
+ * account for the exit code.
  */
 function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], warn: WarnFn): void {
   if (faultedScans.length === 0) return
-  const sides = faultedScans.join(" and ")
-  const thrown = faultedScans.reduce((n, side) => n + scans[side].extractionFailures.length, 0)
-  const starved = faultedScans
-    .map((side) => scans[side].coverageFault)
-    .find((fault) => fault !== null)
-  const cause =
-    thrown > 0
-      ? `A plugin exception withdrew ${thrown} file(s) during the ${sides} scan`
-      : starved === undefined
-        ? `The ${sides} scan did not exit clean`
-        : describeStarvedScan(sides, starved)
+  const clauses = faultedScans.map((side) => `${side}: ${describeScanFault(scans[side])}`)
   warn(
-    `⚠ ${cause}, so this run exits 3 even though the diff was written. ` +
+    `⚠ ${clauses.join("; ")}. This run exits 3 even though the diff was written. ` +
       `Fix it, or the comparison is against a workspace one side could not read.`,
   )
 }
 
 /**
- * The scan's own coverage finding, said from the diff's side of it.
+ * Why one scan did not exit clean, in the words of what it reported.
  *
- * Shorter than the line `scan` prints: that one carries the consequence and where to look,
- * and both scans' reports are already on this stderr above it (§5.6). This clause exists to
- * account for the exit code, so it names the cause and stops.
+ * Shorter than the lines `scan` prints for itself: those carry the consequence and where to
+ * look, and both scans' reports are already on this stderr above this one (§5.6). This clause
+ * exists to account for the exit code, so it names the cause and stops.
+ *
+ * A plugin exception comes first when one scan has both. It is the reason that says something
+ * in the run is broken, and a scan that threw on every file it found has the coverage fault as
+ * a consequence of it rather than as a second finding. That reading holds *within* a scan and
+ * not across two, which is why it is decided here rather than by the caller.
+ *
+ * The last arm is for a scan that gates for a reason this function has not been taught. It is
+ * unreachable today — the two above are the whole of `runScan`'s gate — and saying nothing more
+ * than the exit code already said is the honest answer to a cause we cannot name.
  */
-function describeStarvedScan(sides: string, fault: CoverageFault): string {
+function describeScanFault(scan: ScanReport): string {
+  const thrown = scan.extractionFailures.length
+  if (thrown > 0) return `a plugin exception withdrew ${thrown} file(s)`
+  const fault = scan.coverageFault
+  if (fault === null) return "it did not exit clean"
   switch (fault.kind) {
     case "nothing-discovered":
-      return `The ${sides} scan discovered no file to read`
+      return "it discovered no file to read"
     case "nothing-parsed":
-      return `The ${sides} scan parsed none of the ${fault.totalFiles} file(s) it found`
+      return `none of the ${fault.totalFiles} file(s) it found parsed`
     case "below-floor":
-      return `The ${sides} scan parsed ${fault.parsedFiles} of ${fault.totalFiles} file(s), below the floor the workspace set`
+      return `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed, below the floor the workspace set`
   }
 }
 

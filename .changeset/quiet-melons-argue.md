@@ -1,5 +1,6 @@
 ---
 "@aburi/cli": minor
+"@aburi/config": minor
 "@aburi/types": minor
 ---
 
@@ -35,6 +36,12 @@ repository, and a default would red a build for a judgement nobody made. Set it 
 gates when `parsedFiles / totalFiles` falls below it — `<`, not `<=`, the reading `--fail-on`'s
 thresholds already use. A floor of `0` is refused by the schema: nothing can fall below it, so
 the key would be a policy that does nothing.
+
+`@aburi/config` is released alongside the CLI because the key lives in `aburi.config.v1.json`,
+which that package inlines at build time and validates with `additionalProperties: false` at the
+root. The CLI bundles `@aburi/config` as an external, so a CLI published against the previously
+released config would reject a correct `minParsedFileRatio` with exit 2 — while the monorepo
+suite, which reads the workspace schema, saw nothing wrong.
 
 **The floor counts every skip reason.** `parse-timeout` is the one whose loss varies by machine,
 and so the one a floor is usually reached for, but it is not the only one that hides a blind
