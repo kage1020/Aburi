@@ -128,10 +128,14 @@ export interface ScanReport {
   skipped: readonly { path: string; reason: SkippedFile["reason"]; detail?: string }[]
   /**
    * Files a plugin threw on, with what it said and the error's own code where it had one.
-   * The same files appear in `skipped` under `reason: "extraction-failed"`; this is where
-   * the message lives, and it is kept apart because it is the one reason that means
-   * something in the run is *broken* rather than merely large, slow, or in a language no
-   * plugin claims — which is why it is also the one that moves the exit code.
+   *
+   * The same files are in `skipped` under `reason: "extraction-failed"`, carrying the same
+   * message — the scan writes it to both at one site — so this is not where the message
+   * lives, and the incident report reads it from `skipped` with every other reason's. What
+   * is only here is the `code`, and the standing that goes with it: this is the one reason
+   * that means something in the run is *broken* rather than merely large, slow, or in a
+   * language no plugin claims, so it is what moves the exit code and what the `diff` fault
+   * clause counts.
    */
   extractionFailures: readonly { file: string; message: string; code?: string }[]
   /**
@@ -284,20 +288,90 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       // — `aburi scan 2>&1 | head -1` — would otherwise turn a gate into a runtime error and
       // send a reader looking for a fault that is not there. There is nowhere to report the
       // failure of the reporting channel, which is why this is the one swallow in the file.
+      //
+      // It absorbs more than the sink. Whatever line the report was on when it threw, the
+      // rest of the report goes with it — the skip section and every LSP warning after it —
+      // leaving the lines already written on screen and, for a faulted scan, a non-zero
+      // status with nothing accounting for it. The only throw not from the sink that
+      // `reportScanIncidents` can raise is a `skipped[].reason` outside this package's union,
+      // which nothing in-tree can produce; see the contract on that function.
     }
   }
   return report
 }
 
 /**
- * How many withdrawn files are named individually before the list is summarised.
+ * How many withdrawn files a reason names individually before the rest are counted.
  *
- * A plugin broken enough to reject one file usually rejects them all, so the untruncated
- * list is the whole workspace — which on CI scrolls every other warning out of the log it
- * was meant to appear in. Ten is enough to see the shape (one path, or many) and read the
- * message, which is identical across them when the fault is the plugin's.
+ * A fault broken enough to lose one file usually loses them all, so the untruncated list is
+ * the whole workspace — which on CI scrolls every other warning out of the log it was meant
+ * to appear in. Ten is enough to see the shape (one path, or many) and read the detail,
+ * which is identical across them when the cause is a plugin rather than the files.
+ *
+ * Per reason rather than across the listing. One budget shared by all six would be spent by
+ * whichever reason lost the most files, and the reason that lost the most is not the reason
+ * a reader most needs named: a hundred over-size files would push the one file a plugin
+ * threw on — the only reason that moves the exit code — inside `…and N more`, leaving a
+ * non-zero status with nothing on screen to account for it.
  */
-const MAX_LISTED_EXTRACTION_FAILURES = 10
+const MAX_LISTED_PER_REASON = 10
+
+/**
+ * Where each reason sits in the report, and what to do about it.
+ *
+ * `advice` is the whole difference between them, and the one line they used to share said
+ * none of it: `over-size` points at a budget, `parse-timeout` at a different budget and a
+ * re-run, `unreadable` at the filesystem or at a tree that was changing under the scan,
+ * `unroutable` at a bug report, and the two extraction reasons at the source and at the
+ * plugin respectively. The re-run / fix-something split is the one the reason's own schema
+ * docstring draws: `parse-timeout` depends on how loaded the machine was, everything else
+ * describes the file and clears only when something changes.
+ *
+ * `rank` fixes the order the census and the groups under it come out in, which would
+ * otherwise be the order the files arrived in — scan order, and so a function of where in
+ * the workspace the losses happened to sit. It follows the order the schema's `reason` enum
+ * declares, which is also the order the generated union lists. Not the order the schema's
+ * prose beside that enum groups them in: that prose puts `over-size` and `unroutable`
+ * together as decided before the file was read, and no single sequence is both.
+ *
+ * The ranks must stay distinct. `Array.prototype.sort` is stable and the map they order was
+ * filled in scan order, so two reasons sharing a rank would tie and fall back to exactly the
+ * dependency on workspace layout this exists to remove — a `number` does not say so and no
+ * test would catch it.
+ *
+ * A `Record` over the union rather than a list, so a reason added to the schema stops the
+ * build here. A list would have compiled, and quietly left the new reason's files out of the
+ * report while the census above still counted them.
+ */
+const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: string }> = {
+  "over-size": {
+    rank: 1,
+    advice: "larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.",
+  },
+  unreadable: {
+    rank: 2,
+    advice:
+      "could not be read. Check permissions, or re-run if the tree was changing while the scan ran.",
+  },
+  unroutable: {
+    rank: 3,
+    advice:
+      "discovery accepted the extension and no plugin claims it. That disagreement is a bug in the plugin set, not in the files.",
+  },
+  "parse-failed": {
+    rank: 4,
+    advice: "the language plugin refused the source. Deterministic: fix the file, or the plugin.",
+  },
+  "parse-timeout": {
+    rank: 5,
+    advice:
+      "extraction ran past parseTimeoutMs. Machine-dependent: re-run, and raise the budget if it repeats.",
+  },
+  "extraction-failed": {
+    rank: 6,
+    advice: "a plugin threw while extracting. This is the reason the run does not exit clean.",
+  },
+}
 
 /**
  * §5.6 — surface parse failures / soft timeouts / discovery-time skips so a scan that ate 50
@@ -308,6 +382,12 @@ const MAX_LISTED_EXTRACTION_FAILURES = 10
  * line, after the glyph, so `⚠` starts every line that stands on its own. The only lines
  * without it are the indented per-file listing and its `…and N more` tail, which belong to
  * the line above them and are attributed by it.
+ *
+ * Exported, so a caller can assemble a `ScanReport` from something other than a scan. One
+ * contract comes with that: every `report.skipped[].reason` must be a member of this
+ * package's `SkippedFile["reason"]`, because the skip section looks each one up in a table
+ * that is total over it and has nowhere to put a seventh. A document written by a newer
+ * Aburi is the way that could happen; `workspace:*` pins the two together in-tree.
  */
 export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: string | null): void {
   const say = (line: string): void => {
@@ -327,26 +407,7 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   if (report.timeoutCount > 0) {
     say(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
   }
-  if (report.skipped.length > 0) {
-    say(
-      `${report.skipped.length} file(s) contributed no Symbols: ${summariseSkipped(report.skipped)}`,
-    )
-  }
-  if (report.extractionFailures.length > 0) {
-    // Named on its own line rather than left inside the skip summary: this is the reason
-    // that decides the exit code, and a reader given a non-zero status needs to know which
-    // of the counts above earned it — and, unlike the other reasons, which files and why.
-    // `@aburi/core` logs the same per file, but through its own sink, which disappears at
-    // `ABURI_LOG_LEVEL=error` and never reaches a caller that injected its own streams.
-    say(
-      `${report.extractionFailures.length} file(s) were dropped because a plugin threw while extracting them.`,
-    )
-    for (const failure of report.extractionFailures.slice(0, MAX_LISTED_EXTRACTION_FAILURES)) {
-      warn(`    ${failure.file}: ${failure.message}`)
-    }
-    const hidden = report.extractionFailures.length - MAX_LISTED_EXTRACTION_FAILURES
-    if (hidden > 0) warn(`    …and ${hidden} more`)
-  }
+  reportSkipped(report.skipped, say, warn)
   const lsp = report.lspEnrichment
   if (lsp !== undefined) {
     if (lsp.filesFellBack > 0) {
@@ -385,10 +446,53 @@ function reportConfigOutsideWorkspaceRoot(report: ScanReport, say: (line: string
   )
 }
 
-function summariseSkipped(skipped: readonly { reason: string }[]): string {
-  const counts = new Map<string, number>()
-  for (const s of skipped) counts.set(s.reason, (counts.get(s.reason) ?? 0) + 1)
-  return [...counts.entries()].map(([reason, n]) => `${reason}=${n}`).join(", ")
+/**
+ * The census of what the scan gave up on, then each reason's files with the detail
+ * `@aburi/core` wrote for them.
+ *
+ * The details are the point. For `over-size`, `unroutable`, and an `unreadable` raised at
+ * discovery this is the only account there is — those three are not logged at all — and for
+ * the other three the core's per-file line goes to a sink `ABURI_LOG_LEVEL=error` silences
+ * and that never reaches a caller who injected its own streams. `ScanReport.skipped` has
+ * always carried the path and the detail; what dropped them was the line, whose input type
+ * was `readonly { reason: string }[]`, so five of the six reasons reached the reader as a
+ * bare count. (`extraction-failed` was listed, from a second field holding the same string.)
+ *
+ * It is a detail per file rather than per reason because a reason's files rarely share one:
+ * a size and a budget, an errno, a parse position. The rule is that a detail the core
+ * bothered to write is a detail this prints, so a reason added later is listed by the same
+ * code that lists the six here.
+ */
+function reportSkipped(
+  skipped: ScanReport["skipped"],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
+  if (skipped.length === 0) return
+  // Grouped from the files and then ordered, rather than walked reason by reason: every file
+  // handed over is in a group by construction, so the census below cannot come to more than
+  // the groups under it account for.
+  const byReason = new Map<SkippedFile["reason"], ScanReport["skipped"][number][]>()
+  for (const file of skipped) {
+    const group = byReason.get(file.reason)
+    if (group === undefined) byReason.set(file.reason, [file])
+    else group.push(file)
+  }
+  const groups = [...byReason].sort(([a], [b]) => REASON_REPORT[a].rank - REASON_REPORT[b].rank)
+  const census = groups.map(([reason, files]) => `${reason}=${files.length}`).join(", ")
+  say(`${skipped.length} file(s) contributed no Symbols: ${census}`)
+  for (const [reason, files] of groups) {
+    say(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
+    for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
+      // Empty as well as absent. `describeThrown` returns `""` for a plugin that threw one,
+      // and discovery takes `(error as Error).message` unguarded, so a detail that says
+      // nothing is reachable — and `    src/x.ts: ` is a path, a colon, and silence.
+      const detail = file.detail ?? ""
+      warn(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
+    }
+    const hidden = files.length - MAX_LISTED_PER_REASON
+    if (hidden > 0) warn(`    …and ${hidden} more`)
+  }
 }
 
 /**

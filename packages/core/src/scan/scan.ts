@@ -283,10 +283,16 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       const spent = Math.round(result.parseTimeout.elapsedMs)
       const budget = result.parseTimeout.budgetMs
       parseTimeouts.push(result.parseTimeout)
+      // Elapsed and budget rather than the bare fact. They are what the reader acts on —
+      // 5100ms against 5000 says raise it, 60000 against 5000 says look at the file — and
+      // the log line beside this one was the only place they appeared, on a channel
+      // `ABURI_LOG_LEVEL=error` silences. A machine-dependent number is safe here because
+      // `detail` is never projected into the Document (`buildStats`), which is the one
+      // place the bytes have to be stable.
       additionalSkipped.push({
         path: discoveredFile.path,
         reason: "parse-timeout",
-        detail: "extraction exceeded parseTimeoutMs",
+        detail: `extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms)`,
       })
       logger.warn(
         `Skipped ${discoveredFile.path}: extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms). Override with config.parseTimeoutMs.`,

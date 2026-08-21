@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
-import { makeLanguageId } from "@aburi/core"
+import { makeLanguageId, type SkippedFile } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   EXIT,
@@ -28,6 +28,24 @@ import {
  * path — a ref form the loader supports, and the only way to produce a refusal or an
  * extraction throw on demand, since no in-tree plugin will do either to order.
  */
+
+/**
+ * What the stub plugin refuses `bad.stub` with, as the reporter renders it. The scan
+ * composes it from the `ParseError` the plugin returned, so it is a fact about the fixture
+ * rather than about the CLI — and it is now on the command's stderr, where before the only
+ * copy went through the run's `Logger`.
+ */
+const REFUSAL = "parse reported a non-recoverable error at 12:4 — unterminated string"
+
+/**
+ * The advice each reason's group line carries. Spelled once here rather than inline in four
+ * assertions: an exact-byte test that repeats the sentence it is checking drifts one copy at
+ * a time, and the subject of these tests is the shape of the report, not the wording.
+ */
+const PARSE_FAILED_ADVICE =
+  "the language plugin refused the source. Deterministic: fix the file, or the plugin."
+const EXTRACTION_FAILED_ADVICE =
+  "a plugin threw while extracting. This is the reason the run does not exit clean."
 
 class MemStream extends Writable {
   chunks: string[] = []
@@ -225,7 +243,9 @@ describe("runScan — the report goes to the caller's sink", () => {
       "⚠ 1 file(s) had recoverable parse errors.",
       "⚠ 1 file(s) could not be parsed and were left out of the IR.",
       "⚠ 2 file(s) contributed no Symbols: parse-failed=1, extraction-failed=1",
-      "⚠ 1 file(s) were dropped because a plugin threw while extracting them.",
+      `⚠ parse-failed (1) — ${PARSE_FAILED_ADVICE}`,
+      `    bad.stub: ${REFUSAL}`,
+      `⚠ extraction-failed (1) — ${EXTRACTION_FAILED_ADVICE}`,
       "    boom.stub: plugin exploded",
     ])
   })
@@ -241,19 +261,20 @@ describe("runScan — the report goes to the caller's sink", () => {
     })
     expect(lines).toEqual([
       '⚠ base ref "main": 1 file(s) contributed no Symbols: extraction-failed=1',
-      '⚠ base ref "main": 1 file(s) were dropped because a plugin threw while extracting them.',
+      `⚠ base ref "main": extraction-failed (1) — ${EXTRACTION_FAILED_ADVICE}`,
       "    boom.stub: plugin exploded",
     ])
   })
 
   // Exact bytes, where `parse-failure-scan.test.ts` asserts two of these lines by substring.
   // The subjects differ: that test pins the split between recoverable and refused, this one
-  // pins that moving the reporting into `runScan` changed nothing a reader already sees.
+  // pins that the command's own stream carries the whole report and nothing else.
   //
   // "Everything on the injected stream", not "everything on stderr" — the run's `Logger` writes
   // its per-file lines to the real `process.stderr` and lands outside this capture. That gap is
-  // older than this test and is why the CLI prints the extraction failures itself.
-  it("keeps the scan command's stderr as it was", async () => {
+  // why the CLI lists the files itself: at `ABURI_LOG_LEVEL=error` the report is all there is,
+  // and for a discovery-time skip there is no `Logger` line to lose in the first place.
+  it("puts the whole report on the scan command's stderr", async () => {
     await populate(scratch, ["bad.stub", "boom.stub", "warn.stub", "ok.stub"])
     const stdout = new MemStream()
     const stderr = new MemStream()
@@ -269,7 +290,9 @@ describe("runScan — the report goes to the caller's sink", () => {
       "⚠ 1 file(s) had recoverable parse errors.\n" +
         "⚠ 1 file(s) could not be parsed and were left out of the IR.\n" +
         "⚠ 2 file(s) contributed no Symbols: parse-failed=1, extraction-failed=1\n" +
-        "⚠ 1 file(s) were dropped because a plugin threw while extracting them.\n" +
+        `⚠ parse-failed (1) — ${PARSE_FAILED_ADVICE}\n` +
+        `    bad.stub: ${REFUSAL}\n` +
+        `⚠ extraction-failed (1) — ${EXTRACTION_FAILED_ADVICE}\n` +
         "    boom.stub: plugin exploded\n",
     )
   })
@@ -375,19 +398,142 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(lines).toEqual(["⚠ LSP requests: 10 issued · 0 timed out · 2 failed."])
   })
 
-  it("caps the per-file listing and leaves the tail unlabelled with the rest of it", () => {
-    const failures = Array.from({ length: 12 }, (_, i) => ({
-      file: `src/f${i}.ts`,
-      message: "plugin exploded",
+  it("caps each reason's listing and leaves the tail unlabelled with the rest of it", () => {
+    const skipped = Array.from({ length: 12 }, (_, i) => ({
+      path: `src/f${i}.ts`,
+      reason: "extraction-failed" as const,
+      detail: "plugin exploded",
     }))
-    const lines = linesFrom(reportWith({ extractionFailures: failures }), 'base ref "main"')
-    expect(lines[0]).toBe(
-      '⚠ base ref "main": 12 file(s) were dropped because a plugin threw while extracting them.',
+    const lines = linesFrom(
+      reportWith({
+        skipped,
+        extractionFailures: skipped.map((s) => ({ file: s.path, message: s.detail })),
+      }),
+      'base ref "main"',
     )
-    expect(lines.slice(1, 11)).toEqual(
-      failures.slice(0, 10).map((f) => `    ${f.file}: ${f.message}`),
+    expect(lines[0]).toBe(
+      '⚠ base ref "main": 12 file(s) contributed no Symbols: extraction-failed=12',
+    )
+    expect(lines[1]).toContain('⚠ base ref "main": extraction-failed (12) — ')
+    expect(lines.slice(2, 12)).toEqual(
+      skipped.slice(0, 10).map((s) => `    ${s.path}: ${s.detail}`),
     )
     expect(lines.at(-1)).toBe("    …and 2 more")
+  })
+
+  it("says nothing about a tail when the cap is met exactly", () => {
+    // The one size the guard exists for, and the size every other case here steps over: at
+    // ten there is nothing hidden, and a tail would read `…and 0 more` — a truthful count of
+    // nothing on a line whose whole job is to say files are missing.
+    const skipped = Array.from({ length: 10 }, (_, i) => ({
+      path: `vendor/big${i}.js`,
+      reason: "over-size" as const,
+      detail: "2100000 > 1048576",
+    }))
+    const lines = linesFrom(reportWith({ skipped }), null)
+    expect(lines.filter((l) => l.startsWith("    "))).toHaveLength(10)
+    expect(lines.some((l) => l.startsWith("    …and"))).toBe(false)
+  })
+
+  it("gives each reason its own ten, so a flood cannot hide the one that gates", () => {
+    // A single cap across the whole listing is the failure: eleven over-size files would
+    // spend it, and the one file that set the exit code would be inside `…and N more`. §5.6
+    // promises the opposite — a reader handed a non-zero status is told which files earned it.
+    const flood = Array.from({ length: 11 }, (_, i) => ({
+      path: `vendor/big${i}.js`,
+      reason: "over-size" as const,
+      detail: "2100000 > 1048576",
+    }))
+    const gating = { path: "src/route.ts", reason: "extraction-failed" as const, detail: "boom" }
+    const lines = linesFrom(
+      reportWith({
+        skipped: [...flood, gating],
+        extractionFailures: [{ file: gating.path, message: gating.detail }],
+      }),
+      null,
+    )
+    expect(lines).toContain("    …and 1 more")
+    expect(lines).toContain("    src/route.ts: boom")
+  })
+
+  it("names every reason's files, with the detail the core wrote", () => {
+    const lines = linesFrom(
+      reportWith({
+        // Handed over in an order no rule produces — the order a walk of some workspace or
+        // other would have produced. What comes out must not depend on it.
+        skipped: [
+          { path: "src/route.ts", reason: "extraction-failed", detail: "plugin exploded" },
+          { path: "src/x.weird", reason: "unroutable", detail: "no plugin claims it" },
+          {
+            path: "src/slow.ts",
+            reason: "parse-timeout",
+            detail: "extraction reached 5123ms, exceeding parseTimeoutMs (5000ms)",
+          },
+          { path: "vendor/bundle.js", reason: "over-size", detail: "2100000 > 1048576" },
+          { path: "src/broken.ts", reason: "parse-failed", detail: "unexpected token at 3:7" },
+          { path: "src/locked.ts", reason: "unreadable", detail: "EACCES: permission denied" },
+        ],
+        extractionFailures: [{ file: "src/route.ts", message: "plugin exploded" }],
+      }),
+      null,
+    )
+    // The order the schema's `reason` enum declares, not scan order: the groups arrive in the
+    // order the census named them, and neither depends on where in the workspace the files sat.
+    expect(lines[0]).toBe(
+      "⚠ 6 file(s) contributed no Symbols: over-size=1, unreadable=1, unroutable=1, parse-failed=1, parse-timeout=1, extraction-failed=1",
+    )
+    expect(lines.filter((l) => l.startsWith("    "))).toEqual([
+      "    vendor/bundle.js: 2100000 > 1048576",
+      "    src/locked.ts: EACCES: permission denied",
+      "    src/x.weird: no plugin claims it",
+      "    src/broken.ts: unexpected token at 3:7",
+      "    src/slow.ts: extraction reached 5123ms, exceeding parseTimeoutMs (5000ms)",
+      "    src/route.ts: plugin exploded",
+    ])
+  })
+
+  it("sends each reason somewhere different, and names the setting where there is one", () => {
+    // The line used to be neutral about six reasons that want six different responses.
+    const advice = (reason: SkippedFile["reason"], detail?: string): string => {
+      const entry = detail === undefined ? { path: "f", reason } : { path: "f", reason, detail }
+      const found = linesFrom(reportWith({ skipped: [entry] }), null).find((l) =>
+        l.startsWith(`⚠ ${reason} (1) — `),
+      )
+      if (found === undefined) throw new Error(`no group line for ${reason}`)
+      return found
+    }
+    expect(advice("over-size")).toContain("maxFileSizeBytes")
+    expect(advice("parse-timeout")).toContain("parseTimeoutMs")
+    expect(advice("parse-timeout")).toContain("re-run")
+    // Two producers: a stat or read that failed at discovery, and a file deleted between
+    // discovery and the read before extraction. Advice true for one only would be false half
+    // the time, and there is nothing in the entry that says which happened.
+    expect(advice("unreadable")).toContain("permission")
+    expect(advice("unreadable")).toContain("re-run")
+    expect(advice("unroutable")).toContain("plugin set")
+    expect(advice("parse-failed")).toContain("refused")
+    expect(advice("extraction-failed")).toContain("threw")
+    // The split the reason's own schema docstring draws: machine-dependent says re-run,
+    // deterministic says fix something.
+    expect(advice("parse-failed")).toContain("Deterministic")
+    expect(advice("parse-timeout")).toContain("Machine-dependent")
+  })
+
+  it("lists a file the core gave no detail without a dangling separator", () => {
+    // Absent and empty are both reachable, and they render the same. `throw ""` reaches
+    // `describeThrown` and comes back as `""`, and discovery takes `(error as Error).message`
+    // unguarded, so an `Error` built with no message leaves one behind too. Either way
+    // `    src/quiet.ts: ` would be a path, a colon, and silence.
+    for (const skipped of [
+      [{ path: "src/quiet.ts", reason: "over-size" as const }],
+      [{ path: "src/quiet.ts", reason: "over-size" as const, detail: "" }],
+    ]) {
+      expect(linesFrom(reportWith({ skipped }), null).at(-1)).toBe("    src/quiet.ts")
+    }
+  })
+
+  it("says nothing when the scan lost nothing", () => {
+    expect(linesFrom(reportWith({}), null)).toEqual([])
   })
 
   it("names a config that sits below the workspace root, labelled like the rest", () => {
@@ -433,7 +579,8 @@ describe("aburi explain — the scan it ran for you", () => {
     })
     expect(stdout.text()).toContain("ok_stub")
     expect(code).toBe(EXIT.GATE)
-    expect(stderr.text()).toContain("dropped because a plugin threw")
+    expect(stderr.text()).toContain("extraction-failed (1)")
+    expect(stderr.text()).toContain("boom.stub: plugin exploded")
   })
 
   it("exits 3 rather than 1 when the answer it could not find may be the fault's", async () => {
@@ -670,7 +817,10 @@ describe("aburi diff — both scans it ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    expect(warnings.join("\n")).toContain("dropped because a plugin threw")
+    // Labelled, so a two-scan run says which side lost the file; the per-file line under it
+    // stays indented and unlabelled and is attributed by the line above.
+    expect(warnings.join("\n")).toContain('⚠ base ref "main": extraction-failed (1)')
+    expect(warnings).toContain("    boom.stub: plugin exploded")
     // Rendering the clause is the CLI wrapper's job, so what is pinned here is that the fault
     // did not swallow it: `triggered` survives, and it still formats as the gate that tripped.
     const triggered = report.triggered

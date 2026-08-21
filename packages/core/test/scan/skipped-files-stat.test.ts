@@ -100,6 +100,14 @@ function stubLanguage(): LanguagePlugin {
     init: async () => {},
     parseFile: async (file: SourceFile): Promise<ParseResult> => {
       if (file.path === "boom.stub") throw new Error("stub parseFile exploded")
+      if (file.path === "slow.stub") {
+        // Spent, not mocked: the budget can only be blown harder on a slower machine, so
+        // there is no direction in which this flakes.
+        const until = performance.now() + 250
+        let spins = 0
+        while (performance.now() < until) spins++
+        if (spins < 0) throw new Error("unreachable")
+      }
       const errors: ParseError[] =
         file.path === "refused.stub"
           ? [{ message: "wrong dialect", line: 1, column: 1, recoverable: false }]
@@ -181,6 +189,29 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
     await writeFile(join(workRoot, "ok.stub"), "ok", "utf8")
     const { stats } = (await runScan()).ir
     expect("skippedFiles" in stats).toBe(false)
+  })
+
+  it("says how long a timed-out file ran and what it was given", async () => {
+    // The detail is the whole account of the loss a `runScan` caller gets, and it read
+    // `extraction exceeded parseTimeoutMs` — a restatement of the reason. The numbers that
+    // decide whether to raise the budget or look at the file were in a log line on a
+    // channel `ABURI_LOG_LEVEL=error` silences.
+    await writeFile(join(workRoot, "slow.stub"), "slow", "utf8")
+    const result = await runScan({ parseTimeoutMs: 100 })
+
+    const skipped = result.skipped[0]
+    expect(skipped?.reason).toBe("parse-timeout")
+    const spent = /^extraction reached (\d+)ms, exceeding parseTimeoutMs \(100ms\)$/.exec(
+      skipped?.detail ?? "",
+    )
+    expect(spent).not.toBeNull()
+    // The elapsed, not the budget again and not a zero — either would leave the sentence
+    // grammatical and drain it of the thing a reader acts on. The deadline starts before
+    // `parseFile` and is read after it returns, so a reading below the spin's own 250ms is
+    // impossible and a slower machine only widens the margin.
+    expect(Number(spent?.[1])).toBeGreaterThanOrEqual(250)
+    // And still not in the Document: those milliseconds are how loaded the machine was.
+    expect(result.ir.stats.skippedFiles).toEqual([{ path: "slow.stub", reason: "parse-timeout" }])
   })
 
   it("carries no detail, so the bytes do not depend on where the repository sits", async () => {
