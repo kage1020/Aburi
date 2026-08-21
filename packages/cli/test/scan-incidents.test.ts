@@ -421,6 +421,20 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(lines.at(-1)).toBe("    …and 2 more")
   })
 
+  it("says nothing about a tail when the cap is met exactly", () => {
+    // The one size the guard exists for, and the size every other case here steps over: at
+    // ten there is nothing hidden, and a tail would read `…and 0 more` — a truthful count of
+    // nothing on a line whose whole job is to say files are missing.
+    const skipped = Array.from({ length: 10 }, (_, i) => ({
+      path: `vendor/big${i}.js`,
+      reason: "over-size" as const,
+      detail: "2100000 > 1048576",
+    }))
+    const lines = linesFrom(reportWith({ skipped }), null)
+    expect(lines.filter((l) => l.startsWith("    "))).toHaveLength(10)
+    expect(lines.some((l) => l.startsWith("    …and"))).toBe(false)
+  })
+
   it("gives each reason its own ten, so a flood cannot hide the one that gates", () => {
     // A single cap across the whole listing is the failure: eleven over-size files would
     // spend it, and the one file that set the exit code would be inside `…and N more`. §5.6
@@ -463,8 +477,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       }),
       null,
     )
-    // Schema order, not scan order: the groups arrive in the order the histogram named them,
-    // and neither depends on where in the workspace the files happened to sit.
+    // The order the schema's `reason` enum declares, not scan order: the groups arrive in the
+    // order the census named them, and neither depends on where in the workspace the files sat.
     expect(lines[0]).toBe(
       "⚠ 6 file(s) contributed no Symbols: over-size=1, unreadable=1, unroutable=1, parse-failed=1, parse-timeout=1, extraction-failed=1",
     )
@@ -506,13 +520,16 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("lists a file the core gave no detail without a dangling separator", () => {
-    // Every producer writes one today, but `detail` is optional on the report and a plugin
-    // boundary that hands back an empty message is the case `describeThrown` exists for.
-    const lines = linesFrom(
-      reportWith({ skipped: [{ path: "src/quiet.ts", reason: "over-size" }] }),
-      null,
-    )
-    expect(lines.at(-1)).toBe("    src/quiet.ts")
+    // Absent and empty are both reachable, and they render the same. `throw ""` reaches
+    // `describeThrown` and comes back as `""`, and discovery takes `(error as Error).message`
+    // unguarded, so an `Error` built with no message leaves one behind too. Either way
+    // `    src/quiet.ts: ` would be a path, a colon, and silence.
+    for (const skipped of [
+      [{ path: "src/quiet.ts", reason: "over-size" as const }],
+      [{ path: "src/quiet.ts", reason: "over-size" as const, detail: "" }],
+    ]) {
+      expect(linesFrom(reportWith({ skipped }), null).at(-1)).toBe("    src/quiet.ts")
+    }
   })
 
   it("says nothing when the scan lost nothing", () => {

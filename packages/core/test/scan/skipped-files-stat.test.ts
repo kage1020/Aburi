@@ -201,9 +201,15 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
 
     const skipped = result.skipped[0]
     expect(skipped?.reason).toBe("parse-timeout")
-    expect(skipped?.detail).toMatch(
-      /^extraction reached \d+ms, exceeding parseTimeoutMs \(100ms\)$/,
+    const spent = /^extraction reached (\d+)ms, exceeding parseTimeoutMs \(100ms\)$/.exec(
+      skipped?.detail ?? "",
     )
+    expect(spent).not.toBeNull()
+    // The elapsed, not the budget again and not a zero — either would leave the sentence
+    // grammatical and drain it of the thing a reader acts on. The deadline starts before
+    // `parseFile` and is read after it returns, so a reading below the spin's own 250ms is
+    // impossible and a slower machine only widens the margin.
+    expect(Number(spent?.[1])).toBeGreaterThanOrEqual(250)
     // And still not in the Document: those milliseconds are how loaded the machine was.
     expect(result.ir.stats.skippedFiles).toEqual([{ path: "slow.stub", reason: "parse-timeout" }])
   })

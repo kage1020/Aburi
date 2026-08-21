@@ -226,7 +226,8 @@ changing under the scan, `unroutable` at a bug in the plugin set, `parse-failed`
 fix-something split is the one `SkippedFile.reason` draws in the IR schema.
 
 Reasons appear in a fixed order — `over-size`, `unreadable`, `unroutable`, `parse-failed`,
-`parse-timeout`, `extraction-failed` — in the census and in the groups alike, so the groups
+`parse-timeout`, `extraction-failed`, the order the IR schema's `reason` enum declares — in the
+census and in the groups alike, so the groups
 arrive in the order the census named them and neither depends on where in the workspace the
 losses happened to sit.
 

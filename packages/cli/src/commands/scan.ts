@@ -288,6 +288,13 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       // — `aburi scan 2>&1 | head -1` — would otherwise turn a gate into a runtime error and
       // send a reader looking for a fault that is not there. There is nowhere to report the
       // failure of the reporting channel, which is why this is the one swallow in the file.
+      //
+      // It absorbs more than the sink. Whatever line the report was on when it threw, the
+      // rest of the report goes with it — the skip section and every LSP warning after it —
+      // leaving the lines already written on screen and, for a faulted scan, a non-zero
+      // status with nothing accounting for it. The only throw not from the sink that
+      // `reportScanIncidents` can raise is a `skipped[].reason` outside this package's union,
+      // which nothing in-tree can produce; see the contract on that function.
     }
   }
   return report
@@ -322,8 +329,15 @@ const MAX_LISTED_PER_REASON = 10
  *
  * `rank` fixes the order the census and the groups under it come out in, which would
  * otherwise be the order the files arrived in — scan order, and so a function of where in
- * the workspace the losses happened to sit. It follows the schema docstring's own sequence:
- * decided before the file was read, then during the read, then during extraction.
+ * the workspace the losses happened to sit. It follows the order the schema's `reason` enum
+ * declares, which is also the order the generated union lists. Not the order the schema's
+ * prose beside that enum groups them in: that prose puts `over-size` and `unroutable`
+ * together as decided before the file was read, and no single sequence is both.
+ *
+ * The ranks must stay distinct. `Array.prototype.sort` is stable and the map they order was
+ * filled in scan order, so two reasons sharing a rank would tie and fall back to exactly the
+ * dependency on workspace layout this exists to remove — a `number` does not say so and no
+ * test would catch it.
  *
  * A `Record` over the union rather than a list, so a reason added to the schema stops the
  * build here. A list would have compiled, and quietly left the new reason's files out of the
@@ -368,6 +382,12 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
  * line, after the glyph, so `⚠` starts every line that stands on its own. The only lines
  * without it are the indented per-file listing and its `…and N more` tail, which belong to
  * the line above them and are attributed by it.
+ *
+ * Exported, so a caller can assemble a `ScanReport` from something other than a scan. One
+ * contract comes with that: every `report.skipped[].reason` must be a member of this
+ * package's `SkippedFile["reason"]`, because the skip section looks each one up in a table
+ * that is total over it and has nowhere to put a seventh. A document written by a newer
+ * Aburi is the way that could happen; `workspace:*` pins the two together in-tree.
  */
 export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: string | null): void {
   const say = (line: string): void => {
@@ -433,8 +453,10 @@ function reportConfigOutsideWorkspaceRoot(report: ScanReport, say: (line: string
  * The details are the point. For `over-size`, `unroutable`, and an `unreadable` raised at
  * discovery this is the only account there is — those three are not logged at all — and for
  * the other three the core's per-file line goes to a sink `ABURI_LOG_LEVEL=error` silences
- * and that never reaches a caller who injected its own streams. A programmatic consumer of
- * `runScan`, which is how `aburi explain` and `aburi diff` scan, saw counts and nothing else.
+ * and that never reaches a caller who injected its own streams. `ScanReport.skipped` has
+ * always carried the path and the detail; what dropped them was the line, whose input type
+ * was `readonly { reason: string }[]`, so five of the six reasons reached the reader as a
+ * bare count. (`extraction-failed` was listed, from a second field holding the same string.)
  *
  * It is a detail per file rather than per reason because a reason's files rarely share one:
  * a size and a budget, an errno, a parse position. The rule is that a detail the core
@@ -462,7 +484,11 @@ function reportSkipped(
   for (const [reason, files] of groups) {
     say(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
     for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
-      warn(file.detail === undefined ? `    ${file.path}` : `    ${file.path}: ${file.detail}`)
+      // Empty as well as absent. `describeThrown` returns `""` for a plugin that threw one,
+      // and discovery takes `(error as Error).message` unguarded, so a detail that says
+      // nothing is reachable — and `    src/x.ts: ` is a path, a colon, and silence.
+      const detail = file.detail ?? ""
+      warn(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
     }
     const hidden = files.length - MAX_LISTED_PER_REASON
     if (hidden > 0) warn(`    …and ${hidden} more`)

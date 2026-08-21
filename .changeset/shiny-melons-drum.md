@@ -59,8 +59,8 @@ message to both `skipped[].detail` and `extractionFailures[].message` at a singl
 the exit code, and is still what the `diff` fault clause counts.
 
 **Reasons are reported in a fixed order** — `over-size`, `unreadable`, `unroutable`,
-`parse-failed`, `parse-timeout`, `extraction-failed`, the sequence the schema docstring itself
-uses — in the census line and in the groups alike. Insertion order is scan order, so the census
+`parse-failed`, `parse-timeout`, `extraction-failed`, the order the schema's `reason` enum
+declares — in the census line and in the groups alike. Insertion order is scan order, so the census
 used to list its reasons in an order that depended on where in the workspace the losses happened
 to sit.
 
