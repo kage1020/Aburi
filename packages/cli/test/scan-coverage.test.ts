@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
@@ -125,6 +125,64 @@ describe("aburi scan — a workspace it could not read", () => {
     expect(report.coverageFault).toBeNull()
     expect(report.exitCode).toBe(EXIT.SUCCESS)
     expect(warnings).toEqual([])
+  })
+})
+
+describe("aburi scan — a name no Symbol id can hold", () => {
+  it("lists it, keeps the rest, and lets explain answer out of it", async () => {
+    // End to end: discovery records the file instead of ending the walk, the report groups it
+    // under `unroutable` with its detail, and the Document names it — so `explain` asked about
+    // something that would have lived there says the IR never analysed it rather than "no
+    // matches". None of that needed a diff-side change: `stats.skippedFiles[].path` is held to
+    // the shared path rule, which admits `#`.
+    //
+    // `#` and not `:` in the fixture: both are refused by the grammar, but NTFS reads `:` as an
+    // alternate-data-stream separator, so a `:` file would pass here and be a different file on
+    // Windows. `id.test.ts` covers `:` without touching a filesystem.
+    await populate(scratch, ["ok.stub"])
+    // Under a directory, so `explain` routes it as a path rather than as a name to match on
+    // (`docs/cli-reference.md` — the file arm wants a `/`).
+    await mkdir(resolve(scratch, "src"), { recursive: true })
+    await writeFile(resolve(scratch, "src", "od#d.stub"), "odd", "utf8")
+    const warnings: string[] = []
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    expect(report.parsedFiles).toBe(1)
+    expect(report.keptSymbols).toBe(1)
+    const printed = warnings.join("\n")
+    expect(printed).toContain("1 file(s) contributed no Symbols: unroutable=1")
+    expect(printed).toContain("⚠ unroutable (1) — ")
+    expect(printed).toContain(
+      '    src/od#d.stub: its path segment "od#d.stub" contains "#", which a Symbol id is split on',
+    )
+
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/od#d.stub",
+      irPath: resolve(scratch, "out", "aburi.ir.json"),
+      warn: () => {},
+    })
+    expect(outcome.kind).toBe("unknown")
+    expect(outcome.exitCode).toBe(EXIT.GATE)
+  })
+
+  it("trips the coverage gate when every file it found was one", async () => {
+    const warnings: string[] = []
+    await populate(scratch, ["od#d.stub"])
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(warnings.join("\n")).toContain("1 file(s) discovered, 0 parsed — 1 as unroutable")
   })
 })
 

@@ -435,7 +435,8 @@ function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["sig
  *
  * `namespaceBinding` and the local half of `symbols[]` are compared against a call's head
  * segment, and `source` is resolved into a file path and compared against the discovered
- * file set — which `toPosixRelative` normalized. A miss here is silent: the call falls into
+ * file set — which `toDocumentPath` normalized on the way in. A miss here is silent: the call
+ * falls into
  * the `no-match` diagnostic bucket rather than `external`, which is precisely the state that
  * sends a reviewer looking for a typo that does not exist.
  */

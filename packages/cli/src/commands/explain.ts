@@ -154,19 +154,25 @@ async function locate(
 
   if (arg.includes("#")) {
     const hit = ir.symbols.find((s) => s.id === arg)
-    if (hit === undefined) {
-      const claimed = symbolIdFile(arg)
-      return missed(claimed === null ? undefined : lost.get(claimed), "id", coverage)
+    if (hit !== undefined) {
+      const markdown = projectSymbolExplain(hit, explainContext)
+      if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+      return {
+        kind: "single",
+        markdown,
+        symbol: hit,
+        exitCode: EXIT.SUCCESS,
+        writtenTo: outputPath,
+      }
     }
-    const markdown = projectSymbolExplain(hit, explainContext)
-    if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
-    return {
-      kind: "single",
-      markdown,
-      symbol: hit,
-      exitCode: EXIT.SUCCESS,
-      writtenTo: outputPath,
-    }
+    // A miss answers as a missed *id* only when the argument is one. `#` is what makes this
+    // arm worth trying, not proof that it applies: a path can hold one too, since a file
+    // whose name cannot host a Symbol id is still recorded in `stats.skippedFiles[]` — the
+    // Document's path rule admits both id separators and only the id grammar refuses them.
+    // Returning here for a string that is provably not an id would make the path arm below
+    // unreachable for exactly the files that most need it.
+    const claimed = symbolIdFile(arg)
+    if (claimed !== null) return missed(lost.get(claimed), "id", coverage)
   }
 
   if (arg.includes("/")) {

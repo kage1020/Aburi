@@ -14,6 +14,8 @@ import {
   makeTopLevelQname,
   RESERVED_LANGUAGE_IDS,
   symbolIdFile,
+  symbolIdSeparatorSite,
+  toDocumentPath,
   toPosixRelative,
   trySymbolId,
 } from "../src/index"
@@ -239,6 +241,74 @@ describe("toPosixRelative", () => {
       expect(() => toPosixRelative(raw), raw).toThrowError(
         expect.objectContaining({ code: "non-posix-path" }),
       )
+    }
+  })
+})
+
+describe("toDocumentPath and symbolIdSeparatorsIn", () => {
+  it("admits the two characters the id rule refuses", () => {
+    // The Document records paths the id grammar would not accept — `stats.skippedFiles[].path`
+    // is one, and it is how a file no Symbol can name is still named. Integrity #10 holds it to
+    // this rule, so what this returns is what that check will accept.
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
+      expect(toDocumentPath(raw), raw).toBe(raw)
+      expect(() => toPosixRelative(raw), raw).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
+  })
+
+  it("each describes the path as the thing its caller was building", () => {
+    // The two entry points share one normalizer and then apply their own rule. Composed the
+    // other way — the id rule layered on the document one — a path that breaks the shared rule
+    // is reported by whichever ran first, and a caller assembling a Symbol id is told about a
+    // "path" instead.
+    expect(() => toPosixRelative("../outside.ts")).toThrowError(/Symbol id file path/)
+    expect(() => toDocumentPath("../outside.ts")).toThrowError(/^path /)
+  })
+
+  it("still refuses a path that is not workspace-relative at all", () => {
+    // The half that stays fatal. There is nothing to record about a path from outside what the
+    // Document describes, so it is a caller error rather than one file to skip.
+    for (const raw of ["C:\\Users\\foo\\a.ts", "../outside.ts", ""]) {
+      expect(() => toDocumentPath(raw), raw).toThrowError(
+        expect.objectContaining({ code: "non-posix-path" }),
+      )
+    }
+  })
+
+  it("normalizes the same way, so a skip entry and a Symbol id spell one path", () => {
+    expect(toDocumentPath("src\\a\\b.ts")).toBe("src/a/b.ts")
+    expect(toDocumentPath("src/cafe\u0301.ts")).toBe("src/caf\u00e9.ts")
+  })
+
+  it("names the segment that holds them, and which, in id order", () => {
+    expect(symbolIdSeparatorSite("src/a.ts")).toBeNull()
+    expect(symbolIdSeparatorSite("src/a#b.ts")).toEqual({ segment: "a#b.ts", separators: ["#"] })
+    expect(symbolIdSeparatorSite("src/a:b.ts")).toEqual({ segment: "a:b.ts", separators: [":"] })
+    // The directory, not the file under it: `util.ts` is innocent and renaming it fixes nothing.
+    expect(symbolIdSeparatorSite("src/v#1/util.ts")).toEqual({
+      segment: "v#1",
+      separators: ["#"],
+    })
+    // Both, and `:` first however they sit in the segment — the order is the id's, so the
+    // sentence a skip detail builds from it does not depend on where in the name they are.
+    expect(symbolIdSeparatorSite("src/a#b:c.ts")?.separators).toEqual([":", "#"])
+  })
+
+  it("answers null for a path that holds none but still cannot host an id", () => {
+    // Scoped to separators, and nothing more: `"."` holds neither and `symbolIdPathViolation`
+    // refuses it all the same, because a directory declares no Symbol.
+    expect(symbolIdSeparatorSite(".")).toBeNull()
+    expect(() => toPosixRelative(".")).toThrowError()
+  })
+
+  it("is the same rule the id grammar enforces", () => {
+    // One source. A check that drifted from the reporter would let discovery pass a file on
+    // that `makeSymbolId` then refuses, which is the throw this whole split exists to remove.
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "src/a#b:c.ts", "src/v#1/util.ts"]) {
+      expect(symbolIdSeparatorSite(raw), raw).not.toBeNull()
+      expect(() => toPosixRelative(raw), raw).toThrowError()
     }
   })
 })

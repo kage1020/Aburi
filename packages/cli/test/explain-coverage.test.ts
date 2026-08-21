@@ -190,6 +190,47 @@ describe("runExplain — the id arm", () => {
   })
 })
 
+describe("runExplain — an argument that holds a `#` without being an id", () => {
+  it("falls through to the file arm instead of claiming it as a missed id", async () => {
+    // `#` is what makes the id arm worth trying, not proof that it applies. A file whose name
+    // holds one is recorded in `stats.skippedFiles` — the Document's path rule admits both id
+    // separators and only the id grammar refuses them — so answering "no such Symbol id" here
+    // would make the file arm unreachable for exactly the files that most need it.
+    const lost = { path: "src/od#d.ts", reason: "unroutable" as const }
+    await writeIR({ symbols: [KEPT], skipped: [lost] })
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/od#d.ts",
+      noRescan: true,
+    })
+    expect(outcome.kind).toBe("unknown")
+    if (outcome.kind !== "unknown") throw new Error("unreachable")
+    expect(outcome.skipped).toEqual(lost)
+    expect(outcome.namedBy).toBe("path")
+  })
+
+  it("still answers as a missed id when the argument really is one", async () => {
+    await writeIR({ symbols: [KEPT], skipped: [ROUTE_LOST] })
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "ts:src/route.ts#gone",
+      noRescan: true,
+    })
+    expect(outcome.kind).toBe("unknown")
+    if (outcome.kind !== "unknown") throw new Error("unreachable")
+    expect(outcome.namedBy).toBe("id")
+  })
+
+  it("hands a pattern holding a `#` on rather than answering for it", async () => {
+    // Nothing can match it — a qualified name cannot hold a `#` (invariant #17), so the
+    // substring arm finds nothing and the answer is `not-found` either way. What changed is
+    // that the two arms below now get to say so: before, the id arm returned first.
+    await writeIR({ symbols: [KEPT] })
+    const outcome = await runExplain({ cwd: scratch, argument: "odd#name", noRescan: true })
+    expect(outcome.kind).toBe("not-found")
+  })
+})
+
 describe("runExplain — the file arm", () => {
   it("reports unknown for a file on disk the scan never analysed", async () => {
     await put("src/route.ts", "export function handleRequest() {}\n")

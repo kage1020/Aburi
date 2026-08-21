@@ -86,7 +86,7 @@ Normalization therefore happens **where a string enters the process**, not where
 | Entry point | What it normalizes |
 |---|---|
 | `makeSymbolId` / `trySymbolId` | the three id parts, before validating them, so the ids the guard accepts are the ids the constructors can mint |
-| `toPosixRelative` | every path the file walk produces — `symbols[].source.file` and the file segment of the id built beside it |
+| `toDocumentPath` | every path the file walk produces — `symbols[].source.file`, and `stats.skippedFiles[].path` for one the walk gave up on |
 | `toRelativePosix` (workspace detection) | `components[].roots` and `workspace.managers[].roots` |
 | `resolveComponents` (CLI config load) | those same fields when they come from `aburi.json` rather than from detection |
 | `normalizePackagePath` (component detection) | `components[].publicApi` |
@@ -609,6 +609,10 @@ Shapes the schema would have if v1 were not frozen, recorded here so the reasoni
 - **Promote the five Class A fields of §1.1 — `Symbol.component`, `Symbol.signature`, `Component.description`, `SourceRange.startColumn`, `SourceRange.endColumn` — into `required`.** Breaking per §15.2, and the breakage is concrete rather than theoretical: every document generated before the promotion becomes invalid, and `aburi diff` reads a committed IR as its base, so a repository that commits its IR would see a green CI turn red without anyone touching the repository. That every writer in this codebase already satisfies the constraint does not change that.
 
 Whether the promotion is worth doing in v2 at all is open. The §1.1 reader rule already makes an absent key and `null` indistinguishable to every conforming consumer, so promoting buys stricter validation of third-party producers and nothing else.
+
+- **Split `stats.skippedFiles[].reason: "unroutable"` into the two things it means.** Today it covers both "no loaded plugin claims this extension" and "this name holds `:` or `#`, so nothing in it can be given a Symbol id". The two want different fixes — a plugin, and a rename — and the skip detail is currently what tells them apart. A distinct value (`unnameable`, say) would put the distinction where a machine reads it.
+
+  Not v1: `reason` is a closed `enum` here and, by `$ref`, in `aburi.diff.v1.json`, so a document carrying a new value is rejected by any validating reader. §15.2 permits enum additions "only where consumers tolerate unknowns", and this is the same condition the `kind` enum fails — Aburi's own CLI maps the reason through a table that is total over the union by design.
 
 ## 16. Extension Points
 

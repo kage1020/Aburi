@@ -62,9 +62,10 @@ export interface ScanResult {
   parseErrors: readonly ParseErrorRecord[]
   /**
    * Every file the scan stopped working on, and why. `over-size` and `unroutable` are
-   * decided before anything is read, `unreadable` can be raised by either discovery or the
-   * read this function does just before extraction, and `parse-failed`, `parse-timeout` and
-   * `extraction-failed` are decided during extraction.
+   * decided before anything is read — `unroutable` by discovery when the name cannot hold a
+   * Symbol id, and by the router here when no plugin claims the extension. `unreadable` can be
+   * raised by either discovery or the read this function does just before extraction, and
+   * `parse-failed`, `parse-timeout` and `extraction-failed` are decided during extraction.
    *
    * Not the same as "contributed no Symbols": a file that parses cleanly and declares
    * nothing — an empty file, one that is all imports — is absent from this list and counted

@@ -288,7 +288,7 @@ A monorepo mixing multiple managers, such as `apps/web` (pnpm) + `apps/api` (car
 - Since **only TS is supported today**, when a non-TS workspace is detected:
   - The Component is still created (to preserve the full architectural picture)
   - The language is included in `languages`, but Symbol extraction is skipped
-  - Recorded in `stats.skippedFiles[]` with `reason: "unroutable"` — no loaded plugin claims the extension (to be revisited when more languages land — see the [roadmap](../roadmap.md))
+  - Recorded in `stats.skippedFiles[]` with `reason: "unroutable"` — that reason covers both ways a file has no route into the Document, and here it is the first: no loaded plugin claims the extension (to be revisited when more languages land — see the [roadmap](../roadmap.md))
   - Warning on stderr: `Component <id> has language <lang> but no lang plugin enabled. Symbols not extracted.`
 
 ## 7. Conflict resolution
