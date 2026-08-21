@@ -11,6 +11,7 @@ import {
   posixWorkspaceRelativeViolation,
   type SkippedFile,
   scan,
+  type UnrepresentableFile,
   writeCanonicalIR,
 } from "@aburi/core"
 import {
@@ -202,6 +203,16 @@ export interface ScanReport {
    * be three chances to disagree about whether the run was green.
    */
   coverageFault: CoverageFault | null
+  /**
+   * Candidate files the Document has no way to name, in path order.
+   *
+   * Nothing else on this report mentions them, and nothing in the artifact does either: the
+   * path a skip entry would need is one the shared path rule refuses, and a file counted in
+   * `totalFiles` while absent from `stats.skippedFiles` breaks integrity #21. So the run's only
+   * account of them is this list, which is why it moves the exit code — a scan that dropped
+   * source and said nothing would be a clean run over a workspace it did not describe.
+   */
+  unrepresentableFiles: readonly UnrepresentableFile[]
   exitCode: ExitCode
 }
 
@@ -318,6 +329,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     configSource: loaded.source,
     workspaceRoot,
     coverageFault,
+    unrepresentableFiles: scanResult.unrepresentableFiles.map((f) => ({ ...f })),
     // Two gates (`cli-spec.md` §5.4, §5.7), and neither withholds anything the run would
     // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
     // code, where before either guard existed they got the artifact and a green light.
@@ -330,8 +342,17 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     // Losing files while still parsing some keeps exiting 0 unless the workspace set
     // `minParsedFileRatio`, which reaches this line as a `coverageFault` like the other two
     // rather than as a condition of its own.
+    //
+    // A file the Document cannot name is the third: it is source the workspace holds and the
+    // artifact does not describe, and unlike every other loss there is no entry in the
+    // artifact to find it by afterwards. Nothing but this exit code and the line above it
+    // says the workspace was read incompletely.
     exitCode:
-      scanResult.extractionFailures.length > 0 || coverageFault !== null ? EXIT.GATE : EXIT.SUCCESS,
+      scanResult.extractionFailures.length > 0 ||
+      coverageFault !== null ||
+      scanResult.unrepresentableFiles.length > 0
+        ? EXIT.GATE
+        : EXIT.SUCCESS,
   }
   const incidents = options.incidents
   if (incidents !== undefined) {
@@ -464,6 +485,7 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     say(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
   }
   reportSkipped(report.skipped, say, warn)
+  reportUnrepresentable(report.unrepresentableFiles, say, warn)
   const lsp = report.lspEnrichment
   if (lsp !== undefined) {
     if (lsp.filesFellBack > 0) {
@@ -590,6 +612,35 @@ function reportSkipped(
     const hidden = files.length - MAX_LISTED_PER_REASON
     if (hidden > 0) warn(`    …and ${hidden} more`)
   }
+}
+
+/**
+ * Files the Document has no way to name.
+ *
+ * Its own section rather than a seventh skip reason. A skip entry is a path plus a reason, and
+ * the path it would take is one the shared rule refuses — so there is no entry to group, no
+ * count in `totalFiles` to reconcile it against, and nothing in the artifact a reader could
+ * find the file by later. This paragraph is the whole record, which is why it names every file
+ * rather than summarising them the way a reason group does.
+ *
+ * The advice is a rename because that is the only fix: the character is legal on the
+ * filesystem and has no spelling in a Document path, so no setting makes the file
+ * describable — and `ignore` only makes the run stop mentioning it.
+ */
+function reportUnrepresentable(
+  files: ScanReport["unrepresentableFiles"],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
+  if (files.length === 0) return
+  say(
+    `${files.length} file(s) were left out of the IR and out of its counts: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down here at all. Rename the segment named against each, or leave it out with ignore.`,
+  )
+  for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
+    warn(`    ${file.path}: the segment "${file.segment}" holds a backslash`)
+  }
+  const hidden = files.length - MAX_LISTED_PER_REASON
+  if (hidden > 0) warn(`    …and ${hidden} more`)
 }
 
 /**

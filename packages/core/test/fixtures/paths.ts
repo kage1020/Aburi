@@ -77,6 +77,12 @@ export const WORKSPACE_PATH_CASES: readonly WorkspacePathCase[] = [
     why: "backslashes are not POSIX separators",
   },
   {
+    path: "src/weird\\name.ts",
+    root: no("contains a backslash"),
+    symbolPath: no("contains a backslash"),
+    why: "a legal POSIX filename character the Document has no spelling for, refused rather than rewritten into a separator",
+  },
+  {
     path: "\\abs\\a.ts",
     root: no("contains a backslash"),
     symbolPath: no("contains a backslash"),

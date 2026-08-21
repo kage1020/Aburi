@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
-import { symbolIdSeparatorSite, toDocumentPath } from "../id"
+import { backslashSegment, symbolIdSeparatorSite, toDocumentPath } from "../id"
 
 /**
  * Category A drop patterns from drop-list.md §3.1. Kept here rather than embedded in a
@@ -113,9 +113,35 @@ export interface SkippedFile extends SkippedFileRecord {
   detail?: string
 }
 
+/**
+ * A candidate file the Document has no way to name.
+ *
+ * Its name holds a backslash, which is legal on a POSIX filesystem and has no spelling in a
+ * Document path: `/` is the only separator one has, so any way of writing the name down reads
+ * as a directory boundary. That is what separates it from a name holding `:` or `#`, which the
+ * id grammar refuses while the shared path rule admits — those files are recorded on `skipped`
+ * by path, and this one cannot be.
+ *
+ * It cannot be counted without being recorded either: integrity #21 pins
+ * `stats.skippedFiles`'s length to `totalFiles - parsedFiles`. So it leaves `totalFiles`
+ * entirely, the way a file no plugin claims does, and is carried here instead — where the CLI
+ * reports it and gates the exit code on it, so the file is lost from the Document without being
+ * lost from the run.
+ */
+export interface UnrepresentableFile {
+  /**
+   * The path as the filesystem spells it. Not a Document path — that is the whole point — and
+   * deliberately not normalized either: the reader has to go and rename this exact file.
+   */
+  path: string
+  /** The `/`-delimited segment whose name holds the backslash. */
+  segment: string
+}
+
 export interface DiscoverResult {
   files: DiscoveredFile[]
   skipped: SkippedFile[]
+  unrepresentableFiles: UnrepresentableFile[]
 }
 
 /**
@@ -151,13 +177,34 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     absolute: false,
   })
 
-  const extensions = new Set(options.languageExtensions ?? [])
+  const extensions = new Set(
+    (options.languageExtensions ?? []).map((extension) => extension.normalize("NFC")),
+  )
   const files: DiscoveredFile[] = []
   const skipped: SkippedFile[] = []
+  const unrepresentableFiles: UnrepresentableFile[] = []
 
   for (const rawPath of matches) {
+    // `tinyglobby` returns `/` as the separator on every platform, so a backslash anywhere in
+    // this string is part of a filename and never a separator. That is what lets the filter and
+    // the check below read the path before `toDocumentPath` has normalized it — and it is why
+    // the rewrite that used to happen inside that call had nothing to convert here.
+    if (extensions.size > 0 && !hasKnownExtension(rawPath, extensions)) continue
+
+    // Before `toDocumentPath`, which refuses the character, and after the extension filter for
+    // the same reason the id-separator check below it is: a `notes\1.txt` in a TypeScript
+    // workspace was never a candidate, and an incident about it would be about a file the scan
+    // was never going to read.
+    //
+    // Not on `skipped`, unlike `:` and `#` — see `UnrepresentableFile` for why there is no path
+    // to record it under, and why leaving `totalFiles` is what keeps the census exact.
+    const segment = backslashSegment(rawPath)
+    if (segment !== null) {
+      unrepresentableFiles.push({ path: rawPath, segment })
+      continue
+    }
+
     const posix = toDocumentPath(rawPath)
-    if (extensions.size > 0 && !hasKnownExtension(posix, extensions)) continue
 
     // After the extension filter, so a file no plugin claims is filtered on that alone. A
     // `notes:1.txt` in a TypeScript workspace was never a candidate, and recording it would be
@@ -205,14 +252,20 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
 
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   skipped.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  unrepresentableFiles.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
-  return { files, skipped }
+  return { files, skipped, unrepresentableFiles }
 }
 
 function hasKnownExtension(path: string, extensions: ReadonlySet<string>): boolean {
   const dot = path.lastIndexOf(".")
   if (dot < 0) return false
-  return extensions.has(path.slice(dot).toLowerCase())
+  // Both sides in NFC. This reads the filesystem's own spelling now rather than the normalized
+  // Document path, and a filesystem that hands back decomposed names would otherwise miss an
+  // extension a plugin declared composed. Every extension in every manifest today is ASCII and
+  // normalizes to itself, so what this buys is that the answer no longer depends on which of
+  // the two spellings the filter happens to be handed.
+  return extensions.has(path.slice(dot).toLowerCase().normalize("NFC"))
 }
 
 async function readGitignore(workspaceRoot: string): Promise<string[]> {

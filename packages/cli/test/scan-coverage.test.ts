@@ -278,6 +278,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       configSource: null,
       workspaceRoot: "/repo",
       coverageFault: null,
+      unrepresentableFiles: [],
       exitCode: EXIT.SUCCESS,
       ...overrides,
     }
@@ -312,6 +313,44 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       "⚠ 1200 file(s) discovered, 0 parsed — 1200 as parse-failed. The IR is empty and will diff clean against any other empty IR.",
     )
     expect(lines[1]).toContain("1200 file(s) contributed no Symbols")
+  })
+
+  it("names every unnameable file, because this line is the only record of them", () => {
+    // No fixture needed and none possible on Windows: the report is assembled here, so what a
+    // reader is told about a file the artifact cannot hold is pinned on every platform.
+    const lines = linesFrom(
+      reportWith({
+        totalFiles: 3,
+        parsedFiles: 3,
+        unrepresentableFiles: [
+          { path: "src/v\\1/other.stub", segment: "v\\1" },
+          { path: "src/v\\1/util.stub", segment: "v\\1" },
+        ],
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines[0]).toContain("2 file(s) were left out of the IR and out of its counts")
+    // The segment, not the file. A backslash in a directory name disqualifies every file
+    // beneath it and each of those filenames is innocent, so a line blaming `util.stub` sends
+    // the reader to rename the wrong thing.
+    expect(lines[1]).toBe('    src/v\\1/other.stub: the segment "v\\1" holds a backslash')
+    expect(lines[2]).toBe('    src/v\\1/util.stub: the segment "v\\1" holds a backslash')
+  })
+
+  it("caps the list the way every skip reason is capped", () => {
+    const lines = linesFrom(
+      reportWith({
+        unrepresentableFiles: Array.from({ length: 12 }, (_, i) => ({
+          path: `src/f${i}\\x.stub`,
+          segment: `f${i}\\x.stub`,
+        })),
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines).toHaveLength(12)
+    expect(lines[11]).toBe("    …and 2 more")
   })
 
   it("never prints a percentage as being below itself", () => {
@@ -463,5 +502,61 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(code).toBe(EXIT.GATE)
     expect(stderr.text()).toContain("1 file(s) discovered, 0 parsed")
+  })
+})
+
+// Windows has no filename that holds a backslash — the character is its path separator — so the
+// fixture can only exist on POSIX. `@aburi/core`'s own suite pins the classification on every
+// platform; these pin what the CLI does with a scan that found one.
+const onPosix = it.skipIf(process.platform === "win32")
+
+describe("aburi scan — a file no Document path can name", () => {
+  onPosix("gates on it, because nothing else in the run is going to mention it", async () => {
+    const warnings: string[] = []
+    const report = await scanIn(["ok.stub", "weird\\name.stub"], warnings)
+
+    expect(report.unrepresentableFiles).toEqual([
+      { path: "weird\\name.stub", segment: "weird\\name.stub" },
+    ])
+    // Neither counted nor skipped, and that pairing is forced: the path a skip entry needs is
+    // one the shared rule refuses, and a file counted while absent from the skip list breaks
+    // integrity #21. The artifact is therefore silent about it, which is why the code is not.
+    expect(report.totalFiles).toBe(1)
+    expect(report.parsedFiles).toBe(1)
+    expect(report.skipped).toEqual([])
+    expect(report.coverageFault).toBeNull()
+    expect(report.exitCode).toBe(EXIT.GATE)
+  })
+
+  onPosix("still writes the IR, so a reader gets the artifact and the code", async () => {
+    // And the IR passes `assertIRIntegrity` on the way out, which is the census this file is
+    // kept out of in order not to break.
+    const report = await scanIn(["ok.stub", "weird\\name.stub"])
+    expect(report.irPath).not.toBeNull()
+  })
+
+  onPosix("names the file and the segment at fault", async () => {
+    const warnings: string[] = []
+    await scanIn(["ok.stub", "v\\1-a.stub", "v\\1-b.stub"], warnings)
+    const text = warnings.join("\n")
+    expect(text).toContain("2 file(s) were left out of the IR and out of its counts")
+    expect(text).toContain('    v\\1-a.stub: the segment "v\\1-a.stub" holds a backslash')
+    expect(text).toContain('    v\\1-b.stub: the segment "v\\1-b.stub" holds a backslash')
+  })
+
+  onPosix("reddens a diff taken over it, in its own words", async () => {
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["ok.stub", "weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+
+    expect(report.faultedScans).toEqual(["base"])
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(warnings.join("\n")).toContain("base: 1 file(s) have names no Document path can spell")
   })
 })

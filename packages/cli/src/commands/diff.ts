@@ -307,6 +307,15 @@ function describeScanFault(scan: ScanReport): string {
   const thrown = scan.extractionFailures.length
   if (thrown > 0) return `a plugin exception withdrew ${thrown} file(s)`
   const fault = scan.coverageFault
+  // Before "discovered no file to read" and after the other two faults, because the direction
+  // of cause runs one way: an unnameable file leaves `totalFiles`, so a workspace whose whole
+  // candidate set is unnameable discovers nothing and that fault is this one's consequence.
+  // Leaving the denominator can only raise the parsed ratio, so it cannot produce either of
+  // the other two — where those hold they are their own cause, and they are named instead.
+  const unnameable = scan.unrepresentableFiles.length
+  if (unnameable > 0 && (fault === null || fault.kind === "nothing-discovered")) {
+    return `${unnameable} file(s) have names no Document path can spell`
+  }
   if (fault === null) return "it did not exit clean"
   switch (fault.kind) {
     case "nothing-discovered":

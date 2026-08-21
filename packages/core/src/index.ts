@@ -32,6 +32,7 @@ export {
   ZERO_FINGERPRINT,
 } from "./fingerprint"
 export {
+  backslashSegment,
   DEFAULT_EXPORT_QNAME,
   type GrammarViolation,
   isComponentId,
@@ -82,6 +83,7 @@ export {
   type DiscoverResult,
   discoverFiles,
   type SkippedFile,
+  type UnrepresentableFile,
 } from "./scan/discover"
 export { decideSymbolDrop } from "./scan/drop-b"
 export {

@@ -270,7 +270,7 @@ export function isDefaultExportQname(qname: string): boolean {
  * workspace and `mergeManager` is what drops those.
  */
 export function toDocumentPath(rawPath: string): string {
-  const normalized = normalizeRawPath(rawPath)
+  const normalized = normalizeToNfc(rawPath)
   const violation = posixWorkspaceRelativeViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -319,16 +319,45 @@ export function symbolIdSeparatorSite(path: string): SymbolIdSeparatorSite | nul
 }
 
 /**
- * NFC as well as separator normalization: the two entry points below share it, and the id built
- * from a path is spelled by the same string the Document records it as.
+ * NFC, and nothing else: the two entry points below share it, so the id built from a path is
+ * spelled by the same string the Document records it as.
+ *
+ * It used to rewrite `\` into `/` first, on the theory that a caller might be holding a native
+ * path. That cost the shared rule its backslash clause — the check ran on a string the character
+ * had already been spent in — and silently renamed any file whose name legitimately held one.
+ * Converting a native path is the caller's job because only the caller knows it has one;
+ * `toRelativePosix` in `workspace.ts` shows the shape, rewriting on the platform separator,
+ * which is a separator exactly where a filename cannot hold one.
  *
  * Shared by the two entry points rather than one composed out of the other, so each applies its
  * own rule and reports it with its own subject. Layered, a path that breaks the shared rule
  * would be described by whichever function ran first, and a caller assembling a Symbol id would
  * be told about a "path".
  */
-function normalizeRawPath(rawPath: string): string {
-  return rawPath.replace(/\\/g, "/").normalize("NFC")
+function normalizeToNfc(rawPath: string): string {
+  return rawPath.normalize("NFC")
+}
+
+/**
+ * The first `/`-delimited segment of this path that holds a backslash, or `null` when none does.
+ *
+ * The character has no spelling in a Document path: `/` is the only separator one has, so a name
+ * holding a backslash cannot be written down without a reader taking it for a separator. That
+ * makes it unlike `:` and `#`, which the id grammar refuses while the shared rule admits them —
+ * a file those disqualify is still recordable by path, and a file this disqualifies is not.
+ *
+ * Per segment for the same reason `symbolIdSeparatorSite` is: a backslash in a directory name
+ * disqualifies every file beneath it, and each of those filenames is innocent. Naming the
+ * segment sends the reader to the name that is actually at fault.
+ *
+ * `posixWorkspaceRelativeViolation` reads it as the predicate and discovery reads the segment,
+ * so a file discovery reports and a path the rule refuses are one set by construction.
+ */
+export function backslashSegment(path: string): string | null {
+  for (const segment of path.split("/")) {
+    if (segment.includes("\\")) return segment
+  }
+  return null
 }
 
 /**
@@ -348,7 +377,7 @@ function normalizeRawPath(rawPath: string): string {
  * was building, and the more useful of the two subjects to be told about.
  */
 export function toPosixRelative(rawPath: string): string {
-  const normalized = normalizeRawPath(rawPath)
+  const normalized = normalizeToNfc(rawPath)
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -484,10 +513,12 @@ export function posixWorkspaceRelativeViolation(
   if (path.length === 0) {
     return { code: "non-posix-path", message: `${subject} is empty`, value: path }
   }
-  if (path.includes("\\")) {
+  // Two producers, and the message has to hold for both: a caller that handed over a native
+  // path without converting it, and a file whose name legitimately contains the character.
+  if (backslashSegment(path) !== null) {
     return {
       code: "non-posix-path",
-      message: `${subject} "${path}" contains a backslash; only POSIX forward slashes are allowed`,
+      message: `${subject} "${path}" contains a backslash; "/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all`,
       value: path,
     }
   }
