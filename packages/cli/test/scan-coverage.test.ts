@@ -67,9 +67,19 @@ describe("aburi scan — a workspace it could not read", () => {
 
   it("names the reason that took the most of them", async () => {
     const warnings: string[] = []
-    await scanIn(["bad.stub", "boom.stub"], warnings)
-    // Two reasons, one file each; the tie goes to the earlier one in the schema's reason
-    // enum, so the line does not depend on which file the walk reached first.
+    // Discovery sorts by path, so the minority reason is the one seen first. The line has to
+    // report the majority, not the earliest.
+    await scanIn(["bad.stub", "boom-a.stub", "boom-b.stub"], warnings)
+    expect(warnings.join("\n")).toContain("3 file(s) discovered, 0 parsed — 2 as extraction-failed")
+  })
+
+  it("breaks a tie on the reason enum rather than on the order of the walk", async () => {
+    const warnings: string[] = []
+    // One file each, and the one that should win is the one discovery reaches second —
+    // `boom.stub` sorts before `zz-bad.stub`. Left to insertion order the line would name
+    // `extraction-failed`, and the same workspace under different filenames would name the
+    // other. A reader comparing two runs needs the sentence to be about the losses.
+    await scanIn(["boom.stub", "zz-bad.stub"], warnings)
     expect(warnings.join("\n")).toContain("2 file(s) discovered, 0 parsed — 1 as parse-failed")
   })
 

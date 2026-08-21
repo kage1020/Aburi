@@ -643,7 +643,9 @@ describe("aburi diff — both scans it ran for you", () => {
 
   it("attributes a recorded fault to the document that holds it", async () => {
     // Base and head must differ, or reading one document twice would satisfy any attribution.
-    const baseWorkspace = resolve(scratch, "base-src")
+    // Beside the head workspace rather than inside it: a base nested under `scratch` is part of
+    // the head scan's own tree, so the head document would hold the base's files as well.
+    const baseWorkspace = await mkdtemp(resolve(tmpdir(), "aburi-scan-incidents-base-"))
     await populate(baseWorkspace, ["boom.stub", "ok.stub"])
     await populate(scratch, ["ok.stub"])
     const baseOut = resolve(scratch, "base-out")
@@ -658,6 +660,7 @@ describe("aburi diff — both scans it ran for you", () => {
       outputDir: resolve(scratch, "diff-out"),
       warn: (m) => warnings.push(m),
     })
+    await rm(baseWorkspace, { recursive: true, force: true })
     expect(warnings.join("\n")).toContain("base IR records 1 file(s) a plugin threw on")
     expect(warnings.join("\n")).not.toContain("head IR records")
   })

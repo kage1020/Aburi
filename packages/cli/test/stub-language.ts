@@ -13,9 +13,15 @@ import type { GitRunner } from "../src"
  */
 
 /**
- * `bad.stub` is refused outright, `warn.stub` keeps a recoverable error and its Symbol,
- * `boom.stub` makes extraction throw, `ok.stub` is clean. Which of them exist is up to the
- * caller, so a fixture can differ between the base worktree and the working tree.
+ * A file is refused outright if its path contains `bad`, keeps a recoverable error and its
+ * Symbol if it contains `warn`, makes extraction throw if it contains `boom`, and is clean
+ * otherwise — so `ok.stub` is the quiet one. Which of them exist is up to the caller, so
+ * a fixture can differ between the base worktree and the working tree.
+ *
+ * By substring rather than by exact name because discovery sorts by path, and a fixture that
+ * needs two files of one behaviour, or needs a given behaviour to arrive second, has to be
+ * free to name them — which a prefix rule is not enough for, since `bad` sorts before `boom`
+ * whatever follows it.
  */
 export const STUB_PLUGIN = `
 const manifest = {
@@ -54,14 +60,14 @@ export const plugin = {
   init: async () => {},
   parseFile: async (file) => {
     const tree = { path: file.path }
-    if (file.path === "bad.stub") {
+    if (file.path.includes("bad")) {
       return {
         tree,
         errors: [{ message: "unterminated string", line: 12, column: 4, recoverable: false }],
         imports: [],
       }
     }
-    if (file.path === "warn.stub") {
+    if (file.path.includes("warn")) {
       return {
         tree,
         errors: [{ message: "stray token", line: 2, column: 1, recoverable: true }],
@@ -71,7 +77,7 @@ export const plugin = {
     return { tree, errors: [], imports: [] }
   },
   extractSymbols: (tree, ctx) => {
-    if (ctx.file.path === "boom.stub") throw new Error("plugin exploded")
+    if (ctx.file.path.includes("boom")) throw new Error("plugin exploded")
     const name = ctx.file.path.replace(/[^A-Za-z0-9]/g, "_")
     return [
       {

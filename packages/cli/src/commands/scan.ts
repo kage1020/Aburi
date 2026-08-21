@@ -604,8 +604,10 @@ function findCoverageFault(
   skipped: readonly { reason: SkippedFile["reason"] }[],
   floor: number | undefined,
 ): CoverageFault | null {
-  if (totalFiles === 0) return { kind: "nothing-discovered" }
   if (parsedFiles === 0) {
+    // No dominant reason means nothing was skipped, which together with nothing parsed means
+    // nothing was found. `totalFiles === 0` is that same state said a third way, so it is not
+    // checked separately — a second branch for it would be unreachable through one of them.
     const dominant = dominantReason(skipped)
     return dominant === null
       ? { kind: "nothing-discovered" }
@@ -632,8 +634,9 @@ function findCoverageFault(
  * the losses rather than of the order the walk happened to reach them in — the same reason the
  * groups below are ordered at all.
  *
- * Returns `null` only for an empty list, which `parsedFiles === 0` with `totalFiles > 0` cannot
- * produce: every file found and not parsed is on it.
+ * Returns `null` for an empty list, which under `parsedFiles === 0` means nothing was found —
+ * every file found and not parsed is on this list, so an empty one and a zero parse count
+ * cannot both hold while anything was discovered.
  */
 function dominantReason(
   skipped: readonly { reason: SkippedFile["reason"] }[],
