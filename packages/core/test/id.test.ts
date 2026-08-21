@@ -258,6 +258,15 @@ describe("toDocumentPath and symbolIdSeparatorsIn", () => {
     }
   })
 
+  it("each describes the path as the thing its caller was building", () => {
+    // The two entry points share one normalizer and then apply their own rule. Composed the
+    // other way — the id rule layered on the document one — a path that breaks the shared rule
+    // is reported by whichever ran first, and a caller assembling a Symbol id is told about a
+    // "path" instead.
+    expect(() => toPosixRelative("../outside.ts")).toThrowError(/Symbol id file path/)
+    expect(() => toDocumentPath("../outside.ts")).toThrowError(/^path /)
+  })
+
   it("still refuses a path that is not workspace-relative at all", () => {
     // The half that stays fatal. There is nothing to record about a path from outside what the
     // Document describes, so it is a caller error rather than one file to skip.

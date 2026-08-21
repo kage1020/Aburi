@@ -263,9 +263,7 @@ export function isDefaultExportQname(qname: string): boolean {
  * to skip, and the skip entry names it using exactly this rule.
  */
 export function toDocumentPath(rawPath: string): string {
-  // NFC as well as separator normalization: this is one of the entry points ir-schema.md
-  // §1.2 names, and the id built from this path is spelled by the same string.
-  const normalized = rawPath.replace(/\\/g, "/").normalize("NFC")
+  const normalized = normalizeRawPath(rawPath)
   const violation = posixWorkspaceRelativeViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -290,14 +288,31 @@ export function symbolIdSeparatorsIn(path: string): readonly string[] {
 const SYMBOL_ID_SEPARATORS = [":", "#"] as const
 
 /**
+ * NFC as well as separator normalization: this is one of the entry points ir-schema.md §1.2
+ * names, and the id built from a path is spelled by the same string the Document records it as.
+ *
+ * Shared by the two entry points rather than one composed out of the other, so each applies its
+ * own rule and reports it with its own subject. Layered, a path that breaks the shared rule
+ * would be described by whichever function ran first, and a caller assembling a Symbol id would
+ * be told about a "path".
+ */
+function normalizeRawPath(rawPath: string): string {
+  return rawPath.replace(/\\/g, "/").normalize("NFC")
+}
+
+/**
  * Normalize a filesystem path into the POSIX, workspace-relative form Symbol.id requires.
  *
- * `toDocumentPath` plus the id rule: what this returns can be the file segment of a Symbol id,
- * where what that returns can only be a path the Document records. Callers that produce
- * `symbols[].source.file` take this one.
+ * The shared path rule plus the id rule, where `toDocumentPath` applies the shared rule alone:
+ * what this returns can be the file segment of a Symbol id, where what that returns can only be
+ * a path the Document records. Callers that produce `symbols[].source.file` take this one.
+ *
+ * It runs `symbolIdPathViolation` rather than layering on `toDocumentPath`, so a path that
+ * breaks the shared rule is still described as a Symbol id path — which is what the caller was
+ * building, and the more useful of the two subjects to be told about.
  */
 export function toPosixRelative(rawPath: string): string {
-  const normalized = toDocumentPath(rawPath)
+  const normalized = normalizeRawPath(rawPath)
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
