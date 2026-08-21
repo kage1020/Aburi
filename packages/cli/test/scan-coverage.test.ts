@@ -559,22 +559,25 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(text).toContain('    v\\1-b.stub: the segment "v\\1-b.stub" holds a backslash')
   })
 
-  onPosix("yields to a plugin exception, which says the run is broken rather than partial", async () => {
-    // Both on one side. The exception is the reason that says something in the run is broken,
-    // and it is the older of the two claims on this line, so the arm for this one sits behind
-    // it rather than in front.
-    await populate(scratch, ["ok.stub"])
-    const warnings: string[] = []
-    await runDiff({
-      cwd: scratch,
-      refSpec: "main..HEAD",
-      git: gitWith(["ok.stub", "boom.stub", "weird\\name.stub"]),
-      outputDir: resolve(scratch, "out"),
-      warn: (m) => warnings.push(m),
-    })
-    expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
-    expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
-  })
+  onPosix(
+    "yields to a plugin exception, which says the run is broken rather than partial",
+    async () => {
+      // Both on one side. The exception is the reason that says something in the run is broken,
+      // and it is the older of the two claims on this line, so the arm for this one sits behind
+      // it rather than in front.
+      await populate(scratch, ["ok.stub"])
+      const warnings: string[] = []
+      await runDiff({
+        cwd: scratch,
+        refSpec: "main..HEAD",
+        git: gitWith(["ok.stub", "boom.stub", "weird\\name.stub"]),
+        outputDir: resolve(scratch, "out"),
+        warn: (m) => warnings.push(m),
+      })
+      expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
+      expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
+    },
+  )
 
   onPosix("yields to a coverage fault it did not cause", async () => {
     // An unnameable file leaves `totalFiles`, so it cannot push a scan below a floor or leave
