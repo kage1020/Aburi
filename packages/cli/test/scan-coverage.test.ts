@@ -351,6 +351,21 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     )
     expect(lines).toHaveLength(12)
     expect(lines[11]).toBe("    …and 2 more")
+
+    // Exactly the cap is the boundary the tail's guard exists for, and no other fixture in
+    // this suite sits on it: eleven files hides a `>= 0` guard as readily as twelve does.
+    const atCap = linesFrom(
+      reportWith({
+        unrepresentableFiles: Array.from({ length: 10 }, (_, i) => ({
+          path: `src/f${i}\\x.stub`,
+          segment: `f${i}\\x.stub`,
+        })),
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(atCap).toHaveLength(11)
+    expect(atCap.join("\\n")).not.toContain("more")
   })
 
   it("never prints a percentage as being below itself", () => {
@@ -542,6 +557,41 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(text).toContain("2 file(s) were left out of the IR and out of its counts")
     expect(text).toContain('    v\\1-a.stub: the segment "v\\1-a.stub" holds a backslash')
     expect(text).toContain('    v\\1-b.stub: the segment "v\\1-b.stub" holds a backslash')
+  })
+
+  onPosix("yields to a plugin exception, which says the run is broken rather than partial", async () => {
+    // Both on one side. The exception is the reason that says something in the run is broken,
+    // and it is the older of the two claims on this line, so the arm for this one sits behind
+    // it rather than in front.
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["ok.stub", "boom.stub", "weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
+    expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
+  })
+
+  onPosix("yields to a coverage fault it did not cause", async () => {
+    // An unnameable file leaves `totalFiles`, so it cannot push a scan below a floor or leave
+    // files unparsed — leaving the denominator only raises the ratio. Where such a fault holds
+    // it is its own cause, and naming this instead would send the reader to rename a file while
+    // every file that *was* read failed to parse.
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["bad.stub", "weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(warnings.join("\n")).toContain("base: none of the 1 file(s) it found parsed")
+    expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
   })
 
   onPosix("reddens a diff taken over it, in its own words", async () => {
