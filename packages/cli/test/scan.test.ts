@@ -20,8 +20,13 @@ class MemStream extends Writable {
 /**
  * runScan integration tests — use a minimal on-disk workspace so config resolution and
  * plugin loading follow the real code paths. The point is to lock in the ScanReport shape
- * that `run.ts` reads to decide whether to emit stderr warnings; the workspace carries no
- * source files, so the reports come back empty without being degenerate.
+ * that `run.ts` reads to decide whether to emit stderr warnings.
+ *
+ * The workspace holds one source file that parses and declares nothing, so every report here
+ * comes back with zero Symbols while the scan still read the repository. That distinction is
+ * the one the coverage gate rests on: a file that parses cleanly and declares nothing is
+ * counted as parsed, and a workspace where nothing parsed is not a success. The fixture used
+ * to carry no source file at all, which is now the state `scan-coverage.test.ts` covers.
  *
  * The config names a language plugin because a scan without one cannot produce a
  * schema-valid IR — `workspace.languages` is `minItems: 1` — and is refused up front.
@@ -44,13 +49,15 @@ beforeEach(async () => {
     }),
     "utf8",
   )
+  await mkdir(resolve(scratch, "src"), { recursive: true })
+  await writeFile(resolve(scratch, "src/quiet.ts"), "// declares nothing\n", "utf8")
 })
 
 afterEach(async () => {
   await rm(scratch, { recursive: true, force: true })
 })
 
-describe("runScan — happy path with no source files", () => {
+describe("runScan — happy path with nothing declared", () => {
   it("produces an IR and a workspace.md with zero symbols", async () => {
     const report = await runScan({
       cwd: scratch,
@@ -131,6 +138,7 @@ describe("runScan — respects --ignore glob", () => {
   it("accepts CLI ignore globs without crashing (regression: empty ignore array)", async () => {
     await mkdir(resolve(scratch, "vendor"), { recursive: true })
     await writeFile(resolve(scratch, "vendor/x.ts"), "export const x = 1", "utf8")
+    await writeFile(resolve(scratch, "src/kept.ts"), "export const kept = 1", "utf8")
     const report = await runScan({
       cwd: scratch,
       outputDir: resolve(scratch, "out"),
@@ -138,9 +146,10 @@ describe("runScan — respects --ignore glob", () => {
       ignore: ["vendor/**"],
     })
     expect(report.exitCode).toBe(0)
-    // `vendor/x.ts` is excluded before routing, so it contributes no Symbol; what this
-    // asserts is that the ignore glob is accepted and the run still writes an IR.
+    // `vendor/x.ts` is excluded before routing and `src/kept.ts` is not, so the glob is
+    // accepted, applied to the file it names, and the run still writes an IR.
     expect(report.irPath).not.toBeNull()
+    expect(report.keptSymbols).toBe(1)
   })
 })
 

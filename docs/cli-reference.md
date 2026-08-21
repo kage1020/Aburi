@@ -13,7 +13,7 @@ document is the operator-facing reference.
 | `0` | `EXIT.SUCCESS` | Command finished; no `--fail-on` gate triggered. |
 | `1` | `EXIT.RUNTIME` | Unexpected runtime failure (IO, unhandled exception). |
 | `2` | `EXIT.INPUT_ERROR` | Bad argv, missing / malformed input file, unresolvable IR shape, ambiguous `aburi explain` target, `--fail-on` grammar mistake. |
-| `3` | `EXIT.GATE` | `--fail-on` clause triggered, a plugin failed to load, a plugin exception withdrew a file during a scan the command ran, or the answer would not be safe — `aburi explain` when the IR it read names the file the question asked about as one that scan never analysed. This is the code CI pipelines gate on. |
+| `3` | `EXIT.GATE` | `--fail-on` clause triggered, a plugin failed to load, a plugin exception withdrew a file during a scan the command ran, a scan read too little of the workspace to be believed (see below), or the answer would not be safe — `aburi explain` when the IR it read names the file the question asked about as one that scan never analysed. This is the code CI pipelines gate on. |
 
 ## Environment variables
 
@@ -88,9 +88,15 @@ not parse, effect-classify timeouts, discovery-time skips — so a scan that ate
 files never looks green. Files that contributed no Symbols are grouped by why: each reason
 gets a line saying what to do about it (`over-size` points at `maxFileSizeBytes`,
 `parse-timeout` at `parseTimeoutMs` and a re-run, and so on) and then its files with the
-detail the scan recorded, capped at ten per reason. All of those leave the exit code at `0`:
-they describe the source, not the run. The one that does not is a file a plugin **threw** on,
-which moves the code to `3`.
+detail the scan recorded, capped at ten per reason. Losing files leaves the exit code at `0`:
+they describe the source, not the run. Two things move it to `3` — a file a plugin **threw** on,
+and a scan that lost too much of the workspace to be believed:
+
+A scan that parsed **no** file exits `3`, whether it discovered nothing (an `ignore` glob that ate
+the tree, a `components[].roots` that matches nothing, a plugin set that claims no extension here)
+or withdrew everything it found. Whatever `--format` asked for is still written. Losing *some*
+files stays at `0` unless the workspace sets `minParsedFileRatio` in `aburi.json`, which gates
+below a given share of discovered files parsed and counts every skip reason.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.

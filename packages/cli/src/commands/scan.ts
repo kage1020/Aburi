@@ -86,11 +86,42 @@ export interface ScanOptions {
   }
 }
 
+/**
+ * A scan that read too little of the workspace to be worth believing.
+ *
+ * The shape it produces is the dangerous one because it is a *success*: an IR with no Symbols
+ * diffs against another one as `+0 -0 ~0`, so every `--fail-on` gate downstream passes and the
+ * run that lost the workspace is the one that looks healthiest.
+ *
+ * Three kinds because the first move differs. Nothing discovered points at `ignore`, at
+ * `components[].roots`, and at whether a loaded plugin claims anything in this repository —
+ * questions about the config. Nothing parsed points at whatever withdrew the files, which is
+ * why it carries the reason that took the most of them. Below the floor is a policy the
+ * workspace opted into, so it says what it measured and what it was held to.
+ */
+export type CoverageFault =
+  | { kind: "nothing-discovered" }
+  | {
+      kind: "nothing-parsed"
+      totalFiles: number
+      dominant: SkippedFile["reason"]
+      dominantCount: number
+    }
+  | { kind: "below-floor"; parsedFiles: number; totalFiles: number; floor: number }
+
 export interface ScanReport {
   irPath: string | null
   workspaceMdPath: string | null
   componentMdPaths: string[]
   totalFiles: number
+  /**
+   * Files that reached the IR — `totalFiles` less everything on `skipped`.
+   *
+   * Read rather than derived, because it is the counter the Document itself publishes and the
+   * one integrity invariant #21 holds the skip list against. A CLI that recomputed it would be
+   * free to disagree with the artifact it just wrote.
+   */
+  parsedFiles: number
   keptSymbols: number
   droppedSymbols: number
   /**
@@ -162,6 +193,15 @@ export interface ScanReport {
   configSource: string | null
   /** Marker-detected root; the base for Symbol id paths and the config's relative globs. */
   workspaceRoot: string
+  /**
+   * Why this scan's coverage is not worth believing, or `null`.
+   *
+   * Computed once and carried, rather than left for each caller to decide from the counters:
+   * `exitCode` below is derived from this field, `reportScanIncidents` renders it, and
+   * `aburi diff` names it as the cause of its own exit. Three readings of one condition would
+   * be three chances to disagree about whether the run was green.
+   */
+  coverageFault: CoverageFault | null
   exitCode: ExitCode
 }
 
@@ -245,11 +285,19 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     scanResult.skipped.filter((s) => s.reason === "parse-failed").map((s) => s.path),
   )
 
+  const coverageFault = findCoverageFault(
+    scanResult.ir.stats.totalFiles,
+    scanResult.ir.stats.parsedFiles,
+    scanResult.skipped,
+    config.minParsedFileRatio,
+  )
+
   const report: ScanReport = {
     irPath,
     workspaceMdPath,
     componentMdPaths,
     totalFiles: scanResult.ir.stats.totalFiles,
+    parsedFiles: scanResult.ir.stats.parsedFiles,
     keptSymbols: scanResult.ir.stats.keptSymbols,
     droppedSymbols: scanResult.ir.stats.droppedSymbols,
     parseErrorCount: scanResult.parseErrors.filter((p) => !withdrawnByParse.has(p.file)).length,
@@ -269,14 +317,21 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unresolvedCalls: scanResult.unresolvedCalls,
     configSource: loaded.source,
     workspaceRoot,
-    // A file lost to a plugin exception is the one incident that says the run is broken
-    // rather than merely partial, so it is the one that gates. `cli-spec.md` §5.4 assigns 3
-    // to a plugin error for `scan`, and the IR is still written — a reviewer gets both the
-    // partial output and a non-zero code, where before the guard fired they got neither.
+    coverageFault,
+    // Two gates (`cli-spec.md` §5.4, §5.7), and neither withholds anything the run would
+    // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
+    // code, where before either guard existed they got the artifact and a green light.
     //
-    // The other skip reasons keep exiting 0. Whether an over-size or timed-out file should
-    // gate, and behind what threshold, is a separate open decision.
-    exitCode: scanResult.extractionFailures.length > 0 ? EXIT.GATE : EXIT.SUCCESS,
+    // A file lost to a plugin exception says the run is broken rather than merely partial.
+    // A scan that parsed nothing says the run described nothing, which is worse in the one
+    // way that matters downstream: it is a *success* today, and an IR with no Symbols passes
+    // every `--fail-on` gate it is later compared through.
+    //
+    // Losing files while still parsing some keeps exiting 0 unless the workspace set
+    // `minParsedFileRatio`, which reaches this line as a `coverageFault` like the other two
+    // rather than as a condition of its own.
+    exitCode:
+      scanResult.extractionFailures.length > 0 || coverageFault !== null ? EXIT.GATE : EXIT.SUCCESS,
   }
   const incidents = options.incidents
   if (incidents !== undefined) {
@@ -393,6 +448,7 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   const say = (line: string): void => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
+  reportCoverageFault(report.coverageFault, say)
   reportConfigOutsideWorkspaceRoot(report, say)
   if (report.parseErrorCount > 0) {
     say(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
@@ -427,6 +483,47 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
       )
     }
   }
+}
+
+/**
+ * The line that accounts for this run's exit code when coverage is what earned it.
+ *
+ * First, above the census that explains it: it is the finding, and the counts below it are the
+ * evidence. A reader who stops after one line has the one that changes what they do.
+ *
+ * Each kind says where to look. Discovery found nothing → the config decided that, and the
+ * three things in it that can. Nothing parsed → whatever withdrew the files, named. Below the
+ * floor → what was measured against what the workspace asked for.
+ */
+function reportCoverageFault(fault: CoverageFault | null, say: (line: string) => void): void {
+  if (fault === null) return
+  const consequence = "The IR is empty and will diff clean against any other empty IR."
+  if (fault.kind === "nothing-discovered") {
+    say(
+      `No file was discovered to scan. ${consequence} Check ignore and .gitignore, ` +
+        "components[].roots, and whether a loaded language plugin claims any extension in this workspace.",
+    )
+    return
+  }
+  if (fault.kind === "nothing-parsed") {
+    say(
+      `${fault.totalFiles} file(s) discovered, 0 parsed — ${fault.dominantCount} as ` +
+        `${fault.dominant}. ${consequence}`,
+    )
+    return
+  }
+  // Down for what was achieved and up for the floor, so the two never meet on one integer.
+  // Rounding both to nearest prints `899 of 1000 file(s) parsed (90%), below the floor of 90%`,
+  // which reads as a bug in the tool. Away from each other the sentence is true for every pair
+  // that reaches this line: the reading is strictly below the floor, so its floored percentage
+  // is strictly below the floor's ceilinged one. The cost is a digit of precision, on a line
+  // that already carries both exact counts.
+  const percent = Math.floor((fault.parsedFiles / fault.totalFiles) * 100)
+  say(
+    `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed (${percent}%), below the ` +
+      `minParsedFileRatio floor of ${Math.ceil(fault.floor * 100)}%. ` +
+      "Raise the coverage, or lower the floor if this is what the workspace looks like now.",
+  )
 }
 
 /**
@@ -493,6 +590,78 @@ function reportSkipped(
     const hidden = files.length - MAX_LISTED_PER_REASON
     if (hidden > 0) warn(`    …and ${hidden} more`)
   }
+}
+
+/**
+ * Whether this scan read enough of the workspace for its answer to mean anything.
+ *
+ * Two gates. `parsedFiles === 0` is unconditional: a Document with no Symbols is not a
+ * description of a codebase, and the failure it produces downstream is silent — two of them
+ * diff as `+0 -0 ~0`. Anything above zero is the workspace's own call, because where the line
+ * sits between "lost some files" and "lost the workspace" depends on the repository, and a
+ * default guess would red a build for a judgement nobody made.
+ *
+ * `keptSymbols` is deliberately not consulted. A file that parses cleanly and declares nothing
+ * is counted as parsed, which is correct — a repository of configuration and tests is not a
+ * failed scan — so a Symbol count says something about the code, and `parsedFiles` says what
+ * this function is asked about.
+ */
+function findCoverageFault(
+  totalFiles: number,
+  parsedFiles: number,
+  skipped: readonly { reason: SkippedFile["reason"] }[],
+  floor: number | undefined,
+): CoverageFault | null {
+  if (parsedFiles === 0) {
+    // No dominant reason means nothing was skipped, which together with nothing parsed means
+    // nothing was found. `totalFiles === 0` is that same state said a third way, so it is not
+    // checked separately — a second branch for it would be unreachable through one of them.
+    const dominant = dominantReason(skipped)
+    return dominant === null
+      ? { kind: "nothing-discovered" }
+      : {
+          kind: "nothing-parsed",
+          totalFiles,
+          dominant: dominant.reason,
+          dominantCount: dominant.count,
+        }
+  }
+  if (floor === undefined) return null
+  // `<`, not `<=`: a floor is a statement about what is unacceptable, and exactly the floor is
+  // not below it. The same reading `--fail-on`'s thresholds already use.
+  if (parsedFiles / totalFiles < floor) {
+    return { kind: "below-floor", parsedFiles, totalFiles, floor }
+  }
+  return null
+}
+
+/**
+ * The reason that took the most files, so a run that lost everything says what to look at.
+ *
+ * Ties go to the earlier reason in `REASON_REPORT`'s order, which makes the line a function of
+ * the losses rather than of the order the walk happened to reach them in — the same reason
+ * `reportSkipped` orders its groups at all.
+ *
+ * Returns `null` for an empty list, which under `parsedFiles === 0` means nothing was found —
+ * every file found and not parsed is on this list, so an empty one and a zero parse count
+ * cannot both hold while anything was discovered.
+ */
+function dominantReason(
+  skipped: readonly { reason: SkippedFile["reason"] }[],
+): { reason: SkippedFile["reason"]; count: number } | null {
+  const counts = new Map<SkippedFile["reason"], number>()
+  for (const file of skipped) counts.set(file.reason, (counts.get(file.reason) ?? 0) + 1)
+  let best: { reason: SkippedFile["reason"]; count: number } | null = null
+  for (const [reason, count] of counts) {
+    if (best === null || count > best.count) {
+      best = { reason, count }
+      continue
+    }
+    if (count === best.count && REASON_REPORT[reason].rank < REASON_REPORT[best.reason].rank) {
+      best = { reason, count }
+    }
+  }
+  return best
 }
 
 /**

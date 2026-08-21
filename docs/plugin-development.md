@@ -128,7 +128,10 @@ Contracts to know:
   a line in the CLI's `parseFailureCount`. Returning `tree: null` withdraws the
   file on the same terms; set both when you have no tree, and only the flag when
   you have one but refuse it (a wrong-dialect source, a generated blob). The
-  exit code stays `0` either way — an unparseable file describes the source.
+  exit code stays `0` either way — an unparseable file describes the source. It
+  stops being `0` when the refusals take the whole workspace: a scan that parsed
+  no file at all exits `3`, so a dialect check that got its comparison backwards
+  is caught rather than shipped as an empty IR.
 - **Throwing** is a different thing again: the core withdraws the file under
   `reason: "extraction-failed"`, records what you threw, and `aburi scan` exits
   `3`. Throw when your plugin hit a bug, not when the source is unusable. The

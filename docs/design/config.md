@@ -76,7 +76,10 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
 
   // Resource limits for parsing/extraction
   "maxFileSizeBytes": 2097152,        // 2 MB (default); files exceeding this are skipped
-  "parseTimeoutMs": 5000              // per-file parse+extract+walk budget (default 5s); an over-budget file is skipped whole — lang-plugin.md §7.1.2
+  "parseTimeoutMs": 5000,             // per-file parse+extract+walk budget (default 5s); an over-budget file is skipped whole — lang-plugin.md §7.1.2
+
+  // Coverage floor — absent by default
+  "minParsedFileRatio": 0.9           // exit 3 when fewer than 90% of discovered files were parsed — cli-spec.md §5.7
 }
 ```
 
@@ -327,6 +330,27 @@ The CI default is `true`; use `false` or the CLI's `--discover` when you want di
 
 When both are specified, the CLI flag overrides the config.
 
+## 10.1 `minParsedFileRatio`
+
+```jsonc
+{ "minParsedFileRatio": 0.9 }
+```
+
+- Absent by default, and absent means no floor rather than a floor of zero
+- Range `0 < r <= 1`; a floor of `0` is refused because nothing can fall below it, and a config
+  key that cannot change an outcome is a policy that lies
+- `aburi scan` exits `3` when `parsedFiles / totalFiles` is **below** it — `<`, not `<=`, so
+  exactly the floor passes
+- Counts every skip reason, not `parse-timeout` alone: which reason produced the loss decides the
+  fix, not whether coverage collapsed
+
+Independent of this key, a scan that discovered nothing, or parsed nothing of what it discovered,
+exits `3` — see [`cli-spec.md`](./cli-spec.md) §5.7. The floor is only about the ground between
+that and a clean run, which is where the answer depends on the repository.
+
+No CLI flag mirrors it. A coverage floor is a property of the workspace rather than of one
+invocation, and a flag would need the key in the config anyway for the CI run to be reproducible.
+
 ## 11. Overrides from the CLI
 
 Config values can be overridden by CLI flags:
@@ -396,6 +420,10 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C8 | Extracting undeclared vocab with `strict: false` | Warning only; recorded in `out/aburi-vocab-discovered.json` |
 | C9 | Passing CLI `--strict` | Overrides config `strict: false` |
 | C10 | Specifying an unregistered plugin in `pluginOptions` | Warning (ignored because the plugin is disabled) |
+| C11 | `minParsedFileRatio` omitted, and a scan that parsed some files and lost others | Exit 0 |
+| C12 | `minParsedFileRatio: 0.9`, and a scan that parsed half the files it found | Exit 3, naming both counts and the floor |
+| C13 | `minParsedFileRatio` equal to the ratio the scan achieved | Exit 0 |
+| C14 | `minParsedFileRatio: 0` | Config validation error |
 
 ## 14.1 Config Schema Compatibility Policy
 
