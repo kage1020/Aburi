@@ -276,18 +276,41 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     )
   })
 
-  it("keeps the two apart at the top of the range too", () => {
-    // 199/200 against a floor of 1. Rounding to nearest prints `(100%), below … 100%`.
-    const lines = linesFrom(
-      reportWith({
-        totalFiles: 200,
+  it("keeps the two apart wherever the pair sits", () => {
+    // Each row collapses under a different rounding mistake. 199/200 against a floor of 1 is
+    // the top of the range, where rounding the *share* to nearest prints `(100%), below … 100%`.
+    // 902/1000 against 0.904 is where rounding the *floor* to nearest does the same — which
+    // neither that row nor the one above can show, since 0.9 and 1 land on the same integer
+    // whichever way they are rounded.
+    const cases = [
+      {
         parsedFiles: 199,
-        coverageFault: { kind: "below-floor", parsedFiles: 199, totalFiles: 200, floor: 1 },
-        exitCode: EXIT.GATE,
-      }),
-      null,
-    )
-    expect(lines[0]).toContain("parsed (99%), below the minParsedFileRatio floor of 100%")
+        totalFiles: 200,
+        floor: 1,
+        expected: "parsed (99%), below the",
+        printed: "floor of 100%",
+      },
+      {
+        parsedFiles: 902,
+        totalFiles: 1000,
+        floor: 0.904,
+        expected: "parsed (90%), below the",
+        printed: "floor of 91%",
+      },
+    ] as const
+    for (const { expected, printed, ...fault } of cases) {
+      const lines = linesFrom(
+        reportWith({
+          totalFiles: fault.totalFiles,
+          parsedFiles: fault.parsedFiles,
+          coverageFault: { kind: "below-floor", ...fault },
+          exitCode: EXIT.GATE,
+        }),
+        null,
+      )
+      expect(lines[0]).toContain(expected)
+      expect(lines[0]).toContain(printed)
+    }
   })
 
   it("labels it like every other line it owns", () => {
