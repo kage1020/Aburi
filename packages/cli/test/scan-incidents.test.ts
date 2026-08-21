@@ -384,7 +384,11 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     // the time, and there is nothing in the entry that says which happened.
     expect(advice("unreadable")).toContain("permission")
     expect(advice("unreadable")).toContain("re-run")
+    // Two producers, like `unreadable`: the router refusing an extension, and a path segment
+    // holding a Symbol id separator. Advice true for one only would be false half the time, and
+    // nothing in the entry says which happened.
     expect(advice("unroutable")).toContain("plugin set")
+    expect(advice("unroutable")).toContain("renaming that segment")
     expect(advice("parse-failed")).toContain("refused")
     expect(advice("extraction-failed")).toContain("threw")
     // The split the reason's own schema docstring draws: machine-dependent says re-run,

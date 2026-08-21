@@ -162,6 +162,10 @@ describe("discoverFiles", () => {
  * would pass on Linux and macOS and silently be a different file on Windows. The grammar-level
  * case covers `:` without touching a filesystem.
  */
+const DETAIL_PREFIX = "its path segment "
+const DETAIL_SUFFIX =
+  ' contains "#", which a Symbol id is split on, so nothing declared in this file could be given an id'
+
 describe("discoverFiles — a name no Symbol id can hold", () => {
   it("records it and keeps walking", async () => {
     await writeFileAt("src/a.ts", "1")
@@ -179,10 +183,42 @@ describe("discoverFiles — a name no Symbol id can hold", () => {
       {
         path: "src/od#d.ts",
         reason: "unroutable",
-        detail:
-          'its name contains "#", which a Symbol id is split on, so nothing declared in it could be given an id',
+        detail: `${DETAIL_PREFIX}"od#d.ts"${DETAIL_SUFFIX}`,
       },
     ])
+  })
+
+  it("blames the segment that holds it, not every filename underneath", async () => {
+    // A separator in a directory name disqualifies every file beneath it, and none of those
+    // filenames is at fault. Reported as "its name contains", `src/v#1/util.ts` sends the reader
+    // to rename `util.ts`, which fixes nothing and loses the one name that would.
+    await writeFileAt("src/v#1/util.ts", "1")
+    await writeFileAt("src/v#1/other.ts", "1")
+    await writeFileAt("src/ok.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/ok.ts"])
+    expect(result.skipped.map((s) => s.path)).toEqual(["src/v#1/other.ts", "src/v#1/util.ts"])
+    for (const entry of result.skipped) {
+      expect(entry.detail).toBe(`${DETAIL_PREFIX}"v#1"${DETAIL_SUFFIX}`)
+    }
+  })
+
+  it("names the first offending segment when more than one holds a separator", async () => {
+    await writeFileAt("a#1/b#2/c.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.skipped[0]?.detail).toBe(`${DETAIL_PREFIX}"a#1"${DETAIL_SUFFIX}`)
   })
 
   it("leaves it out of the skip list when no plugin claims its extension anyway", async () => {

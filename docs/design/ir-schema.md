@@ -86,7 +86,7 @@ Normalization therefore happens **where a string enters the process**, not where
 | Entry point | What it normalizes |
 |---|---|
 | `makeSymbolId` / `trySymbolId` | the three id parts, before validating them, so the ids the guard accepts are the ids the constructors can mint |
-| `toPosixRelative` | every path the file walk produces — `symbols[].source.file` and the file segment of the id built beside it |
+| `toDocumentPath` | every path the file walk produces — `symbols[].source.file`, and `stats.skippedFiles[].path` for one the walk gave up on |
 | `toRelativePosix` (workspace detection) | `components[].roots` and `workspace.managers[].roots` |
 | `resolveComponents` (CLI config load) | those same fields when they come from `aburi.json` rather than from detection |
 | `normalizePackagePath` (component detection) | `components[].publicApi` |

@@ -377,7 +377,7 @@ async function readJson(path: string): Promise<unknown> {
 
 /**
  * Express `target` as a workspace-relative POSIX path, in the same spelling
- * `toPosixRelative` gives the file paths that sit beside it in the IR.
+ * `toDocumentPath` gives the file paths that sit beside it in the IR.
  *
  * The NFC step is the §1.2 entry point for roots (ir-schema.md): a root left in whatever
  * spelling the filesystem returned would disagree with a `symbols[].source.file` naming

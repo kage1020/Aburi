@@ -181,7 +181,7 @@ describe("detectManagers", () => {
   })
 
   it("spells a workspace root in Unicode NFC, as the paths beside it are spelled", async () => {
-    // `symbols[].source.file` is normalized at its source (`toPosixRelative`). A root left
+    // `symbols[].source.file` is normalized at its source (`toDocumentPath`). A root left
     // in the spelling the filesystem handed back would disagree with it for the same
     // directory, which is the divergence canonical serialization exists to prevent.
     // Written decomposed on purpose: `e` + U+0301, the spelling an archive, an HFS+

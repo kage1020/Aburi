@@ -14,7 +14,7 @@ import {
   makeTopLevelQname,
   RESERVED_LANGUAGE_IDS,
   symbolIdFile,
-  symbolIdSeparatorsIn,
+  symbolIdSeparatorSite,
   toDocumentPath,
   toPosixRelative,
   trySymbolId,
@@ -247,7 +247,7 @@ describe("toPosixRelative", () => {
 
 describe("toDocumentPath and symbolIdSeparatorsIn", () => {
   it("admits the two characters the id rule refuses", () => {
-    // The Document records paths the id grammar would not accept \u2014 `stats.skippedFiles[].path`
+    // The Document records paths the id grammar would not accept — `stats.skippedFiles[].path`
     // is one, and it is how a file no Symbol can name is still named. Integrity #10 holds it to
     // this rule, so what this returns is what that check will accept.
     for (const raw of ["src/a:b.ts", "src/a#b.ts", "."]) {
@@ -282,20 +282,32 @@ describe("toDocumentPath and symbolIdSeparatorsIn", () => {
     expect(toDocumentPath("src/cafe\u0301.ts")).toBe("src/caf\u00e9.ts")
   })
 
-  it("names which separators a path holds, in id order", () => {
-    expect(symbolIdSeparatorsIn("src/a.ts")).toEqual([])
-    expect(symbolIdSeparatorsIn("src/a#b.ts")).toEqual(["#"])
-    expect(symbolIdSeparatorsIn("src/a:b.ts")).toEqual([":"])
-    // Both, and `:` first however they sit in the path \u2014 the order is the id's, so the sentence
-    // a skip detail builds from it does not depend on where in the name they happen to be.
-    expect(symbolIdSeparatorsIn("src/a#b:c.ts")).toEqual([":", "#"])
+  it("names the segment that holds them, and which, in id order", () => {
+    expect(symbolIdSeparatorSite("src/a.ts")).toBeNull()
+    expect(symbolIdSeparatorSite("src/a#b.ts")).toEqual({ segment: "a#b.ts", separators: ["#"] })
+    expect(symbolIdSeparatorSite("src/a:b.ts")).toEqual({ segment: "a:b.ts", separators: [":"] })
+    // The directory, not the file under it: `util.ts` is innocent and renaming it fixes nothing.
+    expect(symbolIdSeparatorSite("src/v#1/util.ts")).toEqual({
+      segment: "v#1",
+      separators: ["#"],
+    })
+    // Both, and `:` first however they sit in the segment — the order is the id's, so the
+    // sentence a skip detail builds from it does not depend on where in the name they are.
+    expect(symbolIdSeparatorSite("src/a#b:c.ts")?.separators).toEqual([":", "#"])
+  })
+
+  it("answers null for a path that holds none but still cannot host an id", () => {
+    // Scoped to separators, and nothing more: `"."` holds neither and `symbolIdPathViolation`
+    // refuses it all the same, because a directory declares no Symbol.
+    expect(symbolIdSeparatorSite(".")).toBeNull()
+    expect(() => toPosixRelative(".")).toThrowError()
   })
 
   it("is the same rule the id grammar enforces", () => {
     // One source. A check that drifted from the reporter would let discovery pass a file on
     // that `makeSymbolId` then refuses, which is the throw this whole split exists to remove.
-    for (const raw of ["src/a:b.ts", "src/a#b.ts", "src/a#b:c.ts"]) {
-      expect(symbolIdSeparatorsIn(raw).length, raw).toBeGreaterThan(0)
+    for (const raw of ["src/a:b.ts", "src/a#b.ts", "src/a#b:c.ts", "src/v#1/util.ts"]) {
+      expect(symbolIdSeparatorSite(raw), raw).not.toBeNull()
       expect(() => toPosixRelative(raw), raw).toThrowError()
     }
   })

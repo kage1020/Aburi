@@ -411,7 +411,7 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   unroutable: {
     rank: 3,
     advice:
-      "no route into the IR exists for them, decided before either was read. Discovery accepted an extension no plugin claims \u2014 a bug in the plugin set \u2014 or the name holds a Symbol id separator, and renaming the file is the fix. Each detail says which.",
+      "no route into the IR exists for them, decided before any of them was read. Discovery accepted an extension no plugin claims \u2014 a bug in the plugin set \u2014 or a path segment holds a Symbol id separator, and renaming that segment is the fix. Each detail says which.",
   },
   "parse-failed": {
     rank: 4,

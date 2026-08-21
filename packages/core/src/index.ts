@@ -49,7 +49,7 @@ export {
   RESERVED_LANGUAGE_IDS,
   type SymbolIdParts,
   symbolIdFile,
-  symbolIdSeparatorsIn,
+  symbolIdSeparatorSite,
   toDocumentPath,
   toPosixRelative,
   trySymbolId,

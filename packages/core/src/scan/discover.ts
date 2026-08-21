@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
-import { symbolIdSeparatorsIn, toDocumentPath } from "../id"
+import { symbolIdSeparatorSite, toDocumentPath } from "../id"
 
 /**
  * Category A drop patterns from drop-list.md §3.1. Kept here rather than embedded in a
@@ -99,9 +99,10 @@ export interface DiscoveredFile {
  * file that parses cleanly and declares nothing is not one of those: it is absent from the
  * list and counted as parsed, which is correct.
  *
- * `unreadable` is the one reason both sides can raise: discovery hits it when it cannot stat
- * or read a candidate, and the orchestrator hits it when the read it does just before
- * extraction fails.
+ * Two reasons are raised on both sides. `unreadable`: discovery hits it when it cannot stat or
+ * read a candidate, and the orchestrator hits it when the read it does just before extraction
+ * fails. `unroutable`: discovery hits it for a path no Symbol id could name, and the
+ * orchestrator hits it when the router claims no plugin for the extension.
  *
  * The reason union comes from the IR schema rather than being spelled again here, because
  * the two must agree: `stats.skippedFiles[]` is this list projected into the Document, and a
@@ -164,16 +165,22 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     //
     // Recorded rather than thrown on, which is what this used to do from inside the path
     // normalizer. `:` and `#` are legal POSIX filename characters and are refused by the id
-    // grammar alone, so one of them anywhere in the tree ended the whole walk — six lines below,
-    // a file that cannot even be `stat`ed is recorded and the walk continues. The path is
-    // recordable because `stats.skippedFiles[].path` is held to the shared rule, so the Document
-    // names a file no Symbol in it could ever have named.
-    const separators = symbolIdSeparatorsIn(posix)
-    if (separators.length > 0) {
+    // grammar alone, so one of them anywhere in the tree ended the whole walk — while further
+    // down this same loop a file that cannot even be `stat`ed is recorded and the walk
+    // continues. The path is recordable because `stats.skippedFiles[].path` is held to the
+    // shared rule, so the Document names a file no Symbol in it could ever have named.
+    //
+    // The segment is the subject, not the file. A separator in a directory name disqualifies
+    // every file beneath it, and each of those filenames is innocent — `src/v#1/util.ts` is
+    // fixed by renaming `v#1`, and a line blaming `util.ts` sends the reader to rename the
+    // wrong thing. When the basename is the offender the two coincide.
+    const site = symbolIdSeparatorSite(posix)
+    if (site !== null) {
+      const held = site.separators.map((separator) => `"${separator}"`).join(" and ")
       skipped.push({
         path: posix,
         reason: "unroutable",
-        detail: `its name contains ${separators.map((s) => `"${s}"`).join(" and ")}, which a Symbol id is split on, so nothing declared in it could be given an id`,
+        detail: `its path segment "${site.segment}" contains ${held}, which a Symbol id is split on, so nothing declared in this file could be given an id`,
       })
       continue
     }

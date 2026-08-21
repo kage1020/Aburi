@@ -250,17 +250,24 @@ export function isDefaultExportQname(qname: string): boolean {
 }
 
 /**
- * Normalize a filesystem path into the POSIX, workspace-relative form every path the Document
- * holds is in — `components[].roots`, `workspace.managers[].roots`, `stats.skippedFiles[].path`.
+ * Normalize a filesystem path into the POSIX, workspace-relative form the Document holds paths
+ * in. This is the file walk's entry point (ir-schema.md §1.2): what it returns becomes a
+ * `symbols[].source.file`, or a `stats.skippedFiles[].path` for a file the walk gave up on.
  *
  * The shared path rule only. It does **not** answer whether a Symbol from that file could be
  * given an id: `:` and `#` are legal in a POSIX filename and legal in every path the Document
- * records, and are refused by the id grammar alone. `toPosixRelative` is this plus that rule.
+ * records, and are refused by the id grammar alone. Discovery asks that separately, with
+ * `symbolIdSeparatorSite`, and records the answer instead of throwing it; `makeSymbolId` enforces
+ * it again where the id is actually minted.
  *
  * The split exists because the two answers call for different responses. A path that is not
  * workspace-relative at all is a caller handing over something from outside what the Document
  * describes, and there is nothing to record. A path that merely cannot host an id is one file
  * to skip, and the skip entry names it using exactly this rule.
+ *
+ * Roots take a third entry point — `toRelativePosix` in `workspace.ts` — which normalizes the
+ * same way and validates nothing, because a root may legitimately be `.` or ascend out of the
+ * workspace and `mergeManager` is what drops those.
  */
 export function toDocumentPath(rawPath: string): string {
   const normalized = normalizeRawPath(rawPath)
@@ -271,25 +278,49 @@ export function toDocumentPath(rawPath: string): string {
   return normalized
 }
 
-/**
- * The two characters a Symbol id is split on, held by this path, in id order.
- *
- * Non-throwing, and beside the grammar that enforces them so the two cannot drift — the same
- * arrangement `symbolIdFile` has. Discovery needs the answer without an exception: a file whose
- * name cannot host an id is one file to record, not the end of the walk, and the path itself is
- * still recordable because `stats.skippedFiles[].path` is held to the shared rule.
- *
- * Empty when the path can host an id, which is the condition callers branch on.
- */
-export function symbolIdSeparatorsIn(path: string): readonly string[] {
-  return SYMBOL_ID_SEPARATORS.filter((separator) => path.includes(separator))
-}
-
 const SYMBOL_ID_SEPARATORS = [":", "#"] as const
 
+/** Where a path holds an id separator, and which ones. */
+export interface SymbolIdSeparatorSite {
+  /** The `/`-delimited segment that holds them — a directory name as readily as a filename. */
+  segment: string
+  /** The separators that segment holds, in id order. */
+  separators: readonly string[]
+}
+
 /**
- * NFC as well as separator normalization: this is one of the entry points ir-schema.md §1.2
- * names, and the id built from a path is spelled by the same string the Document records it as.
+ * The first segment of this path that holds an id separator, or `null` when none does.
+ *
+ * Per segment rather than per path, because the two answers are read by different callers and
+ * only one of them is a predicate. A reporter that knew only "this path holds a `#`" blames the
+ * file it is describing, and for `src/v#1/util.ts` that is a file whose name is innocent and a
+ * rename that fixes nothing — the offending name is the directory's, and every file under it
+ * carries the same cause.
+ *
+ * A separator can only ever sit inside a segment, `/` being what separates them, so a non-`null`
+ * answer here and "the path holds one" are the same fact. `symbolIdPathViolation` reads it as
+ * the predicate; discovery reads the segment.
+ *
+ * Non-throwing, and beside the grammar that enforces it so the two cannot drift — the same
+ * arrangement `symbolIdFile` has. Discovery needs the answer without an exception: a file whose
+ * path cannot host an id is one file to record, not the end of the walk, and the path itself is
+ * still recordable because `stats.skippedFiles[].path` is held to the shared rule.
+ *
+ * `null` means the path holds no separator. It does not mean the path can host an id — a bare
+ * `"."` holds none and is refused by `symbolIdPathViolation` all the same, because a directory
+ * declares no Symbol.
+ */
+export function symbolIdSeparatorSite(path: string): SymbolIdSeparatorSite | null {
+  for (const segment of path.split("/")) {
+    const separators = SYMBOL_ID_SEPARATORS.filter((separator) => segment.includes(separator))
+    if (separators.length > 0) return { segment, separators }
+  }
+  return null
+}
+
+/**
+ * NFC as well as separator normalization: the two entry points below share it, and the id built
+ * from a path is spelled by the same string the Document records it as.
  *
  * Shared by the two entry points rather than one composed out of the other, so each applies its
  * own rule and reports it with its own subject. Layered, a path that breaks the shared rule
@@ -305,11 +336,16 @@ function normalizeRawPath(rawPath: string): string {
  *
  * The shared path rule plus the id rule, where `toDocumentPath` applies the shared rule alone:
  * what this returns can be the file segment of a Symbol id, where what that returns can only be
- * a path the Document records. Callers that produce `symbols[].source.file` take this one.
+ * a path the Document records.
+ *
+ * Nothing in this workspace calls it. The file walk takes `toDocumentPath` and records what
+ * cannot host an id rather than refusing it, and `makeSymbolId` runs the same rule where the id
+ * is minted — so this is for a caller outside the core that wants the refusal up front, on a
+ * path it is about to build ids from. It is public API, which is why it stays.
  *
  * It runs `symbolIdPathViolation` rather than layering on `toDocumentPath`, so a path that
- * breaks the shared rule is still described as a Symbol id path — which is what the caller was
- * building, and the more useful of the two subjects to be told about.
+ * breaks the shared rule is still described as a Symbol id path — which is what such a caller
+ * was building, and the more useful of the two subjects to be told about.
  */
 export function toPosixRelative(rawPath: string): string {
   const normalized = normalizeRawPath(rawPath)
@@ -508,7 +544,7 @@ function symbolIdPathViolation(path: string): GrammarViolation | null {
       value: path,
     }
   }
-  if (symbolIdSeparatorsIn(path).length > 0) {
+  if (symbolIdSeparatorSite(path) !== null) {
     return {
       code: "non-posix-path",
       message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,

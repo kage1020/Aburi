@@ -159,7 +159,7 @@ describe("aburi scan — a name no Symbol id can hold", () => {
     expect(printed).toContain("1 file(s) contributed no Symbols: unroutable=1")
     expect(printed).toContain("⚠ unroutable (1) — ")
     expect(printed).toContain(
-      '    src/od#d.stub: its name contains "#", which a Symbol id is split on',
+      '    src/od#d.stub: its path segment "od#d.stub" contains "#", which a Symbol id is split on',
     )
 
     const outcome = await runExplain({

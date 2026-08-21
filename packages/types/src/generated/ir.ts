@@ -346,7 +346,7 @@ export interface SkippedFile {
  */
 path: string
 /**
- * Why the scan stopped working on this file. `over-size` and `unroutable` are decided before it was read, `unreadable` by either discovery or the read before extraction, and `parse-failed` / `parse-timeout` / `extraction-failed` during extraction. `unroutable` means no route into the Document exists for the file: either no loaded plugin claims its extension, or its name holds `:` or `#` and so cannot be the file segment of a Symbol id (§3.1) — both decided without reading it, and the scan's own skip detail says which. A reader distinguishes the reasons because they call for different actions: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
+ * Why the scan stopped working on this file. `over-size` and `unroutable` are decided before it was read, `unreadable` by either discovery or the read before extraction, and `parse-failed` / `parse-timeout` / `extraction-failed` during extraction. `unroutable` means no route into the Document exists for the file: either no loaded plugin claims its extension, or a segment of its path holds `:` or `#` and so cannot be part of a Symbol id (§3.1) — both decided without reading it, and the path itself says which, since the second case is visible in it. A reader distinguishes the reasons because they call for different actions: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
  */
 reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
 }
