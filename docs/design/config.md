@@ -358,7 +358,7 @@ Config values can be overridden by CLI flags:
 | CLI flag | Config overridden |
 |---|---|
 | `--ignore <glob>` | Appended to `ignore[]` |
-| `--no-respect-gitignore` | `respectGitignore: false` |
+| `--respect-gitignore` / `--no-respect-gitignore` | `respectGitignore` |
 | `--strict` / `--no-strict` | `strict` |
 | `--discover` | Equivalent to `strict: false` |
 | `--output-dir <path>` | `output.dir` |
