@@ -3,6 +3,7 @@ export { createLspClient, isLspFailure, LSP_TIMEOUT, SHUTDOWN_GRACE_MS } from ".
 export type {
   EnrichmentInput,
   EnrichmentResult,
+  ReadFile,
   ReceiverHint,
   ReceiverHintKey,
   ServerFactory,

@@ -652,15 +652,34 @@ function reportUnrepresentable(
   say: (line: string) => void,
   warn: WarnFn,
 ): void {
-  reportUnspellable(
-    files.filter((file) => file.reason === "unspellable-name"),
-    say,
-    warn,
-  )
-  reportColliding(
-    files.filter((file) => file.reason === "colliding-spelling"),
-    say,
-    warn,
+  const unspellable: UnnameableFile[] = []
+  const colliding: CollidingFile[] = []
+  for (const file of files) {
+    switch (file.reason) {
+      case "unspellable-name":
+        unspellable.push(file)
+        break
+      case "colliding-spelling":
+        colliding.push(file)
+        break
+      default:
+        // A third reason routed to neither section prints nothing while the gate still reads
+        // `unrepresentableFiles.length` — exit 3 over an empty screen, about the one list the
+        // artifact holds no copy of. Two `filter` calls compiled happily in that state; this
+        // does not. `reportSkipped` keeps the same property by looking its reason up in a
+        // table that is total over the union.
+        return assertNeverUnrepresentable(file)
+    }
+  }
+  reportUnspellable(unspellable, say, warn)
+  reportColliding(colliding, say, warn)
+}
+
+/** Compile-time guard: a new `UnrepresentableFile` member is a type error rather than silence. */
+function assertNeverUnrepresentable(file: never): never {
+  throw new CliError(
+    `@aburi/core reported a file the Document cannot name for a reason this CLI has no section for: ${JSON.stringify(file)}`,
+    "runtime-error",
   )
 }
 
@@ -692,9 +711,17 @@ function reportUnspellable(
  * prints the offending line twice identically. This is the section a reader cannot act on
  * without being told which character differs.
  *
- * The advice stops at renaming. `ignore` matches the filesystem's spelling, not the Document's,
- * so the path printed as the group header is the one pattern that will *not* work — and the two
- * that will cannot be typed from what is on screen. A wildcard is what is left.
+ * The `ignore` half is stated per outcome, because the patterns do different things and the
+ * obvious summary of them is false. Measured against discovery's own options:
+ *
+ * - the group header excludes the claimant spelled exactly that way, if one is. The group drops
+ *   to a single claimant, the collision is over, and the remaining file is scanned normally.
+ * - a wildcard over the group excludes all of them, and the IR describes none.
+ * - where no claimant is spelled as the header — two decomposed spellings of one composed path —
+ *   the header matches nothing and the group is untouched.
+ *
+ * So the header is not a pattern that cannot work; it is the one that keeps a file. Which of
+ * the two a reader wants is theirs to decide, and neither is the fix, which is a rename.
  */
 function reportColliding(
   files: readonly CollidingFile[],
@@ -704,7 +731,7 @@ function reportColliding(
   if (files.length === 0) return
   const byPath = groupBy(files, (file) => file.documentPath)
   say(
-    `${files.length} file(s) were left out of the IR and out of its counts, on ${byPath.size} path(s) that two names claim at once: the Document holds every string in Unicode NFC, and these names differ only in how they are composed, so normalizing them gives one path for more than one file. Rename one of each group. ignore matches the spelling on disk rather than the one below, so the pattern that works there is a wildcard.`,
+    `${files.length} file(s) were left out of the IR and out of its counts, on ${byPath.size} path(s) more than one name claims: the Document holds every string in Unicode NFC, and these names differ only in how they are composed, so normalizing them gives one path for several files. Rename all but one of each group. ignore matches the spelling on disk, so the path below excludes whichever claimant is spelled that way and leaves the rest of the group scannable, while a wildcard over it excludes them all.`,
   )
   for (const [documentPath, group] of byPath) {
     warn(`    ${documentPath} — claimed by ${group.length} file(s) on disk:`)

@@ -26,7 +26,7 @@ import { serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
-import { enrichWithLsp, type ServerFactory } from "../lsp"
+import { enrichWithLsp, type ReadFile, type ServerFactory } from "../lsp"
 import { type PropagationStats, propagateEffects } from "../propagate"
 import {
   type DiscoveredFile,
@@ -206,7 +206,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const parseTimeouts: ParseTimeoutEvent[] = []
   const extractionFailures: ExtractionFailure[] = []
   const importsByFile = new Map<string, readonly ImportEdge[]>()
-  const fileContents = new Map<string, string>()
+  const fileContents = new Map<string, ReadFile>()
   const dynamicCallSites = new Set<string>()
   for (const discoveredFile of discovered.files) {
     // Discovery's `languageExtensions` filter already narrowed the file list to extensions
@@ -338,7 +338,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
     // Held for LSP enrichment, and only for files that reached the IR: the pass builds one
     // document per file it has Symbols for, so a withdrawn file's text would never be read.
-    fileContents.set(sourceFile.path, sourceFile.content)
+    fileContents.set(sourceFile.path, {
+      content: sourceFile.content,
+      fsPath: discoveredFile.fsPath,
+    })
 
     timeoutEvents.push(...result.timeoutEvents)
     symbols.push(...result.symbols)
@@ -358,7 +361,6 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols,
     workspaceRoot: input.workspaceRoot,
     fileContents,
-    fsPaths: new Map(discovered.files.map((file) => [file.path, file.fsPath])),
     lspConfig: input.config.lsp,
     logger,
   }

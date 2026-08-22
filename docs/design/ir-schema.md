@@ -97,7 +97,7 @@ Normalization is all these entry points do to a path. None of them converts a na
 
 **A normalized path is not a filename.** What comes out of these entry points addresses the Document, and a filesystem that stores the name it was given — NTFS, ext4 — does not answer to it: a `stat` or a `readFile` under the normalized spelling of a decomposed name misses, and a `file://` URI built from it names nothing. Whatever opens a file keeps the spelling the filesystem handed back, which is why `DiscoveredFile` carries both and only `path` reaches the Document.
 
-Two names that differ only in composition therefore claim one Document path. That is not a spelling to choose between: the scan withdraws every claimant and reports them, because one path naming two files gives one construct two Symbol ids, which invariant #1 refuses.
+Two names that differ only in composition therefore claim one Document path. That is not a spelling to choose between: the scan withdraws every claimant and reports them, because one path naming two files mints the same Symbol id for both, which invariant #1 refuses. (The mirror case — one file reachable under two spellings, and so holding two ids — is the one #10 exists for, and the one #1 by construction cannot see.)
 
 The last row is not a separate rule: normalization has to be **total across a comparison**. A value normalized on one side and left alone on the other turns a match into a miss, and these misses are quiet - a suppressed call reappears in the Document, a resolved edge points at an unrelated Symbol, a call lands in the `no-match` diagnostic bucket instead of `external`.
 

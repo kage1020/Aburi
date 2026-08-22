@@ -394,12 +394,28 @@ The pair is decided over every **candidate**, not over the files that were read:
 in `stats.skippedFiles[]` *and* on `symbols[].source.file` is the contradiction `aburi diff`
 resolves as a deletion, and two skipped claimants break invariant #21 outright.
 
-Renaming is the fix here too, and `ignore` is worse than in the first case: it matches the
-filesystem's spelling, so the path printed above is the one pattern that cannot work, and the two
-that can are not typeable from what is on screen. A wildcard is what is left.
+Renaming all but one of the group is the fix. `ignore` does something different in each
+direction, and the summary "use a wildcard" is false, so the paragraph states both. Measured
+against discovery's own options, on a composed and a decomposed spelling of one path:
 
-`aburi explain` does **not** answer for this one. The first cause is decidable from the argument
-string; a collision is a property of a pair, so nothing in the argument says whether one exists.
+| `ignore` pattern | candidates left |
+|---|---|
+| none | both, withdrawn as a collision |
+| the path printed above | the claimant *not* spelled that way, scanned normally |
+| the other claimant's spelling | the composed one, scanned normally |
+| `src/caf*` | none |
+
+So the printed path is not a pattern that fails: it is the one that resolves the collision and
+keeps a file, by excluding the claimant it names. It matches nothing only in the case two
+paragraphs up — where no claimant is spelled as the normalized path — and that is the case the
+"wildcard" advice is actually for.
+
+`aburi explain` has no dedicated answer for this one, the way it does for a name a path cannot
+spell: that is decidable from the argument string, and a collision is a property of a group, so
+nothing in the argument says whether one exists. On the default path it rescans, so the section
+above is printed and the run exits 3 like any other scan that found one. Under `--ir` or
+`--no-rescan` there is no scan and the document holds no trace of the group, so the lookup
+answers `No matches` at exit 1 — which is the case to know about.
 
 ## 6. `aburi diff`
 

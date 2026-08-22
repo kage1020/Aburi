@@ -90,9 +90,10 @@ export interface DiscoveredFile {
    * The same file as the filesystem spells it, relative to `workspaceRoot`.
    *
    * Not decoration. `path` is normalized on the way into the Document, and a filesystem that
-   * stores the name it was given — NTFS, ext4 — does not answer to the normalized one. Anything
-   * that opens the file has to use this: the read below, and the URI a language server is told
-   * to open. The two differ only for a name that was not already in NFC.
+   * stores the name it was given — NTFS, ext4 — does not answer to the normalized one. Every site
+   * that addresses the file takes this instead: the `stat` below, the `readFile` in the scan
+   * orchestrator, and the `file://` URI the LSP pass tells a language server to open. The two
+   * differ only for a name that was not already in NFC.
    */
   fsPath: string
   /** File size in bytes. */
@@ -128,17 +129,14 @@ export interface SkippedFile extends SkippedFileRecord {
 /**
  * A candidate file the Document has no way to name.
  *
- * Its name holds a backslash, which is legal on a POSIX filesystem and has no spelling in a
- * Document path: `/` is the only separator one has, so any way of writing the name down reads
- * as a directory boundary. That is what separates it from a name holding `:` or `#`, which the
- * id grammar refuses while the shared path rule admits — those files are recorded on `skipped`
- * by path, and this one cannot be.
+ * Two things put a file here, and only what follows is true of both: it cannot be recorded on
+ * `skipped`, because a skip entry is a path plus a reason and the path is what is missing or
+ * ambiguous; and it cannot be counted without being recorded, because integrity #21 pins
+ * `stats.skippedFiles`'s length to `totalFiles - parsedFiles`.
  *
- * It cannot be counted without being recorded either: integrity #21 pins
- * `stats.skippedFiles`'s length to `totalFiles - parsedFiles`. So it leaves `totalFiles`
- * entirely, the way a file no plugin claims does, and is carried here instead — where the CLI
- * reports it and gates the exit code on it, so the file is lost from the Document without being
- * lost from the run.
+ * So it leaves `totalFiles` entirely, the way a file no plugin claims does, and is carried here
+ * instead — where the CLI reports it and gates the exit code on it, so the file is lost from the
+ * Document without being lost from the run. Each arm says what it is and what fixes it.
  */
 export type UnrepresentableFile = UnnameableFile | CollidingFile
 
@@ -152,7 +150,15 @@ interface UnrepresentableBase {
   fsPath: string
 }
 
-/** A file whose name holds a character no Document path can spell. */
+/**
+ * A file whose name holds a character no Document path can spell.
+ *
+ * A backslash is legal on a POSIX filesystem and has no spelling in a Document path: `/` is the
+ * only separator one has, so any way of writing the name down reads as a directory boundary.
+ * That is what separates it from a name holding `:` or `#`, which the id grammar refuses while
+ * the shared path rule admits — those files are recorded on `skipped` by path, and this one
+ * cannot be.
+ */
 export interface UnnameableFile extends UnrepresentableBase {
   reason: "unspellable-name"
   /**
@@ -173,8 +179,11 @@ export interface UnnameableFile extends UnrepresentableBase {
  *
  * Every claimant is withdrawn rather than one being kept. A rule granting the path to the
  * NFC-spelled claimant is partial — two different decomposed spellings can normalize to one
- * composed path with no NFC claimant among them — and it is the pair that is at fault, the same
- * reading a backslash in a directory name gets.
+ * composed path with no NFC claimant among them — and it is the group that is at fault rather
+ * than any member of it, the same reading a backslash in a directory name gets.
+ *
+ * A group is two or more: three spellings of one name is an ordinary case for a script that
+ * emitted the same filename through different normalizers, and nothing here caps it at two.
  */
 export interface CollidingFile extends UnrepresentableBase {
   reason: "colliding-spelling"
@@ -266,6 +275,20 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
 
     const posix = toDocumentPath(rawPath)
 
+    // Every candidate that got a Document path, recorded the instant it has one and before any
+    // arm can end the iteration. More than one filesystem spelling under a key is a collision,
+    // and it has to be decided over every list a candidate can land in: a path on
+    // `stats.skippedFiles[]` *and* on `symbols[].source.file` is the contradiction `buildDiff`
+    // resolves as a deletion, and two on the skip list break invariant #21 outright.
+    //
+    // Above `symbolIdSeparatorSite` for that reason, not merely for tidiness. That check reads
+    // `posix` alone, so two spellings of one name always get the same verdict from it — both
+    // would be pushed under the identical path with the pair never recorded, which is the #21
+    // breach in the paragraph above rather than something this map prevents.
+    const claimantsByPath = claimants.get(posix)
+    if (claimantsByPath === undefined) claimants.set(posix, [rawPath])
+    else claimantsByPath.push(rawPath)
+
     // After the extension filter, so a file no plugin claims is filtered on that alone. A
     // `notes:1.txt` in a TypeScript workspace was never a candidate, and recording it would be
     // an incident about a file the scan was never going to read.
@@ -291,15 +314,6 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       })
       continue
     }
-
-    // Every candidate that got a Document path, whether it ends up read or skipped. Two
-    // filesystem spellings under one key is a collision, and it has to be decided over both
-    // lists: one path landing in `stats.skippedFiles[]` *and* on `symbols[].source.file` is
-    // the contradiction `buildDiff` resolves as a deletion, and two skipped ones break
-    // invariant #21 outright.
-    const claimantsByPath = claimants.get(posix)
-    if (claimantsByPath === undefined) claimants.set(posix, [rawPath])
-    else claimantsByPath.push(rawPath)
 
     // `rawPath`, not `posix`. The normalization belongs to the Document, and a filesystem that
     // stores the name it was given does not answer to it — the miss reads as `ENOENT`, and the
@@ -334,10 +348,10 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
 /**
  * Take every candidate whose Document path another candidate also claims out of both lists.
  *
- * Left in, the pair is not a degraded result but a broken run: two `DiscoveredFile`s with one
- * path make the pipeline extract one file's content twice and mint the same Symbol id twice,
- * which invariant #1 refuses — ending the scan on a message about ids that names neither
- * filename. Two skipped ones break #21's "no path appears twice" the same way.
+ * Left in, the group is not a degraded result but a broken run: two `DiscoveredFile`s with one
+ * path make the pipeline read two different files — each by its own `fsPath` — and mint one
+ * Symbol id for both, which invariant #1 refuses, ending the scan on a message about ids that
+ * names neither filename. Two on the skip list break #21's "no path appears twice" the same way.
  *
  * They leave `totalFiles` with the rest of `unrepresentableFiles`, for the reason that list
  * exists: the Document cannot name them, so it cannot count them either without the census

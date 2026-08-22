@@ -499,4 +499,81 @@ describe("discoverFiles — a name the filesystem and the Document spell differe
       expect(result.unrepresentableFiles).toHaveLength(2)
     },
   )
+
+  onCollidingFs(
+    "withdraws a pair whose Document path an earlier arm would have skipped",
+    async () => {
+      // `symbolIdSeparatorSite` reads the Document path alone, so both spellings get the identical
+      // verdict from it: recorded before the claim map existed at that point, they went onto
+      // `skipped` under one path twice, and invariant #21 ended the scan on
+      // "names ... more than once". The claim is therefore taken the instant a candidate has a
+      // Document path, ahead of every arm that can end the iteration.
+      await writeFileAt("src/v#1/caf\u0065\u0301.ts", "1")
+      await writeFileAt("src/v#1/caf\u00e9.ts", "22")
+
+      const result = await discoverFiles({
+        workspaceRoot: workRoot,
+        languageExtensions: [".ts"],
+        respectGitignore: false,
+      })
+
+      expect(result.skipped).toEqual([])
+      expect(result.files).toEqual([])
+      expect(result.unrepresentableFiles).toEqual([
+        {
+          fsPath: "src/v#1/caf\u0065\u0301.ts",
+          reason: "colliding-spelling",
+          documentPath: "src/v#1/caf\u00e9.ts",
+        },
+        {
+          fsPath: "src/v#1/caf\u00e9.ts",
+          reason: "colliding-spelling",
+          documentPath: "src/v#1/caf\u00e9.ts",
+        },
+      ])
+    },
+  )
+
+  onCollidingFs("holds a group of three, since nothing about the rule caps it at two", async () => {
+    // Three spellings of one name is what a script emitting through different normalizers
+    // produces. The rule is "more than one claimant", and the report says so.
+    await writeFileAt("src/b\u1ec7.ts", "1")
+    await writeFileAt("src/b\u0065\u0323\u0302.ts", "22")
+    await writeFileAt("src/b\u1eb9\u0302.ts", "333")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.unrepresentableFiles).toHaveLength(3)
+    for (const entry of result.unrepresentableFiles) {
+      expect(entry.reason === "colliding-spelling" && entry.documentPath).toBe("src/b\u1ec7.ts")
+    }
+  })
+
+  onCollidingFs("leaves no Document path claimed twice, whichever arm produced it", async () => {
+    // The property the design rests on, asserted as one rather than as a list of the arms that
+    // could break it: every arm above the claim map is one this would catch without anyone
+    // having to think of it again.
+    await writeFileAt("src/caf\u0065\u0301.ts", "1")
+    await writeFileAt("src/caf\u00e9.ts", "22")
+    await writeFileAt("src/v#1/na\u0065\u0301.ts", "1")
+    await writeFileAt("src/v#1/na\u00e9.ts", "22")
+    await writeFileAt("src/big\u0065\u0301.ts", "1234567")
+    await writeFileAt("src/big\u00e9.ts", "1")
+    await writeFileAt("src/ok.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+      maxFileSizeBytes: 4,
+    })
+
+    const named = [...result.files, ...result.skipped].map((entry) => entry.path)
+    expect(new Set(named).size).toBe(named.length)
+    expect(named).toEqual(["src/ok.ts"])
+  })
 })

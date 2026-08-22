@@ -35,22 +35,31 @@ import { requestDocumentSymbols, requestHover } from "./requests"
 import { createStatsBuilder, finalizeStats, type LspStatsBuilder } from "./stats"
 import { type SpawnedServer, spawnStdioServer } from "./transport"
 
+/** A file the caller read: what was in it, and the name it was read under. */
+export interface ReadFile {
+  content: string
+  /** Relative to `workspaceRoot`, as the filesystem spells it — not as the Document does. */
+  fsPath: string
+}
+
 export interface EnrichmentInput {
   symbols: readonly IRSymbol[]
   workspaceRoot: string
-  fileContents: ReadonlyMap<string, string>
   /**
-   * Document path to the spelling the filesystem stores the file under, for the files the scan
-   * read. They differ only for a name that was not already in NFC.
+   * The files the caller read, keyed by Document path.
    *
-   * A `file://` URI is a filesystem address, so it takes the second. `didOpen` pushes the
-   * content, but a server is free to read the file itself — tsserver walks the project — and one
-   * told about a URI nothing resolves to answers about a document it invented, or not at all.
+   * Both halves of each entry are needed and they are one entry rather than two maps, because
+   * every file that has content also has a spelling on disk and the two cannot go out of step
+   * — a second map keyed the same way is an agreement nothing enforces, and a missing key
+   * there would be an invariant violation dressed as a fallback.
    *
-   * A path absent from this map is one the caller did not read; `fileUriFor` falls back to the
-   * Document spelling, which is the same string for every path that is already NFC.
+   * `content` is what `didOpen` pushes. `fsPath` is the spelling the filesystem stores the file
+   * under, which is what the `file://` URI is built from: a URI is a filesystem address, and a
+   * server is free to read the project itself — tsserver does — so one told about a URI nothing
+   * resolves to answers about a document it invented rather than about the file. The two differ
+   * only for a name that was not already in NFC.
    */
-  fsPaths: ReadonlyMap<string, string>
+  fileContents: ReadonlyMap<string, ReadFile>
   lspConfig: Config["lsp"] | undefined
   logger?: Logger
   /**
@@ -183,7 +192,6 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       symbols: langSymbols,
       workingById,
       fileContents: input.fileContents,
-      fsPaths: input.fsPaths,
       workspaceRoot: input.workspaceRoot,
       stats,
       fallback,
@@ -210,8 +218,7 @@ interface ProcessLanguageInput {
   client: LspClient
   symbols: readonly IRSymbol[]
   workingById: Map<SymbolId, IRSymbol>
-  fileContents: ReadonlyMap<string, string>
-  fsPaths: ReadonlyMap<string, string>
+  fileContents: ReadonlyMap<string, ReadFile>
   workspaceRoot: string
   stats: LspStatsBuilder
   fallback: FallbackState
@@ -230,10 +237,11 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
 
   for (const file of filesSorted) {
     if (input.fallback.isLanguageDisabled(input.language)) break
-    const content = input.fileContents.get(file)
-    if (content === undefined) continue
+    const read = input.fileContents.get(file)
+    if (read === undefined) continue
+    const content = read.content
 
-    const uri = fileUriFor(input.workspaceRoot, input.fsPaths.get(file) ?? file)
+    const uri = fileUriFor(input.workspaceRoot, read.fsPath)
     const languageIdForOpen = languageIdForLspOpen(input.language)
     const fileSymbols = symbolsByFile.get(file) ?? []
 

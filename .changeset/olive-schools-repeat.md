@@ -24,6 +24,8 @@ claimant is now withdrawn and reported on `ScanResult.unrepresentableFiles`, whi
 exits 3. The collision section spells each name out by codepoint, because the two print
 identically in a terminal.
 
-`EnrichmentInput` takes an `fsPaths` map for the same reason the read does. Callers of
-`enrichWithLsp` outside the core pass `new Map()` to keep today's behaviour, which is correct for
-any path already in NFC.
+`EnrichmentInput.fileContents` becomes `ReadonlyMap<string, { content, fsPath }>` for the same
+reason the read changed: a `file://` URI is a filesystem address. One entry rather than a second
+map keyed the same way, so "a file that was read has a spelling on disk" holds by construction
+instead of by agreement. A caller of `enrichWithLsp` outside the core passes `fsPath: path` for
+any name already in NFC, which is every ASCII one.

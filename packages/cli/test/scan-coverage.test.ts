@@ -738,11 +738,13 @@ describe("aburi scan — two spellings of one name", () => {
     })
 
     const text = warnings.join("\n")
-    expect(text).toContain("path(s) that two names claim at once")
+    expect(text).toContain("path(s) more than one name claims")
     expect(text).toContain("U+0065 U+0301")
     expect(text).toContain("U+00E9")
-    // The header is the Document path, and `ignore` does not match it — so it is not offered.
-    expect(text).toContain("the pattern that works there is a wildcard")
+    // Both outcomes named, because the two patterns do different things and the reader has to
+    // pick: the header keeps a file, the wildcard keeps none.
+    expect(text).toContain("excludes whichever claimant is spelled that way")
+    expect(text).toContain("a wildcard over it excludes them all")
   })
 
   onCollidingFs("catches a collision between a skipped candidate and a parsed one", async () => {
