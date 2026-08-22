@@ -1,6 +1,6 @@
 {
   "name": "@aburi/diff",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Aburi diff engine: 5-stage semantic matcher (id / git-rename / logic fingerprint / name+signature / dropped weak) followed by status classification and per-Symbol delta computation, emitting aburi.diff.v1-conformant output for PR-review workflows",
   "license": "MIT",
   "author": "kage1020",
