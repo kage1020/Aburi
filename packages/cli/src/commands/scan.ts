@@ -2,7 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { type LoadedConfig, loadConfig, readConfigFile } from "@aburi/config"
 import {
+  type CollidingFile,
   CoreError,
+  describeCodePoints,
   detectComponents,
   detectManagers,
   detectWorkspaceRoot,
@@ -11,6 +13,7 @@ import {
   posixWorkspaceRelativeViolation,
   type SkippedFile,
   scan,
+  type UnnameableFile,
   type UnrepresentableFile,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -649,23 +652,102 @@ function reportUnrepresentable(
   say: (line: string) => void,
   warn: WarnFn,
 ): void {
-  if (files.length === 0) return
-  const byPrefix = new Map<string, ScanReport["unrepresentableFiles"][number][]>()
+  const unspellable: UnnameableFile[] = []
+  const colliding: CollidingFile[] = []
   for (const file of files) {
-    const group = byPrefix.get(file.unnameablePrefix)
-    if (group === undefined) byPrefix.set(file.unnameablePrefix, [file])
-    else group.push(file)
+    switch (file.reason) {
+      case "unspellable-name":
+        unspellable.push(file)
+        break
+      case "colliding-spelling":
+        colliding.push(file)
+        break
+      default:
+        // A third reason routed to neither section prints nothing while the gate still reads
+        // `unrepresentableFiles.length` — exit 3 over an empty screen, about the one list the
+        // artifact holds no copy of. Two `filter` calls compiled happily in that state; this
+        // does not. `reportSkipped` keeps the same property by looking its reason up in a
+        // table that is total over the union.
+        assertNeverUnrepresentable(file)
+    }
   }
+  reportUnspellable(unspellable, say, warn)
+  reportColliding(colliding, say, warn)
+}
+
+/** Compile-time guard: a new `UnrepresentableFile` member is a type error rather than silence. */
+function assertNeverUnrepresentable(file: never): never {
+  throw new CliError(
+    `@aburi/core reported a file the Document cannot name for a reason this CLI has no section for: ${JSON.stringify(file)}`,
+    "runtime-error",
+  )
+}
+
+/** One section per cause, because the fix differs and the two are told apart by nothing else. */
+function reportUnspellable(
+  files: readonly UnnameableFile[],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
+  if (files.length === 0) return
+  const byPrefix = groupBy(files, (file) => file.unnameablePrefix)
   say(
     `${files.length} file(s) were left out of the IR and out of its counts, under ${byPrefix.size} name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.`,
   )
-  for (const [prefix, group] of [...byPrefix].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const [prefix, group] of byPrefix) {
     warn(
       group[0]?.fsPath === prefix
         ? `    ${prefix}`
         : `    ${prefix} — a directory, and the ${group.length} file(s) under it`,
     )
   }
+}
+
+/**
+ * Two spellings of one name, which the Document has one path for and therefore no name for.
+ *
+ * Every claimant is spelled out by codepoint, and there is no way around that: the whole point
+ * of the pair is that the two names are different bytes and the same glyphs, so a terminal
+ * prints the offending line twice identically. This is the section a reader cannot act on
+ * without being told which character differs.
+ *
+ * The `ignore` half is stated per outcome, because the patterns do different things and the
+ * obvious summary of them is false. Measured against discovery's own options:
+ *
+ * - the group header excludes the claimant spelled exactly that way, if one is. The group drops
+ *   to a single claimant, the collision is over, and the remaining file is scanned normally.
+ * - a wildcard over the group excludes all of them, and the IR describes none.
+ * - where no claimant is spelled as the header — two decomposed spellings of one composed path —
+ *   the header matches nothing and the group is untouched.
+ *
+ * So the header is not a pattern that cannot work; it is the one that keeps a file. Which of
+ * the two a reader wants is theirs to decide, and neither is the fix, which is a rename.
+ */
+function reportColliding(
+  files: readonly CollidingFile[],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
+  if (files.length === 0) return
+  const byPath = groupBy(files, (file) => file.documentPath)
+  say(
+    `${files.length} file(s) were left out of the IR and out of its counts, on ${byPath.size} path(s) more than one name claims: the Document holds every string in Unicode NFC, and these names differ only in how they are composed, so normalizing them gives one path for several files. Rename all but one of each group. ignore matches the spelling on disk, so the path below excludes whichever claimant is spelled that way and leaves the rest of the group scannable, while a wildcard over it excludes them all.`,
+  )
+  for (const [documentPath, group] of byPath) {
+    warn(`    ${documentPath} — claimed by ${group.length} file(s) on disk:`)
+    for (const file of group) warn(`        ${describeCodePoints(file.fsPath)}`)
+  }
+}
+
+/** Grouped and ordered by key, so the paragraph is the same paragraph on every run. */
+function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const group = groups.get(key(item))
+    if (group === undefined) groups.set(key(item), [item])
+    else group.push(item)
+  }
+  return new Map([...groups].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 
 /**

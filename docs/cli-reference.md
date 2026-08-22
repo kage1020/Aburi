@@ -106,8 +106,24 @@ to change, uncapped, because nothing else holds a copy. Renaming is the fix. `ig
 one out instead, but the backslash has to be written **twice** in the pattern — a glob spends a
 single one as an escape, so the name as printed does not match itself.
 
-`aburi explain` answers for such a file directly, with exit `3` and a line saying no IR can name
-it, rather than reporting no match against a document that could never have held it.
+Source files whose **names differ only in Unicode composition** exit `3` the same way. An IR path
+is normalized, so they normalize to one and the IR has a single name for several files. All of
+them are withdrawn rather than one being picked, and the stderr paragraph spells each out by
+codepoint — they print identically in a terminal, which is the whole property of the group.
+Renaming all but one is the fix. `ignore` matches the spelling on disk: the path the report
+prints excludes whichever file is spelled exactly that way, which ends the collision and leaves
+the others scannable, and a wildcard over the group excludes all of them.
+
+Before this, that pair ended the scan on `duplicate Symbol id`, naming neither file — and a
+single file whose name was not already normalized was reported `unreadable`, because the scan
+looked for it under the spelling it had recorded rather than the one on disk.
+
+`aburi explain` answers for a backslash-named file directly, with exit `3` and a line saying no
+IR can name it, rather than reporting no match against a document that could never have held it.
+It has no such answer for a composition collision, which is a property of a group rather than of
+the argument. On the default path it rescans, so the collision is reported and the run exits 3
+anyway; with `--ir` or `--no-rescan` there is no scan and no trace in the document, and the
+lookup reports no match at exit 1.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.

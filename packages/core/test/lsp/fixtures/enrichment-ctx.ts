@@ -31,11 +31,19 @@ export function makeEnrichmentInput(input: {
   serverFactory: ServerFactory
   lspConfig?: Config["lsp"]
   now?: () => number
+  fsPaths?: Record<string, string>
 }): EnrichmentInput {
   const base: EnrichmentInput = {
     symbols: input.symbols,
     workspaceRoot: TEST_WORKSPACE_ROOT,
-    fileContents: new Map(Object.entries(input.fileContents)),
+    // Every fixture path here is ASCII by default, where the Document spelling and the
+    // filesystem's are the same string; `fsPaths` overrides one that is not.
+    fileContents: new Map(
+      Object.entries(input.fileContents).map(([path, content]) => [
+        path,
+        { content, fsPath: input.fsPaths?.[path] ?? path },
+      ]),
+    ),
     lspConfig: input.lspConfig ?? makeLspConfig(),
     serverFactory: input.serverFactory,
   }

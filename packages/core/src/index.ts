@@ -7,6 +7,7 @@ export {
   resolveCallGraph,
 } from "./callgraph"
 export { type SerializeOptions, serializeCanonical } from "./canonical"
+export { describeCodePoints } from "./codepoints"
 export {
   __testing as __testing_component,
   type DetectComponentsOptions,
@@ -78,12 +79,14 @@ export {
   propagateEffects,
 } from "./propagate"
 export {
+  type CollidingFile,
   DEFAULT_MAX_FILE_SIZE_BYTES,
   type DiscoveredFile,
   type DiscoverOptions,
   type DiscoverResult,
   discoverFiles,
   type SkippedFile,
+  type UnnameableFile,
   type UnrepresentableFile,
 } from "./scan/discover"
 export { decideSymbolDrop } from "./scan/drop-b"

@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
+import type { UnrepresentableFile } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   EXIT,
@@ -257,6 +258,11 @@ describe("config.minParsedFileRatio — the floor a workspace opts into", () => 
   })
 })
 
+/** The union's first member, which every fixture here but the collision ones wants. */
+function unspellable(fsPath: string, unnameablePrefix: string): UnrepresentableFile {
+  return { fsPath, reason: "unspellable-name", unnameablePrefix }
+}
+
 describe("reportScanIncidents — the fault and the code cannot disagree", () => {
   function reportWith(overrides: Partial<ScanReport>): ScanReport {
     return {
@@ -328,9 +334,9 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
         totalFiles: 3,
         parsedFiles: 3,
         unrepresentableFiles: [
-          { fsPath: "src/v\\1/other.stub", unnameablePrefix: "src/v\\1" },
-          { fsPath: "src/v\\1/util.stub", unnameablePrefix: "src/v\\1" },
-          { fsPath: "odd\\name.stub", unnameablePrefix: "odd\\name.stub" },
+          unspellable("src/v\\1/other.stub", "src/v\\1"),
+          unspellable("src/v\\1/util.stub", "src/v\\1"),
+          unspellable("odd\\name.stub", "odd\\name.stub"),
         ],
         exitCode: EXIT.GATE,
       }),
@@ -354,7 +360,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
         totalFiles: 1,
         parsedFiles: 0,
         skipped: [{ path: "src/a.ts", reason: "over-size" as const, detail: "big" }],
-        unrepresentableFiles: [{ fsPath: "odd\\name.ts", unnameablePrefix: "odd\\name.ts" }],
+        unrepresentableFiles: [unspellable("odd\\name.ts", "odd\\name.ts")],
         exitCode: EXIT.GATE,
       }),
       null,
@@ -371,7 +377,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // a reader round the loop to an identical exit 3, with nothing on screen to say why.
     const lines = linesFrom(
       reportWith({
-        unrepresentableFiles: [{ fsPath: "odd\\name.stub", unnameablePrefix: "odd\\name.stub" }],
+        unrepresentableFiles: [unspellable("odd\\name.stub", "odd\\name.stub")],
         exitCode: EXIT.GATE,
       }),
       null,
@@ -386,10 +392,9 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // declining to say the one thing only it knows. Grouping is what keeps the length sane.
     const lines = linesFrom(
       reportWith({
-        unrepresentableFiles: Array.from({ length: 12 }, (_, i) => ({
-          fsPath: `f${i}\\x.stub`,
-          unnameablePrefix: `f${i}\\x.stub`,
-        })),
+        unrepresentableFiles: Array.from({ length: 12 }, (_, i) =>
+          unspellable(`f${i}\\x.stub`, `f${i}\\x.stub`),
+        ),
         exitCode: EXIT.GATE,
       }),
       null,
@@ -561,7 +566,7 @@ describe("aburi scan — a file no Document path can name", () => {
     const report = await scanIn(["ok.stub", "weird\\name.stub"], warnings)
 
     expect(report.unrepresentableFiles).toEqual([
-      { fsPath: "weird\\name.stub", unnameablePrefix: "weird\\name.stub" },
+      unspellable("weird\\name.stub", "weird\\name.stub"),
     ])
     // Neither counted nor skipped, and that pairing is forced: the path a skip entry needs is
     // one the shared rule refuses, and a file counted while absent from the skip list breaks
@@ -679,5 +684,114 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
     expect(warnings.join("\n")).toContain("base: 1 file(s) have names no Document path can spell")
+  })
+})
+// A collision needs two names on disk that normalize to one, and a filesystem that keeps both.
+// APFS resolves them to a single file, so the second write overwrites the first and the pair
+// the test is about never exists. NTFS and ext4 both store the codepoints they are given.
+const onCollidingFs = it.skipIf(process.platform === "darwin")
+
+describe("aburi scan — two spellings of one name", () => {
+  onCollidingFs("reports both instead of ending the scan on a duplicate id", async () => {
+    // Before this, the two were one `DiscoveredFile` path twice: the pipeline read whichever
+    // file the lookup found, twice, and minted its Symbol id twice — so `assertIRIntegrity`
+    // ended the run on `[#1] duplicate Symbol id`, naming neither filename.
+    const warnings: string[] = []
+    await populate(scratch, ["ok.stub"])
+    await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "a", "utf8")
+    await writeFile(resolve(scratch, "caf\u00e9.stub"), "b", "utf8")
+
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+
+    expect(report.unrepresentableFiles).toEqual([
+      {
+        fsPath: "caf\u0065\u0301.stub",
+        reason: "colliding-spelling",
+        documentPath: "caf\u00e9.stub",
+      },
+      { fsPath: "caf\u00e9.stub", reason: "colliding-spelling", documentPath: "caf\u00e9.stub" },
+    ])
+    // Neither counted nor skipped, so the census stays exact and the document validates.
+    expect(report.totalFiles).toBe(1)
+    expect(report.parsedFiles).toBe(1)
+    expect(report.skipped).toEqual([])
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(report.irPath).not.toBeNull()
+  })
+
+  onCollidingFs("names both by codepoint, since a terminal prints them identically", async () => {
+    const warnings: string[] = []
+    await populate(scratch, ["ok.stub"])
+    await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "a", "utf8")
+    await writeFile(resolve(scratch, "caf\u00e9.stub"), "b", "utf8")
+
+    await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+
+    const text = warnings.join("\n")
+    expect(text).toContain("path(s) more than one name claims")
+    expect(text).toContain("U+0065 U+0301")
+    expect(text).toContain("U+00E9")
+    // Both outcomes named, because the two patterns do different things and the reader has to
+    // pick: the header keeps a file, the wildcard keeps none.
+    expect(text).toContain("excludes whichever claimant is spelled that way")
+    expect(text).toContain("a wildcard over it excludes them all")
+  })
+
+  onCollidingFs("catches a collision between a skipped candidate and a parsed one", async () => {
+    // One path in `stats.skippedFiles[]` and on `symbols[].source.file` is the contradiction
+    // `buildDiff` resolves as a deletion. The pair has to be decided over both lists.
+    const warnings: string[] = []
+    await populate(scratch, ["ok.stub"])
+    await writeFile(resolve(scratch, "b\u0061\u0301d.stub"), "a", "utf8")
+    await writeFile(resolve(scratch, "b\u00e1d.stub"), "b", "utf8")
+
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+
+    expect(report.unrepresentableFiles).toHaveLength(2)
+    expect(report.skipped).toEqual([])
+    expect(report.totalFiles).toBe(1)
+  })
+})
+describe("aburi scan — a name the filesystem and the Document spell differently", () => {
+  it("reads it, parses it, and records the normalized spelling", async () => {
+    // It used to be `unreadable`: the `stat` and the `readFile` both went out under the
+    // spelling the Document records, which is not the one the filesystem stores.
+    const warnings: string[] = []
+    await populate(scratch, ["ok.stub"])
+    await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "hello", "utf8")
+
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+
+    expect(report.skipped).toEqual([])
+    expect(report.totalFiles).toBe(2)
+    expect(report.parsedFiles).toBe(2)
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+
+    // And the Document holds one spelling of it, the composed one, which invariant #19 is
+    // about — the filesystem's spelling stops at the read.
+    const ir = JSON.parse(await readFile(resolve(scratch, "out/aburi.ir.json"), "utf8")) as {
+      symbols: { source: { file: string } }[]
+    }
+    expect(ir.symbols.map((s) => s.source.file).sort()).toEqual(["caf\u00e9.stub", "ok.stub"])
   })
 })
