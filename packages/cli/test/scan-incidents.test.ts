@@ -391,6 +391,10 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(advice("unreadable")).toContain("re-run")
     expect(advice("unreadable")).not.toContain("permission")
     expect(advice("unreadable")).toContain("ends the run")
+    // And it says the file stopped being one, not that it was no longer there. Under ENOTDIR
+    // nothing of that name was deleted — its directory was — so a reader is holding this line
+    // next to a tree where something of that name is still sitting.
+    expect(advice("unreadable")).toContain("stopped being files")
     // Two producers, like `unreadable`: the router refusing an extension, and a path segment
     // holding a Symbol id separator. Advice true for one only would be false half the time, and
     // nothing in the entry says which happened.

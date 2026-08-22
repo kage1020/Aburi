@@ -299,7 +299,8 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // Recorded rather than thrown on, which is what this used to do from inside the path
     // normalizer. `:` and `#` are legal POSIX filename characters and are refused by the id
     // grammar alone, so one of them anywhere in the tree ended the whole walk — while a file
-    // the tree stopped holding is recorded further down this same loop and the walk continues. The path is recordable because `stats.skippedFiles[].path` is held to the
+    // the tree stopped holding is recorded further down this same loop and the walk
+    // continues. The path is recordable because `stats.skippedFiles[].path` is held to the
     // shared rule, so the Document names a file no Symbol in it could ever have named.
     //
     // The segment is the subject, not the file. A separator in a directory name disqualifies

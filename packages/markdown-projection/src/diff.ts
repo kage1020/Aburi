@@ -509,9 +509,11 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
  *
  * Rendered apart from Added and Removed rather than inside them, because the reader's next
  * action is different: an entry here is not a change to review but a gap to close, and the
- * reason says how. `parse-timeout` and `unreadable` are properties of the machine and the
- * moment — a wall clock, a file deleted mid-scan, a transient permission — and usually clear
- * on a re-run. `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the
+ * reason says how. `parse-timeout` and `unreadable` are properties of the moment rather than
+ * of the workspace — a wall clock, and a file that stopped being one between the listing and
+ * the read — and usually clear on a re-run. A permission or an IO failure is not among them:
+ * the scan ends the run on those rather than recording a file, so nothing here can have come
+ * from one. `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the
  * file or the plugin set and clear only when one of those is changed.
  */
 function renderUnknown(items: readonly SymbolUnknown[]): string[] {

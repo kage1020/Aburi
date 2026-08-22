@@ -35,7 +35,19 @@ export function errorCode(error: unknown): string | null {
  * Two codes, because the operating systems disagree about what to call one event. Replacing
  * a directory with a file mid-scan is answered `ENOTDIR` on POSIX and `ENOENT` on Windows;
  * holding only `ENOENT` would make the identical act fatal on one platform and benign on the
- * other.
+ * other. A file deleted while another process holds it open was measured for the same
+ * asymmetry and does not have it: NTFS unlinks the name at once, so the walk cannot list it
+ * and a call that already had the path is answered `ENOENT` — not the `EPERM` a directory
+ * entry lingering in a delete-pending state would give.
+ *
+ * The fatal side is not homogeneous, and this is the deliberate part. A symlink cycle or a
+ * name too long for the platform is a property of the workspace, reproduces from every
+ * machine, and by the reasoning above has no business ending a run. What keeps it there is
+ * that sorting the fatal codes into deterministic and not would need a per-errno taxonomy
+ * both callers agree on, and the two disagreeing is the whole defect this predicate exists to
+ * close — so the conservative side is the one that stays shared. (A symlink cycle does not
+ * reach discovery's `stat` in any case: the walk drops a cyclic link before it becomes a
+ * candidate, in both follow modes.)
  */
 export function isVanishedFile(error: unknown): boolean {
   const code = errorCode(error)
