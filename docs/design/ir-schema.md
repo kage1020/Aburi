@@ -95,6 +95,10 @@ Normalization therefore happens **where a string enters the process**, not where
 
 Normalization is all these entry points do to a path. None of them converts a native path into a POSIX one, because the conversion is not decidable from the string: `\` is a separator on Windows and an ordinary filename character on POSIX, so a rewrite applied to every path silently renames any file whose name holds one. A caller that knows it holds a native path converts it — `toRelativePosix` does, on the platform separator, which is a separator exactly where a filename cannot hold one — and everything else hands over a path that is already POSIX and is validated as it stands.
 
+**A normalized path is not a filename.** What comes out of these entry points addresses the Document, and a filesystem that stores the name it was given — NTFS, ext4 — does not answer to it: a `stat` or a `readFile` under the normalized spelling of a decomposed name misses, and a `file://` URI built from it names nothing. Whatever opens a file keeps the spelling the filesystem handed back, which is why `DiscoveredFile` carries both and only `path` reaches the Document.
+
+Two names that differ only in composition therefore claim one Document path. That is not a spelling to choose between: the scan withdraws every claimant and reports them, because one path naming two files gives one construct two Symbol ids, which invariant #1 refuses.
+
 The last row is not a separate rule: normalization has to be **total across a comparison**. A value normalized on one side and left alone on the other turns a match into a miss, and these misses are quiet - a suppressed call reappears in the Document, a resolved edge points at an unrelated Symbol, a call lands in the `no-match` diagnostic bucket instead of `external`.
 
 Normalizing at the comparator instead would fix an ordering and leave the two spellings in the Document as two entries, which is the larger of the two problems.

@@ -318,11 +318,15 @@ a claim about what gating does not change rather than about what a gated run alw
 
 ### 5.8 Files the Document cannot name
 
-A filename may contain a backslash on any POSIX filesystem, and a Document path may not: `/` is
-its only separator, so there is no way to write such a name down that a reader will not take for
-a directory boundary (ir-schema.md §14 invariant #10). The file is therefore not skippable — a
-skip entry is a path plus a reason, and the path is what is missing — and not countable either,
-because invariant #21 holds `stats.skippedFiles`'s length to `totalFiles - parsedFiles`.
+Two things put a file beyond what a Document can name, and both end the same way: the file is
+not skippable — a skip entry is a path plus a reason, and it is the path that is missing — and not
+countable either, because invariant #21 holds `stats.skippedFiles`'s length to
+`totalFiles - parsedFiles`.
+
+**The first: a name a path cannot spell.** A filename may contain a backslash on any POSIX
+filesystem, and a Document path may not: `/` is its only separator, so there is no way to write
+such a name down that a reader will not take for a directory boundary (ir-schema.md §14
+invariant #10).
 
 So it leaves `totalFiles` the way a file no plugin claims does, and the run says so itself:
 
@@ -366,6 +370,36 @@ disallowed one.
 
 `aburi explain` answers for one of these files without consulting the document, since no document
 could hold it: see §7.2.
+
+**The second cause: two names, one path.** A path is normalized on the way into the Document
+(§1.2), and two names differing only in how they are composed normalize to the same string. The
+Document then has one path for two files, which is no name for either.
+
+```
+⚠ 2 file(s) were left out of the IR and out of its counts, on 1 path(s) that two names claim at once: the Document holds every string in Unicode NFC, and these names differ only in how they are composed, so normalizing them gives one path for more than one file. Rename one of each group. ignore matches the spelling on disk rather than the one below, so the pattern that works there is a wildcard.
+    src/café.ts — claimed by 2 file(s) on disk:
+        "src/café.ts" (U+0073 U+0072 U+0063 U+002F U+0063 U+0061 U+0066 U+0065 U+0301 U+002E U+0074 U+0073)
+        "src/café.ts" (U+0073 U+0072 U+0063 U+002F U+0063 U+0061 U+0066 U+00E9 U+002E U+0074 U+0073)
+```
+
+Every claimant is withdrawn, not one kept. A rule granting the path to the NFC-spelled claimant
+is partial — two *different* decomposed spellings can normalize to one composed path with no NFC
+claimant among them — and it is the pair that is at fault rather than either file, the same
+reading a backslash in a directory name gets.
+
+The codepoints are not decoration. The whole property of the pair is that the names are
+different bytes and identical glyphs, so the two lines would otherwise print the same.
+
+The pair is decided over every **candidate**, not over the files that were read: one path landing
+in `stats.skippedFiles[]` *and* on `symbols[].source.file` is the contradiction `aburi diff`
+resolves as a deletion, and two skipped claimants break invariant #21 outright.
+
+Renaming is the fix here too, and `ignore` is worse than in the first case: it matches the
+filesystem's spelling, so the path printed above is the one pattern that cannot work, and the two
+that can are not typeable from what is on screen. A wildcard is what is left.
+
+`aburi explain` does **not** answer for this one. The first cause is decidable from the argument
+string; a collision is a property of a pair, so nothing in the argument says whether one exists.
 
 ## 6. `aburi diff`
 

@@ -106,8 +106,21 @@ to change, uncapped, because nothing else holds a copy. Renaming is the fix. `ig
 one out instead, but the backslash has to be written **twice** in the pattern — a glob spends a
 single one as an escape, so the name as printed does not match itself.
 
-`aburi explain` answers for such a file directly, with exit `3` and a line saying no IR can name
-it, rather than reporting no match against a document that could never have held it.
+Two source files whose **names differ only in Unicode composition** exit `3` the same way. An IR
+path is normalized, so the two normalize to one and the IR has a single name for two files. Both
+are withdrawn rather than one being picked, and the stderr paragraph spells each out by codepoint
+— they print identically in a terminal, which is the whole property of the pair. Renaming one is
+the fix; `ignore` matches the spelling on disk rather than the printed one, so a wildcard is the
+pattern that works.
+
+Before this, that pair ended the scan on `duplicate Symbol id`, naming neither file — and a
+single file whose name was not already normalized was reported `unreadable`, because the scan
+looked for it under the spelling it had recorded rather than the one on disk.
+
+`aburi explain` answers for a backslash-named file directly, with exit `3` and a line saying no
+IR can name it, rather than reporting no match against a document that could never have held it.
+It does not answer for a composition collision: that is a property of a pair, and nothing in the
+argument says whether one exists.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.
