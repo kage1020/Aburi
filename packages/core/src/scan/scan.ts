@@ -35,6 +35,7 @@ import {
   type UnrepresentableFile,
 } from "./discover"
 import { buildDropCFilter } from "./drop-c"
+import { describeThrown, errorCode, isVanishedFile } from "./faults"
 import { runFilePipeline } from "./pipeline"
 import { buildLanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
@@ -228,21 +229,15 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     try {
       sourceFile = await loadSourceFile(input.workspaceRoot, discoveredFile)
     } catch (error) {
-      // Only a file that is *gone*. Discovery lists the workspace up front and this read
-      // happens when the loop reaches the file, so anything deleting files while a scan runs
-      // — a concurrent build, a watch-mode clean — leaves a listed path pointing at nothing.
-      // That is the condition discovery's own `unreadable` already names, and a rerun is the
-      // whole fix.
-      //
-      // Every other read failure still ends the run. `EACCES` on a badly-checked-out tree,
-      // `EMFILE` under fd pressure, `EIO` on failing storage: those depend on how the machine
-      // was feeling, so absorbing them would let one commit produce a different IR on every
-      // run and still exit 0 — which is the opposite of what a byte-stable canonical document
-      // is for.
-      if (!isFileGone(error)) throw error
+      // Only a file that is no longer one. `isVanishedFile` says which failures those are and
+      // why the rest end the run; discovery applies the same predicate to its own `stat`, so
+      // the stage a failure lands in does not change what happens to it.
+      if (!isVanishedFile(error)) throw error
       const detail = describeThrown(error)
       additionalSkipped.push({ path: discoveredFile.path, reason: "unreadable", detail })
-      logger.warn(`Skipped ${discoveredFile.path}: it was gone by the time it was read — ${detail}`)
+      logger.warn(
+        `Skipped ${discoveredFile.path}: it was no longer a file by the time it was read — ${detail}`,
+      )
       continue
     }
 
@@ -506,18 +501,6 @@ function quote(error: ParseError): string {
 }
 
 /**
- * True when a `readFile` failure means the file is no longer there.
- *
- * The only read failure the scan absorbs. Everything else — a permission the checkout got
- * wrong, an exhausted descriptor table, failing storage — is a property of the machine
- * rather than of the workspace, and letting it withdraw a file would make the same commit
- * produce a different Document on a different day, silently.
- */
-function isFileGone(error: unknown): boolean {
-  return errorCode(error) === "ENOENT"
-}
-
-/**
  * Codes that name a fault in the plugin *set* rather than in the file being extracted. The
  * per-file boundary re-throws these and absorbs everything else.
  *
@@ -553,45 +536,6 @@ const PLUGIN_SET_FAULT_CODES: ReadonlySet<string> = new Set([
 function isPluginSetFault(error: unknown): boolean {
   const code = errorCode(error)
   return code !== null && PLUGIN_SET_FAULT_CODES.has(code)
-}
-
-/** The `code` a coded error carries, or `null` for a thrown value that has none. */
-function errorCode(error: unknown): string | null {
-  if (typeof error !== "object" || error === null) return null
-  const code = (error as { code?: unknown }).code
-  return typeof code === "string" ? code : null
-}
-
-/**
- * The message to record for a thrown value.
- *
- * A plugin is under no obligation to throw an `Error` — it is ordinary JavaScript loaded by
- * ref — so a thrown string, a plain object, or an `Error` nobody gave a message still has to
- * name itself in the incident list. An empty `detail` is the same silence the boundary
- * exists to replace, one step further in.
- *
- * This function is the last thing between an unusual throw and the boundary meant to absorb
- * it, so every fallback is itself guarded: `JSON.stringify` throws on a circular structure
- * and on a BigInt, and `String()` throws on a null-prototype object with no `toString`.
- */
-function describeThrown(error: unknown): string {
-  if (error instanceof Error) return error.message.length > 0 ? error.message : safeString(error)
-  if (typeof error !== "object" || error === null) return safeString(error)
-  try {
-    return JSON.stringify(error) ?? safeString(error)
-  } catch {
-    return safeString(error)
-  }
-}
-
-function safeString(value: unknown): string {
-  try {
-    return String(value)
-  } catch {
-    // A null-prototype object has no `toString`, and a Symbol refuses the conversion.
-    // `Object.prototype.toString` works on both because it never consults the value.
-    return Object.prototype.toString.call(value)
-  }
 }
 
 /**

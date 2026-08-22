@@ -1,8 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { discoverFiles } from "../../src"
+import { CoreError, discoverFiles } from "../../src"
 
 let workRoot: string
 
@@ -137,6 +137,27 @@ describe("discoverFiles", () => {
     })
 
     expect(result.files.map((f) => f.path)).toEqual(["src/keep.ts"])
+  })
+
+  it("raises a coded error when .gitignore is there and cannot be read", async () => {
+    // A missing `.gitignore` is the common case and means "no patterns". Anything else is a
+    // pattern list the caller asked for and did not get, so a scan that fell back to the core
+    // ignores would include files the workspace said to leave out — silently, and only on the
+    // machine where the read failed.
+    await writeFileAt("src/a.ts", "1")
+    await mkdir(join(workRoot, ".gitignore"))
+
+    const thrown = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CoreError)
+    expect((thrown as CoreError).code).toBe("scan-gitignore-unreadable")
+    expect((thrown as CoreError).message).toContain("EISDIR")
   })
 
   it("does not read .gitignore when respectGitignore is false", async () => {
@@ -575,5 +596,59 @@ describe("discoverFiles — a name the filesystem and the Document spell differe
     const named = [...result.files, ...result.skipped].map((entry) => entry.path)
     expect(new Set(named).size).toBe(named.length)
     expect(named).toEqual(["src/ok.ts"])
+  })
+})
+
+// A directory that is readable but not traversable: the walk lists what is in it and the
+// `stat` on each entry is refused. Windows has no mode bit that produces it, and root is
+// exempt from the check, so the fixture exists only for an ordinary POSIX user.
+const asUnprivilegedPosixUser = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
+
+describe("discoverFiles — a candidate the stat cannot reach", () => {
+  asUnprivilegedPosixUser("ends the run when the failure is the machine's", async () => {
+    // The orchestrator refuses the same errno one stage later, and says why: a permission
+    // the checkout got wrong or an exhausted descriptor table depends on how the machine was
+    // feeling, so absorbing it lets one commit produce a different Document on a different
+    // day and still exit 0. Discovery recorded it as a skipped file instead.
+    await writeFileAt("src/sealed/a.ts", "1")
+    await writeFileAt("src/plain.ts", "1")
+    const sealed = join(workRoot, "src", "sealed")
+    await chmod(sealed, 0o444)
+
+    try {
+      await expect(
+        discoverFiles({
+          workspaceRoot: workRoot,
+          languageExtensions: [".ts"],
+          respectGitignore: false,
+        }),
+      ).rejects.toThrow(/EACCES/)
+    } finally {
+      await chmod(sealed, 0o755)
+    }
+  })
+
+  asUnprivilegedPosixUser("throws the operating system's own account of it", async () => {
+    // Not wrapped. The orchestrator re-throws the error it caught, so the two stages hand the
+    // reader the same sentence for the same condition — and that sentence already names the
+    // absolute path, which is the one thing a caller needs to act on.
+    await writeFileAt("src/sealed/a.ts", "1")
+    const sealed = join(workRoot, "src", "sealed")
+    await chmod(sealed, 0o444)
+
+    try {
+      const thrown = await discoverFiles({
+        workspaceRoot: workRoot,
+        languageExtensions: [".ts"],
+        respectGitignore: false,
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      )
+      expect((thrown as { code?: string }).code).toBe("EACCES")
+      expect((thrown as Error).message).toContain(join(workRoot, "src", "sealed", "a.ts"))
+    } finally {
+      await chmod(sealed, 0o755)
+    }
   })
 })

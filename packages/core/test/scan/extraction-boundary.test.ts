@@ -399,6 +399,43 @@ describe("a file the read cannot reach", () => {
     expect(result.extractionFailures).toEqual([])
   })
 
+  it("skips one whose directory stopped being one, under whichever code the platform gives", async () => {
+    // The same event as a deletion — something replaced part of the path while the scan held
+    // a listing of it — and the operating systems disagree about what to call it: POSIX
+    // answers ENOTDIR, Windows answers ENOENT for the identical act. A predicate holding only
+    // ENOENT ends the run on POSIX and absorbs it on Windows, which is one commit producing
+    // two different outcomes by platform.
+    await mkdir(join(workRoot, "sub"))
+    await writeFile(join(workRoot, "sub", "d.stub"), "d", "utf8")
+    const language: LanguagePlugin = Object.create(stubLanguage())
+    language.parseFile = async (file: SourceFile) => {
+      if (file.path === "a.stub") {
+        await rm(join(workRoot, "sub"), { recursive: true })
+        await writeFile(join(workRoot, "sub"), "no longer a directory", "utf8")
+      }
+      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+    }
+
+    const { result, warned } = await run({ language })
+
+    expect(result.skipped).toEqual([
+      {
+        path: "sub/d.stub",
+        reason: "unreadable",
+        detail: expect.stringMatching(process.platform === "win32" ? /^ENOENT/ : /^ENOTDIR/),
+      },
+    ])
+    expect(result.extractionFailures).toEqual([])
+    // "gone" would be a smaller claim than the condition: the file was never deleted, its
+    // directory was, and the log line is what a reader has to reconcile with a tree where
+    // something of that name is still sitting.
+    expect(warned.warn).toEqual([
+      expect.stringContaining(
+        "Skipped sub/d.stub: it was no longer a file by the time it was read",
+      ),
+    ])
+  })
+
   it("still ends the run for a read failure that is the machine's rather than the file's", async () => {
     // `EACCES`, `EMFILE`, `EIO`: whether they happen depends on how loaded or how
     // badly-checked-out the machine is, so absorbing them would let one commit produce a

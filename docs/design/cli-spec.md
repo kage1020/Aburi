@@ -160,7 +160,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | code | Meaning |
 |---|---|
 | 0 | Extraction succeeded |
-| 1 | Extraction error — a file the scan could not read. A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
+| 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
 | 2 | Config error (schema violation, resolution failure) |
 | 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
@@ -220,8 +220,9 @@ recoverable error with its position.
 The "contributed no Symbols" line is a census; under it each reason present gets a line of its
 own, saying what to do about it, and then its files with the detail `@aburi/core` recorded for
 each. The reasons want different responses — `over-size` points at `maxFileSizeBytes`,
-`parse-timeout` at `parseTimeoutMs` and a re-run, `unreadable` at permissions or a tree that was
-changing under the scan, `unroutable` at a bug in the plugin set or at a rename, `parse-failed` at the source,
+`parse-timeout` at `parseTimeoutMs` and a re-run, `unreadable` at a re-run alone — a tree that
+changed while the scan ran is the only thing that produces it, since every other read failure
+ends the run — `unroutable` at a bug in the plugin set or at a rename, `parse-failed` at the source,
 `extraction-failed` at the plugin — and one neutral line said none of it. The re-run /
 fix-something split is the one `SkippedFile.reason` draws in the IR schema.
 

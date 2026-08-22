@@ -404,11 +404,12 @@ const MAX_LISTED_PER_REASON = 10
  *
  * `advice` is the whole difference between them, and the one line they used to share said
  * none of it: `over-size` points at a budget, `parse-timeout` at a different budget and a
- * re-run, `unreadable` at the filesystem or at a tree that was changing under the scan,
- * `unroutable` at a bug report or at a rename, and the two extraction reasons at the source
- * and at the plugin respectively. The re-run / fix-something split is the one the reason's own schema
- * docstring draws: `parse-timeout` depends on how loaded the machine was, everything else
- * describes the file and clears only when something changes.
+ * re-run, `unreadable` at a re-run alone — a tree that changed under the scan is the only
+ * thing that produces it — `unroutable` at a bug report or at a rename, and the two
+ * extraction reasons at the source and at the plugin respectively. The re-run /
+ * fix-something split is the one the reason's own schema docstring draws: `parse-timeout`
+ * depends on how loaded the machine was, everything else describes the file and clears only
+ * when something changes.
  *
  * `rank` fixes the order the census and the groups under it come out in, which would
  * otherwise be the order the files arrived in — scan order, and so a function of where in
@@ -434,7 +435,7 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   unreadable: {
     rank: 2,
     advice:
-      "could not be read. Check permissions, or re-run if the tree was changing while the scan ran.",
+      "they stopped being files while the scan ran, so something changed the tree under it — re-run. A read that failed for any other reason ends the run rather than landing here.",
   },
   unroutable: {
     rank: 3,
@@ -614,9 +615,11 @@ function reportSkipped(
   for (const [reason, files] of groups) {
     say(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
     for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
-      // Empty as well as absent. `describeThrown` returns `""` for a plugin that threw one,
-      // and discovery takes `(error as Error).message` unguarded, so a detail that says
-      // nothing is reachable — and `    src/x.ts: ` is a path, a colon, and silence.
+      // Empty as well as absent. Nothing in a scan produces either any more: every detail
+      // derived from a thrown value goes through `describeThrown`, which is total on
+      // non-emptiness, and the rest are built at their site from non-empty literals. But this
+      // function is exported for a report a caller assembled, where the field is optional and
+      // one that says nothing renders as `    src/x.ts: ` — a path, a colon, and silence.
       const detail = file.detail ?? ""
       warn(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
     }
