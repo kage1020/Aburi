@@ -416,7 +416,7 @@ describe("a file the read cannot reach", () => {
       return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
     }
 
-    const { result } = await run({ language })
+    const { result, warned } = await run({ language })
 
     expect(result.skipped).toEqual([
       {
@@ -426,6 +426,14 @@ describe("a file the read cannot reach", () => {
       },
     ])
     expect(result.extractionFailures).toEqual([])
+    // "gone" would be a smaller claim than the condition: the file was never deleted, its
+    // directory was, and the log line is what a reader has to reconcile with a tree where
+    // something of that name is still sitting.
+    expect(warned.warn).toEqual([
+      expect.stringContaining(
+        "Skipped sub/d.stub: it was no longer a file by the time it was read",
+      ),
+    ])
   })
 
   it("still ends the run for a read failure that is the machine's rather than the file's", async () => {
