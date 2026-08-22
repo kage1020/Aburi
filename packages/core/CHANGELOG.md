@@ -1,5 +1,1099 @@
 # @aburi/core
 
+## 0.3.0
+
+### Minor Changes
+
+- e2dab93: Establish the Document's shape before the invariants assume it
+
+  `checkIRIntegrity` took an `IR` and dereferenced its way through the Document. `readIR`
+  brands a parsed JSON object after checking `$schema`, so in practice the checker is the only
+  gate a Document read off disk passes — and it assumed the thing it was being asked to
+  establish. Fourteen shapes that survive that gate produced a `TypeError` instead of a
+  violation list, among them a missing `workspace`, a `stats.callResolution` of `null`, a
+  non-string entry in `components[].roots`, and a `derivedFrom` of `null`.
+
+  The CLI wrapped each as `config-error`, so a user was told the IR failed to load and not
+  which invariant broke — which is the one thing the invariant list exists to say.
+
+  **Invariant #20** is the Document's shape as `aburi.ir.v1` requires it: every `required`
+  field, of the declared kind, at every depth. It names the record and the field:
+
+  ```
+  [#20] symbols[0]: "fingerprint" is absent, not an object
+  [#20] document: "workspace" is absent, not an object
+  [#20] components[0].roots[0]: entry is a number, not a string
+  ```
+
+  Three decisions worth stating:
+
+  - **The scope is the schema's requirements, not "the fields the invariants read".** `readIR`
+    brands its result `IR` on the strength of this check, so what #20 establishes is what that
+    brand asserts. A narrower check would hand `@aburi/diff` a Document with no `fingerprint`
+    and let it fail on `b.fingerprint.logic`, outside anyone's error handling and with no file
+    or field named.
+  - **The restatement is checked, not trusted.** A test reads `schema/aburi.ir.v1.json` and
+    fails on a `required` entry with no counterpart in the spec, on a spec field the schema
+    does not declare, and on a structural definition the spec omits entirely.
+  - **#20 is reported alone.** The nineteen relational invariants are statements about a
+    Document; a value that fails #20 is not one.
+
+  `checkIRIntegrity` and `assertIRIntegrity` now take `unknown`. Every other caller holds a
+  typed `IR` and is unaffected; the caller these exist for holds a parsed JSON object, and
+  declaring `IR` had them assert what they were being asked to establish. `readIR` brands
+  after the check rather than before, and its own array pre-check is gone — #20 covers it, and
+  a duplicate is only a second place for the answer to drift.
+
+  Also fixed by the same shape guarantee: four invariants that a mistyped field silently
+  disabled rather than crashed. `dropped: "true"` skipped #5 entirely, `derivedFrom: 5` passed
+  #11 because `(5).length` is `undefined`, and `workspace.languages: [null]` passed #18 because
+  the grammar regex coerced `null` to the string `"null"`.
+
+- 309f093: Withdraw the file a plugin threw on, instead of the whole run
+
+  `lang-plugin.md` §7.2 has always said what should happen when extraction throws:
+
+  > - If `extractSymbols` / `walkBody` / `normalizeAst` throws → skip the entire file, warning log
+  > - The extraction pipeline as a whole does not stop (prevents one file's bug from halting all IR generation)
+
+  Neither `scan.ts` nor `pipeline.ts` contained a single `try`, so it never did. One throw
+  discarded every file's results and the run produced no IR at all:
+
+  ```ts
+  // src/route.ts — an Auth.js route file, and legal TypeScript
+  export const { GET, POST } = handlers;
+  ```
+
+  The destructuring pattern's text reaches `makeSymbolId` as a qualified name, the id grammar
+  refuses it, and `scan()` exits non-zero having written nothing. A `src/ok.ts` beside it produces
+  nothing either; delete the one file and the same run succeeds.
+
+  ## What happens instead
+
+  Any plugin call that throws for a file — `parseFile`, `extractSymbols`, `walkBody`,
+  `normalizeAst`, a framework `classifySymbol`, an effect `classify` — withdraws that file. The
+  run continues, and the file is accounted for twice:
+
+  - `ScanResult.skipped` gains `reason: "extraction-failed"`, so it is named in the list that
+    answers "why is this file missing from the IR";
+  - `ScanResult.extractionFailures` is a new `{ file, message, code? }[]` carrying what the plugin
+    actually said, the way `parseTimeouts` carries numbers `skipped` has nowhere to put. The CLI
+    lists the first ten on stderr with the file and the message, capped so a plugin that rejects
+    every file cannot scroll the rest of a CI log away.
+
+  A file that is _gone_ by the time the scan reads it — discovery lists the workspace up front, and
+  a concurrent build can delete a listed path before the loop reaches it — is skipped as
+  `"unreadable"`, the reason discovery already uses for the same condition, rather than ending the
+  run as it did before. **Every other read failure still ends the run**: a permission the checkout
+  got wrong, an exhausted descriptor table, failing storage. Those depend on how the machine was
+  feeling, and absorbing them would let one commit produce a different Document on a different day
+  and still exit 0, which is the opposite of what a byte-stable canonical document is for.
+
+  Unlike a file abandoned for its `parseTimeoutMs` budget, a thrown file loses its recoverable
+  parse errors: the pipeline result never materialized. The thrown message stands in for them.
+
+  ## Some throws are still fatal
+
+  An error whose code names a fault in the plugin _set_ rather than in the file propagates and ends
+  the run:
+
+  - `scan-plugin-misconfigured` — an effect plugin returning a Promise from the synchronous
+    `classify`, a language plugin emitting Symbol ids with no language prefix at all;
+  - `invalid-language-id` — the prefix is present but is not a legal `LanguageId`, which comes from
+    the plugin's own `languageId` and so is the same on every Symbol it emits;
+  - `vocab-undeclared` — an effect or extKind id the emitting plugin's manifest does not claim.
+
+  Each repeats for every file, so absorbing them would report the workspace as broken instead of
+  the plugin, and would replace one precise sentence about the manifest with a file count.
+
+  Everything else describes the file and is absorbed: `anonymous-symbol-id-attempted` and
+  `invalid-symbol-id` come from what a declaration is named, `non-posix-path` from where it lives.
+  The check reads the error's `code` rather than its class, because `vocab-undeclared` is a
+  `RegistryError` and `@aburi/core` does not depend on `@aburi/plugin-registry`.
+
+  A plugin-wide bug carrying none of those codes now presents as one failure per file rather than
+  one crash. That is the intended shape rather than a regression — every file named, the messages
+  identical, the count the whole workspace — though it is a weaker diagnostic than a code that says
+  outright what is wrong.
+
+  `ScanResult.extractionFailures[].code` carries the thrown error's own code where it had one, so a
+  consumer can separate "this source is something the plugins cannot express" from "a plugin
+  crashed" without matching on prose.
+
+  ## `aburi scan` exits 3 when a file was dropped this way
+
+  Without this the change would be a loudness regression: a guard firing would go from "exit 1, no
+  output" to "exit 0, output written, a line on stderr". `cli-spec.md` §5.4 already assigns `3` to
+  a plugin error for `scan`, and a reviewer now gets both the partial IR _and_ a non-zero code,
+  where a thrown guard previously gave them neither.
+
+  The scope is exactly `extractionFailures`. Over-size, unroutable and timed-out files keep exiting
+  `0` — whether they should gate, and behind what threshold, is a separate open question.
+
+  `ScanReport` gains `extractionFailures`, and the stderr block names the count on its own line so
+  a reader handed a non-zero status can tell which of the counts earned it.
+
+  ## Contracts restated rather than changed
+
+  `effect-plugin.md` EP3a and the `plugin-input` guards said a contract violation "fails the scan".
+  It now fails the _file_. EP3a's reason for refusing to degrade — that a silently unclassified
+  call turns a parser bug into a quietly under-populated IR — is untouched by this: a withdrawn
+  file is counted, named, quoted back with the guard's own message, and reflected in the exit code.
+  Silence was the objection, and there is none here.
+
+  `SkippedFile.reason` widens by one member, which is breaking for an exhaustive `switch` over it.
+
+  ## Two things this makes visible rather than fixes
+
+  A withdrawn file leaves no trace **inside** the IR. `skipped` and `extractionFailures` are
+  siblings of `ir`, not part of it, so `out/aburi.ir.json` records only that `parsedFiles` is below
+  `totalFiles` — the same gap an over-size file leaves. A `diff` against a healthy baseline
+  therefore reports the withdrawn file's Symbols as `removed`, and `--fail-on removed` trips with
+  the wrong explanation. Before this change there was no IR to be misled by; now there is a
+  complete-looking partial one, and the exit code is the only signal, which does not travel with
+  the artifact. The other withdrawal reasons have the same hole and have had it all along.
+  Tracked separately.
+
+  `export const { GET, POST } = handlers` — an ordinary Auth.js route file — is a reachable trigger,
+  so a repository containing one now exits 3 on every scan where it previously exited 1. The gate is
+  reporting a real loss rather than causing one, and the remedy is the id-grammar bug behind it
+  rather than this boundary.
+
+- fc8f3c9: Implement `config.parseTimeoutMs`, which the schema had documented and nothing read
+
+  `parseTimeoutMs` appeared only in `aburi.config.v1.json` and the type generated from it.
+  Setting it changed nothing, so the one lever a user had against a file that would not finish
+  did not exist.
+
+  It is now a per-file budget over parse + extract + walk, per lang-plugin.md §7.1.2, defaulting
+  to the schema's 5000 ms and clamped up to its 100 ms minimum. The budget is **cooperative**,
+  for the same reason the classify budget is (effect-plugin.md §5.1.1): `extractSymbols` and
+  `walkBody` are synchronous plugin calls, and nothing can interrupt one that has started. It is
+  read where control is back in the pipeline — after `parseFile`, after `extractSymbols`, and
+  before each candidate's walk — so what it guarantees is that an over-budget file is handed no
+  further work. A file costs at most its budget plus one stage, and a single enormous candidate
+  can still overrun by however long that candidate takes.
+
+  An over-budget file contributes nothing to the IR: no Symbols, no import edges. Keeping
+  whichever Symbols it finished first would make the Document depend on how fast the machine was
+  that day, so the outcome is binary per file. Its **parse errors are still reported**, because
+  they are diagnostic rather than IR and because backtracking over malformed input is a common
+  reason for a slow parse — a run that swallowed them would send the reader to raise the budget
+  when the fix is the syntax.
+
+  Such a file lands in `ScanResult.skipped` under a new `reason: "parse-timeout"` and again on
+  `ScanResult.parseTimeouts` with the budget and the elapsed beside it, is left out of
+  `stats.parsedFiles` while still counting toward `stats.totalFiles`, and warns in the shape
+  lang-plugin.md §7.1.1 uses for the size cap:
+
+  ```
+  Skipped src/generated/client.ts: extraction reached 7413ms, exceeding parseTimeoutMs (5000ms). Override with config.parseTimeoutMs.
+  ```
+
+  Skipping on wall clock does mean the IR can differ between a fast machine and a slow one, at
+  file granularity. That is inherent in asking for a time budget rather than introduced here; a
+  run that needs reproducibility across machines sets the budget high enough that nothing reaches
+  it. The tests accordingly never assert that something finished in time — a stub plugin
+  deliberately spends the budget, so the over-budget cases can only fail in the direction of a
+  machine spending more.
+
+  `@aburi/core` also exports `startParseDeadline`, `ParseDeadline`, `ParseTimeoutEvent`,
+  `DEFAULT_PARSE_TIMEOUT_MS` and `PARSE_TIMEOUT_MIN_MS`. `SkippedFile.reason` gains a fourth
+  member, so an exhaustive `switch` over it needs a new arm. The CLI's skip summary no longer
+  says "skipped during discovery": two of the four reasons are decided after it.
+
+- 4c2d5aa: Record what the scan lost, and stop calling it removed API
+
+  A file the scan gave up on left no trace **inside** the IR. `ScanResult.skipped` and
+  `ScanResult.extractionFailures` are siblings of `ir`, and `writeCanonicalIR` serialises `ir`
+  alone, so `out/aburi.ir.json` said only that `parsedFiles` was below `totalFiles` — which is
+  equally true of an over-size file, a timed-out one and a withdrawn one, and names none of
+  them.
+
+  The next `aburi diff` then read every Symbol in that file as deliberately deleted API:
+
+  ```
+  scan @ main       → 400 symbols
+  scan @ PR branch  → src/route.ts withdrawn, 380 symbols
+  aburi diff        → 20 symbols "removed"
+  --fail-on removed → trips, reporting an API deletion nobody made
+  ```
+
+  The scan's exit code was the only signal, and an exit code does not travel with the
+  artifact. `parse-timeout` was the sharpest case: whether a file times out depends on how
+  loaded the machine was, so the same commit produced the phantom on one run and not the next.
+
+  ## `stats.skippedFiles[]`
+
+  The Document now names them: `{ path, reason }[]`, sorted by path, one entry per file the
+  scan stopped working on, whatever stopped it. The name is the one `component-detect.md`,
+  `drop-list.md` and `lang-plugin.md` have each pointed at as planned.
+
+  Class B per `ir-schema.md` §1.1 — the key is omitted when nothing was lost, so its presence
+  answers "did this run drop anything" on its own, and absence _with_ `totalFiles > parsedFiles`
+  identifies a document written before the field rather than a clean run.
+
+  **No `detail`.** The scan carries one per entry — the size, the elapsed, the message a plugin
+  refused the file with — but the `unreadable` detail is an OS error message containing the
+  **absolute** path, and a canonical document whose bytes depend on where the repository was
+  checked out is not the byte-stable artifact everything downstream assumes.
+
+  Integrity **invariant #21**: when present, `skippedFiles.length === totalFiles - parsedFiles`
+  and no path appears twice. This is a **read-side** check — inside Aburi's own scan both sides
+  reduce to the same sum of the same two counts, so it cannot fire on a document Aburi wrote.
+  What it guards is a document arriving through `readIR`, hand-edited or from another generator,
+  that `aburi diff` is about to read to decide an absent Symbol is a loss rather than a deletion.
+  Conditional on presence, because a document that predates the field cannot satisfy it and its
+  absence is itself the answer.
+
+  It does not cover a file that parsed successfully and yielded no Symbols: counted in
+  `parsedFiles`, in no array, satisfying the check, and its Symbols still reported as removed.
+  Withdrawal takes a plugin saying so, so a plugin that swallows its own error and returns an
+  empty Symbol list withdraws nothing.
+
+  `workspace.md` gains a "Files not analysed" section grouping the paths by reason, so a reader
+  holding only the Markdown sees the same thing.
+
+  ## `status: "unknown"`
+
+  `aburi diff` reads that list. A leftover Symbol whose `source.file` the _other_ document never
+  analysed is no longer `removed` (or `added`) but `unknown`, carrying `absentFrom` — the
+  document that lost the file, so `head` reads as "this may still exist" and `base` as "this may
+  not be new" — and the skip `reason`, which is what decides the reader's next move.
+
+  Three properties this rests on:
+
+  - **Classified after the five matching stages, never before.** A Symbol that moved _out of_ a
+    lost file into a file the other document has is matched by stage 3 or 4 and stays `moved` —
+    that document holds real evidence for it. Filtering the base list up front would throw the
+    answer away.
+  - **Both directions.** A file fine at head and withdrawn at base makes phantom `added` entries
+    exactly as the reverse makes phantom `removed` ones.
+  - **`dropped` leftovers keep their counters.** They produce no `symbols[]` entry on either
+    side today and nothing gates on them, so `droppedAdded` / `droppedRemoved` still count them
+    rather than gaining entries where there were none. Stated rather than silently different.
+
+  A status of its own rather than the alternatives: suppression hides a Symbol that may
+  genuinely have been deleted, and `removed` plus a flag shows an API deletion to every reader
+  that does not know to look — including `--fail-on removed`, which is the whole reason the
+  phantom mattered.
+
+  `SymbolChange` gains a member, which is breaking for an exhaustive `switch` over `status`.
+  `Summary.unknown` is optional rather than required, so a diff written before the counter stays
+  schema-valid; `--fail-on unknown` counts the entries rather than reading it, so the gate
+  answers about the document rather than about which writer produced it.
+
+  ## What a reader sees
+
+  ```
+  ⚠ head IR reports 3 file(s) it did not parse but has no stats.skippedFiles to name them, …
+  ```
+
+  when a document dropped files but predates the field. `buildDiff` cannot invent the list —
+  inferring it from `totalFiles > parsedFiles` would attach the doubt to whichever Symbols
+  happened to be missing — so it reports what it can see, and the CLI says what it could not
+  check. Both sides are examined.
+
+  `diff.md` gains an `❔ Unknown` section directly after Removed, naming the file, the side that
+  lost it and why. **Both** summary lines — the word form in `diff.md` and the glyph form on
+  stdout — grow `· ?N unknown` when there is one, and neither carries a permanent `?0` when there
+  is not. The glyph line matters most: with `stats.skippedFiles` present on both sides the stderr
+  warning cannot fire, so it is the only place a run that lost a file says so without
+  `--fail-on unknown`. `aburi diff` now renders it through
+  `@aburi/markdown-projection`'s `projectDiffSummaryLine` rather than a byte-identical private
+  copy, which is how the two came to disagree.
+
+  `workspace.md`'s header reports `parsedFiles` beside `totalFiles` whenever they differ, so a
+  document that lost files but predates `stats.skippedFiles` no longer renders byte-identically
+  to a clean scan — the projection is a pure function with no stderr to fall back on.
+
+  A file skipped by **both** scans produces no `unknown` entry: neither document holds Symbols
+  from it, so the matcher has no leftover to classify. Most skip reasons are deterministic
+  properties of the file, which makes symmetric loss the ordinary case rather than the
+  exceptional one, and the diff would otherwise look exactly like one that compared the file and
+  found it unchanged. `aburi diff` names those paths on stderr, capped. Representing them inside
+  `diff.json` is left open: the only thing to say about such a file is that neither side read it,
+  which is a statement about the run rather than about a Symbol.
+
+  ## Not closed by this
+
+  `aburi scan` still exits `0` when a plugin refuses every file in the workspace — the document
+  now says so, but nothing gates on it.
+
+  `aburi explain` and `aburi diff` still discard the incident report of the scans they run
+  themselves, so a Symbol in a file the scan refused is answered with `No matches` rather than
+  with a reason.
+
+  `dependencies[]` is projected from the call graph, so a lost file's Symbols take their edges
+  with them and `summary.depsRemoved` reports exactly the confidently-wrong deletion this change
+  fixed for `symbols[]`. `unknown` is a `symbols[]` status only.
+
+  Each of the three is tracked as its own issue.
+
+- 1e59445: Decide a file the scan cannot open the same way at both stages that open one
+
+  Two calls in a scan open files: discovery's `stat` on every candidate, and the `readFile` the
+  orchestrator does just before extraction. They disagreed about what a failure meant. The
+  orchestrator absorbed only `ENOENT` and re-threw the rest, and said why — a permission the
+  checkout got wrong or an exhausted descriptor table depends on how the machine was feeling, so
+  absorbing it lets one commit produce a different Document on a different day. Discovery
+  recorded every errno as a skipped file, so the identical `EACCES` on the identical machine
+  either ended the run or quietly shrank the IR, according to which of the two calls happened to
+  reach the file first. Nothing gated the second outcome: `minParsedFileRatio` is unset by
+  default, so the run exited `0`.
+
+  One predicate now decides both. It holds `ENOENT` and `ENOTDIR`, because the operating systems
+  disagree about what to call one event: replacing a directory with a file while a scan runs is
+  answered `ENOTDIR` on POSIX and `ENOENT` on Windows, and a predicate holding only `ENOENT` made
+  the same act fatal on one platform and benign on the other. Everything else propagates out of
+  `discoverFiles` as the operating system raised it, which is what the orchestrator already did,
+  and reaches the CLI's exit code `1`.
+
+  So `unreadable` now means one thing wherever it appears — the file stopped being one while the
+  scan ran — and `aburi scan`'s advice for it no longer sends the reader to check permissions,
+  which after this change cannot have caused it.
+
+  **`describeThrown` no longer answers a thrown empty string with an empty string.** It exists to
+  replace a plugin's silence, and `throw ""` produced exactly that, one step further in: the
+  value lands on `skipped[].detail` and `extractionFailures[].message`, where nothing separates
+  "the plugin said nothing" from "nobody recorded anything". The guarantee is now non-emptiness
+  and it is enforced on the result rather than inside the chain, since an object whose `toJSON`
+  returns `undefined` and whose `toString` returns `""` reaches the end and comes back empty too.
+  Discovery's `stat` detail and the `.gitignore` read failure both go through it, replacing an
+  unguarded `(error as Error).message` that left `detail: undefined` for a non-`Error` throw and
+  a third copy of the same chain.
+
+- 8ce6ed4: Record a filename Aburi cannot build an id from, instead of ending the scan on it
+
+  `discoverFiles` called `toPosixRelative` outside any `try`. That constructor runs the **Symbol
+  id** path grammar, which refuses `:` and `#` — both legal POSIX filename characters, and `#`
+  legal on Windows and macOS too. One such file anywhere in the tree threw a `CoreError` naming the
+  id constructor, and the whole walk died with it. Further down that same loop, a file that cannot
+  even be `stat`ed is recorded on `skipped[]` and the walk continues.
+
+  Both are "one file cannot be handled". They now reach the user the same way:
+
+  ```
+  ⚠ 1 file(s) contributed no Symbols: unroutable=1
+  ⚠ unroutable (1) — no route into the IR exists for them, decided before either was read. …
+      src/od#d.ts: its path segment "od#d.ts" contains "#", which a Symbol id is split on, so nothing declared in this file could be given an id
+  ```
+
+  **The Document names it.** `stats.skippedFiles[].path` is held to the shared path rule
+  (integrity #10), which admits both characters — only the _id_ grammar refuses them. So the file
+  is counted in `totalFiles`, excluded from `parsedFiles`, and listed by path, and everything built
+  for lost files answers honestly with no change: `aburi explain` says the IR never analysed it, and
+  `buildDiff` puts it in `notCompared[]` when both revisions lost it.
+
+  `@aburi/types` is released with it: the reason's description in `aburi.ir.v1.json` is mirrored
+  into `packages/types/src/generated/ir.ts` by codegen, and that package is published. Only
+  descriptions changed, so the bump is a patch.
+
+  **Reason: `unroutable`, generalized.** Two producers, one meaning — _no route into the Document
+  exists for this file, decided before it was read._ The router refusing an extension and the id
+  grammar refusing a name are the same answer with different causes; the skip `detail` says which,
+  and a reader with only the Document can tell from the path, since the second cause is visible in
+  it and `detail` is deliberately not projected. A distinct `unnameable` would be the better model and is not available: `reason` is a
+  closed `enum` in `aburi.ir.v1.json` and, by `$ref`, in `aburi.diff.v1.json`, so a document
+  carrying a new value is rejected by any validating reader. Recorded as a v2 shape in
+  `ir-schema.md` §15.4 with that reasoning.
+
+  **The subject is the offending path segment, not the file.** A separator in a directory name
+  disqualifies every file beneath it, and none of those filenames is at fault — `src/v#1/util.ts`
+  is fixed by renaming `v#1`, and a line blaming `util.ts` sends the reader to rename the wrong
+  thing. When the basename is the offender the two coincide.
+
+  **`toDocumentPath` beside `toPosixRelative`.** The path rule and the id rule are now separate
+  entry points, because the two answers call for different responses. A path that is not
+  workspace-relative at all is a caller handing over something from outside what the Document
+  describes, and there is nothing to record — still fatal. A path that merely cannot host an id is
+  one file to skip, and the skip entry names it using exactly the rule that will accept it.
+  `symbolIdSeparatorSite` answers the second question without an exception and names the segment
+  that holds the separator, and the id grammar enforces the rule through the same helper so the two
+  cannot drift. `toPosixRelative` now has no caller inside this workspace — the walk records rather
+  than refuses, and `makeSymbolId` runs the rule where the id is minted — but it stays as public
+  API for a caller that wants the refusal up front.
+
+  **`aburi explain` stops claiming a `#` argument that is not an id.** `cli-spec.md` §7.2 has always
+  said the id arm applies to a string that "matches the `<language>:<path>#<qname>` form"; the
+  implementation took any `#` and answered "no such Symbol id" for it. That was invisible while no
+  `#`-named file could be in a document — and it would have made the file arm unreachable for
+  exactly the files this change adds. The id arm now claims the argument only when it is one, and
+  §7.2's file arm loses its "contains no `#`" clause, which the same change falsifies.
+
+- 6d3d390: Match a decorator on the name it was imported under, and read where it came from
+
+  `framework-nestjs` compared `Decorator.name` against four literal tables. The name a decorator
+  is written with is not evidence on its own, and matching it alone got the answer wrong in both
+  directions:
+
+  ```ts
+  import { Controller as Ctrl, Get as Fetch } from "@nestjs/common";
+  @Ctrl("/b")
+  export class BController {
+    // was extKind: null — the boundary disappeared
+    @Fetch("/list") list() {} // was extKind: null
+  }
+  ```
+
+  ```ts
+  import { Controller } from "routing-controllers";
+  @Controller("/x")
+  export class XController {} // was framework:nestjs:controller, confidence: "high"
+  ```
+
+  The first is the reported bug: a renamed import takes the boundary off the class _and_ off
+  every route it owns, and nothing in the IR records that anything was missed. The second is the
+  same missing evidence pointing the other way — a competing library's decorator claimed as
+  NestJS, at full confidence.
+
+  `ImportEdge` already carried what was needed. `symbols` records the recoverable form
+  (`"Controller as Ctrl"`) and `source` records the module. The framework plugins could not see
+  either: their context was `ExtractionContext`, which has no imports.
+
+  ## Framework plugins now receive the file's import edges
+
+  `FrameworkPlugin.classifySymbol` takes a `FrameworkClassifyContext` — `ExtractionContext` plus
+  the file's `ImportEdge[]`, the same list `parseFile` produced. This mirrors what effect plugins
+  already get through `ClassifyContext.file.imports`.
+
+  A plugin that has no use for the edges needs no change: declaring the parameter as the supertype
+  `ExtractionContext` still satisfies the interface. `framework-express`, `framework-next` and
+  `framework-react` do no name matching against a package's vocabulary and are untouched.
+
+  ## Three tiers of evidence
+
+  | What the file's edges say about the written name | Matched against   | Confidence |
+  | ------------------------------------------------ | ----------------- | ---------- |
+  | imported from `@nestjs/*`                        | the imported name | `high`     |
+  | imported from anything else                      | the imported name | `medium`   |
+  | named on no edge                                 | the written name  | `high`     |
+
+  The middle row downgrades rather than refuses, and that is the one judgement call here. A NestJS
+  monorepo conventionally re-exports `@nestjs/common` through a tsconfig path alias (`@app/common`),
+  which is indistinguishable from a foreign npm package without reading `tsconfig.json`. Refusing
+  would take the boundary off every controller in such a project — the same loss this change exists
+  to prevent, at a larger scale. `medium` is what `ir-schema.md` §5.4 calls an identifier match,
+  which is exactly what is left when provenance is unknown.
+
+  **So a `@Controller` from a competing library still classifies as NestJS**, now at `medium`
+  rather than `high`. Closing that properly needs tsconfig path resolution, which is filed
+  separately.
+
+  The last row is the status quo, and is what a decorator reached through a namespace import
+  (`import * as nest from "@nestjs/common"` → `@nest.Controller()`) falls into: the language plugin
+  hands over the leaf identifier and `Decorator` carries no qualifier to tie it back to the
+  namespace binding. That makes it the one row not ordered by how much the file disclosed — a
+  namespace import from a _competing_ library also lands here, and is therefore trusted further
+  than the named import of the same decorator would be.
+
+  Two further shapes stay at `high` that the table above does not obviously cover, both because a
+  re-export names a symbol without binding it in local scope:
+
+  ```ts
+  import { Controller } from "routing-controllers"; // the binding the file actually uses
+  export { Controller } from "@nestjs/common"; // binds nothing; re-publishes the name
+  @Controller()
+  export class C {} // → nestjs:controller, high
+  ```
+
+  The duplicate rule prefers the NestJS edge, so a non-binding edge displaces a real one and skips
+  the middle tier. And an aliased re-export (`export { X as Y } from './z'`) reaches the plugin as
+  `"X"` alone — the language plugin composes `" as "` on imports but not on re-exports — so the name
+  the file publishes is not the name that gets indexed. Both are pinned by tests rather than left to
+  be rediscovered.
+
+  Duplicate bindings resolve NestJS-over-foreign in either order; every other duplicate (two foreign
+  edges, or two NestJS edges disagreeing on the exported name) is settled by write order, which is
+  arbitrary rather than reasoned.
+
+  Provenance is tested against the `@nestjs/` scope rather than a package list — `@nestjs/common`,
+  `@nestjs/microservices` and `@nestjs/websockets` all supply vocabulary today and the set grows.
+
+  ## What changes in the IR
+
+  A file that renames a NestJS decorator on import gains an `extKind` on the class and on each of
+  its routes, and `boundary: true` on the decorators, where it previously had none. A file that
+  takes matching vocabulary from a module outside the scope keeps its `extKind` and drops to
+  `Symbol.confidence: "medium"`.
+
+  One direction **loses** a classification. Because the match moved to the imported name, a
+  decorator whose local name only happens to spell vocabulary no longer counts as it:
+
+  ```ts
+  import { Thing as Controller } from "./thing";
+  @Controller()
+  export class C {} // was framework:nestjs:controller; now null
+  ```
+
+  That is the change working — the file states outright that `Controller` here is `Thing` — but it
+  is the one case where a Symbol drops its `extKind` and its decorator boundary flags with no source
+  change, so it lands as diff noise the same way the gains do.
+
+  The downgrade is a record rather than a signal: nothing downstream reads a Symbol's `confidence`
+  today. The diff compares it only on effects, and the Markdown projection's badge renders only on
+  effect rows, so a `medium` Symbol is visible in the IR document and nowhere else. That is why the
+  tier costs no diff churn, and equally why it cannot yet be acted on. The projection side is a
+  pre-existing gap against `ir-schema.md` §5.4 and is tracked separately.
+
+  `derivedBy` now carries the imported name (`framework:nestjs:route:Get` for a `@Fetch()` that was
+  `import { Get as Fetch }`), because it is a closed vocabulary that filters and diffs read and a
+  rename changes nothing about the route. `Decorator.name` and `.raw` keep the spelling the source
+  used, and `decoratorBoundaries` stays keyed on it — that is what the core matches against when it
+  folds the classification back onto the Symbol.
+
+  ## Supporting moves
+
+  `splitAliasedImportName` is exported from `@aburi/core`. It parses the `ImportEdge.symbols` wire
+  format, which now has two readers — the call-graph resolver and the framework plugins — so it is
+  no longer private to the resolver.
+
+  Its unaliased branch now trims, which it did not while it was private to the resolver, so
+  `"  Controller  "` resolves where it previously matched nothing.
+
+  `assertImportEdgeSource` is exported from `@aburi/plugin-registry/plugin-input`, factored out of
+  `hasMatchingImport` so a plugin that walks the edge list itself rejects an empty module specifier
+  the same way and with the same message. `assertImportBinding` joins it for the other field of the
+  same edge: a `symbols` entry with an empty half (`" as Y"`, `"X as "`) names nothing, and a
+  consumer that looked it up in a vocabulary table would miss every entry and drop the
+  classification silently — with a decorator, taking the owning class's `extKind` with it.
+
+  `Decorator.name` is now NFC-normalized alongside the other strings this boundary collapses
+  (`scan/pipeline.ts`). `ImportEdge.symbols` was already normalized, so leaving the decorator alone
+  left the two halves of the new comparison in different spellings, and an alias silently failed to
+  resolve on a file that spells its identifiers decomposed. `Decorator.raw` is untouched — it is a
+  quotation of source.
+
+  `FrameworkClassifyContext.imports` is `readonly`. The pipeline hands over the live array, not a
+  copy: it is the same instance reported as the file's imports and read by call resolution, so a
+  plugin that sorted or spliced it would rewrite the IR from inside a classifier. `framework-nestjs`
+  memoizes its name index on that array's identity, which makes the index per file rather than per
+  decorated Symbol — the difference between linear and (declarations × import entries) on a large
+  controller.
+
+- c3654c3: Stop answering "No matches" out of an IR that says it never read the file
+
+  `aburi explain` reports the incidents of a scan it runs itself. Reading an IR off disk it runs
+  no scan, so there is nothing live to report — but the document it read carries
+  `stats.skippedFiles`, and the answer ignored it:
+
+  ```
+  $ aburi scan
+  ⚠ 1 file(s) could not be parsed and were left out of the IR.
+  $ aburi explain handleRequest --ir out/aburi.ir.json
+  No matches for "handleRequest".
+  EXIT=1
+  ```
+
+  `src/route.ts` declares `handleRequest`, the IR says `src/route.ts` was never parsed, and the
+  answer asserts the Symbol does not exist. Every fact needed to say otherwise was in the file
+  that had just been read. `--ir` and `--no-rescan` exist so a CI job can question a pinned
+  artifact without re-scanning, which is exactly the path where nobody is watching a live scan's
+  stderr — so it is the path where the document has to speak for itself.
+
+  **One principle decides every case.** The answer is `unknown` (exit 3) when the document
+  positively identifies the file the question named as one it never analysed; it stays "not found"
+  (exit 1) with a qualifying line when the doubt is diffuse. The id arm reads the `<path>` segment
+  of the id, the file arm reads the argument, and the pattern arm names no file at all.
+
+  ```
+  $ aburi explain src/route.ts --ir out/aburi.ir.json
+  Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed), so it cannot say what that file declares.
+  EXIT=3
+  ```
+
+  Exit 3 already meant "this answer is not safe" — until now only because the scan this command
+  ran did not exit clean. The second route says the same thing about different evidence, and it is
+  narrower: the scan is intact, and only the question that named the withdrawn file is
+  unanswerable.
+
+  **What follows from the principle**
+
+  - **The file arm no longer requires the path on disk**, only that the document names it in
+    `stats.skippedFiles`. Requiring it locally would have dropped the motivating case — a pinned
+    artifact read in a tree that need not hold the same files — into the pattern arm.
+  - **The check runs on a miss only, so a hit is never qualified.** A hit is the document speaking
+    about a Symbol it holds, and an `over-size` file is skipped by every run of a workspace, so
+    caveating hits would caveat that workspace's every answer forever. This is also what answers
+    an id whose `<path>` segment and `symbols[].source.file` disagree, as a re-export or a
+    generated file produces: the Symbol is right there.
+  - **The id arm asks the id grammar rather than the `#` it dispatches on.** `symbolIdFile` is new
+    in `@aburi/core`, beside the grammar it runs, and returns `null` for anything `makeSymbolId`
+    would have refused — so a typo that happens to contain a skipped path names no file and gets
+    the diffuse line instead of a positive claim about coverage.
+  - **A document predating `stats.skippedFiles` gets the diffuse line in every arm.**
+    `totalFiles > parsedFiles` with no list can be counted but never tied to the file that was
+    asked about. `aburi diff` warns about the same shape per side.
+  - **The file arm's key is normalised into the space the document is in.**
+    `stats.skippedFiles[].path` and `symbols[].source.file` are NFC by schema and by invariant
+    #19; the argument is whatever the shell handed over, and a name carrying a combining mark
+    survives an archive or a rename in decomposed form. Both of the arm's lookups key on that one
+    string, so the same fix ends the older defect where a decomposed argument found none of a
+    file's Symbols and was told it had no matches.
+
+  The diffuse line is a count and a pointer at `stats.skippedFiles`, not a list. The question was
+  about one Symbol; answering it with an inventory of the run buries it.
+
+  **The library surface.** `ExplainOutcome` gains an `unknown` member whose `exitCode` is typed
+  to the gate alone, and `not-found` gains a `coverage` field carrying either the lost entries
+  themselves or, for a document that cannot name them, a count. Facts rather than prose: the
+  wording lives in the CLI wrapper, the only layer that knows it is talking to a person, and the
+  non-empty entry list is what keeps the number it prints from drifting from the list it
+  describes. The wrapper's switch is exhaustive, so a later member is a type error rather than a
+  command that exits on a code with nothing written to explain it.
+
+  **`@aburi/core`.** `symbolIdFile` is new. Invariant #21 gains a clause that does not depend on
+  `stats.skippedFiles` being present: `parsedFiles` never exceeds `totalFiles`. For a document
+  that omits the list, the subtraction is the only trace of a loss there is — a reader taking a
+  negative difference for a count reads it as "nothing was lost", which is the assertion of
+  absence the enumeration exists to prevent, arrived at from the other side. A document with that
+  shape is now refused by `readIR` instead of interpreted downstream; no Aburi scan can produce
+  one.
+
+  Verification: 28 tests in `packages/cli/test/explain-coverage.test.ts`, covering each arm on
+  both sides of the principle, plus four in `@aburi/core` for `symbolIdFile`'s accept/reject table
+  and the new invariant clause. Two exist for the miss-only rule: a Symbol whose id names a
+  skipped file while its `source.file` names another, and a listed path that still carries the
+  Symbols it was asked for. One pins that a live scan which withdrew a file benignly, and
+  therefore stayed green, still reaches the new exit 3, with a control case proving the scan was
+  green.
+
+- da20510: Open a file by the name the filesystem gave it, not the one the Document records
+
+  `toDocumentPath` normalizes a path to NFC on the way into the Document (ir-schema.md §1.2), and
+  three sites then handed that normalized string back to the operating system: the `stat` in
+  discovery, the `readFile` in the scan orchestrator, and the `file://` URI the LSP pass tells a
+  language server to open. A filesystem that stores the name it was given — NTFS, ext4 — does not
+  answer to the normalized spelling, so a file whose name was not already in NFC was reported
+  `unreadable`, with an `ENOENT` naming a path almost but not quite the one on disk.
+
+  `DiscoveredFile` now carries both: `path` for the Document and `fsPath` for whatever opens the
+  file. Only `path` reaches a Symbol id, so nothing about the artifact changes for a workspace
+  whose names are all ASCII.
+
+  **Two spellings of one name are reported instead of ending the scan.** Both normalize to one
+  Document path, so the pipeline read one file twice and minted its Symbol id twice — and
+  `assertIRIntegrity` ended the run on `[#1] duplicate Symbol id`, naming neither file. Every
+  claimant is now withdrawn and reported on `ScanResult.unrepresentableFiles`, which grew a
+  `reason` to say which of the two things happened; `aburi scan` prints a section per cause and
+  exits 3. The collision section spells each name out by codepoint, because the two print
+  identically in a terminal.
+
+  `EnrichmentInput.fileContents` becomes `ReadonlyMap<string, { content, fsPath }>` for the same
+  reason the read changed: a `file://` URI is a filesystem address. One entry rather than a second
+  map keyed the same way, so "a file that was read has a spelling on disk" holds by construction
+  instead of by agreement. A caller of `enrichWithLsp` outside the core passes `fsPath: path` for
+  any name already in NFC, which is every ASCII one.
+
+- 54881d5: Withdraw a file its language plugin refused to parse
+
+  `ParseError.recoverable` has been documented since the plugin types were written:
+
+  ```ts
+  /** false → core skips this file. */
+  recoverable: boolean;
+  ```
+
+  `lang-plugin.md` §7.1 said the same, in more detail: _"the file is skipped, excluded from
+  stats.parsedFiles, warning log"_. No non-test code in `packages/**` read the field — every
+  occurrence was a write. What actually withdrew a file was `ParseResult.tree === null`, a
+  separate signal a plugin sets independently.
+
+  So a plugin following the documented contract — return the tree you managed to build, mark
+  the error `recoverable: false` to say "do not use this file" — got its file extracted
+  normally. No error, no warning; the instruction was ignored.
+
+  `@aburi/lang-typescript` never noticed. The only `recoverable: false` it emits is paired
+  with a null tree, so the real gate fired anyway, and a plugin reasoning from the type
+  doc rather than from that coincidence got different behaviour from the one it asked for.
+
+  ## What happens instead
+
+  The two signals are read as one condition. A file is withdrawn when its parse returned no
+  tree **or** reported any error marked non-recoverable:
+
+  - no Symbols reach the IR, and `extractSymbols` / `walkBody` / `normalizeAst` are never
+    called for it;
+  - `ScanResult.skipped` gains an entry with `reason: "parse-failed"`, whose `detail` quotes
+    the refusing error's message and position. With no tree and no such error it quotes the
+    first recoverable one instead, because a withdrawn file is excluded from the CLI's
+    recoverable-error count and this line is then the only place its errors can be read;
+  - `stats.parsedFiles` excludes it while `stats.totalFiles` still counts it;
+  - the core logs a warning.
+
+  Its **parse errors are still reported** on `ScanResult.parseErrors`, for the reason a
+  timed-out file keeps its own: they are diagnostic rather than IR, and here they are the
+  entire account of why the file went. Its **import edges are kept** — a file whose contents
+  could not be used still told us truthfully what it imports, the one place this differs from
+  a file abandoned on its `parseTimeoutMs` budget, which is being withdrawn deliberately.
+
+  Reading the flag also gives a plugin something it did not have: a way to reject a file it
+  _could_ parse — a wrong-dialect source, a generated blob — without fabricating a null tree
+  to be heard.
+
+  ## The two other halves of that sentence
+
+  The doc promised three things and the code delivered one, _including for the null-tree case
+  it did implement_: a file with no tree was excluded from `parsedFiles` and otherwise
+  invisible — no `skipped` entry, no warning. Both now happen for both conditions, so
+  `ScanResult.skipped` finally answers "why is this file missing from the IR" exhaustively.
+
+  That makes the count derivable from the list, so the counter beside it is gone. On the public
+  surface the identity is now `stats.parsedFiles = stats.totalFiles - ScanResult.skipped.length`:
+  one subtraction, where before a withdrawn file was both listed and counted and would have been
+  netted out twice, reporting two files lost for one.
+
+  What the length has to mean is _at most one entry per file_, which rests on every branch that
+  records a skip ending the file's turn in the loop.
+
+  `SkippedFile.reason` widens by one member, which is breaking for an exhaustive `switch`
+  over it. `ScanReport.skipped[].reason` is narrowed from `string` to that union, so the CLI
+  report now fails to compile if a member is renamed rather than silently reporting zero.
+
+  `ParseError.recoverable` is read as exactly `false`, not as a falsy value. Plugins arrive as
+  plain JavaScript through a `PluginRef`, and a plugin that simply omits the key would otherwise
+  have every file it reported any parse error on withdrawn, silently and at exit `0`. Read
+  literally, such a plugin is left where it was before the field was read at all.
+
+  ## The CLI stopped calling a refusal recoverable
+
+  `⚠ N file(s) had recoverable parse errors.` counted every file on `ScanResult.parseErrors`,
+  which now includes files withdrawn _for an error that said it was not recoverable_. The
+  counts are split:
+
+  ```
+  ⚠ 3 file(s) had recoverable parse errors.
+  ⚠ 1 file(s) could not be parsed and were left out of the IR.
+  ```
+
+  `ScanReport.parseErrorCount` counts files whose errors the plugin called recoverable; the new
+  `ScanReport.parseFailureCount` counts the ones it refused. The split is by what the plugin
+  said rather than by what reached the IR — a file abandoned on its `parseTimeoutMs` budget is
+  counted on the first line and is not in the document, because its errors really are all
+  recoverable and they are the reason that path keeps them.
+
+  `aburi scan` stays at exit `0`. An unparseable file is a property of the source, like an
+  over-size or timed-out one; `extraction-failed` remains the only reason that gates
+  (cli-spec.md §5.4). The same row promised exit `1` on a "cascade of unrecoverable parse
+  errors", which nothing implemented and which this change contradicts outright; it now
+  describes the read failures that really do end the run.
+
+- dbdc8aa: Refuse a backslash in a filename instead of rewriting it into a path separator
+
+  `toDocumentPath` and `toPosixRelative` began by rewriting every `\` into `/`, before any
+  validation ran. A backslash is a legal POSIX filename character, so a file named
+  `weird\name.ts` was silently renamed to `weird/name.ts`: the Symbol ids built beside it named
+  a path nothing can open, and `a\b.ts` beside `a/b.ts` collapsed onto one path, which invariant
+  #1 reported as duplicate ids rather than as the filenames that produced them. The shared path
+  rule has always refused the character and has a message for it; nothing reached the check,
+  because the rewrite spent the character first.
+
+  The two entry points now normalize NFC and validate what they are given. Converting a native
+  path is the caller's job, because only the caller knows it holds one — `toRelativePosix` in
+  `workspace.ts` shows the shape, rewriting on the platform separator, which is a separator
+  exactly where a filename cannot hold one.
+
+  **Migration.** A caller passing a native path to either entry point must convert it first:
+
+  ```ts
+  import { sep } from "node:path";
+  toDocumentPath(sep === "/" ? nativePath : nativePath.split(sep).join("/"));
+  ```
+
+  Nothing in this repository needed the change: the file walk takes its paths from `glob`, which
+  returns POSIX separators on every platform.
+
+  `aburi scan` reports such a file and exits 3. It cannot be recorded on `stats.skippedFiles`,
+  because that path is held to the same rule, nor counted in `stats.totalFiles` without being
+  recorded, because integrity #21 pins the skip list's length to `totalFiles - parsedFiles`. So it
+  leaves the census the way a file no plugin claims does, and `ScanResult.unrepresentableFiles`
+  plus the stderr paragraph built from it are the run's only account of it — which is why the exit
+  code moves. `aburi explain` answers for one of these files without consulting the document, since
+  no document could hold it.
+
+  `aburi diff` names it as the fault for the side that has it, in ref mode, where it runs the
+  scans. `--base` / `--head` reads two documents and neither records the file, so a rename into
+  such a name reads as deletions there: `dependencySideView` builds its lost-file set from
+  `stats.skippedFiles`, which this file is absent from by construction. That is a limit of the
+  frozen path grammar rather than of the diff, and is recorded as a v2 shape in `ir-schema.md`
+  §15.4.
+
+- 85ade16: Give paths and qualified names one grammar, applied everywhere they are read
+
+  Four places asked overlapping questions about the same strings and answered differently, so
+  a value could pass every gate and break something that trusted it.
+
+  **One path rule.** IR integrity invariant #10 carried its own copy of the workspace-relative
+  path rule, and that copy checked only backslashes and absolute prefixes. An IR whose
+  `symbols[].source.file` read `../../../../etc/passwd.ts` — or whose `components[].roots` /
+  `workspace.managers[].roots` pointed above the workspace — produced zero violations, while
+  `readIR` uses `assertIRIntegrity` as its only validation gate. `workspace.root` anchors every
+  path in a Document, so a path that ascends past it names something the Document has no way
+  to be about. Invariant #10 now calls `posixWorkspaceRelativeViolation`, the rule the Symbol
+  id constructor calls, and the shared rule additionally rejects an empty path, a
+  drive-relative `C:a.ts`, and a `.` segment — `./src/a.ts` beside `src/a.ts` is one file with
+  two spellings, and by §3.1 that is one file with two Symbol ids that invariant #1 cannot see
+  as a duplicate.
+
+  A file path keeps the two restrictions that belong to the id rather than to the path: it
+  holds neither `:` nor `#` (the id is split on the first of each), and it is never the bare
+  `.`, which names the workspace root. `toPosixRelative` applies those too, since everything
+  it returns becomes a `source.file` and the file segment of an id.
+
+  **One qualified-name rule, applied to both places one is stored.** `makeSymbolId` dropped
+  empty segments before validating them, so `A.`, `A..B`, `.` and `::` all built ids and
+  satisfied `isSymbolId`. Separately, `Symbol.name` carries a qualified name of its own and
+  nothing checked it at all — and it, not the qname inside the id, is what `apiFingerprint`
+  and the framework classifiers hand to `lastQnameSegment`, which throws on an empty leaf.
+  Both are now covered: the constructor refuses an empty segment, and invariant #17 checks
+  `symbols[].name` alongside `symbols[].id`.
+
+  **Producers that could break the tightened rules.** Two existed, and both now report against
+  the input rather than the Document:
+
+  - Glob patterns may ascend (`packages: ['../shared/*']`), and the matches became
+    `workspace.managers[].roots` entries containing `..`. The file walk never followed them —
+    it globs under the workspace root — so those packages contributed no Symbol, and the entry
+    described a directory the scan never opened. `detectManagers` now refuses such a manifest
+    with `workspace-root-outside`, naming the tool and the root. Continuing would have produced
+    a Document silently missing packages the user declared.
+  - The config schema's `RelativePath` constrains only `minLength` and "no backslash", so a
+    `components[].roots` entry of `"../shared"` was schema-valid and copied into the IR
+    verbatim. It is now checked where the config is read, so it is reported against
+    `components[id=…].roots` in the config with the input-error exit code, instead of
+    surfacing as an integrity violation blaming the Document at the end of the scan.
+
+  Workspace and component roots are also normalized to Unicode NFC, matching
+  `symbols[].source.file`, so one directory is not spelled two ways within one Document.
+
+  `@aburi/core` newly exports `posixWorkspaceRelativeViolation`, `isQualifiedName` and the
+  `GrammarViolation` type, so a consumer building an IR can apply the same rules the integrity
+  checker will.
+
+- 14bdb6b: Separate the `LanguageId` and `PluginRef` vocabularies
+
+  `aburi.json` uses the key `languages` at two nesting levels with two different
+  vocabularies: the top-level array holds plugin refs the loader resolves as module
+  specifiers, while `components[].languages` holds `LanguageId`s constrained to
+  `^[a-z][a-z0-9]*$`. Both writers conflated them.
+
+  - `LanguagePlugin` gains a required `languageId` field. `@aburi/core` projects it into
+    `IR.workspace.languages`, which previously received `manifest.name` and therefore
+    emitted `"lang-typescript"` — a value that fails the frozen `aburi.ir.v1` schema for
+    every first-party plugin. Third-party language plugins must add the field.
+  - `LanguageId` is now a branded type constructed through `makeLanguageId` (exported from
+    `@aburi/core`), so a manifest name can no longer be assigned where a language id belongs.
+  - `aburi init` writes plugin manifest names (`lang-typescript`, `framework-nestjs`) in the
+    top-level arrays and keeps `LanguageId`s inside `components[]`. It previously wrote
+    detector ids, so the loader looked for the non-existent `@aburi/ts` package and the
+    documented `init` then `scan` quick start failed on every project.
+  - `InitReport` gains `unmappedLanguages` / `unmappedFrameworks`, and the CLI warns about
+    them. A detected language with no first-party plugin leaves `languages` empty, which is
+    otherwise invisible until the next command stops.
+  - `--with-suggestions` names the language plugin first, per `cli-spec.md` §4.6: it is a
+    hard requirement for the next `aburi scan`, where a framework plugin only widens
+    classification.
+  - `aburi scan` refuses to run when no language plugin resolves, instead of writing an IR
+    with zero Symbols and an empty `workspace.languages` at exit 0. That document fails the
+    schema's `minItems: 1`, and two of them diff to `+0 -0 ~0` — so every `--fail-on` gate
+    downstream passed regardless of what changed.
+  - New integrity invariant #18: `workspace.languages` is non-empty, every entry satisfies
+    the `LanguageId` grammar, and every `Symbol.language` appears in it. It also covers an IR
+    read off disk, which `readIR` brands without validating.
+
+### Patch Changes
+
+- 630460f: Make the effect-propagation sweep order sub-quadratic
+
+  `reverseTopoOrder` re-sorted the ready set on every dequeue and shifted off its front. Both
+  are linear in the size of that set, and the set is large in the ordinary case: most symbols
+  call nothing, so nearly every SCC is ready from the start and the set grows to the size of
+  the graph. That put the pass at `O(V² log V)` on the most common workspace shape.
+
+  Measured on out-degree-zero symbols, before and after:
+
+  | symbols | before    | after  |
+  | ------- | --------- | ------ |
+  | 5,000   | 223 ms    | 27 ms  |
+  | 10,000  | 810 ms    | 54 ms  |
+  | 20,000  | 3,923 ms  | 72 ms  |
+  | 40,000  | 14,196 ms | 148 ms |
+
+  A binary min-heap answers the same question the sort did — smallest ready index — bringing
+  the pass to `O((V + E) log V)` and leaving the emitted permutation unchanged.
+
+  `reverseTopoOrder` is now exported. The tie-break it implements is not observable through
+  `propagateEffects`, because the SCC aggregation is commutative and both `derivedFrom` and
+  the propagated entries are sorted explicitly afterwards — so pinning the permutation
+  requires calling the function directly.
+
+  `effect-propagation.md` described the pass as `O(V + E)`, which the previous implementation
+  did not meet and this one still does not: the log factor is unavoidable while the spec
+  mandates a deterministic minimum-index tie-break. The document now states the real bound.
+
+- c825c74: Normalize Unicode before ordering, so canonical output is canonical
+
+  `serializeCanonical` sorted object keys in whatever Unicode form the caller held and then
+  wrote them normalized, which broke the property the function exists to provide:
+
+  - two objects whose keys differed only in composition (`é` as one code point versus `e`
+    plus a combining acute) produced different bytes, and therefore different fingerprints,
+    for the same logical value;
+  - keys that were distinct strings but identical once normalized were both written,
+    producing JSON a parser silently collapses — an entry lost on the next read;
+  - the emitted key order did not match the emitted bytes.
+
+  Keys are now normalized first and ordered afterwards, and a post-normalization collision
+  is rejected with a `CoreError` rather than written, matching how the serializer already
+  treats other lossy coercions.
+
+  Paths are normalized where they enter the process, in `toPosixRelative`. Which Unicode
+  spelling a path arrives in depends on how the name was created — an archive, an HFS+
+  volume, a Finder rename — and it survives copying to any platform, so one source tree could
+  produce two spellings for a file and every cross-platform diff reported spurious changes.
+  Normalizing at that single point keeps `symbol.source.file`, `components[].roots` and the
+  Symbol id built from the same string spelled identically; normalizing inside the id
+  constructor alone would have left them disagreeing, which silently degrades a rename into
+  a delete-plus-add in `@aburi/diff`.
+
+  `makeSymbolId` and `trySymbolId` normalize their parts too, before validating rather than
+  after, so the ids `isSymbolId` accepts are exactly the ids the constructors can mint. That
+  also keeps the id in memory and the id on disk the same string: the integrity sort check
+  compares the in-memory form, so an un-normalized id could pass it and still land on disk
+  out of order.
+
+  `serializeCanonical`'s new refusal has its own error code, `canonical-key-collision`.
+  Reusing `non-plain-json` would have been wrong — each key is perfectly representable, and
+  it is their coexistence that is not.
+
+- b8763eb: Make Unicode normalization total across every comparison the IR makes
+
+  Ids and paths were normalized to Unicode NFC at the points where they enter the process, so
+  the string held in memory and the string written to disk are one string. Several values that
+  decide an order or an identity were not, and the missing halves were quiet.
+
+  `effects[].target` is the clearest. `propagateEffects` orders propagated entries by
+  `(id, target)`, integrity invariant #11 verifies that order against the in-memory value, and
+  `serializeCanonical` writes the normalized one — so a Document could satisfy the sort
+  invariant and land on disk violating it. The two spellings of `é` sort on opposite sides of
+  `z`, so this is an inversion, not a near-miss.
+
+  The rest are comparisons where one side is normalized and the other is not. That is worse
+  than neither being normalized, because it turns a match into a miss:
+
+  - `signature.inputs[].name` is compared against a call's head segment to decide that a
+    parameter shadows a Symbol of the same name. A miss emits an edge to an unrelated Symbol,
+    which then carries effects through propagation.
+  - `ImportEdge.namespaceBinding` / `symbols[]` / `source` decide import-scope resolution. A
+    miss puts the call in the `no-match` diagnostic bucket instead of `external` — the state
+    that sends a reviewer looking for a typo that does not exist.
+  - The `suppress` / `keep` / `dropCallees` prefixes decide whether a call is dropped. A miss
+    leaves nothing in the Document to trace it back from.
+  - `components[].publicApi` is deduped and sorted at collection and compared across revisions
+    by `@aburi/diff`, whose base side came off disk normalized. A mismatch reports a
+    `publicApiChanged` for a component nobody touched.
+
+  All of them are now normalized where they enter: the scan pipeline's plugin boundary,
+  `buildDropCFilter`, `normalizePackagePath`, and the CLI's config-component path.
+
+  **The rule now has one home.** `ir-schema.md` §1.2 states it — every string in a Document is
+  NFC, why that is load-bearing for both ordering and identity, the entry points where it is
+  established, and why it is NFC and not NFKC (compatibility folding rewrites text rather than
+  respelling it, collapsing distinct ids and misquoting source). The explanation had been
+  repeated across `canonical.ts`, `id.ts`, `workspace.ts` and their tests; those now reference
+  the section. §1 no longer says "alphabetical" and "UTF-16 code unit" in the same breath, and
+  §9.4 states the propagated-effect ordering that made `target` a sort key in the first place.
+
+  **Invariant #19** makes it checkable on a Document read off disk: `source.file`,
+  `effects[].target`, `calls[].target`, `components[].roots`, `components[].publicApi`,
+  `workspace.managers[].roots` and both `dependencies[]` endpoints. Ids and `Symbol.name` are
+  left to #17 — all three grammars are ASCII-only, so a non-NFC value fails the grammar first
+  and reporting it twice would have the reader chase one string twice. Strings the Document
+  quotes are excluded for the opposite reason: their spelling decides nothing, and normalizing
+  a quotation would misquote it.
+
+  Normalization violations now name both spellings by code point. They render identically by
+  definition, so the old message showed a string that looked correct beside the claim that it
+  was not. The Symbol id constructor's version of the same message was fixed with it.
+
+- 667f9b7: Say which files a scan lost and what to do about each, instead of a bare histogram
+
+  The stderr report named how many files contributed no Symbols and never which, let alone why:
+
+  ```
+  ⚠ 412 file(s) contributed no Symbols: parse-timeout=412
+  ```
+
+  `@aburi/core` writes a `detail` on every entry it produces — the size against the cap, the parse
+  error that refused the file, the `readFile` errno, the message a plugin threw — and
+  `summariseSkipped` took `readonly { reason: string }[]`, so the path and the detail were dropped
+  structurally before the line was built. The same run now reads:
+
+  ```
+  ⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
+  ⚠ over-size (3) — larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.
+      vendor/bundle.js: 2100000 > 1048576
+      vendor/legacy.js: 1400000 > 1048576
+      public/data.js: 1100000 > 1048576
+  ⚠ parse-failed (1) — the language plugin refused the source. Deterministic: fix the file, or the plugin.
+      src/broken.ts: parse reported a non-recoverable error at 12:4 — unterminated string
+  ⚠ extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.
+      src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
+  ```
+
+  **The listing is the only account there is, for half the reasons.** `over-size`, `unroutable`,
+  and an `unreadable` raised during discovery are decided before extraction and are not logged at
+  all; the other three log per file through the run's `Logger`, which `ABURI_LOG_LEVEL=error`
+  silences and which never reaches a caller who injected its own streams. Turning down log noise in
+  CI used to remove the only record of which files were lost — and for a file withdrawn by its
+  parse, the skip detail is the only account of the error that refused it, since counting that
+  error among the recoverable ones would call it something the plugin did not.
+
+  **One line per reason, because they want different answers.** `over-size` points at
+  `maxFileSizeBytes`, `parse-timeout` at `parseTimeoutMs` and a re-run, `unreadable` at permissions
+  or a tree that was changing under the scan, `unroutable` at a bug in the plugin set, and the two
+  extraction reasons at the source and at the plugin. The re-run / fix-something split is the one
+  `SkippedFile.reason` already draws in the IR schema, rather than a second vocabulary. The advice
+  and the order both come from one `Record` over the reason union, so a reason added to the schema
+  stops the build instead of printing a group with nothing to say — or, had the order been a list,
+  compiling and quietly leaving that reason's files out of a report whose census still counted
+  them.
+
+  **Ten files per reason, not ten across the listing.** One shared budget belongs to whichever
+  reason lost the most files, and that is not the reason a reader most needs named: a hundred
+  over-size files would push the one file a plugin threw on — the only reason that moves the exit
+  code to `3` — inside `…and N more`, leaving a non-zero status with nothing on screen to account
+  for it.
+
+  **`extraction-failed` is listed by that rule rather than by one of its own.** It had a separate
+  clause with its own listing, which meant its files were named twice: the scan writes the thrown
+  message to both `skipped[].detail` and `extractionFailures[].message` at a single site.
+  `ScanReport.extractionFailures` is unchanged — it still carries the error's `code`, still decides
+  the exit code, and is still what the `diff` fault clause counts.
+
+  **Reasons are reported in a fixed order** — `over-size`, `unreadable`, `unroutable`,
+  `parse-failed`, `parse-timeout`, `extraction-failed`, the order the schema's `reason` enum
+  declares — in the census line and in the groups alike. Insertion order is scan order, so the census
+  used to list its reasons in an order that depended on where in the workspace the losses happened
+  to sit.
+
+  **In `@aburi/core`, a timed-out file's detail now names the numbers.** It read
+  `extraction exceeded parseTimeoutMs`, a restatement of the reason, while the elapsed and the
+  budget — the pair that decides whether to raise the budget or go and look at the file — sat only
+  in the log line beside it. A machine-dependent number is safe there because `detail` is never
+  projected into the Document; `stats.skippedFiles[]` still carries `path` and `reason` only, which
+  is what keeps two checkouts of one commit byte-identical.
+
+- Updated dependencies [f73eb46]
+- Updated dependencies [4c2d5aa]
+- Updated dependencies [8ce6ed4]
+- Updated dependencies [6d3d390]
+- Updated dependencies [cafd4b8]
+- Updated dependencies [54881d5]
+- Updated dependencies [37715cd]
+- Updated dependencies [14bdb6b]
+  - @aburi/types@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
