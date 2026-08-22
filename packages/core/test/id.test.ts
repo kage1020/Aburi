@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  backslashSite,
   CoreError,
   DEFAULT_EXPORT_QNAME,
   isComponentId,
@@ -222,12 +223,18 @@ describe("qualified-name segment grammar", () => {
 })
 
 describe("toPosixRelative", () => {
-  it("normalizes backslashes into forward slashes", () => {
-    expect(toPosixRelative("src\\a\\b.ts")).toBe("src/a/b.ts")
+  it("refuses a backslash instead of reading it as a separator", () => {
+    // A backslash is a legal POSIX filename character, so rewriting it renames the file: the id
+    // built from the result names a path nothing can open, and `a\b.ts` beside `a/b.ts`
+    // becomes one path with two files claiming its Symbol ids. Converting a native path is the
+    // caller's job, where the platform separator is what makes the conversion unambiguous.
+    expect(() => toPosixRelative("src/weird\\name.ts")).toThrowError(
+      expect.objectContaining({ code: "non-posix-path" }),
+    )
   })
 
-  it("rejects absolute paths even after normalization", () => {
-    expect(() => toPosixRelative("C:\\Users\\foo\\a.ts")).toThrowError(
+  it("rejects absolute paths", () => {
+    expect(() => toPosixRelative("C:/Users/foo/a.ts")).toThrowError(
       expect.objectContaining({ code: "non-posix-path" }),
     )
   })
@@ -245,7 +252,7 @@ describe("toPosixRelative", () => {
   })
 })
 
-describe("toDocumentPath and symbolIdSeparatorsIn", () => {
+describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
   it("admits the two characters the id rule refuses", () => {
     // The Document records paths the id grammar would not accept — `stats.skippedFiles[].path`
     // is one, and it is how a file no Symbol can name is still named. Integrity #10 holds it to
@@ -278,8 +285,59 @@ describe("toDocumentPath and symbolIdSeparatorsIn", () => {
   })
 
   it("normalizes the same way, so a skip entry and a Symbol id spell one path", () => {
-    expect(toDocumentPath("src\\a\\b.ts")).toBe("src/a/b.ts")
     expect(toDocumentPath("src/cafe\u0301.ts")).toBe("src/caf\u00e9.ts")
+    expect(toPosixRelative("src/cafe\u0301.ts")).toBe("src/caf\u00e9.ts")
+  })
+
+  it("refuses a backslash rather than rewriting it into a separator", () => {
+    // The clause was always in the shared rule and nothing ever reached it: the normalizer
+    // spent the character before the rule ran, so the refusal could not fire.
+    expect(() => toDocumentPath("src/weird\\name.ts")).toThrowError(
+      expect.objectContaining({ code: "non-posix-path" }),
+    )
+    expect(() => toDocumentPath("src/weird\\name.ts")).toThrowError(/backslash/)
+  })
+
+  it("keeps two files that differ only by a backslash apart", () => {
+    // Rewritten, `a\b.ts` and `a/b.ts` are one path — two files claiming one set of Symbol
+    // ids, which invariant #1 reports as duplicate ids rather than as the names behind them.
+    expect(() => toDocumentPath("a\\b.ts")).toThrowError()
+    expect(toDocumentPath("a/b.ts")).toBe("a/b.ts")
+  })
+
+  it("refuses a native Windows path rather than converting it", () => {
+    // Converting is the caller's job, because only the caller knows it holds a native path.
+    // `workspace.ts` does it the way that is unambiguous: on the platform separator, which is
+    // a separator exactly where a filename cannot hold one.
+    expect(() => toDocumentPath("C:\\Users\\foo\\a.ts")).toThrowError(/backslash/)
+  })
+
+  it("names the segment a backslash sits in, and the prefix that locates it", () => {
+    // Per segment for the same reason the id separators are: a backslash in a directory name
+    // disqualifies every file beneath it, and each of those filenames is innocent.
+    expect(backslashSite("src/a.ts")).toBeNull()
+    expect(backslashSite("src/weird\\name.ts")).toEqual({
+      segment: "weird\\name.ts",
+      prefix: "src/weird\\name.ts",
+    })
+    expect(backslashSite("src/v\\1/util.ts")).toEqual({ segment: "v\\1", prefix: "src/v\\1" })
+    // The *first*, and the prefix stops there: two directories may share a segment name, so
+    // the bare segment says what to rename without saying which one.
+    expect(backslashSite("a\\1/b\\2/c.ts")).toEqual({ segment: "a\\1", prefix: "a\\1" })
+    expect(backslashSite("x/a\\1/y.ts")?.prefix).toBe("x/a\\1")
+  })
+
+  it("answers exactly what the shared rule refuses on that clause", () => {
+    // One source, so discovery cannot report a file the rule would accept, nor stay quiet about
+    // one it refuses — the arrangement `symbolIdSeparatorSite` has with the id grammar.
+    for (const raw of ["src/weird\\name.ts", "C:\\Users\\a.ts", "a\\1/b.ts"]) {
+      expect(backslashSite(raw), raw).not.toBeNull()
+      expect(() => toDocumentPath(raw), raw).toThrowError(/backslash/)
+    }
+    for (const raw of ["src/a.ts", "src/a:b.ts", "src/a#b.ts", "."]) {
+      expect(backslashSite(raw), raw).toBeNull()
+      expect(() => toDocumentPath(raw), raw).not.toThrowError(/backslash/)
+    }
   })
 
   it("names the segment that holds them, and which, in id order", () => {

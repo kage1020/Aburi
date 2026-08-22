@@ -89,14 +89,25 @@ files never looks green. Files that contributed no Symbols are grouped by why: e
 gets a line saying what to do about it (`over-size` points at `maxFileSizeBytes`,
 `parse-timeout` at `parseTimeoutMs` and a re-run, and so on) and then its files with the
 detail the scan recorded, capped at ten per reason. Losing files leaves the exit code at `0`:
-they describe the source, not the run. Two things move it to `3` — a file a plugin **threw** on,
-and a scan that lost too much of the workspace to be believed:
+they describe the source, not the run. Three things move it to `3` — a file a plugin **threw** on,
+a scan that lost too much of the workspace to be believed, and a file the IR has no way to name:
 
 A scan that parsed **no** file exits `3`, whether it discovered nothing (an `ignore` glob that ate
 the tree, a `components[].roots` that matches nothing, a plugin set that claims no extension here)
 or withdrew everything it found. Whatever `--format` asked for is still written. Losing *some*
 files stays at `0` unless the workspace sets `minParsedFileRatio` in `aburi.json`, which gates
 below a given share of discovered files parsed and counts every skip reason.
+
+A source file whose **name contains a backslash** exits `3` too, and is reported on its own. An
+IR path separates with `/` alone, so such a name cannot be written down there at all — not even
+as a skipped file, which is a path plus a reason. The file is left out of the counts as well as
+out of the IR, so the stderr paragraph is the run's only record of it: one line per name that has
+to change, uncapped, because nothing else holds a copy. Renaming is the fix. `ignore` can leave
+one out instead, but the backslash has to be written **twice** in the pattern — a glob spends a
+single one as an escape, so the name as printed does not match itself.
+
+`aburi explain` answers for such a file directly, with exit `3` and a line saying no IR can name
+it, rather than reporting no match against a document that could never have held it.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.

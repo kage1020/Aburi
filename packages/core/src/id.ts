@@ -250,9 +250,14 @@ export function isDefaultExportQname(qname: string): boolean {
 }
 
 /**
- * Normalize a filesystem path into the POSIX, workspace-relative form the Document holds paths
- * in. This is the file walk's entry point (ir-schema.md §1.2): what it returns becomes a
- * `symbols[].source.file`, or a `stats.skippedFiles[].path` for a file the walk gave up on.
+ * Validate a path that is already POSIX-separated, and normalize it to NFC. This is the file
+ * walk's entry point (ir-schema.md §1.2): what it returns becomes a `symbols[].source.file`, or
+ * a `stats.skippedFiles[].path` for a file the walk gave up on.
+ *
+ * It does not convert separators, and a backslash reaching it is refused rather than rewritten.
+ * Whether one is a separator is not decidable from the string, so the conversion belongs to the
+ * caller that knows it holds a native path — see `normalizeToNfc` for what that cost while it
+ * happened here.
  *
  * The shared path rule only. It does **not** answer whether a Symbol from that file could be
  * given an id: `:` and `#` are legal in a POSIX filename and legal in every path the Document
@@ -265,12 +270,14 @@ export function isDefaultExportQname(qname: string): boolean {
  * describes, and there is nothing to record. A path that merely cannot host an id is one file
  * to skip, and the skip entry names it using exactly this rule.
  *
- * Roots take a third entry point — `toRelativePosix` in `workspace.ts` — which normalizes the
- * same way and validates nothing, because a root may legitimately be `.` or ascend out of the
- * workspace and `mergeManager` is what drops those.
+ * Roots take a third entry point — `toRelativePosix` in `workspace.ts` — which normalizes to NFC
+ * as this does and validates nothing, because a root may legitimately be `.` or ascend out of
+ * the workspace and `mergeManager` is what drops those. It is also the one that *does* convert
+ * separators, guarded on the platform's own, which is the arrangement this function's caller is
+ * expected to copy.
  */
 export function toDocumentPath(rawPath: string): string {
-  const normalized = normalizeRawPath(rawPath)
+  const normalized = normalizeToNfc(rawPath)
   const violation = posixWorkspaceRelativeViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -279,6 +286,45 @@ export function toDocumentPath(rawPath: string): string {
 }
 
 const SYMBOL_ID_SEPARATORS = [":", "#"] as const
+
+/** Where a path holds a backslash, which a Document path has no spelling for. */
+export interface BackslashSite {
+  /** The first `/`-delimited segment whose own name holds one. */
+  segment: string
+  /**
+   * `path` truncated to the end of that segment: the shortest prefix of it that already
+   * cannot be named, and therefore exactly what a rename has to change. Every path under a
+   * directory whose name holds a backslash shares one.
+   */
+  prefix: string
+}
+
+/**
+ * Where this path first holds a backslash, or `null` when it holds none.
+ *
+ * The character has no spelling in a Document path: `/` is the only separator one has, so a
+ * name holding a backslash cannot be written down without a reader taking it for a segment
+ * boundary. That makes it unlike `:` and `#`, which the id grammar refuses while the shared
+ * rule admits them — a file those disqualify is still recordable by path, and a file this
+ * disqualifies is not.
+ *
+ * Per segment for the same reason `symbolIdSeparatorSite` is: a backslash in a directory name
+ * disqualifies every file beneath it, and each of those filenames is innocent. `prefix` is
+ * what a report names, because the bare segment says what to rename but not where it is, and
+ * two directories may share a name.
+ *
+ * `posixWorkspaceRelativeViolation` reads it as the predicate and discovery reads the prefix,
+ * so a file discovery reports and a path the rule refuses are one set by construction.
+ */
+export function backslashSite(path: string): BackslashSite | null {
+  const segments = path.split("/")
+  for (const [index, segment] of segments.entries()) {
+    if (segment.includes("\\")) {
+      return { segment, prefix: segments.slice(0, index + 1).join("/") }
+    }
+  }
+  return null
+}
 
 /** Where a path holds an id separator, and which ones. */
 export interface SymbolIdSeparatorSite {
@@ -319,20 +365,28 @@ export function symbolIdSeparatorSite(path: string): SymbolIdSeparatorSite | nul
 }
 
 /**
- * NFC as well as separator normalization: the two entry points below share it, and the id built
- * from a path is spelled by the same string the Document records it as.
+ * NFC, and nothing else: `toDocumentPath` above and `toPosixRelative` below share it, so the id
+ * built from a path is spelled by the same string the Document records it as.
  *
- * Shared by the two entry points rather than one composed out of the other, so each applies its
- * own rule and reports it with its own subject. Layered, a path that breaks the shared rule
+ * It used to rewrite `\` into `/` first, on the theory that a caller might be holding a native
+ * path. That cost the shared rule its backslash clause — the check ran on a string the character
+ * had already been spent in — and silently renamed any file whose name legitimately held one.
+ * Converting a native path is the caller's job because only the caller knows it has one;
+ * `toRelativePosix` in `workspace.ts` shows the shape, rewriting on the platform separator,
+ * which is a separator exactly where a filename cannot hold one.
+ *
+ * Shared by the two rather than one composed out of the other, so each applies its own rule and
+ * reports it with its own subject. Layered, a path that breaks the shared rule
  * would be described by whichever function ran first, and a caller assembling a Symbol id would
  * be told about a "path".
  */
-function normalizeRawPath(rawPath: string): string {
-  return rawPath.replace(/\\/g, "/").normalize("NFC")
+function normalizeToNfc(rawPath: string): string {
+  return rawPath.normalize("NFC")
 }
 
 /**
- * Normalize a filesystem path into the POSIX, workspace-relative form Symbol.id requires.
+ * Validate a path that is already POSIX-separated against the form `Symbol.id` requires, and
+ * normalize it to NFC. Like `toDocumentPath`, it converts no separators.
  *
  * The shared path rule plus the id rule, where `toDocumentPath` applies the shared rule alone:
  * what this returns can be the file segment of a Symbol id, where what that returns can only be
@@ -348,7 +402,7 @@ function normalizeRawPath(rawPath: string): string {
  * was building, and the more useful of the two subjects to be told about.
  */
 export function toPosixRelative(rawPath: string): string {
-  const normalized = normalizeRawPath(rawPath)
+  const normalized = normalizeToNfc(rawPath)
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -484,10 +538,12 @@ export function posixWorkspaceRelativeViolation(
   if (path.length === 0) {
     return { code: "non-posix-path", message: `${subject} is empty`, value: path }
   }
-  if (path.includes("\\")) {
+  // Two producers, and the message has to hold for both: a caller that handed over a native
+  // path without converting it, and a file whose name legitimately contains the character.
+  if (backslashSite(path) !== null) {
     return {
       code: "non-posix-path",
-      message: `${subject} "${path}" contains a backslash; only POSIX forward slashes are allowed`,
+      message: `${subject} "${path}" contains a backslash; "/" is the only separator a Document path has, so a native path must be converted before it reaches this rule, and a name holding one cannot be written here at all`,
       value: path,
     }
   }

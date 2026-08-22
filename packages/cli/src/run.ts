@@ -152,8 +152,15 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               },
             },
           })
+          // `totalFiles` excludes the files no Document path can name, by design (§5.8), so on
+          // its own this line moves in the flattering direction: a workspace of 200 with 15
+          // unnameable ones reads `185 files` and looks whole. The other two gate reasons leave
+          // their mark in these numbers; this one has to be added back or the summary
+          // contradicts the exit code beside it.
+          const unnameable = report.unrepresentableFiles.length
           stdout.write(
-            `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files\n`,
+            `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files` +
+              `${unnameable === 0 ? "" : ` · ${unnameable} unnameable`}\n`,
           )
           stdout.write(`${report.callResolutionLine}\n`)
           if (report.irPath !== null) stdout.write(`→ ${report.irPath}\n`)
@@ -273,6 +280,13 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               if (outcome.coverage !== null) {
                 stderr.write(`${coverageLine(outcome.coverage)}\n`)
               }
+              break
+            case "unnameable":
+              // Not `No matches`, for the reason `unknown` is not: the absence is the format's
+              // and not the workspace's, and no rescan or re-ask changes it.
+              stderr.write(
+                `Cannot answer "${argument}": no IR can name this file. "${outcome.unnameablePrefix}" holds a backslash, and "/" is the only separator a Document path has, so nothing Aburi writes can refer to it. Rename it.\n`,
+              )
               break
             case "unknown": {
               // Not a match failure, so it does not start with `No matches`: the document

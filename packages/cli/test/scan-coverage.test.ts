@@ -278,6 +278,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       configSource: null,
       workspaceRoot: "/repo",
       coverageFault: null,
+      unrepresentableFiles: [],
       exitCode: EXIT.SUCCESS,
       ...overrides,
     }
@@ -312,6 +313,89 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       "⚠ 1200 file(s) discovered, 0 parsed — 1200 as parse-failed. The IR is empty and will diff clean against any other empty IR.",
     )
     expect(lines[1]).toContain("1200 file(s) contributed no Symbols")
+  })
+
+  it("names what has to be renamed, once, however many files sit under it", () => {
+    // No fixture needed and none possible on Windows: the report is assembled here, so what a
+    // reader is told about a file the artifact cannot hold is pinned on every platform.
+    //
+    // The directory, not the files. A backslash in a directory name disqualifies every file
+    // beneath it and each of those filenames is innocent, so a line blaming `util.stub` sends
+    // the reader to rename the wrong thing — and two lines saying the same rename twice is a
+    // list of the damage rather than a list of the work.
+    const lines = linesFrom(
+      reportWith({
+        totalFiles: 3,
+        parsedFiles: 3,
+        unrepresentableFiles: [
+          { fsPath: "src/v\\1/other.stub", unnameablePrefix: "src/v\\1" },
+          { fsPath: "src/v\\1/util.stub", unnameablePrefix: "src/v\\1" },
+          { fsPath: "odd\\name.stub", unnameablePrefix: "odd\\name.stub" },
+        ],
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines[0]).toContain("3 file(s) were left out of the IR and out of its counts")
+    expect(lines[0]).toContain("under 2 name(s) with no spelling here")
+    // A file whose own basename offends is itself the rename, so it is not described as a
+    // directory with files under it.
+    expect(lines[1]).toBe("    odd\\name.stub")
+    expect(lines[2]).toBe("    src/v\\1 — a directory, and the 2 file(s) under it")
+    expect(lines).toHaveLength(3)
+  })
+
+  it("puts the one record nothing else holds above the census that is recoverable", () => {
+    // The sink these go through has its failure deliberately swallowed, and the census under it
+    // can run to six reasons of eleven lines. Last is the wrong place for the only account of a
+    // file the artifact does not mention.
+    const lines = linesFrom(
+      reportWith({
+        totalFiles: 1,
+        parsedFiles: 0,
+        skipped: [{ path: "src/a.ts", reason: "over-size" as const, detail: "big" }],
+        unrepresentableFiles: [{ fsPath: "odd\\name.ts", unnameablePrefix: "odd\\name.ts" }],
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    const unnameableAt = lines.findIndex((l) => l.includes("out of its counts"))
+    const censusAt = lines.findIndex((l) => l.includes("contributed no Symbols"))
+    expect(unnameableAt).toBeGreaterThanOrEqual(0)
+    expect(censusAt).toBeGreaterThan(unnameableAt)
+  })
+
+  it("tells the reader the ignore spelling that actually matches", () => {
+    // Measured: picomatch spends a lone backslash as an escape, so `src/v\1/**` does not match
+    // `src/v\1/util.ts` while `src/v\\1/**` does. Advice naming the printed spelling would send
+    // a reader round the loop to an identical exit 3, with nothing on screen to say why.
+    const lines = linesFrom(
+      reportWith({
+        unrepresentableFiles: [{ fsPath: "odd\\name.stub", unnameablePrefix: "odd\\name.stub" }],
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines[0]).toContain("write its backslash twice")
+    expect(lines[0]).toContain("does not match itself")
+  })
+
+  it("does not cap the list, because nothing else holds a copy of it", () => {
+    // Every other listing here is capped at ten with a `…and N more`, and can be: the files are
+    // in `stats.skippedFiles[]`. These are in no artifact at all, so a tail would be the tool
+    // declining to say the one thing only it knows. Grouping is what keeps the length sane.
+    const lines = linesFrom(
+      reportWith({
+        unrepresentableFiles: Array.from({ length: 12 }, (_, i) => ({
+          fsPath: `f${i}\\x.stub`,
+          unnameablePrefix: `f${i}\\x.stub`,
+        })),
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines).toHaveLength(13)
+    expect(lines.join("\n")).not.toContain("more")
   })
 
   it("never prints a percentage as being below itself", () => {
@@ -463,5 +547,137 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(code).toBe(EXIT.GATE)
     expect(stderr.text()).toContain("1 file(s) discovered, 0 parsed")
+  })
+})
+
+// Windows has no filename that holds a backslash — the character is its path separator — so the
+// fixture can only exist on POSIX. `@aburi/core`'s own suite pins the classification on every
+// platform; these pin what the CLI does with a scan that found one.
+const onPosix = it.skipIf(process.platform === "win32")
+
+describe("aburi scan — a file no Document path can name", () => {
+  onPosix("gates on it, because nothing else in the run is going to mention it", async () => {
+    const warnings: string[] = []
+    const report = await scanIn(["ok.stub", "weird\\name.stub"], warnings)
+
+    expect(report.unrepresentableFiles).toEqual([
+      { fsPath: "weird\\name.stub", unnameablePrefix: "weird\\name.stub" },
+    ])
+    // Neither counted nor skipped, and that pairing is forced: the path a skip entry needs is
+    // one the shared rule refuses, and a file counted while absent from the skip list breaks
+    // integrity #21. The artifact is therefore silent about it, which is why the code is not.
+    expect(report.totalFiles).toBe(1)
+    expect(report.parsedFiles).toBe(1)
+    expect(report.skipped).toEqual([])
+    expect(report.coverageFault).toBeNull()
+    expect(report.exitCode).toBe(EXIT.GATE)
+  })
+
+  onPosix("adds them back to the stdout summary, which counts what it could name", async () => {
+    // `totalFiles` excludes them by design, so the summary alone reads as a whole workspace
+    // beside an exit code saying otherwise.
+    await populate(scratch, ["ok.stub", "weird\\name.stub"])
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out")],
+      cwd: scratch,
+      stdout,
+      stderr,
+    })
+
+    expect(code).toBe(EXIT.GATE)
+    expect(stdout.text()).toContain("1 files · 1 unnameable")
+  })
+
+  onPosix("still writes the IR, so a reader gets the artifact and the code", async () => {
+    // And the IR passes `assertIRIntegrity` on the way out, which is the census this file is
+    // kept out of in order not to break.
+    const report = await scanIn(["ok.stub", "weird\\name.stub"])
+    expect(report.irPath).not.toBeNull()
+  })
+
+  onPosix("names the file and the segment at fault", async () => {
+    const warnings: string[] = []
+    await scanIn(["ok.stub", "v\\1-a.stub", "v\\1-b.stub"], warnings)
+    const text = warnings.join("\n")
+    expect(text).toContain("2 file(s) were left out of the IR and out of its counts")
+    expect(text).toContain("    v\\1-a.stub")
+    expect(text).toContain("    v\\1-b.stub")
+  })
+
+  onPosix(
+    "yields to a plugin exception, which says the run is broken rather than partial",
+    async () => {
+      // Both on one side. The exception is the reason that says something in the run is broken,
+      // and it is the older of the two claims on this line, so the arm for this one sits behind
+      // it rather than in front.
+      await populate(scratch, ["ok.stub"])
+      const warnings: string[] = []
+      await runDiff({
+        cwd: scratch,
+        refSpec: "main..HEAD",
+        git: gitWith(["ok.stub", "boom.stub", "weird\\name.stub"]),
+        outputDir: resolve(scratch, "out"),
+        warn: (m) => warnings.push(m),
+      })
+      expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
+      expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
+    },
+  )
+
+  onPosix("yields to a coverage fault it did not cause", async () => {
+    // An unnameable file leaves `totalFiles`, so it cannot push a scan below a floor or leave
+    // files unparsed — leaving the denominator only raises the ratio. Where such a fault holds
+    // it is its own cause, and naming this instead would send the reader to rename a file while
+    // every file that *was* read failed to parse.
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["bad.stub", "weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    // Named second, not dropped. This is the line a reader greps out of a CI log to account
+    // for the exit code, and the cause that lost the contest is the one with no other trace.
+    expect(warnings.join("\n")).toContain(
+      "base: none of the 1 file(s) it found parsed (and 1 more have names no Document path can spell)",
+    )
+  })
+
+  onPosix("outranks the fault it caused, when it took the whole candidate set", async () => {
+    // The other side of the guard. Every candidate unnameable means `totalFiles` is zero and
+    // the scan reports "discovered no file to read" — true, and the consequence rather than the
+    // cause. A reader sent to check `ignore` and `components[].roots` would find nothing wrong
+    // with either.
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(warnings.join("\n")).toContain("base: 1 file(s) have names no Document path can spell")
+    expect(warnings.join("\n")).not.toContain("base: it discovered no file to read")
+  })
+
+  onPosix("reddens a diff taken over it, in its own words", async () => {
+    await populate(scratch, ["ok.stub"])
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["ok.stub", "weird\\name.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+
+    expect(report.faultedScans).toEqual(["base"])
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(warnings.join("\n")).toContain("base: 1 file(s) have names no Document path can spell")
   })
 })

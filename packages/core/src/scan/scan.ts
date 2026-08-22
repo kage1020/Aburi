@@ -28,7 +28,12 @@ import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
 import { enrichWithLsp, type ServerFactory } from "../lsp"
 import { type PropagationStats, propagateEffects } from "../propagate"
-import { type DiscoveredFile, discoverFiles, type SkippedFile } from "./discover"
+import {
+  type DiscoveredFile,
+  discoverFiles,
+  type SkippedFile,
+  type UnrepresentableFile,
+} from "./discover"
 import { buildDropCFilter } from "./drop-c"
 import { runFilePipeline } from "./pipeline"
 import { buildLanguageRouter } from "./route"
@@ -108,6 +113,20 @@ export interface ScanResult {
    * not on `skipped` as a whole.
    */
   extractionFailures: readonly ExtractionFailure[]
+  /**
+   * One record per candidate file the Document has no way to name, in path order.
+   *
+   * These files appear nowhere else. They are not on `skipped`, because the path a skip entry
+   * would be recorded under is one the shared path rule refuses; and they are not in
+   * `stats.totalFiles`, because a file counted there and absent from `stats.skippedFiles`
+   * breaks integrity #21. The Document is silent about them by construction, which is exactly
+   * why the list is here: it is the run's only account of a file the format cannot hold.
+   *
+   * Non-empty means the workspace holds source the IR cannot describe, which is why the CLI
+   * gates on it the way it gates on `extractionFailures` — a scan that quietly dropped a file
+   * would otherwise report a clean run over an incomplete workspace.
+   */
+  unrepresentableFiles: readonly UnrepresentableFile[]
 }
 
 /**
@@ -449,6 +468,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     parseTimeouts,
     unresolvedCalls: callGraph.diagnostics,
     extractionFailures,
+    unrepresentableFiles: discovered.unrepresentableFiles,
   }
 }
 

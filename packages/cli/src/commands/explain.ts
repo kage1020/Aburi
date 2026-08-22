@@ -1,6 +1,6 @@
 import { access, writeFile } from "node:fs/promises"
-import { relative, resolve } from "node:path"
-import { detectWorkspaceRoot, symbolIdFile } from "@aburi/core"
+import { relative, resolve, sep } from "node:path"
+import { backslashSite, detectWorkspaceRoot, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { CliError } from "../errors"
@@ -48,6 +48,16 @@ export type ExplainOutcome =
     }
   | { kind: "ambiguous"; candidates: readonly IRSymbol[]; exitCode: ExitCode }
   | { kind: "not-found"; exitCode: ExitCode; coverage: CoverageDoubt | null }
+  /**
+   * The argument names a file no Document can hold, so no answer about it would be safe.
+   *
+   * Separate from `unknown`, which carries the `SkippedFile` the document recorded. There is no
+   * such entry here and there cannot be one: the path a skip entry would take is held to the
+   * shared rule, which refuses the character. Deciding it from the argument alone is what lets
+   * this answer hold for a document read off disk as readily as for one just scanned — neither
+   * has anything to say about the file, and for the same reason.
+   */
+  | { kind: "unnameable"; path: string; unnameablePrefix: string; exitCode: ExitCode }
   /**
    * The question named a file, and the document says that file was never analysed. Not an
    * absence: the answer is that this IR cannot have one.
@@ -182,7 +192,30 @@ async function locate(
     // archive or a rename in decomposed form. Both lookups below key on this string.
     // Not `toPosixRelative`: it throws on `..` and on absolute paths, and an argument
     // shaped like either has to fall through to the substring arm rather than error.
-    const relPath = relative(workspaceRoot, resolve(cwd, arg)).replace(/\\/g, "/").normalize("NFC")
+    //
+    // The separator conversion is conditional, the way `toRelativePosix` does it in the core.
+    // `relative` returns a native path, and only where the platform separator is a backslash
+    // is a backslash in it a separator — POSIX allows one in a filename, and rewriting it
+    // there turns the argument into a path naming a directory nobody has.
+    const native = relative(workspaceRoot, resolve(cwd, arg))
+    const relPath = (sep === "/" ? native : native.split(sep).join("/")).normalize("NFC")
+    // Before the skip list and before the disk, because neither can answer. A name holding a
+    // backslash has no spelling in a Document path, so it is in no `stats.skippedFiles[]` and
+    // never will be, and the file existing says nothing about whether the IR could describe it.
+    // Left to the two lookups below this reports `No matches` about a file that is right there,
+    // which is the silence the scan-side gate exists to prevent, one command along.
+    //
+    // Unreachable on Windows, and correctly so: the conversion above spends every backslash as
+    // a separator there, which is what one is, and no Windows filename can hold the character.
+    const unnameable = backslashSite(relPath)
+    if (unnameable !== null) {
+      return {
+        kind: "unnameable",
+        path: relPath,
+        unnameablePrefix: unnameable.prefix,
+        exitCode: EXIT.GATE,
+      }
+    }
     // The skip list is consulted before the disk probe, not after: a file the document
     // already describes needs no filesystem to answer for it, and `unreadable` is a reason
     // whose file may well refuse the probe too.

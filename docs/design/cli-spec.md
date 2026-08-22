@@ -162,7 +162,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that is simply *gone* by the time the scan reads it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
 | 2 | Config error (schema violation, resolution failure) |
-| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, or a scan whose coverage collapsed (§5.7). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
+| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
 
@@ -258,6 +258,9 @@ at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `un
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
 before extraction and are not logged at all, so the report is their only account.
 
+§5.8's paragraph sits directly under the coverage line and above this census — ahead of
+everything that is recoverable from the artifact, because it is the one section that is not.
+
 A command that runs more than one scan labels them, after the glyph, with the scan the line
 came from:
 
@@ -312,6 +315,57 @@ Neither gate withholds anything the run would otherwise have written, as neither
 plugin exception: a reviewer gets whatever `--format` asked for and a non-zero code rather than
 the artifact and a green light. `--format md` writes no IR either way, so "the IR is written" is
 a claim about what gating does not change rather than about what a gated run always produces.
+
+### 5.8 Files the Document cannot name
+
+A filename may contain a backslash on any POSIX filesystem, and a Document path may not: `/` is
+its only separator, so there is no way to write such a name down that a reader will not take for
+a directory boundary (ir-schema.md §14 invariant #10). The file is therefore not skippable — a
+skip entry is a path plus a reason, and the path is what is missing — and not countable either,
+because invariant #21 holds `stats.skippedFiles`'s length to `totalFiles - parsedFiles`.
+
+So it leaves `totalFiles` the way a file no plugin claims does, and the run says so itself:
+
+```
+⚠ 3 file(s) were left out of the IR and out of its counts, under 2 name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.
+    odd\name.ts
+    src/v\1 — a directory, and the 2 file(s) under it
+```
+
+**It exits `3`.** Every other loss leaves a trace in the artifact that a later reader can find the
+file by; this one leaves none, so the exit code and that paragraph are the whole record. A scan
+that dropped source and went green would be reporting a clean run over a workspace it did not
+describe.
+
+**One line per name that has to change, not per file, and no cap.** A backslash in a directory
+name disqualifies every file beneath it and none of those filenames is at fault, which is the
+same rule the `unroutable` detail follows for `:` and `#` — so the line names the path up to and
+including the offending segment, and the file count under it. That also makes the listing the
+length of the work rather than of the damage, which is what lets it go uncapped: every other
+listing in §5.6 caps at ten because `stats.skippedFiles[]` holds the rest, and here nothing does.
+
+**The `ignore` spelling is not the printed one.** Patterns reach picomatch, which spends a lone
+backslash as an escape:
+
+| pattern | excludes `src/v\1/util.ts` |
+|---|---|
+| `src/v\1/**` | no |
+| `src/v\\1/**` | yes |
+| `src/v?1/**` | yes |
+
+The first row is the name exactly as the paragraph above prints it, which is why the advice says
+to double the character rather than leaving the reader to infer it from one failed attempt.
+
+The check runs after the extension filter, so a `notes\1.txt` in a TypeScript workspace is
+filtered on the extension alone: it was never a candidate, and an incident that gates the exit
+code should not be raised about a file the scan was never going to read.
+
+Renaming is the only fix that makes the file *describable*. `ignore` only stops the run
+mentioning it — no setting gives the character a spelling here, because it has none rather than a
+disallowed one.
+
+`aburi explain` answers for one of these files without consulting the document, since no document
+could hold it: see §7.2.
 
 ## 6. `aburi diff`
 
@@ -416,7 +470,12 @@ comparison with a broken half is not evidence about the half that worked.
 
 It gates on the scan's exit code, not on a named incident, and the diagnostic wording is derived
 from what the scan actually reported so that a second reason arrives with the code right and the
-message still true. A second one has: a scan whose coverage collapsed (§5.7) reddens a diff the
+message still true. Two more have: a scan whose coverage collapsed (§5.7), and one that found a
+file the Document cannot name (§5.8). The second is named ahead of "discovered no file to read"
+and behind the other two faults, because an unnameable file leaves `totalFiles` — so a workspace
+whose whole candidate set is unnameable discovers nothing and that fault is this one's
+consequence, while leaving the denominator can only raise the parsed ratio and so cannot produce
+either of the others. A coverage collapse reddens a diff the
 same way a plugin exception does, and names itself — `The base scan parsed none of the 1200
 file(s) it found` — rather than falling back to "did not exit clean". A plugin exception is named
 first when both apply, because a scan that threw on every file has the coverage fault as a
@@ -542,6 +601,12 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 - **Full Symbol id** — the string contains `#` and matches the `<language>:<path>#<qname>` form → direct lookup
 - **File path** — the string contains `/` and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file. A `#` in it does not disqualify it: the id form above is checked first and only claims the argument when it *is* one, and a file whose name holds an id separator is recorded in `stats.skippedFiles` precisely because no Symbol in it could be named
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
+
+A file path whose name holds a **backslash** is answered without consulting the document at
+all, with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on
+disk says anything about it, and `No matches` would be a claim about the workspace when the
+absence is the format's. The same answer whether the run scanned or read an IR off disk, because
+it is decided from the argument.
 
 #### 7.2.1 Exact Definition of Partial Matching
 
@@ -848,6 +913,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
 | CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
+| CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |
+| CL24 | `aburi explain 'src/weird\name.ts'` where that file exists | exit 3, a line saying no IR can name it, nothing on stdout |
 
 ## 18. Design Decisions
 

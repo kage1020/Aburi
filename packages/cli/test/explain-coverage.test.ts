@@ -637,3 +637,51 @@ describe("aburi explain — what the user reads", () => {
     expect(stderr.text()).toBe('No matches for "handleRequest".\n')
   })
 })
+
+// Windows has no filename that holds a backslash — the character is its path separator — so the
+// fixture can only exist on POSIX.
+const onPosix = it.skipIf(process.platform === "win32")
+
+describe("runExplain — the path arm converts a native path the way the core does", () => {
+  onPosix("does not answer for the file the old conversion turned the argument into", async () => {
+    // The argument is a native path, and the conversion used to rewrite every backslash into a
+    // separator whatever the platform. That turns `src/weird\name.stub` — a real file — into
+    // `src/weird/name.stub`, which here is a *different* real file the document does hold a
+    // Symbol for, so the answer was another file's API with nothing saying so.
+    await put("src/weird/name.stub", "1")
+    await put("src/weird\\name.stub", "1")
+    await writeIR({
+      symbols: [makeSymbol("ts:src/weird/name.stub#neighbour", "src/weird/name.stub")],
+    })
+
+    // The forward slash is what puts the argument in this arm at all; a bare basename goes to
+    // the substring arm and never reaches the conversion.
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/weird\\name.stub",
+      noRescan: true,
+    })
+
+    // Stated positively. `not.toBe("single")` passed against the old code too — this arm
+    // returns "file", never "single" — so it pinned nothing on its own.
+    expect(outcome.kind).toBe("unnameable")
+    if (outcome.kind !== "unnameable") throw new Error("unreachable")
+    expect(outcome.unnameablePrefix).toBe("src/weird\\name.stub")
+    expect(outcome.exitCode).toBe(EXIT.GATE)
+    expect(JSON.stringify(outcome)).not.toContain("neighbour")
+  })
+
+  onPosix("says so for a name that is not on disk either, since no IR could hold it", async () => {
+    // Decided from the argument, not from the filesystem and not from the skip list: neither
+    // can answer, and both would answer `No matches` about a file the format cannot describe.
+    await writeIR({ symbols: [KEPT] })
+
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/no\\such.stub",
+      noRescan: true,
+    })
+
+    expect(outcome.kind).toBe("unnameable")
+  })
+})

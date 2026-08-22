@@ -213,6 +213,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       configSource: null,
       workspaceRoot: "/repo",
       coverageFault: null,
+      unrepresentableFiles: [],
       exitCode: EXIT.SUCCESS,
       ...overrides,
     }
