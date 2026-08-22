@@ -81,8 +81,20 @@ export interface DiscoverOptions {
 }
 
 export interface DiscoveredFile {
-  /** POSIX path relative to `workspaceRoot`. */
+  /**
+   * POSIX path relative to `workspaceRoot`, in NFC: the spelling the Document holds
+   * (ir-schema.md §1.2), and the one a Symbol id is built from.
+   */
   path: string
+  /**
+   * The same file as the filesystem spells it, relative to `workspaceRoot`.
+   *
+   * Not decoration. `path` is normalized on the way into the Document, and a filesystem that
+   * stores the name it was given — NTFS, ext4 — does not answer to the normalized one. Anything
+   * that opens the file has to use this: the read below, and the URI a language server is told
+   * to open. The two differ only for a name that was not already in NFC.
+   */
+  fsPath: string
   /** File size in bytes. */
   size: number
 }
@@ -128,7 +140,9 @@ export interface SkippedFile extends SkippedFileRecord {
  * reports it and gates the exit code on it, so the file is lost from the Document without being
  * lost from the run.
  */
-export interface UnrepresentableFile {
+export type UnrepresentableFile = UnnameableFile | CollidingFile
+
+interface UnrepresentableBase {
   /**
    * The path as the filesystem spells it. Named apart from `SkippedFile.path` because it is
    * not the same kind of value: that one is a validated, NFC Document path, and this one is
@@ -136,12 +150,36 @@ export interface UnrepresentableFile {
    * the way the filesystem does.
    */
   fsPath: string
+}
+
+/** A file whose name holds a character no Document path can spell. */
+export interface UnnameableFile extends UnrepresentableBase {
+  reason: "unspellable-name"
   /**
    * The shortest prefix of `fsPath` that already cannot be named: the path up to and including
    * the first segment whose own name holds a backslash. That is the one rename that fixes it,
    * and every file under a directory with such a name shares it.
    */
   unnameablePrefix: string
+}
+
+/**
+ * A file whose name a Document path can spell, but not apart from another file's.
+ *
+ * Two names differing only in Unicode normalization are one path once normalized, and §1.2
+ * requires the normalization: a Document that held both spellings would sort them on opposite
+ * sides of the alphabet and give one construct two Symbol ids. So the Document has exactly one
+ * name for two files, which is no name at all.
+ *
+ * Every claimant is withdrawn rather than one being kept. A rule granting the path to the
+ * NFC-spelled claimant is partial — two different decomposed spellings can normalize to one
+ * composed path with no NFC claimant among them — and it is the pair that is at fault, the same
+ * reading a backslash in a directory name gets.
+ */
+export interface CollidingFile extends UnrepresentableBase {
+  reason: "colliding-spelling"
+  /** The one Document path every claimant normalizes to. */
+  documentPath: string
 }
 
 export interface DiscoverResult {
@@ -190,6 +228,7 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
   const files: DiscoveredFile[] = []
   const skipped: SkippedFile[] = []
   const unrepresentableFiles: UnrepresentableFile[] = []
+  const claimants = new Map<string, string[]>()
 
   for (const rawPath of matches) {
     // `tinyglobby` returns `/` as the separator on every platform — it hands `fdir` a
@@ -217,7 +256,11 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // the caller contract of that constructor rather than a case this loop handles.
     const unnameable = backslashSite(rawPath)
     if (unnameable !== null) {
-      unrepresentableFiles.push({ fsPath: rawPath, unnameablePrefix: unnameable.prefix })
+      unrepresentableFiles.push({
+        fsPath: rawPath,
+        reason: "unspellable-name",
+        unnameablePrefix: unnameable.prefix,
+      })
       continue
     }
 
@@ -249,7 +292,19 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       continue
     }
 
-    const absolute = resolve(workspaceRoot, posix)
+    // Every candidate that got a Document path, whether it ends up read or skipped. Two
+    // filesystem spellings under one key is a collision, and it has to be decided over both
+    // lists: one path landing in `stats.skippedFiles[]` *and* on `symbols[].source.file` is
+    // the contradiction `buildDiff` resolves as a deletion, and two skipped ones break
+    // invariant #21 outright.
+    const claimantsByPath = claimants.get(posix)
+    if (claimantsByPath === undefined) claimants.set(posix, [rawPath])
+    else claimantsByPath.push(rawPath)
+
+    // `rawPath`, not `posix`. The normalization belongs to the Document, and a filesystem that
+    // stores the name it was given does not answer to it — the miss reads as `ENOENT`, and the
+    // file is reported unreadable when nothing about it was.
+    const absolute = resolve(workspaceRoot, rawPath)
     let size: number
     try {
       const info = await stat(absolute)
@@ -264,14 +319,51 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       continue
     }
 
-    files.push({ path: posix, size })
+    files.push({ path: posix, fsPath: rawPath, size })
   }
+
+  withdrawCollisions(claimants, files, skipped, unrepresentableFiles)
 
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   skipped.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   unrepresentableFiles.sort((a, b) => (a.fsPath < b.fsPath ? -1 : a.fsPath > b.fsPath ? 1 : 0))
 
   return { files, skipped, unrepresentableFiles }
+}
+
+/**
+ * Take every candidate whose Document path another candidate also claims out of both lists.
+ *
+ * Left in, the pair is not a degraded result but a broken run: two `DiscoveredFile`s with one
+ * path make the pipeline extract one file's content twice and mint the same Symbol id twice,
+ * which invariant #1 refuses — ending the scan on a message about ids that names neither
+ * filename. Two skipped ones break #21's "no path appears twice" the same way.
+ *
+ * They leave `totalFiles` with the rest of `unrepresentableFiles`, for the reason that list
+ * exists: the Document cannot name them, so it cannot count them either without the census
+ * claiming a file it has no entry for.
+ */
+function withdrawCollisions(
+  claimants: ReadonlyMap<string, readonly string[]>,
+  files: DiscoveredFile[],
+  skipped: SkippedFile[],
+  unrepresentableFiles: UnrepresentableFile[],
+): void {
+  const collided = new Set<string>()
+  for (const [documentPath, spellings] of claimants) {
+    if (spellings.length < 2) continue
+    collided.add(documentPath)
+    for (const fsPath of spellings) {
+      unrepresentableFiles.push({ fsPath, reason: "colliding-spelling", documentPath })
+    }
+  }
+  if (collided.size === 0) return
+  for (const list of [files, skipped]) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const entry = list[i]
+      if (entry !== undefined && collided.has(entry.path)) list.splice(i, 1)
+    }
+  }
 }
 
 function hasKnownExtension(path: string, extensions: ReadonlySet<string>): boolean {

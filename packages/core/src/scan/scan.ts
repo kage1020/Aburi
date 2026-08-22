@@ -358,6 +358,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols,
     workspaceRoot: input.workspaceRoot,
     fileContents,
+    fsPaths: new Map(discovered.files.map((file) => [file.path, file.fsPath])),
     lspConfig: input.config.lsp,
     logger,
   }
@@ -633,11 +634,19 @@ function collectLangDropPatterns(languages: readonly LanguagePlugin[]): string[]
   return patterns
 }
 
+/**
+ * `fsPath` opens it, `path` names it.
+ *
+ * The two differ whenever the filesystem stores a name that is not already in NFC, and reading
+ * by the Document's spelling misses on every filesystem that keeps what it was given. What the
+ * plugin then sees is `path`, because that is what its Symbol ids are built from and what the
+ * Document records — the filesystem spelling stops here.
+ */
 async function loadSourceFile(
   workspaceRoot: string,
   discovered: DiscoveredFile,
 ): Promise<SourceFile> {
-  const absolute = resolve(workspaceRoot, discovered.path)
+  const absolute = resolve(workspaceRoot, discovered.fsPath)
   const content = await readFile(absolute, "utf8")
   return { path: discovered.path, content }
 }

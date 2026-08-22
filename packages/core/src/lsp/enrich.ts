@@ -39,6 +39,18 @@ export interface EnrichmentInput {
   symbols: readonly IRSymbol[]
   workspaceRoot: string
   fileContents: ReadonlyMap<string, string>
+  /**
+   * Document path to the spelling the filesystem stores the file under, for the files the scan
+   * read. They differ only for a name that was not already in NFC.
+   *
+   * A `file://` URI is a filesystem address, so it takes the second. `didOpen` pushes the
+   * content, but a server is free to read the file itself — tsserver walks the project — and one
+   * told about a URI nothing resolves to answers about a document it invented, or not at all.
+   *
+   * A path absent from this map is one the caller did not read; `fileUriFor` falls back to the
+   * Document spelling, which is the same string for every path that is already NFC.
+   */
+  fsPaths: ReadonlyMap<string, string>
   lspConfig: Config["lsp"] | undefined
   logger?: Logger
   /**
@@ -171,6 +183,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       symbols: langSymbols,
       workingById,
       fileContents: input.fileContents,
+      fsPaths: input.fsPaths,
       workspaceRoot: input.workspaceRoot,
       stats,
       fallback,
@@ -198,6 +211,7 @@ interface ProcessLanguageInput {
   symbols: readonly IRSymbol[]
   workingById: Map<SymbolId, IRSymbol>
   fileContents: ReadonlyMap<string, string>
+  fsPaths: ReadonlyMap<string, string>
   workspaceRoot: string
   stats: LspStatsBuilder
   fallback: FallbackState
@@ -219,7 +233,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
     const content = input.fileContents.get(file)
     if (content === undefined) continue
 
-    const uri = fileUriFor(input.workspaceRoot, file)
+    const uri = fileUriFor(input.workspaceRoot, input.fsPaths.get(file) ?? file)
     const languageIdForOpen = languageIdForLspOpen(input.language)
     const fileSymbols = symbolsByFile.get(file) ?? []
 
@@ -544,6 +558,7 @@ function cloneSignature(
   return base
 }
 
+/** `relativePath` is a filesystem path, not a Document one — see `EnrichmentInput.fsPaths`. */
 function fileUriFor(workspaceRoot: string, relativePath: string): string {
   const absolute = normalizeAbsolute(workspaceRoot, relativePath)
   return pathToFileURL(absolute).toString()

@@ -2,7 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { type LoadedConfig, loadConfig, readConfigFile } from "@aburi/config"
 import {
+  type CollidingFile,
   CoreError,
+  describeCodePoints,
   detectComponents,
   detectManagers,
   detectWorkspaceRoot,
@@ -11,6 +13,7 @@ import {
   posixWorkspaceRelativeViolation,
   type SkippedFile,
   scan,
+  type UnnameableFile,
   type UnrepresentableFile,
   writeCanonicalIR,
 } from "@aburi/core"
@@ -649,23 +652,75 @@ function reportUnrepresentable(
   say: (line: string) => void,
   warn: WarnFn,
 ): void {
+  reportUnspellable(
+    files.filter((file) => file.reason === "unspellable-name"),
+    say,
+    warn,
+  )
+  reportColliding(
+    files.filter((file) => file.reason === "colliding-spelling"),
+    say,
+    warn,
+  )
+}
+
+/** One section per cause, because the fix differs and the two are told apart by nothing else. */
+function reportUnspellable(
+  files: readonly UnnameableFile[],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
   if (files.length === 0) return
-  const byPrefix = new Map<string, ScanReport["unrepresentableFiles"][number][]>()
-  for (const file of files) {
-    const group = byPrefix.get(file.unnameablePrefix)
-    if (group === undefined) byPrefix.set(file.unnameablePrefix, [file])
-    else group.push(file)
-  }
+  const byPrefix = groupBy(files, (file) => file.unnameablePrefix)
   say(
     `${files.length} file(s) were left out of the IR and out of its counts, under ${byPrefix.size} name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.`,
   )
-  for (const [prefix, group] of [...byPrefix].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const [prefix, group] of byPrefix) {
     warn(
       group[0]?.fsPath === prefix
         ? `    ${prefix}`
         : `    ${prefix} — a directory, and the ${group.length} file(s) under it`,
     )
   }
+}
+
+/**
+ * Two spellings of one name, which the Document has one path for and therefore no name for.
+ *
+ * Every claimant is spelled out by codepoint, and there is no way around that: the whole point
+ * of the pair is that the two names are different bytes and the same glyphs, so a terminal
+ * prints the offending line twice identically. This is the section a reader cannot act on
+ * without being told which character differs.
+ *
+ * The advice stops at renaming. `ignore` matches the filesystem's spelling, not the Document's,
+ * so the path printed as the group header is the one pattern that will *not* work — and the two
+ * that will cannot be typed from what is on screen. A wildcard is what is left.
+ */
+function reportColliding(
+  files: readonly CollidingFile[],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
+  if (files.length === 0) return
+  const byPath = groupBy(files, (file) => file.documentPath)
+  say(
+    `${files.length} file(s) were left out of the IR and out of its counts, on ${byPath.size} path(s) that two names claim at once: the Document holds every string in Unicode NFC, and these names differ only in how they are composed, so normalizing them gives one path for more than one file. Rename one of each group. ignore matches the spelling on disk rather than the one below, so the pattern that works there is a wildcard.`,
+  )
+  for (const [documentPath, group] of byPath) {
+    warn(`    ${documentPath} — claimed by ${group.length} file(s) on disk:`)
+    for (const file of group) warn(`        ${describeCodePoints(file.fsPath)}`)
+  }
+}
+
+/** Grouped and ordered by key, so the paragraph is the same paragraph on every run. */
+function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const group = groups.get(key(item))
+    if (group === undefined) groups.set(key(item), [item])
+    else group.push(item)
+  }
+  return new Map([...groups].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }
 
 /**

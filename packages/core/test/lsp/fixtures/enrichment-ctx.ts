@@ -36,6 +36,9 @@ export function makeEnrichmentInput(input: {
     symbols: input.symbols,
     workspaceRoot: TEST_WORKSPACE_ROOT,
     fileContents: new Map(Object.entries(input.fileContents)),
+    // Every fixture path here is ASCII, where the Document spelling and the filesystem's are
+    // the same string, so an empty map and a full one address the same files.
+    fsPaths: new Map(),
     lspConfig: input.lspConfig ?? makeLspConfig(),
     serverFactory: input.serverFactory,
   }

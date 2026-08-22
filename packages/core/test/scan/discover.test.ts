@@ -274,7 +274,11 @@ describe("discoverFiles \u2014 a name the Document cannot spell", () => {
     expect(result.files.map((f) => f.path)).toEqual(["src/ok.ts"])
     expect(result.skipped).toEqual([])
     expect(result.unrepresentableFiles).toEqual([
-      { fsPath: "src/weird\\name.ts", unnameablePrefix: "src/weird\\name.ts" },
+      {
+        fsPath: "src/weird\\name.ts",
+        reason: "unspellable-name",
+        unnameablePrefix: "src/weird\\name.ts",
+      },
     ])
   })
 
@@ -312,7 +316,7 @@ describe("discoverFiles \u2014 a name the Document cannot spell", () => {
     ])
     // One prefix for both: the directory is the rename, and neither filename is at fault.
     for (const entry of result.unrepresentableFiles) {
-      expect(entry.unnameablePrefix).toBe("src/v\\1")
+      expect(entry.reason === "unspellable-name" && entry.unnameablePrefix).toBe("src/v\\1")
     }
   })
 
@@ -351,12 +355,12 @@ describe("discoverFiles \u2014 the extension filter reads the filesystem's spell
       respectGitignore: false,
     })
 
-    // Accounted for, rather than in `files`: which of the two it lands in depends on whether
-    // the filesystem finds a file by a spelling other than the one it stores it under, and
-    // this is about the filter, which is what decides between being accounted for at all and
-    // being dropped with no record.
-    expect(result.files.length + result.skipped.length).toBe(1)
-    expect(result.unrepresentableFiles).toEqual([])
+    // In `files`, and by its composed name. It used to land in `skipped` as `unreadable`,
+    // because the `stat` went out under the spelling the Document records rather than the one
+    // the filesystem stores — that is fixed here, and the assertion says so rather than
+    // accepting either list.
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.t\u015b"])
+    expect(result.skipped).toEqual([])
   })
 
   it("matches a decomposed declaration against a composed filename", async () => {
@@ -409,4 +413,90 @@ describe("discoverFiles — what the walk assumes of its glob", () => {
     })
     expect(doubled.unrepresentableFiles).toEqual([])
   })
+})
+// Two names that normalize to one need a filesystem that keeps both. APFS resolves them to a
+// single file, so the second write lands on the first and the pair never exists.
+const onCollidingFs = it.skipIf(process.platform === "darwin")
+
+describe("discoverFiles — a name the filesystem and the Document spell differently", () => {
+  it("opens the file by the name on disk and records the normalized one", async () => {
+    // §1.2 normalizes a path on the way into the Document. A filesystem that stores what it was
+    // given — NTFS, ext4 — does not answer to the result, so a `stat` under it reports ENOENT
+    // and the file was recorded `unreadable`: a lost file, and a reason pointing at permissions.
+    await writeFileAt("src/caf\u0065\u0301.ts", "1234")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.skipped).toEqual([])
+    expect(result.files).toEqual([
+      // Both spellings, each where it belongs: the Document's on `path`, the filesystem's on
+      // `fsPath`, and a size that could only have come from opening the second.
+      { path: "src/caf\u00e9.ts", fsPath: "src/caf\u0065\u0301.ts", size: 4 },
+    ])
+  })
+
+  it("leaves the two the same string for a name that is already NFC", async () => {
+    await writeFileAt("src/plain.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files).toEqual([{ path: "src/plain.ts", fsPath: "src/plain.ts", size: 1 }])
+  })
+
+  onCollidingFs("withdraws both when two spellings claim one Document path", async () => {
+    await writeFileAt("src/caf\u0065\u0301.ts", "1")
+    await writeFileAt("src/caf\u00e9.ts", "22")
+    await writeFileAt("src/ok.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/ok.ts"])
+    expect(result.skipped).toEqual([])
+    expect(result.unrepresentableFiles).toEqual([
+      {
+        fsPath: "src/caf\u0065\u0301.ts",
+        reason: "colliding-spelling",
+        documentPath: "src/caf\u00e9.ts",
+      },
+      {
+        fsPath: "src/caf\u00e9.ts",
+        reason: "colliding-spelling",
+        documentPath: "src/caf\u00e9.ts",
+      },
+    ])
+  })
+
+  onCollidingFs(
+    "withdraws a claimant that would have been skipped, not only a read one",
+    async () => {
+      // One path on `stats.skippedFiles[]` and on `symbols[].source.file` is the contradiction
+      // `buildDiff` resolves as a deletion; two skipped ones break invariant #21 outright. So the
+      // pair is decided over the candidates rather than over the files.
+      await writeFileAt("src/caf\u0065\u0301.ts", "12345")
+      await writeFileAt("src/caf\u00e9.ts", "1")
+
+      const result = await discoverFiles({
+        workspaceRoot: workRoot,
+        languageExtensions: [".ts"],
+        respectGitignore: false,
+        maxFileSizeBytes: 2,
+      })
+
+      expect(result.files).toEqual([])
+      expect(result.skipped).toEqual([])
+      expect(result.unrepresentableFiles).toHaveLength(2)
+    },
+  )
 })
