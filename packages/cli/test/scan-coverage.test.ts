@@ -345,6 +345,26 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     expect(lines).toHaveLength(3)
   })
 
+  it("puts the one record nothing else holds above the census that is recoverable", () => {
+    // The sink these go through has its failure deliberately swallowed, and the census under it
+    // can run to six reasons of eleven lines. Last is the wrong place for the only account of a
+    // file the artifact does not mention.
+    const lines = linesFrom(
+      reportWith({
+        totalFiles: 1,
+        parsedFiles: 0,
+        skipped: [{ path: "src/a.ts", reason: "over-size" as const, detail: "big" }],
+        unrepresentableFiles: [{ fsPath: "odd\\name.ts", unnameablePrefix: "odd\\name.ts" }],
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    const unnameableAt = lines.findIndex((l) => l.includes("out of its counts"))
+    const censusAt = lines.findIndex((l) => l.includes("contributed no Symbols"))
+    expect(unnameableAt).toBeGreaterThanOrEqual(0)
+    expect(censusAt).toBeGreaterThan(unnameableAt)
+  })
+
   it("tells the reader the ignore spelling that actually matches", () => {
     // Measured: picomatch spends a lone backslash as an escape, so `src/v\1/**` does not match
     // `src/v\1/util.ts` while `src/v\\1/**` does. Advice naming the printed spelling would send
@@ -551,6 +571,23 @@ describe("aburi scan — a file no Document path can name", () => {
     expect(report.skipped).toEqual([])
     expect(report.coverageFault).toBeNull()
     expect(report.exitCode).toBe(EXIT.GATE)
+  })
+
+  onPosix("adds them back to the stdout summary, which counts what it could name", async () => {
+    // `totalFiles` excludes them by design, so the summary alone reads as a whole workspace
+    // beside an exit code saying otherwise.
+    await populate(scratch, ["ok.stub", "weird\\name.stub"])
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out")],
+      cwd: scratch,
+      stdout,
+      stderr,
+    })
+
+    expect(code).toBe(EXIT.GATE)
+    expect(stdout.text()).toContain("1 files · 1 unnameable")
   })
 
   onPosix("still writes the IR, so a reader gets the artifact and the code", async () => {
