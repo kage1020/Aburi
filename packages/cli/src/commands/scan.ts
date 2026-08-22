@@ -44,6 +44,13 @@ export interface ScanOptions {
   outputDir?: string
   format?: "json" | "md" | "both"
   ignore?: readonly string[]
+  /**
+   * Override for `Config.respectGitignore`. `true` from `--respect-gitignore`, `false` from
+   * `--no-respect-gitignore`, absent when neither was typed — which is the only value that
+   * leaves the config's own answer standing, and so the only correct one for a caller that
+   * has nothing to say about it. A caller passing the flag's default rather than omitting the
+   * field asks for that default, and gets it.
+   */
   respectGitignore?: boolean
   compact?: boolean
   suppressTimestamp?: boolean
