@@ -258,6 +258,9 @@ at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `un
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
 before extraction and are not logged at all, so the report is their only account.
 
+§5.8's paragraph sits directly under the coverage line and above this census — ahead of
+everything that is recoverable from the artifact, because it is the one section that is not.
+
 A command that runs more than one scan labels them, after the glyph, with the scan the line
 came from:
 
@@ -324,9 +327,9 @@ because invariant #21 holds `stats.skippedFiles`'s length to `totalFiles - parse
 So it leaves `totalFiles` the way a file no plugin claims does, and the run says so itself:
 
 ```
-⚠ 2 file(s) were left out of the IR and out of its counts: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down here at all. Rename the segment named against each, or leave it out with ignore.
-    src/v\1/other.ts: the segment "v\1" holds a backslash
-    src/v\1/util.ts: the segment "v\1" holds a backslash
+⚠ 3 file(s) were left out of the IR and out of its counts, under 2 name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.
+    odd\name.ts
+    src/v\1 — a directory, and the 2 file(s) under it
 ```
 
 **It exits `3`.** Every other loss leaves a trace in the artifact that a later reader can find the
@@ -334,16 +337,35 @@ file by; this one leaves none, so the exit code and that paragraph are the whole
 that dropped source and went green would be reporting a clean run over a workspace it did not
 describe.
 
-The segment is named rather than the file. A backslash in a directory name disqualifies every
-file beneath it and none of those filenames is at fault, which is the same rule the `unroutable`
-detail follows for `:` and `#`.
+**One line per name that has to change, not per file, and no cap.** A backslash in a directory
+name disqualifies every file beneath it and none of those filenames is at fault, which is the
+same rule the `unroutable` detail follows for `:` and `#` — so the line names the path up to and
+including the offending segment, and the file count under it. That also makes the listing the
+length of the work rather than of the damage, which is what lets it go uncapped: every other
+listing in §5.6 caps at ten because `stats.skippedFiles[]` holds the rest, and here nothing does.
+
+**The `ignore` spelling is not the printed one.** Patterns reach picomatch, which spends a lone
+backslash as an escape:
+
+| pattern | excludes `src/v\1/util.ts` |
+|---|---|
+| `src/v\1/**` | no |
+| `src/v\\1/**` | yes |
+| `src/v?1/**` | yes |
+
+The first row is the name exactly as the paragraph above prints it, which is why the advice says
+to double the character rather than leaving the reader to infer it from one failed attempt.
 
 The check runs after the extension filter, so a `notes\1.txt` in a TypeScript workspace is
 filtered on the extension alone: it was never a candidate, and an incident that gates the exit
 code should not be raised about a file the scan was never going to read.
 
-Renaming is the only fix. `ignore` stops the run mentioning it, and no setting makes the file
-describable, because the character has no spelling here rather than a disallowed one.
+Renaming is the only fix that makes the file *describable*. `ignore` only stops the run
+mentioning it — no setting gives the character a spelling here, because it has none rather than a
+disallowed one.
+
+`aburi explain` answers for one of these files without consulting the document, since no document
+could hold it: see §7.2.
 
 ## 6. `aburi diff`
 
@@ -579,6 +601,12 @@ aburi explain <id-or-pattern> [--output <path>] [--ir <path>] [--no-rescan] [--d
 - **Full Symbol id** — the string contains `#` and matches the `<language>:<path>#<qname>` form → direct lookup
 - **File path** — the string contains `/` and either is an existing file or is a path the IR names in `stats.skippedFiles` (§7.6) → show all Symbols in that file. A `#` in it does not disqualify it: the id form above is checked first and only claims the argument when it *is* one, and a file whose name holds an id separator is recorded in `stats.skippedFiles` precisely because no Symbol in it could be named
 - **Partial-match pattern** — anything not matching the above → collect candidates by **case-sensitive substring match** against each Symbol's qualified name (`Symbol.name`)
+
+A file path whose name holds a **backslash** is answered without consulting the document at
+all, with exit 3: no IR can name it (§5.8), so neither the skip list nor the file existing on
+disk says anything about it, and `No matches` would be a claim about the workspace when the
+absence is the format's. The same answer whether the run scanned or read an IR off disk, because
+it is decided from the argument.
 
 #### 7.2.1 Exact Definition of Partial Matching
 
@@ -885,7 +913,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
 | CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
-| CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the file and the segment at fault on stderr, and the file absent from `stats.totalFiles` |
+| CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |
+| CL24 | `aburi explain 'src/weird\name.ts'` where that file exists | exit 3, a line saying no IR can name it, nothing on stdout |
 
 ## 18. Design Decisions
 

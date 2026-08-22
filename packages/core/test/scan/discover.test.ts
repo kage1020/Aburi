@@ -253,7 +253,7 @@ describe("discoverFiles — a name no Symbol id can hold", () => {
 })
 // Windows has no filename that holds a backslash — the character is its path separator, and
 // `writeFile` reads one as a directory boundary — so the fixture can only exist on POSIX. The
-// classification itself is `backslashSegment`, which `id.test.ts` pins on every platform; what
+// classification itself is `backslashSite`, which `id.test.ts` pins on every platform; what
 // these cover is the wiring around it, on ubuntu and macOS.
 const onPosix = it.skipIf(process.platform === "win32")
 
@@ -274,7 +274,7 @@ describe("discoverFiles \u2014 a name the Document cannot spell", () => {
     expect(result.files.map((f) => f.path)).toEqual(["src/ok.ts"])
     expect(result.skipped).toEqual([])
     expect(result.unrepresentableFiles).toEqual([
-      { path: "src/weird\\name.ts", segment: "weird\\name.ts" },
+      { fsPath: "src/weird\\name.ts", unnameablePrefix: "src/weird\\name.ts" },
     ])
   })
 
@@ -306,12 +306,13 @@ describe("discoverFiles \u2014 a name the Document cannot spell", () => {
       respectGitignore: false,
     })
 
-    expect(result.unrepresentableFiles.map((f) => f.path)).toEqual([
+    expect(result.unrepresentableFiles.map((f) => f.fsPath)).toEqual([
       "src/v\\1/other.ts",
       "src/v\\1/util.ts",
     ])
+    // One prefix for both: the directory is the rename, and neither filename is at fault.
     for (const entry of result.unrepresentableFiles) {
-      expect(entry.segment).toBe("v\\1")
+      expect(entry.unnameablePrefix).toBe("src/v\\1")
     }
   })
 
@@ -368,5 +369,44 @@ describe("discoverFiles \u2014 the extension filter reads the filesystem's spell
     })
 
     expect(result.files.map((f) => f.path)).toEqual(["src/b.t\u015b"])
+  })
+})
+describe("discoverFiles — what the walk assumes of its glob", () => {
+  it("gets `/` as the separator whatever the platform separator is", async () => {
+    // `tinyglobby` passes `pathSeparator: "/"` to `fdir`, which is why a backslash in its output
+    // is always part of a filename. That is the dependency's behaviour rather than a documented
+    // contract, and the whole ordering of the loop rests on it, so a version bump that took it
+    // away silently would fail here rather than in a user's IR.
+    await writeFileAt("src/nested/deep/a.ts", "1")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/nested/deep/a.ts"])
+  })
+
+  onPosix("takes an ignore pattern only with the backslash written twice", async () => {
+    // What the scan report tells the reader to do, measured. Patterns reach picomatch, which
+    // spends a lone backslash as an escape, so the name as printed does not match itself.
+    await writeFileAt("src/v\\1/util.ts", "1")
+
+    const asPrinted = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+      ignore: ["src/v\\1/**"],
+    })
+    expect(asPrinted.unrepresentableFiles).toHaveLength(1)
+
+    const doubled = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      respectGitignore: false,
+      ignore: ["src/v\\\\1/**"],
+    })
+    expect(doubled.unrepresentableFiles).toEqual([])
   })
 })

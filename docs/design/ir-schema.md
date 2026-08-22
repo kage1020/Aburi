@@ -620,6 +620,8 @@ Whether the promotion is worth doing in v2 at all is open. The §1.1 reader rule
 
   Not v1: every path in every document written so far would have to be read through the unescaping rule to stay correct, and a reader that does not know the rule turns `a\\b.ts` into a two-segment path — silently, and in the direction that invents a directory. The change is to how paths are *read*, which is the one kind of change a frozen wire format cannot absorb.
 
+  What the gap costs downstream, so the v2 case is on the record: `aburi diff` separates a deletion from a loss using `stats.skippedFiles`, and a file the format cannot name is in no list at all. A file renamed into such a name between two revisions therefore has its base Symbols read as deletions somebody made. `aburi scan` gates on it in the run that hits it, but two documents compared later carry no trace.
+
 ## 16. Extension Points
 
 Places where Aburi can be extended without forking the core:

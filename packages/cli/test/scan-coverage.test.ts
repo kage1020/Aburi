@@ -315,57 +315,67 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     expect(lines[1]).toContain("1200 file(s) contributed no Symbols")
   })
 
-  it("names every unnameable file, because this line is the only record of them", () => {
+  it("names what has to be renamed, once, however many files sit under it", () => {
     // No fixture needed and none possible on Windows: the report is assembled here, so what a
     // reader is told about a file the artifact cannot hold is pinned on every platform.
+    //
+    // The directory, not the files. A backslash in a directory name disqualifies every file
+    // beneath it and each of those filenames is innocent, so a line blaming `util.stub` sends
+    // the reader to rename the wrong thing — and two lines saying the same rename twice is a
+    // list of the damage rather than a list of the work.
     const lines = linesFrom(
       reportWith({
         totalFiles: 3,
         parsedFiles: 3,
         unrepresentableFiles: [
-          { path: "src/v\\1/other.stub", segment: "v\\1" },
-          { path: "src/v\\1/util.stub", segment: "v\\1" },
+          { fsPath: "src/v\\1/other.stub", unnameablePrefix: "src/v\\1" },
+          { fsPath: "src/v\\1/util.stub", unnameablePrefix: "src/v\\1" },
+          { fsPath: "odd\\name.stub", unnameablePrefix: "odd\\name.stub" },
         ],
         exitCode: EXIT.GATE,
       }),
       null,
     )
-    expect(lines[0]).toContain("2 file(s) were left out of the IR and out of its counts")
-    // The segment, not the file. A backslash in a directory name disqualifies every file
-    // beneath it and each of those filenames is innocent, so a line blaming `util.stub` sends
-    // the reader to rename the wrong thing.
-    expect(lines[1]).toBe('    src/v\\1/other.stub: the segment "v\\1" holds a backslash')
-    expect(lines[2]).toBe('    src/v\\1/util.stub: the segment "v\\1" holds a backslash')
+    expect(lines[0]).toContain("3 file(s) were left out of the IR and out of its counts")
+    expect(lines[0]).toContain("under 2 name(s) with no spelling here")
+    // A file whose own basename offends is itself the rename, so it is not described as a
+    // directory with files under it.
+    expect(lines[1]).toBe("    odd\\name.stub")
+    expect(lines[2]).toBe("    src/v\\1 — a directory, and the 2 file(s) under it")
+    expect(lines).toHaveLength(3)
   })
 
-  it("caps the list the way every skip reason is capped", () => {
+  it("tells the reader the ignore spelling that actually matches", () => {
+    // Measured: picomatch spends a lone backslash as an escape, so `src/v\1/**` does not match
+    // `src/v\1/util.ts` while `src/v\\1/**` does. Advice naming the printed spelling would send
+    // a reader round the loop to an identical exit 3, with nothing on screen to say why.
+    const lines = linesFrom(
+      reportWith({
+        unrepresentableFiles: [{ fsPath: "odd\\name.stub", unnameablePrefix: "odd\\name.stub" }],
+        exitCode: EXIT.GATE,
+      }),
+      null,
+    )
+    expect(lines[0]).toContain("write its backslash twice")
+    expect(lines[0]).toContain("does not match itself")
+  })
+
+  it("does not cap the list, because nothing else holds a copy of it", () => {
+    // Every other listing here is capped at ten with a `…and N more`, and can be: the files are
+    // in `stats.skippedFiles[]`. These are in no artifact at all, so a tail would be the tool
+    // declining to say the one thing only it knows. Grouping is what keeps the length sane.
     const lines = linesFrom(
       reportWith({
         unrepresentableFiles: Array.from({ length: 12 }, (_, i) => ({
-          path: `src/f${i}\\x.stub`,
-          segment: `f${i}\\x.stub`,
+          fsPath: `f${i}\\x.stub`,
+          unnameablePrefix: `f${i}\\x.stub`,
         })),
         exitCode: EXIT.GATE,
       }),
       null,
     )
-    expect(lines).toHaveLength(12)
-    expect(lines[11]).toBe("    …and 2 more")
-
-    // Exactly the cap is the boundary the tail's guard exists for, and no other fixture in
-    // this suite sits on it: eleven files hides a `>= 0` guard as readily as twelve does.
-    const atCap = linesFrom(
-      reportWith({
-        unrepresentableFiles: Array.from({ length: 10 }, (_, i) => ({
-          path: `src/f${i}\\x.stub`,
-          segment: `f${i}\\x.stub`,
-        })),
-        exitCode: EXIT.GATE,
-      }),
-      null,
-    )
-    expect(atCap).toHaveLength(11)
-    expect(atCap.join("\\n")).not.toContain("more")
+    expect(lines).toHaveLength(13)
+    expect(lines.join("\n")).not.toContain("more")
   })
 
   it("never prints a percentage as being below itself", () => {
@@ -531,7 +541,7 @@ describe("aburi scan — a file no Document path can name", () => {
     const report = await scanIn(["ok.stub", "weird\\name.stub"], warnings)
 
     expect(report.unrepresentableFiles).toEqual([
-      { path: "weird\\name.stub", segment: "weird\\name.stub" },
+      { fsPath: "weird\\name.stub", unnameablePrefix: "weird\\name.stub" },
     ])
     // Neither counted nor skipped, and that pairing is forced: the path a skip entry needs is
     // one the shared rule refuses, and a file counted while absent from the skip list breaks
@@ -555,8 +565,8 @@ describe("aburi scan — a file no Document path can name", () => {
     await scanIn(["ok.stub", "v\\1-a.stub", "v\\1-b.stub"], warnings)
     const text = warnings.join("\n")
     expect(text).toContain("2 file(s) were left out of the IR and out of its counts")
-    expect(text).toContain('    v\\1-a.stub: the segment "v\\1-a.stub" holds a backslash')
-    expect(text).toContain('    v\\1-b.stub: the segment "v\\1-b.stub" holds a backslash')
+    expect(text).toContain("    v\\1-a.stub")
+    expect(text).toContain("    v\\1-b.stub")
   })
 
   onPosix(

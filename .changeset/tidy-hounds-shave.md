@@ -33,4 +33,12 @@ because that path is held to the same rule, nor counted in `stats.totalFiles` wi
 recorded, because integrity #21 pins the skip list's length to `totalFiles - parsedFiles`. So it
 leaves the census the way a file no plugin claims does, and `ScanResult.unrepresentableFiles`
 plus the stderr paragraph built from it are the run's only account of it — which is why the exit
-code moves. `aburi diff` names it as the fault for the side that has it.
+code moves. `aburi explain` answers for one of these files without consulting the document, since
+no document could hold it.
+
+`aburi diff` names it as the fault for the side that has it, in ref mode, where it runs the
+scans. `--base` / `--head` reads two documents and neither records the file, so a rename into
+such a name reads as deletions there: `dependencySideView` builds its lost-file set from
+`stats.skippedFiles`, which this file is absent from by construction. That is a limit of the
+frozen path grammar rather than of the diff, and is recorded as a v2 shape in `ir-schema.md`
+§15.4.

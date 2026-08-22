@@ -662,7 +662,26 @@ describe("runExplain — the path arm converts a native path the way the core do
       noRescan: true,
     })
 
-    expect(outcome.kind).not.toBe("single")
+    // Stated positively. `not.toBe("single")` passed against the old code too — this arm
+    // returns "file", never "single" — so it pinned nothing on its own.
+    expect(outcome.kind).toBe("unnameable")
+    if (outcome.kind !== "unnameable") throw new Error("unreachable")
+    expect(outcome.unnameablePrefix).toBe("src/weird\\name.stub")
+    expect(outcome.exitCode).toBe(EXIT.GATE)
     expect(JSON.stringify(outcome)).not.toContain("neighbour")
+  })
+
+  onPosix("says so for a name that is not on disk either, since no IR could hold it", async () => {
+    // Decided from the argument, not from the filesystem and not from the skip list: neither
+    // can answer, and both would answer `No matches` about a file the format cannot describe.
+    await writeIR({ symbols: [KEPT] })
+
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/no\\such.stub",
+      noRescan: true,
+    })
+
+    expect(outcome.kind).toBe("unnameable")
   })
 })

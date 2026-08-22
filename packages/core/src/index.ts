@@ -32,7 +32,8 @@ export {
   ZERO_FINGERPRINT,
 } from "./fingerprint"
 export {
-  backslashSegment,
+  type BackslashSite,
+  backslashSite,
   DEFAULT_EXPORT_QNAME,
   type GrammarViolation,
   isComponentId,

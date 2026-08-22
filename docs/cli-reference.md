@@ -101,8 +101,13 @@ below a given share of discovered files parsed and counts every skip reason.
 A source file whose **name contains a backslash** exits `3` too, and is reported on its own. An
 IR path separates with `/` alone, so such a name cannot be written down there at all — not even
 as a skipped file, which is a path plus a reason. The file is left out of the counts as well as
-out of the IR, and the stderr paragraph naming it and the segment at fault is the run's only
-record of it. Renaming that segment is the fix; `ignore` only stops the run mentioning it.
+out of the IR, so the stderr paragraph is the run's only record of it: one line per name that has
+to change, uncapped, because nothing else holds a copy. Renaming is the fix. `ignore` can leave
+one out instead, but the backslash has to be written **twice** in the pattern — a glob spends a
+single one as an escape, so the name as printed does not match itself.
+
+`aburi explain` answers for such a file directly, with exit `3` and a line saying no IR can name
+it, rather than reporting no match against a document that could never have held it.
 
 Every command that scans reports them the same way, because the reporting belongs to the scan.
 `aburi diff` runs two and labels each — by ref for the base, `head (working tree)` for the head.

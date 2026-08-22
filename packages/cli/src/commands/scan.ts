@@ -330,7 +330,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     workspaceRoot,
     coverageFault,
     unrepresentableFiles: scanResult.unrepresentableFiles.map((f) => ({ ...f })),
-    // Two gates (`cli-spec.md` §5.4, §5.7), and neither withholds anything the run would
+    // Three gates (`cli-spec.md` §5.4, §5.7, §5.8), and none withholds anything the run would
     // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
     // code, where before either guard existed they got the artifact and a green light.
     //
@@ -387,8 +387,12 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
  * Per reason rather than across the listing. One budget shared by all six would be spent by
  * whichever reason lost the most files, and the reason that lost the most is not the reason
  * a reader most needs named: a hundred over-size files would push the one file a plugin
- * threw on — the only reason that moves the exit code — inside `…and N more`, leaving a
- * non-zero status with nothing on screen to account for it.
+ * threw on — the only reason *in this listing* that moves the exit code — inside `…and N more`,
+ * leaving a non-zero status with nothing on screen to account for it.
+ *
+ * The two gate reasons that are not skip reasons print their own sections, and one of those is
+ * uncapped: where the artifact holds no copy of the list, a tail is the tool declining to say
+ * what it alone knows. Here it is a pointer into `stats.skippedFiles[]`, which holds every one.
  */
 const MAX_LISTED_PER_REASON = 10
 
@@ -470,6 +474,11 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
   reportCoverageFault(report.coverageFault, say)
+  // Directly under the coverage line, ahead of everything recoverable from the artifact. The
+  // skip census below can run to six reasons of eleven lines each, and the sink this all goes
+  // through is one whose failure is deliberately swallowed further up — so the account that
+  // exists nowhere else is the one that must not be last.
+  reportUnrepresentable(report.unrepresentableFiles, say, warn)
   reportConfigOutsideWorkspaceRoot(report, say)
   if (report.parseErrorCount > 0) {
     say(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
@@ -485,7 +494,6 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     say(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
   }
   reportSkipped(report.skipped, say, warn)
-  reportUnrepresentable(report.unrepresentableFiles, say, warn)
   const lsp = report.lspEnrichment
   if (lsp !== undefined) {
     if (lsp.filesFellBack > 0) {
@@ -620,12 +628,21 @@ function reportSkipped(
  * Its own section rather than a seventh skip reason. A skip entry is a path plus a reason, and
  * the path it would take is one the shared rule refuses — so there is no entry to group, no
  * count in `totalFiles` to reconcile it against, and nothing in the artifact a reader could
- * find the file by later. This paragraph is the whole record, which is why it names every file
- * rather than summarising them the way a reason group does.
+ * find the file by later. This paragraph is the whole record.
  *
- * The advice is a rename because that is the only fix: the character is legal on the
- * filesystem and has no spelling in a Document path, so no setting makes the file
- * describable — and `ignore` only makes the run stop mentioning it.
+ * **Uncapped**, which every other listing here is not. A truncated skip group is still
+ * recoverable from `stats.skippedFiles[]`; this one is recoverable from nothing, so a
+ * `…and N more` would be the tool declining to say what it alone knows. What keeps it short
+ * is grouping instead: one line per *name* that has to change rather than one per file, which
+ * for the usual shape — a directory whose name holds the character — is a single line however many
+ * files sit under it. That count is also the number of renames the reader has to perform, so
+ * the listing is the length of the work rather than the length of the damage.
+ *
+ * The `ignore` half of the advice carries its own warning because the obvious spelling is
+ * wrong. Patterns reach picomatch, which spends a lone backslash as an escape, so
+ * `src/v\1/**` does not match `src/v\1/util.ts` while `src/v\\1/**` does. Printing the name
+ * and then advising a pattern the name does not satisfy would send a reader round the loop
+ * with an identical exit 3 and nothing on screen to say why.
  */
 function reportUnrepresentable(
   files: ScanReport["unrepresentableFiles"],
@@ -633,14 +650,22 @@ function reportUnrepresentable(
   warn: WarnFn,
 ): void {
   if (files.length === 0) return
-  say(
-    `${files.length} file(s) were left out of the IR and out of its counts: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down here at all. Rename the segment named against each, or leave it out with ignore.`,
-  )
-  for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
-    warn(`    ${file.path}: the segment "${file.segment}" holds a backslash`)
+  const byPrefix = new Map<string, ScanReport["unrepresentableFiles"][number][]>()
+  for (const file of files) {
+    const group = byPrefix.get(file.unnameablePrefix)
+    if (group === undefined) byPrefix.set(file.unnameablePrefix, [file])
+    else group.push(file)
   }
-  const hidden = files.length - MAX_LISTED_PER_REASON
-  if (hidden > 0) warn(`    …and ${hidden} more`)
+  say(
+    `${files.length} file(s) were left out of the IR and out of its counts, under ${byPrefix.size} name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.`,
+  )
+  for (const [prefix, group] of [...byPrefix].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    warn(
+      group[0]?.fsPath === prefix
+        ? `    ${prefix}`
+        : `    ${prefix} — a directory, and the ${group.length} file(s) under it`,
+    )
+  }
 }
 
 /**

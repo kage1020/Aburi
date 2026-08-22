@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  backslashSegment,
+  backslashSite,
   CoreError,
   DEFAULT_EXPORT_QNAME,
   isComponentId,
@@ -252,7 +252,7 @@ describe("toPosixRelative", () => {
   })
 })
 
-describe("toDocumentPath, backslashSegment and symbolIdSeparatorSite", () => {
+describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
   it("admits the two characters the id rule refuses", () => {
     // The Document records paths the id grammar would not accept — `stats.skippedFiles[].path`
     // is one, and it is how a file no Symbol can name is still named. Integrity #10 holds it to
@@ -312,24 +312,30 @@ describe("toDocumentPath, backslashSegment and symbolIdSeparatorSite", () => {
     expect(() => toDocumentPath("C:\\Users\\foo\\a.ts")).toThrowError(/backslash/)
   })
 
-  it("names the segment a backslash sits in, and none when no segment holds one", () => {
+  it("names the segment a backslash sits in, and the prefix that locates it", () => {
     // Per segment for the same reason the id separators are: a backslash in a directory name
     // disqualifies every file beneath it, and each of those filenames is innocent.
-    expect(backslashSegment("src/a.ts")).toBeNull()
-    expect(backslashSegment("src/weird\\name.ts")).toBe("weird\\name.ts")
-    expect(backslashSegment("src/v\\1/util.ts")).toBe("v\\1")
-    expect(backslashSegment("a\\1/b\\2/c.ts")).toBe("a\\1")
+    expect(backslashSite("src/a.ts")).toBeNull()
+    expect(backslashSite("src/weird\\name.ts")).toEqual({
+      segment: "weird\\name.ts",
+      prefix: "src/weird\\name.ts",
+    })
+    expect(backslashSite("src/v\\1/util.ts")).toEqual({ segment: "v\\1", prefix: "src/v\\1" })
+    // The *first*, and the prefix stops there: two directories may share a segment name, so
+    // the bare segment says what to rename without saying which one.
+    expect(backslashSite("a\\1/b\\2/c.ts")).toEqual({ segment: "a\\1", prefix: "a\\1" })
+    expect(backslashSite("x/a\\1/y.ts")?.prefix).toBe("x/a\\1")
   })
 
   it("answers exactly what the shared rule refuses on that clause", () => {
     // One source, so discovery cannot report a file the rule would accept, nor stay quiet about
     // one it refuses — the arrangement `symbolIdSeparatorSite` has with the id grammar.
     for (const raw of ["src/weird\\name.ts", "C:\\Users\\a.ts", "a\\1/b.ts"]) {
-      expect(backslashSegment(raw), raw).not.toBeNull()
+      expect(backslashSite(raw), raw).not.toBeNull()
       expect(() => toDocumentPath(raw), raw).toThrowError(/backslash/)
     }
     for (const raw of ["src/a.ts", "src/a:b.ts", "src/a#b.ts", "."]) {
-      expect(backslashSegment(raw), raw).toBeNull()
+      expect(backslashSite(raw), raw).toBeNull()
       expect(() => toDocumentPath(raw), raw).not.toThrowError(/backslash/)
     }
   })

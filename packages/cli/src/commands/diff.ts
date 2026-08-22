@@ -258,8 +258,13 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
 /**
  * A scan that broke makes the diff evidence of nothing, whichever side broke.
  *
- * The counts are not the problem — a withdrawn file is in `stats.skippedFiles`, so its
- * Symbols already classify as `unknown` rather than as deletions. The problem is greenness: an
+ * The counts are mostly not the problem: a withdrawn file is in `stats.skippedFiles`, which
+ * `dependencySideView` reads into `lostFiles`, so its Symbols already classify as `unknown`
+ * rather than as deletions. One gate reason escapes that — a file whose name the Document
+ * cannot spell is in no list at all, so a file renamed into such a name between the two
+ * revisions has its base Symbols read as deletions somebody made. Nothing here can repair it;
+ * the document it would have to read is the one that cannot describe the file. The problem the
+ * rest of this function is about is greenness: an
  * incident that `scan` refuses to exit `0` on (§5.6) should not turn green by being asked for
  * a diff instead of a scan. That covers the base side too, deliberately — a fault at the base
  * ref reddens every diff taken against it, which is the intended reading of "this comparison
@@ -267,8 +272,8 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
  *
  * The wording comes from what the scan reported rather than from the gate condition, which is
  * only `exitCode !== EXIT.SUCCESS`. A plugin exception was the sole reason that gated when this
- * was written and `runScan` said outright that others might follow; a second one has, so the
- * clause reads both. Naming either unconditionally would leave the exit code right and the
+ * was written and `runScan` said outright that others might follow; two more have, so the clause
+ * reads all three. Naming any of them unconditionally would leave the exit code right and the
  * diagnosis wrong.
  *
  * One clause per faulted side, joined, rather than one sentence about a joined list of sides.
@@ -294,14 +299,20 @@ function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], war
  * look, and both scans' reports are already on this stderr above this one (§5.6). This clause
  * exists to account for the exit code, so it names the cause and stops.
  *
- * A plugin exception comes first when one scan has both. It is the reason that says something
- * in the run is broken, and a scan that threw on every file it found has the coverage fault as
- * a consequence of it rather than as a second finding. That reading holds *within* a scan and
- * not across two, which is why it is decided here rather than by the caller.
+ * A plugin exception comes first when one scan has more than one. It is the reason that says
+ * something in the run is broken, and a scan that threw on every file it found has the coverage
+ * fault as a consequence of it rather than as a second finding. That reading holds *within* a
+ * scan and not across two, which is why it is decided here rather than by the caller.
+ *
+ * A cause that loses the contest still gets a trailing clause rather than silence. This is the
+ * line a reader greps out of a CI log to account for the exit code, and an unnameable file
+ * leaves no other trace anywhere — so the one reason that cannot be recovered later is the one
+ * that must not be dropped for being second.
  *
  * The last arm is for a scan that gates for a reason this function has not been taught. It is
- * unreachable today — the two above are the whole of `runScan`'s gate — and saying nothing more
- * than the exit code already said is the honest answer to a cause we cannot name.
+ * unreachable today — the three above are the whole of `runScan`'s gate, and the unnameable arm
+ * fills the `fault === null` gap ahead of it — and saying nothing more than the exit code already
+ * said is the honest answer to a cause we cannot name.
  */
 function describeScanFault(scan: ScanReport): string {
   const thrown = scan.extractionFailures.length
@@ -316,14 +327,18 @@ function describeScanFault(scan: ScanReport): string {
   if (unnameable > 0 && (fault === null || fault.kind === "nothing-discovered")) {
     return `${unnameable} file(s) have names no Document path can spell`
   }
+  // Only on the two arms it can co-occur with. The guard above already returned for the other
+  // two, so appending it there would be a clause no input can produce.
+  const alsoUnnameable =
+    unnameable === 0 ? "" : ` (and ${unnameable} more have names no Document path can spell)`
   if (fault === null) return "it did not exit clean"
   switch (fault.kind) {
     case "nothing-discovered":
       return "it discovered no file to read"
     case "nothing-parsed":
-      return `none of the ${fault.totalFiles} file(s) it found parsed`
+      return `none of the ${fault.totalFiles} file(s) it found parsed${alsoUnnameable}`
     case "below-floor":
-      return `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed, below the floor the workspace set`
+      return `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed, below the floor the workspace set${alsoUnnameable}`
   }
 }
 
