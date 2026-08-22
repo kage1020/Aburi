@@ -160,8 +160,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           const unnameable = report.unrepresentableFiles.length
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files` +
-              `${unnameable === 0 ? "" : ` · ${unnameable} unnameable`}
-`,
+              `${unnameable === 0 ? "" : ` · ${unnameable} unnameable`}\n`,
           )
           stdout.write(`${report.callResolutionLine}\n`)
           if (report.irPath !== null) stdout.write(`→ ${report.irPath}\n`)

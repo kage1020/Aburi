@@ -640,8 +640,11 @@ describe("aburi scan — a file no Document path can name", () => {
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnings.push(m),
     })
-    expect(warnings.join("\n")).toContain("base: none of the 1 file(s) it found parsed")
-    expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
+    // Named second, not dropped. This is the line a reader greps out of a CI log to account
+    // for the exit code, and the cause that lost the contest is the one with no other trace.
+    expect(warnings.join("\n")).toContain(
+      "base: none of the 1 file(s) it found parsed (and 1 more have names no Document path can spell)",
+    )
   })
 
   onPosix("outranks the fault it caused, when it took the whole candidate set", async () => {
