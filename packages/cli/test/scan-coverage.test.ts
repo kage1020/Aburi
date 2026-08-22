@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
@@ -763,5 +763,33 @@ describe("aburi scan — two spellings of one name", () => {
     expect(report.unrepresentableFiles).toHaveLength(2)
     expect(report.skipped).toEqual([])
     expect(report.totalFiles).toBe(1)
+  })
+})
+describe("aburi scan — a name the filesystem and the Document spell differently", () => {
+  it("reads it, parses it, and records the normalized spelling", async () => {
+    // It used to be `unreadable`: the `stat` and the `readFile` both went out under the
+    // spelling the Document records, which is not the one the filesystem stores.
+    const warnings: string[] = []
+    await populate(scratch, ["ok.stub"])
+    await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "hello", "utf8")
+
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => warnings.push(m) },
+    })
+
+    expect(report.skipped).toEqual([])
+    expect(report.totalFiles).toBe(2)
+    expect(report.parsedFiles).toBe(2)
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+
+    // And the Document holds one spelling of it, the composed one, which invariant #19 is
+    // about — the filesystem's spelling stops at the read.
+    const ir = JSON.parse(await readFile(resolve(scratch, "out/aburi.ir.json"), "utf8")) as {
+      symbols: { source: { file: string } }[]
+    }
+    expect(ir.symbols.map((s) => s.source.file).sort()).toEqual(["caf\u00e9.stub", "ok.stub"])
   })
 })

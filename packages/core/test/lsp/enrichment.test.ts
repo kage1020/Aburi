@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { resolveCallGraph } from "../../src/callgraph"
 import { enrichWithLsp } from "../../src/lsp"
 import { makeClassSymbol, makeEnrichmentInput, makeMethodSymbol } from "./fixtures/enrichment-ctx"
-import { mockServerFactory } from "./fixtures/mock-server"
+import { type MockLspClient, mockServerFactory } from "./fixtures/mock-server"
 
 const HOVER_METHOD = "textDocument/hover"
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
@@ -43,6 +43,35 @@ describe("LSP enrichment", () => {
     expect(edge).toBeDefined()
     expect(edge?.to).toBe("ts:src/a.ts#C.foo")
     expect(edge?.confidence).toBe("high")
+  })
+
+  it("opens the file by the name on disk, not by the Document's spelling of it", async () => {
+    // A `file://` URI is a filesystem address. `didOpen` pushes the content, but a server is
+    // free to read the project itself, and one told about a URI nothing resolves to answers
+    // about a document it invented — or drops the file and takes the language down with it.
+    const documentPath = "src/caf\u00e9.ts"
+    const onDisk = "src/caf\u0065\u0301.ts"
+    const cls = makeClassSymbol(documentPath, "C", 1)
+    let client: MockLspClient | null = null
+    const factory = mockServerFactory((_lang, c) => {
+      client = c
+      c.installHandler(DOC_SYMBOL_METHOD, () => [])
+      c.installHandler(HOVER_METHOD, () => null)
+    })
+
+    await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: [cls],
+        fileContents: { [documentPath]: "class C {}" },
+        fsPaths: { [documentPath]: onDisk },
+        serverFactory: factory,
+      }),
+    )
+
+    const opened = (client as MockLspClient | null)?.openFiles ?? []
+    expect(opened).toHaveLength(1)
+    expect(decodeURIComponent(opened[0] ?? "")).toContain(onDisk)
+    expect(decodeURIComponent(opened[0] ?? "")).not.toContain(documentPath)
   })
 
   it("resolves super.foo() using the receiver type reported by hover", async () => {
