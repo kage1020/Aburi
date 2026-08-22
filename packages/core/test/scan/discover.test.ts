@@ -2,7 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { discoverFiles } from "../../src"
+import { CoreError, discoverFiles } from "../../src"
 
 let workRoot: string
 
@@ -137,6 +137,27 @@ describe("discoverFiles", () => {
     })
 
     expect(result.files.map((f) => f.path)).toEqual(["src/keep.ts"])
+  })
+
+  it("raises a coded error when .gitignore is there and cannot be read", async () => {
+    // A missing `.gitignore` is the common case and means "no patterns". Anything else is a
+    // pattern list the caller asked for and did not get, so a scan that fell back to the core
+    // ignores would include files the workspace said to leave out — silently, and only on the
+    // machine where the read failed.
+    await writeFileAt("src/a.ts", "1")
+    await mkdir(join(workRoot, ".gitignore"))
+
+    const thrown = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CoreError)
+    expect((thrown as CoreError).code).toBe("scan-gitignore-unreadable")
+    expect((thrown as CoreError).message).toContain("EISDIR")
   })
 
   it("does not read .gitignore when respectGitignore is false", async () => {
