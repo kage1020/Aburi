@@ -668,7 +668,7 @@ function reportUnrepresentable(
         // artifact holds no copy of. Two `filter` calls compiled happily in that state; this
         // does not. `reportSkipped` keeps the same property by looking its reason up in a
         // table that is total over the union.
-        return assertNeverUnrepresentable(file)
+        assertNeverUnrepresentable(file)
     }
   }
   reportUnspellable(unspellable, say, warn)
