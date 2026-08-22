@@ -4,6 +4,7 @@ import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
 import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
+import { describeThrown, errorCode, isVanishedFile } from "./faults"
 
 /**
  * Category A drop patterns from drop-list.md §3.1. Kept here rather than embedded in a
@@ -112,10 +113,12 @@ export interface DiscoveredFile {
  * file that parses cleanly and declares nothing is not one of those: it is absent from the
  * list and counted as parsed, which is correct.
  *
- * Two reasons are raised on both sides. `unreadable`: discovery hits it when it cannot stat or
- * read a candidate, and the orchestrator hits it when the read it does just before extraction
- * fails. `unroutable`: discovery hits it for a path no Symbol id could name, and the
- * orchestrator hits it when the router claims no plugin for the extension.
+ * Two reasons are raised on both sides. `unreadable`: one condition decided by one predicate at
+ * two calls — the candidate stopped being a file between the listing and the call that opened
+ * it, which is discovery's `stat` and the orchestrator's `readFile` just before extraction. A
+ * failure neither can put down to the tree changing ends the run instead of landing here.
+ * `unroutable`: discovery hits it for a path no Symbol id could name, and the orchestrator hits
+ * it when the router claims no plugin for the extension.
  *
  * The reason union comes from the IR schema rather than being spelled again here, because
  * the two must agree: `stats.skippedFiles[]` is this list projected into the Document, and a
@@ -295,9 +298,8 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     //
     // Recorded rather than thrown on, which is what this used to do from inside the path
     // normalizer. `:` and `#` are legal POSIX filename characters and are refused by the id
-    // grammar alone, so one of them anywhere in the tree ended the whole walk — while further
-    // down this same loop a file that cannot even be `stat`ed is recorded and the walk
-    // continues. The path is recordable because `stats.skippedFiles[].path` is held to the
+    // grammar alone, so one of them anywhere in the tree ended the whole walk — while a file
+    // the tree stopped holding is recorded further down this same loop and the walk continues. The path is recordable because `stats.skippedFiles[].path` is held to the
     // shared rule, so the Document names a file no Symbol in it could ever have named.
     //
     // The segment is the subject, not the file. A separator in a directory name disqualifies
@@ -324,7 +326,12 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       const info = await stat(absolute)
       size = info.size
     } catch (error) {
-      skipped.push({ path: posix, reason: "unreadable", detail: (error as Error).message })
+      // The same decision the orchestrator makes about the `readFile` one stage later, out of
+      // the same predicate. Recording a permission failure or an exhausted descriptor table
+      // here left a smaller Document behind and exited `0`, while the identical errno on the
+      // identical machine ended the run if it happened to land on the read instead.
+      if (!isVanishedFile(error)) throw error
+      skipped.push({ path: posix, reason: "unreadable", detail: describeThrown(error) })
       continue
     }
 
@@ -401,19 +408,13 @@ async function readGitignore(workspaceRoot: string): Promise<string[]> {
     // level and gracefully fall back to just the core ignore patterns. Any other
     // failure (permission denied, I/O error, symlink loop) is a real problem the
     // caller needs to see instead of a silently-empty pattern list.
-    if (isEnoent(error)) return []
+    if (errorCode(error) === "ENOENT") return []
     throw new CoreError(
-      `.gitignore at "${path}" exists but could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      `.gitignore at "${path}" exists but could not be read: ${describeThrown(error)}`,
       { code: "scan-gitignore-unreadable", value: path },
       { cause: error },
     )
   }
-}
-
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT"
-  )
 }
 
 /**

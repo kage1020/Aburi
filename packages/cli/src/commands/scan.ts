@@ -434,7 +434,7 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   unreadable: {
     rank: 2,
     advice:
-      "could not be read. Check permissions, or re-run if the tree was changing while the scan ran.",
+      "they were no longer there when the scan reached them, so something changed the tree while it ran — re-run. A read that failed for any other reason ends the run rather than landing here.",
   },
   unroutable: {
     rank: 3,
@@ -614,9 +614,10 @@ function reportSkipped(
   for (const [reason, files] of groups) {
     say(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
     for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
-      // Empty as well as absent. `describeThrown` returns `""` for a plugin that threw one,
-      // and discovery takes `(error as Error).message` unguarded, so a detail that says
-      // nothing is reachable — and `    src/x.ts: ` is a path, a colon, and silence.
+      // Empty as well as absent. Nothing in a scan produces either any more — every detail
+      // goes through `describeThrown`, which is total on non-emptiness — but this function is
+      // exported for a report a caller assembled, where the field is optional and one that
+      // says nothing renders as `    src/x.ts: `: a path, a colon, and silence.
       const detail = file.detail ?? ""
       warn(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
     }

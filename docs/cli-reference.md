@@ -11,7 +11,7 @@ document is the operator-facing reference.
 | Code | Constant | When it fires |
 |---|---|---|
 | `0` | `EXIT.SUCCESS` | Command finished; no `--fail-on` gate triggered. |
-| `1` | `EXIT.RUNTIME` | Unexpected runtime failure (IO, unhandled exception). |
+| `1` | `EXIT.RUNTIME` | Unexpected runtime failure (IO, unhandled exception) — including a file the scan could not open for any reason other than the tree changing under it, at the discovery `stat` as well as at the read before extraction. A file that stopped being one mid-scan is skipped and listed as `unreadable` instead. |
 | `2` | `EXIT.INPUT_ERROR` | Bad argv, missing / malformed input file, unresolvable IR shape, ambiguous `aburi explain` target, `--fail-on` grammar mistake. |
 | `3` | `EXIT.GATE` | `--fail-on` clause triggered, a plugin failed to load, a plugin exception withdrew a file during a scan the command ran, a scan read too little of the workspace to be believed (see below), or the answer would not be safe — `aburi explain` when the IR it read names the file the question asked about as one that scan never analysed. This is the code CI pipelines gate on. |
 

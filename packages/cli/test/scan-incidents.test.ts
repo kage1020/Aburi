@@ -346,7 +346,11 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
           },
           { path: "vendor/bundle.js", reason: "over-size", detail: "2100000 > 1048576" },
           { path: "src/broken.ts", reason: "parse-failed", detail: "unexpected token at 3:7" },
-          { path: "src/locked.ts", reason: "unreadable", detail: "EACCES: permission denied" },
+          {
+            path: "src/vanished.ts",
+            reason: "unreadable",
+            detail: "ENOENT: no such file or directory",
+          },
         ],
         extractionFailures: [{ file: "src/route.ts", message: "plugin exploded" }],
       }),
@@ -359,7 +363,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     )
     expect(lines.filter((l) => l.startsWith("    "))).toEqual([
       "    vendor/bundle.js: 2100000 > 1048576",
-      "    src/locked.ts: EACCES: permission denied",
+      "    src/vanished.ts: ENOENT: no such file or directory",
       "    src/x.weird: no plugin claims it",
       "    src/broken.ts: unexpected token at 3:7",
       "    src/slow.ts: extraction reached 5123ms, exceeding parseTimeoutMs (5000ms)",
@@ -380,11 +384,13 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(advice("over-size")).toContain("maxFileSizeBytes")
     expect(advice("parse-timeout")).toContain("parseTimeoutMs")
     expect(advice("parse-timeout")).toContain("re-run")
-    // Two producers: a stat or read that failed at discovery, and a file deleted between
-    // discovery and the read before extraction. Advice true for one only would be false half
-    // the time, and there is nothing in the entry that says which happened.
-    expect(advice("unreadable")).toContain("permission")
+    // One condition, at either of two calls: the file stopped being one while the scan ran.
+    // A read that failed for any other reason ends the run, so advice to check permissions
+    // would send the reader after something that cannot have produced this entry — and the
+    // line says so, because "where is my permission error" is the question it leaves.
     expect(advice("unreadable")).toContain("re-run")
+    expect(advice("unreadable")).not.toContain("permission")
+    expect(advice("unreadable")).toContain("ends the run")
     // Two producers, like `unreadable`: the router refusing an extension, and a path segment
     // holding a Symbol id separator. Advice true for one only would be false half the time, and
     // nothing in the entry says which happened.
