@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 import { detectWorkspaceRoot, makeLanguageId } from "@aburi/core"
 import type { IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { runDiff, runExplain, runScan } from "../src"
+import { type GitRunner, runDiff, runExplain, runScan } from "../src"
 import {
   DEFAULT_OUTPUT_DIRNAME,
   DIFF_JSON_FILENAME,
@@ -180,6 +180,36 @@ describe("aburi diff", () => {
 
     expect(report.diffJsonPath).toBe(resolve(scratch, "artifacts", DIFF_JSON_FILENAME))
     expect(await exists(resolve(scratch, DEFAULT_OUTPUT_DIRNAME))).toBe(false)
+  })
+
+  it("keeps a ref diff's per-side scans out of the configured directory", async () => {
+    // The intermediate IRs are handed an explicit `mkdtemp` path, which is a flag by another
+    // name — so a configured directory must collect the diff and nothing else. Otherwise a
+    // workspace that sets `output.dir` finds two whole IR documents in its own tree after
+    // every `aburi diff`.
+    await writeConfig(scratch, "artifacts")
+    await writeSource(scratch)
+    const runner: GitRunner = {
+      async run(args) {
+        const key = args.slice(0, 2).join(" ")
+        if (key === "rev-parse --verify") return { stdout: "abc\n", stderr: "" }
+        if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
+        if (key === "worktree add") {
+          // `worktree add --detach <dir> <ref>` — materialise the base revision the command
+          // is about to scan, since no real git ran.
+          const worktree = args[3] ?? ""
+          await mkdir(worktree, { recursive: true })
+          await writeConfig(worktree, "artifacts")
+          await writeSource(worktree)
+        }
+        return { stdout: "", stderr: "" }
+      },
+    }
+
+    const report = await runDiff({ cwd: scratch, refSpec: "main..HEAD", git: runner })
+
+    expect(report.diffJsonPath).toBe(resolve(scratch, "artifacts", DIFF_JSON_FILENAME))
+    expect(await exists(resolve(scratch, "artifacts", IR_JSON_FILENAME))).toBe(false)
   })
 
   it("does not read the config when the flag already answered", async () => {

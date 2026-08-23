@@ -46,11 +46,15 @@ Using a git worktree allows generating the base IR while keeping head intact, so
 ### 2.3 Outputs
 
 ```bash
-out/diff.json     # diff result (aburi.diff.v1.json schema)
-out/diff.md       # Markdown projection for pasting into PR comments
+<output-dir>/diff.json     # diff result (aburi.diff.v1.json schema)
+<output-dir>/diff.md       # Markdown projection for pasting into PR comments
 ```
 
-A one-line summary goes to `stdout`; details are referred to `out/diff.md`.
+`<output-dir>` is `--output-dir`, then `config.output.dir`, then `out` — resolved against the
+working directory in every case. The two filenames are the contract; the rest of this document
+writes them as `out/diff.json` / `out/diff.md`, which is the default run.
+
+A one-line summary goes to `stdout`; details are referred to the Markdown file.
 
 ## 3. Matching algorithm (5 stages)
 
