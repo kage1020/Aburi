@@ -671,7 +671,7 @@ it is decided from the argument.
 | Option | Meaning |
 |---|---|
 | `--output <path>` | Write to a file (default: stdout) |
-| `--ir <path>` | Use an existing IR file (default: `out/ir.json`, or trigger a scan if missing) |
+| `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `out/aburi.ir.json` starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
 | `--no-rescan` | Do not rescan even if the IR file is stale |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
