@@ -30,3 +30,11 @@ to.
 The artefact names `aburi.ir.json`, `workspace.md`, `components` and the default output
 directory moved into the module that already holds `diff.json` and `diff.md` for this reason,
 and one function resolves the output directory for `scan`, `diff` and `explain` alike.
+
+`resolveWorkspaceRoot` stops absorbing every failure. It answered `cwd` for anything
+`detectWorkspaceRoot` threw, including a `package.json` or `pnpm-workspace.yaml` that will not
+parse — which silently rooted every Symbol id at the package instead of the repository, and, now
+that the same value bounds the IR search, also made the "nor in any directory up to …" line
+describe a search that did not happen. Only `workspace-root-not-found` is absorbed now, which is
+the one case `detectWorkspaceRoot` documents as expected; anything else exits with the file
+named.
