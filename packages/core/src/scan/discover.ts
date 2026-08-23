@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
+import ignore, { type Ignore } from "ignore"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
 import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
@@ -63,9 +64,10 @@ export interface DiscoverOptions {
    */
   langDropPatterns?: readonly string[]
   /**
-   * When true (the default), `.gitignore` in the workspace root is read and its
-   * patterns are folded into the ignore set. What `config.respectGitignore` sets, and what
-   * the CLI's `--respect-gitignore` / `--no-respect-gitignore` pair overrides for one run.
+   * When true (the default), `.gitignore` in the workspace root decides which candidates the
+   * walk returns — see `readGitignore` for why it is asked per file rather than folded into
+   * the globs below. What `config.respectGitignore` sets, and what the CLI's
+   * `--respect-gitignore` / `--no-respect-gitignore` pair overrides for one run.
    */
   respectGitignore?: boolean
   /**
@@ -215,20 +217,22 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
   const maxSize = options.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES
   const respectGitignore = options.respectGitignore ?? true
 
-  const ignore = [
+  // Globs, and only globs. `.gitignore` is not in here: see `readGitignore` for why the walk
+  // is not the place its patterns can be applied. The name is `dropGlobs` rather than `ignore`
+  // because the module-level `ignore` is the matcher factory.
+  const dropGlobs = [
     ...CORE_IGNORE_PATTERNS,
     ...(options.ignore ?? []),
     ...(options.langDropPatterns ?? []),
   ]
 
-  if (respectGitignore) {
-    const gitignorePatterns = await readGitignore(workspaceRoot)
-    ignore.push(...gitignorePatterns)
-  }
+  // `null` rather than an empty rule set: an instance with no rules still validates every path
+  // handed to it, so the off switch would pay for a check it can never act on.
+  const gitignore = respectGitignore ? await readGitignore(workspaceRoot) : null
 
   const matches = await glob(["**/*"], {
     cwd: workspaceRoot,
-    ignore,
+    ignore: dropGlobs,
     onlyFiles: true,
     dot: false,
     absolute: false,
@@ -248,11 +252,27 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // never a separator. That is why the rewrite that used to happen inside `toDocumentPath` had
     // nothing to convert here, and why the check below can read this path as it stands. The
     // guarantee is the dependency's behaviour rather than its documented contract, so a test
-    // pins it against a version bump taking it away quietly.
+    // pins it against a version bump taking it away quietly. It is a guarantee about the walk
+    // only: on Windows the gitignore matcher rewrites a backslash to `/` before matching, so a
+    // rule of `secret` would match a candidate spelled `dir\secret` — moot, because NTFS has no
+    // such filename, and that moot-ness is what the arm further down is about.
     //
     // Reading the raw path costs the filter the normalization `toDocumentPath` used to have
     // done first, which is a separate matter and is handled where the comparison happens.
     if (extensions.size > 0 && !hasKnownExtension(rawPath, extensions)) continue
+
+    // Above every arm that *records* something, because glob-side pruning is what this
+    // replaces: a `.gitignore`d file was never a candidate, so it takes no path, moves no
+    // count, and leaves no incident. The extension filter above only drops candidates, so it
+    // may sit either side; it is first because it is a set lookup against one regex per rule,
+    // in exactly the directories this change stopped pruning.
+    //
+    // `rawPath`, not the normalized spelling — git matches what the filesystem stores. The
+    // matcher throws on an empty, absolute, or `.`/`..`-leading path — a narrower set than the
+    // rule `toDocumentPath` applies further down, and one `glob({ absolute: false })` already
+    // guarantees. A dot-prefixed name like `.gitignore` is not among them, and neither is a
+    // backslash, which is why this can sit above the arm that withdraws such a name.
+    if (gitignore?.ignores(rawPath)) continue
 
     // Before `toDocumentPath`, which refuses the character, and after the extension filter for
     // the same reason the id-separator check below it is: a `notes\1.txt` in a TypeScript
@@ -399,49 +419,57 @@ function hasKnownExtension(path: string, extensions: ReadonlySet<string>): boole
   return extensions.has(path.slice(dot).toLowerCase().normalize("NFC"))
 }
 
-async function readGitignore(workspaceRoot: string): Promise<string[]> {
+/**
+ * The workspace root's `.gitignore`, as something that can answer about one path.
+ *
+ * A matcher rather than a list of globs, and asked about each candidate rather than handed to
+ * the walk, because the two are not interchangeable. Pruning is what makes a `!rule`
+ * unrescuable: a directory the walk skipped never produces the file a later line would have
+ * put back, so the negation has nothing left to act on. Git's own two rules pull opposite ways
+ * — a later `!rule` re-includes, and nothing re-includes under a directory excluded outright,
+ * because git never descends into it — and only something that sees each path can hold both.
+ *
+ * The cost is that a `.gitignore`d directory is walked rather than skipped. What such a file
+ * usually names — `node_modules`, `dist`, `build`, `out`, `target`, `coverage`, `.venv` — is in
+ * `CORE_IGNORE_PATTERNS` and still pruned there; the rest is workspace-specific, and is the
+ * price of the negation working at all.
+ *
+ * `ignorecase: false`, against the library's default. Git folds case only where
+ * `core.ignoreCase` says so, which is false on ext4 and true on NTFS and APFS — so no single
+ * setting agrees with git everywhere, and the choice is which way to be wrong. Folding drops a
+ * file git keeps wherever git is case-sensitive, which is the failure this whole mechanism
+ * exists to stop; not folding, on a case-insensitive checkout, scans a file git hides. Reading
+ * `core.ignoreCase` would settle it and is refused for a different reason: it would make the
+ * Document depend on the machine's git configuration.
+ *
+ * `null` for a file that is not there, so the caller pays nothing per candidate — an instance
+ * with no rules still validates every path it is handed.
+ *
+ * Only this file. Git also reads nested `.gitignore`s, `.git/info/exclude` and
+ * `core.excludesFile`; none of those are consulted here.
+ */
+async function readGitignore(workspaceRoot: string): Promise<Ignore | null> {
   const path = resolve(workspaceRoot, ".gitignore")
   try {
     const content = await readFile(path, "utf8")
-    return parseGitignore(content)
+    const matcher = ignore({ ignorecase: false }).add(content)
+    // `add` stores the lines; the regexes are built on the first question asked. A line long
+    // enough to blow the regex engine therefore throws at the first candidate, 200 lines from
+    // here, as a bare SyntaxError naming neither this file nor the workspace. One throwaway
+    // question compiles every rule while the catch below can still say what failed.
+    matcher.ignores("a")
+    return matcher
   } catch (error) {
     // Missing file is fine — most workspaces do not have a .gitignore at the root
     // level and gracefully fall back to just the core ignore patterns. Any other
-    // failure (permission denied, I/O error, symlink loop) is a real problem the
-    // caller needs to see instead of a silently-empty pattern list.
-    if (errorCode(error) === "ENOENT") return []
+    // failure (permission denied, I/O error, symlink loop, a line no regex engine will
+    // take) is a real problem the caller needs to see instead of a silently-empty
+    // pattern list.
+    if (errorCode(error) === "ENOENT") return null
     throw new CoreError(
-      `.gitignore at "${path}" exists but could not be read: ${describeThrown(error)}`,
+      `.gitignore at "${path}" could not be used: ${describeThrown(error)}`,
       { code: "scan-gitignore-unreadable", value: path },
       { cause: error },
     )
   }
-}
-
-/**
- * Minimal `.gitignore` parser — enough to translate line-oriented patterns into globs
- * `tinyglobby` understands. Negation (`!pattern`) is preserved so an explicit
- * un-ignore in the file survives.
- */
-function parseGitignore(content: string): string[] {
-  const patterns: string[] = []
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue
-    if (trimmed.startsWith("!")) {
-      patterns.push(`!${normalizePattern(trimmed.slice(1))}`)
-    } else {
-      patterns.push(normalizePattern(trimmed))
-    }
-  }
-  return patterns
-}
-
-function normalizePattern(pattern: string): string {
-  // Anchored pattern (`/foo`) matches at the root only; the equivalent glob is just
-  // stripping the leading slash. Trailing slash marks a directory match — glob it as
-  // `<name>/**` so the entire subtree is included.
-  let p = pattern.startsWith("/") ? pattern.slice(1) : `**/${pattern}`
-  if (p.endsWith("/")) p = `${p}**`
-  return p
 }

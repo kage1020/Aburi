@@ -304,7 +304,7 @@ When multiple detectors generate the same id with different paths (§4.1):
 
 ## 8. `.gitignore` / exclusions
 
-- Honor `.gitignore` patterns during traversal (per config.respectGitignore)
+- Honor the workspace root's `.gitignore` per `config.respectGitignore`, by the rules in [`drop-list.md` §3.3](./drop-list.md) — asked about each candidate rather than folded into the traversal's exclusion globs
 - `node_modules/` / `vendor/` / `__pycache__/` etc. are always excluded during autodetect as well
 - The contents of `.git/` are never read, but its presence is used as a workspace root marker
 
