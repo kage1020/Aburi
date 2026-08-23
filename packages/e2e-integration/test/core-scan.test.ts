@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME } from "@aburi/cli"
 import {
   apiFingerprint,
   assertIRIntegrity,
@@ -451,7 +452,7 @@ describe("scan — integration through real plugins", () => {
       registry: buildRegistry(),
     })
 
-    const outPath = join(workRoot, "out", "aburi.ir.json")
+    const outPath = join(workRoot, DEFAULT_OUTPUT_DIRNAME, IR_JSON_FILENAME)
     const serialized = await writeCanonicalIR(result.ir, outPath)
     expect(serialized.startsWith("{\n")).toBe(true)
     const parsed = JSON.parse(serialized)

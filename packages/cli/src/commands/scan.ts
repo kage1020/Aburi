@@ -7,7 +7,6 @@ import {
   describeCodePoints,
   detectComponents,
   detectManagers,
-  detectWorkspaceRoot,
   makeComponentId,
   makeLanguageId,
   posixWorkspaceRelativeViolation,
@@ -43,6 +42,7 @@ import { readGeneratorInfo } from "../generator-info"
 import { createLogger } from "../logger"
 import { loadPlugins } from "../plugin-loader"
 import type { WarnFn } from "../warn"
+import { resolveWorkspaceRoot } from "../workspace-root"
 
 export interface ScanOptions {
   cwd?: string
@@ -855,14 +855,6 @@ function requireCallResolution(ir: IR): CallResolutionStats {
     )
   }
   return stats
-}
-
-async function resolveWorkspaceRoot(cwd: string): Promise<string> {
-  try {
-    return await detectWorkspaceRoot({ cwd })
-  } catch {
-    return resolve(cwd)
-  }
 }
 
 /**

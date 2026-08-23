@@ -16,6 +16,8 @@ import { IR_JSON_FILENAME, resolveOutputDir } from "../src/artifact-paths"
  * answers correctly, so the only symptom is the time it took.
  */
 
+/** `outer/` holds no marker; `outer/repo` is the workspace and `outer/repo/pkgs/app` a package. */
+let outer = ""
 let mono = ""
 let app = ""
 
@@ -53,11 +55,13 @@ async function readIrAt(path: string): Promise<Record<string, unknown>> {
 }
 
 beforeEach(async () => {
-  mono = await mkdtemp(resolve(tmpdir(), "aburi-output-anchor-"))
+  outer = await mkdtemp(resolve(tmpdir(), "aburi-output-anchor-"))
+  mono = resolve(outer, "repo")
+  await mkdir(mono, { recursive: true })
 })
 
 afterEach(async () => {
-  await rm(mono, { recursive: true, force: true })
+  await rm(outer, { recursive: true, force: true })
 })
 
 describe("the directory scan writes to is the directory explain reads from", () => {
@@ -112,7 +116,97 @@ describe("the directory scan writes to is the directory explain reads from", () 
     // reader acts on. The old message named the workspace root's path and nothing else.
     expect((thrown as Error).message).toContain(resolve(app, "out", IR_JSON_FILENAME))
     expect((thrown as Error).message).not.toContain(resolve(mono, "out", IR_JSON_FILENAME))
-    expect((thrown as Error).message).toContain(mono)
+    // Not `toContain(mono)`, which every candidate path already satisfies as a prefix.
+    expect((thrown as Error).message).toContain(`nor in any directory up to ${mono}`)
+  })
+
+  it("does not claim to have searched upward when there was nowhere to search", async () => {
+    // From the workspace root the walk has one candidate, and a message offering a range it
+    // never covered would be a confident overstatement about where it looked.
+    await makeMonorepo()
+
+    const thrown = await runExplain({ cwd: mono, argument: "alpha", noRescan: true }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect((thrown as Error).message).toContain(resolve(mono, "out", IR_JSON_FILENAME))
+    expect((thrown as Error).message).not.toContain("nor in any directory up to")
+  })
+
+  it("stops at the workspace root rather than reading an IR from outside it", async () => {
+    // An `out/` above the workspace holds a document about a different tree. Config discovery
+    // deliberately walks past the root — a config may be shared across repositories — and this
+    // deliberately does not.
+    await makeMonorepo()
+    await runScan({ cwd: mono, format: "json" })
+    // Move the only IR in the ancestry to a directory above the workspace root.
+    await mkdir(resolve(outer, "out"), { recursive: true })
+    await writeFile(
+      resolve(outer, "out", IR_JSON_FILENAME),
+      await readFile(resolve(mono, "out", IR_JSON_FILENAME), "utf8"),
+      "utf8",
+    )
+    await rm(resolve(mono, "out"), { recursive: true, force: true })
+
+    const thrown = await runExplain({ cwd: app, argument: "alpha", noRescan: true }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect((thrown as Error).message).toContain("No IR file at")
+  })
+
+  it("searches the directories between the working directory and the root", async () => {
+    // The middle of the walk. With only the two endpoints exercised, an implementation that
+    // checked `cwd` and the root and nothing between would pass every other test here.
+    await makeMonorepo()
+    const group = resolve(mono, "pkgs")
+    const deep = resolve(group, "app/nested")
+    await mkdir(resolve(deep, "src"), { recursive: true })
+    await writeFile(resolve(deep, "src/b.ts"), "export function gamma() { return 3 }\n", "utf8")
+
+    const report = await runScan({ cwd: group, format: "json" })
+    expect(report.irPath).toBe(resolve(group, "out", IR_JSON_FILENAME))
+
+    const outcome = await runExplain({ cwd: deep, argument: "alpha", noRescan: true })
+
+    expect(outcome.exitCode).toBe(0)
+  })
+
+  it("says which document answered when it was not the one under the caller", async () => {
+    // The lookup can now reach any ancestor, and the answer carries no trace of where it came
+    // from: `ir.workspace.root` is `"."` in every document by schema, so the file's location is
+    // the only signal there is.
+    await makeMonorepo()
+    await runScan({ cwd: mono, format: "json" })
+    const said: string[] = []
+
+    await runExplain({
+      cwd: app,
+      argument: "alpha",
+      noRescan: true,
+      warn: (message) => said.push(message),
+    })
+
+    expect(said).toEqual([
+      `Answering from ${resolve(mono, "out", IR_JSON_FILENAME)}; there is no IR under ${resolve(app)}.`,
+    ])
+  })
+
+  it("says nothing when the document under the caller answered", async () => {
+    await makeMonorepo()
+    await runScan({ cwd: app, format: "json" })
+    const said: string[] = []
+
+    await runExplain({
+      cwd: app,
+      argument: "alpha",
+      noRescan: true,
+      warn: (message) => said.push(message),
+    })
+
+    expect(said).toEqual([])
   })
 
   it("still resolves --ir against the working directory", async () => {

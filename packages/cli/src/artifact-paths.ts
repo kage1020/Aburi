@@ -7,11 +7,13 @@ import { resolve } from "node:path"
  * GitHub Action, integration fixtures) can import the exact literal string instead of
  * hard-coding a copy that would drift silently the moment we rename either artefact. That is
  * not hypothetical: `aburi explain` held its own `"out/aburi.ir.json"` beside `aburi scan`'s
- * `resolve(outputDir, "aburi.ir.json")`, and the directory half of the copy drifted first.
+ * `resolve(outputDir, "aburi.ir.json")`. Both spelled the directory `out`; what drifted was
+ * what `out` was resolved against — the working directory on one side and the workspace root
+ * on the other — which is the half a copied literal cannot protect.
  *
- * `docs/design/cli-spec.md §6.4` and `docs/design/diff-algorithm.md §5` pin the diff artefacts
- * to `diff.json` and `diff.md`; `§5.3` pins the scan's three. If either contract changes, this
- * is the sole place that has to move.
+ * `docs/design/cli-spec.md §6.4` and `docs/design/diff-algorithm.md §2.3` pin the diff
+ * artefacts to `diff.json` and `diff.md`; `docs/design/cli-spec.md §5.3` pins the scan's
+ * three. If either contract changes, this is the sole place that has to move.
  */
 
 export const DIFF_JSON_FILENAME = "diff.json"

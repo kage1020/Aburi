@@ -230,7 +230,7 @@ Three-arm dispatch:
 
 | Flag | Effect |
 |---|---|
-| `--ir <path>` | Existing IR file (skip autoscan), resolved against the working directory. Without it, `out/aburi.ir.json` is looked for from the working directory upward to the workspace root, nearest first — the same walk config discovery uses, and it finds the artefact wherever `aburi scan` was run. |
+| `--ir <path>` | Existing IR file (skip autoscan), resolved against the working directory. Without it, `out/aburi.ir.json` is looked for from the working directory upward to the workspace root, nearest first — so a scan run without `--output-dir` is found whether it happened here, at the workspace root, or anywhere between. A scan that used `--output-dir`, or one run outside this workspace, is reachable only through `--ir`. |
 | `--output <path>` | Write Markdown to a file instead of stdout. |
 | `--no-rescan` | Fail if no IR file exists — do not implicitly rescan. |
 | `--config <path>` | Alternate config file. |
