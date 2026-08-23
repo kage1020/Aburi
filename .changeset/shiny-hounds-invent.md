@@ -21,9 +21,11 @@ writes and the command that reads still agree on one directory.
 - **`aburi explain` and `aburi diff` now read the config where they did not.** A config that
   cannot be parsed stops them instead of being ignored: the setting is what says where the
   artefacts are, so an unread config means their location is unknown, and answering from `out/`
-  would be a confident wrong answer over a swallowed error. `explain --ir <path>` and
-  `diff --output-dir <dir>` are unaffected — each already answered the question the config
-  would have, and neither consults it.
+  would be a confident wrong answer over a swallowed error. `aburi diff` decides its
+  destination before it computes anything, so an unusable config costs no scan and cannot be
+  reported as a comparison that failed. `explain --ir <path>` and `diff --output-dir <dir>` are
+  unaffected — each already answered the question, and neither reads `output.dir` (a ref diff
+  still loads the config for its per-side scans, as it always has).
 - The GitHub Action always forwards `--output-dir`, so `config.output.dir` does not apply
   under it. That is deliberate — the action reads `diff.md` back to post it — and is now
   stated in its README, whose row also named two files the CLI does not write.

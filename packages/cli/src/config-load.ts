@@ -9,8 +9,8 @@ import { CliError, errorMessage } from "./errors"
 
 /**
  * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the process `cwd`,
- * per the §11 precedence table. A config in the current package therefore wins over one in
- * an ancestor.
+ * per `cli-spec.md §13 Config Resolution Order`. A config in the current package therefore
+ * wins over one in an ancestor.
  *
  * The marker-detected workspace root plays no part here. It is the base for Symbol id
  * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for

@@ -250,7 +250,7 @@ Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed)
 
 A rescan that did not exit clean also exits `3`, whichever of those the lookup concluded: the
 withdrawn file could have held the match, or a second candidate for it. Reading an existing IR
-(`--ir`, or an `out/aburi.ir.json` found by the walk above) runs no scan, so it reaches `3` only by the
+(`--ir`, or an `<output-dir>/aburi.ir.json` found by the walk above) runs no scan, so it reaches `3` only by the
 route above — from what the document says, never from a status inherited for having read one.
 
 **Examples:**

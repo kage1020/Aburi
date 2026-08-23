@@ -415,8 +415,9 @@ async function resolveIR(
  *
  * Upward and nearest-first is what config discovery does too, but it **stops at the workspace
  * root** and config discovery deliberately does not — `findConfig`'s own docblock says a config
- * above the root is still honoured, because a user may share one across repositories. An `out/`
- * above the root is not shareable in that way: it holds a document about a different tree, and
+ * above the root is still honoured, because a user may share one across repositories. An output
+ * directory above the root is not shareable in that way: it holds a document about a different
+ * tree, and
  * answering from it would describe a workspace the caller is not in.
  *
  * Nearest wins, for the same reason the nearest config does: it is the one the caller most

@@ -22,7 +22,7 @@ export const IR_JSON_FILENAME = "aburi.ir.json"
 export const WORKSPACE_MD_FILENAME = "workspace.md"
 export const COMPONENTS_DIRNAME = "components"
 
-/** Where the artefacts go when `--output-dir` is not given. */
+/** The last fallback, when neither `--output-dir` nor `config.output.dir` names a directory. */
 export const DEFAULT_OUTPUT_DIRNAME = "out"
 
 /**

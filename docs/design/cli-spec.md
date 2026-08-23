@@ -879,7 +879,8 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 2. ABURI_CONFIG env
 3. <cwd>/aburi.jsonc
 4. <cwd>/aburi.json
-5. Repeat 3-4 recursively in parent directories (up to the workspace root)
+5. Repeat 3-4 recursively in parent directories, up to the **filesystem** root — not the
+   workspace root, so a config shared across several repositories is still honoured
 6. autodetect (works with no config present)
 ```
 
