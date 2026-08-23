@@ -50,12 +50,20 @@ const GITIGNORE = [
 
 const KEPT_BY_GIT = ["a[1].ts", "assets/keep.ts", "keep.spec.ts", "src/a.ts", "src/keepme/c.ts"]
 
+/** `café.ts`, decomposed and composed. Identical on screen, different bytes on disk. */
+const DECOMPOSED = "src/café.ts"
+const COMPOSED = "src/café.ts"
+
 async function writeFileAt(rel: string, content = "1"): Promise<void> {
   const abs = join(workRoot, rel)
   await mkdir(abs.slice(0, Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"))), {
     recursive: true,
   })
   await writeFile(abs, content, "utf8")
+}
+
+async function writeGitignore(...lines: readonly string[]): Promise<void> {
+  await writeFile(join(workRoot, ".gitignore"), `${lines.join("\n")}\n`, "utf8")
 }
 
 async function discover(options: { ignore?: readonly string[] } = {}): Promise<string[]> {
@@ -126,7 +134,7 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
   it("cannot rescue a file config.ignore excluded", async () => {
     await writeFileAt("src/a.ts")
     await writeFileAt("src/local.ts")
-    await writeFile(join(workRoot, ".gitignore"), "!src/local.ts\n", "utf8")
+    await writeGitignore("!src/local.ts")
 
     expect(await discover({ ignore: ["src/local.ts"] })).toEqual(["src/a.ts"])
   })
@@ -136,7 +144,7 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
     // negotiation by the workspace's `.gitignore`.
     await writeFileAt("src/a.ts")
     await writeFileAt("dist/bundle.ts")
-    await writeFile(join(workRoot, ".gitignore"), "!dist/bundle.ts\n", "utf8")
+    await writeGitignore("!dist/bundle.ts")
 
     expect(await discover()).toEqual(["src/a.ts"])
   })
@@ -144,7 +152,7 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
   it("changes nothing when respectGitignore is false", async () => {
     await writeFileAt("src/a.ts")
     await writeFileAt("gen/keep.ts")
-    await writeFile(join(workRoot, ".gitignore"), "gen/\n!gen/keep.ts\n", "utf8")
+    await writeGitignore("gen/", "!gen/keep.ts")
 
     const result = await discoverFiles({
       workspaceRoot: workRoot,
@@ -158,8 +166,8 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
 
 describe("discoverFiles — the lines a .gitignore is allowed to contain", () => {
   it("skips comments and blank lines, keeps CRLF and trailing spaces straight", async () => {
-    // Five line shapes at once, because they are handled by one parser and a fixture per
-    // shape would not prove they compose.
+    // Five line shapes at once, because one parser handles them all and a fixture per shape
+    // would not prove they compose. The escaped `#` is a filename, not a comment.
     await writeFileAt("src/a.ts")
     await writeFileAt("src/tmp.ts")
     await writeFileAt("#hash.ts")
@@ -174,8 +182,54 @@ describe("discoverFiles — the lines a .gitignore is allowed to contain", () =>
 
   it("treats a .gitignore that excludes nothing as no .gitignore at all", async () => {
     await writeFileAt("src/a.ts")
-    await writeFile(join(workRoot, ".gitignore"), "# nothing here\n\n", "utf8")
+    await writeGitignore("# nothing here", "")
 
     expect(await discover()).toEqual(["src/a.ts"])
+  })
+})
+
+// Two spellings of one name need a filesystem that keeps both; APFS resolves them to a single
+// file, so the collision fixture cannot exist there.
+const onCollidingFs = it.skipIf(process.platform === "darwin")
+
+describe("discoverFiles — which spelling the matcher is asked about, and when", () => {
+  it("matches the spelling on disk, not the one the Document would record", async () => {
+    // A path enters the Document in NFC. Git matches the bytes the filesystem stored, so a
+    // `.gitignore` naming the decomposed spelling has to exclude the decomposed file — asked
+    // about the normalized one, the matcher would keep it.
+    await writeFileAt(DECOMPOSED)
+    await writeFileAt("src/a.ts")
+    await writeGitignore(DECOMPOSED)
+
+    expect(await discover()).toEqual(["src/a.ts"])
+  })
+
+  it("excludes a file before the path it could never take is decided", async () => {
+    // `v#1` holds a Symbol id separator, so a candidate under it is recorded `unroutable` and
+    // named in `stats.skippedFiles`. A `.gitignore`d file is not a candidate at all: asked
+    // about after that arm, it would be reported as a loss the workspace itself excluded.
+    await writeFileAt("src/v#1/emitted.ts")
+    await writeFileAt("src/a.ts")
+    await writeGitignore("src/v#1/")
+
+    const result = await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
+    expect(result.skipped).toEqual([])
+  })
+
+  onCollidingFs("excludes a claimant before the group it would have collided with", async () => {
+    // Two names that normalize to one Document path are withdrawn as a group. Excluding one of
+    // them leaves a single claimant, which is an ordinary file — so the matcher has to be
+    // asked before the claim is recorded, or the workspace's own exclusion would still cost
+    // the other file.
+    await writeFileAt(DECOMPOSED)
+    await writeFileAt(COMPOSED)
+    await writeGitignore(DECOMPOSED)
+
+    const result = await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] })
+
+    expect(result.files.map((f) => f.path)).toEqual([COMPOSED])
+    expect(result.unrepresentableFiles).toEqual([])
   })
 })
