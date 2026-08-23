@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
+import ignore, { type Ignore } from "ignore"
 import { glob } from "tinyglobby"
 import { CoreError } from "../errors"
 import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
@@ -215,20 +216,22 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
   const maxSize = options.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES
   const respectGitignore = options.respectGitignore ?? true
 
-  const ignore = [
+  // Globs, and only globs. `.gitignore` is not in here: see `readGitignore` for why the walk
+  // is not the place its patterns can be applied. The name is `dropGlobs` rather than `ignore`
+  // because the module-level `ignore` is the matcher factory.
+  const dropGlobs = [
     ...CORE_IGNORE_PATTERNS,
     ...(options.ignore ?? []),
     ...(options.langDropPatterns ?? []),
   ]
 
-  if (respectGitignore) {
-    const gitignorePatterns = await readGitignore(workspaceRoot)
-    ignore.push(...gitignorePatterns)
-  }
+  // An empty rule set when the walk is not to consult the file, so the loop below has one
+  // shape. Building it does not read anything.
+  const gitignore = respectGitignore ? await readGitignore(workspaceRoot) : ignore()
 
   const matches = await glob(["**/*"], {
     cwd: workspaceRoot,
-    ignore,
+    ignore: dropGlobs,
     onlyFiles: true,
     dot: false,
     absolute: false,
@@ -252,6 +255,16 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     //
     // Reading the raw path costs the filter the normalization `toDocumentPath` used to have
     // done first, which is a separate matter and is handled where the comparison happens.
+    // First, because glob-side pruning is what this replaces: a `.gitignore`d file was never
+    // a candidate, so it takes no path, moves no count, and leaves no record. Anything below
+    // this line would give it one.
+    //
+    // `rawPath`, not the normalized spelling — git matches what the filesystem stores. The
+    // matcher refuses an empty, `.`-prefixed or absolute path, which is the caller contract
+    // `toDocumentPath` already relies on further down and `glob({ absolute: false })` already
+    // guarantees.
+    if (gitignore.ignores(rawPath)) continue
+
     if (extensions.size > 0 && !hasKnownExtension(rawPath, extensions)) continue
 
     // Before `toDocumentPath`, which refuses the character, and after the extension filter for
@@ -399,49 +412,43 @@ function hasKnownExtension(path: string, extensions: ReadonlySet<string>): boole
   return extensions.has(path.slice(dot).toLowerCase().normalize("NFC"))
 }
 
-async function readGitignore(workspaceRoot: string): Promise<string[]> {
+/**
+ * The workspace root's `.gitignore`, as something that can answer about one path.
+ *
+ * A matcher rather than a list of globs, and applied to each candidate rather than handed to
+ * the walk, because the two are not interchangeable. Pruning is what makes a `!rule`
+ * unrescuable: a directory the walk skipped never produces the file a later line would have
+ * put back, so the negation has nothing left to act on. Translating the file into globs also
+ * translated away most of the grammar — brackets, escapes, a directory negated back — and
+ * every divergence measured against `git check-ignore` lost a file git keeps.
+ *
+ * Git's own two rules are what this reproduces, and they pull opposite ways: a later `!rule`
+ * re-includes, and nothing re-includes under a directory excluded outright, because git never
+ * descends into it.
+ *
+ * The cost is that a `.gitignore`d directory is walked rather than skipped. What such a file
+ * usually names — `node_modules`, `dist`, `build`, `out`, `target`, `coverage`, `.venv` — is in
+ * `CORE_IGNORE_PATTERNS` and still pruned there; the rest is workspace-specific, and is the
+ * price of the negation working at all.
+ *
+ * Only this file. Git also reads nested `.gitignore`s, `.git/info/exclude` and
+ * `core.excludesFile`; none of those are consulted here.
+ */
+async function readGitignore(workspaceRoot: string): Promise<Ignore> {
   const path = resolve(workspaceRoot, ".gitignore")
   try {
     const content = await readFile(path, "utf8")
-    return parseGitignore(content)
+    return ignore().add(content)
   } catch (error) {
     // Missing file is fine — most workspaces do not have a .gitignore at the root
     // level and gracefully fall back to just the core ignore patterns. Any other
     // failure (permission denied, I/O error, symlink loop) is a real problem the
     // caller needs to see instead of a silently-empty pattern list.
-    if (errorCode(error) === "ENOENT") return []
+    if (errorCode(error) === "ENOENT") return ignore()
     throw new CoreError(
       `.gitignore at "${path}" exists but could not be read: ${describeThrown(error)}`,
       { code: "scan-gitignore-unreadable", value: path },
       { cause: error },
     )
   }
-}
-
-/**
- * Minimal `.gitignore` parser — enough to translate line-oriented patterns into globs
- * `tinyglobby` understands. Negation (`!pattern`) is preserved so an explicit
- * un-ignore in the file survives.
- */
-function parseGitignore(content: string): string[] {
-  const patterns: string[] = []
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (trimmed.length === 0 || trimmed.startsWith("#")) continue
-    if (trimmed.startsWith("!")) {
-      patterns.push(`!${normalizePattern(trimmed.slice(1))}`)
-    } else {
-      patterns.push(normalizePattern(trimmed))
-    }
-  }
-  return patterns
-}
-
-function normalizePattern(pattern: string): string {
-  // Anchored pattern (`/foo`) matches at the root only; the equivalent glob is just
-  // stripping the leading slash. Trailing slash marks a directory match — glob it as
-  // `<name>/**` so the entire subtree is included.
-  let p = pattern.startsWith("/") ? pattern.slice(1) : `**/${pattern}`
-  if (p.endsWith("/")) p = `${p}**`
-  return p
 }
