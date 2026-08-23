@@ -9,8 +9,8 @@ Discovery read one file — the workspace root's — so `packages/app/.gitignore
 say a package's fixtures are not source, and the workspace was saying it to nobody.
 
 Git consults a `.gitignore` in each directory from the repository root down to the file's own,
-and the deepest file with an opinion decides — whichever direction it points. Nineteen verdicts
-were measured against `git check-ignore` and are hardcoded as tests.
+and the deepest file with an opinion decides — whichever direction it points. Twenty-eight
+verdicts were measured against `git check-ignore` and are hardcoded as tests.
 
 **This changes which files are in the IR, in both directions.** A package-local exclusion now
 drops files, so a diff against an IR produced before this reports them as removed; a nested
@@ -25,7 +25,16 @@ run `aburi scan` on both sides before reading such a diff.
 - `$GIT_DIR/info/exclude` and `core.excludesFile` are still not read, deliberately: both are
   per-machine, and the Document must not depend on who ran the scan. `.git/.gitignore` is not
   a rule file to git and is not one here.
-- A directory named `.gitignore` is now no patterns rather than an `EISDIR` that ended the run
-  — git reads it as nothing, and so does this. A `.gitignore` that exists and cannot be *used*
-  still ends the run, naming the file, which is stricter than git's own warn-and-continue and
-  is the point: a rule list that silently came up empty puts excluded files in the Document.
+- A `.gitignore` that is not a regular file is no patterns rather than a read failure that
+  ended the run: a **directory** of that name, and a **symlink**, which git refuses to follow
+  whether or not it resolves. Anything else that is not a regular file goes the same way,
+  rather than blocking forever on a FIFO as git does.
+- A `.gitignore` that exists as a regular file and cannot be *used* still ends the run, naming
+  the file **and the line** — which is stricter than git's own warn-and-continue and is the
+  point: a rule list that silently came up empty puts excluded files in the Document. Every
+  rule is compiled when the file is read rather than when a candidate happens to reach it, so
+  a pattern the regex engine refuses can no longer escape as a bare `SyntaxError` hundreds of
+  files later, naming neither.
+- Rule files are opened by descending to them, as git finds them. One under a directory with
+  no surviving candidate — dropped by the Category A globs, excluded by an outer `.gitignore`,
+  or inside `.git` — is never opened, so it can neither apply nor fail.

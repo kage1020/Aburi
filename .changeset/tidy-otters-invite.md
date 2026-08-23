@@ -37,5 +37,4 @@ is the direction that loses data and the one the glob translation being replaced
 right.
 
 Unchanged: `config.ignore` and language-plugin drop patterns are globs by contract and still go
-to the walk, so no `.gitignore` negation can rescue a file they exclude. Only the workspace
-root's `.gitignore` is read, as before.
+to the walk, so no `.gitignore` negation can rescue a file they exclude.

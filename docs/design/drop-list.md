@@ -63,7 +63,7 @@ Each language plugin may add skip patterns specific to its own language. Example
 
 Files ignored by git are therefore skipped automatically without listing `dist/` etc. explicitly.
 
-It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So the file is compiled into a matcher and every discovered candidate is asked about it, rather than the walk being pruned by it. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
+It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So each file is compiled into its own matcher and every discovered candidate is asked about the chain of them above it, rather than the walk being pruned by any. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
 
 **The Category A globs are outside a negation's reach.** The core patterns, `config.ignore[]` (§3.4) and language-plugin drop patterns prune the walk, and no `!` line in `.gitignore` brings back a file they excluded — those are not gitignore rules and the matcher never sees the candidate.
 
@@ -77,7 +77,9 @@ The directory rule above still holds across files: nothing re-includes a file un
 
 **Not read**, and not by accident: `$GIT_DIR/info/exclude` and `core.excludesFile`. Both live outside the tree and are per-machine, so honouring them would make the Document depend on who ran the scan — the determinism [`ir-schema.md`](./ir-schema.md) §1 exists to defend. A `.gitignore` is committed, so every clone answers the same. `.git/.gitignore` is not a rule file to git and is not one here.
 
-A `.gitignore` under a directory the Category A globs already dropped is not read, and could not change an answer if it were: every path it can speak about is gone.
+A rule file is opened by descending to it, as git finds it — so one under a directory that has no surviving candidate is never opened at all. That covers a directory the Category A globs dropped, a directory an outer `.gitignore` excluded, and `.git` itself. It is not only that such a file's rules would be inert; an unusable one would otherwise end a run git would not even have opened it during.
+
+A `.gitignore` that is not a regular file is no patterns, which is git's answer too: a **directory** of that name, and a **symlink** — git refuses to follow one, resolvable or not. Anything else that is not a regular file is treated the same, rather than blocking forever on a FIFO as git does.
 
 ### 3.4 Config additions
 

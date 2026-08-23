@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -27,12 +27,20 @@ async function writeFileAt(rel: string, content = "1"): Promise<void> {
   await writeFile(abs, content, "utf8")
 }
 
+async function symlinkAt(target: string, rel: string): Promise<void> {
+  const abs = join(workRoot, rel)
+  await mkdir(dirname(abs), { recursive: true })
+  await symlink(target, abs)
+}
+
 /** A `.gitignore` in `directory` (`""` for the workspace root). */
 async function gitignoreIn(directory: string, ...lines: readonly string[]): Promise<void> {
   await writeFileAt(join(directory, ".gitignore"), `${lines.join("\n")}\n`)
 }
 
-async function discover(options: { respectGitignore?: boolean } = {}): Promise<string[]> {
+async function discoverWith(
+  options: { respectGitignore?: boolean; ignore?: readonly string[] } = {},
+): Promise<string[]> {
   const result = await discoverFiles({
     workspaceRoot: workRoot,
     languageExtensions: [".ts"],
@@ -42,6 +50,8 @@ async function discover(options: { respectGitignore?: boolean } = {}): Promise<s
   expect(result.unrepresentableFiles).toEqual([])
   return result.files.map((f) => f.path)
 }
+
+const discover = discoverWith
 
 beforeEach(async () => {
   workRoot = await mkdtemp(join(tmpdir(), "aburi-gitignore-nested-"))
@@ -199,22 +209,100 @@ describe("what is not read", () => {
 })
 
 describe("a nested file that cannot be used", () => {
-  it("fails naming the nested file, not the root one", async () => {
-    await gitignoreIn("", "root.ts")
-    await writeFileAt("pkg/a.ts")
-    // A single pattern longer than the regex engine will compile. The failure is raised while
-    // the file is still identifiable, rather than 200 candidates later as a bare SyntaxError.
-    await writeFileAt(join("pkg", ".gitignore"), `${"a".repeat(40_000)}\n`)
+  /** A single pattern longer than the regex engine will compile. */
+  const UNCOMPILABLE = "a".repeat(40_000)
 
-    const thrown = await discoverFiles({
-      workspaceRoot: workRoot,
-      languageExtensions: [".ts"],
-    }).then(
+  async function discoverOrThrow(): Promise<unknown> {
+    return await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] }).then(
       () => null,
       (error: unknown) => error,
     )
+  }
+
+  it("fails naming the nested file, not the root one", async () => {
+    await gitignoreIn("", "root.ts")
+    await writeFileAt("pkg/a.ts")
+    await writeFileAt(join("pkg", ".gitignore"), `${UNCOMPILABLE}\n`)
+
+    const thrown = await discoverOrThrow()
 
     expect((thrown as Error).message).toContain(join(workRoot, "pkg", ".gitignore"))
     expect((thrown as Error).message).not.toContain(join(workRoot, ".gitignore"))
+  })
+
+  it("names a rule the walk would never have asked about", async () => {
+    // A negative rule is skipped while nothing has matched, and a rule that matches shadows the
+    // same-polarity rules after it — so one throwaway question of the assembled matcher compiles
+    // neither of these, and each used to escape as a bare SyntaxError at some later candidate.
+    for (const [directory, rules] of [
+      ["negation", [`!${UNCOMPILABLE}`]],
+      ["shadowed", ["a*", UNCOMPILABLE]],
+    ] as const) {
+      await writeFileAt(`${directory}/a.ts`)
+      await writeFileAt(join(directory, ".gitignore"), `${rules.join("\n")}\n`)
+
+      const thrown = await discoverOrThrow()
+
+      expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+      expect((thrown as Error).message).toContain(join(workRoot, directory, ".gitignore"))
+      await rm(join(workRoot, directory), { recursive: true, force: true })
+    }
+  })
+
+  it("names the line, and does not quote the whole of an oversized rule", async () => {
+    // `CoreError` is not a `CliError`, so the message reaches a terminal unabridged. The engine's
+    // own diagnostic for this case quotes the entire 40,000-character pattern.
+    await writeFileAt("pkg/a.ts")
+    await writeFileAt(
+      join("pkg", ".gitignore"),
+      ["# a comment", "", "*.log", UNCOMPILABLE].join("\n"),
+    )
+
+    const thrown = await discoverOrThrow()
+
+    expect((thrown as Error).message).toContain("line 4")
+    expect((thrown as Error).message).toContain("40000 characters")
+    expect((thrown as Error).message.length).toBeLessThan(1_000)
+  })
+
+  it("is not read at all when respectGitignore is off", async () => {
+    // The off switch skips the read, not just the application. Nothing else here would notice
+    // the difference: a matcher built and thrown away answers the same as no matcher.
+    await gitignoreIn("", "root.ts")
+    await writeFileAt(join("pkg", ".gitignore"), `${UNCOMPILABLE}\n`)
+    await writeFileAt("pkg/a.ts")
+    await writeFileAt("root.ts")
+
+    expect(await discover({ respectGitignore: false })).toEqual(["pkg/a.ts", "root.ts"])
+  })
+
+  it("is not read under a directory the caller's own ignore globs removed", async () => {
+    // No candidate comes from there, so the descent never arrives. Reading it would let
+    // `config.ignore` turn a workspace's own exclusions into a failed scan — or, if the read
+    // succeeded, into no exclusions at all.
+    await writeFileAt(join("private", ".gitignore"), `${UNCOMPILABLE}\n`)
+    await writeFileAt("private/a.ts")
+    await writeFileAt("keep.ts")
+
+    expect(await discoverWith({ ignore: ["private/**"] })).toEqual(["keep.ts"])
+  })
+})
+
+// Creating a symlink on Windows needs a privilege an ordinary test run does not have.
+const onPosix = it.skipIf(process.platform === "win32")
+
+describe("a .gitignore that is not a regular file", () => {
+  onPosix("does not follow a symlink, resolvable or not", async () => {
+    // Measured: `git check-ignore` honours neither. It refuses to follow a symlinked
+    // `.gitignore` at all — a resolvable one is read as nothing, and a dangling one warns.
+    // Discovery agreed with the second by accident and the first not at all, because the walk
+    // that listed the files resolved links and silently dropped the ones that would not.
+    await writeFileAt("rules.txt", "drop.ts\n")
+    await symlinkAt(join(workRoot, "rules.txt"), join("resolvable", ".gitignore"))
+    await symlinkAt(join(workRoot, "nothing-here"), join("dangling", ".gitignore"))
+    await writeFileAt("resolvable/drop.ts")
+    await writeFileAt("dangling/drop.ts")
+
+    expect(await discover()).toEqual(["dangling/drop.ts", "resolvable/drop.ts"])
   })
 })

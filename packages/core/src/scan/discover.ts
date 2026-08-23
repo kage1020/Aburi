@@ -4,7 +4,7 @@ import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
 import { describeThrown, isVanishedFile } from "./faults"
-import { readGitignores } from "./gitignore"
+import { openGitignoreTree } from "./gitignore"
 
 /**
  * Category A drop patterns from drop-list.md §3.1. Kept here rather than embedded in a
@@ -221,16 +221,17 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
   const maxSize = options.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES
   const respectGitignore = options.respectGitignore ?? true
 
-  // Globs, and only globs. `.gitignore` is not in here: see `readGitignores` for why the walk
-  // is not the place its patterns can be applied. They are handed to it all the same — a
-  // `.gitignore` under a directory these already drop has nothing left to speak about.
+  // Globs, and only globs. `.gitignore` is not in here: see `openGitignoreTree` for why the
+  // walk is not the place its patterns can be applied. Nor are these handed to it — a rule file
+  // is opened by descending to it, and a directory these dropped is a directory no candidate
+  // comes from, so the descent never arrives.
   const dropGlobs = [
     ...CORE_IGNORE_PATTERNS,
     ...(options.ignore ?? []),
     ...(options.langDropPatterns ?? []),
   ]
 
-  const gitignore = respectGitignore ? await readGitignores(workspaceRoot, dropGlobs) : null
+  const gitignore = respectGitignore ? openGitignoreTree(workspaceRoot) : null
 
   const matches = await glob(["**/*"], {
     cwd: workspaceRoot,
@@ -263,18 +264,18 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // done first, which is a separate matter and is handled where the comparison happens.
     if (extensions.size > 0 && !hasKnownExtension(rawPath, extensions)) continue
 
-    // Above every arm that *records* something, because glob-side pruning is what this
-    // replaces: a `.gitignore`d file was never a candidate, so it takes no path, moves no
-    // count, and leaves no incident. The extension filter above only drops candidates, so it
-    // may sit either side; it is first because it is a set lookup against one regex per rule,
-    // in exactly the directories this change stopped pruning.
+    // Above every arm that *records* something, because glob-side pruning is what the
+    // matcher replaces: a `.gitignore`d file was never a candidate, so it takes no path, moves
+    // no count, and leaves no incident. The extension filter above only drops candidates, so it
+    // may sit either side; it is first because it is a set lookup, where this walks the
+    // candidate's ancestor chain and may open a rule file it has not read yet.
     //
     // `rawPath`, not the normalized spelling — git matches what the filesystem stores. The
     // matcher throws on an empty, absolute, or `.`/`..`-leading path — a narrower set than the
     // rule `toDocumentPath` applies further down, and one `glob({ absolute: false })` already
     // guarantees. A dot-prefixed name like `.gitignore` is not among them, and neither is a
     // backslash, which is why this can sit above the arm that withdraws such a name.
-    if (gitignore?.ignores(rawPath)) continue
+    if (gitignore !== null && (await gitignore.ignores(rawPath))) continue
 
     // Before `toDocumentPath`, which refuses the character, and after the extension filter for
     // the same reason the id-separator check below it is: a `notes\1.txt` in a TypeScript
