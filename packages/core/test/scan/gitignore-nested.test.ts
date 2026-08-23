@@ -131,6 +131,22 @@ describe("a .gitignore in every directory", () => {
     expect(await discover()).toEqual(["generated/g.ts"])
   })
 
+  it("does not let two nested files together rescue a file under an excluded directory", async () => {
+    // The shape that needs the exclusion to be *inherited* rather than re-derived. `gen/` puts
+    // the whole subtree out; `gen/.gitignore` un-excludes `sub/`, so asked in isolation that
+    // directory looks fine again; and `gen/sub/.gitignore` then un-ignores the file. Git
+    // ignores it regardless — it never descended into `gen`, so neither of those files exists
+    // as far as it is concerned. Rescuing one directory at a time is still not rescuing.
+    await gitignoreIn("", "gen/")
+    await gitignoreIn("gen", "!sub/")
+    await gitignoreIn("gen/sub", "!x.ts")
+    await writeFileAt("gen/sub/x.ts")
+    await writeFileAt("gen/sub/y.ts")
+    await writeFileAt("keep.ts")
+
+    expect(await discover()).toEqual(["keep.ts"])
+  })
+
   it("does not let a directory's own file re-include the directory", async () => {
     await gitignoreIn("", "pkg/")
     await gitignoreIn("pkg", "!keep.ts")
@@ -152,10 +168,21 @@ describe("a .gitignore in every directory", () => {
 })
 
 describe("what is not read", () => {
-  it("ignores a .gitignore inside .git", async () => {
-    // Not a gitignore file to git, whatever it holds. Nothing under `.git` is a candidate
-    // either, so the only way this shows is a rule that would have changed a verdict outside it.
-    await gitignoreIn(".git", "keep.ts")
+  it("never opens a .gitignore inside .git", async () => {
+    // Not a rule file to git, whatever it holds. Its *rules* could not reach outside `.git`
+    // anyway — a matcher only speaks about its own subtree, and nothing under `.git` is a
+    // candidate — so what says the file was skipped is that a line no regex engine will take
+    // did not end the run.
+    await writeFileAt(join(".git", ".gitignore"), `${"a".repeat(40_000)}\n`)
+    await writeFileAt("keep.ts")
+
+    expect(await discover()).toEqual(["keep.ts"])
+  })
+
+  it("never opens a .gitignore under a directory the drop globs already removed", async () => {
+    // Same reasoning, same evidence: a `node_modules` package's own file cannot change a
+    // verdict about anything that survived the walk, and a scan must not fail over one.
+    await writeFileAt(join("node_modules", "pkg", ".gitignore"), `${"a".repeat(40_000)}\n`)
     await writeFileAt("keep.ts")
 
     expect(await discover()).toEqual(["keep.ts"])
