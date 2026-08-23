@@ -78,7 +78,7 @@ aburi scan [--output-dir <dir>] [--format json|md|both]
 | `--format <fmt>` | `json`, `md`, or `both` (default `both`). |
 | `--no-md` / `--no-json` | Shortcuts for `--format json` and `--format md`. |
 | `--ignore <glob>` | Additional ignore glob. Repeatable. |
-| `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore` for this run. Neither leaves the config's answer standing, which defaults to honouring `.gitignore`. |
+| `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore` for this run. Neither leaves the config's answer standing, which defaults to honouring `.gitignore` — every directory's, the way git reads them. |
 | `--compact` | Emit JSON without indentation. |
 | `--no-timestamp` | Omit `generatedAt` from the IR. Implicit when `CI` env is set. |
 | `--config <path>` | Alternate config file. |

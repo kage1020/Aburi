@@ -206,15 +206,16 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
     expect(result.files.map((f) => f.path)).toEqual(["gen/keep.ts", "src/a.ts"])
   })
 
-  it("does not read a .gitignore below the workspace root", async () => {
-    // Git honours one per directory; this reads the root's alone. Asserted rather than left
-    // to the docblock, because the day the nested ones are read this line is what says so.
+  it("reads a .gitignore below the workspace root", async () => {
+    // This line used to assert the opposite, and said why: "the day the nested ones are read
+    // this line is what says so". Precedence between two files that disagree is the subject of
+    // `gitignore-nested.test.ts`; here it is only that a deeper one is read at all.
     await writeFileAt("src/a.ts")
     await writeFileAt("src/nested/x.ts")
     await writeFile(join(workRoot, "src/nested/.gitignore"), "x.ts\n", "utf8")
     await writeGitignore("# the root file excludes nothing")
 
-    expect(await discover()).toEqual(["src/a.ts", "src/nested/x.ts"])
+    expect(await discover()).toEqual(["src/a.ts"])
   })
 })
 
