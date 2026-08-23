@@ -108,7 +108,7 @@ These are **appended** to the core standard patterns of drop-list §3.1 (existin
 ```
 
 - Default: `true`
-- Incorporates `.gitignore` patterns into drop-list Category A
+- Applies the workspace root's `.gitignore` with git's own rules (see drop-list.md §3.3), alongside drop-list Category A
 
 Setting it to `false` makes git-ignored files (build artifacts, etc.) extraction targets as well. Intended for special cases such as deliberately inspecting built code in CI.
 

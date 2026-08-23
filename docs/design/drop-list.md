@@ -59,9 +59,13 @@ Each language plugin may add skip patterns specific to its own language. Example
 
 ### 3.3 .gitignore integration
 
-Patterns from `.gitignore` are respected by default (turned off by `config.respectGitignore: false` or `--no-respect-gitignore`, and back on for one run by `--respect-gitignore`).
+The workspace root's `.gitignore` is respected by default (turned off by `config.respectGitignore: false` or `--no-respect-gitignore`, and back on for one run by `--respect-gitignore`).
 
 Files ignored by git are therefore skipped automatically without listing `dist/` etc. explicitly.
+
+It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So the file is compiled into a matcher and every discovered candidate is asked about, rather than the walk being pruned by it. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
+
+Only the root file. Nested `.gitignore`s, `.git/info/exclude` and `core.excludesFile` are not read.
 
 ### 3.4 Config additions
 
@@ -263,6 +267,8 @@ Properties the extraction pipeline must satisfy.
 | A1 | scan including `node_modules/foo/bar.ts` | Does not appear in symbols; excluded from stats.totalFiles |
 | A2 | scan including `*.d.ts` | Same as above |
 | A3 | Files listed in `.gitignore` | Same as above (unless `respectGitignore` is off, by config or by `--no-respect-gitignore`) |
+| A3b | `.gitignore` holding `assets/*` and `!assets/keep.ts` | `assets/keep.ts` is scanned; the rest of `assets/` is not |
+| A3c | `.gitignore` holding `gen/` and `!gen/keep.ts` | Nothing under `gen/` is scanned — git does not descend into an excluded directory, so the negation reaches nothing |
 | A4 | Adding `config.ignore: ["docs/**"]` | Everything under `docs/` is skipped |
 
 ### 8.2 Symbol-level (Category B)
