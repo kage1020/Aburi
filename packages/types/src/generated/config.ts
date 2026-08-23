@@ -49,6 +49,9 @@ suppress?: string[]
 keep?: string[]
 frameworkHints?: FrameworkHint[]
 output?: {
+/**
+ * Where scan and diff write their artifacts, and where explain reads the IR back from. Resolved against the working directory, as --output-dir is; --output-dir wins when both are given. May be absolute, which is why this is not a RelativePath.
+ */
 dir?: string
 }
 /**

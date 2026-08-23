@@ -10,7 +10,8 @@ import {
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
-import { CliError } from "../errors"
+import { configuredOutputDir } from "../config-load"
+import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
@@ -145,6 +146,22 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
+  // Before anything expensive. The destination is decided from `cwd` alone, and a run that
+  // cannot be filed is a run not worth computing: resolved after the diff, a broken config
+  // would cost two scans or two IR reads and then report `Failed to load Aburi config`, which
+  // reads as "the comparison failed" when the comparison had already succeeded.
+  //
+  // The config is read only when the flag left the question open — a run that named its
+  // destination must not be stopped by a file it never consults. The per-side scans of a ref
+  // diff read the config for their own reasons, and write to an explicit temp directory
+  // either way, which is a flag by another name.
+  const outputDir = resolveOutputDir(
+    cwd,
+    options.outputDir,
+    options.outputDir === undefined
+      ? await configuredOutputDir(cwd, options.configPath)
+      : undefined,
+  )
   const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
     options,
     cwd,
@@ -170,7 +187,6 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     throw error
   }
 
-  const outputDir = resolveOutputDir(cwd, options.outputDir)
   await mkdir(outputDir, { recursive: true })
   const format = options.format ?? "both"
 
@@ -693,11 +709,6 @@ async function collectRenames(
 
 function irRef(refName: string, ir: IR): IRRef {
   return { ref: refName, irSchema: ir.$schema }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 const defaultGitRunner: GitRunner = {

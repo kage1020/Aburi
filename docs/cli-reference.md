@@ -74,7 +74,7 @@ aburi scan [--output-dir <dir>] [--format json|md|both]
 
 | Flag | Effect |
 |---|---|
-| `--output-dir <dir>` | Where to emit `aburi.ir.json` / `workspace.md` / `components/*.md`. Default `out`. |
+| `--output-dir <dir>` | Where to emit `aburi.ir.json` / `workspace.md` / `components/*.md`. Falls back to `config.output.dir`, then to `out`. Resolved against the working directory, as the flag is. |
 | `--format <fmt>` | `json`, `md`, or `both` (default `both`). |
 | `--no-md` / `--no-json` | Shortcuts for `--format json` and `--format md`. |
 | `--ignore <glob>` | Additional ignore glob. Repeatable. |
@@ -177,7 +177,7 @@ and without it a standing blind spot reads as a comparison that found nothing to
 |---|---|
 | `<base>..<head>` | Ref-spec dispatch (git). |
 | `--base <path>` `--head <path>` | File-mode dispatch. Mutually exclusive with the ref-spec. |
-| `--output-dir <dir>` | Emit `diff.json` + `diff.md` here. Default `out`. |
+| `--output-dir <dir>` | Emit `diff.json` + `diff.md` here. Falls back to `config.output.dir`, then to `out`. Resolved against the working directory, as the flag is. |
 | `--format <fmt>` | `json`, `md`, or `both`. |
 | `--fail-on <spec>` | CI gate — see below. |
 | `--compact` | JSON without indentation. |
@@ -230,7 +230,7 @@ Three-arm dispatch:
 
 | Flag | Effect |
 |---|---|
-| `--ir <path>` | Existing IR file (skip autoscan), resolved against the working directory. Without it, `out/aburi.ir.json` is looked for from the working directory upward to the workspace root, nearest first — so a scan run without `--output-dir` is found whether it happened here, at the workspace root, or anywhere between. A scan that used `--output-dir`, or one run outside this workspace, is reachable only through `--ir`. |
+| `--ir <path>` | Existing IR file (skip autoscan), resolved against the working directory. Without it, `<output-dir>/aburi.ir.json` is looked for from the working directory upward to the workspace root, nearest first — so a scan run without `--output-dir` is found whether it happened here, at the workspace root, or anywhere between. The directory searched is `config.output.dir` when the config sets one, so a workspace that redirects its artefacts stays reachable; a scan that used the `--output-dir` *flag*, or one run outside this workspace, is reachable only through `--ir`. `--ir` names the document outright and so consults no config. |
 | `--output <path>` | Write Markdown to a file instead of stdout. |
 | `--no-rescan` | Fail if no IR file exists — do not implicitly rescan. |
 | `--config <path>` | Alternate config file. |
@@ -250,7 +250,7 @@ Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed)
 
 A rescan that did not exit clean also exits `3`, whichever of those the lookup concluded: the
 withdrawn file could have held the match, or a second candidate for it. Reading an existing IR
-(`--ir`, or an `out/aburi.ir.json` found by the walk above) runs no scan, so it reaches `3` only by the
+(`--ir`, or an `<output-dir>/aburi.ir.json` found by the walk above) runs no scan, so it reaches `3` only by the
 route above — from what the document says, never from a status inherited for having read one.
 
 **Examples:**

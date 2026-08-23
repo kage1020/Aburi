@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { type LoadedConfig, loadConfig, readConfigFile } from "@aburi/config"
 import {
   type CollidingFile,
   CoreError,
@@ -35,8 +34,9 @@ import {
   resolveOutputDir,
   WORKSPACE_MD_FILENAME,
 } from "../artifact-paths"
+import { resolveConfig } from "../config-load"
 import type { LogLevel } from "../env"
-import { CliError } from "../errors"
+import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { createLogger } from "../logger"
@@ -278,7 +278,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const scanResult = await scan(scanInput)
 
   const format = options.format ?? "both"
-  const outputDir = resolveOutputDir(cwd, options.outputDir)
+  const outputDir = resolveOutputDir(cwd, options.outputDir, config.output?.dir)
   await mkdir(outputDir, { recursive: true })
 
   let irPath: string | null = null
@@ -879,37 +879,6 @@ function requireLanguagePlugin(count: number, configSource: string | null): void
   )
 }
 
-/**
- * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the process `cwd`,
- * per the §11 precedence table. A config in the current package therefore wins over one in
- * an ancestor.
- *
- * The marker-detected workspace root plays no part here. It is the base for Symbol id
- * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for
- * relative plugin specifiers — but not for locating the config, which is why a
- * package-local config can name paths that resolve against a directory above it.
- */
-async function resolveConfig(cwd: string, overridePath: string | undefined): Promise<LoadedConfig> {
-  try {
-    if (overridePath !== undefined) {
-      const absolute = resolve(cwd, overridePath)
-      const config = await readConfigFile(absolute)
-      const { normalizeFrameworkHints } = await import("@aburi/config")
-      return {
-        found: true,
-        source: absolute,
-        config,
-        syntheticPlugins: normalizeFrameworkHints(config),
-      }
-    }
-    return await loadConfig({ cwd })
-  } catch (error) {
-    throw new CliError(`Failed to load Aburi config: ${errorMessage(error)}`, "config-error", {
-      cause: error,
-    })
-  }
-}
-
 function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Config {
   const merged: Partial<Config> = { ...config }
   if (options.ignore !== undefined && options.ignore.length > 0) {
@@ -1039,9 +1008,4 @@ async function maybeWriteComponentMd(
     paths.push(path)
   }
   return paths
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }

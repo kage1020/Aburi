@@ -22,3 +22,15 @@ export class CliError extends Error {
     this.code = code
   }
 }
+
+/**
+ * The human-readable half of a thrown value, for a message that wraps it.
+ *
+ * Beside `CliError` because every caller is building one: six modules held a byte-identical
+ * copy of these two lines, which is one definition of "what a caught value looks like in a
+ * CLI message" written six times.
+ */
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}

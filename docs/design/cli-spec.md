@@ -134,7 +134,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 
 | Option | Meaning |
 |---|---|
-| `--output-dir <path>` | Output directory (default: `config.output.dir` or `out`) |
+| `--output-dir <path>` | Output directory (default: `config.output.dir`, then `out`). Resolved against the working directory, as the config value is |
 | `--format <json\|md\|both>` | Output format (default: `both`) |
 | `--no-md` | Shortcut for `--format json` |
 | `--no-json` | Shortcut for `--format md` |
@@ -435,7 +435,7 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 |---|---|
 | `--base <path>` | Base IR file path (instead of a ref) |
 | `--head <path>` | Head IR file path |
-| `--output-dir <path>` | Destination for diff.json / diff.md |
+| `--output-dir <path>` | Destination for diff.json / diff.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
 | `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
@@ -671,7 +671,7 @@ it is decided from the argument.
 | Option | Meaning |
 |---|---|
 | `--output <path>` | Write to a file (default: stdout) |
-| `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `out/aburi.ir.json` starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
+| `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `<output-dir>/aburi.ir.json` — `config.output.dir` when the config names one, otherwise `out` — starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
 | `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
@@ -879,7 +879,8 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 2. ABURI_CONFIG env
 3. <cwd>/aburi.jsonc
 4. <cwd>/aburi.json
-5. Repeat 3-4 recursively in parent directories (up to the workspace root)
+5. Repeat 3-4 recursively in parent directories, up to the **filesystem** root — not the
+   workspace root, so a config shared across several repositories is still honoured
 6. autodetect (works with no config present)
 ```
 
