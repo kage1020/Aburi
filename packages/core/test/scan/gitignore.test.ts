@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { discoverFiles } from "../../src"
 
@@ -33,6 +33,7 @@ const FIXTURE = [
   "src/a.ts",
   "src/keepme/c.ts",
   "a[1].ts",
+  "a1.ts",
 ] as const
 
 const GITIGNORE = [
@@ -50,15 +51,17 @@ const GITIGNORE = [
 
 const KEPT_BY_GIT = ["a[1].ts", "assets/keep.ts", "keep.spec.ts", "src/a.ts", "src/keepme/c.ts"]
 
-/** `café.ts`, decomposed and composed. Identical on screen, different bytes on disk. */
-const DECOMPOSED = "src/café.ts"
-const COMPOSED = "src/café.ts"
+/**
+ * `café.ts` in both compositions. Identical on screen and different bytes on disk, so the two
+ * are derived rather than typed: whichever form this source file is stored in, `normalize`
+ * pins each constant to the one it is named for.
+ */
+const COMPOSED = "src/café.ts".normalize("NFC")
+const DECOMPOSED = "src/café.ts".normalize("NFD")
 
 async function writeFileAt(rel: string, content = "1"): Promise<void> {
   const abs = join(workRoot, rel)
-  await mkdir(abs.slice(0, Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"))), {
-    recursive: true,
-  })
+  await mkdir(dirname(abs), { recursive: true })
   await writeFile(abs, content, "utf8")
 }
 
@@ -98,26 +101,29 @@ describe("discoverFiles — .gitignore is decided the way git decides it", () =>
   it("re-includes a file whose directory was never excluded", async () => {
     // `assets/*` excludes the contents, not the directory, so git walks in and the later
     // `!assets/keep.ts` is reached. This file used to be dropped.
-    expect(await discover()).toContain("assets/keep.ts")
-    expect(await discover()).not.toContain("assets/drop.ts")
+    const found = await discover()
+    expect(found).toContain("assets/keep.ts")
+    expect(found).not.toContain("assets/drop.ts")
   })
 
   it("re-includes nothing under a directory that was excluded outright", async () => {
     // `gen/` excludes the directory itself. Git does not descend, so `!gen/keep.ts` has
-    // nothing to act on — the one case the old translation got right, and the case the issue
-    // reported as broken.
-    expect(await discover()).not.toContain("gen/keep.ts")
-    expect(await discover()).not.toContain("gen/other.ts")
+    // nothing to act on — the one shape the old glob translation happened to get right.
+    const found = await discover()
+    expect(found).not.toContain("gen/keep.ts")
+    expect(found).not.toContain("gen/other.ts")
   })
 
   it("lets a negated directory put its whole subtree back", async () => {
     expect(await discover()).toEqual(expect.arrayContaining(["src/a.ts", "src/keepme/c.ts"]))
   })
 
-  it("reads brackets as a character class, so a literal one is not matched", async () => {
-    // `a[1].ts` matches `a1.ts`. The file actually named `a[1].ts` is not ignored, and used
-    // to be.
-    expect(await discover()).toContain("a[1].ts")
+  it("reads brackets as a character class, in both directions", async () => {
+    // `a[1].ts` is a class matching `a1.ts`, which is excluded. The file actually named
+    // `a[1].ts` is not what the pattern matches, and used to be dropped anyway.
+    const found = await discover()
+    expect(found).toContain("a[1].ts")
+    expect(found).not.toContain("a1.ts")
   })
 
   it("records nothing for a file it excluded", async () => {
@@ -127,6 +133,43 @@ describe("discoverFiles — .gitignore is decided the way git decides it", () =>
     const result = await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] })
     expect(result.skipped).toEqual([])
     expect(result.files.map((f) => f.path)).toEqual(KEPT_BY_GIT)
+  })
+})
+
+describe("discoverFiles — .gitignore matching is case-sensitive", () => {
+  // Git folds case only where `core.ignoreCase` says so — false on ext4, true on NTFS and
+  // APFS — so no single setting agrees with git everywhere. Folding drops a file git keeps
+  // wherever git is case-sensitive, which is the failure this mechanism exists to stop; the
+  // matcher's own default folds, and is turned off. Measured against git on ext4.
+  it("does not let a rule spelled with a capital take the lowercase file", async () => {
+    await writeFileAt("dist-out/x.ts")
+    await writeFileAt("a.log.ts")
+    await writeFileAt("src/a.ts")
+    await writeGitignore("Dist-Out/", "*.LOG.ts")
+
+    expect(await discover()).toEqual(["a.log.ts", "dist-out/x.ts", "src/a.ts"])
+  })
+
+  it("does not let a negation spelled with a capital rescue the lowercase file", async () => {
+    // The same fold in the other direction: a file git ignores would come back.
+    await writeFileAt("emitted/keep.ts")
+    await writeFileAt("src/a.ts")
+    await writeGitignore("emitted/*", "!emitted/Keep.ts")
+
+    expect(await discover()).toEqual(["src/a.ts"])
+  })
+
+  it("matches only the case a rule is spelled in", async () => {
+    // One file, two runs, rather than two files: NTFS and APFS would fold the second name
+    // into the first and leave nothing to tell apart.
+    await writeFileAt("Foo.ts")
+    await writeFileAt("src/a.ts")
+
+    await writeGitignore("Foo.ts")
+    expect(await discover()).toEqual(["src/a.ts"])
+
+    await writeGitignore("foo.ts")
+    expect(await discover()).toEqual(["Foo.ts", "src/a.ts"])
   })
 })
 
@@ -162,6 +205,17 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
 
     expect(result.files.map((f) => f.path)).toEqual(["gen/keep.ts", "src/a.ts"])
   })
+
+  it("does not read a .gitignore below the workspace root", async () => {
+    // Git honours one per directory; this reads the root's alone. Asserted rather than left
+    // to the docblock, because the day the nested ones are read this line is what says so.
+    await writeFileAt("src/a.ts")
+    await writeFileAt("src/nested/x.ts")
+    await writeFile(join(workRoot, "src/nested/.gitignore"), "x.ts\n", "utf8")
+    await writeGitignore("# the root file excludes nothing")
+
+    expect(await discover()).toEqual(["src/a.ts", "src/nested/x.ts"])
+  })
 })
 
 describe("discoverFiles — the lines a .gitignore is allowed to contain", () => {
@@ -185,6 +239,25 @@ describe("discoverFiles — the lines a .gitignore is allowed to contain", () =>
     await writeGitignore("# nothing here", "")
 
     expect(await discover()).toEqual(["src/a.ts"])
+  })
+
+  it("names the file when a line is one no regex engine will take", async () => {
+    // The rules compile on the first question asked, not when the file is read, so a line
+    // this long threw at the first candidate — two hundred lines from the read, as a bare
+    // SyntaxError naming neither `.gitignore` nor the workspace.
+    await writeFileAt("src/a.ts")
+    await writeGitignore("a".repeat(40_000))
+
+    const thrown = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+    expect((thrown as Error).message).toContain(".gitignore")
   })
 })
 
@@ -213,6 +286,24 @@ describe("discoverFiles — which spelling the matcher is asked about, and when"
     await writeGitignore("src/v#1/")
 
     const result = await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
+    expect(result.skipped).toEqual([])
+  })
+
+  it("excludes a file before its size is looked at", async () => {
+    // The same rule one arm further down: an excluded file over the size cap would otherwise
+    // be reported `over-size`, sending the reader to raise a budget for a file the workspace
+    // does not want read.
+    await writeFileAt("gen/big.ts", "x".repeat(64))
+    await writeFileAt("src/a.ts")
+    await writeGitignore("gen/")
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+      maxFileSizeBytes: 8,
+    })
 
     expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
     expect(result.skipped).toEqual([])

@@ -63,7 +63,13 @@ The workspace root's `.gitignore` is respected by default (turned off by `config
 
 Files ignored by git are therefore skipped automatically without listing `dist/` etc. explicitly.
 
-It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So the file is compiled into a matcher and every discovered candidate is asked about, rather than the walk being pruned by it. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
+It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So the file is compiled into a matcher and every discovered candidate is asked about it, rather than the walk being pruned by it. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
+
+**The Category A globs are outside a negation's reach.** The core patterns, `config.ignore[]` (§3.4) and language-plugin drop patterns prune the walk, and no `!` line in `.gitignore` brings back a file they excluded — those are not gitignore rules and the matcher never sees the candidate.
+
+Matching is case-sensitive, whatever the filesystem is. Git folds case only where `core.ignoreCase` says so, so no single answer agrees with git on every platform; folding would drop a file git keeps wherever git is case-sensitive, which is the failure this mechanism exists to prevent. Reading `core.ignoreCase` would settle it and is refused for a different reason — it would make the Document depend on the machine's git configuration.
+
+One thing "the way git decides it" does not cover: git applies `.gitignore` to untracked files only, so a tracked file matching a rule is not ignored. There is no index here, so such a file is excluded.
 
 Only the root file. Nested `.gitignore`s, `.git/info/exclude` and `core.excludesFile` are not read.
 

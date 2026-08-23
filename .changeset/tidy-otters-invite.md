@@ -18,6 +18,8 @@ and every disagreement lost a file git keeps:
 - `src/` followed by `!src/` — a directory put back
 - a file literally named `a[1].ts` — brackets are a character class, so the literal name is not
   what the pattern matches
+- `*` with `!src/` and `!src/a.ts` — everything excluded, then one directory and one file put
+  back
 
 The file is now compiled into a matcher and every discovered candidate is asked about it, and
 the glob translation is gone. Git's two rules pull opposite ways — a later `!rule` re-includes,
@@ -27,6 +29,12 @@ and nothing re-includes under a directory excluded outright, because git never d
 The cost is that a `.gitignore`d directory is walked rather than skipped. What such a file
 usually names — `node_modules`, `dist`, `build`, `out`, `target`, `coverage`, `.venv` — is in
 the core drop list and is still pruned there.
+
+Matching is case-sensitive, against the matcher's own default. Git folds case only where
+`core.ignoreCase` says so — false on ext4, true on NTFS and APFS — so no single setting agrees
+with git everywhere; folding would drop a file git keeps wherever git is case-sensitive, which
+is the direction that loses data and the one the glob translation being replaced already got
+right.
 
 Unchanged: `config.ignore` and language-plugin drop patterns are globs by contract and still go
 to the walk, so no `.gitignore` negation can rescue a file they exclude. Only the workspace
