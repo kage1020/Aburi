@@ -8,7 +8,7 @@ import type {
   LanguagePlugin,
   PluginManifest,
 } from "@aburi/types"
-import { CliError } from "./errors"
+import { CliError, errorMessage } from "./errors"
 
 export interface LoadedPlugins {
   languages: LanguagePlugin[]
@@ -175,9 +175,4 @@ function routePlugin(
 
 async function defaultImport(specifier: string): Promise<unknown> {
   return import(specifier)
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }

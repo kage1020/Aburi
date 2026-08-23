@@ -308,7 +308,11 @@ Users never need to think about prefix declarations.
 }
 ```
 
-- `dir` (default `"out"`): output destination for IR/Markdown (relative to the workspace root)
+- `dir` (default `"out"`): output destination for IR/Markdown. It fills the same slot as
+  `--output-dir`, which wins when both are given, and it resolves against the working
+  directory exactly as that flag does — so writing the default `"out"` explicitly changes
+  nothing, which is what a schema `default` has to mean. An absolute value names one
+  directory from wherever the command is run.
 
 Future addition candidates:
 - `format`: `"json"` / `"md"` / `"both"` (default `"both"`)

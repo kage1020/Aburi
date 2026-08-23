@@ -4,7 +4,8 @@ import { backslashSite, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
-import { CliError } from "../errors"
+import { configuredOutputDir } from "../config-load"
+import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
@@ -356,7 +357,11 @@ async function resolveIR(
       return { ir: await readIR(explicit), unresolvedCalls: null, scanFaulted: false }
     }
 
-    const candidates = irSearchPath(cwd, workspaceRoot)
+    // Only now, after `--ir` has had its chance: that flag names the document outright, so a
+    // run using it has no reason to care where a scan would have put one, and no reason to
+    // fail on a config it does not consult.
+    const outputDir = await configuredOutputDir(cwd, options.configPath)
+    const candidates = irSearchPath(cwd, workspaceRoot, outputDir)
     const [nearest] = candidates
     for (const candidate of candidates) {
       if (await pathExistsStrict(candidate)) {
@@ -416,9 +421,18 @@ async function resolveIR(
  *
  * Nearest wins, for the same reason the nearest config does: it is the one the caller most
  * recently had a reason to write.
+ *
+ * `outputDir` is `config.output.dir`, so the walk looks for the directory this workspace
+ * actually writes to. An absolute one names a single place from every rung, and the repeats
+ * are dropped: a candidate list holding the same path five times would make the miss message
+ * offer a range of directories it never searched.
  */
-function irSearchPath(cwd: string, workspaceRoot: string): readonly [string, ...string[]] {
-  const first = join(resolveOutputDir(cwd, undefined), IR_JSON_FILENAME)
+function irSearchPath(
+  cwd: string,
+  workspaceRoot: string,
+  outputDir: string | undefined,
+): readonly [string, ...string[]] {
+  const first = join(resolveOutputDir(cwd, undefined, outputDir), IR_JSON_FILENAME)
   const paths: [string, ...string[]] = [first]
   const root = resolve(workspaceRoot)
   let directory = resolve(cwd)
@@ -430,7 +444,8 @@ function irSearchPath(cwd: string, workspaceRoot: string): readonly [string, ...
     // would spin here forever.
     if (parent === directory) break
     directory = parent
-    paths.push(join(resolveOutputDir(directory, undefined), IR_JSON_FILENAME))
+    const candidate = join(resolveOutputDir(directory, undefined, outputDir), IR_JSON_FILENAME)
+    if (!paths.includes(candidate)) paths.push(candidate)
   }
   return paths
 }
@@ -460,9 +475,4 @@ function isBenignErrno(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false
   const code = (error as { code?: unknown }).code
   return typeof code === "string" && BENIGN_ERRNOS.has(code)
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }

@@ -10,7 +10,8 @@ import {
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
-import { CliError } from "../errors"
+import { configuredOutputDir } from "../config-load"
+import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
@@ -170,7 +171,17 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     throw error
   }
 
-  const outputDir = resolveOutputDir(cwd, options.outputDir)
+  // The config is read only when the flag left the question open: a run that said where to
+  // write does not consult `output.dir`, and must not fail on a config it never needed. The
+  // per-side scans above are unaffected either way — they were handed an explicit temp
+  // directory, which is a flag by another name.
+  const outputDir = resolveOutputDir(
+    cwd,
+    options.outputDir,
+    options.outputDir === undefined
+      ? await configuredOutputDir(cwd, options.configPath)
+      : undefined,
+  )
   await mkdir(outputDir, { recursive: true })
   const format = options.format ?? "both"
 
@@ -693,11 +704,6 @@ async function collectRenames(
 
 function irRef(refName: string, ir: IR): IRRef {
   return { ref: refName, irSchema: ir.$schema }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 const defaultGitRunner: GitRunner = {

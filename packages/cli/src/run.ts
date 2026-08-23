@@ -105,7 +105,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
   program
     .command("scan")
     .description("Generate IR from the current workspace")
-    .option("--output-dir <path>", "output directory (default: out)")
+    .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
     .option("--format <format>", "json | md | both", parseFormat, "both")
     .option("--no-md", "shortcut for --format json")
     .option("--no-json", "shortcut for --format md")
@@ -182,7 +182,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .argument("[refspec]", "<base>..<head> ref spec")
     .option("--base <path>", "base IR file")
     .option("--head <path>", "head IR file")
-    .option("--output-dir <path>", "output directory (default: out)")
+    .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
     .option("--format <format>", "json | md | both", parseFormat, "both")
     .option("--fail-on <spec>", "comma-separated CI gate spec (e.g. changed,removed:>10)")
     .option("--compact", "compact JSON output")

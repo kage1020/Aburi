@@ -2,7 +2,7 @@ import { access, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { detectComponents, detectManagers, detectWorkspaceRoot } from "@aburi/core"
 import type { Config } from "@aburi/types"
-import { CliError } from "../errors"
+import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 
 const CONFIG_SCHEMA_URL = "https://aburi.dev/schema/aburi.config.v1.json"
@@ -138,11 +138,6 @@ function isBenignErrno(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false
   const code = (error as { code?: unknown }).code
   return typeof code === "string" && BENIGN_ERRNOS.has(code)
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 /**

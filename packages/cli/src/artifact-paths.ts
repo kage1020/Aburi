@@ -34,9 +34,19 @@ export const DEFAULT_OUTPUT_DIRNAME = "out"
  * the CLI resolves against `cwd`, and a caller standing in a package means that package.
  *
  * One function rather than the expression written out at each command, so the three callers
- * cannot answer differently again. A configuration-supplied default for this directory belongs
- * inside here for the same reason: the callers would otherwise have to be found a second time.
+ * cannot answer differently again.
+ *
+ * `configured` is `config.output.dir`, and it stands exactly where the flag would: the config
+ * schema's field is the flag's default (`cli-spec.md §5.2`) and `config.md §11`'s override table
+ * maps one onto the other, so it is the same slot filled from a file instead of a command
+ * line, and it resolves against the same directory. Anchoring a configured value to the
+ * workspace root instead would mean the default resolves against `cwd` and a configured one
+ * does not — a rule with no reading that survives a monorepo.
  */
-export function resolveOutputDir(cwd: string, flag: string | undefined): string {
-  return resolve(cwd, flag ?? DEFAULT_OUTPUT_DIRNAME)
+export function resolveOutputDir(
+  cwd: string,
+  flag: string | undefined,
+  configured?: string,
+): string {
+  return resolve(cwd, flag ?? configured ?? DEFAULT_OUTPUT_DIRNAME)
 }

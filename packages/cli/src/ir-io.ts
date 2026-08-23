@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { assertIRIntegrity } from "@aburi/core"
 import type { IR } from "@aburi/types"
-import { CliError } from "./errors"
+import { CliError, errorMessage } from "./errors"
 
 const IR_SCHEMA_URL = "https://aburi.dev/schema/aburi.ir.v1.json"
 
@@ -67,9 +67,4 @@ export async function readIR(path: string): Promise<IR> {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
