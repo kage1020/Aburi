@@ -126,7 +126,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
            [--strict|--no-strict] [--discover]
            [--quiet] [--compact]
            [--concurrency <n>]
-           [--no-respect-gitignore]
+           [--respect-gitignore|--no-respect-gitignore]
            [--ignore <glob>]
 ```
 
@@ -143,7 +143,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | `--quiet` | Suppress progress output; stdout carries the final summary only |
 | `--compact` | Compact the JSON to a single line |
 | `--concurrency <n>` | Parser concurrency (default: CPU - 1) |
-| `--no-respect-gitignore` | Equivalent to `config.respectGitignore: false` |
+| `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore`. A pair rather than the negative alone, so that a run which typed neither is distinguishable from one that asked for the default — an override the caller did not spell must leave the config alone |
 | `--ignore <glob>` | Append to `config.ignore[]` (repeatable) |
 
 ### 5.3 Behavior

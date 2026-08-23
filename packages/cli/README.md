@@ -15,7 +15,8 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
   comments for detected first-party plugins.
 - **`aburi scan`** — load config, resolve plugins, run `@aburi/core` scan,
   emit IR JSON + workspace / component Markdown. `--format json|md|both`,
-  `--ignore <glob>` (repeatable), `--no-respect-gitignore`, `--compact`,
+  `--ignore <glob>` (repeatable),
+  `--respect-gitignore` / `--no-respect-gitignore`, `--compact`,
   `--no-timestamp`.
 - **`aburi diff`** — two dispatch paths:
   - `<base>..<head>` — `git rev-parse --verify` on both refs, shallow-repo

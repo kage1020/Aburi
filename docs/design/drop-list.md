@@ -59,7 +59,7 @@ Each language plugin may add skip patterns specific to its own language. Example
 
 ### 3.3 .gitignore integration
 
-Patterns from `.gitignore` are respected by default (can be disabled with `--no-respect-gitignore`).
+Patterns from `.gitignore` are respected by default (turned off by `config.respectGitignore: false` or `--no-respect-gitignore`, and back on for one run by `--respect-gitignore`).
 
 Files ignored by git are therefore skipped automatically without listing `dist/` etc. explicitly.
 
@@ -262,7 +262,7 @@ Properties the extraction pipeline must satisfy.
 |---|---|---|
 | A1 | scan including `node_modules/foo/bar.ts` | Does not appear in symbols; excluded from stats.totalFiles |
 | A2 | scan including `*.d.ts` | Same as above |
-| A3 | Files listed in `.gitignore` | Same as above (unless `--no-respect-gitignore`) |
+| A3 | Files listed in `.gitignore` | Same as above (unless `respectGitignore` is off, by config or by `--no-respect-gitignore`) |
 | A4 | Adding `config.ignore: ["docs/**"]` | Everything under `docs/` is skipped |
 
 ### 8.2 Symbol-level (Category B)

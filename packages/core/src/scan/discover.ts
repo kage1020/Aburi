@@ -64,8 +64,8 @@ export interface DiscoverOptions {
   langDropPatterns?: readonly string[]
   /**
    * When true (the default), `.gitignore` in the workspace root is read and its
-   * patterns are folded into the ignore set. Matches `--no-respect-gitignore` CLI
-   * inversion.
+   * patterns are folded into the ignore set. What `config.respectGitignore` sets, and what
+   * the CLI's `--respect-gitignore` / `--no-respect-gitignore` pair overrides for one run.
    */
   respectGitignore?: boolean
   /**

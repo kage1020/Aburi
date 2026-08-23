@@ -67,7 +67,7 @@ Load config, resolve plugins, run the scan pipeline, emit IR JSON + Markdown.
 
 ```
 aburi scan [--output-dir <dir>] [--format json|md|both]
-           [--ignore <glob>] [--no-respect-gitignore]
+           [--ignore <glob>] [--respect-gitignore|--no-respect-gitignore]
            [--compact] [--no-timestamp]
            [--config <path>]
 ```
@@ -78,7 +78,7 @@ aburi scan [--output-dir <dir>] [--format json|md|both]
 | `--format <fmt>` | `json`, `md`, or `both` (default `both`). |
 | `--no-md` / `--no-json` | Shortcuts for `--format json` and `--format md`. |
 | `--ignore <glob>` | Additional ignore glob. Repeatable. |
-| `--no-respect-gitignore` | Do not honour `.gitignore` during discovery. |
+| `--respect-gitignore` / `--no-respect-gitignore` | Override `config.respectGitignore` for this run. Neither leaves the config's answer standing, which defaults to honouring `.gitignore`. |
 | `--compact` | Emit JSON without indentation. |
 | `--no-timestamp` | Omit `generatedAt` from the IR. Implicit when `CI` env is set. |
 | `--config <path>` | Alternate config file. |

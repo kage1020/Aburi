@@ -110,7 +110,14 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--no-md", "shortcut for --format json")
     .option("--no-json", "shortcut for --format md")
     .option("--ignore <glob>", "additional ignore glob (repeatable)", collect, [])
-    .option("--no-respect-gitignore", "ignore .gitignore patterns")
+    // Declared as a pair, like `--lsp` / `--no-lsp` below. A lone `--no-x` makes commander
+    // materialise `true` for every run that did not pass it, and the option object then cannot
+    // say whether the caller asked for `true` or said nothing — so the override was applied
+    // unconditionally and a config that turned `.gitignore` off got it back on. With both
+    // spellings declared the value is absent until one of them is typed, which is what the
+    // forwarding below already assumes.
+    .option("--respect-gitignore", "honour .gitignore patterns (overrides config)")
+    .option("--no-respect-gitignore", "ignore .gitignore patterns (overrides config)")
     .option("--compact", "compact JSON output")
     .option("--no-timestamp", "omit generatedAt from IR (default when running under CI env)")
     .option("--config <path>", "config file path")
