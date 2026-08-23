@@ -30,6 +30,12 @@ import type {
   LspEnrichmentStats,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
+import {
+  COMPONENTS_DIRNAME,
+  IR_JSON_FILENAME,
+  resolveOutputDir,
+  WORKSPACE_MD_FILENAME,
+} from "../artifact-paths"
 import type { LogLevel } from "../env"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -272,14 +278,14 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const scanResult = await scan(scanInput)
 
   const format = options.format ?? "both"
-  const outputDir = resolve(cwd, options.outputDir ?? "out")
+  const outputDir = resolveOutputDir(cwd, options.outputDir)
   await mkdir(outputDir, { recursive: true })
 
   let irPath: string | null = null
   const workspaceMdPath = await maybeWriteWorkspaceMd(format, outputDir, scanResult.ir, options)
   const componentMdPaths = await maybeWriteComponentMd(format, outputDir, scanResult.ir)
   if (format !== "md") {
-    irPath = resolve(outputDir, "aburi.ir.json")
+    irPath = resolve(outputDir, IR_JSON_FILENAME)
     // Serialization can refuse the document — two object keys that differ only in Unicode
     // composition cannot both be written without one being lost on read-back. That is a
     // property of the scanned project, so it belongs on the input-error exit code with the
@@ -1013,7 +1019,7 @@ async function maybeWriteWorkspaceMd(
   options: ScanOptions,
 ): Promise<string | null> {
   if (format === "json") return null
-  const path = resolve(outputDir, "workspace.md")
+  const path = resolve(outputDir, WORKSPACE_MD_FILENAME)
   const md = projectWorkspace(ir, {
     suppressTimestamp: options.suppressTimestamp ?? false,
   })
@@ -1028,7 +1034,7 @@ async function maybeWriteComponentMd(
 ): Promise<string[]> {
   if (format === "json") return []
   const paths: string[] = []
-  await mkdir(resolve(outputDir, "components"), { recursive: true })
+  await mkdir(resolve(outputDir, COMPONENTS_DIRNAME), { recursive: true })
   for (const component of ir.components) {
     const symbolsInComponent = ir.symbols.filter((s) => s.component === component.id)
     const md = projectComponent({
@@ -1036,7 +1042,7 @@ async function maybeWriteComponentMd(
       symbols: symbolsInComponent,
       dependencies: ir.dependencies,
     })
-    const path = resolve(outputDir, "components", `${component.id}.md`)
+    const path = resolve(outputDir, COMPONENTS_DIRNAME, `${component.id}.md`)
     await writeFile(path, md, "utf8")
     paths.push(path)
   }

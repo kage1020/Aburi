@@ -1,8 +1,9 @@
 import { access, writeFile } from "node:fs/promises"
-import { relative, resolve, sep } from "node:path"
+import { dirname, relative, resolve, sep } from "node:path"
 import { backslashSite, detectWorkspaceRoot, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
+import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
@@ -353,14 +354,18 @@ async function resolveIR(
       return { ir: await readIR(explicit), unresolvedCalls: null, scanFaulted: false }
     }
 
-    const defaultPath = resolve(workspaceRoot, "out/aburi.ir.json")
-    if (await pathExistsStrict(defaultPath)) {
-      return { ir: await readIR(defaultPath), unresolvedCalls: null, scanFaulted: false }
+    const candidates = irSearchPath(cwd, workspaceRoot)
+    for (const candidate of candidates) {
+      if (await pathExistsStrict(candidate)) {
+        return { ir: await readIR(candidate), unresolvedCalls: null, scanFaulted: false }
+      }
     }
 
     if (options.noRescan) {
+      const [nearest] = candidates
+      const rest = candidates.length > 1 ? `, nor in any directory up to ${workspaceRoot}` : ""
       throw new CliError(
-        `No IR file at ${defaultPath} and --no-rescan was set. Run \`aburi scan\` first or pass --ir <path>.`,
+        `No IR file at ${nearest}${rest}, and --no-rescan was set. Run \`aburi scan\` first or pass --ir <path>.`,
         "input-error",
       )
     }
@@ -381,6 +386,37 @@ async function resolveIR(
     unresolvedCalls: wantsDiagnostics ? report.unresolvedCalls : null,
     scanFaulted: report.exitCode !== EXIT.SUCCESS,
   }
+}
+
+/**
+ * Where a written IR might be, nearest first.
+ *
+ * `aburi scan` writes under the directory it was run from, and that is not necessarily this
+ * one: a caller standing in `pkgs/app` may have scanned there, or at the repository root, and
+ * either document describes the same workspace — the scan covers the whole of it wherever it
+ * was started. So the lookup walks up from `cwd` to the workspace root, which is how this CLI
+ * already finds a config file, rather than guessing one of the two anchors. Reading only the
+ * workspace root missed a scan run inside a package; reading only `cwd` misses the far more
+ * common one run at the root.
+ *
+ * Nearest wins, for the same reason the nearest config does: it is the one the caller most
+ * recently had a reason to write.
+ */
+function irSearchPath(cwd: string, workspaceRoot: string): readonly string[] {
+  const paths: string[] = []
+  let directory = resolve(cwd)
+  const root = resolve(workspaceRoot)
+  while (true) {
+    paths.push(resolve(resolveOutputDir(directory, undefined), IR_JSON_FILENAME))
+    if (directory === root) break
+    const parent = dirname(directory)
+    // A `cwd` outside the detected root, and the filesystem root itself, both end the walk —
+    // the first because there is no ancestry to follow, the second because `dirname` stops
+    // moving there and this would not terminate.
+    if (parent === directory) break
+    directory = parent
+  }
+  return paths
 }
 
 async function resolveWorkspaceRoot(cwd: string): Promise<string> {
