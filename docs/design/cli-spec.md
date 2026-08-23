@@ -152,7 +152,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 2. Load plugins and build the registry
 3. Walk the workspace, parsing each file in parallel
 4. Extraction pipeline: drop list → tag propagation → effect classification → fingerprint → Symbol finalization
-5. Write `<output-dir>/ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md`
+5. Write `<output-dir>/aburi.ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md`
 6. Print a one-line final summary to stdout
 
 ### 5.4 Exit Codes
@@ -170,7 +170,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 ✓ Loaded 3 plugins (1 lang, 1 framework, 1 effects)
 ✓ Parsed 1234 files in 12.4s
 ✓ Extracted 542 kept · 87 dropped symbols
-✓ Wrote out/ir.json + out/workspace.md + 3 component files
+✓ Wrote out/aburi.ir.json + out/workspace.md + 3 component files
 ```
 
 The kept/dropped line is followed by the call-resolution census in the same
@@ -671,8 +671,8 @@ it is decided from the argument.
 | Option | Meaning |
 |---|---|
 | `--output <path>` | Write to a file (default: stdout) |
-| `--ir <path>` | Use an existing IR file (default: `out/ir.json`, or trigger a scan if missing) |
-| `--no-rescan` | Do not rescan even if the IR file is stale |
+| `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `out/aburi.ir.json` starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
+| `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
 
 ### 7.4 Behavior

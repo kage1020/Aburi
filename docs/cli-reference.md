@@ -230,7 +230,7 @@ Three-arm dispatch:
 
 | Flag | Effect |
 |---|---|
-| `--ir <path>` | Existing IR file (skip autoscan). |
+| `--ir <path>` | Existing IR file (skip autoscan), resolved against the working directory. Without it, `out/aburi.ir.json` is looked for from the working directory upward to the workspace root, nearest first — so a scan run without `--output-dir` is found whether it happened here, at the workspace root, or anywhere between. A scan that used `--output-dir`, or one run outside this workspace, is reachable only through `--ir`. |
 | `--output <path>` | Write Markdown to a file instead of stdout. |
 | `--no-rescan` | Fail if no IR file exists — do not implicitly rescan. |
 | `--config <path>` | Alternate config file. |
@@ -250,7 +250,7 @@ Cannot answer "src/route.ts": this IR never analysed src/route.ts (parse-failed)
 
 A rescan that did not exit clean also exits `3`, whichever of those the lookup concluded: the
 withdrawn file could have held the match, or a second candidate for it. Reading an existing IR
-(`--ir`, or an `out/aburi.ir.json` already on disk) runs no scan, so it reaches `3` only by the
+(`--ir`, or an `out/aburi.ir.json` found by the walk above) runs no scan, so it reaches `3` only by the
 route above — from what the document says, never from a status inherited for having read one.
 
 **Examples:**

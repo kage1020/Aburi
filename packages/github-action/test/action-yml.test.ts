@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
+import { DEFAULT_OUTPUT_DIRNAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
 import { describe, expect, it } from "vitest"
 import { parse } from "yaml"
 import { ABURI_COMMENT_MARKER } from "../src/comment"
@@ -103,6 +103,14 @@ describe("action.yml", () => {
     // runtime because the CLI never writes them.
     expect(raw).not.toContain("aburi.diff.json")
     expect(raw).not.toContain("aburi.diff.md")
+  })
+
+  it("defaults output-dir to the directory the CLI defaults to", async () => {
+    // The action forwards this to `--output-dir`, so the two defaults have to be the same
+    // string: a rename on the CLI side would leave the action writing somewhere the comment
+    // step does not read, and the concat check above would still pass.
+    const action = await loadAction()
+    expect(action.inputs?.["output-dir"]?.default).toBe(DEFAULT_OUTPUT_DIRNAME)
   })
 
   it("skips the comment step when the CLI failed with runtime or input error", async () => {

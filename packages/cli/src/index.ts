@@ -1,4 +1,12 @@
-export { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "./artifact-paths"
+export {
+  COMPONENTS_DIRNAME,
+  DEFAULT_OUTPUT_DIRNAME,
+  DIFF_JSON_FILENAME,
+  DIFF_MD_FILENAME,
+  IR_JSON_FILENAME,
+  resolveOutputDir,
+  WORKSPACE_MD_FILENAME,
+} from "./artifact-paths"
 export {
   classifyDiffError,
   type DiffOptions,

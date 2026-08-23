@@ -1,12 +1,14 @@
 import { access, writeFile } from "node:fs/promises"
-import { relative, resolve, sep } from "node:path"
-import { backslashSite, detectWorkspaceRoot, symbolIdFile } from "@aburi/core"
+import { dirname, join, relative, resolve, sep } from "node:path"
+import { backslashSite, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
+import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
+import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan } from "./scan"
 
 export interface ExplainOptions {
@@ -24,9 +26,10 @@ export interface ExplainOptions {
    */
   debugResolution?: boolean
   /**
-   * Sink for the incidents of the scan this command runs when no IR is on disk (§5.6).
-   * Reading an existing IR runs no scan and reports nothing — the live signal fired when
-   * `aburi scan` wrote the file.
+   * Sink for the incidents of the scan this command runs when no IR is on disk (§5.6), and
+   * for the one line reading an existing IR can produce: which document answered, when it was
+   * not the one under the working directory. Otherwise reading an IR reports nothing — the
+   * live signal fired when `aburi scan` wrote the file.
    */
   warn?: WarnFn
 }
@@ -353,14 +356,26 @@ async function resolveIR(
       return { ir: await readIR(explicit), unresolvedCalls: null, scanFaulted: false }
     }
 
-    const defaultPath = resolve(workspaceRoot, "out/aburi.ir.json")
-    if (await pathExistsStrict(defaultPath)) {
-      return { ir: await readIR(defaultPath), unresolvedCalls: null, scanFaulted: false }
+    const candidates = irSearchPath(cwd, workspaceRoot)
+    const [nearest] = candidates
+    for (const candidate of candidates) {
+      if (await pathExistsStrict(candidate)) {
+        // Which document answered, when it is not the one under the caller's feet. The lookup
+        // can now reach any ancestor up to the workspace root, and the answer carries no trace
+        // of where it came from — `ir.workspace.root` is `"."` in every document by schema, so
+        // the file's own location is the only signal there is.
+        if (candidate !== nearest) {
+          options.warn?.(`Answering from ${candidate}; there is no IR under ${resolve(cwd)}.`)
+        }
+        return { ir: await readIR(candidate), unresolvedCalls: null, scanFaulted: false }
+      }
     }
 
     if (options.noRescan) {
+      const rest =
+        candidates.length > 1 ? `, nor in any directory up to ${resolve(workspaceRoot)}` : ""
       throw new CliError(
-        `No IR file at ${defaultPath} and --no-rescan was set. Run \`aburi scan\` first or pass --ir <path>.`,
+        `No IR file at ${nearest}${rest}, and --no-rescan was set. Run \`aburi scan\` first or pass --ir <path>.`,
         "input-error",
       )
     }
@@ -383,12 +398,41 @@ async function resolveIR(
   }
 }
 
-async function resolveWorkspaceRoot(cwd: string): Promise<string> {
-  try {
-    return await detectWorkspaceRoot({ cwd })
-  } catch {
-    return resolve(cwd)
+/**
+ * Where a written IR might be, nearest first.
+ *
+ * `aburi scan` writes under the directory it was run from, and that is not necessarily this
+ * one: a caller standing in `pkgs/app` may have scanned there, or at the repository root, and
+ * either document describes the same workspace — the scan covers the whole of it wherever it
+ * was started. So the lookup walks up from `cwd` rather than guessing one of the two anchors.
+ * Reading only the workspace root missed a scan run inside a package; reading only `cwd`
+ * misses the far more common one run at the root.
+ *
+ * Upward and nearest-first is what config discovery does too, but it **stops at the workspace
+ * root** and config discovery deliberately does not — `findConfig`'s own docblock says a config
+ * above the root is still honoured, because a user may share one across repositories. An `out/`
+ * above the root is not shareable in that way: it holds a document about a different tree, and
+ * answering from it would describe a workspace the caller is not in.
+ *
+ * Nearest wins, for the same reason the nearest config does: it is the one the caller most
+ * recently had a reason to write.
+ */
+function irSearchPath(cwd: string, workspaceRoot: string): readonly [string, ...string[]] {
+  const first = join(resolveOutputDir(cwd, undefined), IR_JSON_FILENAME)
+  const paths: [string, ...string[]] = [first]
+  const root = resolve(workspaceRoot)
+  let directory = resolve(cwd)
+  while (directory !== root) {
+    const parent = dirname(directory)
+    // `resolveWorkspaceRoot` returns `cwd` or an ancestor of it, so the loop condition is what
+    // normally ends this. The guard is for an invariant that no longer holds: `dirname` is a
+    // fixed point at the filesystem root, and without it a `root` the walk can never reach
+    // would spin here forever.
+    if (parent === directory) break
+    directory = parent
+    paths.push(join(resolveOutputDir(directory, undefined), IR_JSON_FILENAME))
   }
+  return paths
 }
 
 /**

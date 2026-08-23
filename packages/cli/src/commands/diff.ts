@@ -9,7 +9,7 @@ import {
   projectDiffSummaryLine,
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "../artifact-paths"
+import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
@@ -170,7 +170,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     throw error
   }
 
-  const outputDir = resolve(cwd, options.outputDir ?? "out")
+  const outputDir = resolveOutputDir(cwd, options.outputDir)
   await mkdir(outputDir, { recursive: true })
   const format = options.format ?? "both"
 
