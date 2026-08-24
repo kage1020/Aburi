@@ -6,6 +6,7 @@ import {
   describeCodePoints,
   detectComponents,
   detectManagers,
+  languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
   posixWorkspaceRelativeViolation,
@@ -25,6 +26,7 @@ import type {
   Component,
   Config,
   IR,
+  LanguagePlugin,
   LspEnrichmentStats,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
@@ -258,7 +260,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   requireLanguagePlugin(plugins.languages.length, loaded.source)
 
   const managers = await detectManagers(workspaceRoot)
-  const components = await resolveComponents(config, workspaceRoot)
+  const components = await resolveComponents(config, workspaceRoot, plugins.languages)
 
   const scanInput: Parameters<typeof scan>[0] = {
     workspaceRoot,
@@ -923,6 +925,7 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
 async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
+  languages: readonly LanguagePlugin[],
 ): Promise<Component[]> {
   try {
     if (config.components !== undefined && config.components.length > 0) {
@@ -965,7 +968,16 @@ async function resolveComponents(
         return component
       })
     }
-    return await detectComponents({ workspaceRoot })
+    // The same drop decision the scan is about to make. Detection counts file extensions to
+    // decide `Component.languages`, so a file this run refuses to read must not put a language
+    // on a component — which it did, from detection's own shorter list.
+    return await detectComponents({
+      workspaceRoot,
+      ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
+      ...(config.respectGitignore === undefined
+        ? {}
+        : { respectGitignore: config.respectGitignore }),
+    })
   } catch (error) {
     throw new CliError(`Failed to resolve components: ${errorMessage(error)}`, "config-error", {
       cause: error,

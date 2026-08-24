@@ -105,6 +105,7 @@ export {
   LanguageRouter,
 } from "./scan/route"
 export {
+  languageFileDropPatterns,
   type ParseErrorRecord,
   type ScanInput,
   type ScanResult,

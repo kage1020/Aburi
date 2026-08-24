@@ -151,7 +151,7 @@ POSIX path relative to the workspace root.
 
 ### 4.4 `languages`
 
-Shallow-scan the workspace subtree (up to depth 3) and tally extension frequencies. Include the language id for each extension exceeding the threshold (>5% and >10 files).
+Shallow-scan each component's subtree (up to depth 3 below its own root) and tally extension frequencies, over the files a scan would read — see §8. Include the language id for each extension exceeding the threshold (>5% and >10 files).
 
 **Minority-language files below the threshold** are handled as follows:
 
@@ -304,8 +304,10 @@ When multiple detectors generate the same id with different paths (§4.1):
 
 ## 8. `.gitignore` / exclusions
 
-- **Intended, and not implemented:** honour `.gitignore` per `config.respectGitignore`, by the rules in [`drop-list.md` §3.3](./drop-list.md) — every directory's file, asked about each candidate rather than folded into the traversal's exclusion globs. `detectLanguagesForDirectory` reads no `.gitignore` at all today and carries its own eight-pattern exclusion list, so a git-ignored tree is counted when a component's languages are decided. This line says what the behaviour should be, not what it is
-- `node_modules/` / `vendor/` / `__pycache__/` etc. are always excluded during autodetect as well
+- Honour `.gitignore` per `config.respectGitignore`, by the rules in [`drop-list.md` §3.3](./drop-list.md) — every directory's file, asked about each candidate rather than folded into the traversal's exclusion globs
+- Category A's core patterns apply too, the same list discovery uses rather than a copy of part of it: `node_modules/`, `vendor/`, `__pycache__/`, `out/`, `.venv/`, `*.d.ts` and the rest of [`drop-list.md` §3.1](./drop-list.md)
+- `config.ignore[]` and the loaded language plugins' file-drop globs apply when the caller has them. The census is one walk from the **workspace root**, bucketed by component root afterwards, because those patterns are workspace-root relative by contract and cannot be matched against a walk rooted inside a package
+- The one caller that has neither is `aburi init`, which detects components in order to write the first config. It honours `.gitignore` and the core patterns, which is everything knowable before a config exists
 - The contents of `.git/` are never read, but its presence is used as a workspace root marker
 
 ## 9. Performance

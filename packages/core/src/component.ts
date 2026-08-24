@@ -4,6 +4,8 @@ import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "./errors"
 import { makeComponentId, makeLanguageId } from "./id"
+import { CORE_IGNORE_PATTERNS } from "./scan/discover"
+import { openGitignoreTree } from "./scan/gitignore"
 import {
   detectManagers,
   isDirectory,
@@ -61,6 +63,9 @@ const NPM_DEP_TO_FRAMEWORK: ReadonlyArray<readonly [string, string]> = [
   ["@trpc/server", "trpc"],
 ]
 
+/** How far below a component root the language census looks (component-detect.md §4.4). */
+const LANGUAGE_SCAN_DEPTH = 3
+
 /** Language-frequency filter: skip extensions with fewer than this many files. */
 const LANGUAGE_MIN_FILES = 10
 
@@ -77,6 +82,23 @@ const FALLBACK_LANGUAGE: LanguageId = makeLanguageId("ts")
 export interface DetectComponentsOptions {
   /** Workspace root absolute path; same value passed to detectManagers. */
   workspaceRoot: string
+  /**
+   * Extra drop globs, on top of the core list — `config.ignore` and the file-drop patterns of
+   * the loaded language plugins, which is exactly what discovery folds in. POSIX and
+   * workspace-root relative, as the config schema says.
+   *
+   * There is no separate option for the plugin half, because a caller that knows one knows
+   * both and the two are one list by the time they are applied. `aburi init` knows neither: it
+   * detects components in order to *write* the first config, before any plugin is resolved, so
+   * detection and discovery cannot be made to agree in every caller — only in the one where
+   * disagreeing would put a language on a component whose files the same run refused to read.
+   */
+  ignore?: readonly string[]
+  /**
+   * Honour every directory's `.gitignore` while counting, as discovery does. Default `true`,
+   * matching `config.respectGitignore`'s own default.
+   */
+  respectGitignore?: boolean
 }
 
 /**
@@ -90,12 +112,20 @@ export interface DetectComponentsOptions {
  */
 export async function detectComponents(options: DetectComponentsOptions): Promise<Component[]> {
   const { workspaces } = await detectManagers(options.workspaceRoot)
-  if (workspaces.length === 0) {
-    return [await buildSingleProjectComponent(options.workspaceRoot)]
+  const merged = workspaces.length === 0 ? null : mergeCandidatesByPath(workspaces)
+  // One walk for every root, before any component is built — see `countLanguagesPerRoot`.
+  const languages = await countLanguagesPerRoot(
+    options.workspaceRoot,
+    merged === null ? ["."] : merged.map((entry) => entry.relativeRoot),
+    options,
+  )
+  if (merged === null) {
+    return [await buildSingleProjectComponent(options.workspaceRoot, languages.get(".") ?? [])]
   }
 
-  const merged = mergeCandidatesByPath(workspaces)
-  const components = await Promise.all(merged.map((entry) => buildComponent(entry)))
+  const components = await Promise.all(
+    merged.map((entry) => buildComponent(entry, languages.get(entry.relativeRoot) ?? [])),
+  )
   return resolveIdCollisions(components).sort((a, b) => compareString(a.id, b.id))
 }
 
@@ -131,18 +161,20 @@ function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): Merge
   return [...byPath.values()]
 }
 
-async function buildComponent(entry: MergedCandidate): Promise<Component> {
+async function buildComponent(
+  entry: MergedCandidate,
+  languages: readonly LanguageId[],
+): Promise<Component> {
   const manifest = entry.manifestPath !== null ? await readPackageJson(entry.manifestPath) : null
   const id = decideId(entry, manifest)
   const name = decideName(entry, manifest)
-  const languages = await detectLanguagesForDirectory(entry.absoluteRoot)
   const frameworks = collectFrameworks(manifest)
   const publicApi = collectPublicApi(manifest)
   const component: Component = {
     id,
     name,
     roots: [entry.relativeRoot],
-    languages: languages.length > 0 ? languages : [FALLBACK_LANGUAGE],
+    languages: languages.length > 0 ? [...languages] : [FALLBACK_LANGUAGE],
     // Class A per ir-schema.md §1.1: always written, `null` when unset. Detection has no
     // source for a description; the config path (`resolveComponents` in @aburi/cli) writes
     // the same key from `components[].description`, so both producers agree on the shape.
@@ -153,7 +185,10 @@ async function buildComponent(entry: MergedCandidate): Promise<Component> {
   return component
 }
 
-async function buildSingleProjectComponent(workspaceRoot: string): Promise<Component> {
+async function buildSingleProjectComponent(
+  workspaceRoot: string,
+  languages: readonly LanguageId[],
+): Promise<Component> {
   const manifestPath = join(workspaceRoot, "package.json")
   const manifest = (await pathExists(manifestPath)) ? await readPackageJson(manifestPath) : null
   const fakeEntry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot"> = {
@@ -162,14 +197,13 @@ async function buildSingleProjectComponent(workspaceRoot: string): Promise<Compo
   }
   const id = decideId(fakeEntry, manifest)
   const name = decideName(fakeEntry, manifest)
-  const languages = await detectLanguagesForDirectory(workspaceRoot)
   const frameworks = collectFrameworks(manifest)
   const publicApi = collectPublicApi(manifest)
   const component: Component = {
     id,
     name,
     roots: ["."],
-    languages: languages.length > 0 ? languages : [FALLBACK_LANGUAGE],
+    languages: languages.length > 0 ? [...languages] : [FALLBACK_LANGUAGE],
     // Class A per ir-schema.md §1.1 -- see buildComponent.
     description: null,
   }
@@ -246,35 +280,77 @@ function toKebabCase(input: string): string {
     .replace(/^-|-$/g, "")
 }
 
-async function detectLanguagesForDirectory(absoluteRoot: string): Promise<LanguageId[]> {
+/**
+ * Count file extensions under every component root, dropping what a scan would drop.
+ *
+ * One walk from the workspace root rather than one per component, for two reasons. The rules
+ * are workspace-root relative by contract — `config.ignore`'s `packages/app/fixtures/**` matches
+ * nothing against a walk rooted at `packages/app`, and its `fixtures/**` would match the wrong
+ * package — and the `.gitignore` matcher is keyed the same way. It also replaces N walks with
+ * one.
+ *
+ * The depth limit survives as a per-root check after bucketing: still three levels below each
+ * component root, which is no longer something a single `deep` can express.
+ */
+async function countLanguagesPerRoot(
+  workspaceRoot: string,
+  roots: readonly string[],
+  options: DetectComponentsOptions,
+): Promise<Map<string, LanguageId[]>> {
   const files = await glob(["**/*"], {
-    cwd: absoluteRoot,
-    ignore: [
-      "**/node_modules/**",
-      "**/.git/**",
-      "**/dist/**",
-      "**/build/**",
-      "**/coverage/**",
-      "**/.next/**",
-      "**/__pycache__/**",
-      "**/target/**",
-    ],
+    cwd: workspaceRoot,
+    ignore: [...CORE_IGNORE_PATTERNS, ...(options.ignore ?? [])],
     onlyFiles: true,
-    deep: 3,
+    deep: Math.max(...roots.map((root) => rootDepth(root) + LANGUAGE_SCAN_DEPTH)),
   })
-  if (files.length === 0) return []
-  const counts = new Map<LanguageId, number>()
+  const gitignore = (options.respectGitignore ?? true) ? openGitignoreTree(workspaceRoot) : null
+
+  const counts = new Map<string, Map<LanguageId, number>>(roots.map((root) => [root, new Map()]))
   for (const file of files) {
-    const dot = file.lastIndexOf(".")
-    if (dot < 0) continue
-    const ext = file.slice(dot).toLowerCase()
-    const raw = EXTENSION_TO_LANGUAGE.get(ext)
-    if (raw === undefined) continue
-    // The table is the boundary where a per-extension token becomes a LanguageId, so the
-    // grammar check happens once here rather than at every consumer.
-    const lang = makeLanguageId(raw)
-    counts.set(lang, (counts.get(lang) ?? 0) + 1)
+    const language = languageOfExtension(file)
+    if (language === null) continue
+    // Asked with the filesystem's own spelling, which is what git matches and what keys the
+    // matcher. The bucketing below needs the other one — see `withinRoot`.
+    if (gitignore !== null && (await gitignore.ignores(file))) continue
+    const normalized = file.normalize("NFC")
+    for (const root of roots) {
+      if (!withinRoot(root, normalized)) continue
+      const perRoot = counts.get(root)
+      if (perRoot !== undefined) perRoot.set(language, (perRoot.get(language) ?? 0) + 1)
+    }
   }
+  return new Map([...counts].map(([root, perRoot]) => [root, frequentLanguages(perRoot)]))
+}
+
+/** `.` is the workspace root itself and has no segments. */
+function rootDepth(root: string): number {
+  return root === "." ? 0 : root.split("/").length
+}
+
+/**
+ * Whether a workspace-relative file sits under `root`, within the depth limit.
+ *
+ * Both sides are NFC here. A component root arrives normalized from `toRelativePosix`, and the
+ * walk returns the spelling the filesystem stored — so a decomposed directory name would fail
+ * to contain its own files if either side were compared raw.
+ */
+function withinRoot(root: string, file: string): boolean {
+  if (root === ".") return file.split("/").length <= LANGUAGE_SCAN_DEPTH
+  if (!file.startsWith(`${root}/`)) return false
+  return file.slice(root.length + 1).split("/").length <= LANGUAGE_SCAN_DEPTH
+}
+
+function languageOfExtension(file: string): LanguageId | null {
+  const dot = file.lastIndexOf(".")
+  if (dot < 0) return null
+  const raw = EXTENSION_TO_LANGUAGE.get(file.slice(dot).toLowerCase())
+  if (raw === undefined) return null
+  // The table is the boundary where a per-extension token becomes a LanguageId, so the
+  // grammar check happens once here rather than at every consumer.
+  return makeLanguageId(raw)
+}
+
+function frequentLanguages(counts: ReadonlyMap<LanguageId, number>): LanguageId[] {
   const total = [...counts.values()].reduce((a, b) => a + b, 0)
   if (total === 0) return []
   const out: LanguageId[] = []
