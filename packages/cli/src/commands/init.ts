@@ -1,6 +1,6 @@
 import { access, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { detectComponents, detectManagers, detectWorkspaceRoot } from "@aburi/core"
+import { CoreError, detectComponents, detectManagers, detectWorkspaceRoot } from "@aburi/core"
 import type { Config } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -8,6 +8,12 @@ import { EXIT, type ExitCode } from "../exit-codes"
 const CONFIG_SCHEMA_URL = "https://aburi.dev/schema/aburi.config.v1.json"
 
 export interface InitOptions {
+  /**
+   * Whether to honour `.gitignore` while counting a component's languages. Absent means the
+   * default, which is to honour it — `aburi scan` reads this from the config, and this command
+   * runs before there is one.
+   */
+  respectGitignore?: boolean
   cwd?: string
   output?: string
   force?: boolean
@@ -58,13 +64,25 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const managers = await detectManagers(workspaceRoot)
   // Same wrapping rationale as `resolveComponents` in scan.ts: an id the detection cannot
   // derive is a property of the project, and belongs in the input-error exit code.
+  //
+  // There is no config to read `respectGitignore` from — this command is what writes the first
+  // one — so the flag is the only way to say it, and honouring `.gitignore` is the default
+  // because a vendored or generated tree otherwise skews the languages of the config being
+  // generated.
   let components: Awaited<ReturnType<typeof detectComponents>>
   try {
-    components = await detectComponents({ workspaceRoot })
+    components = await detectComponents({
+      workspaceRoot,
+      ...(options.respectGitignore === undefined
+        ? {}
+        : { respectGitignore: options.respectGitignore }),
+    })
   } catch (error) {
     throw new CliError(
-      `Failed to detect components: ${error instanceof Error ? error.message : String(error)}`,
-      "config-error",
+      `Failed to detect components: ${errorMessage(error)}${gitignoreEscapeHatch(error)}`,
+      error instanceof CoreError && error.code === "scan-gitignore-unreadable"
+        ? "runtime-error"
+        : "config-error",
       { cause: error },
     )
   }
@@ -246,4 +264,17 @@ function renderConfig(input: RenderedConfigInput): string {
   // Insert the comment banner right after the opening `{` so the JSON stays valid JSONC.
   const insertion = `\n  ${banner.split("\n").join("\n  ")}`
   return `${json.replace("{\n", `{${insertion}\n`)}\n`
+}
+
+/**
+ * The one recovery for a `.gitignore` this command cannot read.
+ *
+ * `aburi scan` can be told to leave `.gitignore` alone through the config; this command is what
+ * writes that config, so the flag is the whole of the escape hatch and the message has to name
+ * it. Silently carrying on instead would put a vendored tree's language into the file the user
+ * is about to keep.
+ */
+function gitignoreEscapeHatch(error: unknown): string {
+  if (!(error instanceof CoreError) || error.code !== "scan-gitignore-unreadable") return ""
+  return " Pass --no-respect-gitignore to detect components without reading it."
 }

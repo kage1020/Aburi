@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path"
 import type { IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runScan } from "../src"
+import { STUB_PLUGIN } from "./stub-language"
 
 /**
  * `Component.languages` is decided by a census of file extensions, and the census used to run
@@ -77,5 +78,31 @@ describe("aburi scan hands the census its own drop decision", () => {
     await writeLanguage("fixtures", ".py")
 
     expect(await scannedLanguages({ ignore: ["fixtures/**"] })).toEqual(["ts"])
+  })
+})
+
+/**
+ * The stub plugin, given a file-drop glob of its own.
+ *
+ * The only shipped language plugin declares the three TypeScript declaration globs, and all
+ * three are already core patterns — so `languageFileDropPatterns` contributes nothing for it, and deleting
+ * the spread that carries it is invisible to any fixture built on `lang-typescript`. It stops
+ * being inert the moment a plugin names a pattern outside the core list.
+ */
+const DROPPING_PLUGIN = STUB_PLUGIN.replace(
+  '  fileExtensions: [".stub"],',
+  '  fileExtensions: [".stub"],\n  fileDropPatterns: ["**/legacy/**"],',
+)
+
+describe("a language plugin's own drop globs reach the census", () => {
+  it("does not count a directory only the plugin excludes", async () => {
+    await writeFile(resolve(workRoot, "lang-stub.mjs"), DROPPING_PLUGIN, "utf8")
+    await writeFileAt("package.json", JSON.stringify({ name: "fixture", private: true }))
+    // One file the plugin claims, so the scan produces an IR at all.
+    await writeFileAt(join("src", "a.stub"), "x")
+    await writeLanguage("src", ".py")
+    await writeLanguage("legacy", ".rs")
+
+    expect(await scannedLanguages({ languages: ["./lang-stub.mjs"] })).toEqual(["py"])
   })
 })

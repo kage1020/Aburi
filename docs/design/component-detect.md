@@ -151,7 +151,9 @@ POSIX path relative to the workspace root.
 
 ### 4.4 `languages`
 
-Shallow-scan each component's subtree (up to depth 3 below its own root) and tally extension frequencies, over the files a scan would read — see §8. Include the language id for each extension exceeding the threshold (>5% and >10 files).
+Shallow-scan each component's subtree (up to 3 directory levels below its own root) and tally extension frequencies, over the files the workspace has not excluded — see §8. Include the language id for each extension exceeding the threshold (>5% and >10 files).
+
+The census counts every extension in the table below, whether or not a lang plugin claims it. That is deliberate and is the point of the paragraph after next: the field answers "what is this component written in", not "what did this run parse", and `aburi init` has to answer it before any plugin is resolved. A file too large for `maxFileSizeBytes` counts for the same reason.
 
 **Minority-language files below the threshold** are handled as follows:
 

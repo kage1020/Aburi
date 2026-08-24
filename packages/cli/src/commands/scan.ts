@@ -968,9 +968,12 @@ async function resolveComponents(
         return component
       })
     }
-    // The same drop decision the scan is about to make. Detection counts file extensions to
-    // decide `Component.languages`, so a file this run refuses to read must not put a language
-    // on a component — which it did, from detection's own shorter list.
+    // The same *drop* decision the scan is about to make: a file this run has been told to
+    // leave out of the workspace must not put a language on a component, which it did from
+    // detection's own shorter list. Not the same *routing* decision — the census counts every
+    // extension it knows, whether or not a plugin claims it, because `Component.languages`
+    // answers "what is this component written in" rather than "what did this run parse"
+    // (component-detect.md §4.4), and `aburi init` has to answer it with no plugin loaded.
     return await detectComponents({
       workspaceRoot,
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
@@ -979,11 +982,44 @@ async function resolveComponents(
         : { respectGitignore: config.respectGitignore }),
     })
   } catch (error) {
-    throw new CliError(`Failed to resolve components: ${errorMessage(error)}`, "config-error", {
-      cause: error,
-    })
+    throw componentResolutionFailure(error)
   }
 }
+
+/**
+ * Which of the two exit codes a failed component resolution deserves.
+ *
+ * Detection walks the workspace and opens every `.gitignore` on the way, so this `try` now
+ * spans real IO — and `cli-spec.md §9` reserves exit 2 for bad input and exit 1 for a runtime
+ * failure. Reporting an `EACCES` as a config error sends the reader through `aburi.json`
+ * looking for a mistake that is not there, and the same fault would already exit 1 if the file
+ * sat one directory deeper than the census reaches.
+ *
+ * A `CoreError` that names a config-shaped fault keeps exit 2; everything else, coded or not,
+ * is the machine's.
+ */
+function componentResolutionFailure(error: unknown): CliError {
+  const configFault = error instanceof CoreError && CONFIG_COMPONENT_ERROR_CODES.has(error.code)
+  return new CliError(
+    `Failed to resolve components: ${errorMessage(error)}`,
+    configFault ? "config-error" : "runtime-error",
+    { cause: error },
+  )
+}
+
+/**
+ * `CoreError` codes that mean the workspace or its config is wrong, rather than the machine.
+ *
+ * Listed rather than inferred: a code that is not here exits 1, so a new one added upstream is
+ * reported as a runtime failure until someone decides otherwise — which is the safe direction,
+ * since exit 2 is the one that tells a reader to go and edit their config.
+ */
+const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<string> = new Set([
+  "invalid-component-id",
+  "invalid-language-id",
+  "non-posix-path",
+  "workspace-root-outside",
+])
 
 async function maybeWriteWorkspaceMd(
   format: "json" | "md" | "both",

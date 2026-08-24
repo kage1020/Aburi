@@ -12,7 +12,9 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 - **`aburi init`** — autodetect the workspace, write `aburi.json` with the
   detected languages / frameworks / components. `--force` overwrites,
   `--with-suggestions` appends `pnpm add -D @aburi/framework-<x>` JSONC
-  comments for detected first-party plugins.
+  comments for detected first-party plugins,
+  `--respect-gitignore` / `--no-respect-gitignore` decides whether the
+  language census reads `.gitignore` (honoured by default).
 - **`aburi scan`** — load config, resolve plugins, run `@aburi/core` scan,
   emit IR JSON + workspace / component Markdown. `--format json|md|both`,
   `--ignore <glob>` (repeatable),

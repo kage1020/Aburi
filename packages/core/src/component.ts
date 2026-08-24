@@ -301,6 +301,10 @@ async function countLanguagesPerRoot(
     cwd: workspaceRoot,
     ignore: [...CORE_IGNORE_PATTERNS, ...(options.ignore ?? [])],
     onlyFiles: true,
+    // Written out rather than left to the default, so this and `discoverFiles` are provably the
+    // same decision: `.git` is kept out of the census by this and not by a core pattern, and a
+    // default that changed in a minor bump would start counting git objects towards a language.
+    dot: false,
     deep: Math.max(...roots.map((root) => rootDepth(root) + LANGUAGE_SCAN_DEPTH)),
   })
   const gitignore = (options.respectGitignore ?? true) ? openGitignoreTree(workspaceRoot) : null
@@ -330,14 +334,24 @@ function rootDepth(root: string): number {
 /**
  * Whether a workspace-relative file sits under `root`, within the depth limit.
  *
+ * The limit is counted in **directory levels**, which is the unit the walk's own `deep` uses:
+ * `deep: 3` returns `a/b/c/f.ts`, three directories down. Counting path segments instead would
+ * include the filename and quietly move the limit by one — and the file it drops,
+ * `src/components/ui/*.tsx`, is the ordinary shape of a package this census exists to label.
+ *
  * Both sides are NFC here. A component root arrives normalized from `toRelativePosix`, and the
  * walk returns the spelling the filesystem stored — so a decomposed directory name would fail
  * to contain its own files if either side were compared raw.
  */
 function withinRoot(root: string, file: string): boolean {
-  if (root === ".") return file.split("/").length <= LANGUAGE_SCAN_DEPTH
+  if (root === ".") return directoryLevels(file) <= LANGUAGE_SCAN_DEPTH
   if (!file.startsWith(`${root}/`)) return false
-  return file.slice(root.length + 1).split("/").length <= LANGUAGE_SCAN_DEPTH
+  return directoryLevels(file.slice(root.length + 1)) <= LANGUAGE_SCAN_DEPTH
+}
+
+/** How many directories a relative file path descends through. `f.ts` is none. */
+function directoryLevels(file: string): number {
+  return file.split("/").length - 1
 }
 
 function languageOfExtension(file: string): LanguageId | null {

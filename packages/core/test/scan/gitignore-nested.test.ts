@@ -244,6 +244,11 @@ describe("a nested file that cannot be used", () => {
     for (const [directory, rules] of [
       ["negation", [`!${UNUSABLE}`]],
       ["shadowed", ["a*", UNUSABLE]],
+      // The engine's own refusal rather than the length gate, in the position only per-line
+      // compilation reaches: `ignore` splits on `/`, so a `[` with a `/` inside it is an
+      // unterminated character class at five characters, and the assembled matcher never
+      // compiles a rule the one before it shadowed.
+      ["shadowed-syntax", ["a*", "a/[/b"]],
     ] as const) {
       await writeFileAt(`${directory}/a.ts`)
       await writeFileAt(join(directory, ".gitignore"), `${rules.join("\n")}\n`)
@@ -254,6 +259,35 @@ describe("a nested file that cannot be used", () => {
       expect((thrown as Error).message).toContain(join(workRoot, directory, ".gitignore"))
       await rm(join(workRoot, directory), { recursive: true, force: true })
     }
+  })
+
+  it("measures the line the matcher compiles, not a trimmed version of it", async () => {
+    // Two ways past a gate that reads `line.trim()`. Leading whitespace is part of a gitignore
+    // pattern, so a rule of four thousand spaces and one character trims to one; and `ignore`
+    // treats `#` as a comment only at the first character, so `  #…` trims to a comment here
+    // and stays a live pattern there. Both were measured against the matcher, not reasoned out.
+    for (const [directory, line] of [
+      ["padded", `${" ".repeat(5_000)}x`],
+      ["pseudo-comment", `  #${UNUSABLE}`],
+    ] as const) {
+      await writeFileAt(`${directory}/a.ts`)
+      await gitignoreIn(directory, line)
+
+      const thrown = await discoverOrThrow()
+
+      expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+      expect((thrown as Error).message).toContain(join(workRoot, directory, ".gitignore"))
+      await rm(join(workRoot, directory), { recursive: true, force: true })
+    }
+  })
+
+  it("leaves a real comment and a blank line alone", async () => {
+    // The other side of the same predicate: what `ignore` discards, this discards, so a file of
+    // comments is not a file of refusals.
+    await writeFileAt("pkg/a.ts")
+    await gitignoreIn("pkg", "", `#${UNUSABLE}`, "   ", "*.log")
+
+    expect(await discover()).toEqual(["pkg/a.ts"])
   })
 
   it("names the line, and quotes only the head of the rule", async () => {

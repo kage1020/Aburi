@@ -6,10 +6,14 @@ import { detectComponents } from "../src/index"
 
 /**
  * Detection decides `Component.languages` by counting file extensions, and it used to count
- * files the workspace had excluded: it carried its own eight-pattern list where discovery has
- * twenty-six, and read no `.gitignore` at all. A vendored copy or a generated client then put a
- * language on a component that no Symbol in it is written in — a label that reaches the IR and
- * is compared against the next revision.
+ * files the workspace had excluded: it carried a shorter copy of part of the core drop list and
+ * read no `.gitignore` at all. A vendored copy or a generated client then put a language on a
+ * component whose files this run never opened — a label that reaches the IR and is compared
+ * against the next revision.
+ *
+ * What is aligned is the *drop* decision, not the routing one. The census counts every
+ * extension it knows whether or not a plugin claims it, because `Component.languages` answers
+ * what a component is written in rather than what a run parsed (component-detect.md §4.4).
  *
  * The threshold is ten files and a five-percent share, so every fixture here writes enough of
  * one language to clear it and enough of another to be the thing under test.
@@ -55,8 +59,8 @@ afterEach(async () => {
 
 describe("detection drops what discovery drops", () => {
   it("does not count a directory only the shared core list names", async () => {
-    // `out/` is one of the eighteen patterns detection's own list lacked — and it is where
-    // `aburi scan` puts its own artefacts, so a second run counted the first run's output.
+    // `out/` is one of the patterns detection's own list lacked — and it is where `aburi scan`
+    // puts its own artefacts, so a second run counted the first run's output.
     await writeLanguage("src", ".ts")
     await writeLanguage("out", ".py")
 
@@ -135,24 +139,31 @@ describe("what the drop decision is relative to", () => {
     // One walk serves every root, so its depth is the deepest root's — which admits files that
     // are too deep for a shallower one. The limit is per root, and only a layout whose roots
     // disagree about depth can tell that apart from the walk's own cutoff.
+    //
+    // Both sides of the limit are here on purpose. A fixture that only ever asserts what is
+    // *excluded* is satisfied by a limit that is too small, which is how the depth spent this
+    // change one level shallower than every document said.
     await writeWorkspaceManifest(["packages/*", "packages/app/inner/*"])
     await writeFileAt("package.json", JSON.stringify({ name: "root", private: true }))
     await writeFileAt(join("packages", "app", "package.json"), JSON.stringify({ name: "app" }))
     await writeLanguage(join("packages", "app", "src"), ".ts")
-    // Four levels under `packages/app`: out of its reach, inside the walk's.
-    await writeLanguage(join("packages", "app", "a", "b", "c", "d"), ".go")
+    // Exactly three directories below `packages/app` — the last depth that counts.
+    await writeLanguage(join("packages", "app", "a", "b", "c"), ".go")
+    // Four below it: the first that does not.
+    await writeLanguage(join("packages", "app", "x", "y", "z", "w"), ".rb")
     await writeFileAt(
       join("packages", "app", "inner", "deep", "package.json"),
       JSON.stringify({ name: "deep" }),
     )
-    // One level under the deepest root, and six from the workspace root — only reachable if
-    // the walk went as deep as that root needed.
-    await writeLanguage(join("packages", "app", "inner", "deep", "src"), ".rs")
+    // Three below the deepest root and seven from the workspace root, so it is counted only if
+    // the walk went as deep as that root needed — and five below `packages/app`, so it must not
+    // reach the shallower component that contains it.
+    await writeLanguage(join("packages", "app", "inner", "deep", "p", "q", "r"), ".rs")
 
     const components = await detectComponents({ workspaceRoot: workRoot })
 
     const byId = new Map(components.map((c) => [c.id as string, c.languages as readonly string[]]))
-    expect(byId.get("app")).toEqual(["ts"])
+    expect(byId.get("app")).toEqual(["go", "ts"])
     expect(byId.get("deep")).toEqual(["rs"])
   })
 
@@ -167,13 +178,16 @@ describe("what the drop decision is relative to", () => {
     await writeFileAt(join("packages", "app", "project.json"), JSON.stringify({ name: "app" }))
     await writeFileAt(join("packages", "app", "package.json"), JSON.stringify({ name: "app" }))
     await writeLanguage(join("packages", "app", "src"), ".ts")
-    // Four levels from the workspace root, which the walk reaches for `packages/app`'s sake.
-    await writeLanguage(join("a", "b", "c", "d"), ".go")
+    // The `.` arm has its own limit and needs its own pair: three directories down is the last
+    // depth it counts, four the first it does not — and the walk reaches both for
+    // `packages/app`'s sake.
+    await writeLanguage(join("a", "b", "c"), ".go")
+    await writeLanguage(join("x", "y", "z", "w"), ".rb")
 
     const components = await detectComponents({ workspaceRoot: workRoot })
 
     const byId = new Map(components.map((c) => [c.id as string, c.languages as readonly string[]]))
-    expect(byId.get("root")).toEqual(["ts"])
+    expect(byId.get("root")).toEqual(["go", "ts"])
   })
 
   it("collects the files of a component root whose name is decomposed", async () => {

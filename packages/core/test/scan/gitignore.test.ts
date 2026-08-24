@@ -69,6 +69,13 @@ async function writeGitignore(...lines: readonly string[]): Promise<void> {
   await writeFile(join(workRoot, ".gitignore"), `${lines.join("\n")}\n`, "utf8")
 }
 
+async function discoverOrThrow(): Promise<unknown> {
+  return await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] }).then(
+    () => null,
+    (error: unknown) => error,
+  )
+}
+
 async function discover(options: { ignore?: readonly string[] } = {}): Promise<string[]> {
   const result = await discoverFiles({
     workspaceRoot: workRoot,
@@ -242,23 +249,46 @@ describe("discoverFiles — the lines a .gitignore is allowed to contain", () =>
     expect(await discover()).toEqual(["src/a.ts"])
   })
 
-  it("names the file when a line is one no regex engine will take", async () => {
-    // The rules compile on the first question asked, not when the file is read, so a line
-    // this long threw at the first candidate — two hundred lines from the read, as a bare
-    // SyntaxError naming neither `.gitignore` nor the workspace.
+  it("names the file when a line is one the matcher will not take", async () => {
+    // Rules used to compile on the first question asked rather than when the file is read, so
+    // an unusable line threw at some later candidate as a bare SyntaxError naming neither the
+    // `.gitignore` nor the workspace. Refused by length here, before any engine sees it.
     await writeFileAt("src/a.ts")
     await writeGitignore("a".repeat(5_000))
 
-    const thrown = await discoverFiles({
-      workspaceRoot: workRoot,
-      languageExtensions: [".ts"],
-    }).then(
-      () => null,
-      (error: unknown) => error,
-    )
+    const thrown = await discoverOrThrow()
 
     expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
     expect((thrown as Error).message).toContain(".gitignore")
+  })
+
+  it("takes a rule of exactly the maximum length, and refuses one character more", async () => {
+    // The limit is pinned from both sides or it is not pinned at all: every other fixture here
+    // is far past it, so a limit lowered to sixty would pass them all while refusing ordinary
+    // path globs. The honoured side is also what "rules out no real pattern" rests on.
+    await writeFileAt("src/a.ts")
+    await writeGitignore("a".repeat(4_096))
+
+    expect(await discover()).toEqual(["src/a.ts"])
+
+    await writeGitignore("a".repeat(4_097))
+    const thrown = await discoverOrThrow()
+
+    expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+  })
+
+  it("names the file when a rule inside the limit is one the engine refuses", async () => {
+    // The length gate is not the whole guard. `ignore` splits a pattern on `/` and builds the
+    // regex around the pieces, so a `[` with a `/` inside it is an unterminated character class
+    // at any length — five characters here. Without the per-line compilation this reaches a
+    // candidate as a bare SyntaxError, which is the failure the length gate cannot catch.
+    await writeFileAt("src/a.ts")
+    await writeGitignore("a/[/b")
+
+    const thrown = await discoverOrThrow()
+
+    expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+    expect((thrown as Error).message).toContain("line 1")
   })
 })
 
