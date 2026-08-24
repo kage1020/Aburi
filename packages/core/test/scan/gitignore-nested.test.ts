@@ -24,10 +24,10 @@ let workRoot: string
 /**
  * A pattern past the length the matcher hands to a regex engine at all.
  *
- * Not an engine failure: where the engine's own size limit falls is the engine's business, and
- * measured, V8 refuses somewhere above 32,000 characters on one platform and spends forty
- * seconds reaching the same verdict on another. The matcher refuses at a fixed length before
- * any of that, which is what makes this fixture instant and identical everywhere.
+ * Not an engine failure: where the engine's own size limit falls, and what reaching it costs,
+ * is the engine's business — see `MAX_RULE_LENGTH`. The matcher refuses at a fixed length
+ * before any of that, which is what makes this fixture instant and identical everywhere. For a
+ * rule the engine itself refuses, `a/[/b` is five characters and unterminated.
  */
 const UNUSABLE = "a".repeat(5_000)
 
@@ -300,6 +300,19 @@ describe("a nested file that cannot be used", () => {
 
     expect((thrown as Error).message).toContain("line 4")
     expect((thrown as Error).message).toContain("5000 characters")
+    expect((thrown as Error).message.length).toBeLessThan(1_000)
+  })
+
+  it("abridges the engine's own diagnostic too", async () => {
+    // A different string from the rule, and unbounded for a different reason: the engine quotes
+    // the whole pattern it refused, so a rule that stops just short of the length limit produces
+    // four kilobytes of message — and a `CoreError` is printed verbatim.
+    await writeFileAt("pkg/a.ts")
+    await gitignoreIn("pkg", `${"a".repeat(4_000)}/[/b`)
+
+    const thrown = await discoverOrThrow()
+
+    expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
     expect((thrown as Error).message.length).toBeLessThan(1_000)
   })
 

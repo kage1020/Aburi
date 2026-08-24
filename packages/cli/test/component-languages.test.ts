@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path"
 import type { IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runScan } from "../src"
+import { CliError } from "../src/errors"
 import { STUB_PLUGIN } from "./stub-language"
 
 /**
@@ -104,5 +105,40 @@ describe("a language plugin's own drop globs reach the census", () => {
     await writeLanguage("legacy", ".rs")
 
     expect(await scannedLanguages({ languages: ["./lang-stub.mjs"] })).toEqual(["py"])
+  })
+})
+
+describe("what a failed component resolution exits with", () => {
+  /**
+   * Detection walks the workspace and opens rule files now, so this path spans real IO —
+   * and `cli-spec.md` §9 keeps exit 2 for bad input and exit 1 for a runtime failure. Reporting
+   * an unreadable `.gitignore` as a config error sends the reader through `aburi.json` for a
+   * mistake that is not there.
+   */
+  it("exits with a runtime failure when a rule file cannot be used", async () => {
+    await writeLanguage("src", ".ts")
+    await writeFileAt(".gitignore", `${"a".repeat(5_000)}\n`)
+
+    const thrown = await scannedLanguages({}).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("runtime-error")
+  })
+
+  it("keeps the input error for a component root the Document cannot hold", async () => {
+    await writeLanguage("src", ".ts")
+
+    const thrown = await scannedLanguages({
+      components: [{ id: "app", roots: ["../outside"] }],
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("config-error")
   })
 })
