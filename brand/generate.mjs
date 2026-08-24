@@ -84,9 +84,15 @@ const rect = ({ x, y, w, h }) => `<rect x="${x}" y="${y}" width="${w}" height="$
 const group = (fill, boxes) =>
   boxes.length ? `<g fill="${fill}">${boxes.map(rect).join("")}</g>` : ""
 
+/**
+ * Deliberately no width/height: a mark carrying an intrinsic 64px renders at 64px
+ * wherever the surrounding CSS only caps it — VitePress's hero, for one, sets a
+ * `max-width` and nothing else, so the logo came out the size of a favicon. With
+ * just the viewBox the asset takes the size it is given.
+ */
 function svg(body, { size = 64, background } = {}) {
   const ground = background ? `<rect width="${size}" height="${size}" fill="${background}"/>` : ""
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Aburi">${ground}${body}</svg>\n`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="Aburi">${ground}${body}</svg>\n`
 }
 
 /** Reading order — left to right, top to bottom — so the reveal follows how the grid is read. */

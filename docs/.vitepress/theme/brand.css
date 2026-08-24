@@ -1,0 +1,30 @@
+/**
+ * The default theme ships indigo, which left the mark as the only warm thing on
+ * the page. These stops are the sear #B87514 walked up and down its own hue until
+ * each one clears the contrast it actually needs — link text against the page,
+ * button fill against the white label sitting on it — rather than being picked to
+ * look like the mark and checked afterwards.
+ */
+
+:root {
+  /* Link and accent text: 4.51:1 on white. */
+  --vp-c-brand-1: #a46a1b;
+  /* Hover, so it has to move visibly and stay legible: 6.26:1. */
+  --vp-c-brand-2: #8a5410;
+  /* Solid button fill. Measured against the white label, not the page: 5.23:1. */
+  --vp-c-brand-3: #9a5f0d;
+  --vp-c-brand-soft: rgb(184 117 20 / 14%);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #b87514, #e3a72f);
+}
+
+.dark {
+  /* Dark grounds need the hue brighter, not just inverted: 8.26:1 on #1B1B1F. */
+  --vp-c-brand-1: #e6a93b;
+  --vp-c-brand-2: #f0bc5c;
+  /* The label on a filled button stays white in both themes, so this stop cannot
+     follow the others upward — 4.71:1 against that label. */
+  --vp-c-brand-3: #9e620e;
+  --vp-c-brand-soft: rgb(227 167 47 / 16%);
+}
