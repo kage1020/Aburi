@@ -11,6 +11,11 @@ export default defineConfig({
     hostname: "https://aburi.kage1020.com",
   },
   head: [
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["link", { rel: "icon", type: "image/png", sizes: "32x32", href: "/brand/favicon-32.png" }],
+    ["link", { rel: "icon", type: "image/png", sizes: "16x16", href: "/brand/favicon-16.png" }],
+    ["link", { rel: "apple-touch-icon", href: "/brand/apple-touch-icon.png" }],
+    ["meta", { name: "theme-color", content: "#B87514" }],
     ["meta", { property: "og:title", content: "Aburi" }],
     [
       "meta",
@@ -20,8 +25,12 @@ export default defineConfig({
       },
     ],
     ["meta", { property: "og:url", content: "https://aburi.kage1020.com" }],
+    ["meta", { property: "og:image", content: "https://aburi.kage1020.com/brand/og.png" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ["meta", { name: "twitter:image", content: "https://aburi.kage1020.com/brand/og.png" }],
   ],
   themeConfig: {
+    logo: { light: "/brand/mark.svg", dark: "/brand/mark-dark.svg", alt: "Aburi" },
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
       { text: "Reference", link: "/cli-reference" },
