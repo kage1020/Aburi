@@ -5,6 +5,10 @@ hero:
   name: Aburi
   text: Semantic IR extraction for high-level code review
   tagline: Read pull requests at the level of business logic, control flow, and module boundaries — not raw diffs.
+  image:
+    light: /brand/mark.svg
+    dark: /brand/mark-dark.svg
+    alt: Aburi
   actions:
     - theme: brand
       text: Getting started

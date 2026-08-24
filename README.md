@@ -1,3 +1,5 @@
+<img src="docs/public/brand/mark.svg" alt="" width="72" height="72">
+
 # Aburi
 
 Aburi extracts a **semantic intermediate representation (IR)** from source code so
