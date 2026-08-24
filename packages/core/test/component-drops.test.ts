@@ -30,6 +30,12 @@ async function writeFileAt(rel: string, content = "x"): Promise<void> {
   await writeFile(abs, content, "utf8")
 }
 
+/** The pnpm marker, whose `packages` list is what decides the component roots. */
+async function writeWorkspaceManifest(patterns: readonly string[]): Promise<void> {
+  const lines = ["packages:", ...patterns.map((pattern) => `  - '${pattern}'`), ""]
+  await writeFileAt("pnpm-workspace.yaml", lines.join("\n"))
+}
+
 /** A single-project workspace: no manager markers, so the root itself is the one component. */
 async function languagesOfRoot(
   options: { ignore?: readonly string[]; respectGitignore?: boolean } = {},
@@ -125,16 +131,49 @@ describe("what the drop decision is relative to", () => {
     expect(byId.get("other")).toEqual(["py", "ts"])
   })
 
-  it("still counts only three levels below each component root", async () => {
-    await makeMonorepo()
-    // Four levels under `packages/app`, which is six from the workspace root — out of reach
-    // whichever root the depth is measured from, and the reason the bucketing checks it.
+  it("counts three levels below each root, whichever root, with roots at different depths", async () => {
+    // One walk serves every root, so its depth is the deepest root's — which admits files that
+    // are too deep for a shallower one. The limit is per root, and only a layout whose roots
+    // disagree about depth can tell that apart from the walk's own cutoff.
+    await writeWorkspaceManifest(["packages/*", "packages/app/inner/*"])
+    await writeFileAt("package.json", JSON.stringify({ name: "root", private: true }))
+    await writeFileAt(join("packages", "app", "package.json"), JSON.stringify({ name: "app" }))
+    await writeLanguage(join("packages", "app", "src"), ".ts")
+    // Four levels under `packages/app`: out of its reach, inside the walk's.
     await writeLanguage(join("packages", "app", "a", "b", "c", "d"), ".go")
+    await writeFileAt(
+      join("packages", "app", "inner", "deep", "package.json"),
+      JSON.stringify({ name: "deep" }),
+    )
+    // One level under the deepest root, and six from the workspace root — only reachable if
+    // the walk went as deep as that root needed.
+    await writeLanguage(join("packages", "app", "inner", "deep", "src"), ".rs")
 
     const components = await detectComponents({ workspaceRoot: workRoot })
 
-    const app = components.find((c) => (c.id as string) === "app")
-    expect(app?.languages).toEqual(["py", "ts"])
+    const byId = new Map(components.map((c) => [c.id as string, c.languages as readonly string[]]))
+    expect(byId.get("app")).toEqual(["ts"])
+    expect(byId.get("deep")).toEqual(["rs"])
+  })
+
+  it("holds the depth limit for the workspace root when it is one root among several", async () => {
+    // `.` is a component root beside deeper ones whenever an nx workspace has a `project.json`
+    // at the top as well as inside its packages. The walk then runs deeper than three levels
+    // for the deeper root's sake, and the root component must still not count what it reaches.
+    await writeFileAt("nx.json", JSON.stringify({ version: 2 }))
+    await writeFileAt("project.json", JSON.stringify({ name: "root" }))
+    await writeFileAt("package.json", JSON.stringify({ name: "root", private: true }))
+    await writeLanguage("src", ".ts")
+    await writeFileAt(join("packages", "app", "project.json"), JSON.stringify({ name: "app" }))
+    await writeFileAt(join("packages", "app", "package.json"), JSON.stringify({ name: "app" }))
+    await writeLanguage(join("packages", "app", "src"), ".ts")
+    // Four levels from the workspace root, which the walk reaches for `packages/app`'s sake.
+    await writeLanguage(join("a", "b", "c", "d"), ".go")
+
+    const components = await detectComponents({ workspaceRoot: workRoot })
+
+    const byId = new Map(components.map((c) => [c.id as string, c.languages as readonly string[]]))
+    expect(byId.get("root")).toEqual(["ts"])
   })
 
   it("collects the files of a component root whose name is decomposed", async () => {
