@@ -59,11 +59,11 @@ Each language plugin may add skip patterns specific to its own language. Example
 
 ### 3.3 .gitignore integration
 
-The workspace root's `.gitignore` is respected by default (turned off by `config.respectGitignore: false` or `--no-respect-gitignore`, and back on for one run by `--respect-gitignore`).
+`.gitignore` is respected by default (turned off by `config.respectGitignore: false` or `--no-respect-gitignore`, and back on for one run by `--respect-gitignore`).
 
 Files ignored by git are therefore skipped automatically without listing `dist/` etc. explicitly.
 
-It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So the file is compiled into a matcher and every discovered candidate is asked about it, rather than the walk being pruned by it. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
+It is decided the way git decides it, which is not the same as adding its lines to the Category A glob list. Git's rules pull in opposite directions — a later `!rule` re-includes a file, and *nothing* re-includes a file under a directory that was excluded outright, because git never descends into it — and a glob list can express neither. So each file is compiled into its own matcher and every discovered candidate is asked about the chain of them above it, rather than the walk being pruned by any. The consequence worth knowing: a `.gitignore`d directory is still walked. What such a file usually names is in the Category A list above and is pruned there.
 
 **The Category A globs are outside a negation's reach.** The core patterns, `config.ignore[]` (§3.4) and language-plugin drop patterns prune the walk, and no `!` line in `.gitignore` brings back a file they excluded — those are not gitignore rules and the matcher never sees the candidate.
 
@@ -71,7 +71,15 @@ Matching is case-sensitive, whatever the filesystem is. Git folds case only wher
 
 One thing "the way git decides it" does not cover: git applies `.gitignore` to untracked files only, so a tracked file matching a rule is not ignored. There is no index here, so such a file is excluded.
 
-Only the root file. Nested `.gitignore`s, `.git/info/exclude` and `core.excludesFile` are not read.
+**Every directory's file, not just the root's.** Git consults a `.gitignore` in each directory from the repository root down to the file's own, and a deeper file's rules override a shallower one's — `packages/app/.gitignore` holding `fixtures/` is the ordinary way to say a package's fixtures are not source. Precedence is per directory rather than per line: two files that disagree about one path are decided by which is deeper, whichever direction each points. A nested file's patterns are relative to its own directory, so `/local.ts` in `packages/app` anchors to `packages/app/local.ts`.
+
+The directory rule above still holds across files: nothing re-includes a file under a directory that was excluded, so a root `gen/` cannot be undone by `gen/.gitignore` holding `!keep.ts`. A root `gen/*` can, because it never excluded the directory.
+
+**Not read**, and not by accident: `$GIT_DIR/info/exclude` and `core.excludesFile`. Both live outside the tree and are per-machine, so honouring them would make the Document depend on who ran the scan — the determinism [`ir-schema.md`](./ir-schema.md) §1 exists to defend. A `.gitignore` is committed, so every clone answers the same. `.git/.gitignore` is not a rule file to git and is not one here.
+
+A rule file is opened by descending to it, as git finds it — so one under a directory that has no surviving candidate is never opened at all. That covers a directory the Category A globs dropped, a directory an outer `.gitignore` excluded, and `.git` itself. It is not only that such a file's rules would be inert; an unusable one would otherwise end a run git would not even have opened it during.
+
+A `.gitignore` that is not a regular file is no patterns, which is git's answer too: a **directory** of that name, and a **symlink** — git refuses to follow one, resolvable or not. Anything else that is not a regular file is treated the same, rather than blocking forever on a FIFO as git does.
 
 ### 3.4 Config additions
 
@@ -275,6 +283,8 @@ Properties the extraction pipeline must satisfy.
 | A3 | Files listed in `.gitignore` | Same as above (unless `respectGitignore` is off, by config or by `--no-respect-gitignore`) |
 | A3b | `.gitignore` holding `assets/*` and `!assets/keep.ts` | `assets/keep.ts` is scanned; the rest of `assets/` is not |
 | A3c | `.gitignore` holding `gen/` and `!gen/keep.ts` | Nothing under `gen/` is scanned — git does not descend into an excluded directory, so the negation reaches nothing |
+| A3d | `packages/app/.gitignore` holding `fixtures/` | Nothing under `packages/app/fixtures/` is scanned; `packages/other/fixtures/` is untouched |
+| A3e | Root `.gitignore` holding `*.ts`, `packages/app/.gitignore` holding `!keep.ts` | `packages/app/keep.ts` is scanned — the deeper file decides |
 | A4 | Adding `config.ignore: ["docs/**"]` | Everything under `docs/` is skipped |
 
 ### 8.2 Symbol-level (Category B)

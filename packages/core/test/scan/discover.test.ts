@@ -139,13 +139,17 @@ describe("discoverFiles", () => {
     expect(result.files.map((f) => f.path)).toEqual(["src/keep.ts"])
   })
 
-  it("raises a coded error when .gitignore is there and cannot be read", async () => {
+  it("raises a coded error when .gitignore is there and cannot be used", async () => {
     // A missing `.gitignore` is the common case and means "no patterns". Anything else is a
     // pattern list the caller asked for and did not get, so a scan that fell back to the core
     // ignores would include files the workspace said to leave out — silently, and only on the
-    // machine where the read failed.
+    // machine where the read failed. Git itself warns and carries on here; a Document compared
+    // across machines cannot afford that, and the divergence is the point of this test.
+    //
+    // A single pattern too long for the regex engine, because it fails identically on every
+    // platform — the mode bits that make a file unreadable are POSIX-only.
     await writeFileAt("src/a.ts", "1")
-    await mkdir(join(workRoot, ".gitignore"))
+    await writeFileAt(".gitignore", `${"a".repeat(40_000)}\n`)
 
     const thrown = await discoverFiles({
       workspaceRoot: workRoot,
@@ -157,7 +161,22 @@ describe("discoverFiles", () => {
 
     expect(thrown).toBeInstanceOf(CoreError)
     expect((thrown as CoreError).code).toBe("scan-gitignore-unreadable")
-    expect((thrown as CoreError).message).toContain("EISDIR")
+    expect((thrown as CoreError).message).toContain(join(workRoot, ".gitignore"))
+  })
+
+  it("treats a directory named .gitignore as no patterns at all, as git does", async () => {
+    // Measured: `git check-ignore` reports nothing and `git status` is silent — a directory of
+    // that name is not a rule file to git, so it is not one here. This used to end the run with
+    // EISDIR, which was the read failing rather than a decision about what the name means.
+    await writeFileAt("src/a.ts", "1")
+    await mkdir(join(workRoot, ".gitignore"))
+
+    const result = await discoverFiles({
+      workspaceRoot: workRoot,
+      languageExtensions: [".ts"],
+    })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
   })
 
   it("does not read .gitignore when respectGitignore is false", async () => {
