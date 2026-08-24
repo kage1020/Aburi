@@ -7,12 +7,22 @@ import { describeThrown, isVanishedFile } from "./faults"
 /** The one filename git reads per directory. */
 const GITIGNORE_FILENAME = ".gitignore"
 
+/**
+ * The longest rule this will hand to the regex engine.
+ *
+ * Not a style rule — a determinism one. A pattern long enough to blow the engine's code-size
+ * limit is refused, but *where* that limit falls is the engine's business: measured, V8 refuses
+ * somewhere above 32,000 characters on one platform and spends **forty seconds** reaching the
+ * same verdict on another. A workspace whose `.gitignore` holds such a line would then scan on
+ * one machine and fail on the next, which is the property this Document is built to avoid.
+ *
+ * Refusing outright at a fixed length settles it, costs nothing, and rules out no real pattern:
+ * a gitignore rule is a path glob, and `PATH_MAX` itself is 4096.
+ */
+const MAX_RULE_LENGTH = 4096
+
 /** How much of a rule the failure message quotes. A pattern can be longer than a screen. */
 const QUOTED_RULE_LENGTH = 60
-
-/** How much of the engine's own diagnostic survives, from each end. */
-const QUOTED_REASON_HEAD = 40
-const QUOTED_REASON_TAIL = 60
 
 /** What one directory's rules say about one candidate. Silence is an answer the walk needs. */
 type Verdict = "none" | "ignored" | "kept"
@@ -117,28 +127,39 @@ function assertEveryRuleCompiles(content: string, path: string): void {
     const rule = line.trim()
     // What `ignore` itself discards before compiling anything.
     if (rule.length === 0 || rule.startsWith("#")) continue
+    if (rule.length > MAX_RULE_LENGTH) {
+      throw refuseRule(path, index, rule, `it is longer than ${MAX_RULE_LENGTH} characters`)
+    }
     try {
       ignore({ ignorecase: false }).add(line).test("a")
     } catch (error) {
-      // Both halves are abridged. A `CoreError` is not a `CliError`, so the CLI prints its
-      // message verbatim — and the engine's diagnostic for an oversized pattern quotes the
-      // whole 40,000 characters of it, with the one useful word at the very end.
-      const quoted =
-        rule.length > QUOTED_RULE_LENGTH ? `${rule.slice(0, QUOTED_RULE_LENGTH)}…` : rule
-      throw new CoreError(
-        `.gitignore at "${path}" line ${index + 1} is not a usable pattern ("${quoted}", ` +
-          `${rule.length} characters): ${abbreviate(describeThrown(error))}`,
-        { code: "scan-gitignore-unreadable", value: path },
-        { cause: error },
-      )
+      throw refuseRule(path, index, rule, describeThrown(error), error)
     }
   }
 }
 
-/** Both ends of a long diagnostic: the kind of failure is at the front, the reason at the back. */
-function abbreviate(reason: string): string {
-  if (reason.length <= QUOTED_REASON_HEAD + QUOTED_REASON_TAIL) return reason
-  return `${reason.slice(0, QUOTED_REASON_HEAD)}…${reason.slice(-QUOTED_REASON_TAIL)}`
+/**
+ * The one shape both refusals take: which file, which line, an abridged quotation of the rule,
+ * and why.
+ *
+ * Abridged because a `CoreError` is not a `CliError`, so the CLI prints its message verbatim —
+ * and the engine's own diagnostic for a long pattern quotes the whole of it, with the one
+ * useful word at the very end.
+ */
+function refuseRule(
+  path: string,
+  index: number,
+  rule: string,
+  reason: string,
+  cause?: unknown,
+): CoreError {
+  const quoted = rule.length > QUOTED_RULE_LENGTH ? `${rule.slice(0, QUOTED_RULE_LENGTH)}…` : rule
+  return new CoreError(
+    `.gitignore at "${path}" line ${index + 1} is not a usable pattern ("${quoted}", ` +
+      `${rule.length} characters): ${reason}`,
+    { code: "scan-gitignore-unreadable", value: path },
+    cause === undefined ? {} : { cause },
+  )
 }
 
 /**

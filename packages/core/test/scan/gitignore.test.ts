@@ -247,7 +247,7 @@ describe("discoverFiles — the lines a .gitignore is allowed to contain", () =>
     // this long threw at the first candidate — two hundred lines from the read, as a bare
     // SyntaxError naming neither `.gitignore` nor the workspace.
     await writeFileAt("src/a.ts")
-    await writeGitignore("a".repeat(40_000))
+    await writeGitignore("a".repeat(5_000))
 
     const thrown = await discoverFiles({
       workspaceRoot: workRoot,

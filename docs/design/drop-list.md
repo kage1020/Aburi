@@ -79,6 +79,8 @@ The directory rule above still holds across files: nothing re-includes a file un
 
 A rule file is opened by descending to it, as git finds it — so one under a directory that has no surviving candidate is never opened at all. That covers a directory the Category A globs dropped, a directory an outer `.gitignore` excluded, and `.git` itself. It is not only that such a file's rules would be inert; an unusable one would otherwise end a run git would not even have opened it during.
 
+A rule longer than 4,096 characters is refused with the file and the line named, without being handed to a regex engine at all. That is a determinism rule, not a style one: where the engine's own size limit falls is the engine's business, and the same `.gitignore` would otherwise scan on one machine and fail on another. No real pattern reaches it — a gitignore rule is a path glob and `PATH_MAX` is 4096.
+
 A `.gitignore` that is not a regular file is no patterns, which is git's answer too: a **directory** of that name, and a **symlink** — git refuses to follow one, resolvable or not. Anything else that is not a regular file is treated the same, rather than blocking forever on a FIFO as git does.
 
 ### 3.4 Config additions

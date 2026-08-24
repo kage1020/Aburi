@@ -21,6 +21,16 @@ import { discoverFiles } from "../../src"
 
 let workRoot: string
 
+/**
+ * A pattern past the length the matcher hands to a regex engine at all.
+ *
+ * Not an engine failure: where the engine's own size limit falls is the engine's business, and
+ * measured, V8 refuses somewhere above 32,000 characters on one platform and spends forty
+ * seconds reaching the same verdict on another. The matcher refuses at a fixed length before
+ * any of that, which is what makes this fixture instant and identical everywhere.
+ */
+const UNUSABLE = "a".repeat(5_000)
+
 async function writeFileAt(rel: string, content = "1"): Promise<void> {
   const abs = join(workRoot, rel)
   await mkdir(dirname(abs), { recursive: true })
@@ -181,9 +191,9 @@ describe("what is not read", () => {
   it("never opens a .gitignore inside .git", async () => {
     // Not a rule file to git, whatever it holds. Its *rules* could not reach outside `.git`
     // anyway — a matcher only speaks about its own subtree, and nothing under `.git` is a
-    // candidate — so what says the file was skipped is that a line no regex engine will take
-    // did not end the run.
-    await writeFileAt(join(".git", ".gitignore"), `${"a".repeat(40_000)}\n`)
+    // candidate — so what says the file was skipped is that a line the matcher refuses did not
+    // end the run.
+    await writeFileAt(join(".git", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("keep.ts")
 
     expect(await discover()).toEqual(["keep.ts"])
@@ -192,7 +202,7 @@ describe("what is not read", () => {
   it("never opens a .gitignore under a directory the drop globs already removed", async () => {
     // Same reasoning, same evidence: a `node_modules` package's own file cannot change a
     // verdict about anything that survived the walk, and a scan must not fail over one.
-    await writeFileAt(join("node_modules", "pkg", ".gitignore"), `${"a".repeat(40_000)}\n`)
+    await writeFileAt(join("node_modules", "pkg", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("keep.ts")
 
     expect(await discover()).toEqual(["keep.ts"])
@@ -209,9 +219,6 @@ describe("what is not read", () => {
 })
 
 describe("a nested file that cannot be used", () => {
-  /** A single pattern longer than the regex engine will compile. */
-  const UNCOMPILABLE = "a".repeat(40_000)
-
   async function discoverOrThrow(): Promise<unknown> {
     return await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] }).then(
       () => null,
@@ -222,7 +229,7 @@ describe("a nested file that cannot be used", () => {
   it("fails naming the nested file, not the root one", async () => {
     await gitignoreIn("", "root.ts")
     await writeFileAt("pkg/a.ts")
-    await writeFileAt(join("pkg", ".gitignore"), `${UNCOMPILABLE}\n`)
+    await writeFileAt(join("pkg", ".gitignore"), `${UNUSABLE}\n`)
 
     const thrown = await discoverOrThrow()
 
@@ -232,11 +239,11 @@ describe("a nested file that cannot be used", () => {
 
   it("names a rule the walk would never have asked about", async () => {
     // A negative rule is skipped while nothing has matched, and a rule that matches shadows the
-    // same-polarity rules after it — so one throwaway question of the assembled matcher compiles
-    // neither of these, and each used to escape as a bare SyntaxError at some later candidate.
+    // same-polarity rules after it — so one throwaway question of the assembled matcher reaches
+    // neither of these. Every line is looked at now, whichever position and polarity it holds.
     for (const [directory, rules] of [
-      ["negation", [`!${UNCOMPILABLE}`]],
-      ["shadowed", ["a*", UNCOMPILABLE]],
+      ["negation", [`!${UNUSABLE}`]],
+      ["shadowed", ["a*", UNUSABLE]],
     ] as const) {
       await writeFileAt(`${directory}/a.ts`)
       await writeFileAt(join(directory, ".gitignore"), `${rules.join("\n")}\n`)
@@ -249,19 +256,16 @@ describe("a nested file that cannot be used", () => {
     }
   })
 
-  it("names the line, and does not quote the whole of an oversized rule", async () => {
-    // `CoreError` is not a `CliError`, so the message reaches a terminal unabridged. The engine's
-    // own diagnostic for this case quotes the entire 40,000-character pattern.
+  it("names the line, and quotes only the head of the rule", async () => {
+    // `CoreError` is not a `CliError`, so the message reaches a terminal verbatim. Quoting the
+    // rule whole would put five thousand characters of it there.
     await writeFileAt("pkg/a.ts")
-    await writeFileAt(
-      join("pkg", ".gitignore"),
-      ["# a comment", "", "*.log", UNCOMPILABLE].join("\n"),
-    )
+    await writeFileAt(join("pkg", ".gitignore"), ["# a comment", "", "*.log", UNUSABLE].join("\n"))
 
     const thrown = await discoverOrThrow()
 
     expect((thrown as Error).message).toContain("line 4")
-    expect((thrown as Error).message).toContain("40000 characters")
+    expect((thrown as Error).message).toContain("5000 characters")
     expect((thrown as Error).message.length).toBeLessThan(1_000)
   })
 
@@ -269,7 +273,7 @@ describe("a nested file that cannot be used", () => {
     // The off switch skips the read, not just the application. Nothing else here would notice
     // the difference: a matcher built and thrown away answers the same as no matcher.
     await gitignoreIn("", "root.ts")
-    await writeFileAt(join("pkg", ".gitignore"), `${UNCOMPILABLE}\n`)
+    await writeFileAt(join("pkg", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("pkg/a.ts")
     await writeFileAt("root.ts")
 
@@ -280,7 +284,7 @@ describe("a nested file that cannot be used", () => {
     // No candidate comes from there, so the descent never arrives. Reading it would let
     // `config.ignore` turn a workspace's own exclusions into a failed scan — or, if the read
     // succeeded, into no exclusions at all.
-    await writeFileAt(join("private", ".gitignore"), `${UNCOMPILABLE}\n`)
+    await writeFileAt(join("private", ".gitignore"), `${UNUSABLE}\n`)
     await writeFileAt("private/a.ts")
     await writeFileAt("keep.ts")
 

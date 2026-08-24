@@ -146,10 +146,11 @@ describe("discoverFiles", () => {
     // machine where the read failed. Git itself warns and carries on here; a Document compared
     // across machines cannot afford that, and the divergence is the point of this test.
     //
-    // A single pattern too long for the regex engine, because it fails identically on every
-    // platform — the mode bits that make a file unreadable are POSIX-only.
+    // A pattern past the length the matcher will hand to a regex engine at all, because it
+    // fails identically on every platform — the mode bits that make a file unreadable are
+    // POSIX-only, and the engine's own size limit is neither fixed nor fast.
     await writeFileAt("src/a.ts", "1")
-    await writeFileAt(".gitignore", `${"a".repeat(40_000)}\n`)
+    await writeFileAt(".gitignore", `${"a".repeat(5_000)}\n`)
 
     const thrown = await discoverFiles({
       workspaceRoot: workRoot,
