@@ -56,6 +56,33 @@ New language / framework / effects plugins are the most welcome kind of
 contribution. See [`docs/plugin-development.md`](docs/plugin-development.md)
 for the plugin contracts and a walkthrough.
 
+## Docs site
+
+[aburi.kage1020.com](https://aburi.kage1020.com) is the VitePress site under
+[`docs/`](docs/), served by a Cloudflare Worker configured in
+[`docs/wrangler.jsonc`](docs/wrangler.jsonc). Cloudflare's git integration
+watches the repository directly — there is no deploy workflow in
+`.github/workflows/`, so changing CI will not change how the site ships.
+
+Pushing to `main` deploys production. Pushing to any other branch uploads a
+*version* instead: the site is built and reachable at a preview URL, but no
+traffic moves off the deployed version. Cloudflare comments that URL on the
+pull request and rewrites the comment on every push, so the link in a review
+always points at the commit being reviewed.
+
+Two things make that work, one in this repository and one outside it:
+
+- `preview_urls` in [`docs/wrangler.jsonc`](docs/wrangler.jsonc). It is set
+  explicitly because the default follows `workers_dev`, and because Wrangler
+  overwrites the dashboard toggle on every deploy.
+- **Workers & Pages → aburi → Settings → Build → Branch control**: *Builds for
+  non-production branches* must be enabled, or pull requests get no preview at
+  all. This is the only step that cannot live in the repository.
+
+Because this is a monorepo, a pull request that touches no documentation still
+triggers a docs build. **Build → Build watch paths** can narrow that to
+`docs/*` if the noise becomes a problem.
+
 ## Conventions
 
 - ESM only, TypeScript strict mode, no `any` escapes.

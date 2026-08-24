@@ -2,6 +2,12 @@
   "$schema": "https://unpkg.com/wrangler/config-schema.json",
   "name": "aburi",
   "compatibility_date": "2026-07-01",
+  // Pull request previews depend on this, so it is stated rather than inherited.
+  // Left unset it follows `workers_dev`, which means switching off the
+  // workers.dev address for production would silently take previews with it.
+  // Wrangler also overwrites the dashboard toggle on the next deploy, so the
+  // file is the only durable answer.
+  "preview_urls": true,
   "assets": {
     "directory": "./.vitepress/dist",
     "not_found_handling": "404-page"
