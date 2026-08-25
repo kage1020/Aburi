@@ -20,7 +20,7 @@ class MemStream extends Writable {
 /**
  * Two anchors that are deliberately different, and the consequences of that.
  *
- * `docs/cli-reference.md` §11 puts `aburi.jsonc` / `aburi.json` discovery at "walking up
+ * `docs/reference/cli.md` puts `aburi.jsonc` / `aburi.json` discovery at "walking up
  * from `cwd`", so a config in the current package wins over one in an ancestor. Everything
  * *inside* the config — `ignore`, `components[].roots`, relative plugin refs — resolves
  * against the marker-detected workspace root instead, and so does the file discovery the

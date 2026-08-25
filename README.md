@@ -2,68 +2,70 @@
 
 # Aburi
 
-Aburi extracts a **semantic intermediate representation (IR)** from source code so
-reviewers can read pull requests at the level of business logic, control flow, and
-module boundaries instead of raw diffs. It is a static analyser (not an LLM
-judge): parses with tree-sitter, matches Symbols across revisions with a 5-stage
-semantic diff, and emits a JSON IR plus a decision-focused Markdown projection
-that CI can gate on.
+Aburi reads a pull request and reports **what changed**, not which lines moved.
 
-> The v1 JSON Schemas are frozen. Every package listed below is implemented,
-> unit-tested, and exercised end-to-end against a NestJS-shaped fixture project.
-> See the [roadmap](docs/roadmap.md) for what works today and what's next.
+It parses each revision with tree-sitter, matches functions and methods across
+them, and writes a Markdown summary: this endpoint is new, this method now
+writes to the database, this validation guard disappeared. CI can fail the build
+on any of those.
 
-**Documentation: [aburi.kage1020.com](https://aburi.kage1020.com)**
+**[aburi.kage1020.com](https://aburi.kage1020.com)** — documentation.
 
-## Why not just `git diff`
+## What the report looks like
 
-`git diff` shows *what changed textually*. Aburi shows *what changed semantically*:
+```md
+# Aburi diff: main..HEAD
 
-- A file rename with unchanged logic surfaces as `moved: 1` — not `removed + added`.
-- Adding a validation guard to a method surfaces as `changed: 1, logicChanged: true` —
-  and can be gated in CI via `--fail-on changed:>0`.
-- Boilerplate (interfaces, re-exports, empty bodies) is dropped from the diff so
-  the reviewer sees only the changes that carry meaning.
-- A refactor that stubs 12 method bodies surfaces as `dropped-toggled:to-dropped: 12`
-  with a single-token CI gate (`--fail-on dropped-toggled:to-dropped:>10`).
+**Summary**: +2 added · -1 removed · ~3 changed · 1 moved
+
+## ⚠ API changes
+
+### `InvoiceService.createInvoice` *(method)*
+**File**: `apps/billing/src/InvoiceService.ts:42`
+
+- signature.outputs: `Promise<Invoice>` → `Promise<InvoiceWithReceipt>`
+- decorator added: `@UseGuards(AuthGuard)`
+
+## 🔧 Logic changes
+
+### `RolesGuard.canActivate` *(method)*
+**File**: `apps/billing/src/guards/roles.guard.ts:9`
+
+- rules removed:
+  - guard: `roles.length === 0` (L40)
+- effects added:
+  - db.write: `prisma.audit.create` (L75)
+```
+
+The removed guard is one line in `git diff`. Here it is a heading.
+
+## Why not `git diff`
+
+- A file rename with unchanged logic is reported as `moved`, not as a delete
+  plus an add.
+- A reformatting pass is reported as a syntax-only change and folded away.
+- Interfaces, DTOs, re-exports, and empty bodies are dropped before the
+  comparison, so they never pad the summary.
+- Every category can be turned into a CI gate:
+  `--fail-on 'removed,changed:>20'`.
+
+It is a static analyser, not an LLM judge. The same commit always produces the
+same report.
 
 ## Quick start
 
-### Install
-
 ```bash
 pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
-# (or your framework: @aburi/framework-next / @aburi/framework-react;
-#  effects: @aburi/effects-prisma, @aburi/effects-nest)
-```
 
-### Autodetect + config
-
-```bash
-pnpm exec aburi init
-# → writes aburi.json with detected languages / frameworks / components
-```
-
-### Scan the workspace to IR + Markdown
-
-```bash
-pnpm exec aburi scan
-# → out/aburi.ir.json      (canonical JSON, aburi.ir.v1 schema)
-# → out/workspace.md       (L0 workspace overview)
-# → out/components/*.md    (L1 + L2 per-component detail)
-```
-
-### Diff a PR
-
-```bash
-# Quote --fail-on: `>` is a shell redirect if left bare.
+pnpm exec aburi init                # detect the project, write aburi.json
+pnpm exec aburi scan                # analyse the workspace → out/
 pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
-# → out/diff.json          (aburi.diff.v1 schema)
-# → out/diff.md            (review-facing Markdown)
-# exit 0 = clean, 3 = --fail-on gate tripped
 ```
 
-### Post to a PR from GitHub Actions
+Exit code `3` means a gate tripped. Full walkthrough:
+[Getting started](https://aburi.kage1020.com/guide/getting-started).
+
+### In GitHub Actions
 
 ```yaml
 - uses: actions/checkout@v4
@@ -74,87 +76,40 @@ pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
     fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
-The action runs `aburi diff` on the PR base..head and upserts the Markdown as a
-hidden-marker PR comment (rewrites in place on every push, no comment spam).
+The action posts the report as a pull request comment and rewrites the same
+comment on every push.
 
-## Architecture at a glance
+## Documentation
 
-```
-source files
-  ↓ (@aburi/lang-typescript, @aburi/lang-*)          tree-sitter parseFile / extractSymbols
-  ↓ (@aburi/framework-nestjs, @aburi/framework-next,
-     @aburi/framework-react)                          classifySymbol → extKind (framework:*)
-  ↓ (@aburi/effects-prisma, @aburi/effects-nest)     classifyCall → Effect (db.read / event.publish / …)
-  ↓ (@aburi/core scan)                               walkBody → Rules + Calls + Effects
-  ↓                                                  drop rules (interfaces, empty bodies, re-exports)
-  ↓                                                  fingerprint per Symbol (api / logic / syntax)
-  ↓                                                  IR integrity check (ir-schema.md §14)
-  ↓
-aburi.ir.v1.json  ─────────────────────────────────────────  Source of Truth (L3)
-  │
-  ├─ @aburi/markdown-projection  workspace.md / component/*.md   (L0 / L1 / L2 views)
-  ├─ @aburi/diff                 5-stage matcher → aburi.diff.v1  (base IR + head IR → diff)
-  └─ @aburi/cli explain          per-Symbol Markdown detail
-```
+| | |
+|---|---|
+| [What is Aburi?](https://aburi.kage1020.com/guide/what-is-aburi) | The idea, in five minutes. |
+| [Getting started](https://aburi.kage1020.com/guide/getting-started) | Install to first diff. |
+| [Reading the report](https://aburi.kage1020.com/guide/reading-the-report) | What each section means. |
+| [Supported stacks](https://aburi.kage1020.com/guide/supported-stacks) | Which plugins cover your framework. |
+| [CI integration](https://aburi.kage1020.com/guide/ci-integration) | Gates and pull request comments. |
+| [CLI reference](https://aburi.kage1020.com/reference/cli) | Every flag and exit code. |
+| [Architecture](https://aburi.kage1020.com/extend/architecture) | How the pipeline fits together. |
+| [Plugin development](https://aburi.kage1020.com/extend/plugin-development) | Add a language, framework, or library. |
+| [Roadmap](https://aburi.kage1020.com/roadmap) | What works today, what is next. |
 
-Everything downstream of `aburi.ir.v1.json` is deterministically derived from it.
-Same IR in → same Markdown / same diff out.
-
-## Package matrix
-
-| Package | Layer | What it does |
-|---|---|---|
-| [`@aburi/types`](packages/types) | Foundation | Schema-generated IR / config / diff / plugin types + hand-written plugin interfaces. |
-| [`@aburi/plugin-registry`](packages/plugin-registry) | Foundation | Plugin manifest validator + vocab registry (owned extKinds / effect ids / namespaces). |
-| [`@aburi/config`](packages/config) | Foundation | JSONC + ajv-validated `aburi.json` loader with framework-hint normalisation. |
-| [`@aburi/core`](packages/core) | Foundation | Symbol ID generation, canonical JSON, IR integrity invariants, autodetect (workspace / managers / components), scan orchestration. |
-| [`@aburi/lang-typescript`](packages/lang-typescript) | Language | TS/TSX language plugin (tree-sitter WASM), JSDoc-aware signature + throws, drop-hint contract. |
-| [`@aburi/framework-nestjs`](packages/framework-nestjs) | Framework | `@Module` / `@Controller` / `@Injectable` / HTTP + WS + pattern decorators → `framework:nestjs:*` extKinds. |
-| [`@aburi/framework-next`](packages/framework-next) | Framework | App Router files (page / layout / route / …) → `framework:next:*` extKinds. |
-| [`@aburi/framework-react`](packages/framework-react) | Framework | React function components / hooks / contexts / forwardRef / memo / providers / HOCs → `framework:react:*` extKinds. |
-| [`@aburi/framework-express`](packages/framework-express) | Framework | Router instances, route handlers, middleware, error handlers, mount points → `framework:express:*` extKinds. |
-| [`@aburi/effects-prisma`](packages/effects-prisma) | Effects | `prisma.<model>.<verb>` / `$transaction` → `db.read` / `db.write` / `db.transaction`. |
-| [`@aburi/effects-drizzle`](packages/effects-drizzle) | Effects | `db.select() / insert() / query.<table>.findMany` / `transaction` → `db.read` / `db.write` / `db.transaction`. |
-| [`@aburi/effects-trpc`](packages/effects-trpc) | Effects | tRPC client `<client>.<path>.{query,mutate,subscribe}` and the React Query hooks → `network.rpc`. |
-| [`@aburi/effects-nest`](packages/effects-nest) | Effects | `EventEmitter2` / `eventBus` `.emit(...)` → `event.publish`. |
-| [`@aburi/diff`](packages/diff) | Diff | 5-stage matcher (id / git-rename / logic-fingerprint / name+signature / dropped-weak) + status + delta. |
-| [`@aburi/markdown-projection`](packages/markdown-projection) | Projection | Workspace / component / diff / explain Markdown views + `--fail-on` formatter. |
-| [`@aburi/cli`](packages/cli) | CLI | `aburi init / scan / diff / explain`, git-worktree ref diff, exit codes 0 / 1 / 2 / 3, `--fail-on` gate. |
-| [`@aburi/github-action`](packages/github-action) | Delivery | Composite GH Action wrapper around the CLI, marker-based PR comment upsert. |
-
-Design docs: [`docs/design/`](docs/design/) (overview + 11 topical designs),
-[`docs/roadmap.md`](docs/roadmap.md), [`schema/`](schema/) (JSON Schemas).
-
-Reference: [`docs/cli-reference.md`](docs/cli-reference.md),
-[`docs/plugin-development.md`](docs/plugin-development.md) — rendered at
-[aburi.kage1020.com](https://aburi.kage1020.com).
-
-## Requirements
-
-- Node.js `>= 24`
-- pnpm (managed via `packageManager`; enable with `corepack enable pnpm`)
-
-## Local development
-
-```bash
-pnpm install
-pnpm check       # Biome lint + format check
-pnpm typecheck   # tsc --noEmit across packages (turbo)
-pnpm test        # Vitest across packages
-pnpm build       # tsdown across packages
-```
-
-Fixture used by the integration suite:
-[`packages/e2e-integration/fixtures/nestjs-billing/`](packages/e2e-integration/fixtures/nestjs-billing) — a small NestJS-shaped
-billing service that exercises boundary routes, providers, modules, and a
-12-method service that scenario B mutates to prove the `--fail-on
-dropped-toggled:to-dropped:>10` gate.
+Design documents live in [`docs/design/`](docs/design/) and the JSON Schemas in
+[`schema/`](schema/).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). New language / framework / effects
-plugins are especially welcome — start from
-[`docs/plugin-development.md`](docs/plugin-development.md).
+Requires Node.js 24+ and pnpm (`corepack enable pnpm`).
+
+```bash
+pnpm install
+pnpm check       # lint + format
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). New language, framework, and effects
+plugins are especially welcome.
 
 ## License
 

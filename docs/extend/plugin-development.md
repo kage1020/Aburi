@@ -1,23 +1,25 @@
 # Plugin development
 
-Aburi has three plugin types. They share a manifest contract but do very
-different things:
+A plugin teaches Aburi something it does not already know: a language to parse,
+a framework whose decorators mean something, or a library whose calls have
+effects. There are three kinds, and they plug into different stages of
+[the pipeline](/extend/architecture#the-pipeline).
 
-| Type | Contract | Emits |
+| Kind | You implement | It produces |
 |---|---|---|
-| **Language** | `parseFile`, `extractSymbols`, `walkBody`, `normalizeAst`, optional `symbolDropHint` | `SymbolCandidate`s + `BodyExtraction` (rules + calls) |
-| **Framework** | `classifySymbol` | `SymbolClassification` (`extKind`, `derivedBy`, decorator boundaries) |
-| **Effects** | `classify` | `EffectClassification` (`effectId`, `derivedBy`, `confidence`) |
+| **Language** | `parseFile`, `extractSymbols`, `walkBody`, `normalizeAst` | Symbols, plus the rules and calls in their bodies |
+| **Framework** | `classifySymbol` | A framework kind and boundary flags for a symbol |
+| **Effects** | `classify` | An effect for a call — `db.write`, `network.rpc`, … |
 
-The full type signatures live in
-[`@aburi/types`](https://github.com/kage1020/Aburi/blob/main/packages/types/src/plugins.ts)
-and the design contracts in the [language plugin spec](/design/lang-plugin),
-the [extension vocabulary spec](/design/extension-vocab) (framework
-classification lives inside the language plugin spec §5.2 — there is no
-separate framework-plugin spec today), and the
-[effect plugin spec](/design/effect-plugin).
+Type signatures live in
+[`@aburi/types`](https://github.com/kage1020/Aburi/blob/main/packages/types/src/plugins.ts);
+the full contracts are in the [design docs](/design/overview).
 
-This document is the operator-facing walkthrough.
+::: tip Before writing one
+Decorator-based frameworks often need no code at all —
+[`frameworkHints`](/guide/configuration#teach-it-your-in-house-framework) covers
+them from config.
+:::
 
 ## Manifest
 
@@ -118,28 +120,32 @@ Contracts to know:
 - `symbolDropHint` returns `{ reason, category: "B" | "C" }` or `null`. Category
   B drops mean "the Symbol never makes it into the IR" — use this for genuine
   boilerplate. Category C means "the Symbol is kept but its calls are pruned".
-- A syntax error in the source is not a reason to give up: return the tree you
-  built and add a `recoverable: true` entry to `ParseResult.errors`. The file is
-  extracted as usual and the CLI counts it in `parseErrorCount`.
-- To say a file must **not** be used, mark an error `recoverable: false` — the
-  literal `false`, since omitting the key means "recoverable". The core
-  withdraws the file: no Symbols, no `stats.parsedFiles`, an entry in
-  `ScanResult.skipped` under `reason: "parse-failed"` quoting your message, and
-  a line in the CLI's `parseFailureCount`. Returning `tree: null` withdraws the
-  file on the same terms; set both when you have no tree, and only the flag when
-  you have one but refuse it (a wrong-dialect source, a generated blob). The
-  exit code stays `0` either way — an unparseable file describes the source. It
-  stops being `0` when the refusals take the whole workspace: a scan that parsed
-  no file at all exits `3`, so a dialect check that got its comparison backwards
-  is caught rather than shipped as an empty IR.
-- **Throwing** is a different thing again: the core withdraws the file under
-  `reason: "extraction-failed"`, records what you threw, and `aburi scan` exits
-  `3`. Throw when your plugin hit a bug, not when the source is unusable. The
-  exception is an error whose `code` names a fault in the plugin set rather than
-  in the file — `scan-plugin-misconfigured`, `invalid-language-id`,
-  `vocab-undeclared` — which is re-thrown and ends the run, because it would
-  otherwise repeat for every file and report the workspace as broken instead of
-  the plugin.
+- A syntax error is not a reason to give up: return the tree you built and add a
+  `recoverable: true` error. The file is extracted as usual.
+- Refuse a file by adding an error with `recoverable: false`, or by returning
+  `tree: null`. The file is withdrawn and recorded as skipped, and the run still
+  exits `0` — an unusable source file describes your repository, not a failure.
+- **Throw only when your plugin has a bug.** A throw withdraws the file *and*
+  exits the scan `3`.
+
+::: details The exact contract for refusing and throwing
+`recoverable: false` must be the literal `false`; omitting the key means
+recoverable. A refused file gets no Symbols, is left out of `stats.parsedFiles`,
+and appears in `ScanResult.skipped` under `reason: "parse-failed"` with your
+message. Set both the flag and `tree: null` when you have no tree; set only the
+flag when you have one but refuse it — a wrong-dialect source, a generated blob.
+
+Refusals leave the exit code at `0` until they take the whole workspace: a scan
+that parsed no file at all exits `3`, so a dialect check with its comparison
+backwards is caught rather than shipped as an empty IR.
+
+A throw is recorded as `reason: "extraction-failed"` along with what you threw.
+The exception is an error whose `code` names a fault in the plugin set rather
+than in the file — `scan-plugin-misconfigured`, `invalid-language-id`,
+`vocab-undeclared`. Those are re-thrown and end the run immediately, because
+they would otherwise repeat for every file and report the workspace as broken
+instead of the plugin.
+:::
 
 ## Framework plugin
 
@@ -219,7 +225,7 @@ Contracts:
   other library. When the edges attribute the name to a module you do not own,
   classify at `confidence: "medium"` rather than refusing — a project-local
   re-export barrel looks exactly like a foreign package. See
-  [`lang-plugin.md` §5.2.2](./design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
+  the [language plugin spec](/design/lang-plugin#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
 
@@ -275,7 +281,7 @@ Contracts:
   a `CallCandidate.target` and rejects an empty target or empty segment) and
   `hasMatchingImport` (matches a module specifier after checking every
   `ImportEdge.source`). Both enforce the language plugin's normalized-output
-  contract from [`design/lang-plugin.md`](design/lang-plugin.md) §4.4, and both
+  contract from the [language plugin spec](/design/lang-plugin), and both
   take a `{ plugin, filePath }` record so the thrown message names your plugin
   and the offending file:
 
@@ -314,22 +320,20 @@ discovers them by package name from `aburi.json`:
 }
 ```
 
-The loader resolves each ref as follows (`packages/cli/src/plugin-loader.ts:84-90`):
+Each entry resolves to exactly one specifier — there is no fallback chain:
 
-- Bare name with no `@` and no `/` → prefixed with `@aburi/` verbatim.
-  `"lang-typescript"` → `@aburi/lang-typescript`, `"framework-mytool"` → `@aburi/framework-mytool`.
-  The loader does **not** infer a bucket prefix — a config entry `frameworks: ["mytool"]`
-  resolves to `@aburi/mytool`, NOT `@aburi/framework-mytool`. Third-party plugin
-  authors should write the full package name (`framework-mytool` for a first-party
-  bucket-prefixed name, or `@myorg/mypkg` for a scoped package) in `aburi.json`.
-- Scoped or slash-containing (`@myorg/pkg`, `some-pkg/subpath`) → verbatim.
-- Relative path (`./plugins/mytool.mjs`) → resolved against the workspace root
-  as a `file:` URL.
+| Written | Resolves to |
+|---|---|
+| `framework-mytool` | `@aburi/framework-mytool` |
+| `@myorg/mypkg` | `@myorg/mypkg`, verbatim |
+| `./plugins/mytool.mjs` | That path, relative to the workspace root |
 
-Bucket assignment (`languages` / `frameworks` / `effects` in `aburi.json`) is
-still enforced at load time: if the loaded manifest's `type` does not match the
-bucket it was listed under, the loader throws with a `plugin-error`
-(`CliError` → `EXIT.GATE`).
+No bucket prefix is inferred: `frameworks: ["mytool"]` resolves to
+`@aburi/mytool`, not `@aburi/framework-mytool`. Publish under a scope and write
+the full package name.
+
+The list a plugin appears in must match its manifest `type`, or the loader fails
+the run.
 
 Your module must export the plugin as a default export, a `plugin` export, or
 any top-level export whose value has a `manifest` field. The first hit wins.

@@ -53,7 +53,7 @@ schema version.
 ## Writing plugins
 
 New language / framework / effects plugins are the most welcome kind of
-contribution. See [`docs/plugin-development.md`](docs/plugin-development.md)
+contribution. See [`docs/extend/plugin-development.md`](docs/extend/plugin-development.md)
 for the plugin contracts and a walkthrough.
 
 ## Docs site

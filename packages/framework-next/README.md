@@ -45,7 +45,7 @@ import { nextFrameworkPlugin } from "@aburi/framework-next"
 `aburi init` writes `"framework-next"` into `aburi.json` under `frameworks`,
 which is the plugin manifest name the loader resolves (to `@aburi/framework-next`
 via the bare-name prefix — see
-[`docs/plugin-development.md`](../../docs/plugin-development.md)). The short
+[`docs/extend/plugin-development.md`](../../docs/extend/plugin-development.md)). The short
 framework id `"nextjs"` that component autodetect uses stays inside
 `components[].frameworks`; the two fields carry different vocabularies and no
 hand-editing is needed.

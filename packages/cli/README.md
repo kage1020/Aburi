@@ -73,6 +73,6 @@ code without terminating the test process.
 
 ## See also
 
-- [`docs/cli-reference.md`](../../docs/cli-reference.md) — per-subcommand flags and examples.
+- [`docs/reference/cli.md`](../../docs/reference/cli.md) — per-subcommand flags and examples.
 - [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md) — CLI contract.
 - [`packages/github-action`](../github-action) — GH Action wrapper.

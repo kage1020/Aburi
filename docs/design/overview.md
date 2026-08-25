@@ -38,14 +38,14 @@ Aburi outputs an **intermediate representation (IR)** that is neither full sourc
 
 ### 3.1 Horizontal layers
 
-```
-L0: workspace overview     (dependency direction / component boundaries — full monorepo view)
-L1: component architecture (public API / side-effect boundaries / owning modules)
-L2: module logic           (control flow / rules / effects — per function/method)
-L3: symbol IR (JSON)       ← Source of Truth
-```
+| Layer | Content | Form |
+|---|---|---|
+| L3 | Symbol IR — **the source of truth** | JSON |
+| L2 | Module logic: control flow, rules, effects, per function or method | Markdown |
+| L1 | Component architecture: public API, effect boundaries, owning modules | Markdown |
+| L0 | Workspace overview: dependency direction and component boundaries | Markdown |
 
-L3 is the truth. L0/L1/L2 are all Markdown derived deterministically from L3.
+L3 is the truth. L0/L1/L2 are all derived from it deterministically.
 
 ### 3.2 Vertical view (Slice View)
 
@@ -57,28 +57,25 @@ Full specification: [`slice-view.md`](./slice-view.md).
 
 ## 4. Extraction Pipeline
 
-```
-source files
-  ↓ tree-sitter parse  (+ LSP enrich if available)
-AST
-  ↓ drop list (.scm queries + decoration callee set)
-filtered AST
-  ↓ tag propagation
-   - Boundary:  framework decorator / exported symbol / route handler
-   - Effect:    db.* / network.* / queue.* / event.* / fs.* / state.* / time.* / random / env.* / process.*
-   - Rule:      guard (if + throw/return) / loop / try / switch / match / non-trivial return
-   - DataModel: interface / type alias / pure DTO
-   - language extensions:  fp:match / fp:adt / fp:effect / oop:abstract / meta:macro ...
-  ↓ score & filter (symbols with no tags are dropped)
-symbols
-  ↓ normalize (callee whitespace, expression canonicalize, sort)
-  ↓ call resolution (fill in Symbol.calls[].resolved → CallEdge[])
-  ↓ effect propagation (augment Symbol.effects[] along resolved edges)
-  ↓ fingerprint (api / logic / syntax)
-L3 IR (JSON)
-  ↓ project
-L2 / L1 / L0 Markdown + Slice View (for time-series diffing)
-```
+| # | Stage | Produces |
+|---|---|---|
+| 1 | tree-sitter parse (plus LSP enrichment when available) | AST |
+| 2 | Drop list — `.scm` queries and the decoration callee set | Filtered AST |
+| 3 | Tag propagation — Boundary / Effect / Rule / DataModel / language extensions | Tagged nodes |
+| 4 | Score and filter — untagged symbols are dropped | Symbols |
+| 5 | Normalize — callee whitespace, expression canonicalization, sort | Normalized symbols |
+| 6 | Call resolution — fill in `Symbol.calls[].resolved` | `CallEdge[]` |
+| 7 | Effect propagation — augment `Symbol.effects[]` along resolved edges | Propagated effects |
+| 8 | Fingerprint — `api` / `logic` / `syntax` | L3 IR (JSON) |
+| 9 | Project | L2 / L1 / L0 Markdown + Slice View |
+
+The tag vocabulary applied at step 3:
+
+- **Boundary**: framework decorator / exported symbol / route handler
+- **Effect**: `db.*` / `network.*` / `queue.*` / `event.*` / `fs.*` / `state.*` / `time.*` / `random` / `env.*` / `process.*`
+- **Rule**: guard (`if` + `throw`/`return`) / loop / try / switch / match / non-trivial return
+- **DataModel**: interface / type alias / pure DTO
+- **Language extensions**: `fp:match` / `fp:adt` / `fp:effect` / `oop:abstract` / `meta:macro` / …
 
 Details are covered by the documents in this directory:
 - Core extraction rules: [`drop-list.md`](./drop-list.md)
@@ -125,13 +122,12 @@ Automatic PR comment posting is bundled as a thin `@aburi/github-action`. Detail
 | `changed` | Same ID with a change in either the `api` or `logic` fingerprint |
 | `moved+changed` | Renamed and the fingerprint changed as well |
 
-Move detection pipeline:
-```
-1. Obtain the physical rename mapping via git diff --find-renames
-2. Symbols not covered by (1) are matched by logic fingerprint equality
-3. Anything still unmatched is matched by name + signature similarity (with a threshold)
-4. Anything beyond that is treated as add + remove
-```
+Move detection runs in order, each stage handling what the previous one left:
+
+1. Physical rename mapping from `git diff --find-renames`
+2. Logic fingerprint equality
+3. Name + signature similarity, above a threshold
+4. Anything left is treated as add + remove
 
 A pure `moved` (no semantic change) is explicitly labeled "move only" in the diff report, reducing review load to zero. Algorithm details: [`diff-algorithm.md`](./diff-algorithm.md).
 
@@ -160,24 +156,11 @@ Explicitly out of scope:
 
 ## 10. Project Layout
 
-```
-Aburi/
-├─ docs/
-│  ├─ design/
-│  │  ├─ overview.md            ← this document
-│  │  └─ ...                    ← detailed designs (IR schema / plugin IF / fingerprint / diff / ...)
-│  └─ roadmap.md                ← per-version scope progression
-├─ schema/                      ← JSON Schema (IR / config)
-├─ packages/                    ← published npm packages. Naming: @aburi/<type>-<name>
-│  ├─ core/                     ← @aburi/core (pipeline itself)
-│  ├─ cli/                      ← @aburi/cli (aburi command)
-│  ├─ lang-typescript/          ← @aburi/lang-typescript    (type=lang)
-│  ├─ framework-nestjs/         ← @aburi/framework-nestjs    (type=framework)
-│  ├─ framework-next/         ← @aburi/framework-next     (type=framework)
-│  ├─ effects-nest/             ← @aburi/effects-nest        (type=effects, xPrefix=nest)
-│  ├─ effects-prisma/           ← @aburi/effects-prisma      (type=effects, xPrefix=prisma)
-│  └─ github-action/            ← @aburi/github-action
-└─ examples/                    ← sample monorepo (tests + documentation)
-```
+| Path | Contents |
+|---|---|
+| `docs/design/` | Detailed designs — IR schema, plugin interfaces, fingerprint, diff, and so on |
+| `docs/` | The published documentation site (guide, reference, extension docs) |
+| `schema/` | JSON Schema for the IR, diff, config, and plugin manifest |
+| `packages/` | Published npm packages, named `@aburi/<type>-<name>` |
 
-Tooling: Vite (bundle) / Vitest (test) / Biome (lint+format) / pnpm workspaces.
+Tooling: tsdown (bundle) / Vitest (test) / Biome (lint + format) / pnpm workspaces.

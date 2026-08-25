@@ -1,126 +1,75 @@
 # Roadmap
 
-What Aburi can do today, what it cannot do yet, and what is planned next.
+Where Aburi stands today, and what comes next.
 
-Detailed designs live in [`docs/design/`](./design/overview); schemas in [`schema/`](https://github.com/kage1020/Aburi/blob/main/schema/).
+::: tip Status
+The `v1` schemas are frozen. Every published package is implemented, unit
+tested, and exercised end to end against a NestJS-shaped fixture project.
+:::
 
----
+## Working today
 
-## What works today
+**Analysis** — TypeScript and JavaScript, parsed with tree-sitter WASM. pnpm and
+npm workspaces detected automatically. NestJS, Next.js App Router, Express, and
+React recognised as frameworks. Prisma, Drizzle, tRPC, and NestJS events
+recognised as effects.
 
-- **Languages**: TypeScript (`.ts` / `.tsx`) and JavaScript (`.js` / `.mjs` /
-  `.cjs` / `.jsx`), parsed with Tree-sitter WASM (`web-tree-sitter` +
-  `@vscode/tree-sitter-wasm`) — no native build step
-- **Workspace detection**: pnpm workspaces / npm workspaces (autodetect)
-- **Framework classification**: NestJS, Next.js (App Router), and React
-  function components / hooks / contexts / providers / HOCs / forwardRef /
-  memo plugins
-- **Effect detection**: Prisma and Drizzle (`db.read` / `db.write` /
-  `db.transaction`), tRPC client calls (`network.rpc`), and NestJS events
-  (`event.publish`) — local detection at the call site
-- **Symbol-to-symbol dependency edges**: file-scope and import-scope call
-  resolution filling `Symbol.calls[].resolved`, projected as `via: "call"`
-  entries in `dependencies[]`
-- **Slice View**: `aburi diff` clusters the changed-Symbol set into weakly
-  connected components over the call graph and renders vertical slices in
-  `out/diff.md` (Controller → Service → Repository grouped as one section)
-- **Call-resolution diagnostics**: `IR.stats.callResolution` counts every call
-  site and buckets the unresolved ones (`local-scope` / `external` / `dynamic`
-  / `ambiguous` / `no-match`); `aburi scan` and `aburi diff` print the census on
-  stdout, Slice View marks the members affected, and
-  `aburi explain --debug-resolution` dumps the per-call detail
-- **Extraction**: drop list (boilerplate removal) + Rules + Boundaries + local Effects
-- **Commands**: `aburi init` / `aburi scan` / `aburi diff <base>..<head>` / `aburi explain`
-- **Diff**: all 6 statuses — `added` / `removed` / `moved` / `changed` /
-  `moved+changed` / `dropped-toggled` — with a `--fail-on` CI gate
-- **Output**: JSON IR (`aburi.ir.v1`) + Markdown projection (workspace
-  overview with mermaid dependency graph covering every declared component,
-  per-component detail, PR diff, per-Symbol explain)
-- **Distribution**: `@aburi/cli` on npm + `@aburi/github-action` for PR comments
+**Dependencies** — calls resolved to the symbols they reach within a file, an
+import, a component, or the workspace, producing a symbol-level dependency
+graph. Unresolved calls are counted and bucketed so you can see what the graph
+is missing.
 
-## Current limitations
+**Diff** — all six statuses (`added`, `removed`, `moved`, `changed`,
+`moved+changed`, `dropped-toggled`), a `--fail-on` gate, and Slice View, which
+clusters changed symbols along the call graph so a feature that cuts through
+controller, service, and repository reads as one section.
 
-- **TypeScript only** — no other languages yet
-- **Effects are local** — an effect is attached to the method that makes the
-  call, not propagated up through the call graph
-- **Call resolution is syntactic only** — file-scope, import-scope,
-  component-scope, and workspace-scope resolution (plus local-parameter shadow
-  guarding and `this` / `super` guarding per §4.7) are wired up; the LSP-based
-  resolution tier is not
-- **No LSP enrichment** — extraction is purely syntactic; no type resolution
-  (LSP enrichment: [design landed](./design/lsp-enrichment.md); implementation upcoming)
-- **No graph visualization beyond the workspace overview and the diff Slice
-  View section** (broader visualization: no design yet)
-- **No LLM integration** — Aburi is a deterministic static analyser by design;
-  AI-assisted review on top of the IR is a separate concern
+**Output** — the JSON analysis, a workspace overview with a dependency diagram,
+per-component detail, the pull-request diff, and per-symbol explain views.
 
----
+**Delivery** — `@aburi/cli` on npm and `@aburi/github-action` for pull request
+comments.
 
-## Next: LSP enrichment and additional plugins
+## Not yet
 
-- **[LSP optional enrichment](./design/lsp-enrichment.md)**: improve effect-inference precision using type
-  resolution (including filling in `SourceRange.startColumn` / `endColumn`)
-- **Additional frameworks**: Express middleware
-- **`@aburi/framework-trpc`**: Boundary classification for the server-side tRPC
-  surface (`t.router({...})` / `publicProcedure.query|mutation|subscription`) as
-  `framework:trpc:*` extKinds. `@aburi/effects-trpc` covers the client call side
-  only — an effects plugin may not declare extKinds (extension-vocab.md §6.1)
-
-All detailed designs for this phase have landed — see the Design documents
-table below (`lsp-enrichment.md` is the primary open item).
-
-## Later: multi-language
-
-- **Language plugins**: Python (`@aburi/lang-python`) / Go (`@aburi/lang-go`)
-- **Extended workspace detection**: uv / poetry / cargo / go.work
-- **Cross-language IR**: output TS + Python + Go within the same monorepo under
-  a unified schema (`components[].languages` holds multiple languages)
-- **Extended effect plugins**: `@aburi/effects-django` / `@aburi/effects-fastapi`
-  / `@aburi/effects-sqlalchemy` / `@aburi/effects-gorm`
-- **Large monorepo support**: parallel parsing via a worker pool; `aburi scan`
-  over >1000 files within 30 seconds
-- **Functional-language plugin (proof of concept)**: one language, Scala or
-  Rust; implementation of the `fp:match` / `fp:adt` extension vocabulary
-
-Detailed designs required before starting:
-
-- `multi-language-id.md` — cross-language symbol ID collision avoidance and cross-references
-- `performance.md` — parallelization architecture
-- `fp-extension-impl.md` — concrete specification of the `fp:*` extension vocabulary
-
-## Under consideration (not committed)
-
-- Turn Aburi itself into an MCP server, callable directly from AI coding agents
-- Feed IR diffs to an AI via `aburi review` to generate automated review
-  comments (Aburi only produces the IR; the review goes through a separate tool)
-- Automatic naming of Slice View clusters (currently cluster IDs only; naming
-  is done by a human or an LLM)
-- Visualize the IR in a Web UI
-
----
-
-## Design documents
-
-The full behaviour of everything in "What works today" is specified in
-[`docs/design/`](./design/overview):
-
-| Content | Document |
+| Limitation | Status |
 |---|---|
-| Complete IR schema definition | [`ir-schema.md`](./design/ir-schema.md) + [`schema/aburi.ir.v1.json`](https://github.com/kage1020/Aburi/blob/main/schema/aburi.ir.v1.json) |
-| Language plugin interface | [`lang-plugin.md`](./design/lang-plugin.md) |
-| Call resolution (filling in `Call.resolved`) | [`call-resolution.md`](./design/call-resolution.md) |
-| Effect propagation (augmenting `Symbol.effects[]` along resolved edges) | [`effect-propagation.md`](./design/effect-propagation.md) |
-| Slice View clustering (weakly-connected components over the resolved call graph) | [`slice-view.md`](./design/slice-view.md) |
-| Optional LSP enrichment (columns, typed dispatch, inferred throws) | [`lsp-enrichment.md`](./design/lsp-enrichment.md) |
-| Effect plugin interface | [`effect-plugin.md`](./design/effect-plugin.md) |
-| Fingerprint computation | [`fingerprint.md`](./design/fingerprint.md) |
-| Component autodetect | [`component-detect.md`](./design/component-detect.md) |
-| Diff algorithm | [`diff-algorithm.md`](./design/diff-algorithm.md) + [`schema/aburi.diff.v1.json`](https://github.com/kage1020/Aburi/blob/main/schema/aburi.diff.v1.json) |
-| Extension vocabulary registration mechanism | [`extension-vocab.md`](./design/extension-vocab.md) + [`schema/aburi.plugin.v1.json`](https://github.com/kage1020/Aburi/blob/main/schema/aburi.plugin.v1.json) |
-| Standard drop list set | [`drop-list.md`](./design/drop-list.md) |
-| Markdown projection conventions | [`markdown-projection.md`](./design/markdown-projection.md) |
-| CLI specification | [`cli-spec.md`](./design/cli-spec.md) |
-| Config schema | [`config.md`](./design/config.md) + [`schema/aburi.config.v1.json`](https://github.com/kage1020/Aburi/blob/main/schema/aburi.config.v1.json) |
+| TypeScript and JavaScript only | Other languages planned below |
+| Effects are recorded where the call happens, not propagated to callers | [Designed](/design/effect-propagation), not implemented |
+| Call resolution is syntactic — no type information | [LSP enrichment designed](/design/lsp-enrichment), not implemented |
+| No graph visualisation beyond the workspace overview and Slice View | No design yet |
+| No LLM integration | Deliberate. Aburi produces the facts; interpreting them is a separate tool's job |
 
-Every document is readable without external context. Implementations must cite
-explicit § numbers when referencing them.
+## Next
+
+- **LSP enrichment** — use type resolution to sharpen effect inference and fill
+  in column-level source ranges.
+- **`@aburi/framework-trpc`** — the server side of tRPC (`t.router`,
+  `publicProcedure.query` / `mutation` / `subscription`). The existing
+  `effects-trpc` covers the client call side only.
+
+## Later
+
+- **More languages** — Python and Go, with uv, poetry, cargo, and `go.work`
+  workspace detection, and a single analysis spanning all of them in one
+  monorepo.
+- **More effects plugins** — Django, FastAPI, SQLAlchemy, GORM.
+- **Large monorepos** — parallel parsing, targeting a 1,000-file scan in under
+  30 seconds.
+- **A functional language** — Scala or Rust, as the proof that the extension
+  vocabulary can express pattern matching and algebraic data types.
+
+## Under consideration
+
+Nothing here is committed.
+
+- Expose Aburi as an MCP server, callable directly from AI coding agents.
+- `aburi review` — feed the diff to a model for automated review comments.
+- Automatic naming of Slice View clusters, which are currently identified by id.
+- A web UI for browsing the analysis.
+
+---
+
+Detailed specifications for everything above live in the
+[design documents](/design/overview), and the JSON Schemas in
+[`schema/`](https://github.com/kage1020/Aburi/blob/main/schema/).
