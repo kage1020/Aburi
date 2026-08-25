@@ -77,12 +77,14 @@ All detector results are merged, duplicates with the same path are removed, and 
 
 - POSIX globs (forward slashes)
 - Relative to the workspace root
-- **A pattern names a directory that holds the manifest, and is resolved against the manifest**: `p` is matched as `p/package.json` (any trailing slash replaced), and the directory holding each match is the candidate. This is what pnpm and npm mean by their patterns, and it is the same rule the nx detector follows with `project.json`. Three consequences worth stating:
-  - `.` and `./` name the workspace root itself — the documented way to say "the root is a package too" — and nothing else. Matched as a directory instead, `.` is a pattern that reaches every directory in the workspace.
+- **A pattern names a directory that holds the manifest, and is resolved against the manifest**: `p` is matched as `p/package.json` (a trailing slash replaced), and the directory holding each match is the candidate. This is how pnpm and npm resolve these patterns, and it is the same rule the nx detector follows with `project.json`. Three consequences worth stating:
+  - `.` and `./` name the workspace root itself, and nothing else. Matched as a directory instead, `.` is a pattern that reaches every directory in the workspace.
   - A literal path names that directory, not its subtree.
   - A matched directory with no manifest is not a package, and is not a candidate.
 - A negated pattern (`!packages/legacy`) takes the same transform and removes the package it names
 - An empty pattern declares nothing
+- **`package.json` is the only manifest recognized.** pnpm also accepts `package.yaml` and `package.json5`, and globs `package.{json,yaml,json5}`; a package declared in either is not detected here, because the manifest is parsed as JSON for the id, name, frameworks and public API. Supporting them is a parser change, not a resolution one.
+- **Which resolved directories become Components is §5's rule, not the manager's.** pnpm counts the workspace root as a workspace project unconditionally — *"The root package is always included, even when custom location wildcards are used"* — and a pattern naming it changes nothing for pnpm. Here it does: the root is a Component when a pattern names it, and otherwise only through §5's no-detector fallback. A root Component's `roots: ["."]` contains every other component's root, so making one unconditionally would give every workspace a component whose census covers the whole tree.
 - Maximum depth of `**` is 10 (to avoid false positives)
 - A path matching multiple globs counts as a single entry
 - Anything under `node_modules/` is always excluded
@@ -262,6 +264,11 @@ If no detector hits, the workspace root is treated as **a single Component**:
 
 This lets Aburi work even for the smallest single-project setups (e.g., a standalone TypeScript repository).
 
+**"No detector hits" means no candidate directory, not no marker.** A manifest that parsed and declared no package reaches the same fallback, and there are two ways to get there:
+
+- A `pnpm-workspace.yaml` with no `packages:` field. pnpm reads that the same way — *"If the `packages` field is omitted, only the root package is included in the workspace"* — so the whole repository as one Component is the right answer.
+- Patterns that matched nothing: a mistyped pattern, a monorepo with no packages in it yet, or packages whose manifest is one §3.1.1 does not recognize. The whole repository becomes one Component and nothing says why, which is the wrong answer arrived at silently. Detection has no diagnostic channel to say it on today.
+
 ## 6. Detector extension mechanism
 
 Language plugins can provide additional detectors:
@@ -346,6 +353,7 @@ Implementation guidance:
 | CD13 | Both pnpm and nx detect the same workspace | Deduped into 1 Component |
 | CD14 | `packages: [".", "packages/*"]` on a tree that also holds `src/` and `a/b/c/d/` | 2 Components: the workspace root (`roots: ["."]`) and the package |
 | CD15 | `packages: ["packages/*"]` where `packages/dist/` holds no manifest | `packages/dist` is not a Component |
+| CD16 | `packages: ["packages/*"]` where *no* matched directory holds a manifest | `managers[]` records pnpm with `roots: []`, and §5's fallback makes the whole repository one Component |
 
 ## 11. Design decisions
 

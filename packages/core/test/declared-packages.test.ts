@@ -117,15 +117,33 @@ describe("a declared package is the directory that holds the manifest", () => {
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
-  it("reaches a package ten directory levels down", async () => {
-    // The documented ceiling for `**` (component-detect.md §3.1.1). A workspace that nests
-    // its packages under a few grouping directories is ordinary, and one that reaches the
-    // ceiling is what says where the ceiling is.
+  it("reaches ten directory levels down and stops there", async () => {
+    // The documented ceiling for `**` (component-detect.md §3.1.1), pinned from both sides: a
+    // workspace that nests its packages under a few grouping directories is ordinary, and one
+    // package at the ceiling with another just past it is what says where the ceiling is.
     const deep = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"].join("/")
     await writePackage(deep, "deep")
+    await writePackage(`${deep}/l11`, "past-the-ceiling")
     await writePnpmManifest("**")
 
     expect(await pnpmRoots()).toEqual([deep])
+  })
+
+  it("falls back to the whole repository when no matched directory holds a manifest", async () => {
+    // `detectComponents` reads "no candidate" as "no detector hit", so patterns that matched
+    // nothing land on the single-project fallback rather than on nothing at all. Whether that
+    // is the right answer depends on why they matched nothing, and detection has no channel
+    // to say which — component-detect.md §5 carries the two cases.
+    await mkdir(join(tmp, "packages", "one"), { recursive: true })
+    await mkdir(join(tmp, "packages", "two"), { recursive: true })
+    await writePnpmManifest("packages/*")
+
+    const { managers } = await detectManagers(tmp)
+    expect(managers).toEqual([{ tool: "pnpm", roots: [] }])
+
+    const components = await detectComponents({ workspaceRoot: tmp })
+    expect(components).toHaveLength(1)
+    expect(components[0]?.roots).toEqual(["."])
   })
 
   it("declares nothing for an empty pattern", async () => {
@@ -190,12 +208,16 @@ describe("a declared package is the directory that holds the manifest", () => {
 
 describe("the workspace root as a declared component", () => {
   /** Enough files to clear the language census thresholds (≥10 files and ≥5% share). */
-  async function seedTypescript(relativeDir: string, count: number): Promise<void> {
+  async function seedFiles(relativeDir: string, extension: string, count: number): Promise<void> {
     const dir = join(tmp, relativeDir)
     await mkdir(dir, { recursive: true })
     for (let i = 0; i < count; i++) {
-      await writeFile(join(dir, `f${i}.ts`), `export const x${i} = ${i}\n`, "utf8")
+      await writeFile(join(dir, `f${i}.${extension}`), `x${i} = ${i}\n`, "utf8")
     }
+  }
+
+  async function seedTypescript(relativeDir: string, count: number): Promise<void> {
+    await seedFiles(relativeDir, "ts", count)
   }
 
   it("becomes one component beside the packages, not one per directory", async () => {
@@ -221,6 +243,22 @@ describe("the workspace root as a declared component", () => {
 
     expect(components).toHaveLength(1)
     expect(components[0]?.languages).toEqual(["ts"])
+  })
+
+  it("censuses the packages nested under it as its own subtree", async () => {
+    // §4.4 counts each component's subtree, and the root's subtree holds the other packages.
+    // A root declared beside them is the shape this rule makes ordinary, so what its
+    // `languages` then contains is worth saying out loud rather than leaving to be found.
+    await writePackage(".", "root-pkg")
+    await writePackage("packages/app", "app")
+    await seedFiles("services", "py", 12)
+    await seedTypescript("packages/app/src", 12)
+    await writePnpmManifest(".", "packages/*")
+
+    const components = await detectComponents({ workspaceRoot: tmp })
+
+    expect(components.find((c) => c.id === "app")?.languages).toEqual(["ts"])
+    expect(components.find((c) => c.id === "root-pkg")?.languages).toEqual(["py", "ts"])
   })
 
   it("names the root after its directory when the root manifest carries no name", async () => {

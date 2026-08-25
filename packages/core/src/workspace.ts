@@ -318,21 +318,14 @@ const JS_PACKAGE_MANIFEST = "package.json"
 /**
  * Resolve a manager's declared package patterns into candidate directories.
  *
- * The patterns are matched against the manifest rather than against the directory, which is
- * what makes them mean what the managers mean by them. `packages: ['.']` — the documented way
- * to say "the root is a package too" — is `./package.json`, one match; matched as a directory
- * it is the pattern `.`, which tinyglobby expands to the whole subtree and turns a two-package
- * workspace into one component per directory. The same expansion is why `tools/build` swallows
- * `tools/build/nested`, and matching the manifest closes both: a directory is a package because
- * someone put a manifest in it, not because a walk reached it.
+ * Matched against the manifest rather than against the directory, because a directory pattern
+ * is not a directory to tinyglobby: `expandDirectories` widens one that names a directory into
+ * that directory's whole subtree, so `.` reaches everything and `tools/build` swallows
+ * `tools/build/nested`. Against the manifest, a pattern names what it says.
  *
- * It is also the rule `detectNx` already follows, globbing for `project.json` and taking the
- * directory that holds it, and it drops the per-candidate existence probe — the match *is*
- * the manifest path.
- *
- * `expandDirectories` is off rather than left at the dependency's default because a directory
- * literally named `package.json` would otherwise be expanded into the files beneath it, and
- * each of those would name that directory as a package.
+ * `expandDirectories` is off here for the residue of the same behaviour: a directory literally
+ * named `package.json` would be widened into the files beneath it, and each of those would
+ * name that directory as a package.
  */
 async function resolveDeclaredPackages(
   workspaceRoot: string,
@@ -360,13 +353,12 @@ async function resolveDeclaredPackages(
 }
 
 /**
- * Append the manifest to the directory the pattern names, replacing any trailing slash — so
- * `.` and `./` alike become `./package.json`, the root's own manifest.
+ * Append the manifest to the directory the pattern names, replacing a trailing slash — so `.`
+ * and `./` alike become `./package.json`, the root's own manifest.
  *
- * A negation keeps its `!`, and needs no special case: the transformed pattern excludes the
- * manifest, and a directory is only a candidate through its manifest, so excluding the one
- * excludes the other. An empty pattern is dropped before this — it would become
- * `/package.json`, which names the filesystem root.
+ * A negation keeps its `!` and needs no special case: a directory is a candidate only through
+ * its manifest, so excluding the manifest excludes the directory. An empty pattern is dropped
+ * before this — it would become `/package.json`, which names the filesystem root.
  */
 function toManifestPattern(pattern: string): string {
   return pattern.replace(/\/?$/, `/${JS_PACKAGE_MANIFEST}`)
