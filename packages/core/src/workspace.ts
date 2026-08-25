@@ -136,8 +136,12 @@ export interface WorkspaceCandidate {
   absoluteRoot: string
   /** Tool that produced this candidate (the same path may appear once per tool). */
   managerTool: string
-  /** Resolved manifest path (e.g. `package.json`). Null if the candidate has no manifest yet. */
-  manifestPath: string | null
+  /**
+   * Absolute path of the manifest that made this directory a package (`package.json`,
+   * `project.json`). Every detector finds candidates by finding manifests, so a candidate
+   * without one is not a shape this type has.
+   */
+  manifestPath: string
 }
 
 /**
@@ -237,7 +241,7 @@ async function detectPnpm(root: string): Promise<ManagerScan | null> {
     )
   }
   const patterns = readStringArray(parsed, "packages")
-  const candidates = await resolveGlobsToCandidates(root, patterns, "pnpm")
+  const candidates = await resolveDeclaredPackages(root, patterns, "pnpm")
   return { tool: "pnpm", candidates }
 }
 
@@ -247,9 +251,9 @@ async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]>
   const parsed = await readJson(manifestPath)
   const patterns = extractWorkspacePatterns(parsed)
   if (patterns.length === 0) return []
-  const tool = detectJsPackageManagerTool(root)
-  const candidates = await resolveGlobsToCandidates(root, patterns, await tool)
-  return [{ tool: await tool, candidates }]
+  const tool = await detectJsPackageManagerTool(root)
+  const candidates = await resolveDeclaredPackages(root, patterns, tool)
+  return [{ tool, candidates }]
 }
 
 function extractWorkspacePatterns(parsed: unknown): string[] {
@@ -308,31 +312,65 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
   return { tool: "nx", candidates }
 }
 
-async function resolveGlobsToCandidates(
+/** The manifest a pnpm/npm/yarn/bun `packages:` entry promises the directory holds. */
+const JS_PACKAGE_MANIFEST = "package.json"
+
+/**
+ * Resolve a manager's declared package patterns into candidate directories.
+ *
+ * The patterns are matched against the manifest rather than against the directory, which is
+ * what makes them mean what the managers mean by them. `packages: ['.']` — the documented way
+ * to say "the root is a package too" — is `./package.json`, one match; matched as a directory
+ * it is the pattern `.`, which tinyglobby expands to the whole subtree and turns a two-package
+ * workspace into one component per directory. The same expansion is why `tools/build` swallows
+ * `tools/build/nested`, and matching the manifest closes both: a directory is a package because
+ * someone put a manifest in it, not because a walk reached it.
+ *
+ * It is also the rule `detectNx` already follows, globbing for `project.json` and taking the
+ * directory that holds it, and it drops the per-candidate existence probe — the match *is*
+ * the manifest path.
+ *
+ * `expandDirectories` is off rather than left at the dependency's default because a directory
+ * literally named `package.json` would otherwise be expanded into the files beneath it, and
+ * each of those would name that directory as a package.
+ */
+async function resolveDeclaredPackages(
   workspaceRoot: string,
   patterns: readonly string[],
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
-  if (patterns.length === 0) return []
-  const dirs = await glob(patterns, {
+  const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
+  if (manifestPatterns.length === 0) return []
+  const manifests = await glob(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],
-    onlyDirectories: true,
+    onlyFiles: true,
+    expandDirectories: false,
     absolute: true,
     deep: 10,
   })
-  const candidates: WorkspaceCandidate[] = []
-  for (const absoluteRoot of dirs) {
-    const manifestPath = join(absoluteRoot, "package.json")
-    const has = await pathExists(manifestPath)
-    candidates.push({
+  return manifests.map((manifestPath) => {
+    const absoluteRoot = dirname(manifestPath)
+    return {
       relativeRoot: toRelativePosix(workspaceRoot, absoluteRoot),
       absoluteRoot,
       managerTool,
-      manifestPath: has ? manifestPath : null,
-    })
-  }
-  return candidates
+      manifestPath,
+    }
+  })
+}
+
+/**
+ * Append the manifest to the directory the pattern names, replacing any trailing slash — so
+ * `.` and `./` alike become `./package.json`, the root's own manifest.
+ *
+ * A negation keeps its `!`, and needs no special case: the transformed pattern excludes the
+ * manifest, and a directory is only a candidate through its manifest, so excluding the one
+ * excludes the other. An empty pattern is dropped before this — it would become
+ * `/package.json`, which names the filesystem root.
+ */
+function toManifestPattern(pattern: string): string {
+  return pattern.replace(/\/?$/, `/${JS_PACKAGE_MANIFEST}`)
 }
 
 function readStringArray(value: unknown, key: string): string[] {

@@ -137,7 +137,7 @@ interface MergedCandidate {
   relativeRoot: string
   absoluteRoot: string
   managerTools: string[]
-  manifestPath: string | null
+  manifestPath: string
 }
 
 function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): MergedCandidate[] {
@@ -154,9 +154,6 @@ function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): Merge
       continue
     }
     if (!existing.managerTools.includes(c.managerTool)) existing.managerTools.push(c.managerTool)
-    if (existing.manifestPath === null && c.manifestPath !== null) {
-      existing.manifestPath = c.manifestPath
-    }
   }
   return [...byPath.values()]
 }
@@ -165,7 +162,7 @@ async function buildComponent(
   entry: MergedCandidate,
   languages: readonly LanguageId[],
 ): Promise<Component> {
-  const manifest = entry.manifestPath !== null ? await readPackageJson(entry.manifestPath) : null
+  const manifest = await readPackageJson(entry.manifestPath)
   const id = decideId(entry, manifest)
   const name = decideName(entry, manifest)
   const frameworks = collectFrameworks(manifest)

@@ -77,6 +77,12 @@ All detector results are merged, duplicates with the same path are removed, and 
 
 - POSIX globs (forward slashes)
 - Relative to the workspace root
+- **A pattern names a directory that holds the manifest, and is resolved against the manifest**: `p` is matched as `p/package.json` (any trailing slash replaced), and the directory holding each match is the candidate. This is what pnpm and npm mean by their patterns, and it is the same rule the nx detector follows with `project.json`. Three consequences worth stating:
+  - `.` and `./` name the workspace root itself — the documented way to say "the root is a package too" — and nothing else. Matched as a directory instead, `.` is a pattern that reaches every directory in the workspace.
+  - A literal path names that directory, not its subtree.
+  - A matched directory with no manifest is not a package, and is not a candidate.
+- A negated pattern (`!packages/legacy`) takes the same transform and removes the package it names
+- An empty pattern declares nothing
 - Maximum depth of `**` is 10 (to avoid false positives)
 - A path matching multiple globs counts as a single entry
 - Anything under `node_modules/` is always excluded
@@ -338,6 +344,8 @@ Implementation guidance:
 | CD11 | Autodetect finds nothing and there is no package.json | id = directory name (kebab-case), name = directory name |
 | CD12 | config.components overrides after autodetect | config wins ([`config.md`](./config.md) §6.1) |
 | CD13 | Both pnpm and nx detect the same workspace | Deduped into 1 Component |
+| CD14 | `packages: [".", "packages/*"]` on a tree that also holds `src/` and `a/b/c/d/` | 2 Components: the workspace root (`roots: ["."]`) and the package |
+| CD15 | `packages: ["packages/*"]` where `packages/dist/` holds no manifest | `packages/dist` is not a Component |
 
 ## 11. Design decisions
 
