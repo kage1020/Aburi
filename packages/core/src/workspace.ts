@@ -340,7 +340,6 @@ async function resolveDeclaredPackages(
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
   const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
-  if (manifestPatterns.length === 0) return []
   const manifests = await glob(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],

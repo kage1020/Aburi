@@ -107,6 +107,27 @@ describe("a declared package is the directory that holds the manifest", () => {
     expect(await pnpmRoots()).toEqual(["packages/app"])
   })
 
+  it("passes over a dependency's own manifest", async () => {
+    // `**` is the one pattern that reaches into `node_modules`, and a workspace that declares
+    // it would otherwise take every installed dependency for one of its own packages.
+    await writePackage("packages/app", "app")
+    await writePackage("node_modules/left-pad", "left-pad")
+    await writePnpmManifest("**")
+
+    expect(await pnpmRoots()).toEqual(["packages/app"])
+  })
+
+  it("reaches a package ten directory levels down", async () => {
+    // The documented ceiling for `**` (component-detect.md §3.1.1). A workspace that nests
+    // its packages under a few grouping directories is ordinary, and one that reaches the
+    // ceiling is what says where the ceiling is.
+    const deep = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"].join("/")
+    await writePackage(deep, "deep")
+    await writePnpmManifest("**")
+
+    expect(await pnpmRoots()).toEqual([deep])
+  })
+
   it("declares nothing for an empty pattern", async () => {
     // The transform would otherwise turn it into "/package.json", which names the filesystem
     // root rather than anything inside the workspace.
