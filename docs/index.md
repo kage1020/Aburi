@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Aburi
   text: See what a pull request did
-  tagline: Aburi reads a change the way a senior reviewer does. New endpoints, new database writes, deleted logic. It writes the result as Markdown your CI can gate on.
+  tagline: It reads a change the way a senior reviewer does, then writes the result as Markdown your CI can gate on.
   image:
     light: /brand/mark.svg
     dark: /brand/mark-dark.svg
