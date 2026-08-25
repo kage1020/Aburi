@@ -20,21 +20,21 @@ on any of those.
 
 ## ⚠ API changes
 
-### `InvoiceService.createInvoice` *(method)*
-**File**: `apps/billing/src/InvoiceService.ts:42`
+### `submitOrder` *(function)*
+**File**: `src/app/orders/actions.ts:18`
 
-- signature.outputs: `Promise<Invoice>` → `Promise<InvoiceWithReceipt>`
-- decorator added: `@UseGuards(AuthGuard)`
+- signature.outputs: `Promise<Order>` → `Promise<OrderWithReceipt>`
+- signature.throws added: `PaymentDeclined`
 
 ## 🔧 Logic changes
 
-### `RolesGuard.canActivate` *(method)*
-**File**: `apps/billing/src/guards/roles.guard.ts:9`
+### `POST` *(function)*
+**File**: `src/app/api/orders/route.ts:9`
 
 - rules removed:
-  - guard: `roles.length === 0` (L40)
+  - guard: `session.user.role !== 'admin'` (L14)
 - effects added:
-  - db.write: `prisma.audit.create` (L75)
+  - db.write: `prisma.auditLog.create` (L31)
 ```
 
 The removed guard is one line in `git diff`. Here it is a heading.
@@ -55,7 +55,8 @@ same report.
 ## Quick start
 
 ```bash
-pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
+pnpm add -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
 
 pnpm exec aburi init                # detect the project, write aburi.json
 pnpm exec aburi scan                # analyse the workspace → out/
