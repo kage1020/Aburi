@@ -2,14 +2,14 @@
 
 # Aburi
 
-Aburi reads a pull request and reports **what changed**, not which lines moved.
+Aburi reads a pull request and tells you what the change did: which endpoints
+are new, which methods now write to the database, which validation guard
+disappeared.
 
-It parses each revision with tree-sitter, matches functions and methods across
-them, and writes a Markdown summary: this endpoint is new, this method now
-writes to the database, this validation guard disappeared. CI can fail the build
-on any of those.
+It parses both revisions with tree-sitter, matches functions and methods across
+them, and writes the answer as Markdown. Your CI can fail the build on any of it.
 
-**[aburi.kage1020.com](https://aburi.kage1020.com)** — documentation.
+Documentation: **[aburi.kage1020.com](https://aburi.kage1020.com)**
 
 ## What the report looks like
 
@@ -37,20 +37,20 @@ on any of those.
   - db.write: `prisma.auditLog.create` (L31)
 ```
 
-The removed guard is one line in `git diff`. Here it is a heading.
+That deleted guard is a single red line somewhere in a 2,000-line `git diff`.
+Aburi gives it a heading.
 
 ## Why not `git diff`
 
-- A file rename with unchanged logic is reported as `moved`, not as a delete
-  plus an add.
-- A reformatting pass is reported as a syntax-only change and folded away.
-- Interfaces, DTOs, re-exports, and empty bodies are dropped before the
-  comparison, so they never pad the summary.
-- Every category can be turned into a CI gate:
-  `--fail-on 'removed,changed:>20'`.
+Rename a file without touching its logic and Aburi reports `moved`, where
+`git diff` reports a delete plus an add. Reformat a body and Aburi files it
+under syntax-only changes, folded out of your way. Interfaces, DTOs,
+re-exports, and empty bodies drop out before the comparison, so they stay out
+of the summary.
 
-It is a static analyser, not an LLM judge. The same commit always produces the
-same report.
+Aburi runs static analysis. No model, no sampling, so the same commit produces
+the same report, and you can gate CI on any category it counts:
+`--fail-on 'removed,changed:>20'`.
 
 ## Quick start
 
@@ -63,7 +63,7 @@ pnpm exec aburi scan                # analyse the workspace → out/
 pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
 ```
 
-Exit code `3` means a gate tripped. Full walkthrough:
+Exit code `3` means a gate tripped. The full walkthrough is in
 [Getting started](https://aburi.kage1020.com/guide/getting-started).
 
 ### In GitHub Actions
@@ -77,7 +77,7 @@ Exit code `3` means a gate tripped. Full walkthrough:
     fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
-The action posts the report as a pull request comment and rewrites the same
+The action posts the report as a pull request comment, and rewrites that same
 comment on every push.
 
 ## Documentation
@@ -94,12 +94,12 @@ comment on every push.
 | [Plugin development](https://aburi.kage1020.com/extend/plugin-development) | Add a language, framework, or library. |
 | [Roadmap](https://aburi.kage1020.com/roadmap) | What works today, what is next. |
 
-Design documents live in [`docs/design/`](docs/design/) and the JSON Schemas in
+Design documents live in [`docs/design/`](docs/design/), the JSON Schemas in
 [`schema/`](schema/).
 
 ## Contributing
 
-Requires Node.js 24+ and pnpm (`corepack enable pnpm`).
+You need Node.js 24+ and pnpm (`corepack enable pnpm`).
 
 ```bash
 pnpm install
@@ -109,8 +109,8 @@ pnpm test
 pnpm build
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). New language, framework, and effects
-plugins are especially welcome.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before you open a pull request. We
+would love new language, framework, and effects plugins.
 
 ## License
 

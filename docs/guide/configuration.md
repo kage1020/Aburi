@@ -7,16 +7,16 @@ projects that generated file is the last you will think about it:
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
-  "frameworks": ["framework-nestjs"]
+  "frameworks": ["framework-next", "framework-react"]
 }
 ```
 
-Every field is optional — even `{}` works, because autodetect fills in the rest.
-The sections below cover the things people actually end up changing.
+Every field is optional. Even `{}` works, because autodetect fills in the rest.
+The sections below cover what people change in practice.
 
 ::: tip JSONC is fine
 Name the file `aburi.jsonc` if you want comments. Keep the `$schema` line either
-way; it gives you completion and validation in most editors.
+way. It gives you completion and validation in most editors.
 :::
 
 ## Exclude files
@@ -29,11 +29,11 @@ Generated code, vendored trees, and fixtures rarely belong in the report.
 }
 ```
 
-Patterns are POSIX globs relative to the workspace root, and they *add* to the
+Write POSIX globs relative to the workspace root. Aburi adds them to the
 built-in exclusions rather than replacing them.
 
-`.gitignore` is honoured by default — every one in the tree, the way git reads
-them. Turn it off only when you deliberately want to analyse build output:
+Aburi honours `.gitignore` by default, every one in the tree, the way git reads
+them. Turn that off when you want to analyse build output on purpose:
 
 ```jsonc
 { "respectGitignore": false }
@@ -46,18 +46,18 @@ Three lists, one per plugin kind:
 ```jsonc
 {
   "languages": ["lang-typescript"],
-  "frameworks": ["framework-nestjs", "framework-next"],
-  "effects": ["effects-prisma", "effects-nest"]
+  "frameworks": ["framework-next", "framework-react"],
+  "effects": ["effects-drizzle"]
 }
 ```
 
-A bare name resolves under the `@aburi` scope, so `"effects-prisma"` means
-`@aburi/effects-prisma`. Third-party plugins need their full package name
+A bare name resolves under the `@aburi` scope, so `"effects-drizzle"` means
+`@aburi/effects-drizzle`. Third-party plugins need their full package name
 (`"@myorg/aburi-effects"`), and a path starting with `./` loads a local file.
 
-Order matters in `effects` only: the first plugin to recognise a call wins, so
-put project-specific plugins first. Options for an individual plugin go under
-`pluginOptions`, keyed by plugin name:
+Order matters in `effects` alone. The first plugin to recognise a call wins, so
+put your project-specific plugins first. Options for an individual plugin go
+under `pluginOptions`, keyed by plugin name:
 
 ```jsonc
 {
@@ -69,32 +69,33 @@ put project-specific plugins first. Options for an individual plugin go under
 
 ## Define components
 
-Components are the boxes in `workspace.md` and the unit `components/*.md` is
-written per. Aburi infers them from your workspace manifests; declare them
-explicitly when the inference does not match how you think about the codebase:
+Components are the boxes in `workspace.md`, and the unit Aburi writes each
+`components/*.md` for. It infers them from your workspace manifests. Declare
+them yourself when that inference does not match how you think about the
+codebase:
 
 ```jsonc
 {
   "components": [
     {
-      "id": "billing",
-      "name": "Billing",
-      "roots": ["apps/billing", "packages/billing-domain"],
-      "publicApi": ["apps/billing/src/routes/**"]
+      "id": "checkout",
+      "name": "Checkout",
+      "roots": ["apps/storefront/src/app/checkout", "packages/pricing"],
+      "publicApi": ["packages/pricing/src/index.ts"]
     }
   ]
 }
 ```
 
-A declared component **replaces** the autodetected one with the same id — there
-is no partial merge, so write out every field you care about. Components you do
-not mention keep their autodetected definition.
+A component you declare **replaces** the autodetected one with the same id.
+There is no partial merge, so write out every field you care about. Components
+you leave alone keep their autodetected definition.
 
 ## Quiet down noisy helpers
 
-Logging and metrics calls tend to appear in every symbol without saying much.
-`suppress` takes identifier prefixes and drops them from effects and calls;
-`keep` carves exceptions back out, and wins over everything:
+Logging and metrics calls show up in almost every symbol without telling you
+much. `suppress` takes identifier prefixes and drops them from effects and
+calls. `keep` carves exceptions back out, and beats everything else:
 
 ```jsonc
 {
@@ -103,7 +104,7 @@ Logging and metrics calls tend to appear in every symbol without saying much.
 }
 ```
 
-An entry starting with `@` in `keep` names a decorator; anything else names a
+An entry starting with `@` in `keep` names a decorator. Anything else names a
 callee.
 
 ## Teach it your in-house framework
@@ -127,7 +128,7 @@ writing a plugin:
 }
 ```
 
-For anything more involved — parsing a new language, recognising call shapes —
+For anything heavier, such as parsing a new language or recognising call shapes,
 write a [plugin](/extend/plugin-development) instead.
 
 ## Move the output
@@ -137,12 +138,12 @@ write a [plugin](/extend/plugin-development) instead.
 ```
 
 `scan` and `diff` write there, and `explain` reads the analysis back from there.
-The `--output-dir` flag wins over this when both are given.
+The `--output-dir` flag beats this setting when you pass both.
 
 ## Limits
 
-The defaults suit a normal repository. Reach for these when a scan is slow, or
-when it silently skips files you expected to see:
+The defaults suit a normal repository. Reach for these when a scan drags, or
+when it skips files you expected to see:
 
 ```jsonc
 {
@@ -153,9 +154,10 @@ when it silently skips files you expected to see:
 }
 ```
 
-`minParsedFileRatio` is the one with teeth and has no default: set it, and a
+`minParsedFileRatio` is the one with teeth, and it has no default. Set it, and a
 scan that parsed less than that share of the files it discovered exits `3`
-instead of quietly reporting on a fraction of your code. Worth setting in CI.
+rather than reporting on a fraction of your code without saying so. Worth
+setting in CI.
 
 ## All fields
 
@@ -171,14 +173,14 @@ instead of quietly reporting on a fraction of your code. Worth setting in CI.
 | `suppress` | `[]` | Identifier prefixes to drop from effects and calls. |
 | `keep` | `[]` | Exceptions to `suppress` and to the built-in drop rules. |
 | `frameworkHints` | `[]` | Decorator and class-name rules for an in-house framework. |
-| `output.dir` | `out` | Where artifacts are written and read back. |
+| `output.dir` | `out` | Where Aburi writes artifacts and reads them back. |
 | `strict` | `true` | Abort when a plugin emits vocabulary it never declared. |
-| `maxFileSizeBytes` | `2097152` | Files above this size are skipped. |
+| `maxFileSizeBytes` | `2097152` | Aburi skips files above this size. |
 | `parseTimeoutMs` | `5000` | Per-file budget for parse, extract, and walk. |
 | `classifyTimeoutMs` | `50` | Per-call budget for an effects plugin. |
 | `minParsedFileRatio` | *(unset)* | Smallest share of discovered files a scan may parse and still pass. |
 | `lsp` | off | Optional type-aware enrichment. Not implemented yet. |
 
 The [JSON Schema](https://github.com/kage1020/Aburi/blob/main/schema/aburi.config.v1.json)
-is the authoritative definition, and the [config design doc](/design/config)
-carries the reasoning behind each field.
+is the authoritative definition. The [config design doc](/design/config) carries
+the reasoning behind each field.

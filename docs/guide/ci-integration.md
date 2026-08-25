@@ -1,7 +1,7 @@
 # CI integration
 
-The point of running Aburi in CI is twofold: put the report where reviewers
-will see it, and fail the build on changes that need a human.
+Running Aburi in CI does two things: it puts the report where reviewers will see
+it, and it fails the build on changes that need a human.
 
 ## GitHub Actions
 
@@ -26,36 +26,38 @@ jobs:
 ```
 
 The action diffs the pull request's base against its head and posts the report
-as a comment. The comment carries a hidden marker, so every push rewrites the
-same comment instead of adding another one.
+as a comment. That comment carries a hidden marker, so every push rewrites it
+in place instead of piling up a new one.
 
 | Input | Effect |
 |---|---|
-| `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, …). |
-| `fail-on` | Passed to `aburi diff --fail-on`. Empty means report only, never fail. |
+| `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, and so on). |
+| `fail-on` | Passed to `aburi diff --fail-on`. Leave it empty to report without ever failing. |
 
 ::: warning `fetch-depth: 0` is required
-Aburi checks out the base revision to analyse it, which a shallow clone cannot
-do. Without this the run fails fast rather than producing a wrong diff.
+Aburi checks out the base revision to analyse it, and a shallow clone cannot
+give it one. Without the full history the run stops early rather than handing
+you a wrong diff.
 :::
 
 ## Any other CI
 
-The CLI has no opinion about your platform. Run it and read the exit code:
+The CLI has no opinion about your platform. Run it and read the exit code.
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `0` | Clean. | Nothing. |
+| `3` | A gate tripped, or the scan was too damaged to trust. | Fail the build. |
+| `2` | Your invocation is wrong: bad flag, malformed `--fail-on`. | Fix the pipeline. |
 
 ```bash
 aburi diff "origin/${BASE_BRANCH}..HEAD" --fail-on 'removed,changed:>20'
 ```
 
-- **`0`** — clean.
-- **`3`** — a gate tripped, or the scan was too damaged to trust. Fail the build.
-- **`2`** — your invocation is wrong (bad flag, malformed `--fail-on`). Fix the
-  pipeline, not the code.
+`out/diff.md` is the report. Post it wherever your platform takes Markdown.
 
-`out/diff.md` is the report; post it wherever your platform accepts Markdown.
-
-When the `CI` environment variable is set, `aburi scan` drops the timestamp from
-its output so identical commits produce identical bytes.
+Set the `CI` environment variable and `aburi scan` drops the timestamp from its
+output, so identical commits produce identical bytes.
 
 ## Choosing a gate
 
@@ -63,15 +65,15 @@ Start narrow. A gate that fires on every pull request gets ignored within a week
 
 | Gate | Fires when |
 |---|---|
-| `removed` | Any symbol was deleted. Cheap and rarely noisy. |
+| `removed` | Somebody deleted a symbol. Cheap, and rarely noisy. |
 | `api-changed` | A public signature or decorator changed. |
-| `changed:>20` | An unusually large semantic change set. |
-| `dropped-toggled:to-dropped:>10` | Many method bodies were emptied at once — the signature of a half-finished refactor. |
+| `changed:>20` | The semantic change set is unusually large. |
+| `dropped-toggled:to-dropped:>10` | Somebody emptied many method bodies at once, the signature of a half-finished refactor. |
 
-Combine them with commas; the first clause that fires ends the evaluation:
+Combine them with commas. The first clause that fires ends the evaluation.
 
 ```bash
 aburi diff main..HEAD --fail-on 'removed,changed:>20'
 ```
 
-The full grammar is in the [CLI reference](/reference/cli#fail-on-grammar).
+The [CLI reference](/reference/cli#fail-on-grammar) has the full grammar.

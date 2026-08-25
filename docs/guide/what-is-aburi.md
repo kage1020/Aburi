@@ -1,24 +1,25 @@
 # What is Aburi?
 
-Aburi is a command-line tool that reads your source code and reports **what a
-change did**, not which lines moved.
+Aburi is a command-line tool that reads your source code and tells you what a
+change did.
 
 Run it on a pull request and you get a Markdown summary: this endpoint is new,
 this method now writes to the database, this validation guard disappeared, these
-files just moved. CI can fail the build on any of those.
+files only moved. Your CI can fail the build on any of it.
 
 ## The problem with `git diff`
 
-A reviewer opening a 2,000-line diff has to reconstruct the intent from the
-text. Two things make that hard:
+Open a 2,000-line diff and you have to reconstruct the intent from the text.
+Two things get in your way.
 
-- **Noise wins.** A formatting pass, a rename, or a file move fills the diff
-  with changes that mean nothing.
-- **Meaning hides.** A single added `if` that skips a permission check looks
-  exactly like a single added `if` that fixes a typo.
+**The noise outweighs the signal.** A formatting pass, a rename, or a file move
+fills the diff with changes that carry no meaning, and you read them anyway.
 
-Aburi separates the two. It parses each revision, matches functions and methods
-across them, and compares what they *do* — their signature, their control flow,
+**The signal looks like the noise.** A single added `if` that skips a permission
+check looks the same as a single added `if` that fixes a typo.
+
+Aburi separates the two. It parses both revisions, matches functions and methods
+across them, then compares what they *do*: their signature, their control flow,
 the effects they perform.
 
 ## What the report looks like
@@ -47,33 +48,39 @@ the effects they perform.
   - db.write: `prisma.auditLog.create` (L31)
 ```
 
-The removed guard is one line in `git diff`. Here it is a heading.
+That deleted guard is a single red line somewhere in the raw diff. Aburi gives
+it a heading.
 
 [Reading the report](/guide/reading-the-report) walks through every section.
 
 ## What makes it usable in CI
 
-- **Deterministic.** No model, no sampling. The same commit produces the same
-  bytes, so two reports can be compared to each other.
-- **Refactor-tolerant.** A file rename with unchanged logic is reported as
-  `moved`, not as a delete plus an add.
-- **Boilerplate-free.** Interfaces, DTOs, re-exports, and empty bodies are
-  dropped before the comparison, so they never pad the summary.
-- **Gateable.** Every category the report shows can be turned into a threshold:
-  `--fail-on 'removed,changed:>20'`.
+**It is deterministic.** No model, no sampling. The same commit produces the
+same bytes, so you can compare two reports to each other and trust the
+difference.
 
-## What it is not
+**It survives refactoring.** Rename a file without touching its logic and you
+get `moved`, where a line-based diff gives you a delete plus an add.
 
-Aburi does not judge your code. It has no opinion on style, it does not suggest
-fixes, and it does not call an LLM. It produces a factual description of a
-change — reading it, and deciding what to do, stays with you (or with whatever
-tool you feed the report to).
+**It ignores boilerplate.** Interfaces, DTOs, re-exports, and empty bodies drop
+out before the comparison, so they stay out of your summary.
 
-It is also not a linter. Biome and ESLint already own that.
+**You can gate on any of it.** Pick a category the report counts and give it a
+threshold: `--fail-on 'removed,changed:>20'`.
+
+## What it will not do for you
+
+Aburi describes a change. You decide what to do about it. It holds no opinion
+on your style, suggests no fixes, and calls no LLM, so the judgement stays with
+you or with whatever tool you feed the report to.
+
+Linting belongs to Biome and ESLint. Aburi stays out of their way.
 
 ## Where to go next
 
-- [Getting started](/guide/getting-started) — install and run your first diff.
-- [Supported stacks](/guide/supported-stacks) — check whether your framework is
-  covered.
-- [CI integration](/guide/ci-integration) — post the report on every pull request.
+- [Getting started](/guide/getting-started) walks you from install to your
+  first diff.
+- [Supported stacks](/guide/supported-stacks) tells you whether your framework
+  is covered.
+- [CI integration](/guide/ci-integration) posts the report on every pull
+  request.

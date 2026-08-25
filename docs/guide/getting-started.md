@@ -5,9 +5,9 @@ newer and a git repository.
 
 ## 1. Install
 
-Install the CLI plus a language plugin. Add framework and effects plugins for
-whatever your project uses — [Supported stacks](/guide/supported-stacks) lists
-them all.
+Install the CLI and a language plugin, then add framework and effects plugins
+for whatever your project uses. [Supported stacks](/guide/supported-stacks)
+lists them all.
 
 ::: code-group
 
@@ -34,8 +34,8 @@ yarn add -D @aburi/cli @aburi/lang-typescript \
 pnpm exec aburi init
 ```
 
-`init` looks at your repository — workspace layout, languages, frameworks — and
-writes `aburi.json`:
+`init` looks at your repository, works out the workspace layout, languages, and
+frameworks, and writes `aburi.json`:
 
 ```jsonc
 {
@@ -46,11 +46,11 @@ writes `aburi.json`:
 ```
 
 That is the whole file. Everything else has a default, and
-[Configuration](/guide/configuration) covers the knobs you may eventually want.
+[Configuration](/guide/configuration) covers the knobs you may want later.
 
 ::: tip
 `aburi init --with-suggestions` adds a comment naming the plugin packages it
-detected but you have not installed yet.
+found in your project but not in your dependencies.
 :::
 
 ## 3. Scan
@@ -63,12 +63,12 @@ Three things land in `out/`:
 
 | File | What it is |
 |---|---|
-| `aburi.ir.json` | The analysis itself, as JSON. Everything else is derived from it. |
-| `workspace.md` | One page describing the whole repository: components, dependencies, effect surface. |
-| `components/*.md` | Per-component detail — every kept symbol, its boundaries, rules, and effects. |
+| `aburi.ir.json` | The analysis itself, as JSON. Everything else derives from it. |
+| `workspace.md` | One page covering the whole repository: components, dependencies, effect surface. |
+| `components/*.md` | Per-component detail. Every kept symbol with its boundaries, rules, and effects. |
 
-Open `workspace.md` first. On an unfamiliar codebase it is the fastest map you
-will get.
+Open `workspace.md` first. On a codebase you have never seen, it is the fastest
+map you will get.
 
 ## 4. Diff two revisions
 
@@ -76,13 +76,13 @@ will get.
 pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
 ```
 
-This writes `out/diff.md` (the review-facing report) and `out/diff.json`, then
-exits `3` if a `--fail-on` clause tripped. That exit code is what CI gates on —
-see [CI integration](/guide/ci-integration).
+You get `out/diff.md`, the report you hand to a reviewer, and `out/diff.json`
+beside it. A tripped `--fail-on` clause exits `3`, which is what CI gates on.
+See [CI integration](/guide/ci-integration).
 
 ::: warning Quote the `--fail-on` value
 `>` is a redirect in every shell. `--fail-on changed:>5` writes a file called
-`5`; `--fail-on 'changed:>5'` sets a threshold.
+`5`. `--fail-on 'changed:>5'` sets a threshold.
 :::
 
 [Reading the report](/guide/reading-the-report) explains what comes out.
@@ -95,11 +95,11 @@ When the diff flags something and you want the full picture:
 pnpm exec aburi explain submitOrder
 ```
 
-The argument can be a symbol name, a file path, or a full symbol id — Aburi
-figures out which you meant.
+Pass a symbol name, a file path, or a full symbol id. Aburi works out which one
+you meant.
 
 ## Where to go next
 
-- [Reading the report](/guide/reading-the-report) — what each section means.
-- [CI integration](/guide/ci-integration) — run this on every pull request.
-- [CLI reference](/reference/cli) — every flag, every exit code.
+- [Reading the report](/guide/reading-the-report) explains each section.
+- [CI integration](/guide/ci-integration) runs this on every pull request.
+- [CLI reference](/reference/cli) lists every flag and exit code.

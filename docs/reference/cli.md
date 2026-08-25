@@ -18,11 +18,11 @@ aburi <command> [flags]
 | Code | Meaning |
 |---|---|
 | `0` | Success, no gate tripped. |
-| `1` | Runtime failure — I/O error, unexpected exception, or `explain` found no match. |
-| `2` | Bad invocation — unknown flag, missing input file, malformed `--fail-on`, ambiguous `explain` target. |
+| `1` | Runtime failure: an I/O error, an unexpected exception, or `explain` found no match. |
+| `2` | Bad invocation: an unknown flag, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
-`3` is the code CI gates on.
+CI gates on `3`.
 
 ## Environment variables
 
@@ -39,9 +39,9 @@ aburi <command> [flags]
 3. `aburi.jsonc` / `aburi.json`, walking up from the working directory
 4. Built-in defaults
 
-Paths given to `--config` resolve against the working directory. Paths *inside*
-the config resolve against the workspace root, which is not necessarily the same
-directory — `aburi scan` warns when they differ.
+Paths you give to `--config` resolve against the working directory. Paths
+*inside* the config resolve against the workspace root, which need not be the
+same directory. `aburi scan` warns you when the two differ.
 
 ---
 
@@ -98,9 +98,9 @@ aburi scan --ignore 'src/generated/**'
 
 ### Files that produce nothing
 
-Files the scan could not use are listed on stderr, grouped by reason, with a
-pointer to the setting that governs each. This does not fail the run — an
-unparseable file describes your source, not the scan.
+The scan lists the files it could not use on stderr, grouped by reason, and
+points at the setting that governs each one. The run still passes. An
+unparseable file tells you something about your source, not about the scan.
 
 ::: details When a scan does exit 3
 - **Nothing was parsed at all.** An `ignore` pattern ate the tree, a
@@ -108,11 +108,10 @@ unparseable file describes your source, not the scan.
   extension present. The output is still written.
 - **Coverage fell below `minParsedFileRatio`**, if you set one.
 - **A plugin threw** on a file, as opposed to declining it.
-- **A filename cannot be written down.** A path containing a backslash has no
-  representation in the analysis, and filenames differing only in Unicode
-  composition collapse to the same one. Both are reported by name on stderr and
-  need renaming; `ignore` can exclude them instead — note that a backslash must
-  be doubled in a glob pattern.
+- **A filename cannot be written down.** The analysis has no representation for
+  a path containing a backslash, and filenames differing in Unicode composition
+  alone collapse to one. The scan names both kinds on stderr. Rename them, or
+  exclude them with `ignore`, doubling the backslash in the glob pattern.
 :::
 
 Every command that scans reports the same way. `aburi diff` runs two scans and
@@ -130,10 +129,10 @@ aburi diff --base <a.json> --head <b.json>  [flags]
 Compares two revisions and writes `diff.json` and `diff.md`.
 
 **Ref mode** verifies both refs with git, checks out the base into a temporary
-worktree, and scans it. The head is always scanned from your working tree — its
-ref is used only as a label in the report.
+worktree, and scans it. Aburi scans the head from your working tree, and uses
+its ref as a label in the report.
 
-**File mode** compares two previously written `aburi.ir.json` files. No git, no
+**File mode** compares two `aburi.ir.json` files you already have. No git, no
 scanning.
 
 | Flag | Effect |
@@ -147,8 +146,8 @@ scanning.
 | `--config <path>` | Use a different config file. |
 
 In ref mode, a scan that did not finish cleanly exits `3` even with no
-`--fail-on` — a workspace `aburi scan` refuses to call green cannot go green here
-instead.
+`--fail-on`. A workspace that `aburi scan` refuses to call green cannot go green
+here instead.
 
 ```bash
 aburi diff main..HEAD
@@ -158,8 +157,8 @@ aburi diff --base ir-main.json --head ir-branch.json --format md
 
 ### `--fail-on` grammar
 
-Comma-separated clauses. Each may carry a `:>N` threshold; without one, a single
-occurrence trips the gate.
+Write comma-separated clauses. Each one may carry a `:>N` threshold. Without a
+threshold, one occurrence trips the gate.
 
 ```
 --fail-on 'removed,changed:>20,api-changed'
@@ -171,7 +170,7 @@ occurrence trips the gate.
 | `dropped-toggled:to-dropped` `dropped-toggled:to-kept` | One direction of a boilerplate toggle. |
 | `api-changed` `logic-changed` `syntax-changed` | Symbols whose change touched that axis. |
 
-Evaluation stops at the first clause that fires, so CI logs stay short.
+Evaluation stops at the first clause that fires, which keeps CI logs short.
 
 ::: warning Quote the value
 `>` is a shell redirect. Write `--fail-on 'changed:>5'`, not
@@ -179,8 +178,8 @@ Evaluation stops at the first clause that fires, so CI logs stay short.
 :::
 
 Unknown tokens, comparators other than `>`, non-integer thresholds, and an empty
-value all exit `2`. An empty gate is treated as a mistake rather than as "no
-gate", because it would turn every regression into a green pipeline.
+value all exit `2`. Aburi treats an empty gate as a mistake rather than as "no
+gate", because it would turn a regression into a green pipeline.
 
 ---
 
@@ -194,9 +193,9 @@ Prints the full detail for one symbol. The target can be:
 
 | Form | Example |
 |---|---|
-| A full symbol id | `ts:src/billing/billing.service.ts#BillingService.applyRefund` |
-| A file path | `src/billing/billing.service.ts` — every symbol in that file |
-| A name fragment | `applyRefund` — case-sensitive substring match |
+| A full symbol id | `ts:src/app/orders/actions.ts#submitOrder` |
+| A file path | `src/app/orders/actions.ts`, giving you every symbol in that file |
+| A name fragment | `submitOrder`, matched as a case-sensitive substring |
 
 | Flag | Effect |
 |---|---|
@@ -206,27 +205,27 @@ Prints the full detail for one symbol. The target can be:
 | `--config <path>` | Use a different config file. |
 
 Without `--ir`, Aburi looks for `aburi.ir.json` in the output directory, walking
-up from the working directory to the workspace root, and scans only if it finds
+up from the working directory to the workspace root. It scans when it finds
 nothing.
 
 Several matches exit `2` and print the candidates so you can requalify. No match
-exits `1`, and names how many files the analysis never read — the match may be in
-one of them. When you asked about a file that the analysis explicitly skipped,
-the exit code is `3` instead: there is no answer to give, and "no matches" would
-claim more than the document can support.
+exits `1`, and names how many files the analysis never read, since your match may
+sit in one of them. Ask about a file the analysis skipped and you get `3`
+instead. There is no answer to give, and "no matches" would claim more than the
+document can support.
 
 ```bash
-aburi explain applyRefund
-aburi explain src/billing/billing.service.ts
-aburi explain applyRefund --output docs/applyRefund.md
+aburi explain submitOrder
+aburi explain src/app/orders/actions.ts
+aburi explain submitOrder --output docs/submitOrder.md
 ```
 
 ---
 
 ## Programmatic use
 
-`@aburi/cli` exports every command as a function, so tests and tooling can drive
-it without spawning a process:
+`@aburi/cli` exports every command as a function, so your tests and tooling can
+drive it without spawning a process:
 
 ```ts
 import { runCli, runInit, runScan, runDiff, runExplain } from "@aburi/cli"
@@ -235,10 +234,10 @@ import { parseFailOn, evaluateFailOn, EXIT } from "@aburi/cli"
 const code = await runCli({ argv, stdout, stderr, env, cwd })
 ```
 
-`runCli` never calls `process.exit` — it returns the code and leaves the
+`runCli` returns the code rather than calling `process.exit`, leaving the
 decision to you.
 
 ---
 
-The behavioural contract behind this page, including the reasoning for each exit
-code, is the [CLI spec](/design/cli-spec).
+The [CLI spec](/design/cli-spec) holds the behavioural contract behind this
+page, including the reasoning for each exit code.

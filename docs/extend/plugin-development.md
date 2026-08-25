@@ -9,25 +9,25 @@ effects. There are three kinds, and they plug into different stages of
 |---|---|---|
 | **Language** | `parseFile`, `extractSymbols`, `walkBody`, `normalizeAst` | Symbols, plus the rules and calls in their bodies |
 | **Framework** | `classifySymbol` | A framework kind and boundary flags for a symbol |
-| **Effects** | `classify` | An effect for a call — `db.write`, `network.rpc`, … |
+| **Effects** | `classify` | An effect for a call: `db.write`, `network.rpc`, and so on |
 
 Type signatures live in
 [`@aburi/types`](https://github.com/kage1020/Aburi/blob/main/packages/types/src/plugins.ts);
 the full contracts are in the [design docs](/design/overview).
 
 ::: tip Before writing one
-Decorator-based frameworks often need no code at all —
+A decorator-based framework often needs no code at all.
 [`frameworkHints`](/guide/configuration#teach-it-your-in-house-framework) covers
-them from config.
+it from config.
 :::
 
 ## Manifest
 
 Every plugin exports a `PluginManifest` and Aburi validates it against
 `schema/aburi.plugin.v1.json`. The manifest is the *only* place a plugin
-declares what vocabulary it owns — the runtime `VocabRegistry` uses the
-declaration to enforce namespace ownership and reject cross-plugin collisions
-at load time.
+declares what vocabulary it owns. The runtime `VocabRegistry` reads that
+declaration to enforce namespace ownership and reject cross-plugin collisions at
+load time.
 
 ```ts
 import type { FrameworkManifest } from "@aburi/types"
@@ -64,8 +64,8 @@ Key rules:
 - `frameworks` is used by `aburi init` autodetect to route framework names in
   `aburi.json` to your plugin.
 
-Two plugins declaring the same `extKind` id → the registry throws at register
-time. This is intentional — we prefer a loud fail over a silent takeover.
+Two plugins declaring the same `extKind` id make the registry throw at register
+time. We chose a loud failure over a silent takeover.
 
 ## Language plugin
 
@@ -78,7 +78,7 @@ import type { LanguagePlugin, ParseResult, BodyExtraction } from "@aburi/types"
 class MyLangPlugin implements LanguagePlugin {
   readonly manifest = myLangManifest
   // The LanguageId you stamp on every Symbol id, and what lands in
-  // IR.workspace.languages. Must match `^[a-z][a-z0-9]*$` — the manifest name
+  // IR.workspace.languages. Must match `^[a-z][a-z0-9]*$`. The manifest name
   // ("lang-mylang") is a plugin ref and cannot be used here.
   readonly languageId = "my"
   readonly fileExtensions = [".my"] as const
@@ -116,15 +116,16 @@ Contracts to know:
 - Every `SymbolCandidate.id` must begin with `<language>:` (the language prefix
   claimed by your manifest). The pipeline throws otherwise.
 - `walkBody`'s `Rule` output is line-sorted by the pipeline before entering the
-  IR — you do not need to sort it yourself. Same for `calls`.
+  IR, so you do not sort it yourself. Same for `calls`.
 - `symbolDropHint` returns `{ reason, category: "B" | "C" }` or `null`. Category
-  B drops mean "the Symbol never makes it into the IR" — use this for genuine
-  boilerplate. Category C means "the Symbol is kept but its calls are pruned".
+  B drops keep the Symbol out of the IR, so use it for genuine boilerplate.
+  Category C keeps the Symbol and prunes its calls.
 - A syntax error is not a reason to give up: return the tree you built and add a
   `recoverable: true` error. The file is extracted as usual.
 - Refuse a file by adding an error with `recoverable: false`, or by returning
   `tree: null`. The file is withdrawn and recorded as skipped, and the run still
-  exits `0` — an unusable source file describes your repository, not a failure.
+  exits `0`. An unusable source file tells you about your repository, not about
+  a failure.
 - **Throw only when your plugin has a bug.** A throw withdraws the file *and*
   exits the scan `3`.
 
@@ -133,7 +134,8 @@ Contracts to know:
 recoverable. A refused file gets no Symbols, is left out of `stats.parsedFiles`,
 and appears in `ScanResult.skipped` under `reason: "parse-failed"` with your
 message. Set both the flag and `tree: null` when you have no tree; set only the
-flag when you have one but refuse it — a wrong-dialect source, a generated blob.
+flag when you have one but refuse it, such as a wrong-dialect source or a
+generated blob.
 
 Refusals leave the exit code at `0` until they take the whole workspace: a scan
 that parsed no file at all exits `3`, so a dialect check with its comparison
@@ -141,7 +143,7 @@ backwards is caught rather than shipped as an empty IR.
 
 A throw is recorded as `reason: "extraction-failed"` along with what you threw.
 The exception is an error whose `code` names a fault in the plugin set rather
-than in the file — `scan-plugin-misconfigured`, `invalid-language-id`,
+than in the file, such as `scan-plugin-misconfigured`, `invalid-language-id`, or
 `vocab-undeclared`. Those are re-thrown and end the run immediately, because
 they would otherwise repeat for every file and report the workspace as broken
 instead of the plugin.
@@ -188,7 +190,7 @@ class MyFrameworkPlugin implements FrameworkPlugin {
       // No edge mentions it: nothing to resolve, so the written name stands.
       if (origin === undefined) return d.name === "Widget"
       if (origin.imported !== "Widget") return false
-      // Same name, someone else's module — classify, but say you are less sure.
+      // Same name, someone else's module. Classify, but say you are less sure.
       confidence = origin.mine ? "high" : "medium"
       return true
     })
@@ -197,7 +199,7 @@ class MyFrameworkPlugin implements FrameworkPlugin {
     return {
       extKind: "framework:mytool:widget",
       derivedBy: "framework:mytool:widget",
-      // Keyed on the name the source wrote — that is what the pipeline matches against
+      // Keyed on the name the source wrote, which is what the pipeline matches against
       // `Decorator.name`. Optional: flip boundary flag for specific decorators.
       decoratorBoundaries: { [hit.name]: true },
       // Omit the key for `high`: the pipeline reads an absent `confidence` as exactly that.
@@ -213,8 +215,8 @@ before shipping a plugin that matches names against a package's vocabulary.
 
 Contracts:
 
-- First non-null classification wins. Order matters — the CLI walks frameworks
-  in the order they appear in `aburi.json`.
+- First non-null classification wins. Order matters, because the CLI walks
+  frameworks in the order they appear in `aburi.json`.
 - `derivedBy` may contain `;`-separated multi-signal reasons; the pipeline
   splits them into individual `derivedBy[]` entries.
 - Any `extKind` or `derivedBy` you emit must be declared in your manifest's
@@ -223,8 +225,8 @@ Contracts:
   wrote, and read `ImportEdge.source` for provenance. Matching the written name
   alone loses `import { Widget as W }` and claims a `@Widget` that came from some
   other library. When the edges attribute the name to a module you do not own,
-  classify at `confidence: "medium"` rather than refusing — a project-local
-  re-export barrel looks exactly like a foreign package. See
+  classify at `confidence: "medium"` rather than refusing, because a
+  project-local re-export barrel looks like a foreign package. See
   the [language plugin spec](/design/lang-plugin#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
@@ -233,7 +235,7 @@ Decorator-free classification (name / shape / body signals) is also supported:
 see [`packages/framework-react`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react)
 for a reference plugin that keys off PascalCase naming, `use[A-Z]` naming, JSX
 return detection, and `createContext(...)` / `forwardRef(...)` / `memo(...)`
-call-shape recognition — no decorators involved.
+call-shape recognition, with no decorators involved.
 
 ## Effects plugin
 
@@ -250,7 +252,7 @@ class MyEffectsPlugin implements EffectPlugin {
   async init() {}
 
   classify(call, ctx): EffectClassification | null {
-    // Pure — no I/O, no state, no async. The per-call timeout budget is 50ms
+    // Keep it pure: no I/O, no state, no async. The per-call budget is 50ms
     // by default and stateful classifiers are the reason it exists.
     if (!looksLikeMyEffect(call, ctx)) return null
     return {
@@ -273,7 +275,7 @@ Contracts:
 - **Two-signal layered gate is strongly recommended**: check for both an
   import-time signal (does the file import the target library at all?) AND a
   call-site signal (does the target's segment shape match?). See
-  `packages/effects-prisma` for the reference pattern — a random `foo.findMany()`
+  `packages/effects-prisma` for the reference pattern. A random `foo.findMany()`
   in a file that never imports `@prisma/client` should return `null`, and so
   should `prisma.foo.bar()` in a file that never uses Prisma's method vocabulary.
 - **Use the shared input guards, do not re-implement them.**
@@ -302,8 +304,8 @@ Contracts:
   }
   ```
 
-  It is the dedicated `/plugin-input` subpath on purpose — importing the package
-  root would pull the manifest validator and its schema compilation into your
+  Import the dedicated `/plugin-input` subpath rather than the package root,
+  which would pull the manifest validator and its schema compilation into your
   classifier's startup path.
 
 ## Registering with the CLI
@@ -320,7 +322,7 @@ discovers them by package name from `aburi.json`:
 }
 ```
 
-Each entry resolves to exactly one specifier — there is no fallback chain:
+Each entry resolves to one specifier. There is no fallback chain:
 
 | Written | Resolves to |
 |---|---|
@@ -340,22 +342,22 @@ any top-level export whose value has a `manifest` field. The first hit wins.
 
 ## Testing
 
-- Unit-test your plugin in isolation — see
+- Unit-test your plugin in isolation. See
   [`packages/framework-nestjs/test`](https://github.com/kage1020/Aburi/tree/main/packages/framework-nestjs/test)
   and
   [`packages/framework-react/test`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react/test)
   for the pattern (fake `ExtractionContext`, hand-authored `SymbolCandidate`s;
-  the React tests additionally exercise the real `@aburi/lang-typescript`
-  parser for JSX-body walkers).
-- Snapshot-verify the manifest against `schema/aburi.plugin.v1.json` — reuse the
-  existing schema validation helpers in `@aburi/plugin-registry`.
+  the React tests also drive the real `@aburi/lang-typescript` parser for
+  JSX-body walkers).
+- Snapshot-verify the manifest against `schema/aburi.plugin.v1.json`, reusing
+  the schema validation helpers in `@aburi/plugin-registry`.
 - Wire the plugin into `packages/e2e-integration` for an integration pass
   against a small handwritten fixture project.
 
 ## Publishing
 
 - Namespace under `@aburi/*` if first-party. Third-party plugins can use any
-  scope (or unscoped) — the loader accepts both.
+  scope, or none at all. The loader accepts both.
 - Follow the workspace tsdown / tsconfig config so the plugin ships ESM
   (`.mjs` + `.d.mts`).
 - Include `manifest` in the top-level exports so the loader's fallback hunt
