@@ -16,7 +16,8 @@ Matched as directories instead, two patterns meant something else entirely:
   `a/b/c/d/` produced seven components named after incidental directories, and not the root.
 - A literal path swallowed its own subtree: `'tools/build'` also produced `tools/build/nested`.
 
-Two further changes fall out of the rule. A matched directory with no manifest is no longer a
-component, because it is not a package to the manager that declared the pattern; and
+Three further changes fall out of the rule. A matched directory with no manifest is no longer a
+component, because it is not a package to the manager that declared the pattern;
 `WorkspaceCandidate.manifestPath` is no longer nullable, since a candidate is now found by
-finding its manifest.
+finding its manifest; and a `**` pattern reaches ten directory levels rather than eleven, which
+is the ceiling the conventions always documented.
