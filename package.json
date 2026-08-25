@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Semantic IR extraction for high-level code review",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi",
   "repository": {
