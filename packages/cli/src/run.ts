@@ -63,43 +63,58 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--output <path>", "output path (default: ./aburi.json)")
     .option("--force", "overwrite existing config")
     .option("--with-suggestions", "include plugin install suggestions as comments")
-    .action((cmdOptions: { output?: string; force?: boolean; withSuggestions?: boolean }) =>
-      wrap(async () => {
-        const report = await runInit({
-          cwd,
-          ...(cmdOptions.output === undefined ? {} : { output: cmdOptions.output }),
-          ...(cmdOptions.force === undefined ? {} : { force: cmdOptions.force }),
-          ...(cmdOptions.withSuggestions === undefined
-            ? {}
-            : { withSuggestions: cmdOptions.withSuggestions }),
-        })
-        stdout.write(`✓ Wrote ${report.outputPath}\n`)
-        stdout.write(
-          `  managers: ${report.detectedManagers.join(", ") || "—"}\n` +
-            `  languages: ${report.detectedLanguages.join(", ") || "—"}\n` +
-            `  frameworks: ${report.detectedFrameworks.join(", ") || "—"}\n` +
-            `  components: ${report.componentCount}\n`,
-        )
-        if (report.suggestedPlugins.length > 0) {
-          stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
-        }
-        // An unmapped language leaves `languages` empty, and `aburi scan` refuses to run
-        // without a language plugin — so this is the difference between the next command
-        // working and it stopping, not a nicety.
-        if (report.unmappedLanguages.length > 0) {
-          stderr.write(
-            `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
-              `"languages" is empty, so \`aburi scan\` has nothing to parse with — add a plugin ref to aburi.json.\n`,
+    // The pair rather than the negative alone, for the reason `scan` states: a run that typed
+    // neither has to be distinguishable from one that asked for the default. There is no config
+    // to fall through to here — this command writes the first one — so the default is honouring
+    // `.gitignore`, and the negative is the only way out of a `.gitignore` that cannot be read.
+    .option("--respect-gitignore", "honour .gitignore while counting a component's languages")
+    .option("--no-respect-gitignore", "ignore .gitignore while counting a component's languages")
+    .action(
+      (cmdOptions: {
+        output?: string
+        force?: boolean
+        withSuggestions?: boolean
+        respectGitignore?: boolean
+      }) =>
+        wrap(async () => {
+          const report = await runInit({
+            cwd,
+            ...(cmdOptions.output === undefined ? {} : { output: cmdOptions.output }),
+            ...(cmdOptions.force === undefined ? {} : { force: cmdOptions.force }),
+            ...(cmdOptions.withSuggestions === undefined
+              ? {}
+              : { withSuggestions: cmdOptions.withSuggestions }),
+            ...(cmdOptions.respectGitignore === undefined
+              ? {}
+              : { respectGitignore: cmdOptions.respectGitignore }),
+          })
+          stdout.write(`✓ Wrote ${report.outputPath}\n`)
+          stdout.write(
+            `  managers: ${report.detectedManagers.join(", ") || "—"}\n` +
+              `  languages: ${report.detectedLanguages.join(", ") || "—"}\n` +
+              `  frameworks: ${report.detectedFrameworks.join(", ") || "—"}\n` +
+              `  components: ${report.componentCount}\n`,
           )
-        }
-        if (report.unmappedFrameworks.length > 0) {
-          stderr.write(
-            `⚠ No framework plugin ships for: ${report.unmappedFrameworks.join(", ")}. ` +
-              `Those components will be scanned without framework classification.\n`,
-          )
-        }
-        return report.exitCode
-      })(),
+          if (report.suggestedPlugins.length > 0) {
+            stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
+          }
+          // An unmapped language leaves `languages` empty, and `aburi scan` refuses to run
+          // without a language plugin — so this is the difference between the next command
+          // working and it stopping, not a nicety.
+          if (report.unmappedLanguages.length > 0) {
+            stderr.write(
+              `⚠ No language plugin ships for: ${report.unmappedLanguages.join(", ")}. ` +
+                `"languages" is empty, so \`aburi scan\` has nothing to parse with — add a plugin ref to aburi.json.\n`,
+            )
+          }
+          if (report.unmappedFrameworks.length > 0) {
+            stderr.write(
+              `⚠ No framework plugin ships for: ${report.unmappedFrameworks.join(", ")}. ` +
+                `Those components will be scanned without framework classification.\n`,
+            )
+          }
+          return report.exitCode
+        })(),
     )
 
   program

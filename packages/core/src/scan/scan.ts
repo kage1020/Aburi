@@ -179,7 +179,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const logger = input.logger ?? silentLogger
 
   const router = buildLanguageRouter(input.languages)
-  const langDropPatterns = collectLangDropPatterns(input.languages)
+  const langDropPatterns = languageFileDropPatterns(input.languages)
 
   const discoverOptions: Parameters<typeof discoverFiles>[0] = {
     workspaceRoot: input.workspaceRoot,
@@ -572,7 +572,15 @@ function assertWorkspaceRootAbsolute(root: string): void {
   }
 }
 
-function collectLangDropPatterns(languages: readonly LanguagePlugin[]): string[] {
+/**
+ * The file-drop globs of every loaded language plugin, in one list.
+ *
+ * Exported because discovery is not the only reader: component detection counts file
+ * extensions to decide `Component.languages`, and a file this run refuses to read must not put
+ * a language on a component. The caller that has the plugins folds these into
+ * `DetectComponentsOptions.ignore` alongside `config.ignore`.
+ */
+export function languageFileDropPatterns(languages: readonly LanguagePlugin[]): string[] {
   const patterns: string[] = []
   for (const language of languages) {
     if (language.fileDropPatterns) patterns.push(...language.fileDropPatterns)

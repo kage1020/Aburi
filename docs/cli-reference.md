@@ -43,6 +43,7 @@ Autodetect the workspace and write `aburi.json`.
 
 ```
 aburi init [--output <path>] [--force] [--with-suggestions]
+           [--respect-gitignore|--no-respect-gitignore]
 ```
 
 | Flag | Effect |
@@ -50,6 +51,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 | `--output <path>` | Write to a different path (default `./aburi.json`). |
 | `--force` | Overwrite an existing output file. Without this, an existing file → `EXIT.INPUT_ERROR`. |
 | `--with-suggestions` | Append `pnpm add -D @aburi/framework-<x>` JSONC banner comments for detected first-party plugins. |
+| `--respect-gitignore` / `--no-respect-gitignore` | Whether the language census honours `.gitignore`. Honoured by default, so a vendored or generated tree does not decide a component's languages. There is no config to override here — this command writes the first one — so the negative is also the only way past a `.gitignore` that cannot be read. |
 
 **Examples:**
 

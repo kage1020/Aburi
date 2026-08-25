@@ -7,11 +7,18 @@ import { describeThrown, isVanishedFile } from "./faults"
 import { openGitignoreTree } from "./gitignore"
 
 /**
- * Category A drop patterns from drop-list.md §3.1. Kept here rather than embedded in a
- * scan-caller because file discovery is the only place they apply — they are ignore
- * globs, not IR-visible drops.
+ * Category A drop patterns from drop-list.md §3.1. They are ignore globs, not IR-visible drops.
+ *
+ * Exported because file discovery is no longer the only place they apply: component detection
+ * counts file extensions to decide `Component.languages`, and it kept a shorter copy of part of
+ * this list, so a directory this one drops was counted towards a label that reaches the IR.
+ * Every entry is `**\/`-anchored, which is what lets one list serve two walks rooted at
+ * different directories.
+ *
+ * The census keeps `.git` out with `dot: false` rather than a pattern, as discovery does — the
+ * copy it replaced had `**\/.git\/**`, and this list does not.
  */
-const CORE_IGNORE_PATTERNS: readonly string[] = [
+export const CORE_IGNORE_PATTERNS: readonly string[] = [
   "**/node_modules/**",
   "**/dist/**",
   "**/build/**",

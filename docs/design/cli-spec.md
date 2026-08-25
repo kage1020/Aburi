@@ -56,6 +56,7 @@ Generates `aburi.json` from autodetect results.
 
 ```
 aburi init [--output <path>] [--force] [--with-suggestions]
+           [--respect-gitignore|--no-respect-gitignore]
 ```
 
 ### 4.2 Options
@@ -65,6 +66,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 | `--output <path>` | Output destination (default: `./aburi.json`) |
 | `--force` | Overwrite an existing file |
 | `--with-suggestions` | Include enable candidates for plugins matching detected frameworks as JSONC comments |
+| `--respect-gitignore` / `--no-respect-gitignore` | Whether the language census honours `.gitignore` (default: honour). No config exists yet to override, so this is also the only way past a `.gitignore` that cannot be read |
 
 ### 4.3 Behavior
 

@@ -84,3 +84,47 @@ describe("--with-suggestions", () => {
     expect(contents).not.toContain("Suggested install:")
   })
 })
+
+describe("aburi init and .gitignore", () => {
+  /**
+   * Detection reads `.gitignore` now, so `init` can fail where it could not before — and it is
+   * the command that writes the config a `respectGitignore: false` would live in. The flag is
+   * the whole of the escape hatch, which is why the failure has to name it.
+   */
+  /**
+   * A file the census counts, so the descent has a reason to open the root's rule file at all.
+   * The extension is checked before the `.gitignore` question — a candidate no language table
+   * knows cannot change a component's languages, so nothing is read for its sake.
+   */
+  async function writeCountableSource(): Promise<void> {
+    await mkdir(resolve(scratch, "apps/api/src"), { recursive: true })
+    await writeFile(resolve(scratch, "apps/api/src/a.ts"), "export const a = 1\n", "utf8")
+  }
+
+  it("refuses a .gitignore it cannot use, and says how to proceed without it", async () => {
+    await makeMinimalPnpmWorkspace()
+    await writeCountableSource()
+    await writeFile(resolve(scratch, ".gitignore"), `${"a".repeat(5_000)}\n`, "utf8")
+
+    const thrown = await runInit({ cwd: scratch }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    // The machine's fault rather than the config's — there is no config yet to be at fault.
+    expect((thrown as CliError).code).toBe("runtime-error")
+    expect((thrown as Error).message).toContain("--no-respect-gitignore")
+  })
+
+  it("writes the config when told to leave .gitignore alone", async () => {
+    await makeMinimalPnpmWorkspace()
+    await writeCountableSource()
+    await writeFile(resolve(scratch, ".gitignore"), `${"a".repeat(5_000)}\n`, "utf8")
+
+    const report = await runInit({ cwd: scratch, respectGitignore: false })
+
+    expect(report.exitCode).toBe(0)
+    expect(JSON.parse(await readFile(report.outputPath, "utf8"))).toHaveProperty("$schema")
+  })
+})
