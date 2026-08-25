@@ -12,15 +12,18 @@ them all.
 ::: code-group
 
 ```bash [pnpm]
-pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
+pnpm add -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
 ```
 
 ```bash [npm]
-npm install -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
+npm install -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
 ```
 
 ```bash [yarn]
-yarn add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
+yarn add -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
 ```
 
 :::
@@ -38,7 +41,7 @@ writes `aburi.json`:
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
-  "frameworks": ["framework-nestjs"]
+  "frameworks": ["framework-next", "framework-react"]
 }
 ```
 
@@ -89,7 +92,7 @@ see [CI integration](/guide/ci-integration).
 When the diff flags something and you want the full picture:
 
 ```bash
-pnpm exec aburi explain applyRefund
+pnpm exec aburi explain submitOrder
 ```
 
 The argument can be a symbol name, a file path, or a full symbol id — Aburi
