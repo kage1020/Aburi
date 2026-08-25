@@ -56,4 +56,4 @@ automatically when a React dependency is detected.
 
 - [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) §5.2 — the framework `classifySymbol` contract this plugin implements.
 - [`docs/design/extension-vocab.md`](../../docs/design/extension-vocab.md) — how framework `extKind` namespaces (`framework:react:*`) plug into the shared vocab.
-- [`docs/plugin-development.md`](../../docs/plugin-development.md) — plugin authoring walkthrough with cross-references to this package's tests.
+- [`docs/extend/plugin-development.md`](../../docs/extend/plugin-development.md) — plugin authoring walkthrough with cross-references to this package's tests.

@@ -3,15 +3,15 @@ layout: home
 
 hero:
   name: Aburi
-  text: Semantic IR extraction for high-level code review
-  tagline: Read pull requests at the level of business logic, control flow, and module boundaries — not raw diffs.
+  text: See what a pull request did
+  tagline: It reads a change the way a senior reviewer does, then writes the result as Markdown your CI can gate on.
   image:
     light: /brand/mark.svg
     dark: /brand/mark-dark.svg
     alt: Aburi
   actions:
     - theme: brand
-      text: Getting started
+      text: Get started
       link: /guide/getting-started
     - theme: alt
       text: What is Aburi?
@@ -22,21 +22,15 @@ hero:
 
 features:
   - icon: 🔍
-    title: Static analysis, not an LLM judge
-    details: Parses with tree-sitter, matches Symbols across revisions with a 5-stage semantic diff, and emits a deterministic JSON IR. Same input, same output — every time.
-  - icon: 🧭
-    title: Diffs that mean something
-    details: A file rename with unchanged logic is `moved`, not `removed + added`. A new validation guard is `changed` with `logicChanged` — and CI can gate on exactly that.
-  - icon: 🧹
-    title: Boilerplate dropped, signal kept
-    details: Interfaces, re-exports, and empty bodies are dropped from the diff so reviewers only see the changes that carry meaning.
+    title: A diff that survives refactoring
+    details: Move a file, rename a variable, reformat a body, and Aburi still recognises the same code. Only the changes that alter behaviour reach the report.
   - icon: 🚦
-    title: CI gates in one flag
-    details: "`aburi diff main..HEAD --fail-on 'changed,removed:>5'` — exit code 3 trips your pipeline. A GitHub Action posts the Markdown report as a PR comment."
+    title: One flag makes it a CI gate
+    details: Add --fail-on removed and your pipeline fails when a symbol disappears. The bundled GitHub Action posts the report as a pull request comment.
   - icon: 🧩
-    title: Pluggable by design
-    details: Language, framework, and effects plugins share a manifest contract with namespace ownership enforced at load time. TypeScript, NestJS, Next.js, and Prisma ship first-party.
-  - icon: 📄
-    title: One IR, many views
-    details: Everything downstream of `aburi.ir.v1.json` is deterministically derived — workspace overview, per-component detail, PR diff, and per-Symbol explain views.
+    title: Knows your framework
+    details: Aburi recognises NestJS routes, Next.js App Router files, Express handlers, React components, and Prisma and Drizzle queries out of the box.
+  - icon: 🔁
+    title: Deterministic, no LLM
+    details: Static analysis with tree-sitter. The same commit always produces the same report, so a difference between two runs is a real difference.
 ---

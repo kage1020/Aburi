@@ -1,88 +1,86 @@
 # What is Aburi?
 
-Aburi extracts a **semantic intermediate representation (IR)** from source code
-so reviewers can read pull requests at the level of business logic, control
-flow, and module boundaries instead of raw diffs.
+Aburi is a command-line tool that reads your source code and tells you what a
+change did.
 
-It reproduces, as a tool, the process a senior engineer performs mentally during
-code review: strip the decoration and look only at meaningful control flow,
-domain rules, and module boundaries.
+Run it on a pull request and you get a Markdown summary: this endpoint is new,
+this method now writes to the database, this validation guard disappeared, these
+files only moved. Your CI can fail the build on any of it.
 
-Aburi is a **static analyser**, not an LLM judge. It parses with tree-sitter,
-matches Symbols across revisions with a 5-stage semantic diff, and emits a JSON
-IR plus a decision-focused Markdown projection that CI can gate on. The output
-is fully deterministic: the same IR in always produces the same Markdown and
-the same diff out.
+## The problem with `git diff`
 
-## Why not just `git diff`?
+Open a 2,000-line diff and you have to reconstruct the intent from the text.
+Two things get in your way.
 
-`git diff` shows *what changed textually*. Aburi shows *what changed
-semantically*:
+**The noise outweighs the signal.** A formatting pass, a rename, or a file move
+fills the diff with changes that carry no meaning, and you read them anyway.
 
-- A file rename with unchanged logic surfaces as `moved: 1` — not
-  `removed + added`.
-- Adding a validation guard to a method surfaces as
-  `changed: 1, logicChanged: true` — and can be gated in CI via
-  `--fail-on changed:>0`.
-- Boilerplate (interfaces, re-exports, empty bodies) is dropped from the diff
-  so the reviewer sees only the changes that carry meaning.
-- A refactor that stubs 12 method bodies surfaces as
-  `dropped-toggled:to-dropped: 12` with a single-token CI gate
-  (`--fail-on dropped-toggled:to-dropped:>10`).
+**The signal looks like the noise.** A single added `if` that skips a permission
+check looks the same as a single added `if` that fixes a typo.
 
-## Primary use cases
+Aburi separates the two. It parses both revisions, matches functions and methods
+across them, then compares what they *do*: their signature, their control flow,
+the effects they perform.
 
-- Review large AI-generated implementation diffs at business-logic and
-  architecture granularity.
-- Help newcomers quickly understand the structure of a large codebase.
-- Visualise per-PR change impact as a semantic diff instead of changed lines.
+## What the report looks like
 
-Aburi is optimised for **time-series comparison within one project** (PR diffs,
-release-to-release, historical versions). Cross-project comparison is
-secondary.
+```md
+# Aburi diff: main..HEAD
 
-## Architecture at a glance
+**Summary**: +2 added · -1 removed · ~3 changed · 1 moved
 
-```
-source files
-  ↓ (@aburi/lang-typescript, @aburi/lang-*)          tree-sitter parseFile / extractSymbols
-  ↓ (@aburi/framework-nestjs, @aburi/framework-next) classifySymbol → extKind (framework:*)
-  ↓ (@aburi/effects-prisma, @aburi/effects-nest)     classifyCall → Effect (db.read / event.publish / …)
-  ↓ (@aburi/core scan)                               walkBody → Rules + Calls + Effects
-  ↓                                                  drop rules (interfaces, empty bodies, re-exports)
-  ↓                                                  fingerprint per Symbol (api / logic / syntax)
-  ↓                                                  IR integrity check (ir-schema.md §14)
-  ↓
-aburi.ir.v1.json  ───────────────────────────────────  Source of Truth (L3)
-  │
-  ├─ @aburi/markdown-projection  workspace.md / component/*.md   (L0 / L1 / L2 views)
-  ├─ @aburi/diff                 5-stage matcher → aburi.diff.v1  (base IR + head IR → diff)
-  └─ @aburi/cli explain          per-Symbol Markdown detail
+## ⚠ API changes
+
+### `submitOrder` *(function)*
+**File**: `src/app/orders/actions.ts:18`
+
+- signature.outputs: `Promise<Order>` → `Promise<OrderWithReceipt>`
+- signature.throws added: `PaymentDeclined`
+
+## 🔧 Logic changes
+
+### `POST` *(function)*
+**File**: `src/app/api/orders/route.ts:9`
+
+- rules removed:
+  - guard: `session.user.role !== 'admin'` (L14)
+- effects added:
+  - db.write: `prisma.auditLog.create` (L31)
 ```
 
-Everything downstream of `aburi.ir.v1.json` is deterministically derived from
-it. The full design rationale lives in the [design overview](/design/overview).
+That deleted guard is a single red line somewhere in the raw diff. Aburi gives
+it a heading.
 
-## Package matrix
+[Reading the report](/guide/reading-the-report) walks through every section.
 
-| Package | Layer | What it does |
-|---|---|---|
-| `@aburi/types` | Foundation | Schema-generated IR / config / diff / plugin types + hand-written plugin interfaces. |
-| `@aburi/plugin-registry` | Foundation | Plugin manifest validator + vocab registry (owned extKinds / effect ids / namespaces). |
-| `@aburi/config` | Foundation | JSONC + ajv-validated `aburi.json` loader with framework-hint normalisation. |
-| `@aburi/core` | Foundation | Symbol ID generation, canonical JSON, the IR invariants, autodetect, scan orchestration. |
-| `@aburi/lang-typescript` | Language | TS/TSX language plugin (tree-sitter WASM), JSDoc-aware signature + throws, drop-hint contract. |
-| `@aburi/framework-nestjs` | Framework | `@Module` / `@Controller` / `@Injectable` / HTTP + WS + pattern decorators → `framework:nestjs:*` extKinds. |
-| `@aburi/framework-next` | Framework | App Router files (page / layout / route / …) → `framework:next:*` extKinds. |
-| `@aburi/effects-prisma` | Effects | `prisma.<model>.<verb>` / `$transaction` → `db.read` / `db.write` / `db.transaction`. |
-| `@aburi/effects-nest` | Effects | `EventEmitter2` / `eventBus` `.emit(...)` → `event.publish`. |
-| `@aburi/diff` | Diff | 5-stage matcher (id / git-rename / logic-fingerprint / name+signature / dropped-weak) + status + delta. |
-| `@aburi/markdown-projection` | Projection | Workspace / component / diff / explain Markdown views + `--fail-on` formatter. |
-| `@aburi/cli` | CLI | `aburi init / scan / diff / explain`, git-worktree ref diff, exit codes, `--fail-on` gate. |
-| `@aburi/github-action` | Delivery | Composite GH Action wrapper around the CLI, marker-based PR comment upsert. |
+## What makes it usable in CI
 
-## Next steps
+**It is deterministic.** No model, no sampling. The same commit produces the
+same bytes, so you can compare two reports to each other and trust the
+difference.
 
-- [Getting started](/guide/getting-started) — install, init, scan, diff.
-- [CI integration](/guide/ci-integration) — gate PRs and post review comments.
-- [CLI reference](/cli-reference) — every flag and exit code.
+**It survives refactoring.** Rename a file without touching its logic and you
+get `moved`, where a line-based diff gives you a delete plus an add.
+
+**It ignores boilerplate.** Interfaces, DTOs, re-exports, and empty bodies drop
+out before the comparison, so they stay out of your summary.
+
+**You can gate on any of it.** Pick a category the report counts and give it a
+threshold: `--fail-on 'removed,changed:>20'`.
+
+## What it will not do for you
+
+Aburi describes a change. You decide what to do about it. It holds no opinion
+on your style, suggests no fixes, and calls no LLM, so the judgement stays with
+you or with whatever tool you feed the report to.
+
+Linting belongs to Biome and ESLint. Aburi stays out of their way.
+
+## Where to go next
+
+- [Getting started](/guide/getting-started) walks you from install to your
+  first diff.
+- [Supported stacks](/guide/supported-stacks) tells you whether your framework
+  is covered.
+- [CI integration](/guide/ci-integration) posts the report on every pull
+  request.

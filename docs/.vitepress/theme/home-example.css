@@ -1,0 +1,159 @@
+/**
+ * Styles for the git-diff / aburi-diff comparison under the home hero. Every
+ * rule stays inside `.home-example`, since this file is global rather than
+ * scoped to a component.
+ *
+ * The hero gives back the padding it would otherwise spend below its buttons,
+ * so the comparison reaches the first view on a laptop screen.
+ */
+
+@media (min-width: 960px) {
+  .VPHome .VPHero {
+    padding-top: calc(var(--vp-nav-height) + var(--vp-layout-top-height, 0px) + 32px);
+    padding-bottom: 24px;
+  }
+}
+
+.home-example {
+  margin: 0 auto;
+  max-width: 1152px;
+  padding: 0 24px 24px;
+}
+
+@media (min-width: 640px) {
+  .home-example {
+    padding: 0 48px 24px;
+  }
+}
+
+@media (min-width: 960px) {
+  .home-example {
+    padding: 0 64px 8px;
+  }
+}
+
+.home-example .panes {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 960px) {
+  .home-example .panes {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+}
+
+.home-example .pane {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background-color: var(--vp-c-bg-alt);
+  overflow: hidden;
+}
+
+.home-example .pane-accent {
+  border-color: var(--vp-c-brand-soft);
+}
+
+.home-example .pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--vp-c-divider);
+  background-color: var(--vp-c-bg-soft);
+}
+
+.home-example .pane-label {
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.home-example .pane-accent .pane-label {
+  color: var(--vp-c-brand-1);
+}
+
+.home-example .pane-file {
+  font-family: var(--vp-font-family-mono);
+  font-size: 11px;
+  color: var(--vp-c-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-example .pane-body {
+  flex: 1;
+  margin: 0;
+  padding: 10px 0;
+  overflow-x: auto;
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.home-example .pane-body code {
+  display: block;
+  white-space: pre;
+}
+
+.home-example .pane-body span {
+  display: block;
+  padding: 0 14px;
+}
+
+/* A line with no text still has to take a line's height. */
+.home-example .pane-body .blank::after {
+  content: " ";
+}
+
+.home-example .pane-body .ctx {
+  color: var(--vp-c-text-3);
+}
+
+.home-example .pane-body .del {
+  color: var(--vp-c-red-1);
+  background-color: var(--vp-c-red-soft);
+}
+
+.home-example .pane-body .add {
+  color: var(--vp-c-green-1);
+  background-color: var(--vp-c-green-soft);
+}
+
+.home-example .pane-body .head {
+  font-weight: 600;
+  color: var(--vp-c-brand-1);
+}
+
+.home-example .pane-body .sym {
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.home-example .pane-body .dim {
+  color: var(--vp-c-text-3);
+}
+
+.home-example .pane-foot {
+  margin: 0;
+  padding: 7px 14px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: 11px;
+  color: var(--vp-c-text-3);
+}
+
+.home-example .caption {
+  margin: 16px auto 0;
+  max-width: 64ch;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+}

@@ -142,7 +142,7 @@ describe("aburi scan — a name no Symbol id can hold", () => {
     // Windows. `id.test.ts` covers `:` without touching a filesystem.
     await populate(scratch, ["ok.stub"])
     // Under a directory, so `explain` routes it as a path rather than as a name to match on
-    // (`docs/cli-reference.md` — the file arm wants a `/`).
+    // (`docs/reference/cli.md` — the file arm wants a `/`).
     await mkdir(resolve(scratch, "src"), { recursive: true })
     await writeFile(resolve(scratch, "src", "od#d.stub"), "odd", "utf8")
     const warnings: string[] = []

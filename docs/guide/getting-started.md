@@ -1,78 +1,105 @@
 # Getting started
 
-## Requirements
+Five minutes from install to your first semantic diff. You need Node.js 24 or
+newer and a git repository.
 
-- Node.js `>= 24`
-- A package manager (examples below use pnpm)
+## 1. Install
 
-## Install
+Install the CLI and a language plugin, then add framework and effects plugins
+for whatever your project uses. [Supported stacks](/guide/supported-stacks)
+lists them all.
 
-```bash
-pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs
+::: code-group
+
+```bash [pnpm]
+pnpm add -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
 ```
 
-Pick the plugins that match your stack:
+```bash [npm]
+npm install -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
+```
 
-- Frameworks: `@aburi/framework-nestjs`, `@aburi/framework-next`
-- Effects: `@aburi/effects-prisma`, `@aburi/effects-nest`
+```bash [yarn]
+yarn add -D @aburi/cli @aburi/lang-typescript \
+  @aburi/framework-next @aburi/framework-react
+```
 
-## Initialise
+:::
+
+## 2. Create a config
 
 ```bash
 pnpm exec aburi init
 ```
 
-`aburi init` autodetects the workspace (pnpm / npm workspaces), languages,
-frameworks, and components, and writes `aburi.json`:
+`init` looks at your repository, works out the workspace layout, languages, and
+frameworks, and writes `aburi.json`:
 
 ```jsonc
 {
   "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
-  "frameworks": ["framework-nestjs"]
+  "frameworks": ["framework-next", "framework-react"]
 }
 ```
 
-Add `--with-suggestions` to get install-command hints for detected first-party
-plugins as JSONC comments.
+That is the whole file. Everything else has a default, and
+[Configuration](/guide/configuration) covers the knobs you may want later.
 
-## Scan the workspace
+::: tip
+`aburi init --with-suggestions` adds a comment naming the plugin packages it
+found in your project but not in your dependencies.
+:::
+
+## 3. Scan
 
 ```bash
 pnpm exec aburi scan
 ```
 
-This emits:
+Three things land in `out/`:
 
-- `out/aburi.ir.json` — canonical JSON, `aburi.ir.v1` schema (the source of truth)
-- `out/workspace.md` — L0 workspace overview
-- `out/components/*.md` — L1 + L2 per-component detail
+| File | What it is |
+|---|---|
+| `aburi.ir.json` | The analysis itself, as JSON. Everything else derives from it. |
+| `workspace.md` | One page covering the whole repository: components, dependencies, effect surface. |
+| `components/*.md` | Per-component detail. Every kept symbol with its boundaries, rules, and effects. |
 
-## Diff a PR
+Open `workspace.md` first. On a codebase you have never seen, it is the fastest
+map you will get.
+
+## 4. Diff two revisions
 
 ```bash
-# Quote --fail-on: `>` is a shell redirect if left bare.
 pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
 ```
 
-This emits:
+You get `out/diff.md`, the report you hand to a reviewer, and `out/diff.json`
+beside it. A tripped `--fail-on` clause exits `3`, which is what CI gates on.
+See [CI integration](/guide/ci-integration).
 
-- `out/diff.json` — `aburi.diff.v1` schema
-- `out/diff.md` — review-facing Markdown
+::: warning Quote the `--fail-on` value
+`>` is a redirect in every shell. `--fail-on changed:>5` writes a file called
+`5`. `--fail-on 'changed:>5'` sets a threshold.
+:::
 
-Exit code `0` means clean; `3` means a `--fail-on` gate tripped — that's the
-code CI pipelines gate on. See the [CLI reference](/cli-reference) for the full
-exit-code table and `--fail-on` grammar.
+[Reading the report](/guide/reading-the-report) explains what comes out.
 
-## Explain a single Symbol
+## 5. Zoom in on one symbol
+
+When the diff flags something and you want the full picture:
 
 ```bash
-pnpm exec aburi explain applyRefund
-pnpm exec aburi explain src/billing/billing.service.ts
-pnpm exec aburi explain 'ts:src/billing/billing.service.ts#BillingService.applyRefund'
+pnpm exec aburi explain submitOrder
 ```
 
-## Next steps
+Pass a symbol name, a file path, or a full symbol id. Aburi works out which one
+you meant.
 
-- [CI integration](/guide/ci-integration) — wire the diff gate into GitHub Actions.
-- [Plugin development](/plugin-development) — add support for your language or framework.
+## Where to go next
+
+- [Reading the report](/guide/reading-the-report) explains each section.
+- [CI integration](/guide/ci-integration) runs this on every pull request.
+- [CLI reference](/reference/cli) lists every flag and exit code.

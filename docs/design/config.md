@@ -16,7 +16,7 @@ References:
 - File name: `aburi.json` or `aburi.jsonc`
 - Placement: workspace root (same level as `pnpm-workspace.yaml` / `package.json`, etc.).
   A config in a subdirectory is also honoured — discovery walks up from `cwd` (§5.2 of
-  [`cli-reference.md`](../cli-reference)) — but every relative path *inside* it (`ignore`,
+  [CLI reference](/reference/cli)) — but every relative path *inside* it (`ignore`,
   `components[].roots`, relative plugin refs) still resolves against the workspace root,
   and the scan still covers the whole workspace. `aburi scan` warns when the two differ.
 - Format: JSONC (comments allowed) or JSON

@@ -33,8 +33,8 @@ export default defineConfig({
     logo: { light: "/brand/mark.svg", dark: "/brand/mark-dark.svg", alt: "Aburi" },
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
-      { text: "Reference", link: "/cli-reference" },
-      { text: "Design", link: "/design/overview" },
+      { text: "Reference", link: "/reference/cli" },
+      { text: "Extend", link: "/extend/architecture" },
       { text: "Roadmap", link: "/roadmap" },
     ],
     sidebar: [
@@ -43,18 +43,30 @@ export default defineConfig({
         items: [
           { text: "What is Aburi?", link: "/guide/what-is-aburi" },
           { text: "Getting started", link: "/guide/getting-started" },
+          { text: "Reading the report", link: "/guide/reading-the-report" },
+          { text: "Supported stacks", link: "/guide/supported-stacks" },
+          { text: "Configuration", link: "/guide/configuration" },
           { text: "CI integration", link: "/guide/ci-integration" },
         ],
       },
       {
         text: "Reference",
+        items: [{ text: "CLI", link: "/reference/cli" }],
+      },
+      {
+        text: "Extend",
         items: [
-          { text: "CLI reference", link: "/cli-reference" },
-          { text: "Plugin development", link: "/plugin-development" },
+          { text: "Architecture", link: "/extend/architecture" },
+          { text: "Plugin development", link: "/extend/plugin-development" },
         ],
       },
       {
-        text: "Design",
+        text: "Project",
+        items: [{ text: "Roadmap", link: "/roadmap" }],
+      },
+      {
+        text: "Design notes",
+        collapsed: true,
         items: [
           { text: "Overview", link: "/design/overview" },
           { text: "IR schema", link: "/design/ir-schema" },
@@ -71,11 +83,8 @@ export default defineConfig({
           { text: "Markdown projection", link: "/design/markdown-projection" },
           { text: "CLI spec", link: "/design/cli-spec" },
           { text: "Config", link: "/design/config" },
+          { text: "LSP enrichment", link: "/design/lsp-enrichment" },
         ],
-      },
-      {
-        text: "Project",
-        items: [{ text: "Roadmap", link: "/roadmap" }],
       },
     ],
     socialLinks: [{ icon: "github", link: "https://github.com/kage1020/Aburi" }],

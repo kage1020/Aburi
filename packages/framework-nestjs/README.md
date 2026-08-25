@@ -36,7 +36,7 @@ import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 `aburi init` writes `"framework-nestjs"` into `aburi.json` under `frameworks`,
 which is the plugin manifest name the loader resolves (to `@aburi/framework-nestjs`
 via the bare-name prefix — see
-[`docs/plugin-development.md`](../../docs/plugin-development.md)). The short
+[`docs/extend/plugin-development.md`](../../docs/extend/plugin-development.md)). The short
 framework id `"nestjs"` that component autodetect uses stays inside
 `components[].frameworks`; the two fields carry different vocabularies and no
 hand-editing is needed.
