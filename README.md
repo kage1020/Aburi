@@ -114,4 +114,4 @@ would love new language, framework, and effects plugins.
 
 ## License
 
-MIT
+Apache License 2.0. See [`LICENSE`](LICENSE).

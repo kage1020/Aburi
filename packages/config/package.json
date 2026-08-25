@@ -2,7 +2,7 @@
   "name": "@aburi/config",
   "version": "0.1.1",
   "description": "Aburi project config loader: JSONC parser + ajv strict validation of aburi.json against aburi.config.v1.json, frameworkHints hint:-prefix normalization, and workspace-aware config file discovery",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/config#readme",
   "bugs": {

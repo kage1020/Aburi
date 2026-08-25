@@ -2,7 +2,7 @@
   "name": "@aburi/types",
   "version": "0.2.0",
   "description": "Aburi shared types: schema-generated IR / config / diff / plugin manifest, plus hand-written plugin interface signatures",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/types#readme",
   "bugs": {
