@@ -614,4 +614,5 @@ export const __testing = {
   toKebabCase,
   collectFrameworks,
   collectPublicApi,
+  manifestRank,
 }

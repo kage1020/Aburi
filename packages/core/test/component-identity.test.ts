@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Component } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { detectComponents } from "../src/index"
+import { __testing_component, detectComponents } from "../src/index"
 
 /**
  * A directory can be claimed by more than one detector, and then more than one manifest
@@ -41,6 +41,21 @@ async function billing(): Promise<Component> {
     throw new Error(`no component at apps/billing: ${JSON.stringify(components)}`)
   return found
 }
+
+describe("the manifest order", () => {
+  const { manifestRank } = __testing_component
+
+  it("ranks a manifest §4.1 does not name behind every one it does", async () => {
+    // No detector produces one today. The next one will — §4.1 lists `Cargo.toml`, `go.mod`
+    // and `pyproject.toml` — and until it is placed in the order, last is the answer that
+    // cannot move an id that a named manifest already decides.
+    expect(manifestRank("/w/apps/a/package.json")).toBe(0)
+    expect(manifestRank("/w/apps/a/project.json")).toBe(1)
+    expect(manifestRank("/w/apps/a/Cargo.toml")).toBeGreaterThan(
+      manifestRank("/w/apps/a/project.json"),
+    )
+  })
+})
 
 describe("a directory two detectors claim", () => {
   it("takes its id and name from the package manifest, not the nx project file", async () => {
