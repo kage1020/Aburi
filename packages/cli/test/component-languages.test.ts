@@ -128,6 +128,24 @@ describe("what a failed component resolution exits with", () => {
     expect((thrown as CliError).code).toBe("runtime-error")
   })
 
+  it("keeps the input error for a manifest that cannot be parsed", async () => {
+    // A manifest that is present and unreadable is the workspace being wrong, so §9's exit 2
+    // is what tells the reader to go and fix a file. Nothing put that code on the config side
+    // before, so even the pnpm manifest's own refusal exited 1.
+    await writeLanguage("src", ".ts")
+    await writeFileAt("pnpm-workspace.yaml", 'packages:\n  - "apps/*"\n')
+    await writeFileAt("apps/billing/package.json", "{ broken")
+
+    const thrown = await scannedLanguages({}).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("config-error")
+    expect((thrown as Error).message).toContain("package.json")
+  })
+
   it("keeps the input error for a component root the Document cannot hold", async () => {
     await writeLanguage("src", ".ts")
 

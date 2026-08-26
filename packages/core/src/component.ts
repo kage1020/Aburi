@@ -5,13 +5,9 @@ import { glob } from "tinyglobby"
 import { CoreError } from "./errors"
 import { makeComponentId, makeLanguageId } from "./id"
 import { CORE_IGNORE_PATTERNS } from "./scan/discover"
+import { describeThrown } from "./scan/faults"
 import { openGitignoreTree } from "./scan/gitignore"
-import {
-  detectManagers,
-  isDirectory,
-  type WorkspaceCandidate,
-  type WorkspaceManager,
-} from "./workspace"
+import { detectManagers, type WorkspaceCandidate, type WorkspaceManager } from "./workspace"
 
 /**
  * Language id assigned to each file extension when counting language frequency in a
@@ -142,18 +138,32 @@ const NPM_MANIFEST = "package.json"
 
 /**
  * Manifest filenames in the order component-detect.md §4.1 reads them for a Component's
- * identity. A directory two detectors claim is described by both of their manifests, and this
- * is which one answers first — by filename rather than by which detector arrived first, so
- * the order `detectManagers` happens to sort its tools in cannot move a Component's id.
+ * identity. A directory several detectors claim is described by all of their manifests, and
+ * this is which one answers first — by filename rather than by which detector arrived first,
+ * so the order `detectManagers` sorts its tools in cannot move a Component's id.
+ *
+ * The three §4.1 names no detector produces yet are listed anyway: a filename absent from
+ * this list is ordered after every name in it and against its peers alphabetically, which is
+ * deterministic but says nothing about what the manifest means.
  */
-const MANIFEST_PRIORITY: readonly string[] = [NPM_MANIFEST, "project.json"]
+const MANIFEST_PRIORITY: readonly string[] = [
+  NPM_MANIFEST,
+  "project.json",
+  "Cargo.toml",
+  "pyproject.toml",
+  "go.mod",
+]
 
 interface MergedCandidate {
   relativeRoot: string
   absoluteRoot: string
   managerTools: string[]
-  /** Every manifest that describes this directory, in `MANIFEST_PRIORITY` order. */
-  manifestPaths: string[]
+  /**
+   * The manifests describing this directory, by filename. Keyed rather than listed because
+   * the key is what decides the reading order and what `frameworks` and `publicApi` are
+   * looked up by, and a list would carry that meaning only in its index.
+   */
+  manifests: Map<string, string>
 }
 
 function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): MergedCandidate[] {
@@ -165,37 +175,67 @@ function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): Merge
         relativeRoot: c.relativeRoot,
         absoluteRoot: c.absoluteRoot,
         managerTools: [c.managerTool],
-        manifestPaths: [c.manifestPath],
+        manifests: new Map([[basename(c.manifestPath), c.manifestPath]]),
       })
       continue
     }
     if (!existing.managerTools.includes(c.managerTool)) existing.managerTools.push(c.managerTool)
-    if (!existing.manifestPaths.includes(c.manifestPath)) {
-      existing.manifestPaths.push(c.manifestPath)
-    }
-  }
-  for (const entry of byPath.values()) {
-    entry.manifestPaths.sort((a, b) => manifestRank(a) - manifestRank(b))
+    existing.manifests.set(basename(c.manifestPath), c.manifestPath)
   }
   return [...byPath.values()]
 }
 
-/** Where this manifest sits in §4.1's order; one past the end when it names none of them. */
-function manifestRank(path: string): number {
-  const rank = MANIFEST_PRIORITY.indexOf(basename(path))
-  return rank === -1 ? MANIFEST_PRIORITY.length : rank
+/**
+ * This candidate's manifests as `[filename, path]`, in the order §4.1 reads them. A filename
+ * the order does not name comes after every one it does, and against its peers by name — a
+ * decision that is at least the same on every machine.
+ */
+function orderedManifests(manifests: ReadonlyMap<string, string>): [string, string][] {
+  const ranked = [...manifests].filter(([kind]) => MANIFEST_PRIORITY.includes(kind))
+  ranked.sort(([a], [b]) => MANIFEST_PRIORITY.indexOf(a) - MANIFEST_PRIORITY.indexOf(b))
+  const unranked = [...manifests].filter(([kind]) => !MANIFEST_PRIORITY.includes(kind))
+  unranked.sort(([a], [b]) => compareString(a, b))
+  return [...ranked, ...unranked]
+}
+
+interface ReadManifest {
+  kind: string
+  manifest: ManifestIdentity | null
+}
+
+/**
+ * Every manifest describing this directory, parsed, in §4.1's reading order.
+ *
+ * The `package.json` under the candidate root is read whether or not a detector reported it.
+ * A directory holding one is an npm package however it was found, and letting the detector set
+ * decide otherwise makes a Component's identity depend on a file elsewhere in the workspace:
+ * `detectNx` reports the `project.json` alone, so in an nx workspace with no
+ * `pnpm-workspace.yaml` and no `workspaces` key every `package.json` in it would go unread —
+ * published name, frameworks and public API with it.
+ */
+async function readCandidateManifests(entry: MergedCandidate): Promise<ReadManifest[]> {
+  const paths = new Map(entry.manifests)
+  if (!paths.has(NPM_MANIFEST)) {
+    paths.set(NPM_MANIFEST, join(entry.absoluteRoot, NPM_MANIFEST))
+  }
+  return Promise.all(
+    orderedManifests(paths).map(async ([kind, path]) => ({
+      kind,
+      manifest: await readJsonManifest(path),
+    })),
+  )
 }
 
 async function buildComponent(
   entry: MergedCandidate,
   languages: readonly LanguageId[],
 ): Promise<Component> {
-  // Aligned with `manifestPaths` rather than compacted, so a manifest that failed to parse
-  // does not promote the one behind it into the npm manifest's place.
-  const manifests = await Promise.all(entry.manifestPaths.map(readJsonManifest))
-  const npmManifest = npmManifestOf(entry.manifestPaths, manifests)
-  const id = decideId(entry, manifests)
-  const name = decideName(entry, manifests)
+  const manifests = await readCandidateManifests(entry)
+  const npm = manifests.find((read) => read.kind === NPM_MANIFEST)
+  const npmManifest = asNpmManifest(npm?.manifest ?? null)
+  const declared = declaredNames(manifests.map((read) => read.manifest))
+  const id = decideId(entry, declared)
+  const name = decideName(entry, declared)
   const frameworks = collectFrameworks(npmManifest)
   const publicApi = collectPublicApi(npmManifest)
   const component: Component = {
@@ -217,16 +257,16 @@ async function buildSingleProjectComponent(
   workspaceRoot: string,
   languages: readonly LanguageId[],
 ): Promise<Component> {
-  const manifestPath = join(workspaceRoot, NPM_MANIFEST)
-  const manifest = (await pathExists(manifestPath)) ? await readJsonManifest(manifestPath) : null
+  const manifest = await readJsonManifest(join(workspaceRoot, NPM_MANIFEST))
   const fakeEntry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot"> = {
     relativeRoot: ".",
     absoluteRoot: workspaceRoot,
   }
-  const id = decideId(fakeEntry, [manifest])
-  const name = decideName(fakeEntry, [manifest])
-  const frameworks = collectFrameworks(manifest)
-  const publicApi = collectPublicApi(manifest)
+  const declared = declaredNames([manifest])
+  const id = decideId(fakeEntry, declared)
+  const name = decideName(fakeEntry, declared)
+  const frameworks = collectFrameworks(asNpmManifest(manifest))
+  const publicApi = collectPublicApi(asNpmManifest(manifest))
   const component: Component = {
     id,
     name,
@@ -241,8 +281,14 @@ async function buildSingleProjectComponent(
 }
 
 /**
- * Pick the Component id, in the priority order of component-detect.md §4.1. Only steps 1 and
- * 5 of that list are implemented today — there is no Cargo / pyproject / go.mod branch yet.
+ * Pick the Component id, in the priority order of component-detect.md §4.1. Of the sources
+ * that list names, `package.json#name` and `project.json#name` have detectors today; the
+ * Cargo, pyproject and go.mod branches arrive with theirs, and the directory name is the last
+ * resort for every candidate.
+ *
+ * A declared name that yields no id is not an answer either, so the next one is asked before
+ * the directory name is — `@scope/` names a package badly enough that nothing can be built
+ * from it, and a `project.json` beside it may name the same directory perfectly well.
  *
  * The result goes through `makeComponentId`, so a name that kebab-cases into something
  * `components[].id` cannot hold aborts detection instead of producing an IR that fails its
@@ -252,10 +298,9 @@ async function buildSingleProjectComponent(
  */
 function decideId(
   entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">,
-  manifests: readonly (PackageJsonShape | null)[],
+  declaredNames: readonly string[],
 ): ComponentId {
-  const declared = declaredName(manifests)
-  if (declared !== null) {
+  for (const declared of declaredNames) {
     const fromManifest = toIdFromNpmName(declared)
     if (fromManifest !== null) {
       return componentIdOrThrow(fromManifest, `package name "${declared}"`, entry.relativeRoot)
@@ -285,24 +330,30 @@ function componentIdOrThrow(candidate: string, origin: string, root: string): Co
 
 function decideName(
   entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">,
-  manifests: readonly (PackageJsonShape | null)[],
+  declaredNames: readonly string[],
 ): string {
-  return declaredName(manifests) ?? directoryLeaf(entry)
+  return declaredNames[0] ?? directoryLeaf(entry)
 }
 
 /**
- * The first name any of these manifests declares, in the order they were ranked.
+ * Every name these manifests declare, in the order they were read.
  *
  * §4.1 and §4.2 are priority orders over *sources*, so a manifest that carries no name is not
  * an answer — the next one is asked before the directory name is. That matters where the two
  * disagree about what exists rather than about the value: an nx `project.json` names a project
  * even for a directory whose `package.json` is a private stub with no `name` at all.
+ *
+ * The `typeof` is not decoration. A manifest is JSON someone else's tool wrote, `name` is
+ * whatever that JSON holds, and an array has a `length` — enough to pass a truthiness check
+ * and then fail inside the id derivation, which reads it as a string.
  */
-function declaredName(manifests: readonly (PackageJsonShape | null)[]): string | null {
+function declaredNames(manifests: readonly (ManifestIdentity | null)[]): string[] {
+  const names: string[] = []
   for (const manifest of manifests) {
-    if (manifest?.name !== undefined && manifest.name.length > 0) return manifest.name
+    const name = manifest?.name
+    if (typeof name === "string" && name.length > 0) names.push(name)
   }
-  return null
+  return names
 }
 
 /** The trailing segment of the candidate's own path, or the root's directory name for `.`. */
@@ -424,8 +475,22 @@ function frequentLanguages(counts: ReadonlyMap<LanguageId, number>): LanguageId[
   return out.sort(compareString)
 }
 
-interface PackageJsonShape {
+/**
+ * What every manifest kind has in common — the `name` §4.1 and §4.2 read. It is all a
+ * `project.json` shares with a `package.json`, so it is what a parse is typed as until
+ * something establishes which file it came from.
+ */
+interface ManifestIdentity {
   name?: string
+}
+
+/**
+ * An npm manifest. `dependencies` and `exports` are npm's fields, so a value of this type is
+ * one that came from a `package.json` — `asNpmManifest` is the only place that is decided,
+ * which is what stops `collectFrameworks` being handed an nx project file whose targets
+ * happen to hold a key of that name.
+ */
+interface NpmManifest extends ManifestIdentity {
   dependencies?: Record<string, string>
   devDependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
@@ -437,27 +502,59 @@ interface PackageJsonShape {
   typings?: string
 }
 
-/** The parse of this candidate's `package.json`, or null when it has none or it did not parse. */
-function npmManifestOf(
-  paths: readonly string[],
-  manifests: readonly (PackageJsonShape | null)[],
-): PackageJsonShape | null {
-  const index = paths.findIndex((path) => basename(path) === NPM_MANIFEST)
-  return index === -1 ? null : (manifests[index] ?? null)
+/** A parse already known to have come from a `package.json`, read as the npm manifest it is. */
+function asNpmManifest(manifest: ManifestIdentity | null): NpmManifest | null {
+  return manifest
 }
 
-async function readJsonManifest(path: string): Promise<PackageJsonShape | null> {
+/**
+ * Parse a manifest, or return null when there is none there.
+ *
+ * Absent is silent and present-but-unusable is not, which is the line `readGitignore` and
+ * `detectPnpm` already draw: a directory without a `package.json` is the ordinary case and
+ * says nothing, while one whose manifest cannot be read has an identity that this run cannot
+ * see. Swallowing that would answer with the next manifest's name, or with the directory's,
+ * and nothing would say the published name was ever there — the misattribution
+ * `assertInsideWorkspace` refuses for a neighbouring case in the same package.
+ *
+ * A parse that is not an object is a manifest that declares nothing rather than one that
+ * cannot be read, and is null: `workspace.ts` reads the root's own `package.json` the same
+ * way when deciding whether it declares workspaces.
+ */
+async function readJsonManifest(path: string): Promise<ManifestIdentity | null> {
+  let raw: string
   try {
-    const raw = await readFile(path, "utf8")
-    const parsed = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
-    return parsed as PackageJsonShape
-  } catch {
-    return null
+    raw = await readFile(path, "utf8")
+  } catch (cause) {
+    if (isMissingFile(cause)) return null
+    throw new CoreError(
+      `Manifest at ${path} could not be read: ${describeThrown(cause)}`,
+      { code: "workspace-manifest-malformed", value: path },
+      { cause },
+    )
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (cause) {
+    throw new CoreError(
+      `Failed to parse JSON at ${path}`,
+      { code: "workspace-manifest-malformed", value: path },
+      { cause },
+    )
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null
+  return parsed as ManifestIdentity
 }
 
-function collectFrameworks(manifest: PackageJsonShape | null): string[] {
+/** Whether this is the filesystem saying there is nothing at that path. */
+function isMissingFile(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return false
+  const code = (error as { code?: unknown }).code
+  return code === "ENOENT" || code === "ENOTDIR"
+}
+
+function collectFrameworks(manifest: NpmManifest | null): string[] {
   if (manifest === null) return []
   const depKeys = new Set<string>()
   for (const block of [
@@ -485,7 +582,7 @@ function collectFrameworks(manifest: PackageJsonShape | null): string[] {
  * read off disk and is therefore normalized — so an un-normalized entry here reports a
  * `publicApiChanged` for a component nobody touched.
  */
-function collectPublicApi(manifest: PackageJsonShape | null): string[] {
+function collectPublicApi(manifest: NpmManifest | null): string[] {
   if (manifest === null) return []
   const found = new Set<string>()
   collectFromExports(manifest.exports, found)
@@ -587,23 +684,6 @@ function applyNumericSuffixPass(components: Component[]): void {
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  return isDirectory(path)
-    .then(
-      (b) => b,
-      () => false,
-    )
-    .then(async (asDir) => {
-      if (asDir) return true
-      try {
-        await readFile(path, "utf8")
-        return true
-      } catch {
-        return false
-      }
-    })
-}
-
 function compareString(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
@@ -614,5 +694,4 @@ export const __testing = {
   toKebabCase,
   collectFrameworks,
   collectPublicApi,
-  manifestRank,
 }

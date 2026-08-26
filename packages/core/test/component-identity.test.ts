@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Component } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { __testing_component, detectComponents } from "../src/index"
+import { CoreError, detectComponents } from "../src/index"
 
 /**
  * A directory can be claimed by more than one detector, and then more than one manifest
@@ -23,39 +23,29 @@ afterEach(async () => {
 })
 
 async function writeJson(relativePath: string, value: unknown): Promise<void> {
+  await writeRaw(relativePath, JSON.stringify(value))
+}
+
+async function writeRaw(relativePath: string, body: string): Promise<void> {
   const path = join(tmp, relativePath)
   await mkdir(join(path, ".."), { recursive: true })
-  await writeFile(path, JSON.stringify(value), "utf8")
+  await writeFile(path, body, "utf8")
 }
 
 /** A workspace where `apps/billing` is declared by pnpm and by nx at once. */
 async function writeDualDetectedWorkspace(): Promise<void> {
-  await writeFile(join(tmp, "pnpm-workspace.yaml"), 'packages:\n  - "apps/*"\n', "utf8")
+  await writeRaw("pnpm-workspace.yaml", 'packages:\n  - "apps/*"\n')
   await writeJson("nx.json", {})
 }
 
 async function billing(): Promise<Component> {
   const components = await detectComponents({ workspaceRoot: tmp })
   const found = components.find((component) => component.roots[0] === "apps/billing")
-  if (found === undefined)
+  if (found === undefined) {
     throw new Error(`no component at apps/billing: ${JSON.stringify(components)}`)
+  }
   return found
 }
-
-describe("the manifest order", () => {
-  const { manifestRank } = __testing_component
-
-  it("ranks a manifest §4.1 does not name behind every one it does", async () => {
-    // No detector produces one today. The next one will — §4.1 lists `Cargo.toml`, `go.mod`
-    // and `pyproject.toml` — and until it is placed in the order, last is the answer that
-    // cannot move an id that a named manifest already decides.
-    expect(manifestRank("/w/apps/a/package.json")).toBe(0)
-    expect(manifestRank("/w/apps/a/project.json")).toBe(1)
-    expect(manifestRank("/w/apps/a/Cargo.toml")).toBeGreaterThan(
-      manifestRank("/w/apps/a/project.json"),
-    )
-  })
-})
 
 describe("a directory two detectors claim", () => {
   it("takes its id and name from the package manifest, not the nx project file", async () => {
@@ -84,14 +74,23 @@ describe("a directory two detectors claim", () => {
     expect(component.publicApi).toEqual(["src/index.ts"])
   })
 
-  it("stays one component, under both tools", async () => {
+  it("keeps the npm fields out of reach of a package manifest that declares nothing", async () => {
+    // Valid JSON that is not an object declares nothing, and the project file behind it must
+    // not be promoted into its place: those two fields are npm's, and an nx target option
+    // spelled `dependencies` is not one.
     await writeDualDetectedWorkspace()
-    await writeJson("apps/billing/package.json", { name: "billing" })
-    await writeJson("apps/billing/project.json", { name: "billing" })
+    await writeRaw("apps/billing/package.json", "[]")
+    await writeJson("apps/billing/project.json", {
+      name: "billing-web",
+      dependencies: { "@nestjs/core": "^10.0.0" },
+      exports: { ".": "./src/index.ts" },
+    })
 
-    const components = await detectComponents({ workspaceRoot: tmp })
+    const component = await billing()
 
-    expect(components.filter((component) => component.id === "billing")).toHaveLength(1)
+    expect(component.id).toBe("billing-web")
+    expect(component.frameworks).toBeUndefined()
+    expect(component.publicApi).toBeUndefined()
   })
 
   it("falls through to the project file for a name the package manifest does not carry", async () => {
@@ -99,6 +98,33 @@ describe("a directory two detectors claim", () => {
     // not an answer, and the directory name is the last resort rather than the second.
     await writeDualDetectedWorkspace()
     await writeJson("apps/billing/package.json", { private: true })
+    await writeJson("apps/billing/project.json", { name: "billing-web" })
+
+    const component = await billing()
+
+    expect(component.id).toBe("billing-web")
+    expect(component.name).toBe("billing-web")
+  })
+
+  it("asks the next manifest for a name that answers §4.2 but yields no id", async () => {
+    // `@scope/` is a name, so §4.2 has its answer — and nothing can be built from it, so
+    // §4.1 does not. Stopping there would take the id from the directory while a project
+    // file beside it names the same directory usably.
+    await writeDualDetectedWorkspace()
+    await writeJson("apps/billing/package.json", { name: "@scope/" })
+    await writeJson("apps/billing/project.json", { name: "billing-web" })
+
+    const component = await billing()
+
+    expect(component.id).toBe("billing-web")
+    expect(component.name).toBe("@scope/")
+  })
+
+  it("passes over a name that is not a string rather than crashing on it", async () => {
+    // A manifest is JSON another tool wrote. An array has a `length`, which is as far as a
+    // truthiness check gets before the id derivation reads it as a string.
+    await writeDualDetectedWorkspace()
+    await writeJson("apps/billing/package.json", { name: ["billing-api"] })
     await writeJson("apps/billing/project.json", { name: "billing-web" })
 
     const component = await billing()
@@ -119,7 +145,26 @@ describe("a directory only nx claims", () => {
     expect(component.name).toBe("billing-web")
   })
 
-  it("reports no frameworks and no public API from it", async () => {
+  it("reads the package manifest beside it that no detector reported", async () => {
+    // `detectNx` reports the project file alone. Leaving it at that would make a Component's
+    // identity depend on whether an unrelated manifest exists elsewhere in the workspace.
+    await writeJson("nx.json", {})
+    await writeJson("apps/billing/project.json", { name: "billing-e2e" })
+    await writeJson("apps/billing/package.json", {
+      name: "@acme/billing-api",
+      dependencies: { "@nestjs/core": "^10.0.0" },
+      exports: { ".": "./src/index.ts" },
+    })
+
+    const component = await billing()
+
+    expect(component.id).toBe("billing-api")
+    expect(component.name).toBe("@acme/billing-api")
+    expect(component.frameworks).toEqual(["nestjs"])
+    expect(component.publicApi).toEqual(["src/index.ts"])
+  })
+
+  it("reports no frameworks and no public API from the project file", async () => {
     // An nx project file holds targets, and its options are arbitrary JSON. A key spelled
     // `dependencies` or `exports` in one is not the npm field of that name, and the two
     // Component fields defined over those npm fields have no source here.
@@ -134,5 +179,34 @@ describe("a directory only nx claims", () => {
 
     expect(component.frameworks).toBeUndefined()
     expect(component.publicApi).toBeUndefined()
+  })
+})
+
+describe("a manifest that cannot be read", () => {
+  /**
+   * Absent is the ordinary case and says nothing. Present and unreadable is a Component whose
+   * identity this run cannot see: answering with the next manifest's name would put the
+   * pre-detection answer back, with nothing anywhere saying the published one was ever there.
+   */
+  it("refuses a package manifest that is not JSON", async () => {
+    await writeDualDetectedWorkspace()
+    await writeRaw("apps/billing/package.json", "{ broken")
+    await writeJson("apps/billing/project.json", { name: "billing-e2e" })
+
+    const thrown = await detectComponents({ workspaceRoot: tmp }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CoreError)
+    expect((thrown as CoreError).code).toBe("workspace-manifest-malformed")
+    expect((thrown as Error).message).toContain("package.json")
+  })
+
+  it("says nothing about a directory that simply has none", async () => {
+    await writeJson("nx.json", {})
+    await writeJson("apps/billing/project.json", { name: "billing-web" })
+
+    await expect(detectComponents({ workspaceRoot: tmp })).resolves.toHaveLength(1)
   })
 })

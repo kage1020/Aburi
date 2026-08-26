@@ -1018,6 +1018,7 @@ const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<string> = new Set([
   "invalid-component-id",
   "invalid-language-id",
   "non-posix-path",
+  "workspace-manifest-malformed",
   "workspace-root-outside",
 ])
 

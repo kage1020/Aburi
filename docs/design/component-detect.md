@@ -136,13 +136,15 @@ Mapping from each workspace to a Component.
 
 Priority order:
 1. `package.json#name` (JS/TS): strip the scope and kebab-case it (`@scope/billing` → `billing`)
-2. `project.json#name` (nx): the project name, for a directory nx declares and no package manifest does
+2. `project.json#name` (nx): the project name, for a directory that has no `package.json`
 3. `package.name` in `Cargo.toml` (Rust)
 4. `project.name` in `pyproject.toml` (Python)
 5. Trailing segment of the module name in `go.mod` (Go)
 6. Kebab-case the trailing segment of the workspace directory's full path
 
-This is a priority over **sources**, not a single source: a manifest that carries no `name` is not an answer, and the next one is asked before the directory name is. A directory that several detectors claim is described by all of their manifests at once (§7), and they are read in this order — by filename, so the order the detectors happened to run in cannot move an id.
+This is a priority over **sources**, not a single source: neither a manifest that carries no `name` nor one whose `name` yields no id is an answer, and the next source is asked before the directory name is. `@scope/` is a name §4.2 can use and §4.1 cannot, so a Component can take its `id` and its `name` from different manifests.
+
+A directory that several detectors claim is described by all of their manifests at once (§7), and they are read in this order — by filename, so the order the detectors happened to run in cannot move an id. The `package.json` under a candidate's root is read whether or not a detector reported it: a directory holding one is an npm package however it was found, and nx reports only `project.json`.
 
 On collision (multiple workspaces yielding the same id) → append the parent directory name as a suffix (`billing` → `billing-apps` / `billing-packages`). When the parent segment kebab-cases to nothing, the id is left unsuffixed and the numeric-suffix pass (`billing-2`, `billing-3`) resolves the collision instead.
 
@@ -316,7 +318,8 @@ When multiple detectors return the same path (e.g., both pnpm and turbo detect `
 - **Merge into one** workspace candidate (dedupe by path)
 - Record `manager` information from both (two entries in `workspace.managers[]`)
 - A single Component
-- Keep **every** manifest the detectors found for that directory, and read them in §4.1's order for `id` and `name`. A directory claimed by pnpm and nx at once has a `package.json` and a `project.json`, and they routinely name it differently: the first is the published npm name the rest of the Document is written against, the second an nx project name
+- Keep **every** manifest the detectors found for that directory, plus the `package.json` under its root whether or not one of them reported it, and read them in §4.1's order for `id` and `name`. A directory claimed by pnpm and nx at once has a `package.json` and a `project.json`, and they routinely name it differently: the first is the published npm name the rest of the Document is written against, the second an nx project name
+- A manifest that is present and cannot be read — bad JSON, or an IO failure that is not "no such file" — aborts detection with `workspace-manifest-malformed` naming the file. Absent is the ordinary case and says nothing; unreadable is an identity this run cannot see, and answering with the next manifest's name would hide it
 - `frameworks` (§4.5) and `publicApi` (§4.6) are read from the `package.json` alone. They are defined over `dependencies` and `exports`, which are npm's fields; an nx `project.json` holds targets whose options are arbitrary JSON, so a key of either name in one is not the npm field it resembles
 
 When multiple detectors generate the same id with different paths (§4.1):
@@ -361,6 +364,8 @@ Implementation guidance:
 | CD16 | `packages: ["packages/*"]` where *no* matched directory holds a manifest | `managers[]` records pnpm with `roots: []`, and §5's fallback makes the whole repository one Component |
 | CD17 | pnpm and nx both claim `apps/billing`; `package.json#name = "@acme/billing-api"`, `project.json#name = "billing-e2e"` | 1 Component, id `billing-api`, name `@acme/billing-api`, with the `package.json`'s frameworks and publicApi |
 | CD18 | nx alone claims `apps/billing`, `project.json#name = "billing-web"` and a `dependencies` key in it | id and name `billing-web`, no frameworks, no publicApi |
+| CD19 | nx alone claims `apps/billing`, and a `package.json` sits beside the `project.json` | Identity, frameworks and publicApi come from the `package.json` |
+| CD20 | `apps/billing/package.json` is not valid JSON | Detection aborts with `workspace-manifest-malformed` naming the file |
 
 ## 11. Design decisions
 
