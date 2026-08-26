@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, runInit } from "../src"
+import { resolveConfig } from "../src/config-load"
 
 /**
  * CL4 / CL5 — `aburi init` file-handling. Each test creates a scratch workspace so
@@ -82,6 +83,37 @@ describe("--with-suggestions", () => {
     const report = await runInit({ cwd: scratch })
     const contents = await readFile(report.outputPath, "utf8")
     expect(contents).not.toContain("Suggested install:")
+  })
+})
+
+describe("a workspace that declares its own root", () => {
+  /**
+   * `packages: ['.']` puts `roots: ["."]` in the config `init` writes, which no other manager
+   * path produces. The config it writes has to be one its own loader accepts, so the two
+   * halves are exercised in one test rather than either alone.
+   */
+  it("writes a root component the config loader reads back", async () => {
+    await writeFile(resolve(scratch, "pnpm-workspace.yaml"), 'packages:\n  - "."\n', "utf8")
+    await writeFile(
+      resolve(scratch, "package.json"),
+      JSON.stringify({ name: "storefront", private: true }),
+      "utf8",
+    )
+    await mkdir(resolve(scratch, "src"), { recursive: true })
+    await writeFile(resolve(scratch, "src/a.ts"), "export const a = 1\n", "utf8")
+
+    const report = await runInit({ cwd: scratch })
+    expect(report.exitCode).toBe(0)
+
+    const written = JSON.parse(await readFile(report.outputPath, "utf8")) as {
+      components: { id: string; roots: string[] }[]
+    }
+    expect(written.components).toHaveLength(1)
+    expect(written.components[0]).toMatchObject({ id: "storefront", roots: ["."] })
+
+    const loaded = await resolveConfig(scratch, undefined)
+    expect(loaded.found).toBe(true)
+    expect(loaded.config.components?.map((c) => c.roots)).toEqual([["."]])
   })
 })
 

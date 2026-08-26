@@ -136,8 +136,12 @@ export interface WorkspaceCandidate {
   absoluteRoot: string
   /** Tool that produced this candidate (the same path may appear once per tool). */
   managerTool: string
-  /** Resolved manifest path (e.g. `package.json`). Null if the candidate has no manifest yet. */
-  manifestPath: string | null
+  /**
+   * Absolute path of the manifest that made this directory a package (`package.json`,
+   * `project.json`). Every detector finds candidates by finding manifests, so a candidate
+   * without one is not a shape this type has.
+   */
+  manifestPath: string
 }
 
 /**
@@ -237,7 +241,7 @@ async function detectPnpm(root: string): Promise<ManagerScan | null> {
     )
   }
   const patterns = readStringArray(parsed, "packages")
-  const candidates = await resolveGlobsToCandidates(root, patterns, "pnpm")
+  const candidates = await resolveDeclaredPackages(root, patterns, "pnpm")
   return { tool: "pnpm", candidates }
 }
 
@@ -247,9 +251,9 @@ async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]>
   const parsed = await readJson(manifestPath)
   const patterns = extractWorkspacePatterns(parsed)
   if (patterns.length === 0) return []
-  const tool = detectJsPackageManagerTool(root)
-  const candidates = await resolveGlobsToCandidates(root, patterns, await tool)
-  return [{ tool: await tool, candidates }]
+  const tool = await detectJsPackageManagerTool(root)
+  const candidates = await resolveDeclaredPackages(root, patterns, tool)
+  return [{ tool, candidates }]
 }
 
 function extractWorkspacePatterns(parsed: unknown): string[] {
@@ -308,31 +312,56 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
   return { tool: "nx", candidates }
 }
 
-async function resolveGlobsToCandidates(
+/** The manifest a pnpm/npm/yarn/bun `packages:` entry promises the directory holds. */
+const JS_PACKAGE_MANIFEST = "package.json"
+
+/**
+ * Resolve a manager's declared package patterns into candidate directories.
+ *
+ * Matched against the manifest rather than against the directory, because a directory pattern
+ * is not a directory to tinyglobby: `expandDirectories` widens one that names a directory into
+ * that directory's whole subtree, so `.` reaches everything and `tools/build` swallows
+ * `tools/build/nested`. Against the manifest, a pattern names what it says.
+ *
+ * `expandDirectories` is off here for the residue of the same behaviour: a directory literally
+ * named `package.json` would be widened into the files beneath it, and each of those would
+ * name that directory as a package.
+ */
+async function resolveDeclaredPackages(
   workspaceRoot: string,
   patterns: readonly string[],
   managerTool: string,
 ): Promise<WorkspaceCandidate[]> {
-  if (patterns.length === 0) return []
-  const dirs = await glob(patterns, {
+  const manifestPatterns = patterns.filter((p) => p.length > 0).map(toManifestPattern)
+  const manifests = await glob(manifestPatterns, {
     cwd: workspaceRoot,
     ignore: ["**/node_modules/**", "**/.git/**"],
-    onlyDirectories: true,
+    onlyFiles: true,
+    expandDirectories: false,
     absolute: true,
     deep: 10,
   })
-  const candidates: WorkspaceCandidate[] = []
-  for (const absoluteRoot of dirs) {
-    const manifestPath = join(absoluteRoot, "package.json")
-    const has = await pathExists(manifestPath)
-    candidates.push({
+  return manifests.map((manifestPath) => {
+    const absoluteRoot = dirname(manifestPath)
+    return {
       relativeRoot: toRelativePosix(workspaceRoot, absoluteRoot),
       absoluteRoot,
       managerTool,
-      manifestPath: has ? manifestPath : null,
-    })
-  }
-  return candidates
+      manifestPath,
+    }
+  })
+}
+
+/**
+ * Append the manifest to the directory the pattern names, replacing a trailing slash — so `.`
+ * and `./` alike become `./package.json`, the root's own manifest.
+ *
+ * A negation keeps its `!` and needs no special case: a directory is a candidate only through
+ * its manifest, so excluding the manifest excludes the directory. An empty pattern is dropped
+ * before this — it would become `/package.json`, which names the filesystem root.
+ */
+function toManifestPattern(pattern: string): string {
+  return pattern.replace(/\/?$/, `/${JS_PACKAGE_MANIFEST}`)
 }
 
 function readStringArray(value: unknown, key: string): string[] {
