@@ -133,11 +133,27 @@ export type { WorkspaceManager }
 /** Re-export so callers can call detectManagers directly when they already have a root. */
 export { detectManagers }
 
+/**
+ * The manifest whose fields `Component.frameworks` and `Component.publicApi` are defined over
+ * — `dependencies` and `exports` are npm's, and a file that is not an npm manifest does not
+ * have them however its own keys happen to be spelled.
+ */
+const NPM_MANIFEST = "package.json"
+
+/**
+ * Manifest filenames in the order component-detect.md §4.1 reads them for a Component's
+ * identity. A directory two detectors claim is described by both of their manifests, and this
+ * is which one answers first — by filename rather than by which detector arrived first, so
+ * the order `detectManagers` happens to sort its tools in cannot move a Component's id.
+ */
+const MANIFEST_PRIORITY: readonly string[] = [NPM_MANIFEST, "project.json"]
+
 interface MergedCandidate {
   relativeRoot: string
   absoluteRoot: string
   managerTools: string[]
-  manifestPath: string
+  /** Every manifest that describes this directory, in `MANIFEST_PRIORITY` order. */
+  manifestPaths: string[]
 }
 
 function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): MergedCandidate[] {
@@ -149,24 +165,39 @@ function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): Merge
         relativeRoot: c.relativeRoot,
         absoluteRoot: c.absoluteRoot,
         managerTools: [c.managerTool],
-        manifestPath: c.manifestPath,
+        manifestPaths: [c.manifestPath],
       })
       continue
     }
     if (!existing.managerTools.includes(c.managerTool)) existing.managerTools.push(c.managerTool)
+    if (!existing.manifestPaths.includes(c.manifestPath)) {
+      existing.manifestPaths.push(c.manifestPath)
+    }
+  }
+  for (const entry of byPath.values()) {
+    entry.manifestPaths.sort((a, b) => manifestRank(a) - manifestRank(b))
   }
   return [...byPath.values()]
+}
+
+/** Where this manifest sits in §4.1's order; one past the end when it names none of them. */
+function manifestRank(path: string): number {
+  const rank = MANIFEST_PRIORITY.indexOf(basename(path))
+  return rank === -1 ? MANIFEST_PRIORITY.length : rank
 }
 
 async function buildComponent(
   entry: MergedCandidate,
   languages: readonly LanguageId[],
 ): Promise<Component> {
-  const manifest = await readPackageJson(entry.manifestPath)
-  const id = decideId(entry, manifest)
-  const name = decideName(entry, manifest)
-  const frameworks = collectFrameworks(manifest)
-  const publicApi = collectPublicApi(manifest)
+  // Aligned with `manifestPaths` rather than compacted, so a manifest that failed to parse
+  // does not promote the one behind it into the npm manifest's place.
+  const manifests = await Promise.all(entry.manifestPaths.map(readJsonManifest))
+  const npmManifest = npmManifestOf(entry.manifestPaths, manifests)
+  const id = decideId(entry, manifests)
+  const name = decideName(entry, manifests)
+  const frameworks = collectFrameworks(npmManifest)
+  const publicApi = collectPublicApi(npmManifest)
   const component: Component = {
     id,
     name,
@@ -186,14 +217,14 @@ async function buildSingleProjectComponent(
   workspaceRoot: string,
   languages: readonly LanguageId[],
 ): Promise<Component> {
-  const manifestPath = join(workspaceRoot, "package.json")
-  const manifest = (await pathExists(manifestPath)) ? await readPackageJson(manifestPath) : null
+  const manifestPath = join(workspaceRoot, NPM_MANIFEST)
+  const manifest = (await pathExists(manifestPath)) ? await readJsonManifest(manifestPath) : null
   const fakeEntry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot"> = {
     relativeRoot: ".",
     absoluteRoot: workspaceRoot,
   }
-  const id = decideId(fakeEntry, manifest)
-  const name = decideName(fakeEntry, manifest)
+  const id = decideId(fakeEntry, [manifest])
+  const name = decideName(fakeEntry, [manifest])
   const frameworks = collectFrameworks(manifest)
   const publicApi = collectPublicApi(manifest)
   const component: Component = {
@@ -221,14 +252,16 @@ async function buildSingleProjectComponent(
  */
 function decideId(
   entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">,
-  manifest: PackageJsonShape | null,
+  manifests: readonly (PackageJsonShape | null)[],
 ): ComponentId {
-  const fromManifest = manifest?.name !== undefined ? toIdFromNpmName(manifest.name) : null
-  if (fromManifest !== null) {
-    return componentIdOrThrow(fromManifest, `package name "${manifest?.name}"`, entry.relativeRoot)
+  const declared = declaredName(manifests)
+  if (declared !== null) {
+    const fromManifest = toIdFromNpmName(declared)
+    if (fromManifest !== null) {
+      return componentIdOrThrow(fromManifest, `package name "${declared}"`, entry.relativeRoot)
+    }
   }
-  const segments = entry.relativeRoot.split("/").filter((s) => s.length > 0 && s !== ".")
-  const leaf = segments[segments.length - 1] ?? basename(entry.absoluteRoot)
+  const leaf = directoryLeaf(entry)
   return componentIdOrThrow(toKebabCase(leaf), `directory name "${leaf}"`, entry.relativeRoot)
 }
 
@@ -252,12 +285,30 @@ function componentIdOrThrow(candidate: string, origin: string, root: string): Co
 
 function decideName(
   entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">,
-  manifest: PackageJsonShape | null,
+  manifests: readonly (PackageJsonShape | null)[],
 ): string {
-  if (manifest?.name !== undefined && manifest.name.length > 0) return manifest.name
+  return declaredName(manifests) ?? directoryLeaf(entry)
+}
+
+/**
+ * The first name any of these manifests declares, in the order they were ranked.
+ *
+ * §4.1 and §4.2 are priority orders over *sources*, so a manifest that carries no name is not
+ * an answer — the next one is asked before the directory name is. That matters where the two
+ * disagree about what exists rather than about the value: an nx `project.json` names a project
+ * even for a directory whose `package.json` is a private stub with no `name` at all.
+ */
+function declaredName(manifests: readonly (PackageJsonShape | null)[]): string | null {
+  for (const manifest of manifests) {
+    if (manifest?.name !== undefined && manifest.name.length > 0) return manifest.name
+  }
+  return null
+}
+
+/** The trailing segment of the candidate's own path, or the root's directory name for `.`. */
+function directoryLeaf(entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot">): string {
   const segments = entry.relativeRoot.split("/").filter((s) => s.length > 0 && s !== ".")
-  const leaf = segments[segments.length - 1] ?? basename(entry.absoluteRoot)
-  return leaf
+  return segments[segments.length - 1] ?? basename(entry.absoluteRoot)
 }
 
 function toIdFromNpmName(npmName: string): string | null {
@@ -386,7 +437,16 @@ interface PackageJsonShape {
   typings?: string
 }
 
-async function readPackageJson(path: string): Promise<PackageJsonShape | null> {
+/** The parse of this candidate's `package.json`, or null when it has none or it did not parse. */
+function npmManifestOf(
+  paths: readonly string[],
+  manifests: readonly (PackageJsonShape | null)[],
+): PackageJsonShape | null {
+  const index = paths.findIndex((path) => basename(path) === NPM_MANIFEST)
+  return index === -1 ? null : (manifests[index] ?? null)
+}
+
+async function readJsonManifest(path: string): Promise<PackageJsonShape | null> {
   try {
     const raw = await readFile(path, "utf8")
     const parsed = JSON.parse(raw)

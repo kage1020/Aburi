@@ -136,10 +136,13 @@ Mapping from each workspace to a Component.
 
 Priority order:
 1. `package.json#name` (JS/TS): strip the scope and kebab-case it (`@scope/billing` → `billing`)
-2. `package.name` in `Cargo.toml` (Rust)
-3. `project.name` in `pyproject.toml` (Python)
-4. Trailing segment of the module name in `go.mod` (Go)
-5. Kebab-case the trailing segment of the workspace directory's full path
+2. `project.json#name` (nx): the project name, for a directory nx declares and no package manifest does
+3. `package.name` in `Cargo.toml` (Rust)
+4. `project.name` in `pyproject.toml` (Python)
+5. Trailing segment of the module name in `go.mod` (Go)
+6. Kebab-case the trailing segment of the workspace directory's full path
+
+This is a priority over **sources**, not a single source: a manifest that carries no `name` is not an answer, and the next one is asked before the directory name is. A directory that several detectors claim is described by all of their manifests at once (§7), and they are read in this order — by filename, so the order the detectors happened to run in cannot move an id.
 
 On collision (multiple workspaces yielding the same id) → append the parent directory name as a suffix (`billing` → `billing-apps` / `billing-packages`). When the parent segment kebab-cases to nothing, the id is left unsuffixed and the numeric-suffix pass (`billing-2`, `billing-3`) resolves the collision instead.
 
@@ -149,7 +152,7 @@ The result must satisfy `aburi.ir.v1.json#/$defs/ComponentId`. Names that kebab-
 
 Priority order:
 1. Full name from `package.json#name` (including the scope, e.g. `@scope/billing`)
-2. The `name` field of other manifests
+2. The `name` field of other manifests, in §4.1's order
 3. The trailing segment of the workspace directory as-is (capitalized)
 
 ### 4.3 `roots`
@@ -313,6 +316,8 @@ When multiple detectors return the same path (e.g., both pnpm and turbo detect `
 - **Merge into one** workspace candidate (dedupe by path)
 - Record `manager` information from both (two entries in `workspace.managers[]`)
 - A single Component
+- Keep **every** manifest the detectors found for that directory, and read them in §4.1's order for `id` and `name`. A directory claimed by pnpm and nx at once has a `package.json` and a `project.json`, and they routinely name it differently: the first is the published npm name the rest of the Document is written against, the second an nx project name
+- `frameworks` (§4.5) and `publicApi` (§4.6) are read from the `package.json` alone. They are defined over `dependencies` and `exports`, which are npm's fields; an nx `project.json` holds targets whose options are arbitrary JSON, so a key of either name in one is not the npm field it resembles
 
 When multiple detectors generate the same id with different paths (§4.1):
 - Append suffixes per the collision-avoidance convention in §4.1
@@ -354,6 +359,8 @@ Implementation guidance:
 | CD14 | `packages: [".", "packages/*"]` on a tree that also holds `src/` and `a/b/c/d/` | 2 Components: the workspace root (`roots: ["."]`) and the package |
 | CD15 | `packages: ["packages/*"]` where `packages/dist/` holds no manifest | `packages/dist` is not a Component |
 | CD16 | `packages: ["packages/*"]` where *no* matched directory holds a manifest | `managers[]` records pnpm with `roots: []`, and §5's fallback makes the whole repository one Component |
+| CD17 | pnpm and nx both claim `apps/billing`; `package.json#name = "@acme/billing-api"`, `project.json#name = "billing-e2e"` | 1 Component, id `billing-api`, name `@acme/billing-api`, with the `package.json`'s frameworks and publicApi |
+| CD18 | nx alone claims `apps/billing`, `project.json#name = "billing-web"` and a `dependencies` key in it | id and name `billing-web`, no frameworks, no publicApi |
 
 ## 11. Design decisions
 
