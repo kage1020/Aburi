@@ -203,6 +203,24 @@ describe("a manifest that cannot be read", () => {
     expect((thrown as Error).message).toContain("package.json")
   })
 
+  it("refuses a package manifest the filesystem will not hand over", async () => {
+    // Not every failure is a syntax error: the read itself can fail, and only "there is
+    // nothing there" is the ordinary case. A directory of that name is the one such failure
+    // a test can make on every platform — EACCES needs permissions Windows does not have.
+    await writeDualDetectedWorkspace()
+    await mkdir(join(tmp, "apps/billing/package.json"), { recursive: true })
+    await writeJson("apps/billing/project.json", { name: "billing-e2e" })
+
+    const thrown = await detectComponents({ workspaceRoot: tmp }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CoreError)
+    expect((thrown as CoreError).code).toBe("workspace-manifest-malformed")
+    expect((thrown as Error).message).toContain("EISDIR")
+  })
+
   it("says nothing about a directory that simply has none", async () => {
     await writeJson("nx.json", {})
     await writeJson("apps/billing/project.json", { name: "billing-web" })
