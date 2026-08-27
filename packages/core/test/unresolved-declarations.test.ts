@@ -94,6 +94,16 @@ describe("a manifest that declared packages and resolved none", () => {
     expect(result.workspaces.map((candidate) => candidate.relativeRoot)).toEqual(["apps/a"])
   })
 
+  it("orders two dead manifests by tool rather than by which detector finished first", async () => {
+    // The detectors race inside one `Promise.all`, so without an order of its own this list
+    // would be whichever finished first — and a report that names the same two manifests in a
+    // different order on each run is one a reader cannot diff.
+    await write("pnpm-workspace.yaml", 'packages:\n  - "tools/*"\n')
+    await write("package.json", JSON.stringify({ name: "root", workspaces: ["apps/*"] }))
+
+    expect((await unresolved()).map((entry) => entry.tool)).toEqual(["npm", "pnpm"])
+  })
+
   it("says nothing when every declaration resolved", async () => {
     await write("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
     await writePackage("packages/app", "app")
