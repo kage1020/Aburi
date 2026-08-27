@@ -127,6 +127,24 @@ export interface DetectManagersResult {
    * paths). Component autodetect consumes this to materialize components without re-globbing.
    */
   workspaces: WorkspaceCandidate[]
+  /**
+   * Managers whose manifest declared package patterns and resolved none of them.
+   *
+   * Reported rather than warned about, because detection has no sink of its own and both of
+   * its callers have one. It is not the same as an empty `managers[].roots`: turbo emits that
+   * deliberately as a co-marker, and a manifest that declared no patterns at all is asking for
+   * the workspace root alone — only a declaration that resolved to nothing means the packages
+   * the user named are missing from the Document.
+   */
+  unresolved: UnresolvedDeclaration[]
+}
+
+/** A manager's package patterns, none of which named a package. */
+export interface UnresolvedDeclaration {
+  /** The tool whose manifest declared them, as spelled on `managers[].tool`. */
+  tool: string
+  /** The patterns as the manifest lists them, including any the resolver drops. */
+  patterns: readonly string[]
 }
 
 export interface WorkspaceCandidate {
@@ -154,15 +172,22 @@ export interface WorkspaceCandidate {
 export async function detectManagers(workspaceRoot: string): Promise<DetectManagersResult> {
   const managers: WorkspaceManager[] = []
   const workspaces: WorkspaceCandidate[] = []
+  const unresolved: UnresolvedDeclaration[] = []
   const seen = new Set<string>()
+  const merge = (scan: ManagerScan | null): void => {
+    mergeManager(scan, managers, workspaces, seen)
+    if (scan !== null && scan.declaredPatterns.length > 0 && scan.candidates.length === 0) {
+      unresolved.push({ tool: scan.tool, patterns: scan.declaredPatterns })
+    }
+  }
 
   await Promise.all([
-    detectPnpm(workspaceRoot).then((r) => mergeManager(r, managers, workspaces, seen)),
+    detectPnpm(workspaceRoot).then(merge),
     detectPackageJsonWorkspaces(workspaceRoot).then((rs) => {
-      for (const r of rs) mergeManager(r, managers, workspaces, seen)
+      for (const r of rs) merge(r)
     }),
-    detectTurbo(workspaceRoot).then((r) => mergeManager(r, managers, workspaces, seen)),
-    detectNx(workspaceRoot).then((r) => mergeManager(r, managers, workspaces, seen)),
+    detectTurbo(workspaceRoot).then(merge),
+    detectNx(workspaceRoot).then(merge),
   ])
 
   managers.sort((a, b) => compareString(a.tool, b.tool))
@@ -171,12 +196,18 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
     (a, b) =>
       compareString(a.relativeRoot, b.relativeRoot) || compareString(a.managerTool, b.managerTool),
   )
-  return { managers, workspaces }
+  unresolved.sort((a, b) => compareString(a.tool, b.tool))
+  return { managers, workspaces, unresolved }
 }
 
 interface ManagerScan {
   tool: string
   candidates: WorkspaceCandidate[]
+  /**
+   * The package patterns this manager's manifest declared, as written. Empty for a manager
+   * that declares none — turbo, nx, and a `pnpm-workspace.yaml` with no `packages:` key.
+   */
+  declaredPatterns: readonly string[]
 }
 
 function mergeManager(
@@ -242,7 +273,7 @@ async function detectPnpm(root: string): Promise<ManagerScan | null> {
   }
   const patterns = readStringArray(parsed, "packages")
   const candidates = await resolveDeclaredPackages(root, patterns, "pnpm")
-  return { tool: "pnpm", candidates }
+  return { tool: "pnpm", candidates, declaredPatterns: patterns }
 }
 
 async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]> {
@@ -253,7 +284,7 @@ async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]>
   if (patterns.length === 0) return []
   const tool = await detectJsPackageManagerTool(root)
   const candidates = await resolveDeclaredPackages(root, patterns, tool)
-  return [{ tool, candidates }]
+  return [{ tool, candidates, declaredPatterns: patterns }]
 }
 
 function extractWorkspacePatterns(parsed: unknown): string[] {
@@ -286,7 +317,7 @@ async function detectTurbo(root: string): Promise<ManagerScan | null> {
   // turbo.json does not declare workspaces itself; it is a co-marker that signals "the
   // real workspace patterns live in pnpm-workspace.yaml or package.json#workspaces".
   // Emit a manager entry with empty roots so the IR records the tool's presence.
-  return { tool: "turbo", candidates: [] }
+  return { tool: "turbo", candidates: [], declaredPatterns: [] }
 }
 
 async function detectNx(root: string): Promise<ManagerScan | null> {
@@ -309,7 +340,7 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
       manifestPath: projectFile,
     })
   }
-  return { tool: "nx", candidates }
+  return { tool: "nx", candidates, declaredPatterns: [] }
 }
 
 /** The manifest a pnpm/npm/yarn/bun `packages:` entry promises the directory holds. */

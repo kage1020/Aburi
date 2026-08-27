@@ -285,6 +285,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       workspaceRoot: "/repo",
       coverageFault: null,
       unrepresentableFiles: [],
+      unresolvedDeclarations: [],
+      fellBackToSingleComponent: false,
       exitCode: EXIT.SUCCESS,
       ...overrides,
     }

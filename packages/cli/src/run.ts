@@ -98,6 +98,23 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           if (report.suggestedPlugins.length > 0) {
             stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
           }
+          // The config this command writes describes the workspace it found, so a manifest
+          // that named packages and produced none makes that description wrong before it is
+          // ever read — and `components[]` is the one part of it a reader cannot check
+          // against anything.
+          for (const declaration of report.unresolvedDeclarations) {
+            const patterns = declaration.patterns.map((p) => JSON.stringify(p)).join(", ")
+            const count = declaration.patterns.length
+            stderr.write(
+              `⚠ ${declaration.tool} declared ${count} package pattern${count === 1 ? "" : "s"} ` +
+                `that named no package: ${patterns}\n`,
+            )
+          }
+          if (report.fellBackToSingleComponent && report.unresolvedDeclarations.length > 0) {
+            stderr.write(
+              "⚠ No workspace package was found, so the whole repository is one component.\n",
+            )
+          }
           // An unmapped language leaves `languages` empty, and `aburi scan` refuses to run
           // without a language plugin — so this is the difference between the next command
           // working and it stopping, not a nicety.

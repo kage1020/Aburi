@@ -272,7 +272,7 @@ This lets Aburi work even for the smallest single-project setups (e.g., a standa
 **"No detector hits" means no candidate directory, not no marker.** A manifest that parsed and declared no package reaches the same fallback, and there are two ways to get there:
 
 - A `pnpm-workspace.yaml` with no `packages:` field. pnpm reads that the same way — *"If the `packages` field is omitted, only the root package is included in the workspace"* — so the whole repository as one Component is the right answer.
-- Patterns that matched nothing: a mistyped pattern, a monorepo with no packages in it yet, or packages whose manifest is one §3.1.1 does not recognize. The whole repository becomes one Component and nothing says why, which is the wrong answer arrived at silently. Detection has no diagnostic channel to say it on today.
+- Patterns that matched nothing: a mistyped pattern, a monorepo with no packages in it yet, or packages whose manifest is one §3.1.1 does not recognize. The whole repository becomes one Component, which is the wrong answer for a workspace that declared packages — so detection reports the manager and its patterns, and `aburi scan` and `aburi init` name both on stderr. The IR itself keeps no trace a reader can act on: `workspace.managers[].roots` is empty, which is also what a turbo co-marker writes on purpose.
 
 ## 6. Detector extension mechanism
 
@@ -319,6 +319,7 @@ When multiple detectors return the same path (e.g., both pnpm and turbo detect `
 - Record `manager` information from both (two entries in `workspace.managers[]`)
 - A single Component
 - Keep **every** manifest the detectors found for that directory, plus the `package.json` under its root whether or not one of them reported it, and read them in §4.1's order for `id` and `name`. A directory claimed by pnpm and nx at once has a `package.json` and a `project.json`, and they routinely name it differently: the first is the published npm name the rest of the Document is written against, the second an nx project name
+- A manager that declared package patterns and resolved none of them is reported on the detection result, per manager and with the patterns as written. An empty `packages:` list is not that: pnpm reads it as the key being absent, and so does this
 - A manifest that is present and cannot be read — bad JSON, or an IO failure that is not "no such file" — aborts detection with `workspace-manifest-malformed` naming the file. Absent is the ordinary case and says nothing; unreadable is an identity this run cannot see, and answering with the next manifest's name would hide it
 - `frameworks` (§4.5) and `publicApi` (§4.6) are read from the `package.json` alone. They are defined over `dependencies` and `exports`, which are npm's fields; an nx `project.json` holds targets whose options are arbitrary JSON, so a key of either name in one is not the npm field it resembles
 
@@ -361,7 +362,9 @@ Implementation guidance:
 | CD13 | Both pnpm and nx detect the same workspace | Deduped into 1 Component |
 | CD14 | `packages: [".", "packages/*"]` on a tree that also holds `src/` and `a/b/c/d/` | 2 Components: the workspace root (`roots: ["."]`) and the package |
 | CD15 | `packages: ["packages/*"]` where `packages/dist/` holds no manifest | `packages/dist` is not a Component |
-| CD16 | `packages: ["packages/*"]` where *no* matched directory holds a manifest | `managers[]` records pnpm with `roots: []`, and §5's fallback makes the whole repository one Component |
+| CD16 | `packages: ["packages/*"]` where *no* matched directory holds a manifest | `managers[]` records pnpm with `roots: []`, §5's fallback makes the whole repository one Component, and both facts are named on stderr |
+| CD21 | `pnpm-workspace.yaml` with no `packages:` key, or with `packages: []` | Nothing is reported — pnpm includes only the root package either way |
+| CD22 | `turbo.json` alone, or `nx.json` with no `project.json` | Nothing is reported — neither declares package patterns |
 | CD17 | pnpm and nx both claim `apps/billing`; `package.json#name = "@acme/billing-api"`, `project.json#name = "billing-e2e"` | 1 Component, id `billing-api`, name `@acme/billing-api`, with the `package.json`'s frameworks and publicApi |
 | CD18 | nx alone claims `apps/billing`, `project.json#name = "billing-web"` and a `dependencies` key in it | id and name `billing-web`, no frameworks, no publicApi |
 | CD19 | nx alone claims `apps/billing`, and a `package.json` sits beside the `project.json` | Identity, frameworks and publicApi come from the `package.json` |

@@ -14,6 +14,7 @@ import {
   scan,
   type UnnameableFile,
   type UnrepresentableFile,
+  type UnresolvedDeclaration,
   writeCanonicalIR,
 } from "@aburi/core"
 import {
@@ -231,6 +232,20 @@ export interface ScanReport {
    * source and said nothing would be a clean run over a workspace it did not describe.
    */
   unrepresentableFiles: readonly UnrepresentableFile[]
+  /**
+   * Managers whose manifest declared package patterns and resolved none of them.
+   *
+   * Not a fault: the artifact is well formed, and a monorepo being set up has no packages in
+   * it yet. It is a description the reader has no other way to check, because the only trace
+   * left in the IR is `workspace.managers[].roots` being empty — which turbo emits on purpose.
+   */
+  unresolvedDeclarations: readonly UnresolvedDeclaration[]
+  /**
+   * Whether the whole repository was described as one Component because detection found no
+   * package. False when `components[]` in the config decided them, since then the manifest's
+   * outcome never reached the IR.
+   */
+  fellBackToSingleComponent: boolean
   exitCode: ExitCode
 }
 
@@ -261,6 +276,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const managers = await detectManagers(workspaceRoot)
   const components = await resolveComponents(config, workspaceRoot, plugins.languages)
+  const fellBackToSingleComponent =
+    declaredComponents(config) === undefined && managers.workspaces.length === 0
 
   const scanInput: Parameters<typeof scan>[0] = {
     workspaceRoot,
@@ -348,6 +365,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     workspaceRoot,
     coverageFault,
     unrepresentableFiles: scanResult.unrepresentableFiles.map((f) => ({ ...f })),
+    unresolvedDeclarations: managers.unresolved,
+    fellBackToSingleComponent,
     // Three gates (`cli-spec.md` §5.4, §5.7, §5.8), and none withholds anything the run would
     // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
     // code, where before either guard existed they got the artifact and a green light.
@@ -492,6 +511,7 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   const say = (line: string): void => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
+  reportUnresolvedDeclarations(report, say)
   reportCoverageFault(report.coverageFault, say)
   // Directly under the coverage line, ahead of everything recoverable from the artifact. The
   // skip census below can run to six reasons of eleven lines each, and the sink this all goes
@@ -665,6 +685,36 @@ function reportSkipped(
  * and then advising a pattern the name does not satisfy would send a reader round the loop
  * with an identical exit 3 and nothing on screen to say why.
  */
+/**
+ * Say which manifest declared packages and found none, and what followed from it.
+ *
+ * Ahead of everything else in the report because it is about the workspace the run was given
+ * rather than about the run: a reader who mistyped `packages/*` needs to know before reading a
+ * coverage number computed over the wrong set of components.
+ *
+ * The consequence is a second line rather than a clause, because it is a different fact with a
+ * different condition — one manifest can be dead while another resolves, and then nothing fell
+ * back at all.
+ */
+function reportUnresolvedDeclarations(report: ScanReport, say: (line: string) => void): void {
+  for (const declaration of report.unresolvedDeclarations) {
+    say(
+      `${declaration.tool} declared ${countOf(declaration.patterns.length, "package pattern")} ` +
+        `that named no package: ${declaration.patterns
+          .map((pattern) => JSON.stringify(pattern))
+          .join(", ")}`,
+    )
+  }
+  if (report.fellBackToSingleComponent && report.unresolvedDeclarations.length > 0) {
+    say("No workspace package was found, so the whole repository is described as one component.")
+  }
+}
+
+/** `1 package pattern` / `2 package patterns` — the plural of a counted noun. */
+function countOf(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`
+}
+
 function reportUnrepresentable(
   files: ScanReport["unrepresentableFiles"],
   say: (line: string) => void,
@@ -922,18 +972,32 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
   return normalized
 }
 
+/**
+ * The components the config declares, or undefined when it leaves them to detection.
+ *
+ * One definition because two readers act on it: `resolveComponents` below chooses its branch
+ * by it, and the incident report says "the whole repository is one component" only when
+ * detection is what decided that. Two spellings of the condition would be two chances for the
+ * report to describe a Document that was built the other way.
+ */
+function declaredComponents(config: Partial<Config>): Config["components"] | undefined {
+  const declared = config.components
+  return declared !== undefined && declared.length > 0 ? declared : undefined
+}
+
 async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
   languages: readonly LanguagePlugin[],
 ): Promise<Component[]> {
+  const declared = declaredComponents(config)
   try {
-    if (config.components !== undefined && config.components.length > 0) {
+    if (declared !== undefined) {
       // The config schema already constrains `id` to the kebab shape, but the value arrives
       // here as a plain string. Re-asserting it through the constructor is what turns it into
       // a Component id, and keeps a config loaded by some other path from smuggling in a
       // shape `components[].id` cannot hold.
-      return config.components.map((entry) => {
+      return declared.map((entry) => {
         // `publicApi` / `frameworks` are Class B and `description` is Class A
         // (`ir-schema.md` §1.1), so the empty cases are spelled differently on purpose:
         // the two array keys disappear, the scalar stays as an explicit `null`. Emitting
