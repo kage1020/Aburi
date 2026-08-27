@@ -199,7 +199,9 @@ describe("detectComponents", () => {
     await writeFile(join(tmp, "nx.json"), "{}", "utf8")
     const billing = await makeDir(tmp, "apps", "billing")
     await writeJson(join(billing, "package.json"), { name: "billing" })
-    await writeFile(join(billing, "project.json"), "{}", "utf8")
+    // Named differently on purpose: with two manifests agreeing, one Component would follow
+    // from either of them winning, and the dedup this row is about would not be what was shown.
+    await writeJson(join(billing, "project.json"), { name: "billing-e2e" })
     await seedTypescriptFiles(billing, 12)
     const components = await detectComponents({ workspaceRoot: tmp })
     expect(components.filter((c) => c.id === "billing")).toHaveLength(1)
