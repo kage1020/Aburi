@@ -309,8 +309,8 @@ describe("DF14b — dropped symbol moved directories with same basename", () => 
 
 describe("DF15 — schema mismatch", () => {
   it("throws DiffError", () => {
-    const base = makeIR({ $schema: "https://aburi.dev/schema/aburi.ir.v1.json" })
-    const head = makeIR({ $schema: "https://aburi.dev/schema/aburi.ir.v2.json" as never })
+    const base = makeIR({ $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" })
+    const head = makeIR({ $schema: "https://aburi.kage1020.com/schema/aburi.ir.v2.json" as never })
     expect(() => diff(base, head)).toThrow(DiffError)
   })
 })

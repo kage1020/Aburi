@@ -11,7 +11,7 @@ export type RelativePath = string
  * aburi.json / aburi.jsonc project configuration. All fields optional; empty config is valid (autodetect handles everything).
  */
 export interface Config {
-$schema?: "https://aburi.dev/schema/aburi.config.v1.json"
+$schema?: "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 /**
  * Glob patterns added to drop-list category A (file-level skip). POSIX, workspace-root relative.
  */

@@ -41,7 +41,7 @@ const EXT_KIND_ENTRIES: ExpressExtKindEntry[] = [
 ]
 
 export const frameworkExpressManifest: FrameworkManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "framework-express",
   version: "0.0.0",
   type: "framework",

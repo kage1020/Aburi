@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aburi.dev/schema/aburi.ir.v1.json",
+  "$id": "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
   "title": "Aburi IR",
   "description": "Aburi intermediate representation (aburi.ir.v1). Source of truth for L3; L0-L2 Markdown views are derived deterministically from this.",
   "type": "object",
@@ -16,7 +16,7 @@
   ],
   "properties": {
     "$schema": {
-      "const": "https://aburi.dev/schema/aburi.ir.v1.json"
+      "const": "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
     },
     "generator": { "$ref": "#/$defs/Generator" },
     "generatedAt": {

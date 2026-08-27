@@ -9,7 +9,7 @@ import type {
 } from "@aburi/types"
 import { makeLanguageId } from "../../src/id"
 
-const SCHEMA = "https://aburi.dev/schema/aburi.ir.v1.json"
+const SCHEMA = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
 
 /**
  * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is

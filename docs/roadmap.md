@@ -35,8 +35,8 @@ comments.
 | Limitation | Status |
 |---|---|
 | TypeScript and JavaScript only | Other languages planned below |
-| Effects sit where the call happens, without propagating to callers | [Designed](/design/effect-propagation), not implemented |
-| Call resolution is syntactic, with no type information | [LSP enrichment designed](/design/lsp-enrichment), not implemented |
+| Effects sit where the call happens, without propagating to callers | [Designed](./design/effect-propagation.md), not implemented |
+| Call resolution is syntactic, with no type information | [LSP enrichment designed](./design/lsp-enrichment.md), not implemented |
 | No graph visualisation beyond the workspace overview and Slice View | No design yet |
 | No LLM integration | Deliberate. Aburi produces the facts, and interpreting them belongs to a separate tool. |
 
@@ -70,5 +70,5 @@ Nothing here is committed.
 
 ---
 
-The [design documents](/design/overview) specify everything above, and the JSON
+The [design documents](./design/overview.md) specify everything above, and the JSON
 Schemas live in [`schema/`](https://github.com/kage1020/Aburi/blob/main/schema/).

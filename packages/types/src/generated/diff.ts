@@ -17,7 +17,7 @@ export type SliceId = string & { readonly __brand: "SliceId" }
  * Result of aburi diff <base>..<head>. JSON projection of the matched/added/removed/moved/changed symbol pairs.
  */
 export interface DiffResult {
-$schema: "https://aburi.dev/schema/aburi.diff.v1.json"
+$schema: "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 generator: Generator
 base: IRRef
 head: IRRef

@@ -39,6 +39,8 @@ describe("effectsPrismaManifest", () => {
   })
 
   it("references the aburi.plugin.v1 schema", () => {
-    expect(effectsPrismaManifest.$schema).toBe("https://aburi.dev/schema/aburi.plugin.v1.json")
+    expect(effectsPrismaManifest.$schema).toBe(
+      "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+    )
   })
 })

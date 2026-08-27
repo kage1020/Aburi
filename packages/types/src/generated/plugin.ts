@@ -5,7 +5,7 @@
  * Plugin manifest declaring extension vocabulary contributed to Aburi. Validated at plugin load time.
  */
 export interface PluginManifest {
-$schema: "https://aburi.dev/schema/aburi.plugin.v1.json"
+$schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
 /**
  * ASCII kebab-case plugin name (e.g., 'effects-prisma', 'framework-nestjs', 'lang-typescript').
  */

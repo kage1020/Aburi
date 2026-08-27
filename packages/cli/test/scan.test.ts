@@ -44,7 +44,7 @@ beforeEach(async () => {
   await writeFile(
     resolve(scratch, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["lang-typescript"],
     }),
     "utf8",
@@ -158,7 +158,7 @@ describe("runScan — config-supplied component roots", () => {
     await writeFile(
       resolve(scratch, "aburi.json"),
       JSON.stringify({
-        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
         languages: ["lang-typescript"],
         components: [{ id: "shared", name: "Shared", roots, languages: ["ts"] }],
       }),
@@ -206,7 +206,7 @@ describe("runScan — config-supplied publicApi", () => {
     await writeFile(
       resolve(scratch, "aburi.json"),
       JSON.stringify({
-        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
         languages: ["lang-typescript"],
         components: [
           {
@@ -376,7 +376,7 @@ describe("runScan — a workspace whose files all extract", () => {
     await writeFile(
       resolve(scratch, "aburi.json"),
       JSON.stringify({
-        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
         languages: ["lang-typescript"],
         maxFileSizeBytes: 1024,
       }),

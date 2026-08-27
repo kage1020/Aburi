@@ -51,7 +51,7 @@ async function scanWithComponents(components: unknown[]): Promise<Record<string,
   await writeFile(
     resolve(scratch, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       // A scan with no language plugin cannot produce a schema-valid IR and is refused, so
       // the plugin is named here even though this file never asserts on Symbols.
       languages: ["lang-typescript"],

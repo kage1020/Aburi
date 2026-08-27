@@ -34,7 +34,7 @@ async function scannedLanguages(config: Record<string, unknown>): Promise<readon
   await writeFile(
     resolve(workRoot, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["lang-typescript"],
       ...config,
     }),

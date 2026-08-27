@@ -39,6 +39,8 @@ describe("effectsDrizzleManifest", () => {
   })
 
   it("references the aburi.plugin.v1 schema", () => {
-    expect(effectsDrizzleManifest.$schema).toBe("https://aburi.dev/schema/aburi.plugin.v1.json")
+    expect(effectsDrizzleManifest.$schema).toBe(
+      "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+    )
   })
 })

@@ -3,7 +3,7 @@ import { assertIRIntegrity } from "@aburi/core"
 import type { IR } from "@aburi/types"
 import { CliError, errorMessage } from "./errors"
 
-const IR_SCHEMA_URL = "https://aburi.dev/schema/aburi.ir.v1.json"
+const IR_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
 
 /**
  * Read an IR file from disk and establish that what comes back is one, so downstream code

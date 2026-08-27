@@ -90,7 +90,7 @@ describe("scan — integration through real plugins", () => {
 
     // scan() throws on integrity violation — reaching here means every invariant is
     // green. Shape sanity assertions:
-    expect(result.ir.$schema).toBe("https://aburi.dev/schema/aburi.ir.v1.json")
+    expect(result.ir.$schema).toBe("https://aburi.kage1020.com/schema/aburi.ir.v1.json")
     expect(result.ir.workspace.root).toBe(".")
     expect(result.ir.symbols.length).toBeGreaterThan(0)
     expect(result.ir.stats.totalFiles).toBe(3)
@@ -456,6 +456,6 @@ describe("scan — integration through real plugins", () => {
     const serialized = await writeCanonicalIR(result.ir, outPath)
     expect(serialized.startsWith("{\n")).toBe(true)
     const parsed = JSON.parse(serialized)
-    expect(parsed.$schema).toBe("https://aburi.dev/schema/aburi.ir.v1.json")
+    expect(parsed.$schema).toBe("https://aburi.kage1020.com/schema/aburi.ir.v1.json")
   })
 })

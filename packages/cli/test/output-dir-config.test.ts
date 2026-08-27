@@ -31,7 +31,7 @@ async function exists(path: string): Promise<boolean> {
   )
 }
 
-const CONFIG_SCHEMA = "https://aburi.dev/schema/aburi.config.v1.json"
+const CONFIG_SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
 async function writeConfigFile(path: string, output: string | undefined): Promise<void> {
   await writeFile(
@@ -70,7 +70,7 @@ async function writeBrokenConfig(directory: string): Promise<void> {
 
 function emptyIR(): IR {
   return {
-    $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
     workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
     components: [],

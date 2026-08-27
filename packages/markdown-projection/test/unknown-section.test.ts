@@ -223,7 +223,7 @@ describe("projectDiff — the Unknown dependency group", () => {
 describe("projectWorkspace — the files not analysed", () => {
   function irWith(stats: Partial<IR["stats"]>): IR {
     return {
-      $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
       generator: { name: "aburi", version: "0.0.0", plugins: [] },
       workspace: { root: ".", managers: [], languages: [languageId("ts")] },
       components: [],

@@ -97,7 +97,7 @@ export type DependencyEndpoint = SymbolId | ComponentId
  * Aburi intermediate representation (aburi.ir.v1). Source of truth for L3; L0-L2 Markdown views are derived deterministically from this.
  */
 export interface IR {
-$schema: "https://aburi.dev/schema/aburi.ir.v1.json"
+$schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
 generator: Generator
 /**
  * ISO 8601 UTC. Excluded from fingerprint. Class B per ir-schema.md §1.1: --no-timestamp omits the key entirely rather than emitting null, so a committed IR carries no producer clock at all.

@@ -116,7 +116,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.ir.v1.json",  // required
+  "$schema": "https://aburi.kage1020.com/schema/aburi.ir.v1.json",  // required
   "generator": {                              // required
     "name": "aburi",
     "version": "1.0.0",
@@ -585,7 +585,7 @@ An invariant violation is a **fatal error**, not a warning.
 
 ### 15.1 `$schema` URL
 
-- Fixed to `https://aburi.dev/schema/aburi.ir.v1.json`
+- Fixed to `https://aburi.kage1020.com/schema/aburi.ir.v1.json`
 - Backward-compatible field additions: allowed within v1
 - Field removal / type change / semantic change: goes to v2. Change `$schema` to `aburi.ir.v2.json`
 

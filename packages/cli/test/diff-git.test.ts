@@ -164,7 +164,7 @@ describe("SUCCESS smoke — file-mode diff still resolves EXIT.SUCCESS", () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
     const emptyIR = {
-      $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
       generator: { name: "aburi", version: "0.0.0", plugins: [] },
       workspace: { root: ".", managers: [], languages: ["ts"] },
       components: [],

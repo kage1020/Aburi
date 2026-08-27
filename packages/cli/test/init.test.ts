@@ -42,7 +42,7 @@ describe("runInit — happy path", () => {
     expect(report.exitCode).toBe(0)
     const contents = await readFile(report.outputPath, "utf8")
     const parsed = JSON.parse(contents) as { $schema: string; components: unknown[] }
-    expect(parsed.$schema).toBe("https://aburi.dev/schema/aburi.config.v1.json")
+    expect(parsed.$schema).toBe("https://aburi.kage1020.com/schema/aburi.config.v1.json")
     expect(parsed.components.length).toBeGreaterThan(0)
   })
 })

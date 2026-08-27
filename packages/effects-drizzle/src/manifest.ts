@@ -16,7 +16,7 @@ import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, EFFECTS_DRIZZLE_PLUGIN_NAME } from "
  * in lockstep across edits.
  */
 export const effectsDrizzleManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: EFFECTS_DRIZZLE_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",

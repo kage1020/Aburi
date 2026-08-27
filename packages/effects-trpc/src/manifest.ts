@@ -24,7 +24,7 @@ import { EFFECTS_TRPC_DERIVED_BY_PREFIX, EFFECTS_TRPC_PLUGIN_NAME } from "./cons
  * lockstep across edits.
  */
 export const effectsTrpcManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: EFFECTS_TRPC_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",

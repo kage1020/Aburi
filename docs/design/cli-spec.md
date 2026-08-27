@@ -109,7 +109,7 @@ With `--with-suggestions`, install/enable lines for official plugins matching th
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
   // Detected: nestjs. Install with: pnpm add -D @aburi/framework-nestjs
   // "frameworks": ["framework-nestjs"],

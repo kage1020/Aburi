@@ -197,7 +197,7 @@ describe("config.minParsedFileRatio — the floor a workspace opts into", () => 
     await writeFile(
       resolve(scratch, "aburi.json"),
       JSON.stringify({
-        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
         languages: ["./lang-stub.mjs"],
         ...(floor === undefined ? {} : { minParsedFileRatio: floor }),
       }),

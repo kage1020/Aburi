@@ -171,7 +171,7 @@ describe("@aburi/types public surface", () => {
 
   it("narrowed plugin manifests reject the wrong type discriminator", () => {
     const langOk: LangManifest = {
-      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
       name: "lang-foo",
       version: "1.0.0",
       type: "lang",
@@ -188,7 +188,7 @@ describe("@aburi/types public surface", () => {
     expectTypeOf(langOk.type).toEqualTypeOf<"lang">()
 
     const effectsOk: EffectsManifest = {
-      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
       name: "effects-foo",
       version: "1.0.0",
       type: "effects",
@@ -206,7 +206,7 @@ describe("@aburi/types public surface", () => {
     expectTypeOf(effectsOk.type).toEqualTypeOf<"effects">()
 
     const fwOk: FrameworkManifest = {
-      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
       name: "framework-foo",
       version: "1.0.0",
       type: "framework",
@@ -234,7 +234,7 @@ describe("@aburi/types public surface", () => {
 
     // @ts-expect-error -- 'name' is required.
     const noName: PluginManifest = {
-      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
       version: "1.0.0",
       type: "lang",
       engines: { aburi: "^1.0.0" },

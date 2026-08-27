@@ -741,7 +741,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.diff.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.diff.v1.json",
   "generator": { "name": "aburi", "version": "1.0.0" },
   "base": {
     "ref": "main",                                   // git ref or "ir-base.json"

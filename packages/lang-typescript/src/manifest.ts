@@ -10,7 +10,7 @@ import type { LangManifest } from "@aburi/types"
  * these prefixes; the registry cross-checks that at load time.
  */
 export const langTypescriptManifest: LangManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "lang-typescript",
   version: "0.0.0",
   type: "lang",

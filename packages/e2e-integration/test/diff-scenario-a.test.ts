@@ -53,7 +53,7 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
 
     const headIR = (await scanFixture(fixture.root)).ir
 
-    const irSchema = "https://aburi.dev/schema/aburi.ir.v1.json"
+    const irSchema = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
     const diff = buildDiff({
       baseIR,
       headIR,

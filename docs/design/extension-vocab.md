@@ -40,7 +40,7 @@ The manifest lives in the `aburi` property of `package.json`, or in a standalone
 ```jsonc
 // type=effects plugin (effects only, e.g. lifecycle hooks)
 {
-  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   "name": "effects-nest",
   "version": "1.0.0",
   "type": "effects",
@@ -60,7 +60,7 @@ The manifest lives in the `aburi` property of `package.json`, or in a standalone
 
 // type=framework plugin (boundary recognition, extKind assignment)
 {
-  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   "name": "framework-nestjs",
   "version": "1.0.0",
   "type": "framework",
@@ -315,7 +315,7 @@ There are three tiers, by complexity, for bringing a new language / in-house fra
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   "name": "acme-framework",
   "version": "0.0.1",
   "type": "framework",
@@ -386,7 +386,7 @@ aburi scan --discover
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.vocab-discovered.v1.json",   // does not exist yet; formalization is planned
+  "$schema": "https://aburi.kage1020.com/schema/aburi.vocab-discovered.v1.json",   // does not exist yet; formalization is planned
   "discoveredAt": "2026-06-21T15:30:00Z",
   "items": [
     {
@@ -415,7 +415,7 @@ If `lang-crystal` were hypothetically written, it could get by on the core vocab
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   "name": "lang-crystal",
   "version": "0.1.0",
   "type": "lang",

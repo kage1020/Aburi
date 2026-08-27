@@ -51,7 +51,7 @@ the effects they perform.
 That deleted guard is a single red line somewhere in the raw diff. Aburi gives
 it a heading.
 
-[Reading the report](/guide/reading-the-report) walks through every section.
+[Reading the report](./reading-the-report.md) walks through every section.
 
 ## What makes it usable in CI
 
@@ -78,9 +78,9 @@ Linting belongs to Biome and ESLint. Aburi stays out of their way.
 
 ## Where to go next
 
-- [Getting started](/guide/getting-started) walks you from install to your
+- [Getting started](./getting-started.md) walks you from install to your
   first diff.
-- [Supported stacks](/guide/supported-stacks) tells you whether your framework
+- [Supported stacks](./supported-stacks.md) tells you whether your framework
   is covered.
-- [CI integration](/guide/ci-integration) posts the report on every pull
+- [CI integration](./ci-integration.md) posts the report on every pull
   request.

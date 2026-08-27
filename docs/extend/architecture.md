@@ -1,7 +1,7 @@
 # Architecture
 
 This page is for people working *on* Aburi, or writing a plugin for it. If you
-want to use the tool, start with the [guide](/guide/what-is-aburi).
+want to use the tool, start with the [guide](../guide/what-is-aburi.md).
 
 ## One artifact, many views
 
@@ -64,6 +64,6 @@ them.
 
 ## Going deeper
 
-The [design documents](/design/overview) specify every stage above in full, and
+The [design documents](../design/overview.md) specify every stage above in full, and
 an implementation is expected to cite them. To write a plugin, start with
-[Plugin development](/extend/plugin-development).
+[Plugin development](./plugin-development.md).

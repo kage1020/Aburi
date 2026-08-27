@@ -3,7 +3,7 @@
 A plugin teaches Aburi something it does not already know: a language to parse,
 a framework whose decorators mean something, or a library whose calls have
 effects. There are three kinds, and they plug into different stages of
-[the pipeline](/extend/architecture#the-pipeline).
+[the pipeline](./architecture.md#the-pipeline).
 
 | Kind | You implement | It produces |
 |---|---|---|
@@ -13,11 +13,11 @@ effects. There are three kinds, and they plug into different stages of
 
 Type signatures live in
 [`@aburi/types`](https://github.com/kage1020/Aburi/blob/main/packages/types/src/plugins.ts);
-the full contracts are in the [design docs](/design/overview).
+the full contracts are in the [design docs](../design/overview.md).
 
 ::: tip Before writing one
 A decorator-based framework often needs no code at all.
-[`frameworkHints`](/guide/configuration#teach-it-your-in-house-framework) covers
+[`frameworkHints`](../guide/configuration.md#teach-it-your-in-house-framework) covers
 it from config.
 :::
 
@@ -33,7 +33,7 @@ load time.
 import type { FrameworkManifest } from "@aburi/types"
 
 export const myFrameworkManifest: FrameworkManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "framework-mytool",
   version: "0.1.0",
   type: "framework",
@@ -227,7 +227,7 @@ Contracts:
   other library. When the edges attribute the name to a module you do not own,
   classify at `confidence: "medium"` rather than refusing, because a
   project-local re-export barrel looks like a foreign package. See
-  the [language plugin spec](/design/lang-plugin#522-matching-a-decorator-against-the-import-edges).
+  the [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
 
@@ -283,7 +283,7 @@ Contracts:
   a `CallCandidate.target` and rejects an empty target or empty segment) and
   `hasMatchingImport` (matches a module specifier after checking every
   `ImportEdge.source`). Both enforce the language plugin's normalized-output
-  contract from the [language plugin spec](/design/lang-plugin), and both
+  contract from the [language plugin spec](../design/lang-plugin.md), and both
   take a `{ plugin, filePath }` record so the thrown message names your plugin
   and the offending file:
 
@@ -315,7 +315,7 @@ discovers them by package name from `aburi.json`:
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
   "frameworks": ["framework-mytool"],
   "effects": ["effects-mytool"]

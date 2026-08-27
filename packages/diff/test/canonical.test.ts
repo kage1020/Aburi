@@ -22,7 +22,7 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
     const base = makeIR()
     const head = makeIR()
     const result = buildDiff({ baseIR: base, headIR: head, base: IR_REF, head: IR_REF })
-    expect(result.$schema).toBe("https://aburi.dev/schema/aburi.diff.v1.json")
+    expect(result.$schema).toBe("https://aburi.kage1020.com/schema/aburi.diff.v1.json")
     expect(result.summary.added).toBe(0)
     expect(result.summary.unchanged).toBe(0)
   })

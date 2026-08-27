@@ -195,7 +195,7 @@ export function dependency(
 
 export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): IR {
   return {
-    $schema: overrides.$schema ?? "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: overrides.$schema ?? "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: overrides.generator ?? { name: "aburi", version: "0.0.0", plugins: [] },
     workspace: overrides.workspace ?? { root: ".", managers: [], languages: [languageId("ts")] },
     components: overrides.components ?? [],
@@ -237,7 +237,7 @@ export function emptySummary(): Summary {
 
 export function makeDiff(overrides: Partial<DiffResult> = {}): DiffResult {
   return {
-    $schema: "https://aburi.dev/schema/aburi.diff.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.diff.v1.json",
     generator: { name: "aburi", version: "0.0.0" },
     base: { ref: "main", irSchema: "aburi.ir.v1.json" },
     head: { ref: "HEAD", irSchema: "aburi.ir.v1.json" },

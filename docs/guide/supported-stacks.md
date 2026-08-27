@@ -14,7 +14,7 @@ You need one language plugin per language in the repository.
 Parsing runs on tree-sitter WASM, so you get no native build step and no
 compiler in the loop.
 
-Python, Go, and a functional language are planned. See the [roadmap](/roadmap).
+Python, Go, and a functional language are planned. See the [roadmap](../roadmap.md).
 
 ## Frameworks
 
@@ -29,9 +29,9 @@ Install as many as apply. They do not conflict.
 | `@aburi/framework-react` | Function components, custom hooks, contexts and providers, `forwardRef`, `memo`, higher-order components |
 
 Nothing here fits? For a decorator-based framework,
-[`frameworkHints`](/guide/configuration#teach-it-your-in-house-framework) covers
+[`frameworkHints`](./configuration.md#teach-it-your-in-house-framework) covers
 you from config. For anything else, write a
-[plugin](/extend/plugin-development).
+[plugin](../extend/plugin-development.md).
 
 ## Effects
 
@@ -48,20 +48,18 @@ to it.
 
 Aburi detects an effect at the call site. A method that calls a repository
 method that writes to the database does not yet inherit `db.write`. Propagation
-along the call graph is on the [roadmap](/roadmap).
+along the call graph is on the [roadmap](../roadmap.md).
 
 ## Example setups
 
 ::: code-group
 
 ```bash [Next.js + Drizzle]
-pnpm add -D @aburi/cli @aburi/lang-typescript \
-  @aburi/framework-next @aburi/framework-react @aburi/effects-drizzle
+pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-next @aburi/framework-react @aburi/effects-drizzle
 ```
 
 ```bash [NestJS + Prisma]
-pnpm add -D @aburi/cli @aburi/lang-typescript \
-  @aburi/framework-nestjs @aburi/effects-prisma @aburi/effects-nest
+pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-nestjs @aburi/effects-prisma @aburi/effects-nest
 ```
 
 ```bash [Express]

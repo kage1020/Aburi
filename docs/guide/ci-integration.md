@@ -76,4 +76,4 @@ Combine them with commas. The first clause that fires ends the evaluation.
 aburi diff main..HEAD --fail-on 'removed,changed:>20'
 ```
 
-The [CLI reference](/reference/cli#fail-on-grammar) has the full grammar.
+The [CLI reference](../reference/cli.md#fail-on-grammar) has the full grammar.

@@ -209,7 +209,7 @@ Example manifest fragment for a Scala plugin using individual enumeration for th
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   "name": "lang-scala",
   "version": "1.0.0",
   "type": "lang",

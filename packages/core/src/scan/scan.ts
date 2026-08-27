@@ -443,7 +443,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   }
 
   const ir: IR = {
-    $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: {
       name: input.generator?.name ?? "@aburi/core",
       version: input.generator?.version ?? "0.0.0",

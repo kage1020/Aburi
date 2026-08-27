@@ -55,13 +55,16 @@ the same report, and you can gate CI on any category it counts:
 ## Quick start
 
 ```bash
-pnpm add -D @aburi/cli @aburi/lang-typescript \
-  @aburi/framework-next @aburi/framework-react
+pnpm add -D @aburi/cli @aburi/lang-typescript @aburi/framework-next @aburi/framework-react
 
 pnpm exec aburi init                # detect the project, write aburi.json
 pnpm exec aburi scan                # analyse the workspace → out/
-pnpm exec aburi diff main..HEAD --fail-on 'changed,removed:>5'
+pnpm exec aburi diff main..HEAD --fail-on 'removed,changed:>20'
 ```
+
+With another package manager, install with `npm install -D …`, `yarn add -D …`,
+or `bun add -D …`, and run the CLI as `npx aburi …`, `yarn aburi …`, or
+`bunx aburi …`.
 
 Exit code `3` means a gate tripped. The full walkthrough is in
 [Getting started](https://aburi.kage1020.com/guide/getting-started).
@@ -88,6 +91,7 @@ comment on every push.
 | [Getting started](https://aburi.kage1020.com/guide/getting-started) | Install to first diff. |
 | [Reading the report](https://aburi.kage1020.com/guide/reading-the-report) | What each section means. |
 | [Supported stacks](https://aburi.kage1020.com/guide/supported-stacks) | Which plugins cover your framework. |
+| [Configuration](https://aburi.kage1020.com/guide/configuration) | Every field of `aburi.json`. |
 | [CI integration](https://aburi.kage1020.com/guide/ci-integration) | Gates and pull request comments. |
 | [CLI reference](https://aburi.kage1020.com/reference/cli) | Every flag and exit code. |
 | [Architecture](https://aburi.kage1020.com/extend/architecture) | How the pipeline fits together. |

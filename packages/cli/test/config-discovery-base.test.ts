@@ -60,7 +60,7 @@ async function makeMonorepo(): Promise<string> {
 }
 
 const TS_CONFIG = {
-  $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   languages: ["lang-typescript"],
 }
 
