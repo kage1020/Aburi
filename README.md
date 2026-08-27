@@ -99,7 +99,9 @@ comment on every push.
 | [Roadmap](https://aburi.kage1020.com/roadmap) | What works today, what is next. |
 
 Design documents live in [`docs/design/`](docs/design/), the JSON Schemas in
-[`schema/`](schema/).
+[`schema/`](schema/). The site serves each schema at the `$id` it carries, so
+`https://aburi.kage1020.com/schema/aburi.config.v1.json` is the same file your
+editor resolves from the `$schema` line of an `aburi.json`.
 
 ## Contributing
 

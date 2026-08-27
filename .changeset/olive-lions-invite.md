@@ -23,6 +23,11 @@ project does not own and never served them from. The docs site is `aburi.kage102
 that is the name the `$id`s, the `$schema` `const`s, the `$schema` an `aburi init` writes,
 and the plugin manifests now carry.
 
+The documentation site now serves the four schemas under `/schema/`, so each `$id` resolves
+to the document it names and an editor reading a `$schema` line gets completion and
+validation from it. A build-time check refuses to publish a schema whose `$id` disagrees with
+the URL it is served at.
+
 `$schema` is validated with a `const`, so an `aburi.json` or a plugin manifest still naming
 the old host is rejected until the string is updated — a find-and-replace of
 `aburi.dev/schema` with `aburi.kage1020.com/schema`, or a re-run of `aburi init --force`.

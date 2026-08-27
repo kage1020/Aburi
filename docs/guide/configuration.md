@@ -181,6 +181,7 @@ setting in CI.
 | `minParsedFileRatio` | *(unset)* | Smallest share of discovered files a scan may parse and still pass. |
 | `lsp` | off | Optional type-aware enrichment. Not implemented yet. |
 
-The [JSON Schema](https://github.com/kage1020/Aburi/blob/main/schema/aburi.config.v1.json)
-is the authoritative definition. The [config design doc](../design/config.md) carries
-the reasoning behind each field.
+The [JSON Schema](https://aburi.kage1020.com/schema/aburi.config.v1.json) is the
+authoritative definition — that URL is the one the `$schema` line points at, and it
+serves the same file the loader validates against. The
+[config design doc](../design/config.md) carries the reasoning behind each field.
