@@ -41,7 +41,7 @@ async function writeConfig(respectGitignore?: boolean): Promise<void> {
   await writeFile(
     resolve(scratch, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["lang-typescript"],
       ...(respectGitignore === undefined ? {} : { respectGitignore }),
     }),

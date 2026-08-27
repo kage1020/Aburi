@@ -16,7 +16,7 @@ import { EFFECTS_NEST_DERIVED_BY_PREFIX, EFFECTS_NEST_PLUGIN_NAME } from "./cons
  * either); the NestJS framework recognition sits in `@aburi/framework-nestjs`.
  */
 export const effectsNestManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: EFFECTS_NEST_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",

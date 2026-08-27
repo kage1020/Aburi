@@ -68,7 +68,7 @@ const validate = ajv.compile<DiffResult>(diffSchema satisfies SchemaObject)
 const schemaWithAnchorInvariant = {
   ...diffSchema,
   // Distinct base URI so Ajv does not see two schemas registered under one $id.
-  $id: "https://aburi.dev/schema/aburi.diff.v1.with-anchor-invariant.json",
+  $id: "https://aburi.kage1020.com/schema/aburi.diff.v1.with-anchor-invariant.json",
   $defs: {
     ...diffSchema.$defs,
     SliceRecord: { ...diffSchema.$defs.SliceRecord, sliceAnchorDerived: true },
@@ -100,8 +100,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "base", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "head", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "base", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "head", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     const ok = validate(diff)
     if (!ok) {
@@ -126,8 +126,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     const malformed = {
       ...diff,
@@ -143,8 +143,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     const malformed = {
       ...diff,
@@ -160,8 +160,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     const malformed = {
       ...diff,
@@ -181,8 +181,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     const malformed = {
       ...diff,
@@ -201,8 +201,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     const { slices: _slices, ...malformed } = diff
     expect(validate(malformed)).toBe(false)
@@ -221,8 +221,8 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "b", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "h", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     return { ...diff, slices }
   }
@@ -231,8 +231,8 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
     const diff = buildDiff({
       baseIR: baseIR(),
       headIR: headIR(),
-      base: { ref: "base", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-      head: { ref: "head", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+      base: { ref: "base", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "head", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
     })
     expect(diff.slices.length).toBeGreaterThan(0)
     const ok = validateWithAnchorInvariant(diff)

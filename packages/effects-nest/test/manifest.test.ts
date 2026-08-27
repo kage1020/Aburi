@@ -35,6 +35,8 @@ describe("effectsNestManifest", () => {
   })
 
   it("references the aburi.plugin.v1 schema", () => {
-    expect(effectsNestManifest.$schema).toBe("https://aburi.dev/schema/aburi.plugin.v1.json")
+    expect(effectsNestManifest.$schema).toBe(
+      "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+    )
   })
 })

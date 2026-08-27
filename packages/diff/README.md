@@ -43,8 +43,8 @@ import { buildDiff, writeCanonicalDiff } from "@aburi/diff"
 const diff = buildDiff({
   baseIR,
   headIR,
-  base: { ref: "main", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
-  head: { ref: "HEAD", irSchema: "https://aburi.dev/schema/aburi.ir.v1.json" },
+  base: { ref: "main", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+  head: { ref: "HEAD", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
   gitRenames: null,          // optional: { oldPath: newPath } table
 })
 

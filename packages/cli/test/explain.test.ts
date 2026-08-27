@@ -11,7 +11,7 @@ let scratch = ""
 
 function makeIRWithTwoNamed(): IR {
   return {
-    $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
     workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
     components: [],
@@ -105,7 +105,7 @@ beforeEach(async () => {
   await writeFile(
     resolve(scratch, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["lang-typescript"],
     }),
     "utf8",

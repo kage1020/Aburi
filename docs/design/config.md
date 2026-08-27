@@ -16,7 +16,7 @@ References:
 - File name: `aburi.json` or `aburi.jsonc`
 - Placement: workspace root (same level as `pnpm-workspace.yaml` / `package.json`, etc.).
   A config in a subdirectory is also honoured — discovery walks up from `cwd` (§5.2 of
-  [CLI reference](/reference/cli)) — but every relative path *inside* it (`ignore`,
+  [CLI reference](../reference/cli.md)) — but every relative path *inside* it (`ignore`,
   `components[].roots`, relative plugin refs) still resolves against the workspace root,
   and the scan still covers the whole workspace. `aburi scan` warns when the two differ.
 - Format: JSONC (comments allowed) or JSON
@@ -31,7 +31,7 @@ Why JSONC is allowed: this is a human-authored config, so comments on each secti
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
 
   // File exclusion (drop-list Category A)
   "ignore": ["docs/**", "scripts/legacy/**"],
@@ -397,7 +397,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "languages": ["lang-typescript"],
   "frameworks": [],
   "effects": [],

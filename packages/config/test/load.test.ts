@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { ConfigError, loadConfig } from "../src/index"
 
-const SCHEMA = "https://aburi.dev/schema/aburi.config.v1.json"
+const SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
 describe("loadConfig", () => {
   let tmp: string

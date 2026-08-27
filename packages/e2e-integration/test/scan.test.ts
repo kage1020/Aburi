@@ -20,7 +20,7 @@ describe("e2e: scan on fixtures/nestjs-billing", () => {
 
     // scan() throws before returning on any integrity violation. Reaching this
     // assertion means every invariant passed for the whole billing fixture.
-    expect(result.ir.$schema).toBe("https://aburi.dev/schema/aburi.ir.v1.json")
+    expect(result.ir.$schema).toBe("https://aburi.kage1020.com/schema/aburi.ir.v1.json")
     expect(result.parseErrors).toEqual([])
     expect(result.skipped).toEqual([])
   })

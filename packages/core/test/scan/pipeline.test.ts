@@ -47,7 +47,7 @@ const silentLog: Logger = {
 
 function langManifest(name: string): LangManifest {
   return {
-    $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
     name,
     version: "0.0.0",
     type: "lang",
@@ -65,7 +65,7 @@ function langManifest(name: string): LangManifest {
 
 function frameworkManifest(name: string): FrameworkManifest {
   return {
-    $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
     name,
     version: "0.0.0",
     type: "framework",
@@ -83,7 +83,7 @@ function frameworkManifest(name: string): FrameworkManifest {
 
 function effectsManifest(name: string): EffectsManifest {
   return {
-    $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
     name,
     version: "0.0.0",
     type: "effects",

@@ -5,7 +5,7 @@ import type { Config } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 
-const CONFIG_SCHEMA_URL = "https://aburi.dev/schema/aburi.config.v1.json"
+const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
 export interface InitOptions {
   /**

@@ -1,6 +1,6 @@
 import type { Config, FrameworkHint } from "@aburi/types"
 
-const SCHEMA = "https://aburi.dev/schema/aburi.config.v1.json"
+const SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
 export function emptyConfig(): Config {
   return { $schema: SCHEMA }

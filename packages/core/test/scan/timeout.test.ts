@@ -25,7 +25,7 @@ const noopRegistry: VocabRegistry = {
 }
 
 const stubManifest: EffectsManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "effects-stub",
   version: "0.0.0",
   type: "effects",

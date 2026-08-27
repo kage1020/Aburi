@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aburi.dev/schema/aburi.config.v1.json",
+  "$id": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "title": "Aburi Project Config",
   "description": "aburi.json / aburi.jsonc project configuration. All fields optional; empty config is valid (autodetect handles everything).",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "$schema": {
-      "const": "https://aburi.dev/schema/aburi.config.v1.json"
+      "const": "https://aburi.kage1020.com/schema/aburi.config.v1.json"
     },
     "ignore": {
       "type": "array",

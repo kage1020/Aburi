@@ -239,5 +239,5 @@ decision to you.
 
 ---
 
-The [CLI spec](/design/cli-spec) holds the behavioural contract behind this
+The [CLI spec](../design/cli-spec.md) holds the behavioural contract behind this
 page, including the reasoning for each exit code.

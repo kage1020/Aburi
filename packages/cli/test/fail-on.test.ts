@@ -23,7 +23,7 @@ function emptySummary(): Summary {
 
 function makeDiff(overrides: Partial<DiffResult> = {}): DiffResult {
   return {
-    $schema: "https://aburi.dev/schema/aburi.diff.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.diff.v1.json",
     generator: { name: "aburi", version: "0.0.0" },
     base: { ref: "main", irSchema: "aburi.ir.v1.json" },
     head: { ref: "HEAD", irSchema: "aburi.ir.v1.json" },

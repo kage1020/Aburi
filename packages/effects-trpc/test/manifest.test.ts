@@ -37,6 +37,8 @@ describe("effectsTrpcManifest", () => {
   })
 
   it("references the aburi.plugin.v1 schema", () => {
-    expect(effectsTrpcManifest.$schema).toBe("https://aburi.dev/schema/aburi.plugin.v1.json")
+    expect(effectsTrpcManifest.$schema).toBe(
+      "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+    )
   })
 })

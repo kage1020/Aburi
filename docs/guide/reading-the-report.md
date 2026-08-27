@@ -110,7 +110,7 @@ names the file and the cause:
 ```
 
 A `parse-timeout` clears on a re-run most of the time. For the rest, fix the
-file or leave it out with [`ignore`](/guide/configuration#exclude-files).
+file or leave it out with [`ignore`](./configuration.md#exclude-files).
 
 **🚫 Not compared** means neither revision could read the file, so nothing in
 the report says anything about it. This is often a standing property of the

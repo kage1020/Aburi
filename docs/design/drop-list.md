@@ -339,14 +339,14 @@ Properties the extraction pipeline must satisfy.
 Minimal configuration (defaults suffice):
 
 ```jsonc
-{ "$schema": "https://aburi.dev/schema/aburi.config.v1.json" }
+{ "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json" }
 ```
 
 Mid-size project with custom drops:
 
 ```jsonc
 {
-  "$schema": "https://aburi.dev/schema/aburi.config.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.config.v1.json",
   "ignore": ["docs/**", "scripts/legacy/**"],
   "suppress": ["myLogger", "metrics", "datadog"],
   "keep": ["myLogger.audit"]

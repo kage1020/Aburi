@@ -19,7 +19,7 @@ export const FRAMEWORK_NESTJS_PLUGIN_NAME = "framework-nestjs"
  * later without a manifest bump is still recognized as owned).
  */
 export const frameworkNestjsManifest: FrameworkManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: FRAMEWORK_NESTJS_PLUGIN_NAME,
   version: "0.0.0",
   type: "framework",

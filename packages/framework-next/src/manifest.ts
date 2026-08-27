@@ -13,7 +13,7 @@ import type { FrameworkManifest } from "@aburi/types"
  * autodetect for the `next` dependency.
  */
 export const frameworkNextManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "framework-next",
   version: "0.0.0",
   type: "framework",

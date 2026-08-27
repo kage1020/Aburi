@@ -10,7 +10,7 @@ import { ConfigError } from "./errors"
  */
 const RESERVED_EXT_KIND_PREFIX = "framework:hint:"
 
-const PLUGIN_SCHEMA = "https://aburi.dev/schema/aburi.plugin.v1.json"
+const PLUGIN_SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
 
 interface NormalizedRule {
   extKind?: string | undefined

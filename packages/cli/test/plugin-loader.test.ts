@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest"
 import { CliError, loadPlugins } from "../src"
 
 const langManifest: LangManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "lang-fake",
   version: "0.0.0",
   type: "lang",

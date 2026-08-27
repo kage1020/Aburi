@@ -20,7 +20,7 @@ let scratch = ""
 function makeIR(symbols: IR["symbols"], skipped?: readonly SkippedFile[], discovered = 2): IR {
   const totalFiles = discovered
   return {
-    $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
     workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
     components: [],

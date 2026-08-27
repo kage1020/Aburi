@@ -9,7 +9,7 @@ interface BaseOverrides {
   version?: string
 }
 
-const SCHEMA = "https://aburi.dev/schema/aburi.plugin.v1.json" as const
+const SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json" as const
 const ENGINES = { aburi: "^1.0.0" } as const
 
 function emptyProvides() {

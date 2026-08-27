@@ -38,7 +38,7 @@ async function makeMonorepo(): Promise<void> {
   await writeFile(
     resolve(mono, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["lang-typescript"],
     }),
     "utf8",

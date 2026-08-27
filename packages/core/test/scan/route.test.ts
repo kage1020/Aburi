@@ -4,7 +4,7 @@ import { buildLanguageRouter } from "../../src"
 
 function stubLangManifest(name: string): LangManifest {
   return {
-    $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
     name,
     version: "0.0.0",
     type: "lang",

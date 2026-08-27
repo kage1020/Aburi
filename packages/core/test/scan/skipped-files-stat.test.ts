@@ -45,7 +45,7 @@ const noopRegistry: VocabRegistry = {
 
 function langManifest(): LangManifest {
   return {
-    $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
     name: "lang-stub",
     version: "0.0.0",
     type: "lang",
@@ -251,7 +251,7 @@ describe("stats.skippedFiles — the Document names what the scan lost", () => {
 describe("integrity #21 — the list accounts for every unparsed file", () => {
   function documentWith(stats: Partial<IR["stats"]>): IR {
     return {
-      $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
       generator: { name: "aburi", version: "0.0.0", plugins: [] },
       workspace: { root: ".", managers: [], languages: [makeLanguageId("stub")] },
       components: [],

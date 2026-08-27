@@ -65,7 +65,7 @@ const EXT_KIND_ENTRIES: ReactExtKindEntry[] = [
 ]
 
 export const frameworkReactManifest: FrameworkManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "framework-react",
   version: "0.0.0",
   type: "framework",

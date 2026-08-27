@@ -6,7 +6,7 @@ import { loadPluginManifest, parsePluginManifest, RegistryError } from "../src/i
 
 const VALID_MANIFEST = `{
   // valid effects plugin
-  "$schema": "https://aburi.dev/schema/aburi.plugin.v1.json",
+  "$schema": "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   "name": "effects-foo",
   "version": "1.0.0",
   "type": "effects",
@@ -56,7 +56,7 @@ describe("parsePluginManifest", () => {
 
   it("throws on schema violation (lang plugin with x-* effects, per schema allOf)", () => {
     const text = JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
       name: "lang-foo",
       version: "1.0.0",
       type: "lang",

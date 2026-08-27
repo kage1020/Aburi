@@ -191,7 +191,7 @@ export function dependency(
 
 export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): IR {
   return {
-    $schema: overrides.$schema ?? "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: overrides.$schema ?? "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: overrides.generator ?? {
       name: "aburi",
       version: "0.0.0",

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { ConfigError, parseConfig, readConfigFile } from "../src/index"
 
-const SCHEMA = "https://aburi.dev/schema/aburi.config.v1.json"
+const SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
 const VALID_JSONC = `{
   // comment is allowed

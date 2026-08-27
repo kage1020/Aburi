@@ -83,7 +83,7 @@ function candidate(name: string): SymbolCandidate<OpaqueAstNode> {
 
 function langManifest(): LangManifest {
   return {
-    $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
     name: "lang-stub",
     version: "0.0.0",
     type: "lang",

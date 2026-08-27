@@ -13,7 +13,7 @@ import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./
  * builder so both stay in lockstep across edits.
  */
 export const effectsPrismaManifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: EFFECTS_PRISMA_PLUGIN_NAME,
   version: "0.0.0",
   type: "effects",

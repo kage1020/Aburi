@@ -20,7 +20,10 @@ let scratch = ""
 async function writeConfig(config: Record<string, unknown>): Promise<void> {
   await writeFile(
     resolve(scratch, "aburi.json"),
-    JSON.stringify({ $schema: "https://aburi.dev/schema/aburi.config.v1.json", ...config }),
+    JSON.stringify({
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
+      ...config,
+    }),
     "utf8",
   )
 }

@@ -36,7 +36,7 @@ class MemStream extends Writable {
 
 const STUB_PLUGIN = `
 const manifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "lang-stub",
   version: "0.0.0",
   type: "lang",
@@ -131,7 +131,7 @@ beforeEach(async () => {
   await writeFile(
     resolve(scratch, "aburi.json"),
     JSON.stringify({
-      $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["./lang-stub.mjs"],
     }),
     "utf8",

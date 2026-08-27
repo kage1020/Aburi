@@ -30,7 +30,7 @@ import {
 import { computeSlices } from "./slice"
 import { classifyStatus, dropDirection } from "./status"
 
-const DIFF_SCHEMA = "https://aburi.dev/schema/aburi.diff.v1.json"
+const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
 /**
  * The two counters `buildDiff` always writes, narrowed off `Summary`'s optionals.

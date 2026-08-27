@@ -129,7 +129,7 @@ describe("normalizeFrameworkHints", () => {
         withHints(hint("acme", { decorators: { A: { extKind: "framework:acme:controller" } } })),
       ),
     )
-    expect(plugin.$schema).toBe("https://aburi.dev/schema/aburi.plugin.v1.json")
+    expect(plugin.$schema).toBe("https://aburi.kage1020.com/schema/aburi.plugin.v1.json")
     expect(plugin.version).toMatch(/^\d+\.\d+\.\d+/)
     expect(plugin.engines.aburi).toBe("*")
     expect(plugin.provides.effects).toEqual([])

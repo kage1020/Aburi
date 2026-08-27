@@ -71,7 +71,7 @@ function makeIR(shape: IRShape): IR {
   const byPath = (a: { path: string }, b: { path: string }): number =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0
   return {
-    $schema: "https://aburi.dev/schema/aburi.ir.v1.json",
+    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
     generator: { name: "aburi", version: "0.0.0", plugins: [] },
     workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
     components: [],
@@ -454,7 +454,7 @@ describe("runExplain — the substring arm", () => {
  */
 const STUB_PLUGIN = `
 const manifest = {
-  $schema: "https://aburi.dev/schema/aburi.plugin.v1.json",
+  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "lang-stub",
   version: "0.0.0",
   type: "lang",
@@ -532,7 +532,7 @@ describe("runExplain — the scan this command runs", () => {
     await writeFile(
       resolve(scratch, "aburi.json"),
       JSON.stringify({
-        $schema: "https://aburi.dev/schema/aburi.config.v1.json",
+        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
         languages: ["./lang-stub.mjs"],
       }),
       "utf8",
