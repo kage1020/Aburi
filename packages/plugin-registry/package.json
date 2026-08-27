@@ -1,6 +1,6 @@
 {
   "name": "@aburi/plugin-registry",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Plugin manifest validator and vocab registry: loads, validates, and tracks every @aburi/* plugin's owned extKind / effect id / framework namespaces, enforcing reservation and conflict rules, plus the shared guards that enforce the language plugin's input contract",
   "license": "Apache-2.0",
   "author": "kage1020",

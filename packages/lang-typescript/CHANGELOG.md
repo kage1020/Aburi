@@ -1,5 +1,314 @@
 # @aburi/lang-typescript
 
+## 0.3.0
+
+### Minor Changes
+
+- 5c36d16: Relicense from MIT to the Apache License 2.0.
+
+  The terms are still permissive, and nothing about how you may use, modify, or
+  redistribute Aburi narrows. Apache 2.0 adds two things MIT leaves unsaid: an
+  express patent grant from every contributor, and a termination clause that
+  withdraws it from anyone who brings a patent claim over the work. Redistributors
+  now also carry two obligations MIT did not impose. State the changes you made to
+  any file you modified, and pass along the `NOTICE` file.
+
+  Each package now ships a copy of the licence in its own tarball, which Apache
+  2.0 section 4(a) asks for and the SPDX field alone did not satisfy.
+
+  Versions published before this change stay under MIT. A licence already granted
+  cannot be withdrawn, so anyone depending on an earlier release keeps the terms
+  they got.
+
+- e760103: Read a decorator wherever the grammar parents it, order them by source position, and let a JSDoc block reach past one
+
+  **This changes what a Symbol carries, and the first scan after upgrading will report
+  `modified` Symbols that no source change explains.** Decorators feed
+  `mergeFrameworkClassification`, so a class that had no `extKind` can now have one; `signature`
+  moves with the JSDoc change; and both feed the api and logic fingerprint axes. The drift is the
+  point of the fix rather than a side effect — the Symbols were wrong before — but it lands as
+  diff noise exactly once.
+
+  ## Where the decorator is written no longer changes whether it is read
+
+  A decorator always belongs to the declaration it precedes. Tree-sitter parents it beside that
+  declaration when nothing separates the two, and inside it when the `export_statement` rule
+  (`decorator* 'export' ['default'] declaration`) has nowhere to put it — so it is the position
+  relative to the keyword that decides, not whether a wrapper exists. Only the first was read:
+
+  | source                           | where the decorator sits                    | read before |
+  | -------------------------------- | ------------------------------------------- | ----------- |
+  | `class C { @A() m() {} }`        | preceding sibling in the class body         | yes         |
+  | `@A() export class C {}`         | preceding sibling in the `export_statement` | yes         |
+  | `@A() class C {}`                | child of `class_declaration`                | no          |
+  | `export @A() class C {}`         | child of `class_declaration`                | no          |
+  | `export default @A() class C {}` | child of `class_declaration`                | no          |
+  | `@A() abstract class C {}`       | child of `abstract_class_declaration`       | no          |
+  | `@A() export @B() class C {}`    | one of each                                 | only `A`    |
+
+  The symptom was an IR that contradicted itself: `export @Controller("x") class A {}` produced a
+  class with no boundary owning routes that had one.
+
+  Every row is legal TypeScript except the last, which `tsc` rejects as TS8038 — decorators may
+  not appear on both sides of `export`. The grammar accepts it, so it still reaches the extractor
+  from a half-edited file, and reading the union rather than one side means such a file loses no
+  decorator on the way to being reported.
+
+  `readDecorators` now returns the union of the preceding-sibling run and the declaration's own
+  `decorator:` field children. The two cannot overlap — a node has one parent, so a preceding
+  sibling of the declaration is never also its child — which is why the union needs no
+  deduplication. A **parameter** decorator (`m(@P() x)`) stays out of both: it is a child of the
+  parameter, and the method does not field-tag it.
+
+  ## Decorators are ordered by source position
+
+  `framework-nestjs` resolves a class carrying several recognised decorators by taking the first
+  in source order, so the order is a contract. It was a line sort with an alphabetical tiebreak,
+  and `Decorator` has no column — so two decorators on one line came out in name order:
+
+  ```ts
+  @Injectable()
+  @Catch(HttpException)
+  class F {} // was framework:nestjs:filter
+  @Injectable()
+  @Catch(HttpException)
+  class F {} // was framework:nestjs:provider
+  ```
+
+  A newline decided the classification, and `mergeFrameworkClassification` stamped the result
+  `confidence: "high"` either way. Ordering on the node's byte offset settles it: total, agrees
+  with the line ordering integrity invariant #11 checks, and needs no tiebreak.
+
+  ## A JSDoc block reaches past a decorator, and only JSDoc counts
+
+  `readLeadingJsDoc` stopped at a decorator, so `/** @throws E */ @Get() handler() {}` discarded
+  the block and every `@throws` tag in it. A decorator is now stepped over — it belongs to the
+  member rather than separating anything from it.
+
+  That opens the space _between_ decorators, which is where `// biome-ignore`, ticket references
+  and commented-out decorators are written. So the run now collects only `/**` blocks, which is
+  what the function always claimed to read: an ordinary `/* … */` and a `//` line are prose, and
+  the one consumer (`readThrows`, scanning the joined text for `@throws`) cannot tell prose from
+  a declaration once both are in it. **A `@throws` written in a `//` or `/* */` comment therefore
+  stops counting**, which it should never have done.
+
+  An anonymous token still ends the run, which is what keeps a stray `;` from handing a member
+  someone else's documentation.
+
+  ## Also
+
+  `@/* why */ Foo()` parses, and the decorator was being named after the comment rather than
+  after `Foo`.
+
+- 4c16cad: Point every schema id at the documentation domain
+
+  The four JSON Schemas identified themselves as `https://aburi.dev/schema/...`, a host this
+  project does not own and never served them from. The docs site is `aburi.kage1020.com`, so
+  that is the name the `$id`s, the `$schema` `const`s, the `$schema` an `aburi init` writes,
+  and the plugin manifests now carry.
+
+  The documentation site now serves the four schemas under `/schema/`, so each `$id` resolves
+  to the document it names and an editor reading a `$schema` line gets completion and
+  validation from it. A build-time check refuses to publish a schema whose `$id` disagrees with
+  the URL it is served at.
+
+  `$schema` is validated with a `const`, so an `aburi.json` or a plugin manifest still naming
+  the old host is rejected until the string is updated — a find-and-replace of
+  `aburi.dev/schema` with `aburi.kage1020.com/schema`, or a re-run of `aburi init --force`.
+
+- ed1c3a0: Refuse an empty module specifier instead of emitting an edge that names no module
+
+  `import x from ""` used to end the run. `readStringLiteral` returned `""` for an empty literal
+  and all three call sites guarded only on `null`, so every form the reader produces an edge for
+  produced one whose `source` names nothing, with no diagnostic:
+
+  ```ts
+  import a from ""; // { source: "", symbols: ["a"] }
+  import ""; // { source: "", symbols: "*" }
+  export * from ""; // { source: "", symbols: "*" }
+  export { X } from ""; // { source: "", symbols: ["X"] }
+  import type { B } from ""; // { source: "", symbols: ["B"] }
+  const p = import(""); // { source: "", symbols: "*", dynamic: true }
+  ```
+
+  `ImportEdge.source` is contractually a non-empty specifier (`lang-plugin.md` §4.4), and the
+  shared guards in `@aburi/plugin-registry/plugin-input` throw when it is not. So the guard fired
+  on syntax a user can legally write — and because it fires inside a plugin, it took the whole
+  scan with it:
+
+  ```
+  src/a.controller.ts   @Controller class, plus one `import x from ""`
+  src/b.service.ts      @Injectable class, nothing wrong with it
+
+  scan() → throws. No IR at all; `BService` is discarded along with the offending file.
+  ```
+
+  The reach is wide: a decorator-driven framework plugin walks the edge list for every file
+  holding a decorated class or method, so any controller with a half-typed import ends the scan.
+  Before framework plugins read import edges, the throw needed an effect plugin _and_ a call
+  candidate in the same file.
+
+  ## What the plugin does instead
+
+  An empty specifier produces no edge and one **recoverable** `ParseError` at the literal's own
+  line and column, naming which construct it belongs to — `export * from ""` is not an import, and
+  being told that it is sends the author to the wrong line. The file keeps its Symbols: what
+  withdraws one is a parse that returned no tree at all, which this is not.
+
+  The diagnostic travels the channel a syntax error already uses, and reaches as far as that
+  channel goes — `ScanResult.parseErrors`, carrying the file, line, column and message. The CLI
+  renders parse errors as a count alone, so someone running `aburi scan` sees `1 file(s) had
+recoverable parse errors` and has to read the programmatic result for the rest. That is an
+  existing gap in the reporting layer rather than something this change introduces.
+
+  Empty and absent stay apart. `readStringLiteral` returning `null` means the node was not a string
+  literal — a computed specifier (`import(p)`, `import("" + x)`) the reader does not follow, which
+  is not a fault in the source and gets no diagnostic. A literal that is present and empty is
+  something someone typed. Collapsing the two into one silent `null` is the drop this change exists
+  to stop, and it would also report a fault against perfectly good code.
+
+  The test is emptiness, not blankness: `import a from " "` still produces an edge, because `" "`
+  is a module name that will not resolve, which is the type checker's business. `tsc 6.0.3` reports
+  TS2307 for the value forms above and TS2882 for the bare side-effect import — all of them parse,
+  which is why they reach the extractor at all.
+
+  The guard in `plugin-input` is unchanged. A third defensive layer would hide the next producer
+  bug, which is the guard's whole job.
+
+  ## What changes in the IR
+
+  Nothing disappears from `dependencies`: `ImportEdge`s are not serialized — they reach
+  `resolveCallGraph` and stop there, and an empty specifier was never relative, so no resolution
+  tier ever consulted it.
+
+  One second-order effect is visible. `bindsToExternalImport` buckets an unresolved call as
+  `external` when its head is bound by a non-relative import, and `""` counted as non-relative.
+  A call bound by the withdrawn edge now buckets as `no-match`, shifting `stats.callResolution` by
+  one. Neither bucket describes a broken specifier — `external` means "a bare package, out of reach
+  by construction" — and the parse error is the channel that does.
+
+  ## Contract
+
+  `extractImports` now returns `{ edges, errors }` rather than `ImportEdge[]`. It is part of the
+  package's public surface, which is why this is a minor rather than a patch; `parseTypescriptFile`
+  is unaffected and merges the import errors into `ParseResult.errors` alongside the syntax ones.
+
+- 14bdb6b: Separate the `LanguageId` and `PluginRef` vocabularies
+
+  `aburi.json` uses the key `languages` at two nesting levels with two different
+  vocabularies: the top-level array holds plugin refs the loader resolves as module
+  specifiers, while `components[].languages` holds `LanguageId`s constrained to
+  `^[a-z][a-z0-9]*$`. Both writers conflated them.
+
+  - `LanguagePlugin` gains a required `languageId` field. `@aburi/core` projects it into
+    `IR.workspace.languages`, which previously received `manifest.name` and therefore
+    emitted `"lang-typescript"` — a value that fails the frozen `aburi.ir.v1` schema for
+    every first-party plugin. Third-party language plugins must add the field.
+  - `LanguageId` is now a branded type constructed through `makeLanguageId` (exported from
+    `@aburi/core`), so a manifest name can no longer be assigned where a language id belongs.
+  - `aburi init` writes plugin manifest names (`lang-typescript`, `framework-nestjs`) in the
+    top-level arrays and keeps `LanguageId`s inside `components[]`. It previously wrote
+    detector ids, so the loader looked for the non-existent `@aburi/ts` package and the
+    documented `init` then `scan` quick start failed on every project.
+  - `InitReport` gains `unmappedLanguages` / `unmappedFrameworks`, and the CLI warns about
+    them. A detected language with no first-party plugin leaves `languages` empty, which is
+    otherwise invisible until the next command stops.
+  - `--with-suggestions` names the language plugin first, per `cli-spec.md` §4.6: it is a
+    hard requirement for the next `aburi scan`, where a framework plugin only widens
+    classification.
+  - `aburi scan` refuses to run when no language plugin resolves, instead of writing an IR
+    with zero Symbols and an empty `workspace.languages` at exit 0. That document fails the
+    schema's `minItems: 1`, and two of them diff to `+0 -0 ~0` — so every `--fail-on` gate
+    downstream passed regardless of what changed.
+  - New integrity invariant #18: `workspace.languages` is non-empty, every entry satisfies
+    the `LanguageId` grammar, and every `Symbol.language` appears in it. It also covers an IR
+    read off disk, which `readIR` brands without validating.
+
+### Patch Changes
+
+- fc8f3c9: Read a declaration's leading comments and decorators from the declaration, not from the file
+
+  `readLeadingJsDoc` and `collectDecoratorNodes` ask the same question — _the run of siblings
+  immediately before this declaration_ — and both answered it by reading the parent's whole
+  child list and searching it for the declaration's own position.
+
+  `children` and `namedChildren` are not field reads. Each unmarshals every child across the
+  WASM boundary into a fresh JS object, and caches the result on one JS wrapper, so the next
+  `node.parent` pays for the list again. The parent of a top-level declaration is the entire
+  program: a file of N declarations paid O(N) per declaration.
+
+  Both now walk backwards from the node with `previousSibling` / `previousNamedSibling`, which
+  stops when the run ends — nearly always immediately, since most declarations carry neither a
+  comment nor a decorator.
+
+  Measured on one file of exported one-line functions, alternating between the two versions
+  so machine drift lands on both arms (min of three runs each, whole `scan`, ms):
+
+  | declarations | before | after | after (repeat) |
+  | ------------ | ------ | ----- | -------------- |
+  | 1,000        | 451    | 214   | 206            |
+  | 2,000        | 1232   | 304   | 326            |
+  | 4,000        | 12208  | 502   | 516            |
+
+  The exponent is the claim, not the digits: doubling the declarations multiplied the old
+  time by 2.7 and then 9.9, and the new one by about 1.5 both times — sub-linear, because a
+  fixed ~200 ms of startup dominates at this size. A 1.5 MB file of ~18,000 declarations, the
+  shape a generated API client or a Prisma type file has and comfortably inside
+  `maxFileSizeBytes`, now extracts in about 1.9 s where it had been taking minutes.
+
+  Two behaviour changes come with the rewrite rather than falling out of it.
+
+  **A comment no longer ends a decorator run.** Tree-sitter treats a comment as a named node
+  and puts it wherever it was written, including between two decorators or between the
+  decorators and the `export` keyword. Stopping there let a `// biome-ignore` or a TODO detach
+  `@Injectable()` from the class it decorates — silently, since decorators feed the framework
+  classifier, so the Symbol came out with the wrong `extKind` rather than with an error.
+  Comments are now skipped, the way `readCallArguments` already skips them. This also fixes
+  the same shape inside a class body (`class C { @A() /* note */ m() {} }`), which had been
+  losing its decorator since before this change.
+
+  **The `export_statement` special case is gone.** The grammar's rule is
+  `decorator* 'export' ['default'] declaration`, so a wrapped export's decorators are the
+  declaration's own preceding siblings and the named walk steps over the keywords to reach
+  them; the sweep-filter that used to handle it separately was doing the same job less
+  precisely.
+
+  Two placements the walk does not reach, pinned by tests here and closed in the change that
+  follows: a decorator on a declaration with no wrapper to hold it (`@A() class C {}` at top
+  level, or `export @A() class C {}`) is parsed as a _child_ of the declaration rather than a
+  sibling, so it is not read.
+
+- Updated dependencies [5c36d16]
+- Updated dependencies [e2dab93]
+- Updated dependencies [309f093]
+- Updated dependencies [74aa475]
+- Updated dependencies [fc8f3c9]
+- Updated dependencies [630460f]
+- Updated dependencies [f73eb46]
+- Updated dependencies [4c2d5aa]
+- Updated dependencies [060d7a5]
+- Updated dependencies [74aa475]
+- Updated dependencies [1e59445]
+- Updated dependencies [c825c74]
+- Updated dependencies [8ce6ed4]
+- Updated dependencies [4c16cad]
+- Updated dependencies [6d3d390]
+- Updated dependencies [c3654c3]
+- Updated dependencies [0b39623]
+- Updated dependencies [da20510]
+- Updated dependencies [baa6857]
+- Updated dependencies [b8763eb]
+- Updated dependencies [cafd4b8]
+- Updated dependencies [667f9b7]
+- Updated dependencies [54881d5]
+- Updated dependencies [37715cd]
+- Updated dependencies [dbdc8aa]
+- Updated dependencies [836b05a]
+- Updated dependencies [85ade16]
+- Updated dependencies [14bdb6b]
+  - @aburi/core@0.3.0
+  - @aburi/types@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

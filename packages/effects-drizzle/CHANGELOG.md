@@ -1,5 +1,56 @@
 # @aburi/effects-drizzle
 
+## 0.2.0
+
+### Minor Changes
+
+- 5c36d16: Relicense from MIT to the Apache License 2.0.
+
+  The terms are still permissive, and nothing about how you may use, modify, or
+  redistribute Aburi narrows. Apache 2.0 adds two things MIT leaves unsaid: an
+  express patent grant from every contributor, and a termination clause that
+  withdraws it from anyone who brings a patent claim over the work. Redistributors
+  now also carry two obligations MIT did not impose. State the changes you made to
+  any file you modified, and pass along the `NOTICE` file.
+
+  Each package now ships a copy of the licence in its own tarball, which Apache
+  2.0 section 4(a) asks for and the SPDX field alone did not satisfy.
+
+  Versions published before this change stay under MIT. A licence already granted
+  cannot be withdrawn, so anyone depending on an earlier release keeps the terms
+  they got.
+
+- 4c16cad: Point every schema id at the documentation domain
+
+  The four JSON Schemas identified themselves as `https://aburi.dev/schema/...`, a host this
+  project does not own and never served them from. The docs site is `aburi.kage1020.com`, so
+  that is the name the `$id`s, the `$schema` `const`s, the `$schema` an `aburi init` writes,
+  and the plugin manifests now carry.
+
+  The documentation site now serves the four schemas under `/schema/`, so each `$id` resolves
+  to the document it names and an editor reading a `$schema` line gets completion and
+  validation from it. A build-time check refuses to publish a schema whose `$id` disagrees with
+  the URL it is served at.
+
+  `$schema` is validated with a `const`, so an `aburi.json` or a plugin manifest still naming
+  the old host is rejected until the string is updated — a find-and-replace of
+  `aburi.dev/schema` with `aburi.kage1020.com/schema`, or a re-run of `aburi init --force`.
+
+### Patch Changes
+
+- Updated dependencies [5c36d16]
+- Updated dependencies [f73eb46]
+- Updated dependencies [4c2d5aa]
+- Updated dependencies [8ce6ed4]
+- Updated dependencies [4c16cad]
+- Updated dependencies [6d3d390]
+- Updated dependencies [cafd4b8]
+- Updated dependencies [54881d5]
+- Updated dependencies [37715cd]
+- Updated dependencies [14bdb6b]
+  - @aburi/plugin-registry@0.3.0
+  - @aburi/types@0.3.0
+
 ## 0.1.0
 
 ### Minor Changes

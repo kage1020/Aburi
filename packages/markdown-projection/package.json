@@ -1,6 +1,6 @@
 {
   "name": "@aburi/markdown-projection",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Aburi Markdown projection: deterministic Markdown views (workspace L0, component L1+L2, aburi diff, aburi explain) derived from aburi.ir.v1 / aburi.diff.v1 with confidence badges, dropped fold-outs, symbol-id sanitization, and CI-facing --fail-on formatter",
   "license": "Apache-2.0",
   "author": "kage1020",

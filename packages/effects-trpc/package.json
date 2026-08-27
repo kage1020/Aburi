@@ -1,6 +1,6 @@
 {
   "name": "@aburi/effects-trpc",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Aburi tRPC effects plugin: classifies tRPC client procedure calls (query / mutate / subscribe and the React Query hook surface) into the core network.rpc effect",
   "license": "Apache-2.0",
   "author": "kage1020",
