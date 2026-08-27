@@ -1,6 +1,6 @@
 {
   "name": "@aburi/framework-express",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Aburi Express framework plugin: recognizes Express Router instances, route handlers (get/post/put/patch/delete/all), middleware (arity-3), error middleware (arity-4), and mount points (app.use('/prefix', router)) — emitting framework:express:* extKinds",
   "license": "Apache-2.0",
   "author": "kage1020",

@@ -1,5 +1,25 @@
 # @aburi/github-action
 
+## 0.2.0
+
+### Minor Changes
+
+- 5c36d16: Relicense from MIT to the Apache License 2.0.
+
+  The terms are still permissive, and nothing about how you may use, modify, or
+  redistribute Aburi narrows. Apache 2.0 adds two things MIT leaves unsaid: an
+  express patent grant from every contributor, and a termination clause that
+  withdraws it from anyone who brings a patent claim over the work. Redistributors
+  now also carry two obligations MIT did not impose. State the changes you made to
+  any file you modified, and pass along the `NOTICE` file.
+
+  Each package now ships a copy of the licence in its own tarball, which Apache
+  2.0 section 4(a) asks for and the SPDX field alone did not satisfy.
+
+  Versions published before this change stay under MIT. A licence already granted
+  cannot be withdrawn, so anyone depending on an earlier release keeps the terms
+  they got.
+
 ## 0.1.0
 
 ### Minor Changes

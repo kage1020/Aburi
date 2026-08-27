@@ -1,6 +1,6 @@
 {
   "name": "@aburi/github-action",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GitHub Action wrapper around @aburi/cli: runs `aburi diff` for a pull request, uploads the semantic diff Markdown as a PR comment (upserted by a hidden marker), and forwards `--fail-on` so CI gates fire off Aburi's status/count clauses. Composite action; the runtime binary is resolved via `pnpm dlx @aburi/cli@<version>` so consumers pin the CLI, not this wrapper.",
   "license": "Apache-2.0",
   "author": "kage1020",
