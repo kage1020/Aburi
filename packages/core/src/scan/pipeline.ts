@@ -40,56 +40,31 @@ import {
 } from "./timeout"
 
 /**
- * Per-file pipeline output. The Symbols carry finalized fingerprints and are already
- * routed through Category B / C drop rules. `imports` is preserved so caller-side
- * dependency extraction (future dependency-extraction pass) has access without re-parsing.
+ * What the pipeline knows about a file whatever became of it: which file, and what its
+ * language plugin said about parsing it. Every outcome carries both.
+ *
+ * `parseErrors` is on all three because it is diagnostic rather than IR, and because the file
+ * that most needs it is the one that produced nothing: backtracking over malformed input is a
+ * common reason for a slow parse, so a reader told only about the budget would go and raise it
+ * when the fix is the syntax.
  */
-export interface FilePipelineResult {
-  symbols: IRSymbol[]
-  imports: readonly ImportEdge[]
-  parseErrors: readonly ParseError[]
-  timeoutEvents: readonly ClassifyTimeoutEvent[]
-  /**
-   * True when the parse produced nothing the rest of the pipeline may use — either the
-   * language plugin returned a null tree, or it reported a `ParseError` whose `recoverable`
-   * is exactly `false`.
-   *
-   * The two are one condition rather than two flags because `ParseResult` documents them
-   * as companions: a plugin that cannot build a tree is expected to say so in `errors[]`
-   * as well. Reading only the tree left the other half unimplemented — a plugin that
-   * followed the documented contract, returning the partial tree it managed to build and
-   * marking the error non-recoverable, had its instruction silently ignored. Honouring the
-   * flag also lets a plugin reject a file it *could* parse (a wrong-dialect source, a
-   * generated blob) without fabricating a null tree to be heard.
-   *
-   * Errors that are all recoverable do not flip this: those files are still counted as
-   * parsed, carrying their warnings.
-   */
-  terminalParseFailure: boolean
-  /**
-   * Set when the file overran `config.parseTimeoutMs` and was abandoned. Every other field
-   * is then empty: an abandoned file contributes nothing to the IR, because the alternative
-   * — keeping whichever Symbols it managed to produce first — would make the Document
-   * depend on how fast the machine was that day. The caller records the file as skipped and
-   * excludes it from `parsedFiles`.
-   *
-   * Two exceptions to "every other field is empty". `parseErrors` survives, because it is
-   * diagnostic rather than IR and because a slow parse is often a slow parse *of broken
-   * input* — a reader told only about the budget would go raise it instead of fixing the
-   * syntax. `imports` does not, which is the one place this differs from a terminal parse
-   * failure: that path keeps its edges, because a file that could not be parsed at all still
-   * told us truthfully what it imports, whereas here the file is being withdrawn
-   * deliberately, and an import list is only ever consulted on behalf of the calls in its
-   * own file — of which an abandoned file has none.
-   *
-   * Never set together with `terminalParseFailure` — the withdrawal is decided before the
-   * first deadline reading. The caller records one skip entry per file, so a file carrying
-   * both would be labelled by whichever flag it happens to test first, and a plugin's
-   * outright refusal would be reported as a file that was merely slow.
-   */
-  parseTimeout: ParseTimeoutEvent | null
+interface FileOutcomeCommon {
   /** POSIX-relative path of the file. */
   path: string
+  parseErrors: readonly ParseError[]
+}
+
+/**
+ * The file reached the IR. Its Symbols carry finalized fingerprints and are already routed
+ * through the Category B / C drop rules.
+ *
+ * `imports` is kept so caller-side dependency extraction has them without re-parsing.
+ */
+export interface ExtractedFile extends FileOutcomeCommon {
+  kind: "extracted"
+  symbols: IRSymbol[]
+  imports: readonly ImportEdge[]
+  timeoutEvents: readonly ClassifyTimeoutEvent[]
   /**
    * `makeCallSiteKey` keys for the surviving calls whose receiver the language
    * plugin reported as an expression. `Call` is a schema type and cannot carry
@@ -98,6 +73,58 @@ export interface FilePipelineResult {
    */
   dynamicCallSites: readonly string[]
 }
+
+/**
+ * The parse produced nothing the rest of the pipeline may use — either the language plugin
+ * returned a null tree, or it reported a `ParseError` whose `recoverable` is exactly `false`.
+ *
+ * The two are one outcome rather than two because `ParseResult` documents them as companions:
+ * a plugin that cannot build a tree is expected to say so in `errors[]` as well. Reading only
+ * the tree left the other half unimplemented — a plugin that followed the documented contract,
+ * returning the partial tree it managed to build and marking the error non-recoverable, had its
+ * instruction silently ignored. Honouring the flag also lets a plugin reject a file it *could*
+ * parse (a wrong-dialect source, a generated blob) without fabricating a null tree to be heard.
+ *
+ * Errors that are all recoverable do not produce this: those files are extracted, carrying
+ * their warnings.
+ *
+ * It keeps its `imports`, which is the one place this differs from an abandoned file: a file
+ * whose contents could not be used still told us truthfully what it imports, whereas an
+ * abandoned one is being withdrawn deliberately.
+ */
+export interface WithdrawnFile extends FileOutcomeCommon {
+  kind: "parse-failed"
+  imports: readonly ImportEdge[]
+}
+
+/**
+ * The file overran `config.parseTimeoutMs` and was abandoned.
+ *
+ * It contributes nothing but its errors, because the alternative — keeping whichever Symbols
+ * it managed to produce first — would make the Document depend on how fast the machine was
+ * that day. An import list would be no better off: it is only ever consulted on behalf of the
+ * calls in its own file, of which an abandoned file has none.
+ */
+export interface AbandonedFile extends FileOutcomeCommon {
+  kind: "parse-timeout"
+  timeout: ParseTimeoutEvent
+}
+
+/**
+ * The three fates of a file the pipeline ran to completion on, as one value.
+ *
+ * A file has more fates than three — a plugin that throws, a file that vanished between the
+ * listing and the read — and none of them produce a result at all. That is deliberate: the
+ * per-file exception boundary lives in `scan.ts`, so "this file contributed nothing" is said
+ * by a throw there rather than by a fourth member here.
+ *
+ * A union rather than a pair of independent fields, because the fields were not independent.
+ * Both fed `parsedFiles` by different subtractions, so the fourth combination the product
+ * type admitted would have counted one file out of it twice — forbidden by a rule that lived
+ * in a comment. And the variants carry different payloads, which the widened product could
+ * only describe as "empty here, present there".
+ */
+export type FilePipelineResult = ExtractedFile | WithdrawnFile | AbandonedFile
 
 export interface FilePipelineInput {
   file: SourceFile
@@ -115,9 +142,6 @@ export interface FilePipelineInput {
    * plugin broken in both places is exactly the run that needs both facts.
    */
   treeReleaseFailures: TreeReleaseFailure[]
-  classifyTimeoutMs?: number
-  /** `config.parseTimeoutMs`. Omitted means the lang-plugin.md §7.1.2 default. */
-  parseTimeoutMs?: number
 }
 
 /**
@@ -171,25 +195,21 @@ export interface TreeReleaseFailure {
 export async function runFilePipeline(input: FilePipelineInput): Promise<FilePipelineResult> {
   const { file, language, frameworks, effects, registry, config, dropCFilter, log } = input
 
-  const deadline = startParseDeadline(input.parseTimeoutMs)
+  const deadline = startParseDeadline(config.parseTimeoutMs)
   // Everything the file produced is withdrawn except its parse errors. Those are the one
   // output that is diagnostic rather than IR, and the one a slow file most needs to keep:
   // backtracking over malformed input is a common reason for a slow parse, so a timeout
   // that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is
   // the syntax. `parseErrors` is in scope at every call — the parse has always returned.
-  const abandon = (): FilePipelineResult => ({
-    symbols: [],
-    imports: [],
+  const abandon = (): AbandonedFile => ({
+    kind: "parse-timeout",
+    path: file.path,
     parseErrors,
-    timeoutEvents: [],
-    terminalParseFailure: false,
-    parseTimeout: {
+    timeout: {
       file: file.path,
       budgetMs: deadline.budgetMs,
       elapsedMs: deadline.elapsedMs(),
     },
-    path: file.path,
-    dynamicCallSites: [],
   })
 
   const parseResult = await language.parseFile(file)
@@ -215,16 +235,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     // 0. Reading it literally leaves such a plugin where it was before the field was read at
     // all — the file kept, the error reported — which is the loud failure of the two.
     if (parseResult.tree === null || parseErrors.some((error) => error.recoverable === false)) {
-      return {
-        symbols: [],
-        imports,
-        parseErrors,
-        timeoutEvents,
-        terminalParseFailure: true,
-        parseTimeout: null,
-        path: file.path,
-        dynamicCallSites: [],
-      }
+      return { kind: "parse-failed", path: file.path, parseErrors, imports }
     }
 
     if (deadline.expired()) return abandon()
@@ -278,8 +289,8 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         dropCFilter,
         timeoutEvents,
       }
-      if (input.classifyTimeoutMs !== undefined)
-        classifyCallsInput.classifyTimeoutMs = input.classifyTimeoutMs
+      if (config.classifyTimeoutMs !== undefined)
+        classifyCallsInput.classifyTimeoutMs = config.classifyTimeoutMs
       const {
         effects: classifiedEffects,
         calls: keptCalls,
@@ -304,13 +315,12 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     log.debug(`scan/pipeline: ${file.path} produced ${symbols.length} symbols`)
 
     return {
+      kind: "extracted",
+      path: file.path,
+      parseErrors,
       symbols,
       imports,
-      parseErrors,
       timeoutEvents,
-      terminalParseFailure: false,
-      parseTimeout: null,
-      path: file.path,
       dynamicCallSites,
     }
   } finally {

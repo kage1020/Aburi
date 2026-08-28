@@ -219,12 +219,12 @@ function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
     frameworks: [],
     effects: [],
     registry: noopRegistry,
-    config: {},
+    // The budget travels on the config, which is where the pipeline reads it from.
+    config: extras.parseTimeoutMs === undefined ? {} : { parseTimeoutMs: extras.parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
     log: silentLog,
     treeReleaseFailures: failures,
   }
-  if (extras.parseTimeoutMs !== undefined) input.parseTimeoutMs = extras.parseTimeoutMs
   return runFilePipeline(input)
 }
 
@@ -241,7 +241,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     const plugin = stubPlugin()
     const result = await run(plugin)
 
-    expect(result.symbols).toHaveLength(1)
+    expect(result.kind).toBe("extracted")
     expect(plugin.released).toHaveLength(1)
     expect(plugin.released[0]).toBe(plugin.handedOut)
   })
@@ -272,7 +272,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     })
     const result = await run(plugin)
 
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
     expect(plugin.released).toEqual([plugin.handedOut])
   })
 
@@ -283,7 +283,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     })
     const result = await run(plugin)
 
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
     expect(plugin.released).toEqual([])
   })
 
@@ -292,7 +292,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     const failures: TreeReleaseFailure[] = []
     const result = await run(plugin, { failures })
 
-    expect(result.symbols).toHaveLength(1)
+    expect(result.kind).toBe("extracted")
     expect(plugin.released).toEqual([])
     expect(failures).toEqual([])
   })
@@ -305,7 +305,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     const failures: TreeReleaseFailure[] = []
     const result = await run(plugin, { failures })
 
-    expect(result.symbols).toHaveLength(1)
+    expect(result.kind).toBe("extracted")
     expect(failures).toEqual([])
   })
 })
@@ -315,7 +315,7 @@ describe("runFilePipeline — every way out of a file releases its tree", () => 
     const plugin = stubPlugin({ parseMs: 250 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(plugin.order).toEqual(["releaseTree"])
     expect(plugin.released).toEqual([plugin.handedOut])
   })
@@ -324,7 +324,7 @@ describe("runFilePipeline — every way out of a file releases its tree", () => 
     const plugin = stubPlugin({ extractMs: 250 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(plugin.order).toEqual(["extractSymbols", "releaseTree"])
     expect(plugin.released).toEqual([plugin.handedOut])
   })
@@ -333,7 +333,7 @@ describe("runFilePipeline — every way out of a file releases its tree", () => 
     const plugin = stubPlugin({ candidates: ["one", "two"], walkMsPerCandidate: 150 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(plugin.order).toEqual([
       "extractSymbols",
       "walkBody:one",
@@ -382,7 +382,7 @@ describe("runFilePipeline — when releasing the tree itself fails", () => {
 
     const result = await run(plugin, { failures })
 
-    expect(result.symbols).toHaveLength(1)
+    expect(result.kind).toBe("extracted")
     expect(failures).toEqual([
       { plugin: PLUGIN_NAME, file: "test.stub", detail: "wasm heap is gone" },
     ])
@@ -424,7 +424,7 @@ describe("runFilePipeline — when releasing the tree itself fails", () => {
 
     const result = await run(plugin, { failures })
 
-    expect(result.symbols).toHaveLength(1)
+    expect(result.kind).toBe("extracted")
     expect(failures).toEqual([
       { plugin: PLUGIN_NAME, file: "test.stub", detail: "releaseTree is a list, not a function" },
     ])

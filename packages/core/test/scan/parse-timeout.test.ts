@@ -168,12 +168,13 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
     frameworks: [],
     effects: [],
     registry: noopRegistry,
-    config: {},
+    // Through the config rather than beside it: the pipeline reads its budgets from the
+    // same object production hands it, so a test cannot exercise a path the CLI cannot.
+    config: parseTimeoutMs === undefined ? {} : { parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
     treeReleaseFailures: [],
     log: silentLog,
   }
-  if (parseTimeoutMs !== undefined) input.parseTimeoutMs = parseTimeoutMs
   const result = await runFilePipeline(input)
   return { result, calls }
 }
@@ -204,7 +205,7 @@ describe("parse deadline budget", () => {
 describe("runFilePipeline — parse deadline", () => {
   it("abandons the file when parseFile alone blows the budget, without extracting", async () => {
     const { result, calls } = await run({ parseMs: 250 }, 100)
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(calls.extract).toBe(0)
     expect(calls.walk).toEqual([])
   })
@@ -214,15 +215,16 @@ describe("runFilePipeline — parse deadline", () => {
       { candidates: ["one", "two", "three", "four"], walkMsPerCandidate: 60 },
       100,
     )
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(calls.extract).toBe(1)
     // 60 ms a candidate against 100: the check before the third is the first that can
     // find the budget spent, and a slower machine only finds it sooner.
     expect(calls.walk.length).toBeLessThanOrEqual(2)
     // The Symbols already built go with the rest. This is the contract that makes the
-    // outcome binary rather than a function of how fast the machine was.
-    expect(result.symbols).toEqual([])
-    expect(result.imports).toEqual([])
+    // outcome binary rather than a function of how fast the machine was — and it is the
+    // type that says so now: an abandoned file has no key to put them under.
+    expect("symbols" in result).toBe(false)
+    expect("imports" in result).toBe(false)
   })
 
   it("keeps the parse errors of a file it abandons", async () => {
@@ -230,16 +232,16 @@ describe("runFilePipeline — parse deadline", () => {
       { message: "unexpected token", line: 1, column: 1, recoverable: true },
     ]
     const { result } = await run({ parseMs: 250, parseErrors }, 100)
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(result.parseErrors).toEqual(parseErrors)
   })
 
   it("reports a file with no tree as a parse failure rather than as a timeout", async () => {
-    // The caller records one skip entry per file, so a file carrying both flags would be
-    // labelled by whichever it tests first.
+    // One outcome per file, so the two cannot both be reported — the withdrawal is decided
+    // before the first deadline reading, and a file that carried both would be labelled by
+    // whichever the caller tested first.
     const { result } = await run({ parseMs: 250, noTree: true }, 100)
-    expect(result.terminalParseFailure).toBe(true)
-    expect(result.parseTimeout).toBeNull()
+    expect(result.kind).toBe("parse-failed")
   })
 
   it("reports a refused file as a parse failure even when the parse also blew the budget", async () => {
@@ -249,8 +251,7 @@ describe("runFilePipeline — parse deadline", () => {
       { message: "wrong dialect", line: 1, column: 1, recoverable: false },
     ]
     const { result } = await run({ parseMs: 250, parseErrors }, 100)
-    expect(result.terminalParseFailure).toBe(true)
-    expect(result.parseTimeout).toBeNull()
+    expect(result.kind).toBe("parse-failed")
   })
 
   it("abandons a file whose extraction blew the budget and found nothing to walk", async () => {
@@ -258,16 +259,18 @@ describe("runFilePipeline — parse deadline", () => {
     // that can catch a file that spent everything inside `extractSymbols`. Reported as a
     // timeout rather than as a file that legitimately holds no Symbols.
     const { result, calls } = await run({ candidates: [], extractMs: 250 }, 100)
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(calls.extract).toBe(1)
     expect(calls.walk).toEqual([])
   })
 
   it("reports the file, the budget in effect and the wall clock it actually spent", async () => {
     const { result } = await run({ parseMs: 250 }, 100)
-    expect(result.parseTimeout?.file).toBe("test.stub")
-    expect(result.parseTimeout?.budgetMs).toBe(100)
-    expect(result.parseTimeout?.elapsedMs).toBeGreaterThanOrEqual(100)
+    expect(result.kind).toBe("parse-timeout")
+    if (result.kind !== "parse-timeout") return
+    expect(result.timeout.file).toBe("test.stub")
+    expect(result.timeout.budgetMs).toBe(100)
+    expect(result.timeout.elapsedMs).toBeGreaterThanOrEqual(100)
   })
 
   it("hands back nothing at all from an abandoned file", async () => {
@@ -275,20 +278,25 @@ describe("runFilePipeline — parse deadline", () => {
       { source: "./other", symbols: ["thing"], line: 1, dynamic: false },
     ]
     const { result } = await run({ parseMs: 250, imports }, 100)
-    expect(result.symbols).toEqual([])
-    expect(result.imports).toEqual([])
+    expect(result.kind).toBe("parse-timeout")
+    expect("symbols" in result).toBe(false)
+    expect("imports" in result).toBe(false)
+    expect("timeoutEvents" in result).toBe(false)
+    expect("dynamicCallSites" in result).toBe(false)
   })
 
   it("leaves a file that finishes inside its budget untouched", async () => {
     const { result, calls } = await run({ candidates: ["one", "two"] }, 600_000)
-    expect(result.parseTimeout).toBeNull()
-    expect(result.symbols.map((s) => s.name)).toEqual(["one", "two"])
+    expect(result.kind).toBe("extracted")
+    if (result.kind !== "extracted") return
+    expect(result.symbols.map((sym) => sym.name)).toEqual(["one", "two"])
     expect(calls.walk).toEqual(["one", "two"])
   })
 
   it("applies the default budget when the config omits one", async () => {
     const { result } = await run({ candidates: ["one"] })
-    expect(result.parseTimeout).toBeNull()
+    expect(result.kind).toBe("extracted")
+    if (result.kind !== "extracted") return
     expect(result.symbols).toHaveLength(1)
   })
 })
