@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { detectManagers } from "../src/index"
+import { CoreError, detectManagers } from "../src/index"
 
 /**
  * A manifest that declares package patterns and resolves none of them is a workspace whose
@@ -31,17 +31,29 @@ async function writePackage(relativeDir: string, name: string): Promise<void> {
   await write(join(relativeDir, "package.json"), JSON.stringify({ name }))
 }
 
-async function unresolved(): Promise<{ tool: string; patterns: string[] }[]> {
+interface Reported {
+  tool: string
+  manifestPath: string
+  patterns: string[]
+}
+
+async function unresolved(): Promise<Reported[]> {
   const result = await detectManagers(tmp)
-  return result.unresolved.map((entry) => ({ tool: entry.tool, patterns: [...entry.patterns] }))
+  return result.unresolved.map((entry) => ({
+    tool: entry.tool,
+    manifestPath: entry.manifestPath,
+    patterns: [...entry.patterns],
+  }))
 }
 
 describe("a manifest that declared packages and resolved none", () => {
-  it("names the tool and the patterns", async () => {
+  it("names the manifest, the tool and the patterns", async () => {
     await write("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n  - "tools/*"\n')
     await mkdir(join(tmp, "packages", "dist"), { recursive: true })
 
-    expect(await unresolved()).toEqual([{ tool: "pnpm", patterns: ["packages/*", "tools/*"] }])
+    expect(await unresolved()).toEqual([
+      { tool: "pnpm", manifestPath: "pnpm-workspace.yaml", patterns: ["packages/*", "tools/*"] },
+    ])
   })
 
   it("counts a pattern the resolver drops as one that was declared", async () => {
@@ -50,7 +62,9 @@ describe("a manifest that declared packages and resolved none", () => {
     // silent about exactly the manifests most likely to be wrong.
     await write("pnpm-workspace.yaml", 'packages:\n  - ""\n  - "!packages/legacy"\n')
 
-    expect(await unresolved()).toEqual([{ tool: "pnpm", patterns: ["", "!packages/legacy"] }])
+    expect(await unresolved()).toEqual([
+      { tool: "pnpm", manifestPath: "pnpm-workspace.yaml", patterns: ["", "!packages/legacy"] },
+    ])
   })
 
   it("says nothing about a manifest with no packages key", async () => {
@@ -104,7 +118,74 @@ describe("a manifest that declared packages and resolved none", () => {
     expect((await unresolved()).map((entry) => entry.tool)).toEqual(["npm", "pnpm"])
   })
 
+  it("orders two dead manifests that spell one tool by the manifest", async () => {
+    // `detectJsPackageManagerTool` answers "pnpm" for `package.json#workspaces` whenever a
+    // `pnpm-lock.yaml` is there, which is what a repository that moved to pnpm and left
+    // `workspaces` behind looks like. The tool is then not a key, and the manifest is.
+    await write("pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+    await write("pnpm-workspace.yaml", 'packages:\n  - "tools/*"\n')
+    await write("package.json", JSON.stringify({ name: "root", workspaces: ["apps/*"] }))
+
+    expect(await unresolved()).toEqual([
+      { tool: "pnpm", manifestPath: "package.json", patterns: ["apps/*"] },
+      { tool: "pnpm", manifestPath: "pnpm-workspace.yaml", patterns: ["tools/*"] },
+    ])
+  })
+
   it("says nothing when every declaration resolved", async () => {
+    await write("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
+    await writePackage("packages/app", "app")
+
+    expect(await unresolved()).toEqual([])
+  })
+})
+
+describe("a packages field that is not a list of patterns", () => {
+  /**
+   * Every shape here declares packages, resolves none, and lands on the same single-project
+   * fallback — while both the reason and the remedy differ from a pattern that matched
+   * nothing: write it as a list of strings, rather than fix the pattern. pnpm refuses all
+   * three itself, so refusing them is its reading rather than a stricter one.
+   */
+  async function refused(): Promise<CoreError> {
+    const thrown = await detectManagers(tmp).then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(thrown).toBeInstanceOf(CoreError)
+    expect((thrown as CoreError).code).toBe("workspace-manifest-malformed")
+    return thrown as CoreError
+  }
+
+  it("refuses an entry the YAML read as a map", async () => {
+    // A trailing colon on the entry — the most ordinary slip there is.
+    await write("pnpm-workspace.yaml", "packages:\n  - tools/*:\n")
+
+    expect((await refused()).message).toContain("entry 0 is an object, not a string")
+  })
+
+  it("refuses a packages field that is a scalar", async () => {
+    await write("pnpm-workspace.yaml", 'packages: "tools/*"\n')
+
+    const error = await refused()
+    expect(error.message).toContain("is a string, not a list")
+    expect(error.message).toContain("pnpm-workspace.yaml")
+  })
+
+  it("refuses a workspaces entry that is not a string", async () => {
+    await write("package.json", JSON.stringify({ name: "root", workspaces: [42] }))
+
+    expect((await refused()).message).toContain("entry 0 is a number, not a string")
+  })
+
+  it("refuses the object form of workspaces the same way", async () => {
+    await write("package.json", JSON.stringify({ name: "root", workspaces: { packages: [42] } }))
+
+    expect((await refused()).message).toContain("entry 0 is a number, not a string")
+  })
+
+  it("says nothing about a workspaces field that is absent", async () => {
+    await write("package.json", JSON.stringify({ name: "root" }))
     await write("pnpm-workspace.yaml", 'packages:\n  - "packages/*"\n')
     await writePackage("packages/app", "app")
 

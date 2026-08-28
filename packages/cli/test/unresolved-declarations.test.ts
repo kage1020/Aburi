@@ -79,7 +79,10 @@ describe("aburi scan says which manifest named no package", () => {
 
     const { stderr } = await run("scan")
 
-    expect(stderr).toContain('pnpm declared 1 package pattern that named no package: "packages/*"')
+    expect(stderr).toContain(
+      'pnpm-workspace.yaml declares 1 pnpm package pattern that named no package: "packages/*"',
+    )
+    expect(stderr).toContain("leave the field out if the workspace has no packages yet")
     expect(stderr).toContain("the whole repository is described as one component")
   })
 
@@ -104,7 +107,7 @@ describe("aburi scan says which manifest named no package", () => {
 
     const { stderr } = await run("scan")
 
-    expect(stderr).toContain("pnpm declared 1 package pattern that named no package")
+    expect(stderr).toContain("pnpm-workspace.yaml declares 1 pnpm package pattern")
     expect(stderr).not.toContain("whole repository")
   })
 
@@ -117,7 +120,7 @@ describe("aburi scan says which manifest named no package", () => {
 
     const { stderr } = await run("scan")
 
-    expect(stderr).toContain("pnpm declared 1 package pattern that named no package")
+    expect(stderr).toContain("pnpm-workspace.yaml declares 1 pnpm package pattern")
     expect(stderr).not.toContain("whole repository")
   })
 })
@@ -131,9 +134,10 @@ describe("aburi init says the same", () => {
 
     expect(exitCode).toBe(0)
     expect(stderr).toContain(
-      'pnpm declared 2 package patterns that named no package: "packages/*", "tools/*"',
+      "pnpm-workspace.yaml declares 2 pnpm package patterns that named no package: " +
+        '"packages/*", "tools/*"',
     )
-    expect(stderr).toContain("the whole repository is one component")
+    expect(stderr).toContain("the whole repository is described as one component")
   })
 
   it("says nothing when the packages resolve", async () => {

@@ -40,9 +40,11 @@ export interface InitReport {
    */
   unmappedLanguages: readonly string[]
   /**
-   * Managers whose manifest declared package patterns and resolved none of them. The config
-   * this command writes describes the workspace it found, so a manifest that named packages
-   * and produced none is what makes that description wrong before it is ever read.
+   * Manifests that declared package patterns and resolved none of them.
+   *
+   * The config this command writes describes the workspace it found, so a manifest that named
+   * packages and produced none makes that description wrong before it is ever read — and
+   * `components[]` is the one part of it a reader cannot check against anything else.
    */
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
   /** Whether the written config's single component is the whole repository, for want of any. */

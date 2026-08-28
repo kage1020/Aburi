@@ -44,6 +44,7 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { createLogger } from "../logger"
 import { loadPlugins } from "../plugin-loader"
+import { describeUnresolvedDeclarations } from "../unresolved-report"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
@@ -511,7 +512,12 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   const say = (line: string): void => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
-  reportUnresolvedDeclarations(report, say)
+  for (const line of describeUnresolvedDeclarations(
+    report.unresolvedDeclarations,
+    report.fellBackToSingleComponent,
+  )) {
+    say(line)
+  }
   reportCoverageFault(report.coverageFault, say)
   // Directly under the coverage line, ahead of everything recoverable from the artifact. The
   // skip census below can run to six reasons of eleven lines each, and the sink this all goes
@@ -557,8 +563,10 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
 /**
  * The line that accounts for this run's exit code when coverage is what earned it.
  *
- * First, above the census that explains it: it is the finding, and the counts below it are the
- * evidence. A reader who stops after one line has the one that changes what they do.
+ * Above the census that explains it: it is the finding, and the counts below it are the
+ * evidence. Only the workspace's own manifests are reported ahead of it, because a coverage
+ * number computed over the wrong set of components is not a finding a reader can act on until
+ * they know the set was wrong.
  *
  * Each kind says where to look. Discovery found nothing → the config decided that, and the
  * three things in it that can. Nothing parsed → whatever withdrew the files, named. Below the
@@ -685,36 +693,6 @@ function reportSkipped(
  * and then advising a pattern the name does not satisfy would send a reader round the loop
  * with an identical exit 3 and nothing on screen to say why.
  */
-/**
- * Say which manifest declared packages and found none, and what followed from it.
- *
- * Ahead of everything else in the report because it is about the workspace the run was given
- * rather than about the run: a reader who mistyped `packages/*` needs to know before reading a
- * coverage number computed over the wrong set of components.
- *
- * The consequence is a second line rather than a clause, because it is a different fact with a
- * different condition — one manifest can be dead while another resolves, and then nothing fell
- * back at all.
- */
-function reportUnresolvedDeclarations(report: ScanReport, say: (line: string) => void): void {
-  for (const declaration of report.unresolvedDeclarations) {
-    say(
-      `${declaration.tool} declared ${countOf(declaration.patterns.length, "package pattern")} ` +
-        `that named no package: ${declaration.patterns
-          .map((pattern) => JSON.stringify(pattern))
-          .join(", ")}`,
-    )
-  }
-  if (report.fellBackToSingleComponent && report.unresolvedDeclarations.length > 0) {
-    say("No workspace package was found, so the whole repository is described as one component.")
-  }
-}
-
-/** `1 package pattern` / `2 package patterns` — the plural of a counted noun. */
-function countOf(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`
-}
-
 function reportUnrepresentable(
   files: ScanReport["unrepresentableFiles"],
   say: (line: string) => void,
@@ -976,9 +954,10 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
  * The components the config declares, or undefined when it leaves them to detection.
  *
  * One definition because two readers act on it: `resolveComponents` below chooses its branch
- * by it, and the incident report says "the whole repository is one component" only when
- * detection is what decided that. Two spellings of the condition would be two chances for the
- * report to describe a Document that was built the other way.
+ * by it, and `fellBackToSingleComponent` is false when the config decided them, so the report's
+ * fallback line is emitted only where detection is what described the workspace. Two spellings
+ * of the condition would be two chances for the report to describe a Document built the other
+ * way.
  */
 function declaredComponents(config: Partial<Config>): Config["components"] | undefined {
   const declared = config.components
