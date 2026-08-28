@@ -17,25 +17,27 @@ describe("langTypescriptPlugin.releaseTree", () => {
     if (tree === null) return
     expect(tree.rootNode.type).toBe("program")
 
-    expect(typeof langTypescriptPlugin.releaseTree).toBe("function")
-    langTypescriptPlugin.releaseTree?.(tree)
+    langTypescriptPlugin.releaseTree(tree)
 
     // web-tree-sitter answers a freed tree with a null root rather than throwing, so this is
-    // what "freed" looks like from the outside.
+    // what "freed" looks like from the outside — and the oracle every case below reuses.
     expect(tree.rootNode).toBeNull()
   })
 
-  it("keeps the WASM heap flat across many parse-and-release cycles", async () => {
-    // The regime the core runs: parse a file, use it, release it. Without the release this
-    // exhausts the WASM heap within a few hundred files, which is the crash lang-plugin.md
-    // §8.1 names.
+  it("frees every tree across a long run of parse-and-release cycles", async () => {
+    // The regime the core runs. Asserted per iteration rather than by watching the heap:
+    // exhausting it takes more files than a test should parse, and a loop that only checked
+    // for a thrown error would pass with the release deleted.
     for (let i = 0; i < 100; i++) {
       const result = await langTypescriptPlugin.parseFile({
         path: `src/f${i}.ts`,
         content: `export function fn${i}(x: number): number { return x + ${i} }`,
       })
-      expect(result.tree).not.toBeNull()
-      if (result.tree !== null) langTypescriptPlugin.releaseTree?.(result.tree)
+      const tree = result.tree
+      expect(tree).not.toBeNull()
+      if (tree === null) return
+      langTypescriptPlugin.releaseTree(tree)
+      expect(tree.rootNode).toBeNull()
     }
   })
 })

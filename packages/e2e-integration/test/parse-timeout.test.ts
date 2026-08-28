@@ -34,7 +34,7 @@ beforeAll(async () => {
   const warm = await langTypescriptPlugin.parseFile({ path: "warm.ts", content: WARM_SOURCE })
   // Released here for the same reason the pipeline releases: whoever calls `parseFile`
   // directly owns the tree it hands back, and nothing else will free it.
-  if (warm.tree !== null) langTypescriptPlugin.releaseTree?.(warm.tree)
+  if (warm.tree !== null) langTypescriptPlugin.releaseTree(warm.tree)
 })
 
 beforeEach(async () => {

@@ -1,7 +1,8 @@
 ---
 "@aburi/types": minor
 "@aburi/lang-typescript": minor
-"@aburi/core": patch
+"@aburi/core": minor
+"@aburi/cli": minor
 ---
 
 Free the parse tree the language plugin hands over
@@ -24,9 +25,20 @@ its own tree on the way out would be handing back something already dead. The on
 plugin still frees it is a `parseFile` that fails *after* parsing, where the caller never
 receives the handle.
 
-A release that throws is warned about and dropped rather than propagated. It runs in a
-`finally`, so a throw there would silently become the file's outcome — replacing the diagnostic
-a failing file was already carrying, and turning a file that produced a perfectly good set of
-Symbols into an extraction failure.
+A release that fails is recorded rather than propagated. It runs in a `finally`, so a throw
+there would silently become the file's outcome — replacing the diagnostic a failing file was
+already carrying, and turning a file that produced a perfectly good set of Symbols into an
+extraction failure. The record is structural: `ScanResult.treeReleaseFailures` names the
+plugin, the file and what went wrong, because a leak is silent until the run dies of it, and
+by then it presents as `RangeError: WebAssembly.Memory()` charged to whichever unrelated file
+was being read when the heap ran out. `ScanReport` carries it to the CLI, which prints it
+grouped by plugin with what the leak costs. It moves no exit code: every one of those files is
+in the IR, so the artifact describes the workspace completely.
 
-`@aburi/lang-typescript` implements it as `tree.delete()`.
+A `releaseTree` declared as something other than a function is recorded there too, in its own
+words — a contract violation is deterministic and fixable in a line, and reading it through the
+same `TypeError` catch as a parser failure would describe it as one. A `null` `releaseTree` is
+read as "nothing to free", the way the optional call it replaced did.
+
+`@aburi/lang-typescript` implements it as `tree.delete()`, and is exported with `satisfies` so
+the method stays required on the exported type.

@@ -182,6 +182,7 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
       config: {},
       dropCFilter: buildDropCFilter({ pluginDropCallees: [] }),
       log: silent,
+      treeReleaseFailures: [],
     })
     return { result, reached }
   }

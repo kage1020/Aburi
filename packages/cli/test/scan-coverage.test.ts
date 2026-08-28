@@ -286,6 +286,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       coverageFault: null,
       unrepresentableFiles: [],
       unresolvedDeclarations: [],
+      treeReleaseFailures: [],
       fellBackToSingleComponent: false,
       exitCode: EXIT.SUCCESS,
       ...overrides,

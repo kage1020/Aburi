@@ -85,8 +85,13 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
  * Default plugin instance. Callers pass this to `@aburi/plugin-registry` or to a core
  * scan pipeline. Creating instances via `new LangTypescriptPlugin()` is also supported
  * for consumers that want a fresh copy per registry.
+ *
+ * `satisfies` rather than an annotation, so the conformance check still runs and the exported
+ * type keeps what the class declares. Annotating it widened the optional members back to
+ * optional — a caller could not call `releaseTree` without checking a method this plugin
+ * always has.
  */
-export const langTypescriptPlugin: LanguagePlugin<Tree, Node> = new LangTypescriptPlugin()
+export const langTypescriptPlugin = new LangTypescriptPlugin() satisfies LanguagePlugin<Tree, Node>
 
 /** Class export for consumers that want to wrap or extend the plugin. */
 export { LangTypescriptPlugin }

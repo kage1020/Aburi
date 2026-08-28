@@ -170,6 +170,7 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
     registry: noopRegistry,
     config: {},
     dropCFilter: buildDropCFilter(),
+    treeReleaseFailures: [],
     log: silentLog,
   }
   if (parseTimeoutMs !== undefined) input.parseTimeoutMs = parseTimeoutMs

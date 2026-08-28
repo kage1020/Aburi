@@ -15,14 +15,15 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDropCFilter, runFilePipeline } from "../../src"
+import { buildDropCFilter, runFilePipeline, type TreeReleaseFailure } from "../../src"
 import { symbolId } from "../fixtures/ir"
 
 /**
  * The parse tree is the plugin's to build and the core's to free: `parseFile` hands the
  * handle over and never sees it again, so nothing but `runFilePipeline` is in a position to
- * release it. These tests pin that it happens on every path out of the pipeline, and that a
- * release failure never becomes the file's story.
+ * release it. These tests pin that it happens on every path out of the pipeline, that it
+ * happens once and not before the tree's last reader, and that a release that fails is
+ * recorded rather than becoming the file's story.
  */
 
 const noopRegistry: VocabRegistry = {
@@ -47,21 +48,9 @@ const silentLog: Logger = {
   error: () => {},
 }
 
-/** A logger that keeps its warnings, for the paths whose only output is a warning. */
-function capturingLog(): { log: Logger; warnings: string[] } {
-  const warnings: string[] = []
-  return {
-    warnings,
-    log: {
-      debug: () => {},
-      info: () => {},
-      warn: (m: string) => warnings.push(m),
-      error: () => {},
-    },
-  }
-}
-
 const stubFile: SourceFile = { path: "test.stub", content: "" }
+
+const PLUGIN_NAME = "lang-stub"
 
 /** Spend `ms` of wall clock, so a deadline test fails only in the direction of more time. */
 function spend(ms: number): void {
@@ -74,7 +63,7 @@ function spend(ms: number): void {
 function langManifest(): LangManifest {
   return {
     $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "lang-stub",
+    name: PLUGIN_NAME,
     version: "0.0.0",
     type: "lang",
     engines: { aburi: "*" },
@@ -113,11 +102,19 @@ interface StubOptions {
   parseErrors?: readonly ParseError[]
   /** Overridable to a value no plugin should return, for the malformed-plugin paths. */
   imports?: unknown
-  /** Drop `releaseTree` entirely, the way a plugin with nothing to free would. */
-  omitRelease?: boolean
+  /** Names of the candidates `extractSymbols` returns. Defaults to one. */
+  candidates?: readonly string[]
+  /**
+   * Replaces the prototype method on the instance. `undefined` is a plugin that never wrote
+   * one; anything else stands in for a plugin that wrote something that is not a function.
+   */
+  releaseTreeOverride?: { value: unknown }
   releaseThrows?: unknown
   throwFrom?: Stage
+  /** Wall clock each stage spends, for the deadline readings. */
   parseMs?: number
+  extractMs?: number
+  walkMsPerCandidate?: number
 }
 
 /**
@@ -148,11 +145,11 @@ class StubLanguagePlugin {
   handedOut: ParsedTree | null = null
 
   constructor(private readonly options: StubOptions) {
-    if (options.omitRelease === true) {
+    const override = options.releaseTreeOverride
+    if (override !== undefined) {
       // Shadowing the prototype method is how an instance of a class that has one stands in
-      // for a plugin that never wrote one. An optional call reads a missing property and a
-      // property holding `undefined` the same way, so the two arrive at the pipeline alike.
-      Object.defineProperty(this, "releaseTree", { value: undefined, enumerable: false })
+      // for a plugin that wrote something else — or nothing.
+      Object.defineProperty(this, "releaseTree", { value: override.value, enumerable: false })
     }
   }
 
@@ -172,21 +169,23 @@ class StubLanguagePlugin {
 
   extractSymbols(_tree: ParsedTree, _ctx: ExtractionContext): SymbolCandidate<OpaqueAstNode>[] {
     this.order.push("extractSymbols")
+    spend(this.options.extractMs ?? 0)
     this.failIfAsked("extractSymbols")
-    return [candidate("one")]
+    return (this.options.candidates ?? ["one"]).map(candidate)
   }
 
   walkBody(
-    _symbol: SymbolCandidate<OpaqueAstNode>,
+    symbol: SymbolCandidate<OpaqueAstNode>,
     _ctx: WalkContext<OpaqueAstNode>,
   ): BodyExtraction {
-    this.order.push("walkBody")
+    this.order.push(`walkBody:${symbol.name}`)
+    spend(this.options.walkMsPerCandidate ?? 0)
     this.failIfAsked("walkBody")
     return { rules: [], calls: [] }
   }
 
-  normalizeAst(_symbol: SymbolCandidate<OpaqueAstNode>): string {
-    this.order.push("normalizeAst")
+  normalizeAst(symbol: SymbolCandidate<OpaqueAstNode>): string {
+    this.order.push(`normalizeAst:${symbol.name}`)
     this.failIfAsked("normalizeAst")
     return "stub-ast"
   }
@@ -206,7 +205,14 @@ function stubPlugin(options: StubOptions = {}): StubLanguagePlugin {
   return new StubLanguagePlugin(options)
 }
 
-function run(plugin: StubLanguagePlugin, extras: { log?: Logger; parseTimeoutMs?: number } = {}) {
+interface RunExtras {
+  parseTimeoutMs?: number
+  /** Supply one to inspect it; otherwise a fresh collector is made and returned. */
+  failures?: TreeReleaseFailure[]
+}
+
+function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
+  const failures = extras.failures ?? []
   const input: Parameters<typeof runFilePipeline>[0] = {
     file: stubFile,
     language: plugin as unknown as LanguagePlugin,
@@ -215,7 +221,8 @@ function run(plugin: StubLanguagePlugin, extras: { log?: Logger; parseTimeoutMs?
     registry: noopRegistry,
     config: {},
     dropCFilter: buildDropCFilter(),
-    log: extras.log ?? silentLog,
+    log: silentLog,
+    treeReleaseFailures: failures,
   }
   if (extras.parseTimeoutMs !== undefined) input.parseTimeoutMs = extras.parseTimeoutMs
   return runFilePipeline(input)
@@ -239,11 +246,22 @@ describe("runFilePipeline — releasing the parse tree", () => {
     expect(plugin.released[0]).toBe(plugin.handedOut)
   })
 
-  it("releases only after the last plugin call that reads the tree", async () => {
-    const plugin = stubPlugin()
+  it("releases after the last candidate is done, not after the first", async () => {
+    // With one candidate a release from inside the loop is indistinguishable from a release
+    // after it — and against a real tree the loop version is a use-after-free on candidate
+    // two, which is worse than the leak this all exists to close.
+    const plugin = stubPlugin({ candidates: ["one", "two"] })
     await run(plugin)
 
-    expect(plugin.order).toEqual(["extractSymbols", "walkBody", "normalizeAst", "releaseTree"])
+    expect(plugin.order).toEqual([
+      "extractSymbols",
+      "walkBody:one",
+      "normalizeAst:one",
+      "walkBody:two",
+      "normalizeAst:two",
+      "releaseTree",
+    ])
+    expect(plugin.released).toHaveLength(1)
   })
 
   it("releases a tree the plugin handed over beside a non-recoverable error", async () => {
@@ -269,11 +287,59 @@ describe("runFilePipeline — releasing the parse tree", () => {
     expect(plugin.released).toEqual([])
   })
 
-  it("releases the tree of a file abandoned on the parse deadline", async () => {
+  it("completes normally for a plugin that declares no releaseTree", async () => {
+    const plugin = stubPlugin({ releaseTreeOverride: { value: undefined } })
+    const failures: TreeReleaseFailure[] = []
+    const result = await run(plugin, { failures })
+
+    expect(result.symbols).toHaveLength(1)
+    expect(plugin.released).toEqual([])
+    expect(failures).toEqual([])
+  })
+
+  it("reads a null releaseTree as a plugin with nothing to free, the way an optional call does", async () => {
+    // Both spellings of "no tree to free" reach the core through a `PluginRef` as plain
+    // JavaScript. Narrowing to `undefined` would turn one of the two working ones into a
+    // warning per file for a plugin that is behaving.
+    const plugin = stubPlugin({ releaseTreeOverride: { value: null } })
+    const failures: TreeReleaseFailure[] = []
+    const result = await run(plugin, { failures })
+
+    expect(result.symbols).toHaveLength(1)
+    expect(failures).toEqual([])
+  })
+})
+
+describe("runFilePipeline — every way out of a file releases its tree", () => {
+  it("releases the tree of a file abandoned before extraction starts", async () => {
     const plugin = stubPlugin({ parseMs: 250 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
     expect(result.parseTimeout).not.toBeNull()
+    expect(plugin.order).toEqual(["releaseTree"])
+    expect(plugin.released).toEqual([plugin.handedOut])
+  })
+
+  it("releases the tree of a file abandoned after extraction, before any candidate", async () => {
+    const plugin = stubPlugin({ extractMs: 250 })
+    const result = await run(plugin, { parseTimeoutMs: 100 })
+
+    expect(result.parseTimeout).not.toBeNull()
+    expect(plugin.order).toEqual(["extractSymbols", "releaseTree"])
+    expect(plugin.released).toEqual([plugin.handedOut])
+  })
+
+  it("releases the tree of a file abandoned partway through its candidates", async () => {
+    const plugin = stubPlugin({ candidates: ["one", "two"], walkMsPerCandidate: 150 })
+    const result = await run(plugin, { parseTimeoutMs: 100 })
+
+    expect(result.parseTimeout).not.toBeNull()
+    expect(plugin.order).toEqual([
+      "extractSymbols",
+      "walkBody:one",
+      "normalizeAst:one",
+      "releaseTree",
+    ])
     expect(plugin.released).toEqual([plugin.handedOut])
   })
 
@@ -291,6 +357,13 @@ describe("runFilePipeline — releasing the parse tree", () => {
     expect(plugin.released).toEqual([plugin.handedOut])
   })
 
+  it("releases the tree when normalizeAst throws, and lets the throw through unchanged", async () => {
+    const plugin = stubPlugin({ throwFrom: "normalizeAst" })
+
+    await expect(run(plugin)).rejects.toThrow("stub normalizeAst exploded")
+    expect(plugin.released).toEqual([plugin.handedOut])
+  })
+
   it("releases the tree when the plugin's own import list is unusable", async () => {
     // Plugins arrive as plain JavaScript through a `PluginRef`, so a `ParseResult` that does
     // not match its type is reachable. Normalizing the edges is the first thing the pipeline
@@ -300,27 +373,19 @@ describe("runFilePipeline — releasing the parse tree", () => {
     await expect(run(plugin)).rejects.toThrow(TypeError)
     expect(plugin.released).toEqual([plugin.handedOut])
   })
-
-  it("completes normally for a plugin that declares no releaseTree", async () => {
-    const plugin = stubPlugin({ omitRelease: true })
-    const result = await run(plugin)
-
-    expect(result.symbols).toHaveLength(1)
-    expect(plugin.released).toEqual([])
-  })
 })
 
 describe("runFilePipeline — when releasing the tree itself fails", () => {
-  it("keeps the file's result and warns, naming the file and the failure", async () => {
+  it("records the plugin, the file and what it said, and keeps the file's result", async () => {
     const plugin = stubPlugin({ releaseThrows: new Error("wasm heap is gone") })
-    const { log, warnings } = capturingLog()
+    const failures: TreeReleaseFailure[] = []
 
-    const result = await run(plugin, { log })
+    const result = await run(plugin, { failures })
 
     expect(result.symbols).toHaveLength(1)
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain("test.stub")
-    expect(warnings[0]).toContain("wasm heap is gone")
+    expect(failures).toEqual([
+      { plugin: PLUGIN_NAME, file: "test.stub", detail: "wasm heap is gone" },
+    ])
   })
 
   it("does not replace the error the file was already failing with", async () => {
@@ -330,19 +395,38 @@ describe("runFilePipeline — when releasing the tree itself fails", () => {
       throwFrom: "walkBody",
       releaseThrows: new Error("wasm heap is gone"),
     })
-    const { log, warnings } = capturingLog()
+    const failures: TreeReleaseFailure[] = []
 
-    await expect(run(plugin, { log })).rejects.toThrow("stub walkBody exploded")
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain("wasm heap is gone")
+    await expect(run(plugin, { failures })).rejects.toThrow("stub walkBody exploded")
+    // The record survives the throw, which is why the collector is an input rather than a
+    // field of the result: a file that failed both ways has no result to carry it, and a
+    // plugin broken in both places is the run that most needs both facts.
+    expect(failures).toEqual([
+      { plugin: PLUGIN_NAME, file: "test.stub", detail: "wasm heap is gone" },
+    ])
   })
 
   it("describes a plugin that threw something that is not an Error", async () => {
     const plugin = stubPlugin({ releaseThrows: "just a string" })
-    const { log, warnings } = capturingLog()
+    const failures: TreeReleaseFailure[] = []
 
-    await run(plugin, { log })
+    await run(plugin, { failures })
 
-    expect(warnings[0]).toContain("just a string")
+    expect(failures[0]?.detail).toBe("just a string")
+  })
+
+  it("says a releaseTree that is not a function broke the contract, and what it was instead", async () => {
+    // A `TypeError` from calling a non-function would land in the same catch as a genuine
+    // parser failure and read as one — a deterministic, one-line-to-fix contract violation
+    // described in the words of a runtime fault.
+    const plugin = stubPlugin({ releaseTreeOverride: { value: ["not", "a", "function"] } })
+    const failures: TreeReleaseFailure[] = []
+
+    const result = await run(plugin, { failures })
+
+    expect(result.symbols).toHaveLength(1)
+    expect(failures).toEqual([
+      { plugin: PLUGIN_NAME, file: "test.stub", detail: "releaseTree is a list, not a function" },
+    ])
   })
 })

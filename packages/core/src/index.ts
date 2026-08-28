@@ -99,6 +99,7 @@ export {
   type FilePipelineInput,
   type FilePipelineResult,
   runFilePipeline,
+  type TreeReleaseFailure,
 } from "./scan/pipeline"
 export {
   buildLanguageRouter,

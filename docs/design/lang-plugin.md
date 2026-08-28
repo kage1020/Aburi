@@ -54,7 +54,7 @@ Keeping the responsibilities narrow lets a new language addition focus solely on
      c. For each SymbolCandidate:
           plugin.walkBody(symbol, ctx) → BodyExtraction { rules, calls, returns }
           plugin.normalizeAst(symbol) → string  (syntax fingerprint input)
-     d. plugin.releaseTree?(tree) — on every way out of c, including a throw
+     d. plugin.releaseTree?(tree) — on every way out of a–c, including a throw
 4. After all files, plugin.cleanup?() is called
 ```
 
@@ -333,9 +333,11 @@ effect plugin classify() for each call          [effects]
   ↓
 plugin.normalizeAst()                           [lang]
   ↓
+core applies the drop list / computes fingerprints
+  ↓
 plugin.releaseTree()                            [lang, called by the core — §8.1]
   ↓
-core applies the drop list / computes fingerprints / assembles the IR
+core assembles the IR
 ```
 
 ## 6. Capabilities
@@ -451,7 +453,8 @@ Each plugin must follow these conventions:
    - Create the parser inside `parseFile()` and call `parser.delete()` after obtaining the result. It never leaves the function, so the plugin frees it.
    - The tree is handed over. The plugin implements `releaseTree(tree)` and the core calls it once per non-null tree, after the last of `extractSymbols()` / `walkBody()` / `normalizeAst()` has read it — including when one of those threw, when the file was withdrawn, and when it ran out of parse budget. A plugin that deleted the tree on its own way out of `parseFile()` would be handing the core a dead handle.
    - The exception is a `parseFile()` that fails *after* parsing: the caller never receives the handle there, so the plugin releases the tree itself before propagating.
-   - Node references taken out of the tree (`SymbolCandidate.bodyNode`, `fullNode`) are valid for as long as the tree is, which is the file's pipeline run rather than the scope of `parseFile()`. None of them may outlive it: what the pipeline returns is the strings and ranges read out of the nodes, never the nodes.
+   - Node references taken out of the tree (`SymbolCandidate.bodyNode`, `fullNode`) are valid for as long as the tree is, which is the file's pipeline run rather than the scope of `parseFile()`. None of them may outlive the tree: what the pipeline returns is the strings and ranges read out of the nodes, never the nodes.
+   - A `releaseTree` that throws is recorded on `ScanResult.treeReleaseFailures` and does not fail the file, whose Symbols are already in the IR. A `releaseTree` that is declared as something other than a function is recorded there too, saying so — it is a contract violation rather than a parser fault, and the two are not described in the same words.
 2. **WASM heap budget under parallel execution**
    - `capabilities.wasmHeapPerWorkerMB` in the plugin manifest (range: 16–4096 MiB, implicit default 256 MiB when undeclared) is the source-of-truth
    - The core caps `--concurrency` at `min(specified value, floor(availableMemoryMB / wasmHeapPerWorkerMB))`
@@ -564,6 +567,7 @@ Every language plugin must pass the following tests.
 | LP31 | A plugin holding a resource its trees do not release on their own | it implements `releaseTree`, and a tree passed to it is unusable afterwards |
 | LP32 | Many files scanned in one process | the parser's heap does not grow with the file count — the core released every tree the plugin handed over |
 | LP33 | A file whose `extractSymbols` / `walkBody` / `normalizeAst` throws, is withdrawn, or overruns `parseTimeoutMs` | its tree is released all the same; the diagnostic the file was already carrying is what the caller sees |
+| LP34 | A `releaseTree` that throws | the file keeps its Symbols and its exit code; the plugin, the file and the message are on `ScanResult.treeReleaseFailures` |
 
 ## 10. Design Decisions
 

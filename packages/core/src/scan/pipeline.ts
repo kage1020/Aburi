@@ -31,7 +31,7 @@ import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
 import { decideSymbolDrop } from "./drop-b"
 import type { DropCFilter } from "./drop-c"
-import { describeThrown } from "./faults"
+import { describeJsonType, describeThrown } from "./faults"
 import {
   type ClassifyTimeoutEvent,
   classifyWithTimeout,
@@ -108,9 +108,34 @@ export interface FilePipelineInput {
   config: Config
   dropCFilter: DropCFilter
   log: Logger
+  /**
+   * Collector for trees the language plugin failed to free. Appended to rather than
+   * returned, because the record has to survive the paths where there is no result to carry
+   * it: a file whose `walkBody` throws still had its tree released in the `finally`, and a
+   * plugin broken in both places is exactly the run that needs both facts.
+   */
+  treeReleaseFailures: TreeReleaseFailure[]
   classifyTimeoutMs?: number
   /** `config.parseTimeoutMs`. Omitted means the lang-plugin.md §7.1.2 default. */
   parseTimeoutMs?: number
+}
+
+/**
+ * A `releaseTree` call that did not free the tree it was given.
+ *
+ * Not a per-file incident despite carrying a file: the file is fine and its Symbols are in
+ * the IR. What is broken is the plugin, in a way that costs one leaked tree per file and
+ * ends the run in `RangeError: WebAssembly.Memory()` if it goes on long enough. Recording
+ * it structurally is what lets that be said *before* the crash, rather than reconstructed
+ * afterwards from thousands of unrelated extraction failures.
+ */
+export interface TreeReleaseFailure {
+  /** Manifest name of the language plugin that was asked to release the tree. */
+  plugin: string
+  /** Workspace-relative POSIX path of the file whose tree it was. */
+  file: string
+  /** What went wrong: the plugin's own message, or how its `releaseTree` broke the contract. */
+  detail: string
 }
 
 /**
@@ -172,7 +197,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const timeoutEvents: ClassifyTimeoutEvent[] = []
 
   // Everything the tree is read for lives inside this `try`, so the `finally` is the single
-  // place the file's tree goes back — one exit for the seven ways out of the body below.
+  // place the file's tree goes back — one exit for every way out of the body below.
   try {
     // Normalized before the early return as well: a terminal parse failure still hands its
     // import edges to the caller, and dependency extraction compares them the same way.
@@ -205,10 +230,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     if (deadline.expired()) return abandon()
 
     const extractCtx: ExtractionContext = { file, registry, config }
-    const candidates = language.extractSymbols(
-      parseResult.tree,
-      extractCtx,
-    ) as SymbolCandidate<OpaqueAstNode>[]
+    const candidates = language.extractSymbols(parseResult.tree, extractCtx)
     if (deadline.expired()) return abandon()
 
     const symbols: IRSymbol[] = []
@@ -292,7 +314,9 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       dynamicCallSites,
     }
   } finally {
-    if (parseResult.tree !== null) releaseParsedTree(language, parseResult.tree, file, log)
+    if (parseResult.tree !== null) {
+      releaseParsedTree(language, parseResult.tree, file, input.treeReleaseFailures)
+    }
   }
 }
 
@@ -305,22 +329,45 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
  * (docs/design/lang-plugin.md §8.1), so a scan that skipped this would grow by one tree per
  * file for the length of the run.
  *
- * A release that fails is reported and dropped. It runs in a `finally`, so a throw would
- * become the file's outcome — replacing, on the paths that are already unwinding, the
+ * A release that fails is recorded and dropped, never thrown. It runs in a `finally`, so a
+ * throw would become the file's outcome — replacing, on the paths already unwinding, the
  * diagnostic the reader actually needs, and turning a file that produced a perfectly good
  * set of Symbols into an extraction failure on the other. Neither is worth a leaked handle,
- * which is what the warning is for.
+ * which is what the record is for.
+ *
+ * The two ways it can fail are recorded apart. A plugin that declares `releaseTree` as
+ * something other than a function has broken the contract, deterministically, in a way its
+ * author fixes in one line; a plugin whose `releaseTree` threw may be reporting a genuine
+ * parser failure. Reading the first through the same `TypeError` catch as the second would
+ * describe a fixable contract violation in the words of a runtime fault.
  */
 function releaseParsedTree(
   language: LanguagePlugin,
   tree: ParsedTree,
   file: SourceFile,
-  log: Logger,
+  failures: TreeReleaseFailure[],
 ): void {
+  const release: unknown = language.releaseTree
+  // `null` as well as absent, which is what the optional call this guard replaced did. A
+  // plugin arriving through a `PluginRef` may spell "no tree to free" either way, and
+  // narrowing to `undefined` would turn one of the two working spellings into a warning per
+  // file.
+  if (release === undefined || release === null) return
+
+  const record = (detail: string): void => {
+    failures.push({ plugin: language.manifest.name, file: file.path, detail })
+  }
+
+  if (typeof release !== "function") {
+    record(`releaseTree is ${describeJsonType(release)}, not a function`)
+    return
+  }
   try {
-    language.releaseTree?.(tree)
+    // Called through the plugin so `this` is the plugin, which a plugin holding its parser
+    // state on the instance needs and a detached call would deny it.
+    ;(release as (this: LanguagePlugin, tree: ParsedTree) => void).call(language, tree)
   } catch (error) {
-    log.warn(`Parse tree for ${file.path} could not be released: ${describeThrown(error)}`)
+    record(describeThrown(error))
   }
 }
 
