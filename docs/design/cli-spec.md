@@ -163,7 +163,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
-| 2 | Config error (schema violation, resolution failure) |
+| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing). A config that exists and cannot be read is `1` — see §9 |
 | 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
@@ -829,6 +829,15 @@ Description: NestJS OnModuleInit hook
 | 3 | Plugin error / fail-on gate / strict violation |
 
 128+N is for fatal signals (Aburi itself does not use it).
+
+The line between `1` and `2` is who has to act, not which subsystem failed. `2` covers the whole
+of what the reader wrote: a config that does not parse, does not conform, or names the same
+component twice — and a `--config` path that names nothing, which is the "missing" in the table
+above and is a mistyped argument rather than an IO failure. `1` covers a config that is **there
+and cannot be read**: a permission, a mount, a directory of that name. No edit to `aburi.json`
+fixes any of those. And a failure Aburi's own invariants raised is `1` with the run named as a
+bug in Aburi, since `2` is a sentence about the reader's file and would send them looking for
+something that is not in it.
 
 A plugin error means the same thing in every command that scans. `scan`, `diff` and `explain` all
 exit `3` when the scan they ran did not exit clean, whichever of them ran it.

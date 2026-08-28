@@ -8,12 +8,16 @@
 export const EXIT = {
   /** Full success — the command finished and no CI gate fired. */
   SUCCESS: 0,
-  /** Runtime failure (IO, git, filesystem, unexpected exception). */
+  /**
+   * Runtime failure (IO, git, filesystem, unexpected exception) — including a file that is
+   * there and cannot be read, which no edit to it fixes.
+   */
   RUNTIME: 1,
   /**
-   * Input error: bad argv, missing / malformed file, unresolvable IR shape, ambiguous
-   * explain target. Configuration and grammar mistakes surface here too so a fail-on
-   * typo does not produce a green pipeline.
+   * Input error: bad argv, a file named and missing, a file malformed, unresolvable IR shape,
+   * ambiguous explain target. Configuration and grammar mistakes surface here too so a fail-on
+   * typo does not produce a green pipeline. The line against `RUNTIME` is who has to act
+   * (`cli-spec.md` §9): a path the reader mistyped is theirs, a permission is not.
    */
   INPUT_ERROR: 2,
   /**

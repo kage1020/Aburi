@@ -42,24 +42,36 @@ export function classifyDiffError(error: DiffError): CliError {
     case "ir-identity-collision":
       return new CliError(error.message, "config-error", { cause: error })
     case "slice-invariant-violated":
-      return new CliError(
-        `Internal error: ${error.message} This is a bug in Aburi, not in your configuration — ` +
-          "please report it at https://github.com/kage1020/Aburi/issues.",
-        "runtime-error",
-        { cause: error },
+      return internalDiffFault(error.message, error)
+    default: {
+      // A new `DiffErrorCode` is a type error here rather than a code that silently takes an
+      // arm — and at runtime it degrades instead of throwing, because the compile-time check
+      // protects this repo's build and not an installed tree: `@aburi/diff` and `@aburi/cli`
+      // version independently, so a compiled switch can meet a code it never saw. Throwing
+      // there would discard the one thing the reader needs, which is what the diff said.
+      const unplaced: never = error.code
+      return internalDiffFault(
+        `${error.message} (diff error code ${JSON.stringify(unplaced)} has no exit code)`,
+        error,
       )
-    default:
-      return assertNever(error.code)
+    }
   }
 }
 
 /**
- * A new `DiffErrorCode` has to be placed in the table above rather than defaulting into
- * `config-error`, because the two outcomes blame different people: one sends the reader to
- * `aburi.json`, the other to the issue tracker.
+ * The report for a diff failure that is Aburi's own rather than the reader's.
+ *
+ * The instruction sits on its own line because nothing that reaches here ends in punctuation:
+ * a thrown message run together with the next sentence is what a reader has to unpick.
  */
-function assertNever(code: never): never {
-  throw new Error(`Unhandled DiffErrorCode: ${JSON.stringify(code)}`)
+function internalDiffFault(detail: string, cause: unknown): CliError {
+  return new CliError(
+    `Internal error: ${detail}\n` +
+      "This is a bug in Aburi, not in your configuration — please report it at " +
+      "https://github.com/kage1020/Aburi/issues.",
+    "runtime-error",
+    { cause },
+  )
 }
 
 export interface DiffOptions {

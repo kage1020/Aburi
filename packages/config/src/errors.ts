@@ -5,10 +5,26 @@
  * integrations can render rich errors without re-parsing the message.
  */
 
+/**
+ * Errnos that mean there is nothing at that path, as opposed to something the filesystem
+ * would not hand over.
+ *
+ * One definition because the two readers act on it differently and must agree on the
+ * question: discovery treats absence as a value and keeps walking, while a path the caller
+ * named explicitly turns it into `config-not-found`. If the sets drifted, one of them would
+ * be calling a missing file an IO failure.
+ */
+export const MISSING_FILE_ERRNOS: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"])
+
 /** Failures with no semantically meaningful value: source path / cause already carry the context. */
 export type ContextFreeConfigErrorCode =
-  /** Filesystem failure while reading or probing aburi.json/aburi.jsonc (EACCES, EIO, …). ENOENT/ENOTDIR are not errors. */
+  /** Filesystem refused a config that is there (EACCES, EIO, EISDIR, …). Absence is `config-not-found`. */
   | "config-read-failed"
+  /**
+   * A config named explicitly is not there. Only the explicit path raises it: discovery
+   * answers absence with `null` and lets autodetect run, because nothing named that file.
+   */
+  | "config-not-found"
   /** Config file is not valid JSONC (lexical error). */
   | "config-parse-failed"
   /** Config does not conform to aburi.config.v1.json or contains non-JSON values. */

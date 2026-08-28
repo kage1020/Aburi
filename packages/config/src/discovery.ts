@@ -1,17 +1,9 @@
 import { access, constants } from "node:fs/promises"
 import { dirname, isAbsolute, resolve } from "node:path"
-import { ConfigError } from "./errors"
+import { ConfigError, MISSING_FILE_ERRNOS } from "./errors"
 
 /** File names checked in priority order. JSONC takes precedence so comments survive a round-trip. */
 const CONFIG_FILENAMES = ["aburi.jsonc", "aburi.json"] as const
-
-/**
- * Errnos that legitimately mean "no config here, keep walking". Anything else (EACCES, EIO,
- * ELOOP, EMFILE, ENAMETOOLONG, …) is surfaced as ConfigError: silently swallowing them would
- * make every transient filesystem failure indistinguishable from an honest absence and send
- * the loader into autodetect mode with no diagnostic.
- */
-const BENIGN_PROBE_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
 
 export interface FindConfigOptions {
   /**
@@ -58,7 +50,11 @@ async function fileExists(path: string): Promise<boolean> {
       typeof (err as { code?: unknown }).code === "string"
         ? (err as { code: string }).code
         : "unknown"
-    if (BENIGN_PROBE_ERRNOS.has(errno)) return false
+    // The shared set: "no config here, keep walking". Anything else (EACCES, EIO, ELOOP,
+    // EMFILE, ENAMETOOLONG, …) is a ConfigError, because swallowing it would make every
+    // transient filesystem failure indistinguishable from an honest absence and send the
+    // loader into autodetect mode with no diagnostic.
+    if (MISSING_FILE_ERRNOS.has(errno)) return false
     throw new ConfigError(
       `Failed to probe config candidate ${path} (${errno})`,
       { code: "config-read-failed" },
