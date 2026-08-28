@@ -35,7 +35,7 @@ export {
   type ScanOptions,
   type ScanReport,
 } from "./commands/scan"
-export { classifyConfigError, configuredOutputDir, resolveConfig } from "./config-load"
+export { classifyConfigError } from "./config-load"
 export { resolveConfigPath } from "./config-path"
 export { type AburiEnv, type LogLevel, readEnv } from "./env"
 export { CliError, type CliErrorCode } from "./errors"

@@ -226,7 +226,10 @@ describe("readConfigFile", () => {
     expect(config.effects).toEqual(["effects-prisma", "effects-pino"])
   })
 
-  it("throws config-read-failed on ENOENT, exposing errno in the message", async () => {
+  it("throws config-not-found when the named path holds nothing", async () => {
+    // Separate from `config-read-failed` because the remedy is: a name the caller mistyped is
+    // theirs to fix, and a file the filesystem refused is not. Only the explicit path reaches
+    // here — discovery answers absence with `null` and lets autodetect run.
     let caught: unknown
     try {
       await readConfigFile(join(tmp, "missing.jsonc"))
@@ -234,9 +237,23 @@ describe("readConfigFile", () => {
       caught = err
     }
     expect(caught).toBeInstanceOf(ConfigError)
-    expect((caught as ConfigError).code).toBe("config-read-failed")
-    expect((caught as ConfigError).message).toMatch(/ENOENT/)
+    expect((caught as ConfigError).code).toBe("config-not-found")
+    expect((caught as ConfigError).message).toContain("No config file at ")
     expect((caught as ConfigError).cause).toBeInstanceOf(Error)
+  })
+
+  it("throws config-not-found when a path segment is not a directory", async () => {
+    // ENOTDIR is the same fact through a different errno: `--config out/aburi.json` where
+    // `out` is a file. The shared errno set is what keeps discovery and this agreeing.
+    const file = join(tmp, "not-a-dir")
+    await writeFile(file, "x", "utf8")
+    let caught: unknown
+    try {
+      await readConfigFile(join(file, "aburi.json"))
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as ConfigError).code).toBe("config-not-found")
   })
 
   it("throws config-read-failed on EISDIR (path is a directory, exercises Error-derived getErrno)", async () => {

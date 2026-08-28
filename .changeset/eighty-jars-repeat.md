@@ -1,4 +1,5 @@
 ---
+"@aburi/config": minor
 "@aburi/cli": minor
 ---
 
@@ -15,15 +16,30 @@ violation…` on exit 2. Anything that is not a `ConfigError` now exits 1 and sa
 Aburi, with where to report it — the same treatment `classifyDiffError` gives
 `slice-invariant-violated`.
 
-**A config that is there and cannot be read.** `config-read-failed` now exits 1 rather than 2.
-It covers both a failing read of the config itself and a failing probe of a candidate while
-discovery walks upward, so a permission, a mount, or a directory named `aburi.json` reports as
-the IO it is. Its message keeps the `Failed to load Aburi config:` prefix, which names the phase
-that failed rather than who is answerable for it.
+**A config that is there and cannot be read.** `config-read-failed` now exits 1 rather than 2. A
+permission, a mount, or a directory named `aburi.json` is IO, and its message keeps the
+`Failed to load Aburi config:` prefix, which names the phase that failed rather than who is
+answerable for it.
 
-The mapping is a switch that is total over `ConfigErrorCode`, so a code added upstream has to be
-placed rather than defaulting into either arm. `classifyConfigError` is exported alongside
-`classifyDiffError` for the same reason: it is where the two exit codes are decided.
+Absence is no longer part of that code. `readConfigFile` stamped `config-read-failed` on every
+read failure, `ENOENT` included, so a mistyped `--config ./typo.json` would have moved to exit 1
+with it — where §9 lists "missing" under exit 2, because a path the reader named is theirs to
+fix. `@aburi/config` gains **`config-not-found`** for that case, with the message `No config
+file at <path>` rather than `Failed to read config at <path> (ENOENT)`, and the CLI keeps it on
+exit 2. Only the explicit `--config` path raises it: discovery answers absence with `null` and
+lets autodetect run, as before. `ENOENT`/`ENOTDIR` is now one set shared by the reader and the
+prober, so the two cannot drift apart on what "nothing there" means.
+
+The mapping is a switch that is total over `ConfigErrorCode`, so a code added upstream is a type
+error rather than a silent arm. At runtime it degrades instead of throwing: `@aburi/config` and
+`@aburi/cli` version independently, so a compiled switch can meet a code it never saw, and
+throwing there would discard the message the reader needs. `classifyDiffError` had the same hole
+and takes the same fix. Both now put the "report it" instruction on its own line, since nothing
+reaching them ends in punctuation.
+
+`classifyConfigError` is exported alongside `classifyDiffError`: it is where the two exit codes
+are decided, and the branch that matters most is not otherwise reachable from a fixture.
 
 Three commands read the config — `scan`, `diff` and `explain` — so all three inherit this;
-`init` writes one and is unaffected.
+`init` writes one and is unaffected. `cli-spec.md` §9 and §5.4 and `EXIT`'s own doc all state the
+rule now, rather than three different ones.

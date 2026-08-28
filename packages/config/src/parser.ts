@@ -7,7 +7,7 @@ import Ajv2020, {
 } from "ajv/dist/2020.js"
 import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
 import configSchema from "../../../schema/aburi.config.v1.json" with { type: "json" }
-import { ConfigError } from "./errors"
+import { ConfigError, MISSING_FILE_ERRNOS } from "./errors"
 
 const ajv = new Ajv2020({
   strict: true,
@@ -76,6 +76,15 @@ export async function readConfigFile(path: string): Promise<Config> {
     text = await readFile(path, "utf8")
   } catch (err: unknown) {
     const errno = getErrno(err)
+    // A path the caller named and a path the filesystem refused are different mistakes with
+    // different remedies — fix the name, or fix the permission — so they are different codes.
+    if (MISSING_FILE_ERRNOS.has(errno)) {
+      throw new ConfigError(
+        `No config file at ${path}`,
+        { code: "config-not-found" },
+        { cause: err },
+      )
+    }
     throw new ConfigError(
       `Failed to read config at ${path} (${errno})`,
       { code: "config-read-failed" },
