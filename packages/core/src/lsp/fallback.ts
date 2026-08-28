@@ -13,12 +13,7 @@ export interface FallbackState {
   onRequest(file: string, ok: boolean): { escalate: boolean }
   /** Called at the end of a file OR when a per-file fallback fires. */
   onFileClose(file: string, language: string, fellBack: boolean): { escalate: boolean }
-  /**
-   * Called after per-language fallback fires: an `initialize` that failed or threw, a
-   * five-file streak, or anything else thrown while enriching that language. The third is the
-   * catch-all §6.1 names, and it is the reason this is a plain setter rather than another
-   * escalation rule — the caller has already decided.
-   */
+  /** Called after per-language fallback fires — any of the three conditions in §6.1. */
   onLanguageDisabled(language: string): void
   isLanguageDisabled(language: string): boolean
   isFileFellBack(file: string): boolean

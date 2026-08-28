@@ -33,6 +33,7 @@ export class MockLspClient implements LspClient {
   shutdownCount = 0
   private initializeThrow: unknown = null
   private shutdownThrow: unknown = null
+  private shutdownHangs = false
   private handlers = new Map<string, MockHandler>()
   private initializeResult: InitializeResult = {
     capabilities: {},
@@ -110,9 +111,16 @@ export class MockLspClient implements LspClient {
     return this
   }
 
+  /** Never settle `shutdown`, the way a client talking to a wedged process would. */
+  installShutdownHang(): this {
+    this.shutdownHangs = true
+    return this
+  }
+
   async shutdown(): Promise<void> {
     this.shutdownCalled = true
     this.shutdownCount += 1
+    if (this.shutdownHangs) await new Promise<void>(() => {})
     if (this.shutdownThrow !== null) throw this.shutdownThrow
   }
 }

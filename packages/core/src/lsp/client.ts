@@ -184,6 +184,12 @@ export function createLspClient(server: SpawnedServer): LspClient {
       }
     },
 
+    /**
+     * Every step is bounded and every step's failure is absorbed, so a caller unwinding
+     * through this in a `finally` cannot have its own diagnostic replaced by one from here.
+     * `killAfter` is what makes the process go away when the courtesies do not; `dispose` is
+     * a courtesy in turn and is guarded like the rest.
+     */
     async shutdown() {
       if (disposed) return
       try {
