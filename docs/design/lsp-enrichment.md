@@ -147,7 +147,9 @@ The pass degrades gracefully at three progressively larger granularities.
 
 - **Per-request fallback**: a single LSP request errors or exceeds `requestTimeoutMs`. The specific enrichment for that request is skipped; the affected IR field retains its untyped-tier value. Sibling requests for the same file are unaffected.
 - **Per-file fallback**: `didOpen` fails — including a write that exceeds its §4.4 bound or is addressed to a server already known to have exited — or `fileBudgetMs` is exceeded for the file, or three consecutive requests hit per-request fallback. The pass sends `didClose`, counts the file in `stats.lspEnrichment.filesFellBack` (§7.2), keeps every untyped-tier value in that file, and moves to the next file.
-- **Per-language fallback**: `initialize` fails, or five consecutive files hit per-file fallback for the same language. The pass sends `shutdown` / `exit` to that language's server, disables LSP for that language for the remainder of the run, and emits one CLI warning.
+- **Per-language fallback**: `initialize` fails, or five consecutive files hit per-file fallback for the same language, or anything thrown while enriching that language reaches the language boundary. The pass sends `shutdown` / `exit` to that language's server, disables LSP for that language for the remainder of the run, and emits one CLI warning.
+
+  The third condition is the catch-all, and it is a fallback rather than a fault because this pass is optional: everything it can lose is the typed-tier values for one language, and every one of those has an untyped-tier value already written. A throw is not a licence to lose the Document. What that language enriched before the throw is kept, per §6.2 — a fallback never lowers a value the pass had already earned.
 
 ### 6.2 IR degradation rules
 
@@ -166,6 +168,8 @@ Under any fallback:
 3. Per-language fallback MUST append the language id to `stats.lspEnrichment.languagesDisabled[]` and MUST emit exactly one CLI warning.
 4. Any fallback MUST NOT alter `Call.resolved` values set by the untyped tier.
 5. Fallback state MUST NOT propagate across `aburi scan` invocations. Every scan starts with a clean per-language enablement.
+6. The pass MUST NOT propagate an exception to its caller. A scan that reached this point has a complete untyped-tier Document, and enrichment is not a reason to lose it.
+7. A language whose server was started MUST be sent `shutdown` on every exit from that language — a clean pass, a reported failure, and a thrown one alike — and exactly once. The server is a child process, so an exit that skips it leaves the process running for the rest of the run and past it. A `shutdown` that itself fails is warned about rather than propagated, because a server that may still be running is worth saying and is not worth losing the run's other diagnostics over.
 
 ## 7. Contract / Output Shape
 

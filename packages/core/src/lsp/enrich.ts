@@ -168,39 +168,58 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       continue
     }
 
-    const initTimeout = serverConfig.initializeTimeoutMs ?? 10000
-    const initResult = await client.initialize({
-      workspaceRoot: input.workspaceRoot,
-      initializationOptions: serverConfig.initializationOptions ?? {},
-      capabilities: CLIENT_CAPABILITIES,
-      timeoutMs: initTimeout,
-    })
-    if (isLspFailure(initResult)) {
+    // Opens where the server exists and nothing has been asked of it yet. The two branches
+    // above are outside it on purpose: neither has a server to shut down. From here every
+    // exit — a reported failure, a thrown one, a clean pass — leaves through the `finally`,
+    // because what is on the other side of it is a child process.
+    try {
+      const initTimeout = serverConfig.initializeTimeoutMs ?? 10000
+      const initResult = await client.initialize({
+        workspaceRoot: input.workspaceRoot,
+        initializationOptions: serverConfig.initializationOptions ?? {},
+        capabilities: CLIENT_CAPABILITIES,
+        timeoutMs: initTimeout,
+      })
+      if (isLspFailure(initResult)) {
+        logger.warn?.(
+          `[aburi:lsp] initialize failed for ${language} (${failureReason(initResult)}); falling back to untyped tier for this language`,
+        )
+        fallback.onLanguageDisabled(language)
+        stats.languagesDisabled.add(language)
+        continue
+      }
+
+      await processLanguage({
+        language,
+        serverConfig,
+        client,
+        symbols: langSymbols,
+        workingById,
+        fileContents: input.fileContents,
+        workspaceRoot: input.workspaceRoot,
+        stats,
+        fallback,
+        receiverHints,
+        logger,
+        now: input.now ?? monotonicNow,
+      })
+    } catch (error) {
+      // An unexpected throw is the per-language tier of §6.1, not the end of the scan: this
+      // pass is optional by design, and the whole of what it can lose is the typed-tier
+      // values for one language. Letting it out would take the Document with it — every
+      // Symbol of every language, over an enrichment nobody asked to be load-bearing.
+      //
+      // Whatever this language enriched before the throw is kept. §6.2 forbids a fallback
+      // lowering a value the pass had already earned, and a half-enriched file is still a
+      // file whose columns are right.
       logger.warn?.(
-        `[aburi:lsp] initialize failed for ${language} (${failureReason(initResult)}); falling back to untyped tier for this language`,
+        `[aburi:lsp] enrichment for ${language} threw (${errorMessage(error)}); falling back to untyped tier for this language`,
       )
       fallback.onLanguageDisabled(language)
       stats.languagesDisabled.add(language)
-      await safeShutdown(client)
-      continue
+    } finally {
+      await safeShutdown(client, language, logger)
     }
-
-    await processLanguage({
-      language,
-      serverConfig,
-      client,
-      symbols: langSymbols,
-      workingById,
-      fileContents: input.fileContents,
-      workspaceRoot: input.workspaceRoot,
-      stats,
-      fallback,
-      receiverHints,
-      logger,
-      now: input.now ?? monotonicNow,
-    })
-
-    await safeShutdown(client)
   }
 
   return {
@@ -449,18 +468,32 @@ function applyDocumentSymbols(
       endCol: range.end.character + 1,
     })
   }
-  const walk = (entry: DocumentSymbol | SymbolInformation): void => {
+  // An explicit stack rather than recursion. The depth of this tree is the server's to
+  // choose, and a deep one used to arrive as a `RangeError` thrown out of the pass — which,
+  // before the language boundary existed, ended the scan. Bounding the depth instead would
+  // trade the crash for silently dropped entries.
+  //
+  // Children are pushed in reverse so they come off in source order: matching below takes the
+  // first entry at a given line and name, so the visit order decides which columns a Symbol
+  // gets. That order is pre-order, parent before children — the same one the recursion had.
+  const stack: (DocumentSymbol | SymbolInformation)[] = [...entries].reverse()
+  while (stack.length > 0) {
+    const entry = stack.pop()
+    if (entry === undefined) break
     if ("range" in entry) {
       push(entry.name, entry.range)
-      if ((entry as DocumentSymbol).children !== undefined) {
-        for (const child of (entry as DocumentSymbol).children ?? []) walk(child)
+      const children = (entry as DocumentSymbol).children
+      if (children !== undefined) {
+        for (let i = children.length - 1; i >= 0; i--) {
+          const child = children[i]
+          if (child !== undefined) stack.push(child)
+        }
       }
-      return
+      continue
     }
     const info = entry as SymbolInformation
     if (info.location?.range !== undefined) push(info.name, info.location.range)
   }
-  for (const entry of entries) walk(entry)
 
   for (const symbol of fileSymbols) {
     const match = flat.find(
@@ -627,11 +660,30 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-async function safeShutdown(client: LspClient): Promise<void> {
+/**
+ * End the language's server, on every path out of the language.
+ *
+ * The swallow is load-bearing rather than cosmetic: this runs from a `finally` that is often
+ * already unwinding, where a throw would replace the diagnostic the reader needs with one
+ * about the shutdown. It is not silent, though — a shutdown that fails is a server that may
+ * still be running, which is the whole thing this call exists to prevent, so it is said.
+ *
+ * `createLspClient`'s own `shutdown` is built not to reach here: it bounds the request, sends
+ * `exit` regardless, and finishes with `killAfter`, which SIGKILLs a server that ignored both.
+ * What this guards is an injected `ServerFactory` client, which is ordinary JavaScript and
+ * free to throw.
+ */
+async function safeShutdown(
+  client: LspClient,
+  language: LanguageId,
+  logger: Logger,
+): Promise<void> {
   try {
     await client.shutdown()
-  } catch {
-    // ignore
+  } catch (error) {
+    logger.warn?.(
+      `[aburi:lsp] shutting down the ${language} server failed (${errorMessage(error)}); it may still be running`,
+    )
   }
 }
 
