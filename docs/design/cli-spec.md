@@ -830,6 +830,13 @@ Description: NestJS OnModuleInit hook
 
 128+N is for fatal signals (Aburi itself does not use it).
 
+The line between `1` and `2` is who has to act, not which subsystem failed. A config that does
+not conform, or does not parse, or names the same component twice is `2`: an edit fixes it. A
+config that is **there and cannot be read** — a permission, a mount, a directory of that name —
+is `1`, because no edit does. And a failure Aburi's own invariants raised is `1` with the run
+named as a bug in Aburi, since `2` is a sentence about the reader's file and would send them
+looking for something that is not in it.
+
 A plugin error means the same thing in every command that scans. `scan`, `diff` and `explain` all
 exit `3` when the scan they ran did not exit clean, whichever of them ran it.
 
