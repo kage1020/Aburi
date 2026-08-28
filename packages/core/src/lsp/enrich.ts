@@ -29,7 +29,13 @@ import type {
 } from "@aburi/types"
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
 import { trySymbolId } from "../id"
-import { createLspClient, isLspFailure, type LspClient, type LspFailure } from "./client"
+import {
+  createLspClient,
+  isLspFailure,
+  type LspClient,
+  type LspFailure,
+  SHUTDOWN_GRACE_MS,
+} from "./client"
 import { createFallbackState, type FallbackState } from "./fallback"
 import { requestDocumentSymbols, requestHover } from "./requests"
 import { createStatsBuilder, finalizeStats, type LspStatsBuilder } from "./stats"
@@ -168,39 +174,69 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
       continue
     }
 
-    const initTimeout = serverConfig.initializeTimeoutMs ?? 10000
-    const initResult = await client.initialize({
-      workspaceRoot: input.workspaceRoot,
-      initializationOptions: serverConfig.initializationOptions ?? {},
-      capabilities: CLIENT_CAPABILITIES,
-      timeoutMs: initTimeout,
-    })
-    if (isLspFailure(initResult)) {
+    // Opens where the server exists and nothing has been asked of it yet. The two branches
+    // above are outside it on purpose: neither has a server to shut down. From here every
+    // exit — a reported failure, a thrown one, a clean pass — leaves through the `finally`,
+    // because what is on the other side of it is a child process.
+    try {
+      const initTimeout = serverConfig.initializeTimeoutMs ?? 10000
+      const initResult = await client.initialize({
+        workspaceRoot: input.workspaceRoot,
+        initializationOptions: serverConfig.initializationOptions ?? {},
+        capabilities: CLIENT_CAPABILITIES,
+        timeoutMs: initTimeout,
+      })
+      if (isLspFailure(initResult)) {
+        logger.warn?.(
+          `[aburi:lsp] initialize failed for ${language} (${failureReason(initResult)}); falling back to untyped tier for this language`,
+        )
+        fallback.onLanguageDisabled(language)
+        stats.languagesDisabled.add(language)
+        continue
+      }
+
+      await processLanguage({
+        language,
+        serverConfig,
+        client,
+        symbols: langSymbols,
+        workingById,
+        fileContents: input.fileContents,
+        workspaceRoot: input.workspaceRoot,
+        stats,
+        fallback,
+        receiverHints,
+        logger,
+        now: input.now ?? monotonicNow,
+      })
+    } catch (error) {
+      // An unexpected throw is the per-language tier of §6.1, not the end of the scan: this
+      // pass is optional by design, and the whole of what it can lose is the typed-tier
+      // values for one language. Letting it out would take the Document with it — every
+      // Symbol of every language, over an enrichment nobody asked to be load-bearing.
+      //
+      // Whatever this language enriched before the throw is kept, per §6.2's SourceRange rule:
+      // a fallback leaves what was already written alone and leaves the rest at the
+      // Tree-sitter tier's `null`. A half-enriched file is still a file whose columns are right.
+      //
+      // The warning is the one §6.3 rule 3 allows, and it says what the reader gets rather than
+      // whose fault it is: from here a broken server and a bug in this package are the same
+      // event, and by the time a throw has survived every guard `processLanguage` puts on the
+      // client, the second is the likelier of the two. The debug line beside it carries what
+      // tells them apart, on a channel that is not a CLI warning and so is not rule 3's to count.
       logger.warn?.(
-        `[aburi:lsp] initialize failed for ${language} (${failureReason(initResult)}); falling back to untyped tier for this language`,
+        `[aburi:lsp] enrichment for ${language} threw (${errorMessage(error)}); falling back to untyped tier for this language`,
       )
+      logger.debug?.(`[aburi:lsp] enrichment for ${language} threw`, {
+        language,
+        error: describeErrorClass(error),
+        stack: errorStack(error),
+      })
       fallback.onLanguageDisabled(language)
       stats.languagesDisabled.add(language)
-      await safeShutdown(client)
-      continue
+    } finally {
+      await safeShutdown(client, language, logger)
     }
-
-    await processLanguage({
-      language,
-      serverConfig,
-      client,
-      symbols: langSymbols,
-      workingById,
-      fileContents: input.fileContents,
-      workspaceRoot: input.workspaceRoot,
-      stats,
-      fallback,
-      receiverHints,
-      logger,
-      now: input.now ?? monotonicNow,
-    })
-
-    await safeShutdown(client)
   }
 
   return {
@@ -449,18 +485,38 @@ function applyDocumentSymbols(
       endCol: range.end.character + 1,
     })
   }
-  const walk = (entry: DocumentSymbol | SymbolInformation): void => {
+  // An explicit stack rather than recursion. The depth of this tree is the server's to
+  // choose, and a deep one used to arrive as a `RangeError` thrown out of the pass — which,
+  // before the language boundary existed, ended the scan. Bounding the depth instead would
+  // trade the crash for silently dropped entries.
+  //
+  // Children are pushed in reverse so they come off in source order: matching below takes the
+  // first entry at a given line and name, so the visit order decides which columns a Symbol
+  // gets. That order is pre-order, parent before children — the same one the recursion had.
+  const stack: (DocumentSymbol | SymbolInformation)[] = [...entries].reverse()
+  while (stack.length > 0) {
+    const entry = stack.pop()
+    // Unreachable under the loop condition; it is here because the index is unchecked. `continue`
+    // rather than `break` so an impossible entry costs one entry rather than every queued sibling.
+    if (entry === undefined) continue
     if ("range" in entry) {
       push(entry.name, entry.range)
-      if ((entry as DocumentSymbol).children !== undefined) {
-        for (const child of (entry as DocumentSymbol).children ?? []) walk(child)
+      // `Array.isArray`, not a presence check: `entries` is a cast over the server's JSON, so
+      // the shape is no more the type's to promise than the depth is. A server that serializes
+      // an empty child list as `null` is ordinary, and reading `.length` off it would cost the
+      // whole language its enrichment.
+      const children = (entry as DocumentSymbol).children
+      if (Array.isArray(children)) {
+        for (let i = children.length - 1; i >= 0; i--) {
+          const child = children[i]
+          if (child !== undefined) stack.push(child)
+        }
       }
-      return
+      continue
     }
     const info = entry as SymbolInformation
     if (info.location?.range !== undefined) push(info.name, info.location.range)
   }
-  for (const entry of entries) walk(entry)
 
   for (const symbol of fileSymbols) {
     const match = flat.find(
@@ -485,6 +541,24 @@ function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void
   symbol.signature = { ...symbol.signature, inferredThrows: merged }
 }
 
+/**
+ * Run `jobs` through at most `concurrency` workers, and do not return while any of them is
+ * still running.
+ *
+ * A worker that throws is recorded rather than allowed to reject, and the lowest-indexed
+ * failure is rethrown once every worker has stopped. Letting a rejection out directly would
+ * settle this function while the other workers were mid-request: they would go on writing
+ * into the Symbols and the hint map their caller had already returned to *its* caller, and
+ * sending requests to a server that had since been shut down. An IR that keeps changing after
+ * the pass returns it is the determinism guarantee in lsp-enrichment.md §10.6, not untidiness.
+ *
+ * The remaining jobs are run rather than abandoned, so the set of writes a failing file
+ * produces is the same on a rerun. Stopping at the first failure would make it depend on how
+ * many workers happened to be in flight, and the cost of finishing is small: `run` re-reads
+ * the file's budget and returns early once it is spent. Which failure is reported is decided
+ * by job index for the same reason — the wall-clock order of concurrent rejections is not a
+ * property of the input.
+ */
 async function runJobsWithConcurrency<T>(
   jobs: readonly T[],
   concurrency: number,
@@ -493,16 +567,24 @@ async function runJobsWithConcurrency<T>(
   if (jobs.length === 0) return
   const workers = Math.max(1, Math.min(concurrency, jobs.length))
   let cursor = 0
+  const failures = new Map<number, unknown>()
   const takers = Array.from({ length: workers }, async () => {
     while (cursor < jobs.length) {
       const idx = cursor
       cursor += 1
       const job = jobs[idx]
       if (job === undefined) return
-      await run(job)
+      try {
+        await run(job)
+      } catch (error) {
+        failures.set(idx, error)
+      }
     }
   })
   await Promise.all(takers)
+  if (failures.size === 0) return
+  const first = Math.min(...failures.keys())
+  throw failures.get(first)
 }
 
 function groupSymbolsByLanguage(symbols: readonly IRSymbol[]): Map<LanguageId, IRSymbol[]> {
@@ -627,12 +709,74 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-async function safeShutdown(client: LspClient): Promise<void> {
-  try {
-    await client.shutdown()
-  } catch {
-    // ignore
+/**
+ * The two things a message does not carry, for the debug channel.
+ *
+ * A message alone cannot separate a server that misbehaved from a bug in this package, and
+ * from the language boundary the second is the likelier: every call this file makes to a
+ * client is already total, so what is left to throw is Aburi's own code. `name` says which
+ * kind of failure it was, and the stack says whose file to open.
+ */
+function describeErrorClass(error: unknown): string {
+  if (error instanceof Error) return error.name
+  return typeof error
+}
+
+function errorStack(error: unknown): string | undefined {
+  return error instanceof Error ? error.stack : undefined
+}
+
+/**
+ * End the language's server, on every path out of the language, without ever becoming the
+ * reason the caller failed.
+ *
+ * The swallow is load-bearing rather than cosmetic: this runs from a `finally` that is often
+ * already unwinding, where a throw would replace the diagnostic the reader needs with one
+ * about the shutdown. It is not silent, though — a shutdown that fails is a server that may
+ * still be running, which is the whole thing this call exists to prevent, so it is said.
+ *
+ * Bounded for the same reason it is guarded. `LspClient` is a seam callers supply through
+ * `EnrichmentInput.serverFactory`, and a `shutdown` that never settles would stop the scan
+ * inside a `finally` with nothing to read — every other call this file makes to a client
+ * carries a deadline. A hang and a failure leave the reader with the same server still up, so
+ * they get the same line.
+ */
+async function safeShutdown(
+  client: LspClient,
+  language: LanguageId,
+  logger: Logger,
+): Promise<void> {
+  const stranded = (detail: string): void => {
+    logger.warn?.(
+      `[aburi:lsp] shutting down the ${language} server failed (${detail}); it may still be running`,
+    )
   }
+  try {
+    const answered = await Promise.race([
+      client.shutdown().then(() => true),
+      delay(SHUTDOWN_CALL_BUDGET_MS).then(() => false),
+    ])
+    if (!answered) stranded(`no answer in ${SHUTDOWN_CALL_BUDGET_MS}ms`)
+  } catch (error) {
+    stranded(errorMessage(error))
+  }
+}
+
+/**
+ * How long `safeShutdown` waits for a client to finish shutting down.
+ *
+ * Three grace periods, which is the longest a client built the way `createLspClient` is can
+ * legitimately take: it spends at most one on the shutdown request, one on the `exit`
+ * notification, and one waiting before SIGKILL. Past that it is not going to answer.
+ */
+const SHUTDOWN_CALL_BUDGET_MS = SHUTDOWN_GRACE_MS * 3
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    // Unreferenced because nothing is waiting on this timer once the shutdown answers, and a
+    // referenced one would hold the process open for the rest of its budget.
+    setTimeout(resolve, ms).unref?.()
+  })
 }
 
 /**

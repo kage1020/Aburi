@@ -29,6 +29,11 @@ export class MockLspClient implements LspClient {
   readonly closeTimeouts: number[] = []
   initializeCalled = false
   shutdownCalled = false
+  /** Shutdowns received, so a caller can tell one from two. */
+  shutdownCount = 0
+  private initializeThrow: unknown = null
+  private shutdownThrow: unknown = null
+  private shutdownHangs = false
   private handlers = new Map<string, MockHandler>()
   private initializeResult: InitializeResult = {
     capabilities: {},
@@ -62,8 +67,15 @@ export class MockLspClient implements LspClient {
     return this
   }
 
+  /** Reject `initialize`, the way an injected client is free to. */
+  installInitializeThrow(error: unknown): this {
+    this.initializeThrow = error
+    return this
+  }
+
   async initialize(): Promise<InitializeResult | LspFailure> {
     this.initializeCalled = true
+    if (this.initializeThrow !== null) throw this.initializeThrow
     if (this.initializeFailure !== null) return this.initializeFailure
     return this.initializeResult
   }
@@ -93,8 +105,23 @@ export class MockLspClient implements LspClient {
     return result as T | LspFailure
   }
 
+  /** Reject `shutdown`, the way an injected client is free to. */
+  installShutdownThrow(error: unknown): this {
+    this.shutdownThrow = error
+    return this
+  }
+
+  /** Never settle `shutdown`, the way a client talking to a wedged process would. */
+  installShutdownHang(): this {
+    this.shutdownHangs = true
+    return this
+  }
+
   async shutdown(): Promise<void> {
     this.shutdownCalled = true
+    this.shutdownCount += 1
+    if (this.shutdownHangs) await new Promise<void>(() => {})
+    if (this.shutdownThrow !== null) throw this.shutdownThrow
   }
 }
 

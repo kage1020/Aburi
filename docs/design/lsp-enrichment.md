@@ -147,13 +147,16 @@ The pass degrades gracefully at three progressively larger granularities.
 
 - **Per-request fallback**: a single LSP request errors or exceeds `requestTimeoutMs`. The specific enrichment for that request is skipped; the affected IR field retains its untyped-tier value. Sibling requests for the same file are unaffected.
 - **Per-file fallback**: `didOpen` fails — including a write that exceeds its §4.4 bound or is addressed to a server already known to have exited — or `fileBudgetMs` is exceeded for the file, or three consecutive requests hit per-request fallback. The pass sends `didClose`, counts the file in `stats.lspEnrichment.filesFellBack` (§7.2), keeps every untyped-tier value in that file, and moves to the next file.
-- **Per-language fallback**: `initialize` fails, or five consecutive files hit per-file fallback for the same language. The pass sends `shutdown` / `exit` to that language's server, disables LSP for that language for the remainder of the run, and emits one CLI warning.
+- **Per-language fallback**: `initialize` fails, or five consecutive files hit per-file fallback for the same language, or anything thrown while enriching that language reaches the language boundary. The pass sends `shutdown` / `exit` to that language's server, disables LSP for that language for the remainder of the run, and emits one CLI warning.
+
+  The third condition is the catch-all, and it is a fallback rather than a fault because this pass is optional: everything it can lose is the typed-tier values for one language, and every one of those has an untyped-tier value already written. A throw is not a licence to lose the Document. What that language enriched before the throw is kept, per §6.2's `SourceRange` rule.
 
 ### 6.2 IR degradation rules
 
 Under any fallback:
 
 - `SourceRange.startColumn` / `endColumn` remain `null` — the value the Tree-sitter tier wrote, not an absent key. They are Class A per [`ir-schema.md`](./ir-schema.md) §1.1, so a consumer cannot tell a fallback apart from a scan that never ran this pass by looking at key presence; `stats.lspEnrichment` (§7.2) is where that distinction lives.
+- Columns this pass had **already written** when the fallback fired are kept. "Remain `null`" is about the columns the fallback prevented, not about the ones it arrived too late to prevent: a per-file fallback does not reach back into the files before it, and a per-language one does not reach back into the files that language already enriched. Rewriting them to `null` would be the fallback lowering a value the pass had earned — the same thing the `Call.resolved` rule below forbids, and for the same reason. It also would not be reproducible: which files a language enriched before it failed is a property of the input, but re-`null`ing them makes the Document depend on where in the file list the failure landed.
 - `Call.resolved` remains at whatever the untyped tier produced ([`call-resolution.md`](./call-resolution.md) §4). LSP fallback MUST NOT lower a resolved value back to `null`.
 - `CallEdge.confidence` remains at the untyped tier's value.
 - `Signature.inferredThrows` is **omitted entirely from the JSON** when this pass could not compute it. It is never emitted as an empty array to signal "we tried and found none". Class B per [`ir-schema.md`](./ir-schema.md) §1.1 — the contrasting case to the columns above, on the same Symbol.
@@ -163,9 +166,13 @@ Under any fallback:
 
 1. Per-request fallback MUST NOT emit warnings. Rationale: warning per request would flood logs on large workspaces where transient timeouts are expected.
 2. Per-file fallback MUST record `stats.lspEnrichment.filesFellBack += 1`.
-3. Per-language fallback MUST append the language id to `stats.lspEnrichment.languagesDisabled[]` and MUST emit exactly one CLI warning.
+3. Per-language fallback MUST append the language id to `stats.lspEnrichment.languagesDisabled[]` and MUST emit exactly one CLI warning attributable to the fallback itself. Rationale: the count is over the lines that say a language was given up on, so that a reader can tell one disabled language from two. Rule 7's shutdown warning describes what happened afterwards and is not one of them.
 4. Any fallback MUST NOT alter `Call.resolved` values set by the untyped tier.
 5. Fallback state MUST NOT propagate across `aburi scan` invocations. Every scan starts with a clean per-language enablement.
+6. The pass MUST NOT propagate an exception to its caller. Rationale: a scan that reached this point has a complete untyped-tier Document, and an optional pass is not a reason to lose it.
+7. A language whose server was started MUST be sent `shutdown` exactly once on every exit from that language — a clean pass, a reported failure, and a thrown one alike. Rationale: the server is a child process, so an exit that skips it leaves the process running for the rest of the run and past it.
+8. A `shutdown` that fails or does not answer within its bound MUST be warned about rather than propagated, and that warning is not counted by rule 3. Rationale: it runs where the pass is often already unwinding, so propagating it would replace the diagnostic the reader needs — but a server that may still be running is the one thing nothing else in the run would report.
+9. The pass MUST NOT write to the Document after it has returned. Rationale: a request still in flight when the pass gives up on a file would otherwise land in Symbols the caller is already holding, which is §10.6 rather than untidiness.
 
 ## 7. Contract / Output Shape
 
