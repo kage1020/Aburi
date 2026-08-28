@@ -99,3 +99,18 @@ function safeString(value: unknown): string {
     return Object.prototype.toString.call(value)
   }
 }
+
+/**
+ * Name a value's JavaScript type the way a sentence about it would.
+ *
+ * For messages that have to say what arrived instead of what was expected — a manifest field
+ * that should have been a list, a plugin method that should have been a function. `null` is
+ * called by its name rather than by `typeof`'s answer for it, and an array by what a reader
+ * would call it rather than by the `"object"` both share.
+ */
+export function describeJsonType(value: unknown): string {
+  if (Array.isArray(value)) return "a list"
+  if (value === null) return "null"
+  const type = typeof value
+  return `${type === "object" ? "an" : "a"} ${type}`
+}

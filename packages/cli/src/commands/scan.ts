@@ -12,6 +12,7 @@ import {
   posixWorkspaceRelativeViolation,
   type SkippedFile,
   scan,
+  type TreeReleaseFailure,
   type UnnameableFile,
   type UnrepresentableFile,
   type UnresolvedDeclaration,
@@ -191,6 +192,16 @@ export interface ScanReport {
    */
   extractionFailures: readonly { file: string; message: string; code?: string }[]
   /**
+   * Parse trees a language plugin was asked to free and did not.
+   *
+   * Reported, not gated. Every one of these files is in the IR with its Symbols intact, so
+   * the artifact describes the workspace completely — the cost is a leak that ends a long
+   * enough run in `RangeError: WebAssembly.Memory()`, charged to whichever unrelated file was
+   * being read when the heap ran out. This is the only thing that names the plugin before
+   * that happens, which is why it is printed rather than left to the run's own log.
+   */
+  treeReleaseFailures: readonly TreeReleaseFailure[]
+  /**
    * Present when the LSP enrichment pass ran (config.lsp.enabled = true and at
    * least one server was configured). Absent when LSP was skipped entirely.
    */
@@ -359,6 +370,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       return entry
     }),
     extractionFailures: scanResult.extractionFailures.map((f) => ({ ...f })),
+    treeReleaseFailures: scanResult.treeReleaseFailures.map((f) => ({ ...f })),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
     callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
@@ -524,6 +536,10 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   // through is one whose failure is deliberately swallowed further up — so the account that
   // exists nowhere else is the one that must not be last.
   reportUnrepresentable(report.unrepresentableFiles, say, warn)
+  // Beside the account that exists nowhere else, and ahead of everything the artifact can be
+  // re-read for. This one predicts a failure rather than describing one: the run it belongs
+  // to finished, and the next longer one dies of the same plugin.
+  reportTreeReleaseFailures(report.treeReleaseFailures, say, warn)
   reportConfigOutsideWorkspaceRoot(report, say)
   if (report.parseErrorCount > 0) {
     say(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
@@ -557,6 +573,42 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
         `LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.`,
       )
     }
+  }
+}
+
+/**
+ * Parse trees a plugin was asked to free and did not.
+ *
+ * Grouped by plugin rather than listed by file, because the plugin is what the reader has to
+ * fix and the files are only where it showed. The first file per plugin is named with what
+ * went wrong; the rest are a count, the way a skip group's tail is.
+ *
+ * The consequence is stated because nothing else about the run says it. Every one of these
+ * files is in the IR and the exit code is unmoved, so a line reading only "could not release
+ * a tree" would be indistinguishable from noise — and the run that pays for it is the next,
+ * longer one, which dies with the heap exhausted and blames whichever file it was on.
+ */
+function reportTreeReleaseFailures(
+  failures: ScanReport["treeReleaseFailures"],
+  say: (line: string) => void,
+  warn: WarnFn,
+): void {
+  if (failures.length === 0) return
+  const byPlugin = new Map<string, ScanReport["treeReleaseFailures"][number][]>()
+  for (const failure of failures) {
+    const group = byPlugin.get(failure.plugin)
+    if (group === undefined) byPlugin.set(failure.plugin, [failure])
+    else group.push(failure)
+  }
+  say(
+    `${failures.length} parse tree(s) were not released by the plugin that built them. ` +
+      `A tree a plugin does not free is not reclaimed by the garbage collector, so a long ` +
+      `enough run exhausts the parser's heap.`,
+  )
+  for (const [plugin, group] of byPlugin) {
+    const first = group[0]
+    if (first === undefined) continue
+    warn(`    ${plugin} (${group.length}) — ${first.file}: ${first.detail}`)
   }
 }
 

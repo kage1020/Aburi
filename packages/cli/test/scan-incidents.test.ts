@@ -215,6 +215,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       coverageFault: null,
       unrepresentableFiles: [],
       unresolvedDeclarations: [],
+      treeReleaseFailures: [],
       fellBackToSingleComponent: false,
       exitCode: EXIT.SUCCESS,
       ...overrides,
@@ -226,6 +227,32 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     reportScanIncidents(report, (m) => lines.push(m), label)
     return lines
   }
+
+  it("groups unreleased parse trees by plugin, and states what the leak costs", () => {
+    // A leak moves no exit code and takes nothing out of the artifact, so a line saying only
+    // that a tree was not released reads as noise. What it costs is the whole reason to print
+    // it — the run that pays is the next, longer one.
+    const lines = linesFrom(
+      reportWith({
+        treeReleaseFailures: [
+          { plugin: "lang-stub", file: "a.ts", detail: "wasm heap is gone" },
+          { plugin: "lang-stub", file: "b.ts", detail: "wasm heap is gone" },
+          { plugin: "lang-other", file: "c.rs", detail: "releaseTree is a list, not a function" },
+        ],
+      }),
+      null,
+    )
+
+    expect(lines).toEqual([
+      "⚠ 3 parse tree(s) were not released by the plugin that built them. A tree a plugin does not free is not reclaimed by the garbage collector, so a long enough run exhausts the parser's heap.",
+      "    lang-stub (2) — a.ts: wasm heap is gone",
+      "    lang-other (1) — c.rs: releaseTree is a list, not a function",
+    ])
+  })
+
+  it("says nothing about parse trees when every plugin freed its own", () => {
+    expect(linesFrom(reportWith({ treeReleaseFailures: [] }), null)).toEqual([])
+  })
 
   it("names the effect-classify timeout budget", () => {
     expect(linesFrom(reportWith({ timeoutCount: 4 }), null)).toEqual([

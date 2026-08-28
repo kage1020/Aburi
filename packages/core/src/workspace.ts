@@ -5,6 +5,7 @@ import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
 import { CoreError } from "./errors"
 import { posixWorkspaceRelativeViolation } from "./id"
+import { describeJsonType } from "./scan/faults"
 
 /**
  * Filenames whose presence at any directory ancestor identifies a workspace root. The
@@ -462,13 +463,6 @@ function malformedPatternList(manifestPath: string, key: string, fault: string):
 }
 
 /** How a value is named in a message about the JSON or YAML shape it came from. */
-function describeJsonType(value: unknown): string {
-  if (Array.isArray(value)) return "a list"
-  if (value === null) return "null"
-  const type = typeof value
-  return `${type === "object" ? "an" : "a"} ${type}`
-}
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path)

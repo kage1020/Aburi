@@ -36,7 +36,7 @@ import {
 } from "./discover"
 import { buildDropCFilter } from "./drop-c"
 import { describeThrown, errorCode, isVanishedFile } from "./faults"
-import { runFilePipeline } from "./pipeline"
+import { runFilePipeline, type TreeReleaseFailure } from "./pipeline"
 import { buildLanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
 
@@ -114,6 +114,22 @@ export interface ScanResult {
    * not on `skipped` as a whole.
    */
   extractionFailures: readonly ExtractionFailure[]
+  /**
+   * One record per parse tree the language plugin was asked to free and did not, in scan
+   * order. Empty for every plugin that either frees its trees or has nothing to free.
+   *
+   * Not a fault, and it moves no exit code: every one of these files is in the IR with its
+   * Symbols intact, so unlike `extractionFailures` and `unrepresentableFiles` the artifact
+   * describes the workspace completely. It is loud-but-not-gating for the same reason
+   * `unresolvedDeclarations` is.
+   *
+   * It is here rather than only in the log because the log is the channel most likely to be
+   * off. A leak is silent until the run dies of it, and by then the failure presents as
+   * `RangeError: WebAssembly.Memory()` charged to whichever unrelated file was being read at
+   * the time — one entry in `extractionFailures` per file for the rest of the run, none of
+   * them the cause. This list is the only thing that names the plugin before that happens.
+   */
+  treeReleaseFailures: readonly TreeReleaseFailure[]
   /**
    * One record per candidate file the Document has no way to name, in path order.
    *
@@ -206,6 +222,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const additionalSkipped: SkippedFile[] = []
   const parseTimeouts: ParseTimeoutEvent[] = []
   const extractionFailures: ExtractionFailure[] = []
+  const treeReleaseFailures: TreeReleaseFailure[] = []
+  // One warning per plugin, at the file it first went wrong on. The record below keeps
+  // every occurrence; a line per file would be one per file for the rest of the run.
+  const warnedReleaseFailure = new Set<string>()
   const importsByFile = new Map<string, readonly ImportEdge[]>()
   const fileContents = new Map<string, ReadFile>()
   const dynamicCallSites = new Set<string>()
@@ -249,6 +269,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     // pipeline that swallowed the exception would need a third way to say "this file
     // contributed nothing", beside `terminalParseFailure` and `parseTimeout`.
     let result: Awaited<ReturnType<typeof runFilePipeline>>
+    const releasesRecordedBefore = treeReleaseFailures.length
     try {
       result = await runFilePipeline({
         file: sourceFile,
@@ -259,6 +280,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         config: input.config,
         dropCFilter,
         log: logger,
+        treeReleaseFailures,
         ...(input.config.classifyTimeoutMs !== undefined
           ? { classifyTimeoutMs: input.config.classifyTimeoutMs }
           : {}),
@@ -285,6 +307,19 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       })
       logger.warn(`Skipped ${discoveredFile.path}: extraction threw — ${message}`)
       continue
+    } finally {
+      // In a `finally` because the catch above `continue`s. A plugin that both throws while
+      // extracting and fails to free the tree is exactly the run that needs to hear both,
+      // and the release runs on that path too.
+      for (const failure of treeReleaseFailures.slice(releasesRecordedBefore)) {
+        if (warnedReleaseFailure.has(failure.plugin)) continue
+        warnedReleaseFailure.add(failure.plugin)
+        logger.warn(
+          `Plugin ${failure.plugin} did not release the parse tree for ${failure.file}: ${failure.detail}. ` +
+            "A tree the plugin does not free is not reclaimed by the garbage collector, so a long " +
+            "enough run exhausts the parser's heap.",
+        )
+      }
     }
 
     // Reported for every file that got as far as a parse, abandoned or not: a file that
@@ -342,6 +377,15 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols.push(...result.symbols)
     importsByFile.set(result.path, result.imports)
     for (const key of result.dynamicCallSites) dynamicCallSites.add(key)
+  }
+
+  // The count the per-file warning above deliberately does not repeat. One line per plugin,
+  // and only when it went wrong more than once, so the run says how far the leak got without
+  // saying it once per file.
+  for (const [plugin, count] of countByPlugin(treeReleaseFailures)) {
+    if (count > 1) {
+      logger.warn(`Plugin ${plugin} failed to release ${count} parse trees over this run.`)
+    }
   }
 
   symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -466,6 +510,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     parseTimeouts,
     unresolvedCalls: callGraph.diagnostics,
     extractionFailures,
+    treeReleaseFailures,
     unrepresentableFiles: discovered.unrepresentableFiles,
   }
 }
@@ -746,4 +791,17 @@ const silentLogger: Logger = {
   info: () => {},
   warn: () => {},
   error: () => {},
+}
+
+/**
+ * How many trees each plugin failed to release, in the order the plugins first went wrong.
+ * Insertion order rather than sorted: the run has already named the first occurrence per
+ * plugin on its own line, and these counts read as the tail of those lines.
+ */
+function countByPlugin(failures: readonly TreeReleaseFailure[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const failure of failures) {
+    counts.set(failure.plugin, (counts.get(failure.plugin) ?? 0) + 1)
+  }
+  return counts
 }

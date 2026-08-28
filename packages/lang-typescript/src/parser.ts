@@ -95,11 +95,13 @@ async function loadLanguage(wasmPath: string): Promise<Language> {
  * Parse a single TypeScript / TSX source file.
  *
  * Every call creates a fresh Parser and releases it in a `finally` so the WASM heap that
- * web-tree-sitter manages stays flat across long scans. Downstream post-parse work
- * (error collection, import extraction) is wrapped in its own try/catch that calls
- * `tree.delete()` on failure, because the caller only receives the tree handle if we
- * return successfully — an exception on the way out would strand the tree in the WASM
- * heap otherwise.
+ * web-tree-sitter manages stays flat across long scans. The tree outlives this function and
+ * is the caller's to free, through the plugin's `releaseTree`.
+ *
+ * Downstream post-parse work (error collection, import extraction) is wrapped in its own
+ * try/catch that calls `tree.delete()` on failure. That is the one path where the tree is
+ * still ours: the caller only receives the handle if we return successfully, so an exception
+ * on the way out would strand it in the WASM heap with nobody able to reach it.
  *
  * When the parser returns null (a genuinely unrecoverable case — typically an OOM),
  * `tree` is null on the result too and `errors[]` carries a `recoverable: false` entry.
