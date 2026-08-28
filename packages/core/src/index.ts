@@ -96,13 +96,13 @@ export {
   type DropCFilterInput,
 } from "./scan/drop-c"
 export {
-  type AbandonedFile,
   type ExtractedFile,
   type FilePipelineInput,
   type FilePipelineResult,
+  type ParseFailedFile,
+  type ParseTimeoutFile,
   runFilePipeline,
   type TreeReleaseFailure,
-  type WithdrawnFile,
 } from "./scan/pipeline"
 export {
   buildLanguageRouter,

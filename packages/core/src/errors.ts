@@ -52,10 +52,10 @@ export type CoreErrorCode =
   | "lsp-config-invalid"
   /**
    * The per-file pipeline reported an outcome the scan has no branch for. Unreachable by
-   * construction — the switch that raises it is total over `FilePipelineResult`, so a new
-   * member is a compile error first. It exists so that the compile-time guard has something
-   * to say if it is ever reached anyway, rather than a file quietly reaching neither the IR
-   * nor the skip list.
+   * construction — the switch that raises it is exhaustive over `FilePipelineResult`,
+   * enforced by a `never` parameter, so a new member is a compile error first. The code
+   * exists so that the guard has something to say if it is ever reached anyway, rather than
+   * a file quietly reaching neither the IR nor the skip list.
    */
   | "scan-outcome-unhandled"
 

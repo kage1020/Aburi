@@ -43,10 +43,11 @@ import {
  * What the pipeline knows about a file whatever became of it: which file, and what its
  * language plugin said about parsing it. Every outcome carries both.
  *
- * `parseErrors` is on all three because it is diagnostic rather than IR, and because the file
- * that most needs it is the one that produced nothing: backtracking over malformed input is a
- * common reason for a slow parse, so a reader told only about the budget would go and raise it
- * when the fix is the syntax.
+ * `parseErrors` is on all three because it is diagnostic rather than IR, and each outcome
+ * needs it for a different reason: an extracted file carries its recoverable warnings, a
+ * refused one has nothing else to explain why it fell, and an abandoned one is often slow
+ * *because* it is broken — lang-plugin.md §7.1.2 keeps them there so a reader is not sent to
+ * raise a budget that was never the problem.
  */
 interface FileOutcomeCommon {
   /** POSIX-relative path of the file. */
@@ -90,9 +91,9 @@ export interface ExtractedFile extends FileOutcomeCommon {
  *
  * It keeps its `imports`, which is the one place this differs from an abandoned file: a file
  * whose contents could not be used still told us truthfully what it imports, whereas an
- * abandoned one is being withdrawn deliberately.
+ * abandoned one is taken out of the run deliberately.
  */
-export interface WithdrawnFile extends FileOutcomeCommon {
+export interface ParseFailedFile extends FileOutcomeCommon {
   kind: "parse-failed"
   imports: readonly ImportEdge[]
 }
@@ -105,7 +106,7 @@ export interface WithdrawnFile extends FileOutcomeCommon {
  * that day. An import list would be no better off: it is only ever consulted on behalf of the
  * calls in its own file, of which an abandoned file has none.
  */
-export interface AbandonedFile extends FileOutcomeCommon {
+export interface ParseTimeoutFile extends FileOutcomeCommon {
   kind: "parse-timeout"
   timeout: ParseTimeoutEvent
 }
@@ -119,12 +120,14 @@ export interface AbandonedFile extends FileOutcomeCommon {
  * by a throw there rather than by a fourth member here.
  *
  * A union rather than a pair of independent fields, because the fields were not independent.
- * Both fed `parsedFiles` by different subtractions, so the fourth combination the product
- * type admitted would have counted one file out of it twice — forbidden by a rule that lived
- * in a comment. And the variants carry different payloads, which the widened product could
- * only describe as "empty here, present there".
+ * The caller records one skip entry per file, so a result carrying both would have been
+ * labelled by whichever the caller happened to test first — a plugin's outright refusal
+ * reported as a file that was merely slow, sending the reader to raise a budget that was never
+ * the problem. That exclusivity was a rule in a comment and is a property of the type now. The
+ * variants also carry different payloads, which the widened product could only describe as
+ * "empty here, present there".
  */
-export type FilePipelineResult = ExtractedFile | WithdrawnFile | AbandonedFile
+export type FilePipelineResult = ExtractedFile | ParseFailedFile | ParseTimeoutFile
 
 export interface FilePipelineInput {
   file: SourceFile
@@ -167,8 +170,8 @@ export interface TreeReleaseFailure {
  * docs/design/lang-plugin.md §5.3 (extraction order) and effect-plugin.md §5.1
  * (first-match-wins) in order:
  *
- *   1. parse the file — a null tree, or any error the plugin marked non-recoverable, is a
- *      terminal parse failure; everything else is surfaced as a recoverable error and we
+ *   1. parse the file — a null tree, or any error the plugin marked non-recoverable, makes
+ *      it a `parse-failed` file; everything else is surfaced as a recoverable error and we
  *      keep going.
  *   2. `extractSymbols` — the raw SymbolCandidate list.
  *   3. framework `classifySymbol` — first non-null result wins; the returned extKind
@@ -196,12 +199,11 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const { file, language, frameworks, effects, registry, config, dropCFilter, log } = input
 
   const deadline = startParseDeadline(config.parseTimeoutMs)
-  // Everything the file produced is withdrawn except its parse errors. Those are the one
-  // output that is diagnostic rather than IR, and the one a slow file most needs to keep:
-  // backtracking over malformed input is a common reason for a slow parse, so a timeout
-  // that swallowed them would tell the reader to raise `parseTimeoutMs` when the fix is
-  // the syntax. `parseErrors` is in scope at every call — the parse has always returned.
-  const abandon = (): AbandonedFile => ({
+  // An abandoned file contributes nothing but its errors, for the reason `ParseTimeoutFile`
+  // gives. `parseErrors` is in scope at every call — the parse has always returned — which is
+  // a temporal-dead-zone constraint rather than a visible one, so reordering the two lines
+  // below the closure would break it silently.
+  const abandon = (): ParseTimeoutFile => ({
     kind: "parse-timeout",
     path: file.path,
     parseErrors,
@@ -219,15 +221,15 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   // Everything the tree is read for lives inside this `try`, so the `finally` is the single
   // place the file's tree goes back — one exit for every way out of the body below.
   try {
-    // Normalized before the early return as well: a terminal parse failure still hands its
+    // Normalized before the early return as well: a `parse-failed` file still hands its
     // import edges to the caller, and dependency extraction compares them the same way.
     const imports = parseResult.imports.map(normalizeImportEdge)
 
-    // Read before the budget, so the two flags cannot both be set: a file the parse withdrew
-    // never reaches a deadline check. They are exclusive because the caller records one skip
-    // entry per file and whichever branch it tests first would decide the reason — a file that
-    // was refused outright reported as merely slow, sending the reader to raise a budget that
-    // was never the problem.
+    // Read before the first deadline check, which is what decides precedence: a file that is
+    // both broken and slow comes back `parse-failed` rather than `parse-timeout`. The type
+    // makes the two exclusive; it does not say which one a file that qualifies for both gets,
+    // and reporting a plugin's outright refusal as a slow file would send the reader to raise
+    // a budget that was never the problem.
     //
     // `=== false`, not falsiness. The contract is that `false` withdraws, and plugins arrive
     // as plain JavaScript through a `PluginRef`: a plugin that simply omits the key would

@@ -22,6 +22,7 @@ import {
   runFilePipeline,
   startParseDeadline,
 } from "../../src"
+import { spend } from "../fixtures/clock"
 import { symbolId } from "../fixtures/ir"
 
 /**
@@ -56,14 +57,6 @@ const silentLog: Logger = {
 }
 
 const stubFile: SourceFile = { path: "test.stub", content: "" }
-
-/** Spend `ms` of wall clock. The point is that the time is really gone. */
-function spend(ms: number): void {
-  const until = performance.now() + ms
-  let spins = 0
-  while (performance.now() < until) spins++
-  if (spins < 0) throw new Error("unreachable")
-}
 
 function candidate(name: string): SymbolCandidate<OpaqueAstNode> {
   return {
@@ -278,11 +271,9 @@ describe("runFilePipeline — parse deadline", () => {
       { source: "./other", symbols: ["thing"], line: 1, dynamic: false },
     ]
     const { result } = await run({ parseMs: 250, imports }, 100)
-    expect(result.kind).toBe("parse-timeout")
-    expect("symbols" in result).toBe(false)
-    expect("imports" in result).toBe(false)
-    expect("timeoutEvents" in result).toBe(false)
-    expect("dynamicCallSites" in result).toBe(false)
+    // The whole key set rather than a list of absences: an outcome that grew a field nobody
+    // meant it to have would pass an enumeration of the ones it must not have.
+    expect(Object.keys(result).sort()).toEqual(["kind", "parseErrors", "path", "timeout"])
   })
 
   it("leaves a file that finishes inside its budget untouched", async () => {

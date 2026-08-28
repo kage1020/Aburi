@@ -317,9 +317,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       }
     }
 
-    // Reported for every file that got as far as a parse, abandoned or not: a file that
-    // was slow *because* it was broken needs to say so, or the reader is sent to raise the
-    // budget when the fix is the syntax.
+    // Ahead of the switch because every outcome carries them, for the reasons on
+    // `FileOutcomeCommon`.
     if (result.parseErrors.length > 0) {
       parseErrors.push({ file: discoveredFile.path, errors: result.parseErrors })
     }
@@ -360,9 +359,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         break
       }
       case "extracted": {
-        // Held for LSP enrichment, and only for files that reached the IR: the pass builds
-        // one document per file it has Symbols for, so a withdrawn file's text would never
-        // be read.
+        // Held for LSP enrichment, and only for files that reached the IR. Nothing would
+        // currently read a refused file's text if it were held — the pass builds one document
+        // per file it has Symbols for, and a file that produced none is never looked up — so
+        // the placement is what stops it being held rather than what stops it being read.
         fileContents.set(sourceFile.path, {
           content: sourceFile.content,
           fsPath: discoveredFile.fsPath,
@@ -375,10 +375,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         break
       }
       default:
-        // A fate added to `FilePipelineResult` and not handled here is a type error rather
-        // than a file that quietly reached neither the IR nor the skip list. It throws
-        // rather than degrading, unlike the config-error switch in `@aburi/cli`: that union
-        // crosses a package boundary where versions can skew, and this one does not.
+        // Throws rather than degrading, unlike `classifyConfigError` in `@aburi/cli`: that
+        // union crosses a package boundary where the two versions can skew, and this one is
+        // declared and consumed in this package.
         throw unhandledOutcome(result)
     }
   }
@@ -456,9 +455,15 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   // listed and counted would be netted out twice, reporting two files lost for one.
   //
   // What the length has to mean is *at most one entry per file*, and what holds it is that
-  // every branch pushing to `additionalSkipped` ends its iteration — the pushes and their
-  // `continue`s are adjacent for that reason. A push left to fall through would subtract a
-  // file the loop went on to extract, silently.
+  // every branch pushing to `additionalSkipped` ends its iteration: the three that run before
+  // the outcome switch `continue`, and the two arms inside it end their case. A push left to
+  // fall through would subtract a file the loop went on to extract, and integrity #21 could
+  // not see it — it compares the same two lengths against the same sum.
+  //
+  // Inside the switch that is checked rather than merely intended: a missing `break` is
+  // `TS7029` from `tsc` and `lint/suspicious/noFallthroughSwitchClause` from Biome, and the
+  // next arm's narrowing then fails on the payload the previous variant does not have. All
+  // three run in CI on every change.
   //
   // `discovered.skipped` is not netted out here: those files were never candidates, and they
   // are added to `totalFiles` instead.
@@ -520,9 +525,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 }
 
 /**
- * What to record beside a file the parse withdrew. Called only when
- * the outcome is `parse-failed` — handed a healthy file's empty error
- * list it would confidently report a missing tree.
+ * What to record beside a file the parse refused. Called only for a `parse-failed` outcome —
+ * handed a healthy file's empty error list it would confidently report a missing tree.
  *
  * Two conditions reach here and a reader needs them apart: a plugin that could not build a
  * tree at all, and one that built a tree and then refused it. The second is the plugin
@@ -813,10 +817,17 @@ function countByPlugin(failures: readonly TreeReleaseFailure[]): Map<string, num
 /**
  * Compile-time guard on the per-file outcome switch. The parameter is `never` when every
  * member of `FilePipelineResult` has a case, so a new one is a type error at the call site.
+ *
+ * `describeThrown` rather than `JSON.stringify`, which is the difference between a message and
+ * a second failure. This arm can only ever run for a member nobody checked, so the value it is
+ * handed is by definition unexamined — a circular reference, a `BigInt`, a throwing `toJSON`
+ * — and a `stringify` that threw would take the `CoreError` with it, leaving the reader with
+ * neither the file nor the stage.
  */
 function unhandledOutcome(outcome: never): CoreError {
   return new CoreError(
-    `Internal error: a file outcome the scan does not handle (${JSON.stringify(outcome)})`,
+    `Internal error: the scan does not handle the file outcome ${describeThrown(outcome)}\n` +
+      "This is a bug in Aburi — please report it at https://github.com/kage1020/Aburi/issues.",
     { code: "scan-outcome-unhandled" },
   )
 }

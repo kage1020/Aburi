@@ -1,3 +1,8 @@
+/**
+ * Both of the pipeline's budgets are read from the `Config` it is handed, and from nowhere
+ * else — so a test cannot exercise a budget by a path the CLI does not use.
+ */
+
 import type {
   BodyExtraction,
   CallCandidate,
@@ -17,14 +22,8 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDropCFilter, DEFAULT_CLASSIFY_TIMEOUT_MS, runFilePipeline } from "../../src"
+import { spend } from "../fixtures/clock"
 import { symbolId } from "../fixtures/ir"
-
-/**
- * Both of the pipeline's budgets are read from the `Config` it is handed, and from nowhere
- * else. They used to be duplicated as optional fields on `FilePipelineInput`, which existed
- * only so a test could pass a number without building a config — so the two paths a budget
- * could arrive by were the production one and the tested one, and they were not the same one.
- */
 
 const noopRegistry: VocabRegistry = {
   findEffect: () => null,
@@ -49,14 +48,6 @@ const silentLog: Logger = {
 }
 
 const stubFile: SourceFile = { path: "test.stub", content: "" }
-
-/** Spend `ms` of wall clock. A budget test can only fail in the direction of more time. */
-function spend(ms: number): void {
-  const until = performance.now() + ms
-  let spins = 0
-  while (performance.now() < until) spins++
-  if (spins < 0) throw new Error("unreachable")
-}
 
 function langManifest(): LangManifest {
   return {
