@@ -15,7 +15,14 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDropCFilter, runFilePipeline, type TreeReleaseFailure } from "../../src"
+import {
+  buildDropCFilter,
+  type ExtractedFile,
+  type FilePipelineResult,
+  runFilePipeline,
+  type TreeReleaseFailure,
+} from "../../src"
+import { spend } from "../fixtures/clock"
 import { symbolId } from "../fixtures/ir"
 
 /**
@@ -51,14 +58,6 @@ const silentLog: Logger = {
 const stubFile: SourceFile = { path: "test.stub", content: "" }
 
 const PLUGIN_NAME = "lang-stub"
-
-/** Spend `ms` of wall clock, so a deadline test fails only in the direction of more time. */
-function spend(ms: number): void {
-  const until = performance.now() + ms
-  let spins = 0
-  while (performance.now() < until) spins++
-  if (spins < 0) throw new Error("unreachable")
-}
 
 function langManifest(): LangManifest {
   return {
@@ -211,6 +210,18 @@ interface RunExtras {
   failures?: TreeReleaseFailure[]
 }
 
+/**
+ * The file this plugin produced, narrowed. Every case that reaches for a payload here is about
+ * a file that made it to the IR, so an unexpected outcome fails as itself rather than as a
+ * missing property — and the reads that follow stay reads of the result, not of its kind.
+ */
+function expectExtracted(result: FilePipelineResult): ExtractedFile {
+  if (result.kind !== "extracted") {
+    throw new Error(`expected an extracted file, got a ${result.kind} one`)
+  }
+  return result
+}
+
 function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
   const failures = extras.failures ?? []
   const input: Parameters<typeof runFilePipeline>[0] = {
@@ -219,12 +230,12 @@ function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
     frameworks: [],
     effects: [],
     registry: noopRegistry,
-    config: {},
+    // The budget travels on the config, which is where the pipeline reads it from.
+    config: extras.parseTimeoutMs === undefined ? {} : { parseTimeoutMs: extras.parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
     log: silentLog,
     treeReleaseFailures: failures,
   }
-  if (extras.parseTimeoutMs !== undefined) input.parseTimeoutMs = extras.parseTimeoutMs
   return runFilePipeline(input)
 }
 
@@ -239,7 +250,7 @@ describe("the stub itself", () => {
 describe("runFilePipeline — releasing the parse tree", () => {
   it("releases the tree it was handed, exactly once, on the success path", async () => {
     const plugin = stubPlugin()
-    const result = await run(plugin)
+    const result = expectExtracted(await run(plugin))
 
     expect(result.symbols).toHaveLength(1)
     expect(plugin.released).toHaveLength(1)
@@ -272,7 +283,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     })
     const result = await run(plugin)
 
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
     expect(plugin.released).toEqual([plugin.handedOut])
   })
 
@@ -283,14 +294,14 @@ describe("runFilePipeline — releasing the parse tree", () => {
     })
     const result = await run(plugin)
 
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
     expect(plugin.released).toEqual([])
   })
 
   it("completes normally for a plugin that declares no releaseTree", async () => {
     const plugin = stubPlugin({ releaseTreeOverride: { value: undefined } })
     const failures: TreeReleaseFailure[] = []
-    const result = await run(plugin, { failures })
+    const result = expectExtracted(await run(plugin, { failures }))
 
     expect(result.symbols).toHaveLength(1)
     expect(plugin.released).toEqual([])
@@ -303,7 +314,7 @@ describe("runFilePipeline — releasing the parse tree", () => {
     // warning per file for a plugin that is behaving.
     const plugin = stubPlugin({ releaseTreeOverride: { value: null } })
     const failures: TreeReleaseFailure[] = []
-    const result = await run(plugin, { failures })
+    const result = expectExtracted(await run(plugin, { failures }))
 
     expect(result.symbols).toHaveLength(1)
     expect(failures).toEqual([])
@@ -315,7 +326,7 @@ describe("runFilePipeline — every way out of a file releases its tree", () => 
     const plugin = stubPlugin({ parseMs: 250 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(plugin.order).toEqual(["releaseTree"])
     expect(plugin.released).toEqual([plugin.handedOut])
   })
@@ -324,7 +335,7 @@ describe("runFilePipeline — every way out of a file releases its tree", () => 
     const plugin = stubPlugin({ extractMs: 250 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(plugin.order).toEqual(["extractSymbols", "releaseTree"])
     expect(plugin.released).toEqual([plugin.handedOut])
   })
@@ -333,7 +344,7 @@ describe("runFilePipeline — every way out of a file releases its tree", () => 
     const plugin = stubPlugin({ candidates: ["one", "two"], walkMsPerCandidate: 150 })
     const result = await run(plugin, { parseTimeoutMs: 100 })
 
-    expect(result.parseTimeout).not.toBeNull()
+    expect(result.kind).toBe("parse-timeout")
     expect(plugin.order).toEqual([
       "extractSymbols",
       "walkBody:one",
@@ -380,8 +391,11 @@ describe("runFilePipeline — when releasing the tree itself fails", () => {
     const plugin = stubPlugin({ releaseThrows: new Error("wasm heap is gone") })
     const failures: TreeReleaseFailure[] = []
 
-    const result = await run(plugin, { failures })
+    const result = expectExtracted(await run(plugin, { failures }))
 
+    // The file's result is *kept*, which is the half of this the outcome alone does not say:
+    // the release runs in a `finally` next to the return, so a regression that swallowed the
+    // throw and handed back an empty file would still be an extracted one.
     expect(result.symbols).toHaveLength(1)
     expect(failures).toEqual([
       { plugin: PLUGIN_NAME, file: "test.stub", detail: "wasm heap is gone" },
@@ -422,7 +436,7 @@ describe("runFilePipeline — when releasing the tree itself fails", () => {
     const plugin = stubPlugin({ releaseTreeOverride: { value: ["not", "a", "function"] } })
     const failures: TreeReleaseFailure[] = []
 
-    const result = await run(plugin, { failures })
+    const result = expectExtracted(await run(plugin, { failures }))
 
     expect(result.symbols).toHaveLength(1)
     expect(failures).toEqual([

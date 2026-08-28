@@ -20,7 +20,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDropCFilter, runFilePipeline } from "../../src"
+import { buildDropCFilter, type ExtractedFile, runFilePipeline } from "../../src"
 import { symbolId } from "../fixtures/ir"
 
 const noopRegistry: VocabRegistry = {
@@ -164,17 +164,22 @@ function stubCall(target: string, line = 1): CallCandidate {
 
 const stubFile: SourceFile = { path: "test.stub", content: "" }
 
+/**
+ * Narrowed to the file that reached the IR, because every case in this file is about the
+ * dispatch such a file goes through. A stub that produced any other outcome would be a broken
+ * fixture rather than a case to assert on, so it fails here instead of at every read below.
+ */
 async function runPipelineWithStubs(overrides: {
   frameworks?: readonly FrameworkPlugin[]
   effects?: readonly EffectPlugin[]
   candidate?: SymbolCandidate<OpaqueAstNode>
   body?: BodyExtraction
   imports?: readonly ImportEdge[]
-}) {
+}): Promise<ExtractedFile> {
   const candidate = overrides.candidate ?? baseCandidate()
   const body: BodyExtraction = overrides.body ?? { rules: [], calls: [] }
   const language = stubLanguagePlugin({ candidate, body, imports: overrides.imports ?? [] })
-  return runFilePipeline({
+  const result = await runFilePipeline({
     file: stubFile,
     language,
     frameworks: overrides.frameworks ?? [],
@@ -185,6 +190,10 @@ async function runPipelineWithStubs(overrides: {
     treeReleaseFailures: [],
     log: silentLog,
   })
+  if (result.kind !== "extracted") {
+    throw new Error(`stub fixture produced a ${result.kind} file, not an extracted one`)
+  }
+  return result
 }
 
 describe("runFilePipeline — framework classifySymbol dispatch", () => {

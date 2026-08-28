@@ -187,16 +187,19 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
     return { result, reached }
   }
 
-  it("flags a tree that came back with a non-recoverable error", async () => {
+  it("reports a tree that came back with a non-recoverable error as withdrawn", async () => {
     const errors = [nonRecoverable("unterminated string")]
     const { result } = await run({ errors, imports: [edge("./x")] })
-    expect(result.terminalParseFailure).toBe(true)
-    expect(result.symbols).toEqual([])
-    expect(result.parseTimeout).toBeNull()
+    expect(result.kind).toBe("parse-failed")
+    if (result.kind !== "parse-failed") return
     // Kept for the same reason the null-tree path keeps them: the file told us truthfully
     // what it imports even though its contents are unusable.
     expect(result.imports).toEqual([edge("./x")])
     expect(result.parseErrors).toEqual(errors)
+    // Not "empty symbols" — no symbols at all. A withdrawn file has nothing the IR could
+    // take, and a variant that carried the key would let a caller read it and believe it.
+    expect("symbols" in result).toBe(false)
+    expect("timeout" in result).toBe(false)
   })
 
   it("asks the plugin nothing else about the file", async () => {
@@ -207,7 +210,8 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
   it("keeps a file whose errors are all recoverable", async () => {
     const errors: ParseError[] = [{ message: "stray token", line: 1, column: 1, recoverable: true }]
     const { result, reached } = await run({ errors })
-    expect(result.terminalParseFailure).toBe(false)
+    expect(result.kind).toBe("extracted")
+    if (result.kind !== "extracted") return
     expect(result.symbols).toHaveLength(1)
     expect(reached.extractSymbols).toEqual(["bad.stub"])
     expect(result.parseErrors).toEqual(errors)
@@ -220,12 +224,12 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
         nonRecoverable("unterminated string"),
       ],
     })
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
   })
 
   it("still withdraws a null tree that came back with no errors at all", async () => {
     const { result, reached } = await run({ tree: null, errors: [] })
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
     expect(reached).toEqual(noReach())
   })
 
@@ -236,7 +240,7 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
       tree: null,
       errors: [{ message: "stray token", line: 1, column: 1, recoverable: true }],
     })
-    expect(result.terminalParseFailure).toBe(true)
+    expect(result.kind).toBe("parse-failed")
     expect(reached).toEqual(noReach())
   })
 
@@ -247,7 +251,7 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
     // the plugin gets what it had before the field was read at all.
     const errors = [{ message: "stray token", line: 1, column: 1 } as ParseError]
     const { result, reached } = await run({ errors })
-    expect(result.terminalParseFailure).toBe(false)
+    expect(result.kind).toBe("extracted")
     expect(reached.extractSymbols).toEqual(["bad.stub"])
   })
 })

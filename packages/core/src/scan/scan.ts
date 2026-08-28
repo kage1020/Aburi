@@ -266,8 +266,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     // leaves no accumulator in this function half-written, and there is nothing to unwind.
     // (Not that nothing is lost: the file's classify-timeout events go with it, because they
     // travel on the result.) The catch lives here rather than in the pipeline because a
-    // pipeline that swallowed the exception would need a third way to say "this file
-    // contributed nothing", beside `terminalParseFailure` and `parseTimeout`.
+    // pipeline that swallowed the exception would need a fourth member on
+    // `FilePipelineResult` to say "this file contributed nothing", beside the three fates a
+    // pipeline that ran to completion has.
     let result: Awaited<ReturnType<typeof runFilePipeline>>
     const releasesRecordedBefore = treeReleaseFailures.length
     try {
@@ -281,12 +282,6 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         dropCFilter,
         log: logger,
         treeReleaseFailures,
-        ...(input.config.classifyTimeoutMs !== undefined
-          ? { classifyTimeoutMs: input.config.classifyTimeoutMs }
-          : {}),
-        ...(input.config.parseTimeoutMs !== undefined
-          ? { parseTimeoutMs: input.config.parseTimeoutMs }
-          : {}),
       })
     } catch (error) {
       if (isPluginSetFault(error)) throw error
@@ -322,61 +317,69 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       }
     }
 
-    // Reported for every file that got as far as a parse, abandoned or not: a file that
-    // was slow *because* it was broken needs to say so, or the reader is sent to raise the
-    // budget when the fix is the syntax.
+    // Ahead of the switch because every outcome carries them, for the reasons on
+    // `FileOutcomeCommon`.
     if (result.parseErrors.length > 0) {
       parseErrors.push({ file: discoveredFile.path, errors: result.parseErrors })
     }
 
-    if (result.parseTimeout !== null) {
-      const spent = Math.round(result.parseTimeout.elapsedMs)
-      const budget = result.parseTimeout.budgetMs
-      parseTimeouts.push(result.parseTimeout)
-      // Elapsed and budget rather than the bare fact. They are what the reader acts on —
-      // 5100ms against 5000 says raise it, 60000 against 5000 says look at the file — and
-      // the log line beside this one was the only place they appeared, on a channel
-      // `ABURI_LOG_LEVEL=error` silences. A machine-dependent number is safe here because
-      // `detail` is never projected into the Document (`buildStats`), which is the one
-      // place the bytes have to be stable.
-      additionalSkipped.push({
-        path: discoveredFile.path,
-        reason: "parse-timeout",
-        detail: `extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms)`,
-      })
-      logger.warn(
-        `Skipped ${discoveredFile.path}: extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms). Override with config.parseTimeoutMs.`,
-      )
-      continue
+    // `reason` is the outcome itself for the two that skip. The pipeline's discriminant and
+    // `SkippedFile["reason"]` name the same two events, so spelling them again here would be
+    // a second copy of the vocabulary to keep in step.
+    switch (result.kind) {
+      case "parse-timeout": {
+        const spent = Math.round(result.timeout.elapsedMs)
+        const budget = result.timeout.budgetMs
+        parseTimeouts.push(result.timeout)
+        // Elapsed and budget rather than the bare fact. They are what the reader acts on —
+        // 5100ms against 5000 says raise it, 60000 against 5000 says look at the file — and
+        // the log line beside this one was the only place they appeared, on a channel
+        // `ABURI_LOG_LEVEL=error` silences. A machine-dependent number is safe here because
+        // `detail` is never projected into the Document (`buildStats`), which is the one
+        // place the bytes have to be stable.
+        additionalSkipped.push({
+          path: discoveredFile.path,
+          reason: result.kind,
+          detail: `extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms)`,
+        })
+        logger.warn(
+          `Skipped ${discoveredFile.path}: extraction reached ${spent}ms, exceeding parseTimeoutMs (${budget}ms). Override with config.parseTimeoutMs.`,
+        )
+        break
+      }
+      case "parse-failed": {
+        const detail = describeParseFailure(result.parseErrors)
+        additionalSkipped.push({ path: discoveredFile.path, reason: result.kind, detail })
+        logger.warn(`Skipped ${discoveredFile.path}: ${detail}`)
+        // Nothing reads its import edges yet. `resolveCallGraph` looks this map up by the
+        // file a Symbol came from, and a withdrawn file has no Symbols, so the entry is
+        // inert until the dependency-extraction pass exists. It is written anyway because
+        // dropping it would silently discard what the outcome is documented to carry.
+        importsByFile.set(result.path, result.imports)
+        break
+      }
+      case "extracted": {
+        // Held for LSP enrichment, and only for files that reached the IR. Nothing would
+        // currently read a refused file's text if it were held — the pass builds one document
+        // per file it has Symbols for, and a file that produced none is never looked up — so
+        // the placement is what stops it being held rather than what stops it being read.
+        fileContents.set(sourceFile.path, {
+          content: sourceFile.content,
+          fsPath: discoveredFile.fsPath,
+        })
+
+        timeoutEvents.push(...result.timeoutEvents)
+        symbols.push(...result.symbols)
+        importsByFile.set(result.path, result.imports)
+        for (const key of result.dynamicCallSites) dynamicCallSites.add(key)
+        break
+      }
+      default:
+        // Throws rather than degrading, unlike `classifyConfigError` in `@aburi/cli`: that
+        // union crosses a package boundary where the two versions can skew, and this one is
+        // declared and consumed in this package.
+        throw unhandledOutcome(result)
     }
-
-    if (result.terminalParseFailure) {
-      const detail = describeParseFailure(result.parseErrors)
-      additionalSkipped.push({ path: discoveredFile.path, reason: "parse-failed", detail })
-      logger.warn(`Skipped ${discoveredFile.path}: ${detail}`)
-      // Its import edges are kept, which is the one place this differs from a timed-out
-      // file: a file whose contents could not be used still told us truthfully what it
-      // imports, whereas an abandoned file is being withdrawn deliberately.
-      //
-      // Nothing reads them yet. `resolveCallGraph` looks this map up by the file a Symbol
-      // came from, and a withdrawn file has no Symbols, so the entry is inert until the
-      // dependency-extraction pass exists. It is written anyway because dropping it here
-      // would silently discard what `runFilePipeline` is documented and tested to hand over.
-      importsByFile.set(result.path, result.imports)
-      continue
-    }
-
-    // Held for LSP enrichment, and only for files that reached the IR: the pass builds one
-    // document per file it has Symbols for, so a withdrawn file's text would never be read.
-    fileContents.set(sourceFile.path, {
-      content: sourceFile.content,
-      fsPath: discoveredFile.fsPath,
-    })
-
-    timeoutEvents.push(...result.timeoutEvents)
-    symbols.push(...result.symbols)
-    importsByFile.set(result.path, result.imports)
-    for (const key of result.dynamicCallSites) dynamicCallSites.add(key)
   }
 
   // The count the per-file warning above deliberately does not repeat. One line per plugin,
@@ -452,9 +455,15 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   // listed and counted would be netted out twice, reporting two files lost for one.
   //
   // What the length has to mean is *at most one entry per file*, and what holds it is that
-  // every branch pushing to `additionalSkipped` ends its iteration — the pushes and their
-  // `continue`s are adjacent for that reason. A push left to fall through would subtract a
-  // file the loop went on to extract, silently.
+  // every branch pushing to `additionalSkipped` ends its iteration: the three that run before
+  // the outcome switch `continue`, and the two arms inside it end their case. A push left to
+  // fall through would subtract a file the loop went on to extract, and integrity #21 could
+  // not see it — it compares the same two lengths against the same sum.
+  //
+  // Inside the switch that is checked rather than merely intended: a missing `break` is
+  // `TS7029` from `tsc` and `lint/suspicious/noFallthroughSwitchClause` from Biome, and the
+  // next arm's narrowing then fails on the payload the previous variant does not have. All
+  // three run in CI on every change.
   //
   // `discovered.skipped` is not netted out here: those files were never candidates, and they
   // are added to `totalFiles` instead.
@@ -516,9 +525,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 }
 
 /**
- * What to record beside a file the parse withdrew. Called only when
- * `FilePipelineResult.terminalParseFailure` is set — handed a healthy file's empty error
- * list it would confidently report a missing tree.
+ * What to record beside a file the parse refused. Called only for a `parse-failed` outcome —
+ * handed a healthy file's empty error list it would confidently report a missing tree.
  *
  * Two conditions reach here and a reader needs them apart: a plugin that could not build a
  * tree at all, and one that built a tree and then refused it. The second is the plugin
@@ -804,4 +812,22 @@ function countByPlugin(failures: readonly TreeReleaseFailure[]): Map<string, num
     counts.set(failure.plugin, (counts.get(failure.plugin) ?? 0) + 1)
   }
   return counts
+}
+
+/**
+ * Compile-time guard on the per-file outcome switch. The parameter is `never` when every
+ * member of `FilePipelineResult` has a case, so a new one is a type error at the call site.
+ *
+ * `describeThrown` rather than `JSON.stringify`, which is the difference between a message and
+ * a second failure. This arm can only ever run for a member nobody checked, so the value it is
+ * handed is by definition unexamined — a circular reference, a `BigInt`, a throwing `toJSON`
+ * — and a `stringify` that threw would take the `CoreError` with it, leaving the reader with
+ * neither the file nor the stage.
+ */
+function unhandledOutcome(outcome: never): CoreError {
+  return new CoreError(
+    `Internal error: the scan does not handle the file outcome ${describeThrown(outcome)}\n` +
+      "This is a bug in Aburi — please report it at https://github.com/kage1020/Aburi/issues.",
+    { code: "scan-outcome-unhandled" },
+  )
 }

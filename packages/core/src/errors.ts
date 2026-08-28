@@ -50,6 +50,14 @@ export type CoreErrorCode =
   | "propagation-invariant-violated"
   /** LSP enrichment received a config the schema should have rejected (e.g. missing `command` after we already dereferenced it). Never reaches users when config-load validation is in place. */
   | "lsp-config-invalid"
+  /**
+   * The per-file pipeline reported an outcome the scan has no branch for. Unreachable by
+   * construction — the switch that raises it is exhaustive over `FilePipelineResult`,
+   * enforced by a `never` parameter, so a new member is a compile error first. The code
+   * exists so that the guard has something to say if it is ever reached anyway, rather than
+   * a file quietly reaching neither the IR nor the skip list.
+   */
+  | "scan-outcome-unhandled"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to the ir-schema.md §14 numbering, which is the single source of the list. */
