@@ -86,6 +86,23 @@ describe("aburi scan says which manifest named no package", () => {
     expect(stderr).toContain("the whole repository is described as one component")
   })
 
+  it("stops naming patterns before the line stops being readable", async () => {
+    // The manifest still holds every one of them, and the line names the manifest — so the
+    // rest is a file away, which is what the skip census truncates for too.
+    const patterns = Array.from({ length: 12 }, (_, index) => `dead${index}/*`)
+    await write(
+      "pnpm-workspace.yaml",
+      `packages:\n${patterns.map((p) => `  - "${p}"`).join("\n")}\n`,
+    )
+    await writeSource("src")
+    await writeConfig()
+
+    const { stderr } = await run("scan")
+
+    expect(stderr).toContain('"dead9/*", and 2 more')
+    expect(stderr).not.toContain("dead10")
+  })
+
   it("says nothing about a manifest that named no packages to begin with", async () => {
     await write("pnpm-workspace.yaml", "onlyBuiltDependencies: []\n")
     await writeSource("src")
