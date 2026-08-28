@@ -72,7 +72,10 @@ export interface ImportEdge {
   /** True for `import()` and equivalent dynamic forms. */
   dynamic: boolean
   /**
-   * Local binding for a namespace import (`import * as Foo from './x'` → `"Foo"`).
+   * Local name bound to the module as a whole — `import * as Foo from './x'` and
+   * `import Foo = require('./x')` both give `"Foo"`, because both make `Foo` the
+   * module object rather than one of its exports.
+   *
    * Present only on edges whose `symbols` is `"*"`. Absent on bare side-effect
    * imports (`import './x'`) and on wildcard re-exports (`export * from './x'`)
    * where there is no in-scope binding for the caller to reference.

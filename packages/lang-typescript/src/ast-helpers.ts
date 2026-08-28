@@ -43,6 +43,22 @@ export function findChild(node: Node, typeName: string): Node | null {
 }
 
 /**
+ * The first named child that is not a comment, or null when there is none.
+ *
+ * A comment is a *named* node and tree-sitter puts it wherever it was written, so anything
+ * reaching for "the first child" by position finds the comment instead of the thing it meant
+ * — the expression a decorator applies, the specifier a dynamic import names. Both cases are
+ * silent: the reader either names the construct after the comment or drops it altogether.
+ */
+export function firstNonCommentChild(node: Node): Node | null {
+  for (const child of node.namedChildren) {
+    if (child === null || child.type === "comment") continue
+    return child
+  }
+  return null
+}
+
+/**
  * Yield every descendant node in a pre-order depth-first walk. Cheap iterator so callers
  * that only want to inspect nodes of a certain type do not have to write the traversal
  * themselves.
