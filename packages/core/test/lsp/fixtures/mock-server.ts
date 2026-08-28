@@ -32,6 +32,7 @@ export class MockLspClient implements LspClient {
   /** Shutdowns received, so a caller can tell one from two. */
   shutdownCount = 0
   private initializeThrow: unknown = null
+  private shutdownThrow: unknown = null
   private handlers = new Map<string, MockHandler>()
   private initializeResult: InitializeResult = {
     capabilities: {},
@@ -103,9 +104,16 @@ export class MockLspClient implements LspClient {
     return result as T | LspFailure
   }
 
+  /** Reject `shutdown`, the way an injected client is free to. */
+  installShutdownThrow(error: unknown): this {
+    this.shutdownThrow = error
+    return this
+  }
+
   async shutdown(): Promise<void> {
     this.shutdownCalled = true
     this.shutdownCount += 1
+    if (this.shutdownThrow !== null) throw this.shutdownThrow
   }
 }
 

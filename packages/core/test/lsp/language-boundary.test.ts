@@ -241,6 +241,33 @@ describe("the server is shut down exactly once", () => {
     expect(clients.get(makeLanguageId("ts"))?.shutdownCount).toBe(1)
   })
 
+  it("and a shutdown that fails is said out loud rather than swallowed", async () => {
+    // It runs in a `finally`, so it cannot be allowed to propagate — but a shutdown that
+    // failed means a child process that may still be running, which is exactly what the call
+    // exists to prevent and the one thing nothing else in the run would report.
+    const factory = mockServerFactory((_language, client) => {
+      client.installHandler(DOC_SYMBOL_METHOD, () => [])
+      client.installShutdownThrow(new Error("pipe already closed"))
+    })
+    const { logger, warnings } = capturingLogger()
+
+    const result = await enrichWithLsp({
+      ...makeEnrichmentInput({
+        symbols: [makeClassSymbol("src/a.ts", "C", 1)],
+        fileContents: { "src/a.ts": "class C {}\n" },
+        serverFactory: factory,
+      }),
+      logger,
+    })
+
+    expect(result.symbols).toHaveLength(1)
+    const shutdownWarnings = warnings.filter((w) => w.includes("may still be running"))
+    expect(shutdownWarnings).toHaveLength(1)
+    expect(shutdownWarnings[0]).toContain("pipe already closed")
+    // The language still enriched: a shutdown is the last thing that happens to it.
+    expect(result.stats?.languagesDisabled).toEqual([])
+  })
+
   it("when initialize reports a failure rather than throwing", async () => {
     const clients = new Map<LanguageId, MockLspClient>()
     const factory = mockServerFactory((language, client) => {
