@@ -31,7 +31,10 @@ let workRoot: string
  * without widening any of them.
  */
 beforeAll(async () => {
-  await langTypescriptPlugin.parseFile({ path: "warm.ts", content: WARM_SOURCE })
+  const warm = await langTypescriptPlugin.parseFile({ path: "warm.ts", content: WARM_SOURCE })
+  // Released here for the same reason the pipeline releases: whoever calls `parseFile`
+  // directly owns the tree it hands back, and nothing else will free it.
+  if (warm.tree !== null) langTypescriptPlugin.releaseTree?.(warm.tree)
 })
 
 beforeEach(async () => {

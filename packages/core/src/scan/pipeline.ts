@@ -17,6 +17,7 @@ import type {
   LanguagePlugin,
   Logger,
   OpaqueAstNode,
+  ParsedTree,
   ParseError,
   SourceFile,
   SymbolCandidate,
@@ -30,6 +31,7 @@ import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
 import { decideSymbolDrop } from "./drop-b"
 import type { DropCFilter } from "./drop-c"
+import { describeThrown } from "./faults"
 import {
   type ClassifyTimeoutEvent,
   classifyWithTimeout,
@@ -133,6 +135,8 @@ export interface FilePipelineInput {
  *      `Symbol.calls[]`, classified calls move to `Symbol.effects[]`.
  *   7. `normalizeAst` + `computeSymbolFingerprint` — locks the Symbol against later
  *      churn.
+ *   8. `releaseTree` — the tree goes back to the plugin, on every way out of the function.
+ *      Steps 2-7 are the only readers it has, and the plugin gave up ownership at step 1.
  *
  * The file's `parseTimeoutMs` budget (lang-plugin.md §7.1.2) is read after step 1, after
  * step 2, and before each iteration of 3-7. A plugin call cannot be interrupted once it has
@@ -166,117 +170,157 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   const parseResult = await language.parseFile(file)
   const parseErrors = parseResult.errors
   const timeoutEvents: ClassifyTimeoutEvent[] = []
-  // Normalized before the early return as well: a terminal parse failure still hands its
-  // import edges to the caller, and dependency extraction compares them the same way.
-  const imports = parseResult.imports.map(normalizeImportEdge)
 
-  // Read before the budget, so the two flags cannot both be set: a file the parse withdrew
-  // never reaches a deadline check. They are exclusive because the caller records one skip
-  // entry per file and whichever branch it tests first would decide the reason — a file that
-  // was refused outright reported as merely slow, sending the reader to raise a budget that
-  // was never the problem.
-  //
-  // `=== false`, not falsiness. The contract is that `false` withdraws, and plugins arrive
-  // as plain JavaScript through a `PluginRef`: a plugin that simply omits the key would
-  // otherwise have every file it reported any parse error on withdrawn, silently and at exit
-  // 0. Reading it literally leaves such a plugin where it was before the field was read at
-  // all — the file kept, the error reported — which is the loud failure of the two.
-  if (parseResult.tree === null || parseErrors.some((error) => error.recoverable === false)) {
+  // Everything the tree is read for lives inside this `try`, so the `finally` is the single
+  // place the file's tree goes back — one exit for the seven ways out of the body below.
+  try {
+    // Normalized before the early return as well: a terminal parse failure still hands its
+    // import edges to the caller, and dependency extraction compares them the same way.
+    const imports = parseResult.imports.map(normalizeImportEdge)
+
+    // Read before the budget, so the two flags cannot both be set: a file the parse withdrew
+    // never reaches a deadline check. They are exclusive because the caller records one skip
+    // entry per file and whichever branch it tests first would decide the reason — a file that
+    // was refused outright reported as merely slow, sending the reader to raise a budget that
+    // was never the problem.
+    //
+    // `=== false`, not falsiness. The contract is that `false` withdraws, and plugins arrive
+    // as plain JavaScript through a `PluginRef`: a plugin that simply omits the key would
+    // otherwise have every file it reported any parse error on withdrawn, silently and at exit
+    // 0. Reading it literally leaves such a plugin where it was before the field was read at
+    // all — the file kept, the error reported — which is the loud failure of the two.
+    if (parseResult.tree === null || parseErrors.some((error) => error.recoverable === false)) {
+      return {
+        symbols: [],
+        imports,
+        parseErrors,
+        timeoutEvents,
+        terminalParseFailure: true,
+        parseTimeout: null,
+        path: file.path,
+        dynamicCallSites: [],
+      }
+    }
+
+    if (deadline.expired()) return abandon()
+
+    const extractCtx: ExtractionContext = { file, registry, config }
+    const candidates = language.extractSymbols(
+      parseResult.tree,
+      extractCtx,
+    ) as SymbolCandidate<OpaqueAstNode>[]
+    if (deadline.expired()) return abandon()
+
+    const symbols: IRSymbol[] = []
+    const dynamicCallSites: string[] = []
+
+    // Built once for the file rather than per candidate: every Symbol in a file is classified
+    // against the same import list, and a decorator-driven framework plugin reads it for every
+    // one of them.
+    const frameworkCtx: FrameworkClassifyContext = { ...extractCtx, imports }
+
+    for (const raw of candidates) {
+      if (deadline.expired()) return abandon()
+
+      const { candidate, confidence } = mergeFrameworkClassification(
+        normalizeCandidateStrings(raw),
+        frameworks,
+        frameworkCtx,
+      )
+      const dropReason = decideDropReason(candidate, language, extractCtx)
+
+      if (dropReason !== null) {
+        symbols.push(
+          buildDroppedSymbol(
+            candidate,
+            dropReason,
+            extractLanguageFromId(candidate.id),
+            confidence,
+          ),
+        )
+        continue
+      }
+
+      const walkCtx: WalkContext<OpaqueAstNode> = { ...extractCtx, symbol: candidate }
+      const body: BodyExtraction = language.walkBody(candidate, walkCtx)
+
+      const classifyCallsInput: ClassifyCallsInput = {
+        calls: body.calls,
+        effects,
+        registry,
+        config,
+        candidate,
+        file,
+        language: extractLanguageFromId(candidate.id),
+        imports,
+        dropCFilter,
+        timeoutEvents,
+      }
+      if (input.classifyTimeoutMs !== undefined)
+        classifyCallsInput.classifyTimeoutMs = input.classifyTimeoutMs
+      const {
+        effects: classifiedEffects,
+        calls: keptCalls,
+        dynamicCallSites: fileDynamicCallSites,
+      } = classifyCalls(classifyCallsInput)
+      dynamicCallSites.push(...fileDynamicCallSites)
+
+      const normalized = language.normalizeAst(candidate)
+      symbols.push(
+        buildKeptSymbol({
+          candidate,
+          language: extractLanguageFromId(candidate.id),
+          rules: body.rules,
+          effects: classifiedEffects,
+          calls: keptCalls,
+          normalizedAstString: normalized,
+          confidence,
+        }),
+      )
+    }
+
+    log.debug(`scan/pipeline: ${file.path} produced ${symbols.length} symbols`)
+
     return {
-      symbols: [],
+      symbols,
       imports,
       parseErrors,
       timeoutEvents,
-      terminalParseFailure: true,
+      terminalParseFailure: false,
       parseTimeout: null,
       path: file.path,
-      dynamicCallSites: [],
+      dynamicCallSites,
     }
+  } finally {
+    if (parseResult.tree !== null) releaseParsedTree(language, parseResult.tree, file, log)
   }
+}
 
-  if (deadline.expired()) return abandon()
-
-  const extractCtx: ExtractionContext = { file, registry, config }
-  const candidates = language.extractSymbols(
-    parseResult.tree,
-    extractCtx,
-  ) as SymbolCandidate<OpaqueAstNode>[]
-  if (deadline.expired()) return abandon()
-
-  const symbols: IRSymbol[] = []
-  const dynamicCallSites: string[] = []
-
-  // Built once for the file rather than per candidate: every Symbol in a file is classified
-  // against the same import list, and a decorator-driven framework plugin reads it for every
-  // one of them.
-  const frameworkCtx: FrameworkClassifyContext = { ...extractCtx, imports }
-
-  for (const raw of candidates) {
-    if (deadline.expired()) return abandon()
-
-    const { candidate, confidence } = mergeFrameworkClassification(
-      normalizeCandidateStrings(raw),
-      frameworks,
-      frameworkCtx,
-    )
-    const dropReason = decideDropReason(candidate, language, extractCtx)
-
-    if (dropReason !== null) {
-      symbols.push(
-        buildDroppedSymbol(candidate, dropReason, extractLanguageFromId(candidate.id), confidence),
-      )
-      continue
-    }
-
-    const walkCtx: WalkContext<OpaqueAstNode> = { ...extractCtx, symbol: candidate }
-    const body: BodyExtraction = language.walkBody(candidate, walkCtx)
-
-    const classifyCallsInput: ClassifyCallsInput = {
-      calls: body.calls,
-      effects,
-      registry,
-      config,
-      candidate,
-      file,
-      language: extractLanguageFromId(candidate.id),
-      imports,
-      dropCFilter,
-      timeoutEvents,
-    }
-    if (input.classifyTimeoutMs !== undefined)
-      classifyCallsInput.classifyTimeoutMs = input.classifyTimeoutMs
-    const {
-      effects: classifiedEffects,
-      calls: keptCalls,
-      dynamicCallSites: fileDynamicCallSites,
-    } = classifyCalls(classifyCallsInput)
-    dynamicCallSites.push(...fileDynamicCallSites)
-
-    const normalized = language.normalizeAst(candidate)
-    symbols.push(
-      buildKeptSymbol({
-        candidate,
-        language: extractLanguageFromId(candidate.id),
-        rules: body.rules,
-        effects: classifiedEffects,
-        calls: keptCalls,
-        normalizedAstString: normalized,
-        confidence,
-      }),
-    )
-  }
-
-  log.debug(`scan/pipeline: ${file.path} produced ${symbols.length} symbols`)
-
-  return {
-    symbols,
-    imports,
-    parseErrors,
-    timeoutEvents,
-    terminalParseFailure: false,
-    parseTimeout: null,
-    path: file.path,
-    dynamicCallSites,
+/**
+ * Hand the parse tree back to the plugin that built it.
+ *
+ * The core is the only side that can: `parseFile` gives the handle away and never sees it
+ * again, and the tree stays live until `normalizeAst` has read the last node out of it. For
+ * a WASM parser that handle is heap the process does not get back on its own
+ * (docs/design/lang-plugin.md §8.1), so a scan that skipped this would grow by one tree per
+ * file for the length of the run.
+ *
+ * A release that fails is reported and dropped. It runs in a `finally`, so a throw would
+ * become the file's outcome — replacing, on the paths that are already unwinding, the
+ * diagnostic the reader actually needs, and turning a file that produced a perfectly good
+ * set of Symbols into an extraction failure on the other. Neither is worth a leaked handle,
+ * which is what the warning is for.
+ */
+function releaseParsedTree(
+  language: LanguagePlugin,
+  tree: ParsedTree,
+  file: SourceFile,
+  log: Logger,
+): void {
+  try {
+    language.releaseTree?.(tree)
+  } catch (error) {
+    log.warn(`Parse tree for ${file.path} could not be released: ${describeThrown(error)}`)
   }
 }
 

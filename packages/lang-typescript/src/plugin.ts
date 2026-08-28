@@ -57,6 +57,13 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
     return parseTypescriptFile(file)
   }
 
+  releaseTree(tree: Tree): void {
+    // The WASM half of the memory convention in lang-plugin.md §8.1. `parseFile` frees the
+    // parser it created, and the core frees the tree here once its last reader is done —
+    // neither handle is anything the JavaScript garbage collector can reach.
+    tree.delete()
+  }
+
   extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandidate<Node>[] {
     return extractSymbols(tree, ctx)
   }

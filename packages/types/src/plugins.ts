@@ -91,6 +91,10 @@ export interface ImportEdge {
  * plugin's own tree type. Callers must check `tree === null` before dispatching to
  * extractSymbols / walkBody / normalizeAst; the paired `errors[]` is expected to carry a
  * `recoverable: false` entry when that happens.
+ *
+ * A non-null `tree` is handed over: the plugin stops owning it here, and the caller owes it
+ * one `releaseTree` once the last of extractSymbols / walkBody / normalizeAst has run. A
+ * plugin that freed it on its own way out would be handing back a dead handle.
  */
 export interface ParseResult<TTree = ParsedTree> {
   tree: TTree | null
@@ -360,6 +364,23 @@ export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
   cleanup?(): Promise<void>
 
   parseFile(file: SourceFile): Promise<ParseResult<TTree>>
+  /**
+   * Free the tree `parseFile` handed over. Called exactly once per non-null tree, after the
+   * last of extractSymbols / walkBody / normalizeAst has run for that file — including when
+   * one of them threw, when the file was withdrawn, and when it ran out of parse budget. A
+   * plugin whose trees are ordinary garbage-collected objects omits the method.
+   *
+   * This is where the WASM convention in docs/design/lang-plugin.md §8.1 is discharged for
+   * the tree: the plugin can free its parser inside `parseFile`, but not the tree, which by
+   * then belongs to the caller. Implementations need not be idempotent or defensive — one
+   * call, on a live handle, is what they are given.
+   *
+   * Synchronous, and its return value is ignored: it is called from a `finally` on paths
+   * that are already unwinding an exception, where awaiting would let a slow release delay a
+   * failure the caller is trying to report. A throw is reported and dropped rather than
+   * replacing whatever the file was already doing.
+   */
+  releaseTree?(tree: TTree): void
   extractSymbols(tree: TTree, ctx: ExtractionContext): SymbolCandidate<TNode>[]
   walkBody(symbol: SymbolCandidate<TNode>, ctx: WalkContext<TNode>): BodyExtraction
   normalizeAst(symbol: SymbolCandidate<TNode>): string

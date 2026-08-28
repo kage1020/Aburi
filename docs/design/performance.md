@@ -122,7 +122,7 @@ The main thread dispatches at most `2 × pool_size` pending files at any moment.
 
 ### 6.4 Parser lifecycle
 
-The plugin-side rule from [lang-plugin.md](./lang-plugin.md) §8.1 stands: `parseFile()` creates a fresh `Parser`, calls `parser.delete()` after obtaining the result, releases `tree` via `tree.delete()`, and confines node references to `parseFile()`'s scope. This document does NOT change that rule — the plugin API surface is unchanged by the worker pool.
+The rule from [lang-plugin.md](./lang-plugin.md) §8.1 stands, on both sides of it: `parseFile()` creates a fresh `Parser` and calls `parser.delete()` after obtaining the result, while the tree it hands over is freed by whoever ran the pipeline for that file, through the plugin's `releaseTree`. Node references drawn out of the tree live as long as the tree does — the file's pipeline run — and no longer. This document does NOT change that rule; the plugin API surface is unchanged by the worker pool.
 
 Rule PF-9 (worker follows plugin lifecycle): each worker invokes the plugin's `parseFile()` per file, which owns the parser lifecycle end-to-end per [lang-plugin.md](./lang-plugin.md) §8.1. No parser handle is retained across `parseFile()` calls. Rationale: reusing a parser across files would require a new API surface between the worker runtime and the plugin (parser injection), which is a change to `lang-plugin.md` §4 out of scope for this document. Parser-construction cost is real (5–15 ms per file on the reference corpus) but sits within the 30 s budget with headroom given file count and per-file work.
 
@@ -237,7 +237,7 @@ Rule PF-20: when a native binding is in use, `capabilities.wasmHeapPerWorkerMB` 
 | PF10 | `Math.random()` referenced inside pool code | Lint failure at CI |
 | PF11 | LSP enabled | Parse phase completes fully before LSP phase starts; no worker calls LSP |
 | PF12 | Two lang plugins declare `wasmHeapPerWorkerMB` = 256 and 512 | Pool sizing uses 512 as the denominator |
-| PF13 | Plugin `parseFile()` implementation retains a node handle after `tree.delete()` (a plugin bug, not a runtime failure) | Plugin conformance tests SHOULD detect this via lang-plugin's own test harness (see [lang-plugin.md](./lang-plugin.md) §9); the pool itself makes no additional check. Listed here for completeness — this is a plugin-side invariant. |
+| PF13 | A node handle outlives the tree it came from — the plugin kept one past `parseFile()`, or the worker kept one past the file's pipeline run (a bug, not a runtime failure) | Plugin conformance tests SHOULD detect this via lang-plugin's own test harness (see [lang-plugin.md](./lang-plugin.md) §9); the pool itself makes no additional check. Listed here for completeness — this is an invariant of the plugin contract. |
 | PF14 | Under `CI=true` | Progress animation silenced; final summary still prints |
 
 ## 14. Design Decisions
