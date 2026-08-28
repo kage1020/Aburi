@@ -9,6 +9,7 @@ import { CliError } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
+import { describeUnresolvedDeclarations } from "./unresolved-report"
 
 export interface RunCliOptions {
   argv: readonly string[]
@@ -97,6 +98,12 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           )
           if (report.suggestedPlugins.length > 0) {
             stdout.write(`  suggested: ${report.suggestedPlugins.join(", ")}\n`)
+          }
+          for (const line of describeUnresolvedDeclarations(
+            report.unresolvedDeclarations,
+            report.fellBackToSingleComponent,
+          )) {
+            stderr.write(`⚠ ${line}\n`)
           }
           // An unmapped language leaves `languages` empty, and `aburi scan` refuses to run
           // without a language plugin — so this is the difference between the next command

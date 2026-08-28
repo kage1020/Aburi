@@ -1,6 +1,12 @@
 import { access, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { CoreError, detectComponents, detectManagers, detectWorkspaceRoot } from "@aburi/core"
+import {
+  CoreError,
+  detectComponents,
+  detectManagers,
+  detectWorkspaceRoot,
+  type UnresolvedDeclaration,
+} from "@aburi/core"
 import type { Config } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -33,6 +39,16 @@ export interface InitReport {
    * names no language plugin, so `aburi scan` cannot parse anything and will say so.
    */
   unmappedLanguages: readonly string[]
+  /**
+   * Manifests that declared package patterns and resolved none of them.
+   *
+   * The config this command writes describes the workspace it found, so a manifest that named
+   * packages and produced none makes that description wrong before it is ever read — and
+   * `components[]` is the one part of it a reader cannot check against anything else.
+   */
+  unresolvedDeclarations: readonly UnresolvedDeclaration[]
+  /** Whether the written config's single component is the whole repository, for want of any. */
+  fellBackToSingleComponent: boolean
   /** Detected framework ids with no first-party plugin; classification is simply narrower. */
   unmappedFrameworks: readonly string[]
   overwrote: boolean
@@ -118,6 +134,10 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     suggestedPlugins: suggestions,
     unmappedLanguages: unmappedIds(languageSet, LANGUAGE_TO_PLUGIN),
     unmappedFrameworks: unmappedIds(frameworkSet, FRAMEWORK_TO_PLUGIN),
+    unresolvedDeclarations: managers.unresolved,
+    // `aburi init` has no `components[]` to defer to — it is the command that writes the
+    // first one — so an empty candidate list is always detection's own answer here.
+    fellBackToSingleComponent: managers.workspaces.length === 0,
     overwrote: existed,
     exitCode: EXIT.SUCCESS,
   }

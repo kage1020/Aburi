@@ -132,8 +132,8 @@ describe("a declared package is the directory that holds the manifest", () => {
   it("falls back to the whole repository when no matched directory holds a manifest", async () => {
     // `detectComponents` reads "no candidate" as "no detector hit", so patterns that matched
     // nothing land on the single-project fallback rather than on nothing at all. Whether that
-    // is the right answer depends on why they matched nothing, and detection has no channel
-    // to say which — component-detect.md §5 carries the two cases.
+    // is the right answer depends on why they matched nothing — component-detect.md §5 carries
+    // the two cases, and `DetectManagersResult.unresolved` is what tells them apart.
     await mkdir(join(tmp, "packages", "one"), { recursive: true })
     await mkdir(join(tmp, "packages", "two"), { recursive: true })
     await writePnpmManifest("packages/*")

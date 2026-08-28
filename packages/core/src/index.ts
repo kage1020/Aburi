@@ -131,5 +131,6 @@ export {
   type DetectWorkspaceRootOptions,
   detectManagers,
   detectWorkspaceRoot,
+  type UnresolvedDeclaration,
   type WorkspaceCandidate,
 } from "./workspace"

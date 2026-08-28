@@ -14,6 +14,7 @@ import {
   scan,
   type UnnameableFile,
   type UnrepresentableFile,
+  type UnresolvedDeclaration,
   writeCanonicalIR,
 } from "@aburi/core"
 import {
@@ -43,6 +44,7 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { createLogger } from "../logger"
 import { loadPlugins } from "../plugin-loader"
+import { describeUnresolvedDeclarations } from "../unresolved-report"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
@@ -231,6 +233,20 @@ export interface ScanReport {
    * source and said nothing would be a clean run over a workspace it did not describe.
    */
   unrepresentableFiles: readonly UnrepresentableFile[]
+  /**
+   * Managers whose manifest declared package patterns and resolved none of them.
+   *
+   * Not a fault: the artifact is well formed, and a monorepo being set up has no packages in
+   * it yet. It is a description the reader has no other way to check, because the only trace
+   * left in the IR is `workspace.managers[].roots` being empty — which turbo emits on purpose.
+   */
+  unresolvedDeclarations: readonly UnresolvedDeclaration[]
+  /**
+   * Whether the whole repository was described as one Component because detection found no
+   * package. False when `components[]` in the config decided them, since then the manifest's
+   * outcome never reached the IR.
+   */
+  fellBackToSingleComponent: boolean
   exitCode: ExitCode
 }
 
@@ -261,6 +277,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const managers = await detectManagers(workspaceRoot)
   const components = await resolveComponents(config, workspaceRoot, plugins.languages)
+  const fellBackToSingleComponent =
+    declaredComponents(config) === undefined && managers.workspaces.length === 0
 
   const scanInput: Parameters<typeof scan>[0] = {
     workspaceRoot,
@@ -348,6 +366,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     workspaceRoot,
     coverageFault,
     unrepresentableFiles: scanResult.unrepresentableFiles.map((f) => ({ ...f })),
+    unresolvedDeclarations: managers.unresolved,
+    fellBackToSingleComponent,
     // Three gates (`cli-spec.md` §5.4, §5.7, §5.8), and none withholds anything the run would
     // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
     // code, where before either guard existed they got the artifact and a green light.
@@ -492,6 +512,12 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   const say = (line: string): void => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
+  for (const line of describeUnresolvedDeclarations(
+    report.unresolvedDeclarations,
+    report.fellBackToSingleComponent,
+  )) {
+    say(line)
+  }
   reportCoverageFault(report.coverageFault, say)
   // Directly under the coverage line, ahead of everything recoverable from the artifact. The
   // skip census below can run to six reasons of eleven lines each, and the sink this all goes
@@ -537,8 +563,10 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
 /**
  * The line that accounts for this run's exit code when coverage is what earned it.
  *
- * First, above the census that explains it: it is the finding, and the counts below it are the
- * evidence. A reader who stops after one line has the one that changes what they do.
+ * Above the census that explains it: it is the finding, and the counts below it are the
+ * evidence. Only the workspace's own manifests are reported ahead of it, because a coverage
+ * number computed over the wrong set of components is not a finding a reader can act on until
+ * they know the set was wrong.
  *
  * Each kind says where to look. Discovery found nothing → the config decided that, and the
  * three things in it that can. Nothing parsed → whatever withdrew the files, named. Below the
@@ -922,18 +950,33 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
   return normalized
 }
 
+/**
+ * The components the config declares, or undefined when it leaves them to detection.
+ *
+ * One definition because two readers act on it: `resolveComponents` below chooses its branch
+ * by it, and `fellBackToSingleComponent` is false when the config decided them, so the report's
+ * fallback line is emitted only where detection is what described the workspace. Two spellings
+ * of the condition would be two chances for the report to describe a Document built the other
+ * way.
+ */
+function declaredComponents(config: Partial<Config>): Config["components"] | undefined {
+  const declared = config.components
+  return declared !== undefined && declared.length > 0 ? declared : undefined
+}
+
 async function resolveComponents(
   config: Partial<Config>,
   workspaceRoot: string,
   languages: readonly LanguagePlugin[],
 ): Promise<Component[]> {
+  const declared = declaredComponents(config)
   try {
-    if (config.components !== undefined && config.components.length > 0) {
+    if (declared !== undefined) {
       // The config schema already constrains `id` to the kebab shape, but the value arrives
       // here as a plain string. Re-asserting it through the constructor is what turns it into
       // a Component id, and keeps a config loaded by some other path from smuggling in a
       // shape `components[].id` cannot hold.
-      return config.components.map((entry) => {
+      return declared.map((entry) => {
         // `publicApi` / `frameworks` are Class B and `description` is Class A
         // (`ir-schema.md` §1.1), so the empty cases are spelled differently on purpose:
         // the two array keys disappear, the scalar stays as an explicit `null`. Emitting

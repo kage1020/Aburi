@@ -127,6 +127,37 @@ export interface DetectManagersResult {
    * paths). Component autodetect consumes this to materialize components without re-globbing.
    */
   workspaces: WorkspaceCandidate[]
+  /**
+   * Managers whose manifest declared package patterns and resolved none of them.
+   *
+   * Reported rather than warned about, because detection has no sink of its own and its two
+   * CLI callers each have one. `detectComponents` drops the field deliberately: `aburi init`
+   * reaches it through that function and reads `unresolved` from its own `detectManagers`
+   * call, so carrying it through a second return type would be a second copy of one answer.
+   *
+   * It is not the same as an empty `managers[].roots`: turbo emits that deliberately as a
+   * co-marker, and a manifest that declared no patterns at all is asking for the workspace
+   * root alone — only a declaration that resolved to nothing means the packages the user
+   * named are missing from the Document.
+   */
+  unresolved: UnresolvedDeclaration[]
+}
+
+/** A manifest's package patterns, none of which named a package. */
+export interface UnresolvedDeclaration {
+  /** The tool whose manifest declared them, as spelled on `managers[].tool`. */
+  tool: string
+  /**
+   * The manifest that declared them, workspace-root-relative and POSIX.
+   *
+   * `tool` does not identify it: `detectJsPackageManagerTool` answers "pnpm" for a
+   * `package.json#workspaces` whenever a `pnpm-lock.yaml` is present, so a repository that
+   * moved to pnpm and left `workspaces` behind has two dead manifests under one tool name.
+   * This is what a reader opens, and what orders the two.
+   */
+  manifestPath: string
+  /** Every string the manifest lists, including ones the resolver drops. */
+  patterns: readonly string[]
 }
 
 export interface WorkspaceCandidate {
@@ -154,15 +185,26 @@ export interface WorkspaceCandidate {
 export async function detectManagers(workspaceRoot: string): Promise<DetectManagersResult> {
   const managers: WorkspaceManager[] = []
   const workspaces: WorkspaceCandidate[] = []
+  const unresolved: UnresolvedDeclaration[] = []
   const seen = new Set<string>()
+  const merge = (scan: ManagerScan | null): void => {
+    mergeManager(scan, managers, workspaces, seen)
+    if (scan !== null && scan.declaredPatterns.length > 0 && scan.candidates.length === 0) {
+      unresolved.push({
+        tool: scan.tool,
+        manifestPath: toRelativePosix(workspaceRoot, scan.manifestPath),
+        patterns: scan.declaredPatterns,
+      })
+    }
+  }
 
   await Promise.all([
-    detectPnpm(workspaceRoot).then((r) => mergeManager(r, managers, workspaces, seen)),
+    detectPnpm(workspaceRoot).then(merge),
     detectPackageJsonWorkspaces(workspaceRoot).then((rs) => {
-      for (const r of rs) mergeManager(r, managers, workspaces, seen)
+      for (const r of rs) merge(r)
     }),
-    detectTurbo(workspaceRoot).then((r) => mergeManager(r, managers, workspaces, seen)),
-    detectNx(workspaceRoot).then((r) => mergeManager(r, managers, workspaces, seen)),
+    detectTurbo(workspaceRoot).then(merge),
+    detectNx(workspaceRoot).then(merge),
   ])
 
   managers.sort((a, b) => compareString(a.tool, b.tool))
@@ -171,12 +213,24 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
     (a, b) =>
       compareString(a.relativeRoot, b.relativeRoot) || compareString(a.managerTool, b.managerTool),
   )
-  return { managers, workspaces }
+  unresolved.sort(
+    (a, b) => compareString(a.tool, b.tool) || compareString(a.manifestPath, b.manifestPath),
+  )
+  return { managers, workspaces, unresolved }
 }
 
 interface ManagerScan {
   tool: string
   candidates: WorkspaceCandidate[]
+  /** Absolute path of the manifest this scan read. */
+  manifestPath: string
+  /**
+   * Every string this manager's manifest lists as a package pattern. Empty when it lists none:
+   * turbo and nx declare no patterns at all, and a `packages:` or `workspaces` field that is
+   * absent yields none. A field that is present and is not a list of strings does not reach
+   * here — `readPatternList` refuses it.
+   */
+  declaredPatterns: readonly string[]
 }
 
 function mergeManager(
@@ -240,31 +294,33 @@ async function detectPnpm(root: string): Promise<ManagerScan | null> {
       { cause },
     )
   }
-  const patterns = readStringArray(parsed, "packages")
+  const patterns = readPatternList(parsed, "packages", manifestPath)
   const candidates = await resolveDeclaredPackages(root, patterns, "pnpm")
-  return { tool: "pnpm", candidates }
+  return { tool: "pnpm", candidates, manifestPath, declaredPatterns: patterns }
 }
 
 async function detectPackageJsonWorkspaces(root: string): Promise<ManagerScan[]> {
   const manifestPath = join(root, "package.json")
   if (!(await pathExists(manifestPath))) return []
   const parsed = await readJson(manifestPath)
-  const patterns = extractWorkspacePatterns(parsed)
+  const patterns = extractWorkspacePatterns(parsed, manifestPath)
   if (patterns.length === 0) return []
   const tool = await detectJsPackageManagerTool(root)
   const candidates = await resolveDeclaredPackages(root, patterns, tool)
-  return [{ tool, candidates }]
+  return [{ tool, candidates, manifestPath, declaredPatterns: patterns }]
 }
 
-function extractWorkspacePatterns(parsed: unknown): string[] {
+/**
+ * npm and yarn accept `workspaces` as a list or as `{ packages: [...] }`, so the object form
+ * is unwrapped before the shared rule in `readPatternList` reads it.
+ */
+function extractWorkspacePatterns(parsed: unknown, manifestPath: string): string[] {
   if (parsed === null || typeof parsed !== "object") return []
   const ws = (parsed as { workspaces?: unknown }).workspaces
-  if (Array.isArray(ws)) return ws.filter((v): v is string => typeof v === "string")
-  if (ws !== null && typeof ws === "object") {
-    const packages = (ws as { packages?: unknown }).packages
-    if (Array.isArray(packages)) return packages.filter((v): v is string => typeof v === "string")
+  if (ws !== null && typeof ws === "object" && !Array.isArray(ws)) {
+    return readPatternList(ws, "packages", manifestPath)
   }
-  return []
+  return readPatternList(parsed, "workspaces", manifestPath)
 }
 
 /**
@@ -286,7 +342,7 @@ async function detectTurbo(root: string): Promise<ManagerScan | null> {
   // turbo.json does not declare workspaces itself; it is a co-marker that signals "the
   // real workspace patterns live in pnpm-workspace.yaml or package.json#workspaces".
   // Emit a manager entry with empty roots so the IR records the tool's presence.
-  return { tool: "turbo", candidates: [] }
+  return { tool: "turbo", candidates: [], manifestPath, declaredPatterns: [] }
 }
 
 async function detectNx(root: string): Promise<ManagerScan | null> {
@@ -309,7 +365,7 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
       manifestPath: projectFile,
     })
   }
-  return { tool: "nx", candidates }
+  return { tool: "nx", candidates, manifestPath, declaredPatterns: [] }
 }
 
 /** The manifest a pnpm/npm/yarn/bun `packages:` entry promises the directory holds. */
@@ -364,11 +420,53 @@ function toManifestPattern(pattern: string): string {
   return pattern.replace(/\/?$/, `/${JS_PACKAGE_MANIFEST}`)
 }
 
-function readStringArray(value: unknown, key: string): string[] {
+/**
+ * The package patterns a manifest declares under `key`, or `[]` when it declares none.
+ *
+ * A field that is present and is not a list of strings is refused rather than filtered away.
+ * `packages:` followed by `- tools/*:` is the most ordinary YAML slip there is — the trailing
+ * colon makes the entry a map — and every such manifest declares packages, resolves none, and
+ * lands on the single-project fallback describing the whole repository. Dropping the element
+ * quietly is the silence this file reports everywhere else, one level further in; pnpm refuses
+ * all three shapes itself (`Invalid package type - object`, `packages field is not an array`,
+ * `Invalid package type - number`), so this is its reading rather than a stricter one.
+ *
+ * The remediation differs from a pattern that matched nothing — write it as a list of strings,
+ * rather than fix the pattern — which is why it is a refusal and not another entry on
+ * `unresolved`.
+ */
+function readPatternList(value: unknown, key: string, manifestPath: string): string[] {
   if (value === null || typeof value !== "object") return []
   const field = (value as Record<string, unknown>)[key]
-  if (!Array.isArray(field)) return []
-  return field.filter((v): v is string => typeof v === "string")
+  if (field === undefined || field === null) return []
+  if (!Array.isArray(field)) {
+    throw malformedPatternList(manifestPath, key, `it is ${describeJsonType(field)}, not a list`)
+  }
+  for (const [index, element] of field.entries()) {
+    if (typeof element !== "string") {
+      throw malformedPatternList(
+        manifestPath,
+        key,
+        `entry ${index} is ${describeJsonType(element)}, not a string`,
+      )
+    }
+  }
+  return [...field]
+}
+
+function malformedPatternList(manifestPath: string, key: string, fault: string): CoreError {
+  return new CoreError(
+    `"${key}" in ${manifestPath} must be a list of package patterns, but ${fault}. Every package it was meant to declare is missing from the workspace.`,
+    { code: "workspace-manifest-malformed", value: manifestPath },
+  )
+}
+
+/** How a value is named in a message about the JSON or YAML shape it came from. */
+function describeJsonType(value: unknown): string {
+  if (Array.isArray(value)) return "a list"
+  if (value === null) return "null"
+  const type = typeof value
+  return `${type === "object" ? "an" : "a"} ${type}`
 }
 
 async function pathExists(path: string): Promise<boolean> {
