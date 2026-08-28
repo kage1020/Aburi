@@ -312,6 +312,31 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md §9)
     expect(cliError.message).toContain("members[] is empty")
     expect(cliError.cause).toBe(cause)
   })
+
+  it("keeps what a code it has no arm for said, rather than throwing it away", () => {
+    // `@aburi/diff` and `@aburi/cli` version independently, so a compiled switch can meet a
+    // code it never saw. The compile-time check cannot help an installed tree, and discarding
+    // the message would leave the reader with nothing about the diff that failed.
+    const cause = new DiffError("Symbol sym:a: fingerprint is not a string.", {
+      code: "symbol-fingerprint-invalid",
+    } as unknown as ConstructorParameters<typeof DiffError>[1])
+
+    const cliError = classifyDiffError(cause)
+
+    expect(cliError.code).toBe("runtime-error")
+    expect(cliError.message).toContain("fingerprint is not a string")
+    expect(cliError.message).toContain("symbol-fingerprint-invalid")
+    expect(cliError.cause).toBe(cause)
+  })
+
+  it("starts the report instruction on its own line", () => {
+    const cause = new DiffError("SliceRecord slice:a: members[] is empty.", {
+      code: "slice-invariant-violated",
+      value: "slice:a",
+    })
+
+    expect(classifyDiffError(cause).message).toContain("empty.\nThis is a bug in Aburi")
+  })
 })
 
 describe("runDiff — a base IR that is not shaped like a Document", () => {

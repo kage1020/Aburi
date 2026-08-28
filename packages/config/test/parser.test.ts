@@ -242,9 +242,12 @@ describe("readConfigFile", () => {
     expect((caught as ConfigError).cause).toBeInstanceOf(Error)
   })
 
-  it("throws config-not-found when a path segment is not a directory", async () => {
+  const onPosix = it.skipIf(process.platform === "win32")
+
+  onPosix("throws config-not-found when a path segment is not a directory", async () => {
     // ENOTDIR is the same fact through a different errno: `--config out/aburi.json` where
     // `out` is a file. The shared errno set is what keeps discovery and this agreeing.
+    // Windows answers the same path with ENOENT, so only POSIX exercises the second member.
     const file = join(tmp, "not-a-dir")
     await writeFile(file, "x", "utf8")
     let caught: unknown
