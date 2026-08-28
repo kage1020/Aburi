@@ -22,12 +22,23 @@ import { type MockLspClient, mockServerFactory } from "./fixtures/mock-server"
 
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 
-function capturingLogger(): { logger: Logger; warnings: string[] } {
+interface CapturedDebug {
+  message: string
+  meta: Record<string, unknown> | undefined
+}
+
+function capturingLogger(): {
+  logger: Logger
+  warnings: string[]
+  debugs: CapturedDebug[]
+} {
   const warnings: string[] = []
+  const debugs: CapturedDebug[] = []
   return {
     warnings,
+    debugs,
     logger: {
-      debug: () => {},
+      debug: (message: string, meta?: Record<string, unknown>) => debugs.push({ message, meta }),
       info: () => {},
       warn: (m: string) => warnings.push(m),
       error: () => {},
@@ -136,6 +147,29 @@ describe("a throw inside one language is a per-language fallback", () => {
     expect(fallbacks).toHaveLength(1)
     expect(fallbacks[0]).toContain("ts")
     expect(fallbacks[0]).toContain("server handler exploded")
+  })
+
+  it("carries the class and the stack on the debug channel, where the warning cannot", async () => {
+    // From the language boundary a broken server and a bug in this package are the same
+    // event, and by the time a throw has survived every guard `processLanguage` puts on the
+    // client, the second is the likelier. The warning cannot say which; this is what does.
+    // A debug line is not a CLI warning, so §6.3 rule 3 is untouched.
+    const clients = new Map<LanguageId, MockLspClient>()
+    const { logger, debugs } = capturingLogger()
+
+    await enrichWithLsp({
+      ...makeEnrichmentInput({
+        symbols: [makeClassSymbol("src/a.ts", "C", 1)],
+        fileContents: { "src/a.ts": "class C {}\n" },
+        serverFactory: throwingFactory(clients),
+      }),
+      logger,
+    })
+
+    const threw = debugs.filter((d) => d.message.includes("threw"))
+    expect(threw).toHaveLength(1)
+    expect(threw[0]?.meta?.error).toBe("Error")
+    expect(String(threw[0]?.meta?.stack)).toContain("server handler exploded")
   })
 
   it("leaves the failed language's symbols at the untyped tier", async () => {
