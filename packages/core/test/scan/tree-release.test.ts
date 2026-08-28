@@ -118,7 +118,6 @@ interface StubOptions {
   releaseThrows?: unknown
   throwFrom?: Stage
   parseMs?: number
-  extractMs?: number
 }
 
 /**
@@ -173,7 +172,6 @@ class StubLanguagePlugin {
 
   extractSymbols(_tree: ParsedTree, _ctx: ExtractionContext): SymbolCandidate<OpaqueAstNode>[] {
     this.order.push("extractSymbols")
-    spend(this.options.extractMs ?? 0)
     this.failIfAsked("extractSymbols")
     return [candidate("one")]
   }
