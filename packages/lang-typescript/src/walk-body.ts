@@ -76,6 +76,10 @@ function visitOwnClassBody(
       continue
     }
     for (const part of member.namedChildren) {
+      // By `id`, not by reference: a field read and a children read of the same node hand back
+      // different JS wrappers (measured), so `===` never matches. Not by type either — today a
+      // `method_definition` has exactly one `statement_block` and the two agree, but a member
+      // shape that carried a second one would start dropping it without a word.
       if (part === null || part.id === memberBody.id) continue
       visit(part, rules, calls)
     }
