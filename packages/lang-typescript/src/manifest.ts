@@ -32,6 +32,7 @@ export const langTypescriptManifest: LangManifest = {
       "export-default",
       "variable-assigned-function",
       "class-method",
+      "field-assigned-function",
       "static-method",
       "interface-declaration",
       "type-alias",

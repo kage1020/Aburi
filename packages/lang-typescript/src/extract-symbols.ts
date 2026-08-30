@@ -7,13 +7,24 @@ import type {
   Visibility,
 } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
-import { findChild, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
+import {
+  findChild,
+  functionValueOf,
+  hasChildOfType,
+  makeSourceRange,
+  nameFieldText,
+} from "./ast-helpers"
 import {
   type CallExtractionState,
   makeCallExtractionState,
   visitCallStatement,
 } from "./call-symbols"
-import { isConstructorMember, memberHasOwnSymbol } from "./class-members"
+import {
+  functionValuedField,
+  isConstructorMember,
+  memberHasOwnSymbol,
+  memberSegment,
+} from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
@@ -323,6 +334,9 @@ function addClassAndMembers(
  * and two `method_definition` nodes. Those fold into one candidate, and the getter is the one
  * that claims it — a property's type is what reading it answers, so taking the setter's
  * signature would report the member as `(n) => void`.
+ *
+ * A field holding a function is a member here too, and folds by id with the rest: a field
+ * and a method of the same name are one id, which is what `tsc` calls TS2300 anyway.
  */
 function addClassMembers(
   classNode: Node,
@@ -334,7 +348,13 @@ function addClassMembers(
   const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
     if (member === null || !memberHasOwnSymbol(classNode, member)) continue
-    const candidate = makeMethodCandidate(member, ctx, ownerChain)
+    // The one call that separates the two member shapes, so nothing asks twice: the
+    // predicate above admits a field only when this answers with the function it holds.
+    const fieldFunction = functionValuedField(member)
+    const candidate =
+      fieldFunction === null
+        ? makeMethodCandidate(member, ctx, ownerChain)
+        : makeFieldFunctionCandidate(member, fieldFunction, ctx, ownerChain)
     const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
     const group = declared.get(candidate.id)
     if (group === undefined) declared.set(candidate.id, [entry])
@@ -411,18 +431,12 @@ function makeMethodCandidate(
   const kind: SymbolKind = isConstructorMember(node) ? "constructor" : "method"
   const methodName = requireDeclarationName(node, "method", ctx.file.path)
   const isStatic = hasChildOfType(node, "static")
-  const isPrivateHash = methodName.startsWith("#")
   const qname =
     kind === "constructor"
       ? classMemberQname(ownerChain, "constructor", "instance")
-      : classMemberQname(ownerChain, methodName.replace(/^#/, ""), isStatic ? "static" : "instance")
+      : classMemberQname(ownerChain, memberSegment(methodName), isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(node)
   const signature = buildSignature(node, jsDoc)
-  const visibility: Visibility = isPrivateHash
-    ? "private"
-    : hasChildOfType(node, "accessibility_modifier")
-      ? readAccessibilityKeyword(node)
-      : "public"
   const derivedBy: string[] = [isStatic ? "static-method" : "class-method"]
   if (kind === "constructor") derivedBy.push("constructor-declaration")
   // `get` and `set` are anonymous tokens on the same `method_definition` a plain method
@@ -435,7 +449,7 @@ function makeMethodCandidate(
     kind,
     extKind: null,
     name: qname,
-    visibility,
+    visibility: memberVisibility(node, methodName),
     decorators: readDecorators(node),
     signature,
     source: makeSourceRange(node, ctx),
@@ -443,6 +457,56 @@ function makeMethodCandidate(
     bodyNode: node.childForFieldName("body"),
     fullNode: node,
   }
+}
+
+/**
+ * A class field whose value is a function, which `memberHasOwnSymbol` has already admitted —
+ * `value` is the function it answered with, so nothing is re-derived here.
+ *
+ * `kind` is `method` rather than `function`: the Symbol is a member of a class, named by the
+ * member convention, and every reader that asks what a class member is gets one answer
+ * whichever way the member was written. `derivedBy` is where the difference is recorded.
+ *
+ * The signature is the function's, not the field's type annotation. `create: Handler = (d) =>
+ * …` writes the parameter names once, in the arrow; the annotation names a type.
+ */
+function makeFieldFunctionCandidate(
+  field: Node,
+  value: Node,
+  ctx: ExtractionContext,
+  ownerChain: readonly string[],
+): SymbolCandidate<Node> {
+  const fieldName = requireDeclarationName(field, "class field", ctx.file.path)
+  const isStatic = hasChildOfType(field, "static")
+  const qname = classMemberQname(
+    ownerChain,
+    memberSegment(fieldName),
+    isStatic ? "static" : "instance",
+  )
+  const jsDoc = readLeadingJsDoc(field)
+  return {
+    id: makeTsSymbolId(currentFile(ctx), qname),
+    kind: "method",
+    extKind: null,
+    name: qname,
+    visibility: memberVisibility(field, fieldName),
+    decorators: readDecorators(field),
+    signature: buildSignature(value, jsDoc),
+    // The field's range, not the function's: the member is declared where it is written, and a
+    // field's modifiers, decorator and type annotation are all outside the arrow.
+    source: makeSourceRange(field, ctx),
+    derivedBy: [isStatic ? "static-method" : "class-method", "field-assigned-function"],
+    bodyNode: value.childForFieldName("body"),
+    fullNode: value,
+  }
+}
+
+/**
+ * A member's visibility, from the two ways a class body writes it: a `#` name is private to the
+ * language, an `accessibility_modifier` is private or protected to the type checker.
+ */
+function memberVisibility(member: Node, writtenName: string): Visibility {
+  return writtenName.startsWith("#") ? "private" : readAccessibilityKeyword(member)
 }
 
 function makeInterfaceCandidate(
@@ -592,10 +656,10 @@ function makeVariableCandidate(
 ): SymbolCandidate<Node> | null {
   const name = nameFieldText(declarator)
   if (name === null) return null
-  const value = declarator.childForFieldName("value")
+  const value = functionValueOf(declarator)
   const qname = nestedQname([...namespacePath, name])
   const id = makeTsSymbolId(currentFile(ctx), qname)
-  if (value !== null && (value.type === "arrow_function" || value.type === "function_expression")) {
+  if (value !== null) {
     const jsDoc = readLeadingJsDoc(parent)
     const signature = buildSignature(value, jsDoc)
     const derivedBy: string[] = ["variable-assigned-function"]

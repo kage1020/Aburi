@@ -1,6 +1,6 @@
 import type { DropHint, ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf } from "./ast-helpers"
+import { bodyNodesOf, functionValueOf } from "./ast-helpers"
 
 /**
  * Category-A skip patterns owned by this language plugin. Added on top of the core
@@ -77,6 +77,14 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
       case "public_field_definition":
       case "field_definition":
       case "property_signature":
+        // A field holding a function is a method however it is written, so a class of them is
+        // not a data model. The question here is the field's *shape*, not whether the member
+        // got a Symbol: a computed-name arrow field has no Symbol and is still not data.
+        if (functionValueOf(member) !== null) {
+          hasMethod = true
+          allStaticLiteral = false
+          break
+        }
         hasAnyField = true
         if (!isStaticLiteralField(member)) allStaticLiteral = false
         break

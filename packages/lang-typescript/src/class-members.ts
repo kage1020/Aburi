@@ -1,5 +1,24 @@
 import type { Node } from "web-tree-sitter"
-import { findChild, hasChildOfType, nameFieldText } from "./ast-helpers"
+import { findChild, functionValueOf, hasChildOfType, nameFieldText } from "./ast-helpers"
+
+/**
+ * The member segment reserved for what `new C()` runs. A field never holds it: `class C {
+ * constructor = () => {} }` is a SyntaxError in an engine, the grammar parses it anyway, and
+ * admitting it would either put a field on `#C.constructor` or fold it into the real
+ * constructor written beside it.
+ */
+const CONSTRUCTION_SEGMENT = "constructor"
+
+/**
+ * The node types a member name is written as when it *is* a name. A computed name is a
+ * `computed_property_name`, and a quoted or numeric one is a `string` / `number` — neither is
+ * a qualified-name segment (`ir-schema.md` §3.2), and the id builder's refusal is a throw
+ * that costs the whole file.
+ */
+const WRITTEN_MEMBER_NAME_TYPES: ReadonlySet<string> = new Set([
+  "property_identifier",
+  "private_property_identifier",
+])
 
 /**
  * True when extraction gives this class-body member a SymbolCandidate of its own.
@@ -20,18 +39,58 @@ import { findChild, hasChildOfType, nameFieldText } from "./ast-helpers"
  * `export default class C {}` is a `class_declaration` rather than an expression, so no named
  * class reaches either reader without member Symbols.
  *
- * A computed member name gets no Symbol and no diagnostic, which is `ir-schema.md` §3.2's own
- * row for it. Every other shape a class body can hold answers false for the plain reason that
- * it is not a `method_definition`.
+ * Two member shapes qualify. A `method_definition` is a member unless its name is computed,
+ * which is `ir-schema.md` §3.2's own row for it — no Symbol and no diagnostic. A field holding
+ * a function is a member because calling it is what runs the body; see `functionValuedField`.
+ * Every other shape a class body can hold answers false for the plain reason that it is
+ * neither.
  *
- * What it does **not** promise is that the member's name is one the id builder will accept: a
- * string-literal or numeric member name (`class C { "ok"() {} }`) passes here and throws there,
- * which costs the file at the per-file boundary.
+ * What it does **not** promise, for a `method_definition`, is that the member's name is one the
+ * id builder will accept: a string-literal or numeric member name (`class C { "ok"() {} }`)
+ * passes here and throws there, which costs the file at the per-file boundary.
  */
 export function memberHasOwnSymbol(classNode: Node, member: Node): boolean {
-  if (member.type !== "method_definition") return false
   if (nameFieldText(classNode) === null) return false
-  return findChild(member, "computed_property_name") === null
+  if (member.type === "method_definition") {
+    return findChild(member, "computed_property_name") === null
+  }
+  return functionValuedField(member) !== null
+}
+
+/**
+ * The function a class field holds, when the field is a member of its own — otherwise null.
+ *
+ * `create = async (d) => { … }` declares a member the same way `create(d) { … }` does. What
+ * separates the two from `seed = makeSeed()` is *when the body runs*: constructing the class
+ * creates the closure and does not enter it, so the body is what calling the member runs and
+ * belongs to the member's Symbol, while `makeSeed()` runs on construction and belongs to the
+ * class (`lang-plugin.md` LP20a).
+ *
+ * The name gate is stricter than the one `method_definition` gets, and deliberately: a field
+ * with a name the id builder refuses is a file this plugin extracts today, and admitting it
+ * would turn that into a lost file rather than into a member.
+ *
+ * `public_field_definition` is the only field shape this plugin sees — every extension it
+ * claims, `.js` included, is parsed with the TypeScript or TSX grammar.
+ */
+export function functionValuedField(member: Node): Node | null {
+  if (member.type !== "public_field_definition") return null
+  const name = member.childForFieldName("name")
+  if (name === null || !WRITTEN_MEMBER_NAME_TYPES.has(name.type)) return null
+  if (memberSegment(name.text) === CONSTRUCTION_SEGMENT) return null
+  return functionValueOf(member)
+}
+
+/**
+ * The qualified-name segment a written member name maps to.
+ *
+ * `#` is not a character `ir-schema.md` §3.2's grammar admits, so a `#`-private member is
+ * spelled without it — which maps `#v` and a `v` written beside it onto one id. The strip is
+ * shared so a field reaches that one defect the same way a method does, rather than a second
+ * way.
+ */
+export function memberSegment(writtenName: string): string {
+  return writtenName.replace(/^#/, "")
 }
 
 /**
@@ -45,10 +104,12 @@ export function memberHasOwnSymbol(classNode: Node, member: Node): boolean {
  * member is not on the construction path, and `class C { static constructor() {} }` is legal
  * JavaScript, which this plugin also parses: reading it as the constructor put its body on the
  * class as part of what instantiating the class runs, and gave it the instance qname, where it
- * collided with the real constructor's.
+ * collided with the real constructor's. A field named `constructor` is not on the path either,
+ * and is refused a Symbol outright rather than reaching here.
  */
 export function isConstructorMember(member: Node): boolean {
+  if (member.type !== "method_definition") return false
   if (hasChildOfType(member, "static")) return false
   const name = member.childForFieldName("name")
-  return name !== null && name.text === "constructor"
+  return name !== null && name.text === CONSTRUCTION_SEGMENT
 }
