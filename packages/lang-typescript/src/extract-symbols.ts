@@ -251,7 +251,9 @@ function makeMethodCandidate(
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> | null {
   const kind: SymbolKind = isConstructor(node) ? "constructor" : "method"
-  if (kind !== "constructor" && findChild(node, "computed_property_name") !== null) return null
+  // A constructor cannot reach this: `isConstructor` compares the `name` field's text to
+  // "constructor", and a computed name's text carries its brackets.
+  if (findChild(node, "computed_property_name") !== null) return null
   // Constructors do not carry a name field in the grammar, so short-circuit before the
   // fail-fast helper would trip on them.
   const methodName =
@@ -482,7 +484,8 @@ function collectPatternBindings(pattern: Node): Node[] {
         }
         return
       case "pair_pattern": {
-        // The key is a `property_identifier` on the value's type, not a declaration.
+        // The key is a `property_identifier`, which this switch has no case for — reading
+        // the `value` field states that rather than relying on it.
         const value = node.childForFieldName("value")
         if (value !== null) visit(value)
         return

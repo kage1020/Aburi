@@ -8,10 +8,10 @@ import { CoreError, DEFAULT_EXPORT_QNAME, makeSymbolId } from "../src"
  * declaration therefore cost its whole file: `makeSymbolId` throws, the throw reaches the
  * per-file boundary, and every Symbol in the file goes with it.
  *
- * The grammar is `[$_\p{ID_Start}][$<ZWNJ><ZWJ>\p{ID_Continue}]*` now, which is
- * ECMAScript's IdentifierName less the escape forms. `_` is in `ID_Continue` and not in
- * `ID_Start`, so it stays spelled out in the first class; ZWNJ and ZWJ are neither, and are
- * what Persian and Arabic-script identifiers use.
+ * The grammar is `[$_\p{ID_Start}][$\p{ID_Continue}]*` now, which is ECMAScript's
+ * IdentifierName less the escape forms. Only `$` and `_` are named — `$` is in neither
+ * property, `_` is in `ID_Continue` and not in `ID_Start` — and ZWNJ and ZWJ, which
+ * ECMAScript names separately, are already inside `ID_Continue` here.
  *
  * What it still refuses is what is not a name at all — a destructuring pattern's text, a
  * computed member's brackets — which the extraction side no longer sends here.
@@ -57,10 +57,10 @@ describe("an identifier ECMAScript defines is a qualified name", () => {
     ["a zero-width non-joiner", `a${ZWNJ}b`],
     ["a zero-width joiner", `a${ZWJ}b`],
   ])("accepts %s, which is an identifier part and not a letter", (_label, qname) => {
-    // Neither is in `ID_Continue`; ECMAScript adds both to IdentifierPartChar, and they are
-    // what a Persian or Arabic-script identifier uses to control ligature shaping. The
-    // tree-sitter grammar parses `a<ZWNJ>b` as one `identifier`, so refusing it here would
-    // cost the file over a character the parser had no trouble with.
+    // ECMAScript names both in IdentifierPartChar, and a Persian or Arabic-script identifier
+    // uses them to control ligature shaping. `\p{ID_Continue}` already covers them here —
+    // measured — so this pins the behaviour rather than a second spelling of it, and the
+    // tree-sitter grammar parses `a<ZWNJ>b` as one `identifier` either way.
     expect(build(qname)).toBe(`ts:src/a.ts#${qname}`)
   })
 

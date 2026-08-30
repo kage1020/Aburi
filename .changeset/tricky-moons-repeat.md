@@ -19,8 +19,9 @@ the throw cost the file every Symbol it had, not the one declaration:
 The last row states it sharpest: one member nobody can name cost the class and every sibling.
 
 **The qualified-name grammar is ECMAScript's IdentifierName.** `[A-Za-z_$][A-Za-z0-9_$]*`
-becomes `[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*`, which is `ID_Start` / `ID_Continue`
-plus `$`, `_`, ZWNJ and ZWJ. `schema/aburi.ir.v1.json#/$defs/SymbolId` already accepted every
+becomes `[$_\p{ID_Start}][$\p{ID_Continue}]*`. Only `$` and `_` are named:
+`$` is in neither property, `_` is in `ID_Continue` and not `ID_Start`, and ZWNJ and ZWJ —
+which ECMAScript names separately — are already inside `ID_Continue` here, measured. `schema/aburi.ir.v1.json#/$defs/SymbolId` already accepted every
 one of these, so this closes a gap between the two rather than opening one. What it still
 refuses is what is not a name — a pattern's text, a computed member's brackets.
 

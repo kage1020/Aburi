@@ -34,10 +34,13 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
  * Identifier-like segment that may appear in a qualified name (no separators, no spaces).
  *
  * ECMAScript's IdentifierName, less the `\u` escape forms no source has to use: a start
- * character is `ID_Start`, `$` or `_`, and a part character is `ID_Continue`, `$`, ZWNJ or
- * ZWJ. `_` is in `ID_Continue` but not in `ID_Start`, so it is spelled out in the first class
- * rather than inherited; ZWNJ and ZWJ are in neither, and are what Persian and Arabic-script
- * identifiers use to control ligature shaping.
+ * character is `ID_Start`, `$` or `_`, and a part character is `ID_Continue` or `$`.
+ *
+ * Only `$` and `_` are spelled out, and each for its own measured reason. `$` is in neither
+ * property, so it is named in both classes. `_` is in `ID_Continue` and not in `ID_Start`, so
+ * it is named in the first only. ZWNJ and ZWJ — which Persian and Arabic-script identifiers
+ * use to control ligature shaping, and which ECMAScript names separately — are already in
+ * `ID_Continue` here, so naming them again would say nothing.
  *
  * The ASCII-only grammar this replaces refused names `schema/aburi.ir.v1.json#/$defs/SymbolId`
  * already accepts — its pattern is `^[a-z][a-z0-9]*:[^#\\]+#[^\\]+$` — so a Japanese or
@@ -49,7 +52,7 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
  * computed member's brackets. Those are the plugin's to stop sending, not this pattern's to
  * accommodate.
  */
-const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u
+const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 /**
  * Prefixes that make a path absolute rather than workspace-relative. The Windows drive
