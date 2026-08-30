@@ -169,6 +169,31 @@ describe("a getter and a setter declare one member", () => {
     expect(calls.map((c) => c.target)).toEqual(["a", "b"])
   })
 
+  it("keeps a decorator written on the declaration that did not lead", async () => {
+    const source = [
+      "export class A {",
+      "  @Memo() get v() { return 1 }",
+      "  @Validate() set v(n) {}",
+      "}",
+    ].join("\n")
+    const symbol = await symbolNamed(source, "ts:src/a.ts#A.v")
+
+    expect(symbol.decorators.map((d) => d.name)).toEqual(["Memo", "Validate"])
+  })
+
+  it("folds a private-name member into the public one of the same name", async () => {
+    // `v` and `#v` are two members and `tsc` accepts both, but `#` is not a qualified-name
+    // segment character, so the id builder is handed `Q.v` for each. The convention predates
+    // this change; what changed is the consequence — a duplicate id used to end the run, and
+    // now the two fold. The IR says one member where the source has two.
+    const source = "export class Q { v() { a() } #v() { b() } }"
+    const symbol = await symbolNamed(source, "ts:src/a.ts#Q.v")
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#Q", "ts:src/a.ts#Q.v"])
+    expect(symbol.derivedBy).toContain("declaration-merged")
+    expect((await walkOf(source, "ts:src/a.ts#Q.v")).calls.map((c) => c.target)).toEqual(["a", "b"])
+  })
+
   it("still says nothing about a computed accessor", async () => {
     const source = "export class C { get [k]() { return 1 } set [k](n) {} }"
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
@@ -231,6 +256,19 @@ describe("merged declarations are one Symbol", () => {
     expect(symbol.derivedBy).toContain("export-keyword")
     expect(symbol.derivedBy).toContain("namespace-declaration")
     expect(symbol.derivedBy).toContain("declaration-merged")
+  })
+
+  it("keeps the boundary evidence of a class an interface was declared before", async () => {
+    // The one merge whose declarations can disagree about something that matters: an
+    // interface may be written before the class it merges with, and a decorator kept only
+    // from the leading declaration would be gone. `decideSymbolDrop` reads boundary
+    // decorators before it drops anything of kind `interface`, so losing one is the
+    // difference between a controller in the IR and a Symbol dropped as a data model.
+    const source = ["export interface P {}", "@Controller()", "export class P {}"].join("\n")
+    const symbol = await symbolNamed(source, "ts:src/a.ts#P")
+
+    expect(symbol.kind).toBe("interface")
+    expect(symbol.decorators.map((d) => d.name)).toEqual(["Controller"])
   })
 
   it("normalizes both interface bodies into one fingerprint input", async () => {

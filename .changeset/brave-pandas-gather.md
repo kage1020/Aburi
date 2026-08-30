@@ -38,6 +38,11 @@ hashes the value has effects, and losing them silently is worse than the duplica
 on a Symbol with one declaration, so the single-declaration path is untouched and no existing
 fingerprint moves.
 
+Decorators are joined across the merged declarations for the same reason. `interface P {}` beside
+`@Controller() class P {}` is legal with the interface first, so the declaration that claims the
+Symbol is the one carrying no decorators — and a lost `boundary` decorator turns a controller into
+an `interface (data model)` drop.
+
 Separately, an unexported `namespace` at statement position is parented under an
 `expression_statement`, which the statement switch never looked through — so every unexported
 namespace lost its own Symbol *and* everything declared inside it. Reading through the wrapper is

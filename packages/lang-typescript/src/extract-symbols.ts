@@ -92,8 +92,16 @@ function makeCandidateSink(): CandidateSink {
 const MERGED_DECLARATION = "declaration-merged"
 
 /**
- * Fold a later declaration into the Symbol an earlier one claimed: union the rationale,
- * append the body. Scalars stay as the claiming declaration wrote them.
+ * Fold a later declaration into the Symbol an earlier one claimed: the scalars stay as the
+ * claiming declaration wrote them, and everything list-shaped is joined.
+ *
+ * Decorators are joined rather than kept from the leading declaration, because dropping one
+ * changes what the Symbol *is*. `interface P {}` beside `@Controller() class P {}` is legal
+ * TypeScript with the interface written first, so the leading declaration is the one that
+ * carries no decorators — and a lost `boundary` decorator turns a controller into an
+ * `interface (data model)` drop. They arrive in the order the fold visits the declarations,
+ * so `lang-plugin.md` LP15's source ordering holds inside each declaration's own run, which
+ * is the only span it is about.
  */
 function mergeDeclarations(
   claimed: SymbolCandidate<Node>,
@@ -106,7 +114,12 @@ function mergeDeclarations(
   const bodies = [...(claimed.mergedBodyNodes ?? [])]
   if (later.bodyNode !== null) bodies.push(later.bodyNode)
   bodies.push(...(later.mergedBodyNodes ?? []))
-  return { ...claimed, derivedBy, mergedBodyNodes: bodies }
+  return {
+    ...claimed,
+    decorators: [...claimed.decorators, ...later.decorators],
+    derivedBy,
+    mergedBodyNodes: bodies,
+  }
 }
 
 function visitModuleLevel(
