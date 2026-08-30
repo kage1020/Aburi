@@ -6,7 +6,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { findChild } from "./ast-helpers"
+import { bodyNodesOf, findChild } from "./ast-helpers"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -28,11 +28,10 @@ import { findChild } from "./ast-helpers"
  * paths, event names, …).
  */
 export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>): BodyExtraction {
-  const body = symbol.bodyNode
-  if (body === null) return { rules: [], calls: [] }
   const rules: Rule[] = []
   const calls: CallCandidate[] = []
-  visit(body, rules, calls)
+  // Every body the Symbol was declared with, not just the leading declaration's.
+  for (const body of bodyNodesOf(symbol)) visit(body, rules, calls)
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
   return { rules, calls }

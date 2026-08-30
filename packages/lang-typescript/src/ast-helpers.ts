@@ -1,5 +1,23 @@
-import type { ExtractionContext, WrittenSourceRange } from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate, WrittenSourceRange } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+
+/**
+ * Every body a Symbol was declared with: the leading declaration's, followed by the bodies of
+ * the declarations that merged into it, in source order.
+ *
+ * A getter and its setter are one member written twice, and so are an interface reopened and
+ * a namespace augmenting the class above it. Anything that reads a body to describe the
+ * Symbol — the body walk, the empty-body hint — has to read all of them, or it describes
+ * whichever declaration was written first. A merged declaration with no body of its own
+ * contributes nothing here; `normalizeAst` is the reader that falls back to its `fullNode`.
+ */
+export function bodyNodesOf(symbol: SymbolCandidate<Node>): Node[] {
+  const out: Node[] = symbol.bodyNode === null ? [] : [symbol.bodyNode]
+  for (const declaration of symbol.mergedDeclarations ?? []) {
+    if (declaration.bodyNode !== null) out.push(declaration.bodyNode)
+  }
+  return out
+}
 
 /**
  * The single writer of `SourceRange` in this plugin — both the declaration extractor and

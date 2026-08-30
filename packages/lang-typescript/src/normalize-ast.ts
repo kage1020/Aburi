@@ -16,10 +16,19 @@ import type { Node } from "web-tree-sitter"
  * When the SymbolCandidate has a `bodyNode`, that node is normalized (the class /
  * function body). When it does not (`type` / `interface` / bare `const`), the full node
  * is normalized instead so type aliases and interface shapes still get a stable hash.
+ *
+ * A Symbol several declarations wrote — a getter beside its setter, an interface reopened —
+ * gets each of the further bodies appended, in source order. A Symbol with one declaration
+ * therefore serializes to exactly the string it did before that was possible, which is what
+ * keeps every existing fingerprint where it was: appending is the only new behaviour, and
+ * there is nothing to append.
  */
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
-  const target = symbol.bodyNode ?? symbol.fullNode
-  return serialize(target)
+  const merged = symbol.mergedDeclarations ?? []
+  const primary = serialize(symbol.bodyNode ?? symbol.fullNode)
+  if (merged.length === 0) return primary
+  const parts = [primary, ...merged.map((d) => serialize(d.bodyNode ?? d.fullNode))]
+  return parts.filter((part) => part.length > 0).join(" ")
 }
 
 function serialize(node: Node): string {

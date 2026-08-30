@@ -145,6 +145,32 @@ export interface SymbolCandidate<TNode = OpaqueAstNode> {
   /** Language-level rationale, e.g. `["export-keyword"]`. */
   derivedBy: string[]
   bodyNode: TNode | null
+  /**
+   * The further declarations that merged into this Symbol, in source order.
+   *
+   * One entity can be written as several declarations — a getter beside its setter, an
+   * overload beside its implementation, an interface reopened, a namespace augmenting the
+   * class it follows. All of those are one Symbol, `bodyNode` / `fullNode` are the leading
+   * declaration's, and the rest arrive here so that `walkBody` and `normalizeAst` see the
+   * whole entity rather than the declaration that happened to be written first.
+   *
+   * Each entry carries both nodes for the same reason the Symbol itself does: a declaration
+   * with no body — an enum, a type alias, a namespace whose statements are their own Symbols
+   * — is still described by `fullNode`, which is what `normalizeAst` falls back to. An entry
+   * holding only a body would make a reopened `enum E {}` fingerprint as though it had never
+   * been written.
+   *
+   * Absent, never empty, and absent means the Symbol has one declaration — the ordinary
+   * case. A consumer that reads only `bodyNode` is complete on those, and every path that
+   * was correct before the field existed still is.
+   */
+  mergedDeclarations?: MergedDeclaration<TNode>[]
+  fullNode: TNode
+}
+
+/** The nodes of one declaration that merged into a Symbol another declaration leads. */
+export interface MergedDeclaration<TNode = OpaqueAstNode> {
+  bodyNode: TNode | null
   fullNode: TNode
 }
 

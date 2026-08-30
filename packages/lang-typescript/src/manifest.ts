@@ -39,6 +39,8 @@ export const langTypescriptManifest: LangManifest = {
       "enum-declaration",
       "constructor-declaration",
       "destructured-binding",
+      "accessor-declaration",
+      "declaration-merged",
     ],
     frameworks: [],
   },

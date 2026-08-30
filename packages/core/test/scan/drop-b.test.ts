@@ -39,6 +39,27 @@ describe("decideSymbolDrop — Category B rules", () => {
     expect(decideSymbolDrop(makeCandidate({ kind: "method", bodyNode: null }))).toBe("empty body")
   })
 
+  it("keeps a method whose only body came from a second declaration", () => {
+    // A getter written `get v() {}` beside a setter that does the work is one member with two
+    // bodies. Reading `bodyNode` alone would call the member ceremonial on the strength of the
+    // declaration that happens to be written first.
+    const merged = makeCandidate({
+      kind: "method",
+      bodyNode: null,
+      mergedDeclarations: [{ bodyNode: {} as OpaqueAstNode, fullNode: {} as OpaqueAstNode }],
+    })
+    expect(decideSymbolDrop(merged)).toBeNull()
+  })
+
+  it("drops a method every declaration of which left it body-less", () => {
+    const empty = makeCandidate({
+      kind: "method",
+      bodyNode: null,
+      mergedDeclarations: [{ bodyNode: null, fullNode: {} as OpaqueAstNode }],
+    })
+    expect(decideSymbolDrop(empty)).toBe("empty body")
+  })
+
   it("drops a re-export symbol via the language-plugin derivedBy marker", () => {
     expect(decideSymbolDrop(makeCandidate({ derivedBy: ["export-keyword", "re-export"] }))).toBe(
       "re-export",
