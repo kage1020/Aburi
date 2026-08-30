@@ -148,6 +148,7 @@ interface SymbolCandidate {
 
   // internal handles passed to walkBody / normalizeAst
   bodyNode: OpaqueAstNode | null
+  mergedBodyNodes?: OpaqueAstNode[]            // §4.3.1, absent when one declaration wrote it
   fullNode: OpaqueAstNode                      // signature + body
 }
 ```
@@ -161,6 +162,16 @@ A brand can be asserted rather than constructed, so the type is a contract, not 
 A plugin that has real column information may write it; nothing forbids that. The in-tree TypeScript plugin deliberately does not, so that every column in an Aburi IR comes from `textDocument/documentSymbol` ([lsp-enrichment.md](./lsp-enrichment.md) §4.2) and one convention about what a column counts. Be aware that a published column is not durable: the enrichment pass overwrites both keys on every Symbol it matches (§5), so a plugin-written column survives only where the LSP tier produced nothing — which is where it is least likely to be checked.
 
 When the plugin chooses an `extKind` from its own declarations, the chosen value must fall under manifest.provides.extKinds or extKindPrefixes. The registry detects violations at startup.
+
+#### 4.3.1 One entity, several declarations
+
+A Symbol id names an entity, not a declaration, and most languages let one entity be written more than once: a getter beside its setter, an overload beside its implementation, an interface reopened, a namespace augmenting the class above it, a partial class. **A plugin emits one SymbolCandidate for all of them.** Two candidates sharing an id is not a thinner IR but no IR at all — [ir-schema.md](./ir-schema.md) §14 invariant #1 is checked once over the finished document, outside the per-file boundary of §7.2, so the whole run ends on it and every other file goes with it.
+
+Which declaration the Symbol's scalars come from is the plugin's to decide and to say in its own tests; what the interface fixes is where the rest goes. `bodyNode` is the leading declaration's body and `mergedBodyNodes` holds the others **in source order**, so that `walkBody` and `normalizeAst` describe the entity rather than whichever declaration was written first — a `set password(v)` that hashes the value has effects, and dropping it because a getter was written above it loses them with nothing to say so.
+
+The field is optional and absent on a Symbol with one declaration, which is the ordinary case. A consumer that reads only `bodyNode` is correct on those, and every path that predates the field still is; a consumer that describes the Symbol from its bodies reads both.
+
+Nothing in the core checks that a plugin folded its declarations — the invariant catches the omission, and it catches it at the end of the run. `derivedBy` is where a plugin says a fold happened; the in-tree TypeScript plugin writes `declaration-merged`.
 
 ### 4.4 `BodyExtraction`
 
@@ -491,6 +502,15 @@ Every language plugin must pass the following tests.
 | LP6 | default export of anonymous function | name = `<default>` |
 | LP7 | `const f = () => ...` | name = `f` (the variable name becomes the qname) |
 | LP8 | nested class (`Outer.Inner.method`) | the `.` nesting in name is correct |
+| LP8a | a getter and a setter for one property | **one** SymbolCandidate. The two are one member, and one id can only carry one Symbol (§4.3.1) |
+| LP8b | LP8a's signature | the getter's. A property's type is what reading it answers; the setter's signature is the type of writing it |
+| LP8c | LP8a's bodies | both, the setter's on `mergedBodyNodes`. `walkBody` reports the calls in either of them |
+| LP8d | a getter with no setter, or a setter with no getter | one SymbolCandidate, nothing merged into it |
+| LP8e | a static accessor pair beside an instance pair of the same name | two SymbolCandidates — `Class::v` and `Class.v` are different entities |
+| LP8f | an overload declaration beside its implementation | one SymbolCandidate, and the signature and body are the **implementation's**. The overload is written first, so a rule that took the first declaration would report the member as body-less and give it the wrong parameter types |
+| LP8g | a class body of overload declarations with no implementation | no member SymbolCandidate. The same answer a top-level overload with no implementation gets, so the construct does not depend on where it is written |
+| LP8h | a declaration merged with an earlier one — a reopened interface or namespace, a namespace augmenting the class or function above it | one SymbolCandidate, carrying the earlier declaration's kind and range and **every** declaration's `derivedBy`. Anything the later declaration declares in turn (`N.b` from a reopened `namespace N`) is its own Symbol and must still be there |
+| LP8i | a file that declares nothing twice | no evidence of merging anywhere in it, and `mergedBodyNodes` absent |
 
 ### 9.2 Signature extraction
 
