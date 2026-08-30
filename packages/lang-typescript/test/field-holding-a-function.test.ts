@@ -121,10 +121,20 @@ describe("a field holding a function is a member Symbol", () => {
   })
 
   it("reports the field's own source range, not the function's", async () => {
-    const source = ["export class C {", "  create = () => {", "    inner()", "  }", "}"].join("\n")
+    // The member is declared where it is written. A decorator is inside the
+    // `public_field_definition` and outside the arrow, so the two ranges differ by the line
+    // it is on — which is what makes this readable at all.
+    const source = [
+      "export class C {",
+      "  @Inject()",
+      "  create = () => {",
+      "    inner()",
+      "  }",
+      "}",
+    ].join("\n")
     const symbol = await symbolOf(source, "ts:src/a.ts#C.create")
 
-    expect([symbol.source.startLine, symbol.source.endLine]).toEqual([2, 4])
+    expect([symbol.source.startLine, symbol.source.endLine]).toEqual([2, 5])
   })
 
   it("carries the field's decorators", async () => {

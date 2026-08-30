@@ -111,6 +111,8 @@ A class is a `pure DTO` when all of the following hold:
 - It has no boundary decorator (one that a framework plugin judged `boundary: true`)
 - The body consists solely of field declarations
 
+A field whose value is a function is a method for this rule, however the language spells it (`create = (d) => { … }`). It declares behaviour, not a shape, and a class written entirely that way is not a data model. The question is the field's value, not whether the member became a Symbol: a member the plugin could not name — a computed name, say — is still not data.
+
 The core performs this determination, but each language plugin may add auxiliary rules for pure-DTO detection (e.g. `class-validator` decorators such as `@IsString` count as decoration; anything else is an ordinary determinant).
 
 ### 4.3 Why "interface (data model)" is dropped

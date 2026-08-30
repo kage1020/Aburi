@@ -104,11 +104,13 @@ export function memberSegment(writtenName: string): string {
  * member is not on the construction path, and `class C { static constructor() {} }` is legal
  * JavaScript, which this plugin also parses: reading it as the constructor put its body on the
  * class as part of what instantiating the class runs, and gave it the instance qname, where it
- * collided with the real constructor's. A field named `constructor` is not on the path either,
- * and is refused a Symbol outright rather than reaching here.
+ * collided with the real constructor's.
+ *
+ * The member shape is not asked about, because it cannot vary: the only two shapes that reach
+ * here are a `method_definition` and a field `functionValuedField` admitted, and that refuses
+ * the name outright.
  */
 export function isConstructorMember(member: Node): boolean {
-  if (member.type !== "method_definition") return false
   if (hasChildOfType(member, "static")) return false
   const name = member.childForFieldName("name")
   return name !== null && name.text === CONSTRUCTION_SEGMENT
