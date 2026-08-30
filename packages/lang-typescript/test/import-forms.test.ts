@@ -40,8 +40,11 @@ describe("LP26f: import-equals-require binds the module object", () => {
   it("is a static edge, which is what makes it reachable by call resolution", async () => {
     const { imports } = await parse("import x = require('./mod')")
 
-    // Both resolution loops skip a dynamic edge, so `dynamic: true` here would leave the
-    // import as invisible to the call graph as no edge at all.
+    // `dynamic` means the import was written as `import()`, and this one was not. What the
+    // value buys is separate from what decides it: both loops in `callgraph.ts` that read a
+    // file's edges skip a dynamic one, so `true` here would put this import out of reach of
+    // call resolution — though the edge would still ship in the IR, where the effects and
+    // framework plugins match on `source` and never consult `dynamic`.
     expect(imports[0]?.dynamic).toBe(false)
   })
 
@@ -86,6 +89,25 @@ describe("LP26f: import-equals-require binds the module object", () => {
         recoverable: true,
       },
     ])
+  })
+
+  it.each([
+    ["a concatenation whose first operand is a literal", `import x = require("a" + b)`],
+    ["a concatenation whose second operand is a literal", `import x = require(b + "./real")`],
+    ["a second argument", "import x = require('./m', 'y')"],
+    ["a nested call", "import x = require(f('./m'))"],
+  ])("refuses a clause that did not parse — %s", async (_label, source) => {
+    const { imports, errors } = await parse(source)
+
+    // The grammar admits nothing but a string literal here, so each of these is a syntax
+    // error — but tree-sitter's recovery leaves the operand it could read as a direct child
+    // of the clause, with the `source` field attached to it. Reading it produces a wrong
+    // edge where there was a missing one: `"a"` for the first, `"./real"` for the second and
+    // `'y'` — the second argument — for the third.
+    expect(imports).toEqual([])
+    // The refusal is not what makes this quiet. The parse error is reported either way, so
+    // an author who writes one of these hears about it.
+    expect(errors.some((e) => e.message === "syntax error")).toBe(true)
   })
 
   it("keeps a require-equals beside an ordinary import, in source order", async () => {
@@ -157,8 +179,9 @@ describe("LP26e: a template the author computes stays computed", () => {
     const { imports, errors } = await parse(source)
 
     // The failure this pins is not the missing edge — it is the plausible one. Joining the
-    // fragments answers "./", "./a/b" and "/b" for the first three: each names a module the
-    // author did not write, and each can resolve to a real file in the right tree.
+    // fragments answers "./", "./a/b" and "/b" for the first three, each a module the author
+    // did not write: the first two are relative and can resolve to a real file in the right
+    // tree, and the third is an absolute-looking specifier that would be filed as a package.
     expect(imports).toEqual([])
     expect(errors).toEqual([])
   })

@@ -21,8 +21,15 @@ The require-equals edge is a **namespace** edge — `symbols: "*"` with the bind
 module object the way `import * as x from './m'` does, and call resolution acts on the
 difference: the namespace arm strips the head off `x.foo()` and looks for `foo` in the target
 file, where a `symbols: ["x"]` edge would send it looking for `x.foo` there, which the target
-does not have. `dynamic` is false for a related reason — both resolution loops skip a dynamic
-edge, so a dynamic require-equals edge would be as invisible as no edge at all.
+does not have. `dynamic` is false because the field means "written as `import()`" and this
+form is not — and because both loops in `callgraph.ts` that read a file's edges skip a
+dynamic one, the value is also what keeps this import in reach of call resolution.
+
+A clause that did not parse is not read at all. The grammar admits nothing but a string
+literal for the specifier, so `require("a" + b)` is a syntax error — but error recovery
+leaves the operand it could read as a direct child of the clause with the `source` field
+attached, and reading it would answer `a`. `require('./m', 'y')` would answer the second
+argument.
 
 A template *with* a substitution stays computed and stays silent, which is the boundary this
 change is careful about: joining a substituting template's fragments would answer `"./"` for
@@ -31,4 +38,4 @@ change is careful about: joining a substituting template's fragments would answe
 An empty specifier written in either new form (`import x = require("")`, ``import(``)``) goes
 through the same gate as `import("")` and is reported as the empty specifier it is.
 `firstNonCommentChild` moves to `ast-helpers.ts`, where the decorator reader takes it too;
-`imports.ts` drops its private copy of `findChild`.
+`imports.ts` drops its private `findChildByType`, a duplicate of `ast-helpers`' `findChild`.

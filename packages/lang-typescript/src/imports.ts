@@ -108,17 +108,23 @@ function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
  * the target file, where a `symbols: ["x"]` edge would send it looking for `x.foo` there —
  * a name the target does not have. A wrong edge is worse than the missing one this replaces.
  *
- * `dynamic` is false for the same reason it matters: both resolution loops skip a dynamic
- * edge, so marking this one dynamic would leave the import as invisible as no edge at all.
+ * `dynamic` is false by definition rather than by consequence: the field means "written as
+ * `import()`" (`lang-plugin.md` §4.2), and a require-equals is resolved when the module
+ * loads. The two loops in `callgraph.ts` that read a file's edges both skip a dynamic one
+ * today, so the value is also what keeps this edge visible to call resolution — but that is
+ * what the value buys, not what decides it.
  *
  * A clause with no binding is not something the grammar produces from valid source, and the
  * wildcard edge it falls back to still records the dependency — which is the half of the
  * edge no binding is needed to state.
  */
 function readRequireClause(statement: Node, clause: Node, errors: ParseError[]): ImportEdge[] {
-  // The specifier is a direct child of the clause. A computed argument nests its parts under
-  // an expression instead, so it is not found here and stays unread, which is the policy for
-  // every computed specifier.
+  // The grammar admits nothing but a string literal for the specifier, so a computed
+  // argument is a syntax error the parser reports for itself — but error recovery leaves the
+  // operand it could read as a direct child of the clause, with the `source` field attached
+  // to it. `require("a" + b)` would answer `a`, and `require('./m', 'y')` would answer the
+  // second argument. A clause that did not parse is not read at all.
+  if (clause.hasError) return []
   const source = readModuleSpecifier(findChild(clause, "string"), "import", errors)
   if (source === null) return []
   const line = statement.startPosition.row + 1
@@ -309,12 +315,13 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * rather than as a fault. An empty literal returns `""`, which is a different answer and is
  * the caller's to judge.
  *
- * **The result is not faithful to the source.** The named children of either node are its
- * fragments and its `escape_sequence`s, and only the fragments are read, so an escape is
- * deleted rather than decoded: `"./ab"` comes back as `./a`, and `"./e"` as `/e` —
- * which stops being relative and is then resolved as a bare package. That is a separate
- * defect from the one the caller guards, and fixing it means decoding the escapes rather
- * than skipping them.
+ * **The result is not faithful to the source.** Only the `string_fragment` children are
+ * read, and an `escape_sequence` is one of the other kinds, so an escape is deleted rather
+ * than decoded: every fragment around it is still joined, so `"./a\tb"` comes back as
+ * `./ab`. What is left can name a different module: `"\t/e"` comes back as `/e`, which is no
+ * longer relative and so is bucketed as an external package rather than resolved against the
+ * importing file. That is a separate defect from the one the caller guards, and fixing it
+ * means decoding the escapes rather than skipping them.
  *
  * It does not reach the caller's gate, though, and the reason is worth stating because it is
  * not obvious: a literal made only of escapes has zero fragments, so it falls to the
