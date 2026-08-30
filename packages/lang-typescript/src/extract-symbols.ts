@@ -120,8 +120,9 @@ function visitStatement(
     case "variable_declaration":
       for (const declarator of node.namedChildren) {
         if (declarator === null || declarator.type !== "variable_declarator") continue
-        const candidate = makeVariableCandidate(declarator, node, ctx, namespacePath)
-        if (candidate !== null) out.push(candidate)
+        for (const candidate of makeVariableCandidates(declarator, node, ctx, namespacePath)) {
+          out.push(candidate)
+        }
       }
       return
     case "expression_statement": {
@@ -190,7 +191,8 @@ function addClassAndMembers(
   for (const member of body.namedChildren) {
     if (member === null) continue
     if (member.type === "method_definition" || member.type === "method_signature") {
-      out.push(makeMethodCandidate(member, ctx, ownerChain))
+      const candidate = makeMethodCandidate(member, ctx, ownerChain)
+      if (candidate !== null) out.push(candidate)
     }
   }
 }
@@ -230,12 +232,26 @@ function makeFunctionCandidate(
   }
 }
 
+/**
+ * Null for a member whose name is computed (`[Symbol.iterator]() {}`, `["go"]() {}`).
+ *
+ * The brackets are not a name, and their text used to go into the id builder, which refused
+ * it — costing the class and every sibling member as well as the one nobody can name.
+ * Normalising the brackets into a segment is refused rather than deferred: any mangling
+ * invents a name the source does not contain, two different computed keys can collapse onto
+ * one segment, and nothing reads it back to what was written.
+ *
+ * Silently, and deliberately. A computed name is not a name static analysis can record — the
+ * position `lang-plugin.md` LP26e takes on a computed module specifier — so there is nothing
+ * to report against the source.
+ */
 function makeMethodCandidate(
   node: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
-): SymbolCandidate<Node> {
+): SymbolCandidate<Node> | null {
   const kind: SymbolKind = isConstructor(node) ? "constructor" : "method"
+  if (kind !== "constructor" && findChild(node, "computed_property_name") !== null) return null
   // Constructors do not carry a name field in the grammar, so short-circuit before the
   // fail-fast helper would trip on them.
   const methodName =
@@ -368,7 +384,28 @@ function addNamespaceAndBody(
  * on the right-hand side is treated as a top-level Symbol whose name is the variable
  * binding. Any other value (`const x = 1`) becomes a plain `const` Symbol whose signature
  * is null.
+ *
+ * A destructuring declaration (`const { GET, POST } = handlers`) declares one binding per
+ * name in the pattern, so it produces one Symbol each — which is why this answers a list.
+ * Reading the pattern's text as a name instead put `{ GET, POST }` into the id builder,
+ * which refused it, and the throw cost the file every Symbol it had.
  */
+function makeVariableCandidates(
+  declarator: Node,
+  parent: Node,
+  ctx: ExtractionContext,
+  namespacePath: readonly string[],
+): SymbolCandidate<Node>[] {
+  const nameNode = declarator.childForFieldName("name")
+  if (nameNode !== null && isBindingPattern(nameNode)) {
+    return collectPatternBindings(nameNode).map((binding) =>
+      makeDestructuredCandidate(binding, parent, ctx, namespacePath),
+    )
+  }
+  const single = makeVariableCandidate(declarator, parent, ctx, namespacePath)
+  return single === null ? [] : [single]
+}
+
 function makeVariableCandidate(
   declarator: Node,
   parent: Node,
@@ -409,6 +446,94 @@ function makeVariableCandidate(
     signature: null,
     source: makeSourceRange(parent, ctx),
     derivedBy: hasExportKeywordAncestor(parent) ? ["export-keyword"] : [],
+    bodyNode: null,
+    fullNode: parent,
+  }
+}
+
+/** The two shapes a `variable_declarator` uses in place of a name. */
+function isBindingPattern(node: Node): boolean {
+  return node.type === "object_pattern" || node.type === "array_pattern"
+}
+
+/**
+ * Every identifier a destructuring pattern *binds*, in source order.
+ *
+ * The distinction the walk has to keep is between a name being bound and a name being read.
+ * `{ a: b }` binds `b` and names the property `a` on the value; `{ a = fallback }` binds `a`
+ * and reads `fallback` from somewhere else entirely. Collecting every identifier under the
+ * pattern would declare Symbols for both of those, so each wrapper is entered through the one
+ * field that holds a binding rather than through its children.
+ *
+ * An array hole (`[, x]`) binds nothing and is not a named child, so it needs no case.
+ */
+function collectPatternBindings(pattern: Node): Node[] {
+  const out: Node[] = []
+  const visit = (node: Node): void => {
+    switch (node.type) {
+      case "identifier":
+      case "shorthand_property_identifier_pattern":
+        out.push(node)
+        return
+      case "object_pattern":
+      case "array_pattern":
+        for (const child of node.namedChildren) {
+          if (child !== null) visit(child)
+        }
+        return
+      case "pair_pattern": {
+        // The key is a `property_identifier` on the value's type, not a declaration.
+        const value = node.childForFieldName("value")
+        if (value !== null) visit(value)
+        return
+      }
+      case "object_assignment_pattern": {
+        // `left` is the binding; `right` is a default expression evaluated elsewhere.
+        const left = node.childForFieldName("left") ?? node.namedChild(0)
+        if (left !== null) visit(left)
+        return
+      }
+      case "rest_pattern": {
+        const inner = node.namedChild(0)
+        if (inner !== null) visit(inner)
+        return
+      }
+      default:
+        return
+    }
+  }
+  visit(pattern)
+  return out
+}
+
+/**
+ * One binding out of a destructuring declaration.
+ *
+ * `const` and not `function`, even when the initializer is an object of arrows: pairing a
+ * pattern key with an object-literal property is analysis this plugin does nowhere else, and
+ * claiming a kind on a guess would make the two paths disagree about what evidence a kind
+ * needs. The `source` range is the whole declaration, as it is for a plain `const` — several
+ * Symbols therefore share one range, and `destructured-binding` is what tells a reader why.
+ */
+function makeDestructuredCandidate(
+  binding: Node,
+  parent: Node,
+  ctx: ExtractionContext,
+  namespacePath: readonly string[],
+): SymbolCandidate<Node> {
+  const qname = nestedQname([...namespacePath, binding.text])
+  const derivedBy = ["destructured-binding"]
+  if (hasExportKeywordAncestor(parent)) derivedBy.push("export-keyword")
+  return {
+    id: makeTsSymbolId(currentFile(ctx), qname),
+    kind: "const",
+    extKind: null,
+    name: qname,
+    visibility: computeTopLevelVisibility(parent),
+    decorators: [],
+    signature: null,
+    source: makeSourceRange(parent, ctx),
+    derivedBy,
     bodyNode: null,
     fullNode: parent,
   }

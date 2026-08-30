@@ -736,26 +736,31 @@ describe("checkIRIntegrity #19 — Unicode normalization", () => {
     expect(message).toContain("U+00E9")
   })
 
-  it("leaves ids and Symbol.name to #17, which already refuses a non-NFC value", () => {
-    // Every one of those grammars is ASCII-only and NFC leaves ASCII alone, so a non-NFC
-    // value fails the grammar first. Two invariants for one string would have the reader
-    // chasing it twice.
-    for (const ir of [
-      (() => {
-        const doc = minimalIR()
-        doc.symbols = [makeSymbol(`ts:src/a.ts#${decomposed}`, { name: "foo" })]
-        return doc
-      })(),
-      (() => {
-        const doc = minimalIR()
-        doc.symbols = [makeSymbol("ts:src/a.ts#foo", { name: decomposed })]
-        return doc
-      })(),
-    ]) {
-      const violations = checkIRIntegrity(ir)
-      expect(violations.some((v) => v.invariant === 17)).toBe(true)
-      expect(violations.some((v) => v.invariant === 19)).toBe(false)
-    }
+  it("leaves a non-NFC Symbol id to #17, which refuses it in its own right", () => {
+    // Not because the qualified-name grammar is ASCII — it is ECMAScript's IdentifierName
+    // now, and accepts a decomposed `café`. `symbolIdViolation` carries its own NFC clause,
+    // so #17 still catches the id, and reporting it here as well would have the reader
+    // chasing one string twice.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol(`ts:src/a.ts#${decomposed}`, { name: "foo" })]
+
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(true)
+    expect(violations.some((v) => v.invariant === 19)).toBe(false)
+  })
+
+  it("reports a non-NFC Symbol.name here, because #17 stopped catching it", () => {
+    // Measured: `isQualifiedName("cafe" + U+0301)` is `true` under the widened grammar, and
+    // was `false` under the ASCII one. The exclusion that covered this field said its own
+    // condition — "should any of those grammars be widened past ASCII, its field belongs on
+    // this list" — and this is that.
+    const ir = minimalIR()
+    ir.symbols = [makeSymbol("ts:src/a.ts#foo", { name: decomposed })]
+
+    const violations = checkIRIntegrity(ir)
+    expect(violations.some((v) => v.invariant === 17)).toBe(false)
+    const nfc = violations.find((v) => v.invariant === 19)
+    expect(nfc?.message).toContain("name")
   })
 
   it("refuses NFKC as a substitute: compatibility folding is not normalization here", () => {

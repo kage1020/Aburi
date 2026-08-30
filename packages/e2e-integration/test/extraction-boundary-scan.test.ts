@@ -10,21 +10,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
  * The per-file exception boundary, reached the way a user reaches it: with the real
  * TypeScript plugin and a source file it cannot express.
  *
- * `export const { GET, POST } = handlers` — an Auth.js route file — hands `makeSymbolId` the
- * text of an `object_pattern` as a qualified name, and the id grammar refuses it. That is a
+ * `export const a🙂 = 1` hands `makeSymbolId` a qualified name carrying a character
+ * ECMAScript's IdentifierName does not admit, and the id grammar refuses it. That is a
  * `CoreError`, thrown from inside `extractSymbols`, and it is the shape that makes the
- * boundary worth having: the source is legal TypeScript, the plugin is the real one, and the
- * throw is a property of that one file. Without a boundary it costs the whole workspace.
+ * boundary worth having: tree-sitter parses the name without complaint, the plugin is the
+ * real one, and the throw is a property of that one file. Without a boundary it costs the
+ * whole workspace.
+ *
+ * The fixture used to be `export const { GET, POST } = handlers`, which extraction reads as
+ * two bindings now rather than as one unusable name. What this file needs is any construct
+ * the id grammar refuses; an emoji is one no widening will make legal, because `tsc` does not
+ * accept it either.
  *
  * The IR the surviving files produce still goes through `assertIRIntegrity`, so what comes
  * out of a run with a withdrawn file is a document and not a fragment.
  */
 
-const BAD_SOURCE = [
-  "const handlers = { GET: () => 1, POST: () => 2 }",
-  "export const { GET, POST } = handlers",
-  "",
-].join("\n")
+const BAD_SOURCE = ["export const a\u{1F642} = 1", ""].join("\n")
 
 let workRoot: string
 
@@ -81,7 +83,7 @@ describe("scan — a file the id grammar cannot express", () => {
     expect(result.extractionFailures).toEqual([
       {
         file: "src/route.ts",
-        message: expect.stringContaining("{ GET, POST }"),
+        message: expect.stringContaining("a\u{1F642}"),
         // The code separates "this source is something the plugins cannot express" from "a
         // plugin crashed" without matching on prose.
         code: "anonymous-symbol-id-attempted",
@@ -91,7 +93,7 @@ describe("scan — a file the id grammar cannot express", () => {
       {
         path: "src/route.ts",
         reason: "extraction-failed",
-        detail: expect.stringContaining("{ GET, POST }"),
+        detail: expect.stringContaining("a\u{1F642}"),
       },
     ])
   })

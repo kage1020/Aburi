@@ -105,7 +105,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 
 §14 invariant #19 checks this on a Document read off disk, scoped to the strings whose spelling decides an order or an identity. Two categories sit outside it:
 
-- **Values held to an ASCII-only grammar** - `symbols[].id`, `components[].id`, `symbols[].name`. NFC leaves ASCII alone, so a non-NFC value fails the grammar before normalization is in question, and #17 reports it. Widening one of those grammars past ASCII moves its field onto #19's list.
+- **Values #17 already refuses a non-NFC spelling of** - `components[].id`, whose grammar is ASCII kebab-case and so leaves nothing for NFC to change, and `symbols[].id`, whose constructor checks NFC in its own right rather than as a side effect of an ASCII grammar. Reporting either under #19 as well would have the reader chase one string twice. `symbols[].name` sat here on the ASCII argument alone and moved onto #19's list when the qualified-name grammar widened to ECMAScript's IdentifierName — a decomposed `café` now satisfies the grammar, so only #19 tells the two spellings apart.
 - **Strings the Document quotes** - a decorator's raw source text, a signature type. Their spelling decides nothing, and rewriting a quotation would misquote it. They still reach disk normalized, since the serializer normalizes everything.
 
 **NFC, not NFKC.** NFC composes characters that are *canonically* equivalent: one character, spelled two ways. NFKC additionally folds compatibility characters - `ﬁ` to `fi`, fullwidth `Ａ` to `A` - which are different characters. Under NFKC two Symbols whose ids differ only by such a character would collapse onto one, and quoted source text would be rewritten into something that never appeared in the file.
@@ -177,7 +177,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 
 - `<language>`: identifier declared by the language plugin (`ts`, `tsx`, `js`, `py`, `go`, `rs`, ...)
 - `<file-path>`: POSIX path relative to the workspace root (forward slashes enforced). §14 invariant #10 states the rule every path in the Document obeys; a file path adds two restrictions of its own, because it is part of an id: it holds neither `:` nor `#` (the id is split on the first of each), and it is never the bare `.` (that names the workspace root, and a directory holds no Symbol)
-- `<qualified-name>`: name unique within the file. `.` and `::` are separators that join two named constructs, so every segment they delimit is a non-empty identifier: `A.`, `.A`, `A..B` and `::` are not qualified names. `<default>` (§3.3) is the one reserved exception to the identifier rule. `Symbol.name` (§5) carries a qualified name too and obeys the same grammar — it is what `apiFingerprint` reduces to a short name, and nothing in the Document ties it to the qualified name inside the id, so §14 invariant #17 checks both
+- `<qualified-name>`: name unique within the file. `.` and `::` are separators that join two named constructs, so every segment they delimit is a non-empty identifier: `A.`, `.A`, `A..B` and `::` are not qualified names. `<default>` (§3.3) is the one reserved exception to the identifier rule. "Identifier" is ECMAScript's IdentifierName — `ID_Start`/`ID_Continue` plus `$`, `_`, ZWNJ and ZWJ — so `ユーザー取得` and `café` are qualified names, and a destructuring pattern's text or a computed member's brackets are not. `Symbol.name` (§5) carries a qualified name too and obeys the same grammar — it is what `apiFingerprint` reduces to a short name, and nothing in the Document ties it to the qualified name inside the id, so §14 invariant #17 checks both
 
 ### 3.2 Building the qualified name
 
@@ -191,6 +191,8 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | interface / type alias | `Invoice` |
 | default export (including anonymous functions/classes) | `<default>` |
 | function/class expression assigned to a variable | the variable name becomes the qname (e.g. `const handler = () => ...` → `handler`) |
+| destructuring declaration | one Symbol per **binding**, each named by the binding (e.g. `const { GET, POST } = handlers` → `GET` and `POST`). The pattern's text is not a name; `{ a: b }` binds `b`, and `{ a = fallback }` binds `a` and reads `fallback` |
+| class member with a computed name (`[Symbol.iterator]() {}`) | **no Symbol**, and no diagnostic. The brackets are not a name static analysis can record, and mangling them into a segment would invent one the source does not contain |
 
 ### 3.3 Handling anonymous symbols
 
