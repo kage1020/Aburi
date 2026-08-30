@@ -24,10 +24,11 @@ import type { Node } from "web-tree-sitter"
  * there is nothing to append.
  */
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
-  const merged = symbol.mergedBodyNodes ?? []
+  const merged = symbol.mergedDeclarations ?? []
   const primary = serialize(symbol.bodyNode ?? symbol.fullNode)
   if (merged.length === 0) return primary
-  return [primary, ...merged.map(serialize)].filter((part) => part.length > 0).join(" ")
+  const parts = [primary, ...merged.map((d) => serialize(d.bodyNode ?? d.fullNode))]
+  return parts.filter((part) => part.length > 0).join(" ")
 }
 
 function serialize(node: Node): string {

@@ -1,5 +1,11 @@
 import { CoreError } from "@aburi/core"
-import type { ExtractionContext, SymbolCandidate, SymbolKind, Visibility } from "@aburi/types"
+import type {
+  ExtractionContext,
+  MergedDeclaration,
+  SymbolCandidate,
+  SymbolKind,
+  Visibility,
+} from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, makeSourceRange, nameFieldText } from "./ast-helpers"
 import {
@@ -52,15 +58,12 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
 /**
  * Collects candidates under the rule that one entity gets one Symbol.
  *
- * The first declaration of an id claims the Symbol and every scalar on it — kind,
- * visibility, source range, signature, decorators. A later declaration of the same id does
- * not become a second Symbol; it contributes its rationale and its body instead
- * (`mergeDeclarations`).
- *
- * First wins because source order already says which declaration carries the entity:
- * TypeScript requires the class or function to precede the namespace that merges with it,
- * and requires every declaration in a merge to agree on whether it is exported. So the
- * choice is between declarations that legal source keeps in agreement.
+ * Declarations of an id accumulate in source order and fold at the end. The **leading**
+ * declaration gives the Symbol every scalar — kind, visibility, range, signature — and the
+ * rest contribute what is list-shaped; here the leader is simply the first, which is what
+ * source order already says. TypeScript requires the class or function to precede the
+ * namespace merged into it, and requires a merge's declarations to agree on whether they are
+ * exported, so the choice is between declarations legal source keeps in agreement.
  *
  * The rule is total rather than a list of the constructs known to need it. A collision this
  * absorbs is not a silent loss: the surviving Symbol carries every declaration's `derivedBy`
@@ -72,18 +75,21 @@ interface CandidateSink {
   list(): SymbolCandidate<Node>[]
 }
 
+/** Declarations of one entity, in source order. A group exists because something is in it. */
+type DeclarationGroup = [SymbolCandidate<Node>, ...SymbolCandidate<Node>[]]
+
 function makeCandidateSink(): CandidateSink {
-  const claimed = new Map<string, SymbolCandidate<Node>>()
+  const declared = new Map<string, DeclarationGroup>()
   return {
     add(candidate) {
-      const first = claimed.get(candidate.id)
-      claimed.set(
-        candidate.id,
-        first === undefined ? candidate : mergeDeclarations(first, candidate),
-      )
+      const group = declared.get(candidate.id)
+      if (group === undefined) declared.set(candidate.id, [candidate])
+      else group.push(candidate)
     },
     list() {
-      return [...claimed.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      return [...declared.values()]
+        .map((group) => foldDeclarations(group, group[0]))
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     },
   }
 }
@@ -92,34 +98,42 @@ function makeCandidateSink(): CandidateSink {
 const MERGED_DECLARATION = "declaration-merged"
 
 /**
- * Fold a later declaration into the Symbol an earlier one claimed: the scalars stay as the
- * claiming declaration wrote them, and everything list-shaped is joined.
+ * Fold every declaration of one entity into the Symbol `lead` heads: scalars are the lead's,
+ * lists are joined **in source order**, and each other declaration's nodes are carried so the
+ * body walk and the fingerprint can see the whole entity.
  *
- * Decorators are joined rather than kept from the leading declaration, because dropping one
- * changes what the Symbol *is*. `interface P {}` beside `@Controller() class P {}` is legal
- * TypeScript with the interface written first, so the leading declaration is the one that
- * carries no decorators — and a lost `boundary` decorator turns a controller into an
- * `interface (data model)` drop. They arrive in the order the fold visits the declarations,
- * so `lang-plugin.md` LP15's source ordering holds inside each declaration's own run, which
- * is the only span it is about.
+ * Both nodes are carried, not just the body. A declaration with no body — an enum, a type
+ * alias, a namespace whose statements are their own Symbols — is described by its `fullNode`,
+ * which is where `normalizeAst` already looks when a Symbol has no body. Carrying only bodies
+ * made a reopened `enum E {}` fingerprint identically to the first declaration alone, so
+ * adding, editing or deleting the second changed nothing. Only the bodies reach `walkBody`,
+ * which is what keeps a merged namespace from being walked twice — once here and once through
+ * the member Symbols its statements already produce.
+ *
+ * Decorators are joined rather than kept from the lead, because dropping one changes what the
+ * Symbol *is*: `interface P {}` beside `@Controller() class P {}` is legal with the interface
+ * written first, so the lead is the declaration carrying no decorators, and a lost `boundary`
+ * decorator turns a controller into an `interface (data model)` drop.
  */
-function mergeDeclarations(
-  claimed: SymbolCandidate<Node>,
-  later: SymbolCandidate<Node>,
+function foldDeclarations(
+  declarations: readonly SymbolCandidate<Node>[],
+  lead: SymbolCandidate<Node>,
 ): SymbolCandidate<Node> {
-  const derivedBy = [...claimed.derivedBy]
-  for (const token of [...later.derivedBy, MERGED_DECLARATION]) {
-    if (!derivedBy.includes(token)) derivedBy.push(token)
+  if (declarations.length < 2) return lead
+  const decorators: SymbolCandidate<Node>["decorators"] = []
+  const derivedBy: string[] = []
+  const merged: MergedDeclaration<Node>[] = [...(lead.mergedDeclarations ?? [])]
+  for (const declaration of declarations) {
+    decorators.push(...declaration.decorators)
+    for (const token of declaration.derivedBy) {
+      if (!derivedBy.includes(token)) derivedBy.push(token)
+    }
+    if (declaration === lead) continue
+    merged.push({ bodyNode: declaration.bodyNode, fullNode: declaration.fullNode })
+    merged.push(...(declaration.mergedDeclarations ?? []))
   }
-  const bodies = [...(claimed.mergedBodyNodes ?? [])]
-  if (later.bodyNode !== null) bodies.push(later.bodyNode)
-  bodies.push(...(later.mergedBodyNodes ?? []))
-  return {
-    ...claimed,
-    decorators: [...claimed.decorators, ...later.decorators],
-    derivedBy,
-    mergedBodyNodes: bodies,
-  }
+  derivedBy.push(MERGED_DECLARATION)
+  return { ...lead, decorators, derivedBy, mergedDeclarations: merged }
 }
 
 function visitModuleLevel(
@@ -339,11 +353,10 @@ type MemberGroup = [MemberDeclaration, ...MemberDeclaration[]]
 
 function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> {
   const lead = group.find((member) => member.isGetter) ?? group[0]
-  let folded = lead.candidate
-  for (const member of group) {
-    if (member !== lead) folded = mergeDeclarations(folded, member.candidate)
-  }
-  return folded
+  return foldDeclarations(
+    group.map((member) => member.candidate),
+    lead.candidate,
+  )
 }
 
 function makeFunctionCandidate(
@@ -508,6 +521,21 @@ function makeEnumCandidate(
   }
 }
 
+/**
+ * A namespace declares one Symbol per segment of its name, and its body is visited under all
+ * of them.
+ *
+ * `namespace A.B {}` is sugar for `namespace A { namespace B {} }` and declares both: `A` is
+ * addressable after it, so emitting only the innermost would leave a name the file defines
+ * with nothing standing for it. Reading the dotted text as one segment is what the id builder
+ * refuses — `qualified name "A.B" contains the non-identifier segment "A.B"` — and the throw
+ * cost the file every Symbol it had.
+ *
+ * The intermediate segments share the declaration's range and node with the innermost one,
+ * because the source gives them nothing of their own. Two dotted declarations under one head
+ * (`namespace A.B {}` beside `namespace A.C {}`) therefore reach the sink as two declarations
+ * of `A`, which is what they are.
+ */
 function addNamespaceAndBody(
   node: Node,
   ctx: ExtractionContext,
@@ -515,24 +543,28 @@ function addNamespaceAndBody(
   out: CandidateSink,
   callState: CallExtractionState,
 ): void {
-  const name = requireDeclarationName(node, "namespace", ctx.file.path)
-  const qname = nestedQname([...namespacePath, name])
-  out.add({
-    id: makeTsSymbolId(currentFile(ctx), qname),
-    kind: "namespace",
-    extKind: null,
-    name: qname,
-    visibility: computeTopLevelVisibility(node),
-    decorators: [],
-    signature: null,
-    source: makeSourceRange(node, ctx),
-    derivedBy: ["namespace-declaration"],
-    bodyNode: null,
-    fullNode: node,
-  })
+  const segments = requireDeclarationName(node, "namespace", ctx.file.path).split(".")
+  const path = [...namespacePath]
+  for (const segment of segments) {
+    path.push(segment)
+    const qname = nestedQname(path)
+    out.add({
+      id: makeTsSymbolId(currentFile(ctx), qname),
+      kind: "namespace",
+      extKind: null,
+      name: qname,
+      visibility: computeTopLevelVisibility(node),
+      decorators: [],
+      signature: null,
+      source: makeSourceRange(node, ctx),
+      derivedBy: ["namespace-declaration"],
+      bodyNode: null,
+      fullNode: node,
+    })
+  }
   const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
   if (body === null) return
-  visitModuleLevel(body, ctx, [...namespacePath, name], out, callState)
+  visitModuleLevel(body, ctx, path, out, callState)
 }
 
 /**

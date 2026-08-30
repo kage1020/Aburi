@@ -148,7 +148,7 @@ interface SymbolCandidate {
 
   // internal handles passed to walkBody / normalizeAst
   bodyNode: OpaqueAstNode | null
-  mergedBodyNodes?: OpaqueAstNode[]            // §4.3.1, absent when one declaration wrote it
+  mergedDeclarations?: MergedDeclaration[]     // §4.3.1, absent when one declaration wrote it
   fullNode: OpaqueAstNode                      // signature + body
 }
 ```
@@ -167,9 +167,20 @@ When the plugin chooses an `extKind` from its own declarations, the chosen value
 
 A Symbol id names an entity, not a declaration, and most languages let one entity be written more than once: a getter beside its setter, an overload beside its implementation, an interface reopened, a namespace augmenting the class above it, a partial class. **A plugin emits one SymbolCandidate for all of them.** Two candidates sharing an id is not a thinner IR but no IR at all — [ir-schema.md](./ir-schema.md) §14 invariant #1 is checked once over the finished document, outside the per-file boundary of §7.2, so the whole run ends on it and every other file goes with it.
 
-Which declaration the Symbol's scalars come from is the plugin's to decide and to say in its own tests; what the interface fixes is where the rest goes. `bodyNode` is the leading declaration's body and `mergedBodyNodes` holds the others **in source order**, so that `walkBody` and `normalizeAst` describe the entity rather than whichever declaration was written first — a `set password(v)` that hashes the value has effects, and dropping it because a getter was written above it loses them with nothing to say so.
+Which declaration leads is the plugin's to decide and to say in its own tests; what the interface fixes is where the rest goes. `bodyNode` / `fullNode` are the leading declaration's, and `mergedDeclarations` holds the others **in source order**, so that `walkBody` and `normalizeAst` describe the entity rather than whichever declaration was written first — a `set password(v)` that hashes the value has effects, and dropping it because a getter was written above it loses them with nothing to say so.
 
-The field is optional and absent on a Symbol with one declaration, which is the ordinary case. A consumer that reads only `bodyNode` is correct on those, and every path that predates the field still is; a consumer that describes the Symbol from its bodies reads both.
+```ts
+interface MergedDeclaration {
+  bodyNode: OpaqueAstNode | null
+  fullNode: OpaqueAstNode
+}
+```
+
+Each entry carries **both** nodes, for the reason the Symbol itself does: a declaration with no body — an enum, a type alias, a namespace whose statements are their own Symbols — is described by its `fullNode`, which is where `normalizeAst` already looks when a Symbol has no body. An entry holding only a body makes a reopened `enum E {}` fingerprint as though the second declaration had never been written, so adding, editing or deleting it changes nothing. Only the bodies belong in the body walk: a merged namespace walked here would be walked a second time through the member Symbols its statements already produce.
+
+Everything list-shaped on the Symbol joins the same way — `derivedBy` and `decorators` both. Dropping a merged declaration's decorators is not cosmetic: an `interface P {}` written above an `@Controller() class P {}` is legal, so the leading declaration is the one carrying none, and a lost `boundary` decorator moves the Symbol back inside the drop list ([drop-list.md](./drop-list.md) §4.1).
+
+The field is optional, **absent and never empty**, so a Symbol with one declaration — the ordinary case — does not carry the key at all. A consumer that reads only `bodyNode` is correct on those, and every path that predates the field still is; a consumer that describes the Symbol from its declarations reads both.
 
 Nothing in the core checks that a plugin folded its declarations — the invariant catches the omission, and it catches it at the end of the run. `derivedBy` is where a plugin says a fold happened; the in-tree TypeScript plugin writes `declaration-merged`.
 
@@ -504,13 +515,16 @@ Every language plugin must pass the following tests.
 | LP8 | nested class (`Outer.Inner.method`) | the `.` nesting in name is correct |
 | LP8a | a getter and a setter for one property | **one** SymbolCandidate. The two are one member, and one id can only carry one Symbol (§4.3.1) |
 | LP8b | LP8a's signature | the getter's. A property's type is what reading it answers; the setter's signature is the type of writing it |
-| LP8c | LP8a's bodies | both, the setter's on `mergedBodyNodes`. `walkBody` reports the calls in either of them |
+| LP8c | LP8a's bodies | both, the setter's on `mergedDeclarations`. `walkBody` reports the calls in either of them |
 | LP8d | a getter with no setter, or a setter with no getter | one SymbolCandidate, nothing merged into it |
 | LP8e | a static accessor pair beside an instance pair of the same name | two SymbolCandidates — `Class::v` and `Class.v` are different entities |
 | LP8f | an overload declaration beside its implementation | one SymbolCandidate, and the signature and body are the **implementation's**. The overload is written first, so a rule that took the first declaration would report the member as body-less and give it the wrong parameter types |
 | LP8g | a class body of overload declarations with no implementation | no member SymbolCandidate. The same answer a top-level overload with no implementation gets, so the construct does not depend on where it is written |
 | LP8h | a declaration merged with an earlier one — a reopened interface or namespace, a namespace augmenting the class or function above it | one SymbolCandidate, carrying the earlier declaration's kind and range and **every** declaration's `derivedBy`. Anything the later declaration declares in turn (`N.b` from a reopened `namespace N`) is its own Symbol and must still be there |
-| LP8i | a file that declares nothing twice | no evidence of merging anywhere in it, and `mergedBodyNodes` absent |
+| LP8i | a file that declares nothing twice | no evidence of merging anywhere in it, and the `mergedDeclarations` key absent — not present and empty |
+| LP8j | a merged declaration that has no body of its own — a reopened `enum` / `namespace` / type alias | its `fullNode` still reaches `normalizeAst`, so editing the second declaration changes the Symbol's normalized string |
+| LP8l | a declaration whose name spells a path the language treats as nesting — TypeScript's `namespace A.B {}` | one SymbolCandidate per segment, and the body under all of them. The dotted text is not one qualified-name segment, so feeding it to the id builder loses the whole file (§4.3) |
+| LP8k | a decorator written on a merged declaration that is not the leading one | among the Symbol's decorators. A `boundary` decorator lost here re-enters the Symbol into [drop-list.md](./drop-list.md) Category B |
 
 ### 9.2 Signature extraction
 
@@ -527,7 +541,7 @@ Every language plugin must pass the following tests.
 | ID | Input | Expected |
 |---|---|---|
 | LP14 | `@Post('/x') method()` | decorators[0] = { name: "Post", raw: "Post('/x')", arguments: ["'/x'"], boundary: `<determined by the framework plugin>`, line: ... } |
-| LP15 | two decorators | 2 entries in decorators[], **ascending by source position** — not by line, which two on one line share, and never by name, which would make a consumer that reads the first one depend on the alphabet |
+| LP15 | two decorators | 2 entries in decorators[], **ascending by source position** — not by line, which two on one line share, and never by name, which would make a consumer that reads the first one depend on the alphabet. On a Symbol several declarations wrote (§4.3.1) the order is still source position, across all of them: the lists join in declaration order, which is why the fold visits declarations in source order rather than leading declaration first |
 | LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
 | LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in source order — a comment is written wherever the author put it and does not end the run |
 | LP15c | a decorator the grammar parents *inside* the declaration rather than beside it (`@A() class C {}`, `export @A() class C {}`, `export default @A() class C {}`, `@A() abstract class C {}`) | read the same as a preceding one — where a decorator is written must not change what the Symbol reports |

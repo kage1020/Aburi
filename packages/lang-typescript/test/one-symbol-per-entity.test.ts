@@ -46,6 +46,25 @@ async function walkOf(source: string, id: string): Promise<BodyExtraction> {
   return walkBody(target, walkCtx)
 }
 
+const TWO_DOTTED = ["export namespace A.B {}", "export namespace A.C {}"].join("\n")
+
+const TWO_ENUMS = ["export enum E { A }", "export enum E { B }"].join("\n")
+
+const CLASS_AND_NAMESPACE_MEMBER = [
+  "export class C {",
+  "  m(a: string) { inner(a) }",
+  "}",
+  "export namespace C {",
+  "  export function m(b: number) { other(b) }",
+  "}",
+].join("\n")
+
+const NESTED_NAMESPACE = [
+  "export namespace Outer {",
+  "  namespace Inner { export const a = 1 }",
+  "}",
+].join("\n")
+
 describe("an overload declaration declares nothing the implementation does not", () => {
   it.each([
     ["a method", "export class Repo { find(id: string): number; find(id: any) { return 1 } }"],
@@ -135,7 +154,7 @@ describe("a getter and a setter declare one member", () => {
     const symbol = await symbolNamed(source, "ts:src/a.ts#G.v")
     expect(symbol.derivedBy).toContain("accessor-declaration")
     expect(symbol.derivedBy).not.toContain("declaration-merged")
-    expect(symbol.mergedBodyNodes ?? []).toEqual([])
+    expect("mergedDeclarations" in symbol).toBe(false)
   })
 
   it("keeps a static pair apart from an instance pair of the same name", async () => {
@@ -192,6 +211,19 @@ describe("a getter and a setter declare one member", () => {
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#Q", "ts:src/a.ts#Q.v"])
     expect(symbol.derivedBy).toContain("declaration-merged")
     expect((await walkOf(source, "ts:src/a.ts#Q.v")).calls.map((c) => c.target)).toEqual(["a", "b"])
+    expect(symbol.visibility).toBe("public")
+  })
+
+  it("reports the private one when the private one is written first", async () => {
+    // The scalars come from the leading declaration, so reordering the two members changes
+    // what the folded Symbol says it is: the public method is the one that disappears, and
+    // the survivor reports itself private. That is a property of the fold being wrong here
+    // rather than of the rule, so it is pinned where the fold is instead of smoothed over.
+    const source = "export class Q { #v(a: number) {} v(c: string) {} }"
+    const symbol = await symbolNamed(source, "ts:src/a.ts#Q.v")
+
+    expect(symbol.visibility).toBe("private")
+    expect(symbol.signature?.inputs).toEqual([{ name: "a", type: "number" }])
   })
 
   it("still says nothing about a computed accessor", async () => {
@@ -282,11 +314,38 @@ describe("merged declarations are one Symbol", () => {
     expect(normalizeAst(merged)).not.toBe(normalizeAst(onlyFirst))
   })
 
+  it("puts a reopened enum's members into the fingerprint input", async () => {
+    // An enum candidate has no `bodyNode` — its members are not Symbols — so a merged
+    // declaration reaches the fingerprint only through its `fullNode`. Carrying bodies alone
+    // made adding, editing or deleting the second `enum E {}` change nothing at all.
+    const one = await symbolNamed("export enum E { A }", "ts:src/a.ts#E")
+    const two = await symbolNamed(TWO_ENUMS, "ts:src/a.ts#E")
+    const other = await symbolNamed(TWO_ENUMS.replace("B", "ZZZ"), "ts:src/a.ts#E")
+
+    expect(normalizeAst(two)).not.toBe(normalizeAst(one))
+    expect(normalizeAst(two)).not.toBe(normalizeAst(other))
+  })
+
+  it("folds an instance member into a namespace export of the same name", async () => {
+    // `C.prototype.m` and `C.m` are two entities, and the qname convention spells both
+    // `#C.m` — only `static` gets `::`. The fold is what a duplicate id used to end the run
+    // over; it is still one Symbol where the source has two, which is why the calls it
+    // reports reach past its own range.
+    const symbol = await symbolNamed(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C.m")
+
+    expect(await idsOf(CLASS_AND_NAMESPACE_MEMBER)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.m"])
+    expect(symbol.kind).toBe("method")
+    expect(symbol.source.startLine).toBe(2)
+    expect(
+      (await walkOf(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C.m")).calls.map((c) => c.line),
+    ).toEqual([2, 5])
+  })
+
   it("says nothing about merging on a file that merges nothing", async () => {
     const symbols = await symbolsOf("export class A { m() {} }\nexport interface I {}")
     for (const symbol of symbols) {
       expect(symbol.derivedBy).not.toContain("declaration-merged")
-      expect(symbol.mergedBodyNodes ?? []).toEqual([])
+      expect("mergedDeclarations" in symbol).toBe(false)
     }
   })
 })
@@ -320,11 +379,51 @@ describe("an unexported namespace is a declaration, not an expression", () => {
     ])
   })
 
+  it("reads a namespace nested inside another one", async () => {
+    // Load-bearing ordering: the unwrap runs before the guard that stops a namespace-scoped
+    // expression statement from being read as a call, so an inner namespace is reached.
+    expect(await idsOf(NESTED_NAMESPACE)).toEqual([
+      "ts:src/a.ts#Outer",
+      "ts:src/a.ts#Outer.Inner",
+      "ts:src/a.ts#Outer.Inner.a",
+    ])
+  })
+
   it("does not shadow call extraction on an ordinary expression statement", async () => {
     // The unwrap is why an expression statement is looked at twice, so the reading it was
     // already there for has to survive it: a promoted call is the other thing an expression
     // statement can be.
     const source = "import { app } from './app'\napp.get('/users', () => 1)\n"
     expect(await idsOf(source)).toContain("ts:src/a.ts#app__get__$users__d0")
+  })
+})
+
+describe("a dotted namespace declares each of its segments", () => {
+  // `namespace A.B {}` is sugar for `namespace A { namespace B {} }`, and reading the dotted
+  // text as one qualified-name segment is what the id builder refuses. Two of the three
+  // spellings threw before this change and cost the file every Symbol it had; the unexported
+  // one produced nothing at all, which is how it went unnoticed for so long.
+  it.each([
+    ["unexported", "namespace A.B { export const x = 1 }"],
+    ["exported", "export namespace A.B { export const x = 1 }"],
+    ["the module spelling", "module A.B { export const x = 1 }"],
+  ])("declares the head, the tail and the body — %s", async (_label, source) => {
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#A", "ts:src/a.ts#A.B", "ts:src/a.ts#A.B.x"])
+  })
+
+  it("declares three segments for a three-part name", async () => {
+    expect(await idsOf("export namespace My.App.Utils {}")).toEqual([
+      "ts:src/a.ts#My",
+      "ts:src/a.ts#My.App",
+      "ts:src/a.ts#My.App.Utils",
+    ])
+  })
+
+  it("gives two dotted declarations under one head a single head Symbol", async () => {
+    const source = TWO_DOTTED
+    const head = await symbolNamed(source, "ts:src/a.ts#A")
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#A", "ts:src/a.ts#A.B", "ts:src/a.ts#A.C"])
+    expect(head.derivedBy).toContain("declaration-merged")
   })
 })

@@ -27,6 +27,12 @@ export function classifySymbolDropHint(
   symbol: SymbolCandidate<Node>,
   _ctx: ExtractionContext,
 ): DropHint | null {
+  // A boundary decorator overrides every hint below, the way it overrides every core rule in
+  // `decideSymbolDrop` — `drop-list.md` §4.1. The check has to be here as well as there:
+  // `decideDropReason` asks core first, core answers `null` on a boundary, and then asks this.
+  // So an unguarded arm here is the one that decides, and a `@Controller()` class merged into
+  // an interface written above it was dropped as a data model.
+  if (symbol.decorators.some((d) => d.boundary)) return null
   switch (symbol.kind) {
     case "interface":
       return { reason: "interface (data model)", category: "B" }
@@ -43,15 +49,18 @@ export function classifySymbolDropHint(
 }
 
 /**
- * A class Symbol whose body has nothing but field declarations (no methods, no boundary
- * decorators) is a DTO. A class with only static / readonly literal fields is treated as
- * pure constants.
+ * A class Symbol whose bodies have nothing but field declarations is a DTO. A class with only
+ * static / readonly literal fields is treated as pure constants. Bodies, plural: a class
+ * merged with a later `class C {}` contributes each of them, and a member found in any one of
+ * them is a member the class has.
  */
 function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
-  const bodies = bodyNodesOf(symbol)
+  // Class bodies only. A `class C {}` merged with an `interface C {}` above it carries the
+  // interface's `interface_body` too, and its `method_signature` members would read as
+  // methods the class does not have — turning `pure constants` into `pure DTO`, and a DTO
+  // into a Symbol that is not dropped at all.
+  const bodies = bodyNodesOf(symbol).filter((body) => body.type === "class_body")
   if (bodies.length === 0) return null
-  const hasBoundary = symbol.decorators.some((d) => d.boundary)
-  if (hasBoundary) return null
 
   let hasMethod = false
   let allStaticLiteral = true

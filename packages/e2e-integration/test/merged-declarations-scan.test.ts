@@ -131,5 +131,9 @@ describe("scan — a workspace whose entities are declared more than once", () =
     expect(value?.derivedBy).toContain("accessor-declaration")
     expect(value?.derivedBy).toContain("declaration-merged")
     expect(value?.calls?.map((c) => c.target)).toContain("audit")
+    // The property survives the drop list too. The getter's body is `return this.#v` and the
+    // setter's is where the work is, so a Symbol described by its leading declaration alone
+    // would have to answer this differently.
+    expect(value?.dropped).toBe(false)
   })
 })

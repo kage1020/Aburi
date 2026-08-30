@@ -46,13 +46,17 @@ describe("decideSymbolDrop — Category B rules", () => {
     const merged = makeCandidate({
       kind: "method",
       bodyNode: null,
-      mergedBodyNodes: [{} as OpaqueAstNode],
+      mergedDeclarations: [{ bodyNode: {} as OpaqueAstNode, fullNode: {} as OpaqueAstNode }],
     })
     expect(decideSymbolDrop(merged)).toBeNull()
   })
 
-  it("drops a method whose declarations all left it body-less", () => {
-    const empty = makeCandidate({ kind: "method", bodyNode: null, mergedBodyNodes: [] })
+  it("drops a method every declaration of which left it body-less", () => {
+    const empty = makeCandidate({
+      kind: "method",
+      bodyNode: null,
+      mergedDeclarations: [{ bodyNode: null, fullNode: {} as OpaqueAstNode }],
+    })
     expect(decideSymbolDrop(empty)).toBe("empty body")
   })
 

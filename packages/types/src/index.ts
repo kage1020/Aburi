@@ -116,6 +116,7 @@ export type {
   LanguageCapabilities,
   LanguagePlugin,
   Logger,
+  MergedDeclaration,
   OpaqueAstNode,
   OwnerSummary,
   ParsedTree,

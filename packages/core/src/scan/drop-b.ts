@@ -23,8 +23,8 @@ export function decideSymbolDrop(symbol: SymbolCandidate<OpaqueAstNode>): string
   // Empty function / method bodies are ceremonial — abstract stubs, no-op adapters,
   // decorator markers. No body node at all means the language plugin flagged the Symbol as
   // body-less; a further check would need AST knowledge and belongs in `symbolDropHint`.
-  // `mergedBodyNodes` counts, because a Symbol several declarations wrote is body-less only
-  // when none of them gave it one.
+  // A merged declaration counts, because a Symbol several declarations wrote is body-less
+  // only when none of them gave it one.
   if ((symbol.kind === "function" || symbol.kind === "method") && !hasAnyBody(symbol)) {
     return "empty body"
   }
@@ -39,6 +39,6 @@ export function decideSymbolDrop(symbol: SymbolCandidate<OpaqueAstNode>): string
 
 function hasAnyBody(symbol: SymbolCandidate<OpaqueAstNode>): boolean {
   if (symbol.bodyNode !== null) return true
-  const merged = symbol.mergedBodyNodes
-  return merged !== undefined && merged.length > 0
+  const merged = symbol.mergedDeclarations ?? []
+  return merged.some((declaration) => declaration.bodyNode !== null)
 }
