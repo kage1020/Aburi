@@ -30,8 +30,34 @@ const LANGUAGE_ID_PATTERN = /^[a-z][a-z0-9]*$/
  */
 export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 
-/** Identifier-like segment that may appear in a qualified name (no separators, no spaces). */
-const QNAME_SEGMENT_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+/**
+ * Identifier-like segment that may appear in a qualified name (no separators, no spaces).
+ *
+ * ECMAScript's IdentifierName, less the `\u` escape forms no source has to use: a start
+ * character is `ID_Start`, `$` or `_`, and a part character is `ID_Continue` or `$`.
+ *
+ * Only `$` and `_` are spelled out, and each for its own measured reason. `$` is in neither
+ * property, so it is named in both classes. `_` is in `ID_Continue` and not in `ID_Start`, so
+ * it is named in the first only. ZWNJ and ZWJ — which Persian and Arabic-script identifiers
+ * use to control ligature shaping, and which ECMAScript names separately — are already in
+ * `ID_Continue` here, so naming them again would say nothing.
+ *
+ * "Here" is load-bearing: `\p{ID_Continue}` resolves against the engine's Unicode tables, and
+ * this was measured on the Node version the workspace pins (`engines.node >= 24`, which is
+ * what CI runs). Lowering that floor is the change that would put ZWNJ and ZWJ back outside
+ * the escape, so it is the change that would have to name them again.
+ *
+ * The ASCII-only grammar this replaces refused names `schema/aburi.ir.v1.json#/$defs/SymbolId`
+ * already accepts — its pattern is `^[a-z][a-z0-9]*:[^#\\]+#[^\\]+$` — so a Japanese or
+ * accented declaration threw here and cost its whole file at the per-file boundary. Widening
+ * closes a gap between the two rather than opening one, and `lang-plugin.md` §3.2 says a qname
+ * the grammar cannot express is a reason to widen the grammar rather than to work around it.
+ *
+ * What it still refuses is what is not a name at all: a destructuring pattern's text, a
+ * computed member's brackets. Those are the plugin's to stop sending, not this pattern's to
+ * accommodate.
+ */
+const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 /**
  * Prefixes that make a path absolute rather than workspace-relative. The Windows drive
@@ -419,10 +445,11 @@ export function toPosixRelative(rawPath: string): string {
  * introduce a separator: the only characters whose NFC form is ASCII are U+037E, U+1FEF
  * and U+212A, mapping to `;`, a backtick and `K`.
  *
- * Only the file path can differ in practice. `posixWorkspaceRelativeViolation` imposes no
- * ASCII restriction, whereas the language and qualified-name grammars are ASCII-only and
- * so normalize to themselves; those two are covered anyway, so widening either grammar
- * does not quietly reopen this.
+ * The file path and the qualified name can both differ in practice — neither grammar is
+ * ASCII-only — and the argument above is what covers them: a decomposed `café` normalizes
+ * to a composed one and is checked in that spelling, and nothing it could normalize to is a
+ * separator. Only the language token is ASCII by its own grammar and so normalizes to
+ * itself.
  */
 function normalizeParts(parts: SymbolIdParts): SymbolIdParts {
   return {

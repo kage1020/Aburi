@@ -237,18 +237,15 @@ describe("runScan — config-supplied publicApi", () => {
  * IR is still written — so the exit code is the only thing left to tell a CI job that
  * something in the run is broken rather than merely partial.
  *
- * `export const { GET, POST } = handlers` is the reachable trigger with real plugins: the
- * text of the destructuring pattern reaches `makeSymbolId` as a qualified name and the id
- * grammar refuses it.
+ * `export const a🙂 = 1` is the reachable trigger with real plugins: tree-sitter parses the
+ * name, `makeSymbolId` is handed a qualified name carrying a character ECMAScript's
+ * IdentifierName does not admit, and the id grammar refuses it. The destructuring pattern
+ * that used to sit here is read as its bindings now.
  */
 describe("runScan — a file a plugin threw on", () => {
   beforeEach(async () => {
     await mkdir(resolve(scratch, "src"), { recursive: true })
-    await writeFile(
-      resolve(scratch, "src", "route.ts"),
-      "const handlers = { GET: 1, POST: 2 }\nexport const { GET, POST } = handlers\n",
-      "utf8",
-    )
+    await writeFile(resolve(scratch, "src", "route.ts"), "export const a\u{1F642} = 1\n", "utf8")
     await writeFile(
       resolve(scratch, "src", "ok.ts"),
       "export function ok() {\n  return 1\n}\n",
@@ -276,7 +273,7 @@ describe("runScan — a file a plugin threw on", () => {
     expect(report.extractionFailures).toEqual([
       {
         file: "src/route.ts",
-        message: expect.stringContaining("{ GET, POST }"),
+        message: expect.stringContaining("a\u{1F642}"),
         code: "anonymous-symbol-id-attempted",
       },
     ])
@@ -299,14 +296,14 @@ describe("runScan — a file a plugin threw on", () => {
     // The reason that earned the 3, and the file that earned it, on the reader's screen —
     // the message being the plugin's own account of what it refused.
     expect(stderr.text()).toContain("⚠ extraction-failed (1) — a plugin threw while extracting.")
-    expect(stderr.text()).toContain('    src/route.ts: qualified name "{ GET, POST }"')
+    expect(stderr.text()).toContain('    src/route.ts: qualified name "a\u{1F642}"')
   })
 
   it("caps the list, because a broken plugin rejects every file", async () => {
     // A plugin broken enough to reject one file usually rejects them all, and the
     // untruncated list is then the whole workspace — which on CI scrolls every other
     // warning out of the log it was meant to appear in.
-    const bad = ["const h = { GET: 1, POST: 2 }", "export const { GET, POST } = h", ""].join("\n")
+    const bad = ["export const a\u{1F642} = 1", ""].join("\n")
     for (let i = 0; i < 14; i++) {
       await writeFile(resolve(scratch, "src", `r${i}.ts`), bad, "utf8")
     }
@@ -341,7 +338,7 @@ describe("runScan — a file a plugin threw on", () => {
       cwd: scratch,
     })
     expect(stderr.text()).toContain("src/route.ts: ")
-    expect(stderr.text()).toContain("{ GET, POST }")
+    expect(stderr.text()).toContain("a\u{1F642}")
   })
 })
 

@@ -481,9 +481,9 @@ describe("a fault in the plugin set is not a per-file fault", () => {
   it("absorbs a coded error that describes the file rather than the wiring", async () => {
     // `anonymous-symbol-id-attempted` is the reachable one: a declaration whose qualified
     // name the id grammar refuses. It is a property of what that file contains.
-    const error = new CoreError('qualified name "{ GET, POST }" contains a non-identifier', {
+    const error = new CoreError('qualified name "a\u{1F642}" contains a non-identifier', {
       code: "anonymous-symbol-id-attempted",
-      value: "{ GET, POST }",
+      value: "a\u{1F642}",
     })
     const { result } = await run({
       language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error }),
@@ -495,9 +495,9 @@ describe("a fault in the plugin set is not a per-file fault", () => {
   it("keeps the code beside the message, so a caller need not match on text", async () => {
     // The difference between "this source is something the plugins cannot express" and "a
     // plugin crashed" is the first thing a reader wants, and the message is prose.
-    const error = new CoreError('qualified name "{ GET, POST }" contains a non-identifier', {
+    const error = new CoreError('qualified name "a\u{1F642}" contains a non-identifier', {
       code: "anonymous-symbol-id-attempted",
-      value: "{ GET, POST }",
+      value: "a\u{1F642}",
     })
     const { result } = await run({
       language: stubLanguage({ stage: "extractSymbols", on: "bad.stub", error }),

@@ -293,10 +293,16 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
  *
  * Two exclusions, each because the field is already covered:
  *
- * - `symbols[].id`, `components[].id` and `symbols[].name` are left to #17. Every one of
- *   those grammars is ASCII-only, and NFC leaves ASCII alone, so a non-NFC value fails the
- *   grammar first. Reporting it here as well would have the reader chase one string twice.
- *   Should any of those grammars be widened past ASCII, its field belongs on this list.
+ * - `components[].id` and `symbols[].id` are left to #17, which refuses a non-NFC value for
+ *   each of them — the Component id because its grammar is ASCII kebab-case and NFC leaves
+ *   ASCII alone, the Symbol id because `symbolIdViolation` checks NFC in its own right, not
+ *   as a side effect of an ASCII grammar. Reporting either here as well would have the
+ *   reader chase one string twice.
+ * - `symbols[].name` used to sit beside them and no longer can. It is checked by
+ *   `isQualifiedName`, which has no NFC clause of its own and relied on the qualified-name
+ *   grammar being ASCII — and that grammar is ECMAScript's IdentifierName now, so a
+ *   decomposed `café` passes #17 and only this check tells the two spellings apart.
+ *   Measured, not assumed.
  * - Strings the Document only quotes — a decorator's raw source text, a signature type —
  *   decide nothing by their spelling, and normalizing a quotation would misquote it. They
  *   still reach disk normalized, because the serializer normalizes everything.
@@ -325,6 +331,7 @@ function checkUnicodeNormalization(ir: IR, out: IntegrityViolation[]): void {
     }
   }
   for (const symbol of ir.symbols) {
+    reportUnnormalized(symbol.name, symbol.id, "name", out)
     reportUnnormalized(symbol.source.file, symbol.id, "source.file", out)
     for (const [index, effect] of symbol.effects.entries()) {
       // Indexed, not keyed by `effect.id`: the effect id is a vocabulary term and one Symbol
