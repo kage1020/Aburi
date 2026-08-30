@@ -145,6 +145,20 @@ export interface SymbolCandidate<TNode = OpaqueAstNode> {
   /** Language-level rationale, e.g. `["export-keyword"]`. */
   derivedBy: string[]
   bodyNode: TNode | null
+  /**
+   * Bodies of the further declarations that merged into this Symbol, in source order.
+   *
+   * One entity can be written as several declarations — a getter beside its setter, an
+   * overload beside its implementation, an interface reopened, a namespace augmenting the
+   * class it follows. All of those are one Symbol, and `bodyNode` is the one the Symbol's
+   * scalars come from; the rest arrive here so that `walkBody` and `normalizeAst` see the
+   * whole entity rather than the declaration that happened to be written first.
+   *
+   * Absent means the Symbol has one declaration, which is the ordinary case — a consumer
+   * that reads only `bodyNode` is then complete, and every path that was correct before the
+   * field existed still is.
+   */
+  mergedBodyNodes?: TNode[]
   fullNode: TNode
 }
 

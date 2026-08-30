@@ -34,22 +34,86 @@ function requireDeclarationName(node: Node, kind: string, file: string): string 
  *   - decorators (raw + arguments, boundary defaults to false)
  *   - signature (function-like nodes only)
  *   - the tree-sitter node handle for walkBody / normalizeAst
+ *
+ * One entity gets one candidate, however many declarations wrote it. TypeScript lets an
+ * accessor pair, an overload and its implementation, and a merged interface / namespace all
+ * name the same thing, and answering one candidate per *declaration* put two Symbols under
+ * one id — which integrity invariant #1 refuses for the whole document, not for the file
+ * that wrote it. See `makeCandidateSink` for what the second declaration contributes.
  */
 export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandidate<Node>[] {
-  const out: SymbolCandidate<Node>[] = []
   const root = tree.rootNode
-  if (root === null) return out
-  const callState = makeCallExtractionState()
-  visitModuleLevel(root, ctx, [], out, callState)
-  out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-  return out
+  if (root === null) return []
+  const out = makeCandidateSink()
+  visitModuleLevel(root, ctx, [], out, makeCallExtractionState())
+  return out.list()
+}
+
+/**
+ * Collects candidates under the rule that one entity gets one Symbol.
+ *
+ * The first declaration of an id claims the Symbol and every scalar on it — kind,
+ * visibility, source range, signature, decorators. A later declaration of the same id does
+ * not become a second Symbol; it contributes its rationale and its body instead
+ * (`mergeDeclarations`).
+ *
+ * First wins because source order already says which declaration carries the entity:
+ * TypeScript requires the class or function to precede the namespace that merges with it,
+ * and requires every declaration in a merge to agree on whether it is exported. So the
+ * choice is between declarations that legal source keeps in agreement.
+ *
+ * The rule is total rather than a list of the constructs known to need it. A collision this
+ * absorbs is not a silent loss: the surviving Symbol carries every declaration's `derivedBy`
+ * plus `declaration-merged`, so the merge is readable in the IR — where the alternative was
+ * a run that ended with one violation and no document at all.
+ */
+interface CandidateSink {
+  add(candidate: SymbolCandidate<Node>): void
+  list(): SymbolCandidate<Node>[]
+}
+
+function makeCandidateSink(): CandidateSink {
+  const claimed = new Map<string, SymbolCandidate<Node>>()
+  return {
+    add(candidate) {
+      const first = claimed.get(candidate.id)
+      claimed.set(
+        candidate.id,
+        first === undefined ? candidate : mergeDeclarations(first, candidate),
+      )
+    },
+    list() {
+      return [...claimed.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    },
+  }
+}
+
+/** Rationale recorded on a Symbol more than one declaration wrote. */
+const MERGED_DECLARATION = "declaration-merged"
+
+/**
+ * Fold a later declaration into the Symbol an earlier one claimed: union the rationale,
+ * append the body. Scalars stay as the claiming declaration wrote them.
+ */
+function mergeDeclarations(
+  claimed: SymbolCandidate<Node>,
+  later: SymbolCandidate<Node>,
+): SymbolCandidate<Node> {
+  const derivedBy = [...claimed.derivedBy]
+  for (const token of [...later.derivedBy, MERGED_DECLARATION]) {
+    if (!derivedBy.includes(token)) derivedBy.push(token)
+  }
+  const bodies = [...(claimed.mergedBodyNodes ?? [])]
+  if (later.bodyNode !== null) bodies.push(later.bodyNode)
+  bodies.push(...(later.mergedBodyNodes ?? []))
+  return { ...claimed, derivedBy, mergedBodyNodes: bodies }
 }
 
 function visitModuleLevel(
   parent: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
-  out: SymbolCandidate<Node>[],
+  out: CandidateSink,
   callState: CallExtractionState,
 ): void {
   for (const stmt of parent.namedChildren) {
@@ -62,7 +126,7 @@ function visitStatement(
   node: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
-  out: SymbolCandidate<Node>[],
+  out: CandidateSink,
   callState: CallExtractionState,
 ): void {
   if (node.type === "export_statement") {
@@ -81,7 +145,7 @@ function visitStatement(
   switch (node.type) {
     case "function_declaration":
     case "generator_function_declaration":
-      out.push(makeFunctionCandidate(node, ctx, namespacePath))
+      out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
     case "arrow_function":
@@ -89,7 +153,7 @@ function visitStatement(
       // of `export default`. Non-default anonymous expressions live inside another
       // Symbol's body and are covered there.
       if (isDefaultExport(node)) {
-        out.push(makeFunctionCandidate(node, ctx, namespacePath))
+        out.add(makeFunctionCandidate(node, ctx, namespacePath))
       }
       return
     case "class_declaration":
@@ -103,13 +167,13 @@ function visitStatement(
       }
       return
     case "interface_declaration":
-      out.push(makeInterfaceCandidate(node, ctx, namespacePath))
+      out.add(makeInterfaceCandidate(node, ctx, namespacePath))
       return
     case "type_alias_declaration":
-      out.push(makeTypeAliasCandidate(node, ctx, namespacePath))
+      out.add(makeTypeAliasCandidate(node, ctx, namespacePath))
       return
     case "enum_declaration":
-      out.push(makeEnumCandidate(node, ctx, namespacePath))
+      out.add(makeEnumCandidate(node, ctx, namespacePath))
       return
     case "internal_module":
     case "module":
@@ -121,11 +185,21 @@ function visitStatement(
       for (const declarator of node.namedChildren) {
         if (declarator === null || declarator.type !== "variable_declarator") continue
         for (const candidate of makeVariableCandidates(declarator, node, ctx, namespacePath)) {
-          out.push(candidate)
+          out.add(candidate)
         }
       }
       return
     case "expression_statement": {
+      // An unexported `namespace` at statement position is parented under an expression
+      // statement — measured: every one of them, not only a repeated one and not only after
+      // a `}`. Reading through the wrapper is what makes an unexported namespace a
+      // declaration at all; without it the statement switch never saw one, and the namespace
+      // lost its own Symbol and everything declared inside it.
+      const wrapped = wrappedDeclaration(node)
+      if (wrapped !== null) {
+        visitStatement(wrapped, ctx, namespacePath, out, callState)
+        return
+      }
       // Namespace-scoped expression statements are extremely rare in TypeScript modules,
       // and the extKind vocabulary that consumes call symbols (framework:express:*) is
       // module-scoped by construction. Only promote calls at the true module top level to
@@ -133,7 +207,7 @@ function visitStatement(
       // pre-extension.
       if (namespacePath.length !== 0) return
       const candidate = visitCallStatement(node, ctx, callState)
-      if (candidate !== null) out.push(candidate)
+      if (candidate !== null) out.add(candidate)
       return
     }
     default:
@@ -141,11 +215,28 @@ function visitStatement(
   }
 }
 
+/**
+ * The declaration an expression statement is standing in front of, or null when it really is
+ * an expression.
+ *
+ * Only `internal_module` — the `namespace X {}` spelling — is wrapped this way; the `module
+ * X {}` spelling arrives as a bare statement, and so does every other declaration form. The
+ * set is a measurement of this grammar rather than a category, so it is written as one.
+ */
+const WRAPPED_DECLARATION_TYPES: ReadonlySet<string> = new Set(["internal_module"])
+
+function wrappedDeclaration(statement: Node): Node | null {
+  if (statement.namedChildCount !== 1) return null
+  const only = statement.namedChild(0)
+  if (only === null || !WRAPPED_DECLARATION_TYPES.has(only.type)) return null
+  return only
+}
+
 function addClassAndMembers(
   node: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
-  out: SymbolCandidate<Node>[],
+  out: CandidateSink,
 ): void {
   const className = nameFieldText(node)
   const isDefault = isDefaultExport(node)
@@ -177,7 +268,7 @@ function addClassAndMembers(
     bodyNode: node.childForFieldName("body"),
     fullNode: node,
   }
-  out.push(candidate)
+  out.add(candidate)
 
   // Members are only walked for named classes. Anonymous default classes
   // (`export default class { m() {} }`) do not have a documented member qname
@@ -187,14 +278,59 @@ function addClassAndMembers(
   // to get member Symbols. Deferred alongside the anonymous-scope proposal.
   const body = node.childForFieldName("body")
   if (body === null || className === null) return
-  const ownerChain = [...namespacePath, className]
+  addClassMembers(body, ctx, [...namespacePath, className], out)
+}
+
+/**
+ * One candidate per member, not per member declaration.
+ *
+ * `method_signature` is skipped outright: inside a class body it is an overload declaration,
+ * and the implementation beside it carries the body and the parameter types the member is
+ * actually called with. Top-level overloads have always behaved this way — `function_signature`
+ * is absent from the statement switch — and a class has to match, or the same source answers
+ * differently depending on where it is written. A class body with signatures and no
+ * implementation therefore declares no members, which is what `tsc` calls TS2391 anyway.
+ *
+ * What is left can still name one member twice: `get v()` beside `set v(n)` is one property,
+ * and two `method_definition` nodes. Those fold into one candidate, and the getter is the one
+ * that claims it — a property's type is what reading it answers, so taking the setter's
+ * signature would report the member as `(n) => void`.
+ */
+function addClassMembers(
+  body: Node,
+  ctx: ExtractionContext,
+  ownerChain: readonly string[],
+  out: CandidateSink,
+): void {
+  const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
-    if (member === null) continue
-    if (member.type === "method_definition" || member.type === "method_signature") {
-      const candidate = makeMethodCandidate(member, ctx, ownerChain)
-      if (candidate !== null) out.push(candidate)
-    }
+    if (member === null || member.type !== "method_definition") continue
+    const candidate = makeMethodCandidate(member, ctx, ownerChain)
+    if (candidate === null) continue
+    const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
+    const group = declared.get(candidate.id)
+    if (group === undefined) declared.set(candidate.id, [entry])
+    else group.push(entry)
   }
+  for (const group of declared.values()) out.add(foldMemberGroup(group))
+}
+
+/** One `method_definition`, with the one thing about it that decides which of a pair leads. */
+interface MemberDeclaration {
+  candidate: SymbolCandidate<Node>
+  isGetter: boolean
+}
+
+/** Declarations of one member, in source order. A group exists because something is in it. */
+type MemberGroup = [MemberDeclaration, ...MemberDeclaration[]]
+
+function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> {
+  const lead = group.find((member) => member.isGetter) ?? group[0]
+  let folded = lead.candidate
+  for (const member of group) {
+    if (member !== lead) folded = mergeDeclarations(folded, member.candidate)
+  }
+  return folded
 }
 
 function makeFunctionCandidate(
@@ -273,6 +409,11 @@ function makeMethodCandidate(
       : "public"
   const derivedBy: string[] = [isStatic ? "static-method" : "class-method"]
   if (kind === "constructor") derivedBy.push("constructor-declaration")
+  // `get` and `set` are anonymous tokens on the same `method_definition` a plain method
+  // uses, so nothing else on the Symbol says the member is a property rather than a call.
+  if (hasChildOfType(node, "get") || hasChildOfType(node, "set")) {
+    derivedBy.push("accessor-declaration")
+  }
   return {
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind,
@@ -358,12 +499,12 @@ function addNamespaceAndBody(
   node: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
-  out: SymbolCandidate<Node>[],
+  out: CandidateSink,
   callState: CallExtractionState,
 ): void {
   const name = requireDeclarationName(node, "namespace", ctx.file.path)
   const qname = nestedQname([...namespacePath, name])
-  out.push({
+  out.add({
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind: "namespace",
     extKind: null,

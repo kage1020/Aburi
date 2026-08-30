@@ -1,5 +1,6 @@
 import type { DropHint, ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+import { bodyNodesOf } from "./ast-helpers"
 
 /**
  * Category-A skip patterns owned by this language plugin. Added on top of the core
@@ -47,15 +48,15 @@ export function classifySymbolDropHint(
  * pure constants.
  */
 function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
-  const body = symbol.bodyNode
-  if (body === null) return null
+  const bodies = bodyNodesOf(symbol)
+  if (bodies.length === 0) return null
   const hasBoundary = symbol.decorators.some((d) => d.boundary)
   if (hasBoundary) return null
 
   let hasMethod = false
   let allStaticLiteral = true
   let hasAnyField = false
-  for (const member of body.namedChildren) {
+  for (const member of bodies.flatMap((body) => body.namedChildren)) {
     if (member === null) continue
     switch (member.type) {
       case "method_definition":
@@ -119,11 +120,16 @@ function isLiteralNode(node: Node): boolean {
  * are legitimate stubs and users often mean them to survive.
  */
 function classifyFunctionBody(symbol: SymbolCandidate<Node>): DropHint | null {
-  const body = symbol.bodyNode
-  if (body === null) return null
-  if (body.type !== "statement_block" && body.type !== "class_body") return null
-  const hasStatement = body.namedChildren.some(
-    (c) => c !== null && c.type !== "comment" && c.type !== "hash_bang_line",
+  const bodies = bodyNodesOf(symbol).filter(
+    (body) => body.type === "statement_block" || body.type === "class_body",
+  )
+  if (bodies.length === 0) return null
+  // Every body, because one of them having something to say is enough: a property whose
+  // getter is `{}` and whose setter validates is not ceremony.
+  const hasStatement = bodies.some((body) =>
+    body.namedChildren.some(
+      (c) => c !== null && c.type !== "comment" && c.type !== "hash_bang_line",
+    ),
   )
   if (!hasStatement) return { reason: "empty body", category: "B" }
   return null

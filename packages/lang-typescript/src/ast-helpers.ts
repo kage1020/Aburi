@@ -1,5 +1,19 @@
-import type { ExtractionContext, WrittenSourceRange } from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate, WrittenSourceRange } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+
+/**
+ * Every body a Symbol was declared with, in source order: the one its scalars came from,
+ * followed by the ones later declarations of the same entity contributed.
+ *
+ * A getter and its setter are one member written twice, and so are an interface reopened and
+ * a namespace augmenting the class above it. Anything that reads a body to describe the
+ * Symbol — the body walk, the fingerprint, the empty-body hint — has to read all of them, or
+ * it describes whichever declaration was written first.
+ */
+export function bodyNodesOf(symbol: SymbolCandidate<Node>): Node[] {
+  const merged = symbol.mergedBodyNodes ?? []
+  return symbol.bodyNode === null ? [...merged] : [symbol.bodyNode, ...merged]
+}
 
 /**
  * The single writer of `SourceRange` in this plugin — both the declaration extractor and

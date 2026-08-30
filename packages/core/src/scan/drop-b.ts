@@ -21,10 +21,11 @@ export function decideSymbolDrop(symbol: SymbolCandidate<OpaqueAstNode>): string
   if (symbol.kind === "type") return "type alias"
 
   // Empty function / method bodies are ceremonial — abstract stubs, no-op adapters,
-  // decorator markers. `bodyNode === null` means the language plugin flagged the
-  // Symbol as body-less; a further check would need AST knowledge and belongs in
-  // `symbolDropHint`.
-  if ((symbol.kind === "function" || symbol.kind === "method") && symbol.bodyNode === null) {
+  // decorator markers. No body node at all means the language plugin flagged the Symbol as
+  // body-less; a further check would need AST knowledge and belongs in `symbolDropHint`.
+  // `mergedBodyNodes` counts, because a Symbol several declarations wrote is body-less only
+  // when none of them gave it one.
+  if ((symbol.kind === "function" || symbol.kind === "method") && !hasAnyBody(symbol)) {
     return "empty body"
   }
 
@@ -34,4 +35,10 @@ export function decideSymbolDrop(symbol: SymbolCandidate<OpaqueAstNode>): string
   if (symbol.derivedBy.includes("re-export")) return "re-export"
 
   return null
+}
+
+function hasAnyBody(symbol: SymbolCandidate<OpaqueAstNode>): boolean {
+  if (symbol.bodyNode !== null) return true
+  const merged = symbol.mergedBodyNodes
+  return merged !== undefined && merged.length > 0
 }
