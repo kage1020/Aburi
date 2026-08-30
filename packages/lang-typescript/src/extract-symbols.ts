@@ -7,12 +7,13 @@ import type {
   Visibility,
 } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
-import { findChild, makeSourceRange, nameFieldText } from "./ast-helpers"
+import { findChild, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
 import {
   type CallExtractionState,
   makeCallExtractionState,
   visitCallStatement,
 } from "./call-symbols"
+import { isConstructorMember, memberHasOwnSymbol } from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
@@ -305,7 +306,7 @@ function addClassAndMembers(
   // to get member Symbols. Deferred alongside the anonymous-scope proposal.
   const body = node.childForFieldName("body")
   if (body === null || className === null) return
-  addClassMembers(body, ctx, [...namespacePath, className], out)
+  addClassMembers(node, body, ctx, [...namespacePath, className], out)
 }
 
 /**
@@ -324,6 +325,7 @@ function addClassAndMembers(
  * signature would report the member as `(n) => void`.
  */
 function addClassMembers(
+  classNode: Node,
   body: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
@@ -331,9 +333,8 @@ function addClassMembers(
 ): void {
   const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
-    if (member === null || member.type !== "method_definition") continue
+    if (member === null || !memberHasOwnSymbol(classNode, member)) continue
     const candidate = makeMethodCandidate(member, ctx, ownerChain)
-    if (candidate === null) continue
     const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
     const group = declared.get(candidate.id)
     if (group === undefined) declared.set(candidate.id, [entry])
@@ -395,31 +396,20 @@ function makeFunctionCandidate(
 }
 
 /**
- * Null for a member whose name is computed (`[Symbol.iterator]() {}`, `["go"]() {}`).
+ * One class member that `memberHasOwnSymbol` has already admitted, which is why this answers a
+ * candidate rather than `null`: a computed member never reaches it.
  *
- * The brackets are not a name, and their text used to go into the id builder, which refused
- * it — costing the class and every sibling member as well as the one nobody can name.
- * Normalising the brackets into a segment is refused rather than deferred: any mangling
- * invents a name the source does not contain, two different computed keys can collapse onto
- * one segment, and nothing reads it back to what was written.
- *
- * Silently, and deliberately. A computed name is not a name static analysis can record — the
- * position `lang-plugin.md` LP26e takes on a computed module specifier — so there is nothing
- * to report against the source.
+ * It can still throw. The predicate admits any `method_definition` with a written name, and a
+ * name that is not an identifier — `class C { "ok"() {} }`, `class C { 1() {} }` — is one the
+ * qualified-name grammar refuses, which costs the file at the per-file boundary.
  */
 function makeMethodCandidate(
   node: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
-): SymbolCandidate<Node> | null {
-  const kind: SymbolKind = isConstructor(node) ? "constructor" : "method"
-  // A constructor cannot reach this: `isConstructor` compares the `name` field's text to
-  // "constructor", and a computed name's text carries its brackets.
-  if (findChild(node, "computed_property_name") !== null) return null
-  // Constructors do not carry a name field in the grammar, so short-circuit before the
-  // fail-fast helper would trip on them.
-  const methodName =
-    kind === "constructor" ? "constructor" : requireDeclarationName(node, "method", ctx.file.path)
+): SymbolCandidate<Node> {
+  const kind: SymbolKind = isConstructorMember(node) ? "constructor" : "method"
+  const methodName = requireDeclarationName(node, "method", ctx.file.path)
   const isStatic = hasChildOfType(node, "static")
   const isPrivateHash = methodName.startsWith("#")
   const qname =
@@ -780,18 +770,6 @@ function readAccessibilityKeyword(node: Node): Visibility {
     default:
       return "public"
   }
-}
-
-function hasChildOfType(node: Node, typeName: string): boolean {
-  for (const child of node.children) {
-    if (child !== null && child.type === typeName) return true
-  }
-  return false
-}
-
-function isConstructor(node: Node): boolean {
-  const name = node.childForFieldName("name")
-  return name !== null && name.text === "constructor"
 }
 
 function isDefaultExport(node: Node): boolean {

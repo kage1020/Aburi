@@ -7,6 +7,7 @@ import type {
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild } from "./ast-helpers"
+import { isConstructorMember, memberHasOwnSymbol } from "./class-members"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -31,10 +32,63 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
   const rules: Rule[] = []
   const calls: CallCandidate[] = []
   // Every body the Symbol was declared with, not just the leading declaration's.
-  for (const body of bodyNodesOf(symbol)) visit(body, rules, calls)
+  for (const body of bodyNodesOf(symbol)) {
+    // The class is read off the body, not off the Symbol: `fullNode` is the **leading**
+    // declaration, and a fold can put a class body on a Symbol another declaration heads.
+    const owner = body.type === "class_body" ? body.parent : null
+    if (owner !== null) visitOwnClassBody(owner, body, rules, calls)
+    else visit(body, rules, calls)
+  }
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
   return { rules, calls }
+}
+
+/**
+ * A class Symbol's own body: what **defining and constructing** the class runs, per
+ * `lang-plugin.md` LP20a–LP20e. Field initialisers, static blocks and the constructor stay; a
+ * member whose body another Symbol records does not.
+ *
+ * Only the *body* is skipped, never the member. A member's `bodyNode` is its `statement_block`,
+ * so a parameter default (`m(x = f())`) is outside it and would be lost with nothing to say so
+ * — which is LP20d, and the reason this reaches for the `body` field rather than the member.
+ *
+ * And only for the Symbol's own bodies: a class written inside a function or a method is not
+ * extracted, so every call in it belongs to the Symbol whose body encloses it (LP20e).
+ */
+function visitOwnClassBody(
+  classNode: Node,
+  body: Node,
+  rules: Rule[],
+  calls: CallCandidate[],
+): void {
+  for (const member of body.namedChildren) {
+    if (member === null) continue
+    const memberBody = memberBodySkippedHere(classNode, member)
+    if (memberBody === null) {
+      visit(member, rules, calls)
+      continue
+    }
+    for (const part of member.namedChildren) {
+      // By `id`, not by reference: a field read and a children read of the same node hand
+      // back different JS wrappers, so `===` never matches. `Node.equals()` answers the same
+      // question and would do; `id` is a field read rather than a call across the WASM
+      // boundary (`lang-plugin.md` §8.2). Not by type: a `method_definition` has exactly one
+      // `statement_block` today, but a member shape carrying a second would start dropping it
+      // without a word.
+      if (part === null || part.id === memberBody.id) continue
+      visit(part, rules, calls)
+    }
+  }
+}
+
+/** The member's body when this class does not walk it, or null when the class still owns it. */
+function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
+  if (!memberHasOwnSymbol(classNode, member)) return null
+  // The constructor's body is recorded on `#C.constructor` too, and stays here anyway: `new
+  // C()` runs it and resolves to this Symbol (LP20b).
+  if (isConstructorMember(member)) return null
+  return member.childForFieldName("body")
 }
 
 function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {

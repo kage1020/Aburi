@@ -44,6 +44,14 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
   }
 }
 
+/** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */
+export function hasChildOfType(node: Node, typeName: string): boolean {
+  for (const child of node.children) {
+    if (child !== null && child.type === typeName) return true
+  }
+  return false
+}
+
 /** Type guard: true when the given node is NOT null. Tree-sitter APIs return `Node | null` everywhere. */
 export function isPresent(node: Node | null): node is Node {
   return node !== null
