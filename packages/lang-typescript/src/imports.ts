@@ -1,6 +1,7 @@
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild } from "./ast-helpers"
+import { decodeEscapeSequence } from "./string-escape"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -315,18 +316,21 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * rather than as a fault. An empty literal returns `""`, which is a different answer and is
  * the caller's to judge.
  *
- * **The result is not faithful to the source.** Only the `string_fragment` children are
- * read, and an `escape_sequence` is one of the other kinds, so an escape is deleted rather
- * than decoded: every fragment around it is still joined, so `"./a\tb"` comes back as
- * `./ab`. What is left can name a different module: `"\t/e"` comes back as `/e`, which is no
- * longer relative and so is bucketed as an external package rather than resolved against the
- * importing file. That is a separate defect from the one the caller guards, and fixing it
- * means decoding the escapes rather than skipping them.
+ * **An escape is decoded, not skipped.** What is *read* is a literal's `string_fragment`s and
+ * its `escape_sequence`s, both in source order, so `"./a\tb"` comes back as `./a`, a tab, `b`.
+ * Dropping the escape used to answer `./ab` — a module that does not exist, indistinguishable
+ * in the IR from one that does — and for `"\x2E/e"` it answered `/e`, which fails
+ * `isRelativeSpecifier` (neither `./` nor `../`) and sent every call through that binding to
+ * the `external` bucket instead of to the sibling file it names.
  *
- * It does not reach the caller's gate, though, and the reason is worth stating because it is
- * not obvious: a literal made only of escapes has zero fragments, so it falls to the
- * quote-stripping fallback and comes back non-empty (`"\n"` → the two characters `\` and
- * `n`). Only a genuinely empty literal reaches the empty branch.
+ * Those are not the only named children a literal can have. An ERROR node is one too, and it
+ * is passed over rather than read: `"./a\uZZZZb"` comes back as `./a`, with the parser's own
+ * syntax error accounting for the rest. What this reader answers is what parsed.
+ *
+ * The quote-stripping fallback below is what a literal reaches when nothing was read at all,
+ * which is now two cases and not three: an empty literal, and one whose contents are entirely
+ * an ERROR node. A literal made only of escapes used to land there and come back as its own
+ * source text; it has a decoded value now.
  */
 function readLiteralSpecifier(node: Node): string | null {
   if (node.type === "template_string") {
@@ -338,11 +342,16 @@ function readLiteralSpecifier(node: Node): string | null {
   for (const child of node.namedChildren) {
     if (child === null) continue
     if (child.type === "string_fragment") parts.push(child.text)
+    else if (child.type === "escape_sequence") parts.push(decodeEscapeSequence(child.text))
   }
+  // An escape can decode to nothing — a line continuation joins two lines and contributes no
+  // character — so a literal that is only one comes back empty and reaches the caller's gate.
   if (parts.length > 0) return parts.join("")
-  // No fragments: either an empty literal, or one made entirely of escape sequences. Strip
-  // the quotes off the raw text, which distinguishes them — the first is empty, the second
-  // is not.
+  // Nothing was read: either the literal is empty, or its contents did not parse and stand as
+  // an ERROR node (`"\uZZZZ"`). Stripping the quotes tells them apart — the first is empty and
+  // the caller reports it, the second comes back non-empty, which is the answer that leaves
+  // the parser's own syntax error as the only thing said about it. Calling it empty as well
+  // would be a third diagnostic claiming the author wrote no module name, and they did.
   const raw = node.text
   if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
   return raw
