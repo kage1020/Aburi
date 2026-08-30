@@ -29,6 +29,16 @@ async function callsOf(source: string, id: string): Promise<string[]> {
   return (await walkOf(source, id)).calls.map((c) => c.target)
 }
 
+const MERGED_CLASS = [
+  "export class C {",
+  "  m() { first() }",
+  "}",
+  "export class C {",
+  "  seed = field()",
+  "  n() { second() }",
+  "}",
+].join("\n")
+
 const USER_SERVICE = [
   "export class UserService {",
   "  constructor(private readonly prisma: PrismaClient) {}",
@@ -84,17 +94,23 @@ describe("a member's body belongs to the member's own Symbol", () => {
   it("applies the skip to every body a merged class was written with", async () => {
     // `tsc` calls this TS2300; tree-sitter accepts it, and the second `class_body` arrives on
     // `mergedDeclarations`. A skip that only looked at `bodyNode` would leave half the
-    // duplication in place.
-    const source = [
-      "export class C {",
-      "  m() { first() }",
-      "}",
-      "export class C {",
-      "  n() { second() }",
-      "}",
-    ].join("\n")
+    // duplication in place \u2014 and one that walked neither would lose `second` entirely, so both
+    // members are asserted as well as the class.
+    expect(await callsOf(MERGED_CLASS, "ts:src/a.ts#C")).toEqual(["field"])
+    expect(await callsOf(MERGED_CLASS, "ts:src/a.ts#C.m")).toEqual(["first"])
+    expect(await callsOf(MERGED_CLASS, "ts:src/a.ts#C.n")).toEqual(["second"])
+  })
+
+  it("reads the class off the body, not off the Symbol that leads it", async () => {
+    // `const C = 1` is written first, so it heads the folded Symbol and `fullNode` is a
+    // `lexical_declaration` \u2014 which has no `name` field, so a predicate asked about *that* node
+    // answers "this class has no member Symbols" and skips nothing. `inner` then landed on the
+    // class as well as on `#C.m`, which is the state this whole change removes. The class node
+    // is a `class_body`'s parent by construction, so that is where it is read from.
+    const source = ["const C = 1", "class C { m() { inner() } }"].join("\n")
 
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual([])
+    expect(await callsOf(source, "ts:src/a.ts#C.m")).toEqual(["inner"])
   })
 })
 
@@ -131,12 +147,31 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
     expect(await callsOf(source, "ts:src/a.ts#C.m")).toEqual(["g"])
   })
 
+  it("does not treat a static member named constructor as the construction path", async () => {
+    // `new C()` never runs a static method, so a `static constructor` is not on the path LP20b
+    // is about. `tsc` refuses it, but this plugin also claims `.js`, where it is legal \u2014 and
+    // reading it as the constructor both put its body on the class and gave it the instance
+    // qname, where it collided with the real constructor's.
+    const source = [
+      "export class C {",
+      "  constructor() { real() }",
+      "  static constructor() { boom() }",
+      "}",
+    ].join("\n")
+
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["real"])
+    expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["real"])
+    expect(await callsOf(source, "ts:src/a.ts#C::constructor")).toEqual(["boom"])
+  })
+
   it("keeps a call written in a member decorator's arguments", async () => {
     const source = ["export class C {", "  @Inject(makeToken())", "  m() { inner() }", "}"].join(
       "\n",
     )
 
-    // `@Inject(...)` is itself a call in the grammar, so the decorator contributes two.
+    // A member's decorator is a **sibling** of its `method_definition` inside `class_body`,
+    // not a child of it \u2014 so it is a member in its own right, one the predicate answers false
+    // for, and the body skip never reaches it. `@Inject(...)` is itself a call, hence two.
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["Inject", "makeToken"])
   })
 })
@@ -208,5 +243,75 @@ describe("the skip reaches the Symbol's own body and no other", () => {
 
     expect(await callsOf(source, "ts:src/a.ts#Outer.build")).toEqual(["x"])
     expect(await callsOf(source, "ts:src/a.ts#Outer")).toEqual([])
+  })
+})
+
+describe("the two readers of \u201cdoes this member have a Symbol?\u201d agree", () => {
+  // The property the whole change rests on: a member body is walked by exactly one Symbol.
+  // Every call below is written once in the source, so a target on two Symbols is a body
+  // counted twice, and one on none is a body lost. The constructor is the documented exception
+  // \u2014 `new C()` runs it and resolves to the class (LP20b) \u2014 so it is on exactly two.
+  const EVERY_MEMBER_SHAPE = [
+    "export class Shapes {",
+    "  seed = fieldInit()",
+    "  static { staticBlock() }",
+    "  constructor() { ctorBody() }",
+    "  plain() { plainBody() }",
+    "  static stat() { staticBody() }",
+    "  get v() { getterBody() }",
+    "  set v(n) { setterBody() }",
+    "  #hidden() { privateBody() }",
+    "  [computed()]() { computedBody() }",
+    "  withDefault(x = defaultValue()) { defaultedBody() }",
+    "  @Dec(decoratorArg())",
+    "  decorated() { decoratedBody() }",
+    "  over(a: string): void",
+    "  over(a: unknown) { overBody() }",
+    "  nests() { class Inner { m() { nestedBody() } } return Inner }",
+    "}",
+  ].join("\n")
+
+  it("walks every member body exactly once, and the constructor's on the class as well", async () => {
+    const result = await parseTypescriptFile({ path: "src/a.ts", content: EVERY_MEMBER_SHAPE })
+    const ctx = makeExtractionCtx("src/a.ts", EVERY_MEMBER_SHAPE)
+    const symbols = extractSymbols(requireTree(result.tree), ctx)
+
+    const owners = new Map<string, string[]>()
+    for (const symbol of symbols) {
+      const walkCtx: WalkContext<Node> = { ...ctx, symbol }
+      for (const call of walkBody(symbol, walkCtx).calls) {
+        owners.set(call.target, [...(owners.get(call.target) ?? []), symbol.id])
+      }
+    }
+
+    const written = [
+      "fieldInit",
+      "staticBlock",
+      "ctorBody",
+      "plainBody",
+      "staticBody",
+      "getterBody",
+      "setterBody",
+      "privateBody",
+      "computed",
+      "computedBody",
+      "defaultValue",
+      "defaultedBody",
+      "Dec",
+      "decoratorArg",
+      "decoratedBody",
+      "overBody",
+      "nestedBody",
+    ]
+    const counts = Object.fromEntries(written.map((t) => [t, owners.get(t)?.length ?? 0]))
+
+    expect(counts).toEqual({
+      ...Object.fromEntries(written.map((t) => [t, 1])),
+      ctorBody: 2,
+    })
+    expect(owners.get("ctorBody")?.slice().sort()).toEqual([
+      "ts:src/a.ts#Shapes",
+      "ts:src/a.ts#Shapes.constructor",
+    ])
   })
 })

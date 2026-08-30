@@ -24,13 +24,21 @@ constructor.
 Only the *body* is skipped, and only for a member that has a Symbol of its own. Both halves
 are load-bearing:
 
-- A parameter default (`m(x = f())`) and a decorator's arguments sit outside the member's own
-  `bodyNode`, which is its `statement_block`. Skipping the whole member would lose them.
+- A parameter default (`m(x = f())`) sits outside the member's own `bodyNode`, which is its
+  `statement_block`. Skipping the whole member would lose it.
 - A computed member (`[Symbol.iterator]() {}`) and a member of an anonymous default class are
   not Symbols at all, so their bodies have nowhere else to be recorded and stay on the class.
 
 Which member has a Symbol is now one predicate, `memberHasOwnSymbol`, that extraction and the
-walk both read — the moment the two sides disagree, a body is counted twice or not at all.
+walk both read — and both ask about the same node. The walk reads the class off the body it is
+walking rather than off the Symbol, because a folded Symbol's `fullNode` is its **leading**
+declaration: `const C = 1` written above `class C { m() {} }` heads the Symbol with a
+`lexical_declaration`, and asking that node whether the class has member Symbols answered no.
+
+`static constructor()` is not the construction path. `new C()` never runs a static member, and
+the check now says so — it used to put the static member's body on the class and give it the
+instance qualified name, where it collided with the real constructor's. `tsc` refuses the
+source; this plugin also parses `.js`, where it is legal.
 
 The skip reaches the Symbol's own body nodes and no others: a class written inside a function
 or a method is not extracted, so every call in it still belongs to the Symbol whose body
@@ -38,4 +46,10 @@ encloses it.
 
 Class Symbols' `calls`, `rules`, `effects` and `fingerprint.logic` move as a result, and so do
 the callers those effects reached. `fingerprint.api` and `fingerprint.syntax` do not: the
-normalized AST still covers the whole class.
+normalized AST still covers the whole class body.
+
+**Scope.** A member written as a field holding an arrow — `create = async (d) => { ... }` — is
+not a `method_definition`, so it has no Symbol of its own and its body stays on the class, where
+it propagates to callers that construct the class. Constructing the class creates the closure and
+does not run it, so the heading above does not describe that shape; nothing here changes it, and
+it is a common way to write a service.

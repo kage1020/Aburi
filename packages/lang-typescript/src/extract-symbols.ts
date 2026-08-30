@@ -7,13 +7,13 @@ import type {
   Visibility,
 } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
-import { findChild, makeSourceRange, nameFieldText } from "./ast-helpers"
+import { findChild, hasChildOfType, makeSourceRange, nameFieldText } from "./ast-helpers"
 import {
   type CallExtractionState,
   makeCallExtractionState,
   visitCallStatement,
 } from "./call-symbols"
-import { memberHasOwnSymbol } from "./class-members"
+import { isConstructorMember, memberHasOwnSymbol } from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
@@ -396,20 +396,20 @@ function makeFunctionCandidate(
 }
 
 /**
- * One class member that `memberHasOwnSymbol` has already admitted — which is what makes this
- * total. A member with a computed name never reaches here, because its brackets are not a
- * name and there is no id to build from them.
+ * One class member that `memberHasOwnSymbol` has already admitted, which is why this answers a
+ * candidate rather than `null`: a computed member never reaches it.
+ *
+ * It can still throw. The predicate admits any `method_definition` with a written name, and a
+ * name that is not an identifier — `class C { "ok"() {} }`, `class C { 1() {} }` — is one the
+ * qualified-name grammar refuses, which costs the file at the per-file boundary.
  */
 function makeMethodCandidate(
   node: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
-  const kind: SymbolKind = isConstructor(node) ? "constructor" : "method"
-  // Constructors do not carry a name field in the grammar, so short-circuit before the
-  // fail-fast helper would trip on them.
-  const methodName =
-    kind === "constructor" ? "constructor" : requireDeclarationName(node, "method", ctx.file.path)
+  const kind: SymbolKind = isConstructorMember(node) ? "constructor" : "method"
+  const methodName = requireDeclarationName(node, "method", ctx.file.path)
   const isStatic = hasChildOfType(node, "static")
   const isPrivateHash = methodName.startsWith("#")
   const qname =
@@ -770,18 +770,6 @@ function readAccessibilityKeyword(node: Node): Visibility {
     default:
       return "public"
   }
-}
-
-function hasChildOfType(node: Node, typeName: string): boolean {
-  for (const child of node.children) {
-    if (child !== null && child.type === typeName) return true
-  }
-  return false
-}
-
-function isConstructor(node: Node): boolean {
-  const name = node.childForFieldName("name")
-  return name !== null && name.text === "constructor"
 }
 
 function isDefaultExport(node: Node): boolean {
