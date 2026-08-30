@@ -13,9 +13,12 @@ import { findChild, hasChildOfType, nameFieldText } from "./ast-helpers"
  * and need not be the class, or a class at all: `const C = 1` beside `class C {}` folds into
  * one Symbol whose `fullNode` is the `lexical_declaration` and whose merged body is the class's.
  *
- * Only a named class *declaration* has member Symbols. `<default>` is reserved for an anonymous
- * default export itself and `<default>.m` is not a qualified name the id builder accepts
- * (`ir-schema.md` §3.2), and a class expression is never visited at statement level.
+ * Only a **named** class has member Symbols, and a name is the whole test: extraction reaches a
+ * class through the statement walk, where the only unnamed form is an anonymous default export —
+ * `<default>` is reserved for the class itself and `<default>.m` is not a qualified name the id
+ * builder accepts (`ir-schema.md` §3.2). A class *expression* is never visited there at all, and
+ * `export default class C {}` is a `class_declaration` rather than an expression, so no named
+ * class reaches either reader without member Symbols.
  *
  * A computed member name gets no Symbol and no diagnostic, which is `ir-schema.md` §3.2's own
  * row for it. Every other shape a class body can hold answers false for the plain reason that
@@ -27,18 +30,8 @@ import { findChild, hasChildOfType, nameFieldText } from "./ast-helpers"
  */
 export function memberHasOwnSymbol(classNode: Node, member: Node): boolean {
   if (member.type !== "method_definition") return false
-  if (!declaresMemberSymbols(classNode)) return false
+  if (nameFieldText(classNode) === null) return false
   return findChild(member, "computed_property_name") === null
-}
-
-/** The class forms `extractSymbols` walks the members of. */
-const MEMBER_OWNING_CLASS_TYPES: ReadonlySet<string> = new Set([
-  "class_declaration",
-  "abstract_class_declaration",
-])
-
-function declaresMemberSymbols(classNode: Node): boolean {
-  return MEMBER_OWNING_CLASS_TYPES.has(classNode.type) && nameFieldText(classNode) !== null
 }
 
 /**

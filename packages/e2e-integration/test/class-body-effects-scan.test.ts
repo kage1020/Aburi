@@ -128,8 +128,9 @@ describe("scan — a member whose Symbol was folded into a droppable one", () =>
     // convention spells `#C.m` both ways, so they fold — and the type alias is written first, so
     // the folded Symbol is a `type` and the drop list removes it before anything walks it.
     //
-    // The fold is a known defect of the qualified-name convention, and this change does not touch it. What it does change is the symptom: the
-    // class used to re-walk the member, so `write` was reported on `#C` as well. It is not any
+    // The fold is a known defect of the qualified-name convention and this change does not touch
+    // it. What it does change is the symptom: the class used to re-walk the member, so `write`
+    // was reported on `#C` as well. It is not any
     // more, which is right on its own terms — a dropped Symbol is one the pipeline was asked not
     // to analyse, and having its calls reappear on the enclosing class was leakage — but on this
     // input it turns a duplicate into an omission. Pinned so the fold's fix has something to move.

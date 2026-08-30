@@ -84,6 +84,20 @@ describe("a member's body belongs to the member's own Symbol", () => {
     expect(await callsOf(source, "ts:src/a.ts#C.v")).toEqual(["read", "write"])
   })
 
+  it("moves a concrete method's body off an abstract class", async () => {
+    // `abstract_class_declaration` is its own node type, and its concrete members are Symbols
+    // like any other class's.
+    const source = [
+      "export abstract class C {",
+      "  abstract m(): void",
+      "  n() { inner() }",
+      "}",
+    ].join("\n")
+
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual([])
+    expect(await callsOf(source, "ts:src/a.ts#C.n")).toEqual(["inner"])
+  })
+
   it("moves a static method's body off the class", async () => {
     const source = ["export class C {", "  static m() { inner() }", "}"].join("\n")
 
