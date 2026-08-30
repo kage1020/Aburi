@@ -1,5 +1,6 @@
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
+import { findChild, firstNonCommentChild } from "./ast-helpers"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -17,9 +18,10 @@ export interface ImportExtraction {
 /**
  * Walk the top level of the parsed module and produce an ImportEdge per import site.
  *
- * Covers the three shapes the design contract enumerates:
+ * Covers the shapes the design contract enumerates:
  *   - Static named / default / mixed:  `import Foo, { A as B, C } from './x'`
  *   - Namespace:                       `import * as Foo from 'z'`
+ *   - CommonJS interop:                `import Foo = require('./x')`
  *   - Dynamic:                         `await import('./x')`, `import('./x').then(...)`
  *
  * Type-only imports (`import type {...}`) still produce an ImportEdge — the design does not
@@ -67,10 +69,13 @@ export function extractImports(tree: Tree, _source: string): ImportExtraction {
  * dependency relationship is visible in the IR.
  */
 function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
+  const requireClause = findChild(node, "import_require_clause")
+  if (requireClause !== null) return readRequireClause(node, requireClause, errors)
+
   const source = readModuleSpecifier(node.childForFieldName("source"), "import", errors)
   if (source === null) return []
   const line = node.startPosition.row + 1
-  const clause = node.childForFieldName("import_clause") ?? findChildByType(node, "import_clause")
+  const clause = node.childForFieldName("import_clause") ?? findChild(node, "import_clause")
   if (clause === null) {
     return [{ source, symbols: "*", line, dynamic: false }]
   }
@@ -88,6 +93,44 @@ function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
   }
   if (edges.length === 0) edges.push({ source, symbols: "*", line, dynamic: false })
   return edges
+}
+
+/**
+ * `import x = require('./m')` — the CommonJS-interop form, and the ordinary way to import
+ * under `.cts` / `.cjs`.
+ *
+ * The specifier hangs off the `import_require_clause` rather than the statement's `source`
+ * field, so the reader above finds nothing and has to be sent here instead.
+ *
+ * The edge is a **namespace** edge and not a default binding, because `x` names the module
+ * object the way `import * as x from './m'` does. Call resolution acts on the difference:
+ * the namespace arm of `callgraph.ts` strips the head off `x.foo()` and looks for `foo` in
+ * the target file, where a `symbols: ["x"]` edge would send it looking for `x.foo` there —
+ * a name the target does not have. A wrong edge is worse than the missing one this replaces.
+ *
+ * `dynamic` is false by definition rather than by consequence: the field means "written as
+ * `import()`" (`lang-plugin.md` §4.2), and a require-equals is resolved when the module
+ * loads. The two loops in `callgraph.ts` that read a file's edges both skip a dynamic one
+ * today, so the value is also what keeps this edge visible to call resolution — but that is
+ * what the value buys, not what decides it.
+ *
+ * A clause with no binding is not something the grammar produces from valid source, and the
+ * wildcard edge it falls back to still records the dependency — which is the half of the
+ * edge no binding is needed to state.
+ */
+function readRequireClause(statement: Node, clause: Node, errors: ParseError[]): ImportEdge[] {
+  // The grammar admits nothing but a string literal for the specifier, so a computed
+  // argument is a syntax error the parser reports for itself — but error recovery leaves the
+  // operand it could read as a direct child of the clause, with the `source` field attached
+  // to it. `require("a" + b)` would answer `a`, and `require('./m', 'y')` would answer the
+  // second argument. A clause that did not parse is not read at all.
+  if (clause.hasError) return []
+  const source = readModuleSpecifier(findChild(clause, "string"), "import", errors)
+  if (source === null) return []
+  const line = statement.startPosition.row + 1
+  const binding = findChild(clause, "identifier")
+  if (binding === null) return [{ source, symbols: "*", line, dynamic: false }]
+  return [{ source, symbols: "*", line, dynamic: false, namespaceBinding: binding.text }]
 }
 
 /**
@@ -117,7 +160,7 @@ function readImportClauseParts(clause: Node): {
     if (child === null) continue
     switch (child.type) {
       case "namespace_import": {
-        const alias = findChildByType(child, "identifier")
+        const alias = findChild(child, "identifier")
         if (alias !== null) namespaceBinding = alias.text
         break
       }
@@ -155,12 +198,12 @@ function readReExport(node: Node, errors: ParseError[]): ImportEdge | null {
   if (source === null) return null
   const line = node.startPosition.row + 1
 
-  const namespaceExport = findChildByType(node, "namespace_export")
+  const namespaceExport = findChild(node, "namespace_export")
   if (namespaceExport !== null) {
     return { source, symbols: "*", line, dynamic: false }
   }
 
-  const clauseNode = findChildByType(node, "export_clause")
+  const clauseNode = findChild(node, "export_clause")
   if (clauseNode === null) {
     return { source, symbols: "*", line, dynamic: false }
   }
@@ -186,8 +229,13 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
       const callee = node.childForFieldName("function")
       if (callee !== null && callee.type === "import") {
         const args = node.childForFieldName("arguments")
+        // The specifier is the first argument that is not a comment. A magic comment
+        // (`import(/* webpackChunkName */ './m')`) is a named node sitting in front of it,
+        // and reading child zero unconditionally would hand the reader the comment.
         const specifier =
-          args !== null ? readModuleSpecifier(args.namedChild(0), "dynamic import", errors) : null
+          args !== null
+            ? readModuleSpecifier(firstNonCommentChild(args), "dynamic import", errors)
+            : null
         if (specifier !== null) {
           edges.push({
             source: specifier,
@@ -210,10 +258,10 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
  * The two ways there can be none are kept apart, because only one of them is the author's
  * doing.
  *
- * - `readStringLiteral` answering `null` means the node was not a string literal — a
- *   computed specifier (`import(p)`, `import("" + x)`), or a shape this reader does not
- *   model. There is nothing to report: the author wrote something valid that static analysis
- *   cannot follow.
+ * - `readLiteralSpecifier` answering `null` means the node was not a literal the reader can
+ *   evaluate — a computed specifier (`import(p)`, `import("" + x)`, a template with a
+ *   substitution in it), or a shape this reader does not model. There is nothing to report:
+ *   the author wrote something valid that static analysis cannot follow.
  * - A literal that *is* there and is empty is something someone typed, and it names no
  *   module. `ImportEdge.source` is a non-empty specifier (`lang-plugin.md` §4.4) and the
  *   shared guards in `@aburi/plugin-registry/plugin-input` throw on one that is not, so no
@@ -234,7 +282,7 @@ function readModuleSpecifier(
   errors: ParseError[],
 ): string | null {
   if (node === null) return null
-  const specifier = readStringLiteral(node)
+  const specifier = readLiteralSpecifier(node)
   if (specifier === null) return null
   if (specifier.length > 0) return specifier
   errors.push({
@@ -254,27 +302,38 @@ function readModuleSpecifier(
 type ImportSite = "import" | "re-export" | "dynamic import"
 
 /**
- * Read a `string` node's contents without the surrounding quotes.
+ * Read the contents of a specifier written as a literal, without its surrounding quotes.
  *
- * Returns `null` for a node that is not a `string` — a template literal, an identifier, a
- * concatenation. Those are computed specifiers this reader does not follow, and the caller
- * treats them as nothing to say rather than as a fault. An empty literal returns `""`, which
- * is a different answer and is the caller's to judge.
+ * A `string` and a substitution-free `` `template` `` are both accepted, because they are
+ * the same specifier written with different quotes: the module a bare template names is
+ * fixed at the point it is written. A template *with* a `template_substitution` is not, and
+ * is refused — joining its fragments would answer `"./"` for `` `./${p}` ``, an edge to a
+ * module the author never named, which is a worse answer than none.
  *
- * **The result is not faithful to the source.** A `string` node's named children are its
- * `string_fragment`s and its `escape_sequence`s, and only the fragments are read, so an
- * escape is deleted rather than decoded: `"./ab"` comes back as `./a`, and `"./e"`
- * as `/e` — which stops being relative and is then resolved as a bare package. That is a
- * separate defect from the one the caller guards, and fixing it means decoding the escapes
- * rather than skipping them.
+ * Returns `null` for anything else — an identifier, a concatenation. Those are computed
+ * specifiers this reader does not follow, and the caller treats them as nothing to say
+ * rather than as a fault. An empty literal returns `""`, which is a different answer and is
+ * the caller's to judge.
+ *
+ * **The result is not faithful to the source.** Only the `string_fragment` children are
+ * read, and an `escape_sequence` is one of the other kinds, so an escape is deleted rather
+ * than decoded: every fragment around it is still joined, so `"./a\tb"` comes back as
+ * `./ab`. What is left can name a different module: `"\t/e"` comes back as `/e`, which is no
+ * longer relative and so is bucketed as an external package rather than resolved against the
+ * importing file. That is a separate defect from the one the caller guards, and fixing it
+ * means decoding the escapes rather than skipping them.
  *
  * It does not reach the caller's gate, though, and the reason is worth stating because it is
  * not obvious: a literal made only of escapes has zero fragments, so it falls to the
  * quote-stripping fallback and comes back non-empty (`"\n"` → the two characters `\` and
  * `n`). Only a genuinely empty literal reaches the empty branch.
  */
-function readStringLiteral(node: Node): string | null {
-  if (node.type !== "string") return null
+function readLiteralSpecifier(node: Node): string | null {
+  if (node.type === "template_string") {
+    if (findChild(node, "template_substitution") !== null) return null
+  } else if (node.type !== "string") {
+    return null
+  }
   const parts: string[] = []
   for (const child of node.namedChildren) {
     if (child === null) continue
@@ -287,13 +346,6 @@ function readStringLiteral(node: Node): string | null {
   const raw = node.text
   if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
   return raw
-}
-
-function findChildByType(node: Node, type: string): Node | null {
-  for (const child of node.namedChildren) {
-    if (child !== null && child.type === type) return child
-  }
-  return null
 }
 
 /**

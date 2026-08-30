@@ -97,11 +97,18 @@ describe("C8: dynamic import specifier shapes", () => {
   it.each([
     ["a variable", "export async function f(p: string) { await import(p) }"],
     ["a concatenation", 'export async function f(x: string) { await import("" + x) }'],
-    ["a template literal", "export async function f() { await import(`./x`) }"],
+    [
+      "a template literal with a substitution",
+      `export async function f(p: string) { await import(\`./\${p}\`) }`,
+    ],
   ])("silently ignores a non-literal specifier — %s", async (_label, source) => {
     // Only the top-level exports produce edges; a computed specifier does not yield an
     // edge because static dependency analysis has nothing to record. The pipeline can
     // enrich this later once symbol resolution is available.
+    //
+    // The substitution is what makes the template computed. A template without one names a
+    // fixed module and is read like any other literal — `import-forms.test.ts` covers both
+    // halves of that split.
     const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
     expect(result.imports.every((e) => !e.dynamic)).toBe(true)
     // *Silently* is the load-bearing half, and it is what separates "this reader does not

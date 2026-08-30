@@ -1,5 +1,6 @@
 import type { Decorator } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
+import { firstNonCommentChild } from "./ast-helpers"
 
 /**
  * Read every decorator attached to a specific declaration node.
@@ -97,7 +98,7 @@ function readDecorator(node: Node): Decorator | null {
   // access (@Foo, @Ns.Foo). A comment may be written between the `@` and the expression —
   // `@/* why */ Foo()` parses — and `leafIdentifier` falls back to a node's text, so taking
   // the first named child unconditionally would name the decorator after the comment.
-  const inner = firstExpression(node)
+  const inner = firstNonCommentChild(node)
   if (inner === null) return null
   const line = node.startPosition.row + 1
 
@@ -124,14 +125,6 @@ function readDecorator(node: Node): Decorator | null {
     boundary: false,
     line,
   }
-}
-
-function firstExpression(node: Node): Node | null {
-  for (const child of node.namedChildren) {
-    if (child === null || child.type === "comment") continue
-    return child
-  }
-  return null
 }
 
 function leafIdentifier(node: Node): string {

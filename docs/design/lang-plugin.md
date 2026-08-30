@@ -125,6 +125,7 @@ interface ImportEdge {
   symbols: string[] | '*'                      // named-import symbol names, or "*"
   line: number
   dynamic: boolean                             // true for import()
+  namespaceBinding?: string                    // the local name bound to the whole module, when there is one
 }
 ```
 
@@ -539,11 +540,18 @@ Every language plugin must pass the following tests.
 | LP24 | `import { X } from './y'` | imports = [{source: "./y", symbols: ["X"], line: 1, dynamic: false}] |
 | LP25 | `import * as Y from 'z'` | imports = [{source: "z", symbols: "*", line: 1, dynamic: false}] |
 | LP26 | `await import('./x')` | imports = [{source: "./x", symbols: "*", dynamic: true}] |
-| LP26a | an empty specifier on a form the reader already produces an edge for — `import a from ""`, `import ""`, `export * from ""`, `export { X } from ""`, `import type { B } from ''`, `import("")` | no edge, and one recoverable `ParseError` at the literal's line and column, naming which construct it belongs to. The specifier names no module, so no edge can carry it (§4.4), and a silent drop would leave the file looking as though the import were never written |
+| LP26a | an empty specifier on a form the reader already produces an edge for — `import a from ""`, `import ""`, `export * from ""`, `export { X } from ""`, `import type { B } from ''`, `import("")`, `import x = require("")`, ``import(``)`` | no edge, and one recoverable `ParseError` at the literal's line and column, naming which construct it belongs to. The specifier names no module, so no edge can carry it (§4.4), and a silent drop would leave the file looking as though the import were never written |
 | LP26b | an empty specifier beside a valid one | only the broken edge is withdrawn |
 | LP26c | two empty specifiers, on one line or on two | two errors. Edges are deduplicated on `(line, source, dynamic, symbols)`, so the only pair that could ever have merged is two writings on one line; diagnostics are per occurrence either way |
 | LP26d | a blank specifier (`import a from " "`) | an ordinary edge. §4.4 rejects empty, not blank |
-| LP26e | a computed specifier — `import(p)`, `import("" + x)`, ``import(`./x`)`` | no edge and **no diagnostic**. The reader does not follow computed specifiers, which is not a fault in the source |
+| LP26e | a computed specifier — `import(p)`, `import("" + x)`, ``import(`./${p}`)`` | no edge and **no diagnostic**. The reader does not follow computed specifiers, which is not a fault in the source. Joining a substituting template's fragments would answer `"./"` here — an edge to a module nobody named, which is worse than none |
+| LP26f | `import x = require('./m')`, written at the top level of a file | one edge, `{source: "./m", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x"}`. `x` binds the module object as `import * as x` does, so the namespace shape is what lets call resolution strip the head off `x.foo()` and look for `foo` in the target; a default binding (`symbols: ["x"]`) would send it looking for `x.foo` there instead. `dynamic` is false because the field means "written as `import()`" (§4.2) and this form is not |
+| LP26g | `import type x = require('./m')` | the same edge. Type-only imports produce edges throughout §9.6 |
+| LP26g1 | a require-equals whose argument is not a lone string literal — `require("a" + b)`, `require('./m', 'y')`, `require(f('./m'))` | no edge. Each is a syntax error the parser already reports, but tree-sitter's recovery leaves an operand it could read as a direct child of the clause with the `source` field attached, so a reader that took it would answer `a`, or the second argument. A clause that did not parse is not read |
+| LP26g2 | `export import x = require('./m')`, and a require-equals inside `declare module` / `namespace` | **no edge, and the reader does not follow either form.** Both are valid TypeScript. The `export` form is a grammar gap: tree-sitter reads it as an `import_alias` with a `MISSING ";"` plus a stray parenthesised expression, so the clause never exists to be read. The nested form is the general limit of walking `root.namedChildren` — a plain `import { A } from './m'` inside `declare module` is missed on the same terms — and is softened by `.d.ts` files being dropped before extraction |
+| LP26h | `import x = A.B.C` | no edge and no diagnostic. The alias renames a local namespace; no module is named |
+| LP26i | `import(/* webpackChunkName: "x" */ './m')` | the ordinary dynamic edge. A comment is a named node standing in front of the specifier, and reading the first argument by position would find the comment |
+| LP26j | ``import(`./m`)`` | the ordinary dynamic edge. A template with no substitution names a fixed module and is a static specifier written with different quotes |
 
 ### 9.7 Error recovery
 
