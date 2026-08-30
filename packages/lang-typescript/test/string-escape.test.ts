@@ -6,10 +6,11 @@ import { decodeEscapeSequence } from "../src/string-escape"
  * escape, read against what tree-sitter actually hands over — the escape's source text with
  * the backslash still on it.
  *
- * What the grammar admits is what this has to cover, and no more. `"\uZZZZ"` and `"\xZZ"`
- * parse as ERROR nodes rather than `escape_sequence`, so an invalid hex or unicode escape
- * never reaches here; the identity arm is for shapes the grammar accepts, not a repair for
- * ones it rejects.
+ * What the grammar admits is what this has to cover, and it admits more than ECMAScript.
+ * `"\uZZZZ"`, `"\u12b"`, `"\u{}"` and `"\xZZ"` parse as ERROR nodes rather than
+ * `escape_sequence`, so an ill-formed hex or unicode escape never reaches here. A braced
+ * escape is checked for shape and not for range, so `\u{110000}` does — and joins `\1` and
+ * `\8` in the set of escapes with no legal value, which come back as their own text.
  */
 
 const BS = String.fromCharCode(92)
@@ -58,8 +59,29 @@ describe("the numeric escapes", () => {
     expect([...decoded]).toHaveLength(1)
   })
 
-  it("decodes the largest code point the syntax allows", () => {
+  it("decodes the largest code point ECMAScript defines", () => {
     expect(decodeEscapeSequence(`${BS}u{10FFFF}`)).toBe("\u{10ffff}")
+  })
+
+  it("keeps a braced escape above it, which the grammar still admits", () => {
+    // `String.fromCodePoint` throws a `RangeError` on these, and the grammar hands them over
+    // as ordinary `escape_sequence` nodes — so without the range check the throw leaves
+    // `parseFile`, lands on the per-file boundary, and costs the whole file over one
+    // character in one specifier.
+    expect(decodeEscapeSequence(`${BS}u{110000}`)).toBe("u{110000}")
+    expect(decodeEscapeSequence(`${BS}u{FFFFFFFFFF}`)).toBe("u{FFFFFFFFFF}")
+  })
+
+  it.each([
+    [`${BS}u{}`, "u{}"],
+    [`${BS}u{ }`, "u{ }"],
+    [`${BS}uZZZZ`, "uZZZZ"],
+    [`${BS}xZZ`, "xZZ"],
+  ])("keeps %s, which the grammar refuses before it reaches here", (raw, expected) => {
+    // The unit-level statement of what the grammar keeps away: each of these parses as an
+    // ERROR node, so nothing hands the decoder a hex body that is not a number. These rows
+    // are what makes the two `Number.isNaN` guards observable at all.
+    expect(decodeEscapeSequence(raw)).toBe(expected)
   })
 })
 
@@ -86,10 +108,13 @@ describe("anything else keeps what the author typed", () => {
     [`${BS}1`, "1"],
     [`${BS}01`, "01"],
     [`${BS}7`, "7"],
-  ])("keeps the digits of a legacy octal escape (%s)", (raw, expected) => {
-    // Legacy octal is a SyntaxError inside a module, so there is no correct value to produce.
-    // Keeping the characters the author typed beats inventing a control character that would
-    // then travel through the IR as a module name.
+    [`${BS}8`, "8"],
+    [`${BS}9`, "9"],
+  ])("keeps the digits of a digit escape (%s)", (raw, expected) => {
+    // `\1` is legacy octal and `\8` is a non-octal decimal escape. Both are a SyntaxError
+    // inside a module, so neither has a correct value to produce: `1` is not what `\1` means
+    // anywhere, but it is what the author typed, and it beats inventing a control character
+    // that would then travel through the IR as part of a module name.
     expect(decodeEscapeSequence(raw)).toBe(expected)
   })
 

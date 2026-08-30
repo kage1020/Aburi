@@ -316,16 +316,20 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * rather than as a fault. An empty literal returns `""`, which is a different answer and is
  * the caller's to judge.
  *
- * **An escape is decoded, not skipped.** The named children of a literal are its
- * `string_fragment`s and its `escape_sequence`s, and both are read in source order, so
- * `"./a\tb"` comes back as `./a`, a tab, `b`. Dropping the escape used to answer `./ab` — a
- * module that does not exist, indistinguishable in the IR from one that does — and for
- * `"\x2E/e"` it answered `/e`, which fails `isRelativeSpecifier` and sent every call through
- * that binding to the `external` bucket instead of to the sibling file it names.
+ * **An escape is decoded, not skipped.** What is *read* is a literal's `string_fragment`s and
+ * its `escape_sequence`s, both in source order, so `"./a\tb"` comes back as `./a`, a tab, `b`.
+ * Dropping the escape used to answer `./ab` — a module that does not exist, indistinguishable
+ * in the IR from one that does — and for `"\x2E/e"` it answered `/e`, which fails
+ * `isRelativeSpecifier` (neither `./` nor `../`) and sent every call through that binding to
+ * the `external` bucket instead of to the sibling file it names.
+ *
+ * Those are not the only named children a literal can have. An ERROR node is one too, and it
+ * is passed over rather than read: `"./a\uZZZZb"` comes back as `./a`, with the parser's own
+ * syntax error accounting for the rest. What this reader answers is what parsed.
  *
  * The quote-stripping fallback below is what a literal reaches when nothing was read at all,
- * which is now two cases and not three: an empty literal, and one whose contents stand as an
- * ERROR node. A literal made only of escapes used to land there and come back as its own
+ * which is now two cases and not three: an empty literal, and one whose contents are entirely
+ * an ERROR node. A literal made only of escapes used to land there and come back as its own
  * source text; it has a decoded value now.
  */
 function readLiteralSpecifier(node: Node): string | null {
