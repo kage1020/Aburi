@@ -62,6 +62,19 @@ describe("a destructuring declaration declares its bindings", () => {
   })
 
   it.each([
+    ["a renamed member expression", "export const { a: obj.b } = m"],
+    ["an array element", "export const [obj.a] = pair"],
+    ["a rest element", "export const [...obj.a] = pair"],
+  ])("refuses a pattern it cannot read, rather than binding nothing — %s", async (_l, source) => {
+    // A `member_expression` is a legal destructuring *assignment* target, and the grammar
+    // shares the node with a declaration's pattern — `tsc` says TS1005 here, tree-sitter
+    // says nothing. Passing over it would drop the declaration with no Symbol and no word,
+    // which is the failure this whole change is about; refusing sends the file to the
+    // per-file boundary, which names it.
+    await expect(symbolIdsOf(source)).rejects.toThrow(/Unmodelled node "member_expression"/)
+  })
+
+  it.each([
     ["an object pattern", "export const { a, /* c */ b } = m"],
     ["an array pattern", "export const [a, /* c */ b] = pair"],
   ])("reads past a comment written inside %s", async (_label, source) => {
