@@ -278,12 +278,42 @@ describe("the class keeps what constructing it runs, and no more", () => {
     expect(await callsOf(source, "ts:src/a.ts#C.first")).toEqual(["one"])
     expect(await callsOf(source, "ts:src/a.ts#C.second")).toEqual(["two"])
   })
+
+  it("folds a field and a method of the same name onto one member", async () => {
+    // `tsc` calls this TS2300. The two candidates carry one id, so the sink folds them the way
+    // it folds a getter and its setter, and the walk reads both bodies — the class carries
+    // neither.
+    const source = classOf("  m() { a() }", "  m = () => { b() }")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C.m")
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.m"])
+    expect(symbol.derivedBy).toContain("declaration-merged")
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual([])
+    expect(await callsOf(source, "ts:src/a.ts#C.m")).toEqual(["a", "b"])
+  })
+
+  it("lets whichever declaration is written first lead the fold", async () => {
+    const source = classOf("  m = () => { b() }", "  m() { a() }")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C.m")
+
+    expect(symbol.derivedBy).toContain("field-assigned-function")
+    expect(await callsOf(source, "ts:src/a.ts#C.m")).toEqual(["b", "a"])
+  })
 })
 
 describe("a class of function-valued fields is not a data model", () => {
   it("does not read as a pure DTO", async () => {
     const source = classOf("  create = () => { inner() }", "  read = () => { other() }")
 
+    expect(await hintOf(source, "ts:src/a.ts#C")).toBeNull()
+  })
+
+  it("does not read a class of computed-name arrow fields as one either", async () => {
+    // The hint asks the field's shape, not whether the member became a Symbol: this class has
+    // exactly one Symbol and still declares behaviour rather than a shape.
+    const source = classOf("  [key] = () => { x() }")
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
     expect(await hintOf(source, "ts:src/a.ts#C")).toBeNull()
   })
 
