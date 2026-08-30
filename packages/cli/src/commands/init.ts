@@ -1,5 +1,5 @@
-import { access, writeFile } from "node:fs/promises"
-import { resolve } from "node:path"
+import { access, mkdir, writeFile } from "node:fs/promises"
+import { dirname, resolve } from "node:path"
 import {
   CoreError,
   detectComponents,
@@ -122,6 +122,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     suggestions,
   })
 
+  await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, contents, "utf8")
 
   return {

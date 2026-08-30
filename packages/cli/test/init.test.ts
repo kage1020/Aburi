@@ -45,6 +45,15 @@ describe("runInit — happy path", () => {
     expect(parsed.$schema).toBe("https://aburi.kage1020.com/schema/aburi.config.v1.json")
     expect(parsed.components.length).toBeGreaterThan(0)
   })
+
+  it("creates parent directories for a nested output path", async () => {
+    await makeMinimalPnpmWorkspace()
+
+    const report = await runInit({ cwd: scratch, output: "generated/config/aburi.json" })
+
+    expect(report.outputPath).toBe(resolve(scratch, "generated/config/aburi.json"))
+    expect(JSON.parse(await readFile(report.outputPath, "utf8"))).toHaveProperty("$schema")
+  })
 })
 
 describe("CL4 — existing aburi.json without --force", () => {

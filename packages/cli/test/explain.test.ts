@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { makeLanguageId } from "@aburi/core"
@@ -127,6 +127,20 @@ describe("runExplain — id lookup", () => {
     if (outcome.kind !== "single") throw new Error("unreachable")
     expect(outcome.exitCode).toBe(EXIT.SUCCESS)
     expect(outcome.markdown).toContain("getUser")
+  })
+
+  it("creates parent directories for a nested output path", async () => {
+    const outputPath = resolve(scratch, "generated/explain/get-user.md")
+
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "ts:src/a.ts#getUser",
+      noRescan: true,
+      outputPath,
+    })
+
+    expect(outcome.kind).toBe("single")
+    expect(await readFile(outputPath, "utf8")).toContain("getUser")
   })
 })
 
