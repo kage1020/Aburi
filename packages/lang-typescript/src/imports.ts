@@ -1,6 +1,7 @@
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild } from "./ast-helpers"
+import { decodeEscapeSequence } from "./string-escape"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -315,18 +316,16 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * rather than as a fault. An empty literal returns `""`, which is a different answer and is
  * the caller's to judge.
  *
- * **The result is not faithful to the source.** Only the `string_fragment` children are
- * read, and an `escape_sequence` is one of the other kinds, so an escape is deleted rather
- * than decoded: every fragment around it is still joined, so `"./a\tb"` comes back as
- * `./ab`. What is left can name a different module: `"\t/e"` comes back as `/e`, which is no
- * longer relative and so is bucketed as an external package rather than resolved against the
- * importing file. That is a separate defect from the one the caller guards, and fixing it
- * means decoding the escapes rather than skipping them.
+ * **An escape is decoded, not skipped.** The named children of a literal are its
+ * `string_fragment`s and its `escape_sequence`s, and both are read in source order, so
+ * `"./a\tb"` comes back as `./a`, a tab, `b`. Dropping the escape used to answer `./ab` — a
+ * module that does not exist, indistinguishable in the IR from one that does — and for
+ * `"\x2E/e"` it answered `/e`, which fails `isRelativeSpecifier` and sent every call through
+ * that binding to the `external` bucket instead of to the sibling file it names.
  *
- * It does not reach the caller's gate, though, and the reason is worth stating because it is
- * not obvious: a literal made only of escapes has zero fragments, so it falls to the
- * quote-stripping fallback and comes back non-empty (`"\n"` → the two characters `\` and
- * `n`). Only a genuinely empty literal reaches the empty branch.
+ * That makes the quote-stripping fallback below reachable by an empty literal alone, which is
+ * a property worth stating because it used to take an argument: a literal made only of
+ * escapes has no fragments, but it now has a decoded value, so it never falls through.
  */
 function readLiteralSpecifier(node: Node): string | null {
   if (node.type === "template_string") {
@@ -338,11 +337,13 @@ function readLiteralSpecifier(node: Node): string | null {
   for (const child of node.namedChildren) {
     if (child === null) continue
     if (child.type === "string_fragment") parts.push(child.text)
+    else if (child.type === "escape_sequence") parts.push(decodeEscapeSequence(child.text))
   }
-  if (parts.length > 0) return parts.join("")
-  // No fragments: either an empty literal, or one made entirely of escape sequences. Strip
-  // the quotes off the raw text, which distinguishes them — the first is empty, the second
-  // is not.
+  // An escape can decode to nothing — a line continuation joins two lines and contributes no
+  // character — so the join is what decides emptiness, not whether any children were read.
+  if (node.namedChildCount > 0) return parts.join("")
+  // No named children at all: an empty literal. Strip the quotes off the raw text, which
+  // answers `""` without special-casing the quote character.
   const raw = node.text
   if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
   return raw

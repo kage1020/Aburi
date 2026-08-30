@@ -552,6 +552,9 @@ Every language plugin must pass the following tests.
 | LP26h | `import x = A.B.C` | no edge and no diagnostic. The alias renames a local namespace; no module is named |
 | LP26i | `import(/* webpackChunkName: "x" */ './m')` | the ordinary dynamic edge. A comment is a named node standing in front of the specifier, and reading the first argument by position would find the comment |
 | LP26j | ``import(`./m`)`` | the ordinary dynamic edge. A template with no substitution names a fixed module and is a static specifier written with different quotes |
+| LP26k | a specifier carrying an escape sequence — `"./a\tb"`, `"\x2E/e"`, ``import(`./a\nb`)`` | the escape is **decoded**, not skipped: `./a`+TAB+`b`, `./e`, `./a`+LF+`b`. Skipping it answers a module that does not exist, and for an escaped leading dot it answers one that is no longer relative — so `isRelativeSpecifier` refuses it and every call through the binding is bucketed `external` rather than resolved against the sibling file it names |
+| LP26l | an escape the grammar refuses — `"./a\uZZZZb"`, `"./a\xZZb"` | recoverable syntax errors from the parser, and the fragment that survived. These parse as ERROR nodes rather than `escape_sequence`, so no decoder is asked to repair source the grammar rejected |
+| LP26m | a literal that is only a line continuation — `"\<newline>"` | no edge, and the LP26a diagnostic. A continuation joins two source lines and contributes no character, so the literal names no module. A literal made only of *other* escapes (`"\n\t"`) is a non-empty name and gets an ordinary edge, on LP26d's terms |
 
 ### 9.7 Error recovery
 
