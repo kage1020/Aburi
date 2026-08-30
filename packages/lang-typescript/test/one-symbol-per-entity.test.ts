@@ -283,7 +283,10 @@ describe("an unexported namespace is a declaration, not an expression", () => {
   })
 
   it("does not shadow call extraction on an ordinary expression statement", async () => {
-    const source = "import { app } from './app'\napp.get('/x', () => 1)\n"
-    expect((await idsOf(source)).length).toBeGreaterThan(0)
+    // The unwrap is why an expression statement is looked at twice, so the reading it was
+    // already there for has to survive it: a promoted call is the other thing an expression
+    // statement can be.
+    const source = "import { app } from './app'\napp.get('/users', () => 1)\n"
+    expect(await idsOf(source)).toContain("ts:src/a.ts#app__get__$users__d0")
   })
 })
