@@ -7,6 +7,7 @@ import type {
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild } from "./ast-helpers"
+import { memberHasOwnSymbol } from "./class-members"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -31,10 +32,66 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
   const rules: Rule[] = []
   const calls: CallCandidate[] = []
   // Every body the Symbol was declared with, not just the leading declaration's.
-  for (const body of bodyNodesOf(symbol)) visit(body, rules, calls)
+  for (const body of bodyNodesOf(symbol)) {
+    if (body.type === "class_body") visitOwnClassBody(symbol.fullNode, body, rules, calls)
+    else visit(body, rules, calls)
+  }
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
   return { rules, calls }
+}
+
+/**
+ * A class Symbol's own body: what **defining and constructing** the class runs.
+ *
+ * Field initialisers, static blocks and the constructor stay. A member whose body is recorded
+ * on a Symbol of its own does not — the class used to re-walk every method, so each member's
+ * calls and rules were counted twice, and `new C()` resolves to the class Symbol
+ * (`call-resolution.md` CR15), so the duplicates propagated to callers that touch nothing.
+ *
+ * The constructor is the one member whose body stays, for that same reason read forwards:
+ * `new C()` runs it, and the Symbol the instantiation resolves to is this one. Recording it
+ * here as well as on `#C.constructor` propagates it nowhere twice, because nothing resolves a
+ * call to a constructor.
+ *
+ * Only the *body* is skipped, never the member. A parameter default (`m(x = f())`) and a
+ * decorator's arguments are not inside any member Symbol's `bodyNode`, which is the member's
+ * `statement_block` — dropping the whole member would lose them with nothing to say so.
+ *
+ * And only for the Symbol's own bodies. A class written inside a function or a method is not
+ * extracted, so every call in it belongs to the Symbol whose body encloses it; applying this
+ * to any `class_body` the walk happens to meet would empty it.
+ */
+function visitOwnClassBody(
+  classNode: Node,
+  body: Node,
+  rules: Rule[],
+  calls: CallCandidate[],
+): void {
+  for (const member of body.namedChildren) {
+    if (member === null) continue
+    const memberBody = memberBodyRecordedElsewhere(classNode, member)
+    if (memberBody === null) {
+      visit(member, rules, calls)
+      continue
+    }
+    for (const part of member.namedChildren) {
+      if (part === null || part.id === memberBody.id) continue
+      visit(part, rules, calls)
+    }
+  }
+}
+
+/** The member's body when another Symbol records it, or null when this class still owns it. */
+function memberBodyRecordedElsewhere(classNode: Node, member: Node): Node | null {
+  if (!memberHasOwnSymbol(classNode, member)) return null
+  if (isConstructorMember(member)) return null
+  return member.childForFieldName("body")
+}
+
+function isConstructorMember(member: Node): boolean {
+  const name = member.childForFieldName("name")
+  return name !== null && name.text === "constructor"
 }
 
 function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {

@@ -13,6 +13,7 @@ import {
   makeCallExtractionState,
   visitCallStatement,
 } from "./call-symbols"
+import { memberHasOwnSymbol } from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
@@ -305,7 +306,7 @@ function addClassAndMembers(
   // to get member Symbols. Deferred alongside the anonymous-scope proposal.
   const body = node.childForFieldName("body")
   if (body === null || className === null) return
-  addClassMembers(body, ctx, [...namespacePath, className], out)
+  addClassMembers(node, body, ctx, [...namespacePath, className], out)
 }
 
 /**
@@ -324,6 +325,7 @@ function addClassAndMembers(
  * signature would report the member as `(n) => void`.
  */
 function addClassMembers(
+  classNode: Node,
   body: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
@@ -331,9 +333,8 @@ function addClassMembers(
 ): void {
   const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
-    if (member === null || member.type !== "method_definition") continue
+    if (member === null || !memberHasOwnSymbol(classNode, member)) continue
     const candidate = makeMethodCandidate(member, ctx, ownerChain)
-    if (candidate === null) continue
     const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
     const group = declared.get(candidate.id)
     if (group === undefined) declared.set(candidate.id, [entry])
@@ -395,27 +396,16 @@ function makeFunctionCandidate(
 }
 
 /**
- * Null for a member whose name is computed (`[Symbol.iterator]() {}`, `["go"]() {}`).
- *
- * The brackets are not a name, and their text used to go into the id builder, which refused
- * it — costing the class and every sibling member as well as the one nobody can name.
- * Normalising the brackets into a segment is refused rather than deferred: any mangling
- * invents a name the source does not contain, two different computed keys can collapse onto
- * one segment, and nothing reads it back to what was written.
- *
- * Silently, and deliberately. A computed name is not a name static analysis can record — the
- * position `lang-plugin.md` LP26e takes on a computed module specifier — so there is nothing
- * to report against the source.
+ * One class member that `memberHasOwnSymbol` has already admitted — which is what makes this
+ * total. A member with a computed name never reaches here, because its brackets are not a
+ * name and there is no id to build from them.
  */
 function makeMethodCandidate(
   node: Node,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
-): SymbolCandidate<Node> | null {
+): SymbolCandidate<Node> {
   const kind: SymbolKind = isConstructor(node) ? "constructor" : "method"
-  // A constructor cannot reach this: `isConstructor` compares the `name` field's text to
-  // "constructor", and a computed name's text carries its brackets.
-  if (findChild(node, "computed_property_name") !== null) return null
   // Constructors do not carry a name field in the grammar, so short-circuit before the
   // fail-fast helper would trip on them.
   const methodName =

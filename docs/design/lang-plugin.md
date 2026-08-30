@@ -558,6 +558,11 @@ Every language plugin must pass the following tests.
 | LP18 | `return foo()` | no return in rules, foo in calls |
 | LP19 | `return a + b` | return in rules (expr: "a + b") |
 | LP20 | `for (let i...) ...` | loop in rules (loopKind: "for") |
+| LP20a | a type whose members are Symbols of their own — a class and its methods | the owner's walk reports **its own** body only: field initialisers, static blocks, and whatever the language runs on construction. A member body reported twice is reported on two Symbols, and any resolution that reaches the owner (`call-resolution.md` CR15 resolves `new C()` to the class) carries the duplicate up into callers that touch nothing |
+| LP20b | the construction path — a constructor body | reported on the owner, because that is the Symbol an instantiation resolves to. Reported on the member's own Symbol as well; nothing resolves a call to a constructor, so it propagates nowhere twice |
+| LP20c | a member with **no** Symbol of its own — a computed name, a member of an anonymous default export | its body stays on the owner. Skipping it would lose the calls in it with no Symbol, no diagnostic and nothing to say so. The plugin needs one predicate for "is this member a Symbol?" that both extraction and the walk read, or the two sides disagree and a body is counted twice or not at all |
+| LP20d | a member's parameter defaults and decorator arguments | on the owner. They sit outside the member's own `bodyNode`, so skipping the whole member rather than its body loses them |
+| LP20e | an owner-shaped node the walk *meets* rather than owns — `function f() { class Inner { m() { x() } } }` | walked whole. `Inner` is not extracted, so every call in it belongs to `f`; the rule above applies to the Symbol's own body nodes and to nothing else |
 
 ### 9.5 normalizeAst
 
