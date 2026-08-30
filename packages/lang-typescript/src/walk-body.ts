@@ -30,8 +30,7 @@ import { bodyNodesOf, findChild } from "./ast-helpers"
 export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>): BodyExtraction {
   const rules: Rule[] = []
   const calls: CallCandidate[] = []
-  // Every body the Symbol was declared with, not just the first: a `set password(v)` whose
-  // body hashes the value is as much a part of the property as the getter beside it.
+  // Every body the Symbol was declared with, not just the leading declaration's.
   for (const body of bodyNodesOf(symbol)) visit(body, rules, calls)
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)

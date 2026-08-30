@@ -46,6 +46,20 @@ async function walkOf(source: string, id: string): Promise<BodyExtraction> {
   return walkBody(target, walkCtx)
 }
 
+const SETTER_FIRST_DECORATED = [
+  "export class A {",
+  "  @Validate() set v(n) {}",
+  "  @Memo() get v() { return 1 }",
+  "}",
+].join("\n")
+
+const CLASS_AND_NAMESPACE_FUNCTION = [
+  "export class C {}",
+  "export namespace C {",
+  "  export function go() { inner() }",
+  "}",
+].join("\n")
+
 const TWO_DOTTED = ["export namespace A.B {}", "export namespace A.C {}"].join("\n")
 
 const TWO_ENUMS = ["export enum E { A }", "export enum E { B }"].join("\n")
@@ -186,6 +200,16 @@ describe("a getter and a setter declare one member", () => {
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#M", "ts:src/a.ts#M.m"])
     const { calls } = await walkOf(source, "ts:src/a.ts#M.m")
     expect(calls.map((c) => c.target)).toEqual(["a", "b"])
+  })
+
+  it("orders the joined decorators by source position, not by which declaration leads", async () => {
+    // The getter leads the pair wherever it is written, so a fold that visited the lead first
+    // would answer `[Memo, Validate]` here \u2014 descending, against `lang-plugin.md` LP15. Scalars
+    // come from the lead; lists are joined by walking the declarations in source order.
+    const symbol = await symbolNamed(SETTER_FIRST_DECORATED, "ts:src/a.ts#A.v")
+
+    expect(symbol.decorators.map((d) => d.name)).toEqual(["Validate", "Memo"])
+    expect(symbol.signature?.inputs).toEqual([])
   })
 
   it("keeps a decorator written on the declaration that did not lead", async () => {
@@ -339,6 +363,18 @@ describe("merged declarations are one Symbol", () => {
     expect(
       (await walkOf(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C.m")).calls.map((c) => c.line),
     ).toEqual([2, 5])
+  })
+
+  it("does not walk a merged namespace, whose statements are Symbols of their own", async () => {
+    // A namespace candidate has no `bodyNode`, and that is what keeps it out of the walk. Take
+    // its `fullNode` instead and every call inside it lands on the class as well as on the
+    // Symbol its own statement already produced \u2014 the same double count a class body would
+    // cause if members were walked twice.
+    const owner = await walkOf(CLASS_AND_NAMESPACE_FUNCTION, "ts:src/a.ts#C")
+    const inner = await walkOf(CLASS_AND_NAMESPACE_FUNCTION, "ts:src/a.ts#C.go")
+
+    expect(owner.calls).toEqual([])
+    expect(inner.calls.map((c) => c.target)).toEqual(["inner"])
   })
 
   it("says nothing about merging on a file that merges nothing", async () => {
