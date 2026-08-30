@@ -184,9 +184,10 @@ describe("Dependency triple collisions (ir-schema.md §14 #13)", () => {
 })
 
 describe("the identity fields are established before they are read", () => {
-  // The scan reads `.id` / `.from` off every entry, so it is the first code to dereference
-  // them — and reading them is what forces the check. Without it, `symbols: [null]` reached
-  // `matchStageId` and failed on `null.id` with no collection or index named, while a single
+  // The shape gate dereferences them first now, so these arrive at the scan already
+  // established and the scan's own type guards are a local guarantee rather than the live
+  // path. What each case still pins is the refusal and where it points: `symbols: [null]`
+  // reached `matchStageId` and failed on `null.id` with no collection or index named, and a
   // Symbol carrying *no* `id` had nothing to collide with, passed, and derived a Slice
   // anchored on `undefined` — reported as `slice-invariant-violated`, the one code the CLI
   // presents as a bug in Aburi rather than in the caller's IR.
@@ -196,41 +197,50 @@ describe("the identity fields are established before they are read", () => {
     return bad as unknown as IRSymbol
   }
 
-  const cases: ReadonlyArray<[string, Partial<IR>, string]> = [
-    ["a null Symbol", { symbols: [null as unknown as IRSymbol] }, "baseIR.symbols[0]"],
-    ["a null Component", { components: [null as unknown as Component] }, "baseIR.components[0]"],
+  const cases: ReadonlyArray<[string, Partial<IR>, string, string]> = [
+    ["a null Symbol", { symbols: [null as unknown as IRSymbol] }, "baseIR.symbols[0]", "null"],
+    [
+      "a null Component",
+      { components: [null as unknown as Component] },
+      "baseIR.components[0]",
+      "null",
+    ],
     [
       "a numeric Dependency",
       { dependencies: [7 as unknown as Dependency] },
       "baseIR.dependencies[0]",
+      "a number",
     ],
-    ["a Symbol with no id", { symbols: [withoutId()] }, "baseIR.symbols[0].id"],
+    ["a Symbol with no id", { symbols: [withoutId()] }, "baseIR.symbols[0]", '"id" is absent'],
     [
       "a Symbol whose id is a number",
       { symbols: [{ ...foo(), id: 42 } as unknown as IRSymbol] },
-      "baseIR.symbols[0].id",
+      "baseIR.symbols[0]",
+      '"id" is a number',
     ],
     [
       "a Dependency with no via",
       { dependencies: [{ from: "a", to: "b" } as unknown as Dependency] },
-      "baseIR.dependencies[0].via",
+      "baseIR.dependencies[0]",
+      '"via" is absent',
     ],
   ]
 
-  for (const [label, overrides, subject] of cases) {
+  for (const [label, overrides, subject, detail] of cases) {
     it(`names ${subject} for ${label}`, () => {
       const broken = { ...makeIR(), ...overrides } as IR
       const error = thrownBy(() => diff(broken, makeIR()))
       expect(error?.code).toBe("ir-shape-invalid")
       expect(error?.message).toContain(subject)
+      expect(error?.message).toContain(detail)
     })
   }
 
   it("distinguishes an absent field from a null one", () => {
     const absent = { ...makeIR(), symbols: [withoutId()] } as IR
     const nulled = { ...makeIR(), symbols: [{ ...foo(), id: null } as unknown as IRSymbol] } as IR
-    expect(thrownBy(() => diff(absent, makeIR()))?.message).toContain("got undefined")
-    expect(thrownBy(() => diff(nulled, makeIR()))?.message).toContain("got null")
+    expect(thrownBy(() => diff(absent, makeIR()))?.message).toContain('"id" is absent')
+    expect(thrownBy(() => diff(nulled, makeIR()))?.message).toContain('"id" is null')
   })
 })
 

@@ -330,7 +330,13 @@ function checkField(
 }
 
 /** Subject for a breach at the top level, where there is no enclosing record to name. */
-const DOCUMENT_SUBJECT = "document"
+/**
+ * The subject a breach at the top level of the Document is attributed to. Exported because
+ * `@aburi/diff` prefixes every subject with the side it came from and has to recognise the
+ * root to write `baseIR` rather than `baseIR.document`; a hand-copied literal there would go
+ * quietly wrong if this were renamed.
+ */
+export const DOCUMENT_SUBJECT = "document"
 
 function violation(subject: string, message: string): IntegrityViolation {
   // The subject names the record, the message names the field inside it, at every depth:
