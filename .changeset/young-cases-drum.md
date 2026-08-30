@@ -31,4 +31,7 @@ an edge whose source was a backslash and a newline. A literal made only of *othe
 (`"\n\t"`) still gets an ordinary edge — the gate tests emptiness, not blankness.
 
 An invalid escape never reaches the decoder: `"\uZZZZ"` and `"\xZZ"` parse as ERROR nodes
-rather than `escape_sequence` and are already reported as recoverable syntax errors.
+rather than `escape_sequence` and are already reported as recoverable syntax errors. A literal
+made of nothing else still comes back as its own source text rather than as the empty string,
+so the parser's syntax error stays the only thing said about it — calling it empty as well
+would be a third diagnostic claiming the author wrote no module name, and they did.

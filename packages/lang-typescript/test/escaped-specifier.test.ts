@@ -135,4 +135,18 @@ describe("an escape the grammar refuses never reaches the decoder", () => {
     expect(imports[0]?.source).toBe("./a")
     expect(errors.some((e) => e.message === "syntax error")).toBe(true)
   })
+
+  it.each([
+    ["an invalid unicode escape", `${BS}uZZZZ`],
+    ["an invalid hex escape", `${BS}xZZ`],
+  ])("does not also call a literal that is only %s empty", async (_label, written) => {
+    const { errors } = await parse(`import x from "${written}"`)
+
+    // Nothing in the literal parsed, so nothing is read from it — but the author did write a
+    // module name, and saying it "names no module" on top of the syntax errors would be a
+    // third diagnostic contradicting the two that are right. The quote-stripping fallback
+    // answers the raw contents, which is non-empty and never reaches the gate.
+    expect(errors.some((e) => e.message === "syntax error")).toBe(true)
+    expect(emptySpecifierErrors(errors)).toEqual([])
+  })
 })

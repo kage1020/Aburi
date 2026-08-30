@@ -323,9 +323,10 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * `"\x2E/e"` it answered `/e`, which fails `isRelativeSpecifier` and sent every call through
  * that binding to the `external` bucket instead of to the sibling file it names.
  *
- * That makes the quote-stripping fallback below reachable by an empty literal alone, which is
- * a property worth stating because it used to take an argument: a literal made only of
- * escapes has no fragments, but it now has a decoded value, so it never falls through.
+ * The quote-stripping fallback below is what a literal reaches when nothing was read at all,
+ * which is now two cases and not three: an empty literal, and one whose contents stand as an
+ * ERROR node. A literal made only of escapes used to land there and come back as its own
+ * source text; it has a decoded value now.
  */
 function readLiteralSpecifier(node: Node): string | null {
   if (node.type === "template_string") {
@@ -340,10 +341,13 @@ function readLiteralSpecifier(node: Node): string | null {
     else if (child.type === "escape_sequence") parts.push(decodeEscapeSequence(child.text))
   }
   // An escape can decode to nothing — a line continuation joins two lines and contributes no
-  // character — so the join is what decides emptiness, not whether any children were read.
-  if (node.namedChildCount > 0) return parts.join("")
-  // No named children at all: an empty literal. Strip the quotes off the raw text, which
-  // answers `""` without special-casing the quote character.
+  // character — so a literal that is only one comes back empty and reaches the caller's gate.
+  if (parts.length > 0) return parts.join("")
+  // Nothing was read: either the literal is empty, or its contents did not parse and stand as
+  // an ERROR node (`"\uZZZZ"`). Stripping the quotes tells them apart — the first is empty and
+  // the caller reports it, the second comes back non-empty, which is the answer that leaves
+  // the parser's own syntax error as the only thing said about it. Calling it empty as well
+  // would be a third diagnostic claiming the author wrote no module name, and they did.
   const raw = node.text
   if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
   return raw
