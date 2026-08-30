@@ -467,7 +467,10 @@ function isBindingPattern(node: Node): boolean {
  * pattern would declare Symbols for both of those, so each wrapper is entered through the one
  * field that holds a binding rather than through its children.
  *
- * An array hole (`[, x]`) binds nothing and is not a named child, so it needs no case.
+ * Which makes the *set of wrappers* the thing that has to be right, and a missing one silent
+ * — so an unmodelled node type is refused rather than passed over. An array hole (`[, x]`)
+ * binds nothing and is not a named child, so it needs no case; a `comment` is a named child
+ * and gets one.
  */
 function collectPatternBindings(pattern: Node): Node[] {
   const out: Node[] = []
@@ -484,12 +487,18 @@ function collectPatternBindings(pattern: Node): Node[] {
         }
         return
       case "pair_pattern": {
-        // The key is a `property_identifier`, which this switch has no case for — reading
-        // the `value` field states that rather than relying on it.
+        // The key is a `property_identifier`, a `string`, a `number` or a
+        // `computed_property_name` depending on how it was written, and none of them is a
+        // declaration. Reading the `value` field says so rather than filtering them out.
         const value = node.childForFieldName("value")
         if (value !== null) visit(value)
         return
       }
+      // Two node types for one idea: the grammar uses `object_assignment_pattern` for an
+      // object shorthand default (`{ a = 1 }`) and `assignment_pattern` for every other
+      // default — an array element (`[a = 1]`) and a renamed property (`{ z: a = 1 }`).
+      // Covering only the first bound nothing at all for the other two.
+      case "assignment_pattern":
       case "object_assignment_pattern": {
         // `left` is the binding; `right` is a default expression evaluated elsewhere.
         const left = node.childForFieldName("left") ?? node.namedChild(0)
@@ -501,8 +510,20 @@ function collectPatternBindings(pattern: Node): Node[] {
         if (inner !== null) visit(inner)
         return
       }
-      default:
+      case "comment":
+        // A named child of both pattern kinds, and the one thing inside a pattern that
+        // legitimately binds nothing.
         return
+      default:
+        // Loud, because the alternative is the failure this whole change is about. A node
+        // type this walk does not model binds nothing here, which is indistinguishable from
+        // a pattern that declares nothing — and a binding lost that way leaves no Symbol, no
+        // diagnostic and no `skipped` entry. `assignment_pattern` went missing exactly this
+        // way. Refusing sends the file to the per-file boundary instead, which names it.
+        throw new CoreError(
+          `Unmodelled node "${node.type}" inside a destructuring pattern at ${pattern.startPosition.row + 1}; refusing to report bindings this walk may have missed`,
+          { code: "anonymous-symbol-id-attempted", value: node.type },
+        )
     }
   }
   visit(pattern)
@@ -517,6 +538,12 @@ function collectPatternBindings(pattern: Node): Node[] {
  * claiming a kind on a guess would make the two paths disagree about what evidence a kind
  * needs. The `source` range is the whole declaration, as it is for a plain `const` — several
  * Symbols therefore share one range, and `destructured-binding` is what tells a reader why.
+ *
+ * `fullNode` is the declaration too, so every binding out of one statement normalizes to the
+ * same AST string and carries the same syntax fingerprint. Intended, and not new: `const a =
+ * 1, b = 2` has done it since before this walk existed. What it costs is precision in the
+ * diff's rename similarity, which compares that fingerprint — two bindings from one
+ * declaration look alike to it, which for a destructuring is closer to true than not.
  */
 function makeDestructuredCandidate(
   binding: Node,

@@ -42,6 +42,11 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
  * use to control ligature shaping, and which ECMAScript names separately — are already in
  * `ID_Continue` here, so naming them again would say nothing.
  *
+ * "Here" is load-bearing: `\p{ID_Continue}` resolves against the engine's Unicode tables, and
+ * this was measured on the Node version the workspace pins (`engines.node >= 24`, which is
+ * what CI runs). Lowering that floor is the change that would put ZWNJ and ZWJ back outside
+ * the escape, so it is the change that would have to name them again.
+ *
  * The ASCII-only grammar this replaces refused names `schema/aburi.ir.v1.json#/$defs/SymbolId`
  * already accepts — its pattern is `^[a-z][a-z0-9]*:[^#\\]+#[^\\]+$` — so a Japanese or
  * accented declaration threw here and cost its whole file at the per-file boundary. Widening

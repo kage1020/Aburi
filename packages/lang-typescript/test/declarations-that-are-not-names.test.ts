@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { extractSymbols, parseTypescriptFile } from "../src/index"
+import { extractSymbols, langTypescriptManifest, parseTypescriptFile } from "../src/index"
 import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
 
 /**
@@ -26,7 +26,12 @@ describe("a destructuring declaration declares its bindings", () => {
   it.each([
     ["shorthand properties", "export const { GET, POST } = handlers", ["GET", "POST"]],
     ["a rename", "export const { a: b } = m", ["b"]],
-    ["a default", "export const { a = 1 } = m", ["a"]],
+    ["a shorthand default", "export const { a = 1 } = m", ["a"]],
+    ["an array default", "export const [a = 1] = pair", ["a"]],
+    ["a renamed default", "export const { a: b = 1 } = m", ["b"]],
+    ["a default inside a nested array", "export const [[a = 1], b] = pair", ["a", "b"]],
+    ["a nested pattern with a default", "export const { a: { b } = {} } = m", ["b"]],
+    ["every default form at once", "export const { a = 1, b: c = 2, ...d } = m", ["a", "c", "d"]],
     ["a rest element", "export const { a, ...r } = m", ["a", "r"]],
     ["a nested pattern", "export const { a: { b } } = m", ["b"]],
     ["an array pattern", "export const [a, b] = pair", ["a", "b"]],
@@ -43,10 +48,27 @@ describe("a destructuring declaration declares its bindings", () => {
     expect(await symbolIdsOf("export const { a: b } = m")).toEqual(["ts:src/a.ts#b"])
   })
 
-  it("does not mistake a default's expression for a binding", async () => {
-    // `{ a = fallback }` binds `a` and *reads* `fallback`. Walking the whole pattern for
-    // identifiers would declare a Symbol for a name that lives in another file.
-    expect(await symbolIdsOf("export const { a = fallback } = m")).toEqual(["ts:src/a.ts#a"])
+  it.each([
+    ["a shorthand default", "export const { a = fallback } = m"],
+    ["an array default", "export const [a = fallback] = pair"],
+    ["a renamed default", "export const { z: a = fallback } = m"],
+  ])("does not mistake %s's expression for a binding", async (_label, source) => {
+    // These bind `a` and *read* `fallback`. Walking the whole pattern for identifiers would
+    // declare a Symbol for a name that lives in another file. Three forms because the
+    // grammar has two node types for a default — `object_assignment_pattern` for the object
+    // shorthand and `assignment_pattern` everywhere else — and covering only the first is
+    // how the array and renamed forms came to bind nothing at all.
+    expect(await symbolIdsOf(source)).toEqual(["ts:src/a.ts#a"])
+  })
+
+  it.each([
+    ["an object pattern", "export const { a, /* c */ b } = m"],
+    ["an array pattern", "export const [a, /* c */ b] = pair"],
+  ])("reads past a comment written inside %s", async (_label, source) => {
+    // A comment is a named child of both pattern kinds, and the walk refuses a node type it
+    // does not model rather than passing over it — so this is the case that keeps the
+    // refusal from firing on ordinary source.
+    expect(await symbolIdsOf(source)).toEqual(["ts:src/a.ts#a", "ts:src/a.ts#b"])
   })
 
   it("gives every binding the kind and range a plain const gets", async () => {
@@ -102,6 +124,35 @@ describe("a destructuring declaration declares its bindings", () => {
       "ts:src/a.ts#N.a",
       "ts:src/a.ts#N.b",
     ])
+  })
+})
+
+describe("every rationale extraction emits is one the manifest declares", () => {
+  it.each([
+    ["export const { a } = m", ["destructured-binding"]],
+    ["export const x = 1", ["export-keyword"]],
+    ["export const f = () => 1", ["variable-assigned-function", "export-keyword"]],
+    ["export class A { m() {} }", ["export-keyword", "class-method"]],
+    ["export class A { static m() {} }", ["static-method"]],
+    ["export class A { constructor() {} }", ["constructor-declaration"]],
+    ["export interface I {}", ["interface-declaration"]],
+    ["export type T = 1", ["type-alias"]],
+    ["export enum E { A }", ["enum-declaration"]],
+    ["export namespace N {}", ["namespace-declaration"]],
+    ["export default function () {}", ["export-default"]],
+  ])("declares the rationales %s produces", async (source, expected) => {
+    // `fp-extension-impl.md` FP-A3 wants at least one entry per Symbol to identify the
+    // emitting plugin under a prefix it owns, and `findDerivedByOwner` resolves it from this
+    // list. Nothing enforces it at load time — the manifest comment used to claim otherwise —
+    // so this is where the list is held to what extraction actually emits. A token missing
+    // here is a Symbol no plugin owns.
+    const declared = new Set(langTypescriptManifest.provides.derivedByPrefixes)
+    const emitted = (await symbolsOf(source)).flatMap((s) => s.derivedBy)
+
+    expect(emitted).toEqual(expect.arrayContaining(expected))
+    for (const token of emitted) {
+      expect(declared.has(token)).toBe(true)
+    }
   })
 })
 

@@ -26,9 +26,16 @@ one of these, so this closes a gap between the two rather than opening one. What
 refuses is what is not a name — a pattern's text, a computed member's brackets.
 
 **A destructuring declaration produces one Symbol per binding.** `{ a: b }` binds `b`, not the
-key `a`; `{ a = fallback }` binds `a` and reads `fallback`, which is a name from another file
-and not a declaration here. Each binding is a `const` carrying `destructured-binding` in
-`derivedBy`, which is what explains several Symbols sharing one source range.
+key `a`; `{ a = fallback }` and `[a = fallback]` bind `a` and read `fallback`, which is a name
+from another file and not a declaration here. Each binding is a `const` carrying
+`destructured-binding` in `derivedBy` — declared in the plugin manifest alongside the other
+language-level rationales — and that token is what explains several Symbols sharing one source
+range.
+
+A node type the pattern walk does not model is **refused** rather than passed over. Binding
+nothing for an unmodelled wrapper is indistinguishable from a pattern that declares nothing,
+and a binding lost that way leaves no Symbol, no diagnostic and no `skipped` entry — which is
+worse than the throw this change replaces, because that one was at least named.
 
 **A class member with a computed name produces no Symbol, and no diagnostic.** Mangling the
 brackets into a segment would invent a name the source does not contain, and two different
