@@ -59,6 +59,7 @@ export {
 } from "./id"
 export { type ImportBinding, splitAliasedImportName } from "./import-edge"
 export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
+export { checkDocumentShape } from "./integrity-shape"
 export {
   type EnrichmentInput,
   type EnrichmentResult,

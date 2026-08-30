@@ -1,4 +1,9 @@
-import { reconstructCallEdgesFromIR, type SerializeOptions, serializeCanonical } from "@aburi/core"
+import {
+  checkDocumentShape,
+  reconstructCallEdgesFromIR,
+  type SerializeOptions,
+  serializeCanonical,
+} from "@aburi/core"
 import type {
   DiffResult,
   IR,
@@ -362,29 +367,50 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
 ]
 
 /**
- * The two things `buildDiff` needs before stage 1 runs: a Document it can walk, and
- * identities it can key on. diff-algorithm.md §3.7 states the second and why it is checked
- * here as well as at extraction time.
+ * The two things `buildDiff` needs before stage 1 runs: a Document of the shape the schema
+ * requires, and identities it can key on. diff-algorithm.md §3.7 states the second and why
+ * it is checked here as well as at extraction time.
  *
- * Neither half is a full schema validation. A Symbol that reaches stage 1 is an object with
- * a string `id`, because the identity scan reads that much; nothing checks it carries a
- * `fingerprint`, which is `checkIRIntegrity` #20's job and runs when the CLI reads an IR off
- * disk. What this does buy is that a malformed collection is named — `symbols: undefined`
- * used to surface as `TypeError: undefined is not iterable` and `symbols: [null]` as
- * `TypeError: Cannot read properties of null (reading 'id')`, both from inside
- * `matchStageId`, with neither the collection nor the index named.
+ * The first is `checkDocumentShape` — invariant #20, and only #20. `buildDiff` is public
+ * API, so an IR a caller assembled in memory arrives having passed nothing; seven fields the
+ * diff reads used to crash it with a `TypeError` that named neither the collection nor the
+ * index. The check is deliberately not scoped to "the fields the matcher dereferences":
+ * `integrity-shape.ts` makes that argument for itself and names this consumer, and a gate
+ * that moved with every change to the matcher would leave a caller's IR conditionally valid.
+ *
+ * It is equally deliberately not the other nineteen. Those are statements about a Document
+ * whose answer the diff does not depend on — an unsorted `symbols[]` diffs correctly,
+ * because stage 1 keys by id — so running them would withhold an answer the matcher can
+ * give. It also means `aburi diff`, which already ran all twenty in `readIR`, re-pays only
+ * the structural walk.
  */
 function assertDiffable(ir: IR, name: IRSide): void {
-  if (ir === null || typeof ir !== "object") {
-    throw shapeError(name, `${name} must be an IR object; got ${describeValue(ir)}.`)
+  const violations = checkDocumentShape(ir)
+  const first = violations[0]
+  if (first !== undefined) {
+    // The subject names the record and the message names the field inside it, which is the
+    // arrangement `checkDocumentShape` writes at every depth. Adopted rather than reworded so
+    // the two gates cannot describe the same breach two ways. `document` is its name for the
+    // root, and the side already says which document this is.
+    const subject = first.subject === DOCUMENT_ROOT ? name : `${name}.${first.subject}`
+    // Every breach at once, quoted through the first: a caller told about one field per run
+    // fixes a malformed IR one field per run.
+    const rest = violations.length - 1
+    const more = rest > 0 ? ` (and ${rest} more)` : ""
+    throw shapeError(subject, `${subject}: ${first.message}${more}.`)
   }
-  if (typeof ir.$schema !== "string" || ir.$schema.length === 0) {
+  // Non-empty is this function's own requirement rather than the schema's: two documents that
+  // both say `""` agree with each other, so `ensureSchemasAgree` would let the pair through.
+  if (ir.$schema.length === 0) {
     throw shapeError(`${name}.$schema`, `${name}.$schema must be a non-empty schema URL.`)
   }
   for (const collection of IDENTIFIED_COLLECTIONS) {
     assertUniqueIdentity(ir[collection.field], `${name}.${collection.field}`, collection)
   }
 }
+
+/** `checkDocumentShape`'s subject for a breach at the top level of the Document. */
+const DOCUMENT_ROOT = "document"
 
 function assertUniqueIdentity(
   entries: unknown,
@@ -414,11 +440,17 @@ function assertUniqueIdentity(
 }
 
 /**
- * The identity fields of one entry, established as strings on the way out. Reading them is
- * what forces the check: without it a Symbol carrying no `id` has nothing to collide with,
- * passes, and derives a Slice anchored on `undefined` several stages later — which
- * `assertSliceRecordInvariant` reports as `slice-invariant-violated`, the one code the CLI
- * presents as a bug in Aburi rather than in the caller's IR.
+ * The identity fields of one entry, read as strings.
+ *
+ * The two guards below are unreachable through `assertDiffable`, which runs the shape gate
+ * first and so has already established that every entry is an object carrying string `id` /
+ * `from` / `to` / `via`. They stay because this function is total on its own terms rather
+ * than on its caller's, and the alternative is a cast that would be wrong the moment either
+ * one is called from somewhere else. What they used to buy is now bought earlier: a Symbol
+ * carrying no `id` had nothing to collide with, passed, and derived a Slice anchored on
+ * `undefined` several stages later — which `assertSliceRecordInvariant` reports as
+ * `slice-invariant-violated`, the one code the CLI presents as a bug in Aburi rather than in
+ * the caller's IR.
  */
 function identityFieldsOf(
   entry: unknown,

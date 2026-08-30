@@ -75,7 +75,7 @@ describe("DiffError — ir-shape-invalid", () => {
         base: IR_REF,
         head: IR_REF,
       }),
-    ).toThrow(/baseIR.symbols must be an array/)
+    ).toThrow(/baseIR: "symbols" is absent, not an array/)
   })
 
   it("throws when components is missing", () => {
@@ -87,7 +87,7 @@ describe("DiffError — ir-shape-invalid", () => {
         base: IR_REF,
         head: IR_REF,
       }),
-    ).toThrow(/headIR.components must be an array/)
+    ).toThrow(/headIR: "components" is absent, not an array/)
   })
 
   it("throws when dependencies is missing", () => {
@@ -99,7 +99,7 @@ describe("DiffError — ir-shape-invalid", () => {
         base: IR_REF,
         head: IR_REF,
       }),
-    ).toThrow(/headIR.dependencies must be an array/)
+    ).toThrow(/headIR: "dependencies" is null, not an array/)
   })
 
   it("throws when $schema is empty", () => {
@@ -122,6 +122,6 @@ describe("DiffError — ir-shape-invalid", () => {
         base: IR_REF,
         head: IR_REF,
       }),
-    ).toThrow(/baseIR must be an IR object/)
+    ).toThrow(/baseIR: Document is null, not an object/)
   })
 })

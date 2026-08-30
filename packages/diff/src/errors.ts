@@ -9,10 +9,16 @@ export type DiffErrorCode =
   /** `config.diff.lineFuzz` was outside the documented [0, 10] range (diff-algorithm.md §5.2.1). */
   | "invalid-line-fuzz"
   /**
-   * `baseIR` or `headIR` failed the top-level shape check that `buildDiff` enforces
-   * before touching any Symbol. Missing / non-array `symbols`, `components`,
-   * `dependencies`, or an absent `$schema` — anything that would otherwise crash with a
-   * cryptic `TypeError: undefined is not iterable` deep in a matching stage.
+   * `baseIR` or `headIR` is not a Document of the shape `aburi.ir.v1` requires. `buildDiff`
+   * establishes that before touching any Symbol, by running invariant #20
+   * (`checkDocumentShape`) — so this covers a missing collection, an entry that is not an
+   * object, and any absent or mistyped field of a Symbol, Component or Dependency, each
+   * named with the collection and the index it sits at. Anything here would otherwise crash
+   * deep in a matching stage with a `TypeError` naming neither.
+   *
+   * Not the other nineteen invariants: those are statements about a Document whose answer
+   * the diff does not depend on, and refusing an unsorted `symbols[]` would withhold a diff
+   * the matcher can produce.
    */
   | "ir-shape-invalid"
   /**
