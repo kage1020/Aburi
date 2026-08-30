@@ -1,5 +1,6 @@
 import {
   checkDocumentShape,
+  DOCUMENT_SUBJECT,
   reconstructCallEdgesFromIR,
   type SerializeOptions,
   serializeCanonical,
@@ -308,11 +309,13 @@ function ensureSchemasAgree(base: IR, head: IR): void {
 type IRSide = "baseIR" | "headIR"
 
 /**
- * A collection `buildDiff` keys by identity. One descriptor drives both halves of the
- * entry-point check — that the entries are objects carrying string identity fields, and that
- * no identity repeats — so the two cannot come to describe different collections, and a
- * fourth entry added here is guarded by both or by neither. Reporting order is the order of
- * this array, base side before head side.
+ * A collection `buildDiff` keys by identity, and refuses a repeat in. Reporting order is the
+ * order of this array, base side before head side.
+ *
+ * The identity scan also refuses an entry that is not an object or whose identity fields are
+ * not strings, and for the three collections here the shape gate has established both before
+ * it runs. That is not free for a fourth: the gate covers what `aburi.ir.v1` declares, so a
+ * collection added here and not there would reach the scan with those guards live again.
  */
 interface IdentifiedCollection {
   readonly field: "symbols" | "components" | "dependencies"
@@ -367,22 +370,30 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
 ]
 
 /**
- * The two things `buildDiff` needs before stage 1 runs: a Document of the shape the schema
- * requires, and identities it can key on. diff-algorithm.md §3.7 states the second and why
- * it is checked here as well as at extraction time.
+ * The three things `buildDiff` needs before stage 1 runs: a Document of the shape the schema
+ * requires, a `$schema` that names something, and identities it can key on. diff-algorithm.md
+ * §3.7 states the third and why it is checked here as well as at extraction time.
  *
- * The first is `checkDocumentShape` — invariant #20, and only #20. `buildDiff` is public
- * API, so an IR a caller assembled in memory arrives having passed nothing; seven fields the
- * diff reads used to crash it with a `TypeError` that named neither the collection nor the
- * index. The check is deliberately not scoped to "the fields the matcher dereferences":
- * `integrity-shape.ts` makes that argument for itself and names this consumer, and a gate
- * that moved with every change to the matcher would leave a caller's IR conditionally valid.
+ * The first is `checkDocumentShape` — invariant #20, and only #20. `buildDiff` is public API,
+ * so an IR a caller assembled in memory arrives having passed nothing, and every field the
+ * diff dereferences used to crash it with a `TypeError` that named neither the record nor the
+ * field: `fingerprint` and `source` in `classifyStatus`, the four array fields in
+ * `computeSymbolDelta`, `components[].roots` in `diffComponents`, `stats` in
+ * `dependencySideView`. That list is the shape of the class rather than the whole of it — it
+ * is one matcher change away from being out of date, which is the argument for a gate that is
+ * not scoped to it. `integrity-shape.ts` makes that argument for itself and names this
+ * consumer: a scope that moved with the matcher would leave a caller's IR conditionally valid.
  *
- * It is equally deliberately not the other nineteen. Those are statements about a Document
- * whose answer the diff does not depend on — an unsorted `symbols[]` diffs correctly,
- * because stage 1 keys by id — so running them would withhold an answer the matcher can
- * give. It also means `aburi diff`, which already ran all twenty in `readIR`, re-pays only
- * the structural walk.
+ * The second is this function's own requirement rather than the schema's, which requires only
+ * that `$schema` is a string: two Documents that both say `""` agree with each other, so
+ * `ensureSchemasAgree` would never fire on the pair. It is worded the way the gate words a
+ * breach so one code does not come back in two shapes.
+ *
+ * It is equally deliberately not the semantic invariants. Those are statements about a
+ * Document whose answer the diff does not depend on — an unsorted `symbols[]` diffs correctly,
+ * because stage 1 keys by id — so running them would withhold an answer the matcher can give.
+ * It also means `aburi diff`, which already ran the full checker in `readIR`, re-pays only the
+ * structural walk.
  */
 function assertDiffable(ir: IR, name: IRSide): void {
   const violations = checkDocumentShape(ir)
@@ -390,27 +401,37 @@ function assertDiffable(ir: IR, name: IRSide): void {
   if (first !== undefined) {
     // The subject names the record and the message names the field inside it, which is the
     // arrangement `checkDocumentShape` writes at every depth. Adopted rather than reworded so
-    // the two gates cannot describe the same breach two ways. `document` is its name for the
-    // root, and the side already says which document this is.
-    const subject = first.subject === DOCUMENT_ROOT ? name : `${name}.${first.subject}`
-    // Every breach at once, quoted through the first: a caller told about one field per run
-    // fixes a malformed IR one field per run.
+    // the two gates cannot describe the same breach two ways. `DOCUMENT_SUBJECT` is its name
+    // for the root, and the side already says which document this is.
+    const subject = sidedSubject(name, first.subject)
+    // The message quotes the first breach and counts the rest; `violations` carries all of
+    // them, because a caller repairing a hand-assembled Document should not have to run the
+    // diff once per field to find out what else is wrong.
     const rest = violations.length - 1
     const more = rest > 0 ? ` (and ${rest} more)` : ""
-    throw shapeError(subject, `${subject}: ${first.message}${more}.`)
+    throw new DiffError(`${subject}: ${first.message}${more}.`, {
+      code: "ir-shape-invalid",
+      value: subject,
+      violations: violations.map((v) => ({ ...v, subject: sidedSubject(name, v.subject) })),
+    })
   }
-  // Non-empty is this function's own requirement rather than the schema's: two documents that
-  // both say `""` agree with each other, so `ensureSchemasAgree` would let the pair through.
   if (ir.$schema.length === 0) {
-    throw shapeError(`${name}.$schema`, `${name}.$schema must be a non-empty schema URL.`)
+    throw shapeError(name, `${name}: "$schema" is empty, not a schema URL.`)
   }
   for (const collection of IDENTIFIED_COLLECTIONS) {
     assertUniqueIdentity(ir[collection.field], `${name}.${collection.field}`, collection)
   }
 }
 
-/** `checkDocumentShape`'s subject for a breach at the top level of the Document. */
-const DOCUMENT_ROOT = "document"
+/**
+ * A shape violation's subject, prefixed with the side it came from. The prefix is what the
+ * whole array needs and the message only shows for one of them — a caller reading
+ * `violations` on a two-sided failure would otherwise get `symbols[0]` twice with nothing to
+ * tell the documents apart.
+ */
+function sidedSubject(name: IRSide, subject: string): string {
+  return subject === DOCUMENT_SUBJECT ? name : `${name}.${subject}`
+}
 
 function assertUniqueIdentity(
   entries: unknown,
@@ -442,15 +463,20 @@ function assertUniqueIdentity(
 /**
  * The identity fields of one entry, read as strings.
  *
- * The two guards below are unreachable through `assertDiffable`, which runs the shape gate
- * first and so has already established that every entry is an object carrying string `id` /
- * `from` / `to` / `via`. They stay because this function is total on its own terms rather
- * than on its caller's, and the alternative is a cast that would be wrong the moment either
- * one is called from somewhere else. What they used to buy is now bought earlier: a Symbol
- * carrying no `id` had nothing to collide with, passed, and derived a Slice anchored on
- * `undefined` several stages later — which `assertSliceRecordInvariant` reports as
- * `slice-invariant-violated`, the one code the CLI presents as a bug in Aburi rather than in
- * the caller's IR.
+ * Three guards in this pass have no live path today — the array check in
+ * `assertUniqueIdentity`, and the object and string checks below — because the shape gate
+ * runs first and establishes all three for `symbols`, `components` and `dependencies`.
+ * `describeValue` is theirs alone and so is dead with them. Measured: disabling all three
+ * leaves this package's suite green.
+ *
+ * They stay because what makes them dead is the *contents* of `IDENTIFIED_COLLECTIONS`
+ * matching what `aburi.ir.v1` declares, not anything about this file — a fourth collection
+ * added to that array and not to the schema puts them back on the live path, silently.
+ *
+ * What they used to buy is now bought earlier: a Symbol carrying no `id` had nothing to
+ * collide with, passed, and derived a Slice anchored on `undefined` several stages later —
+ * which `assertSliceRecordInvariant` reports as `slice-invariant-violated`, the one code the
+ * CLI presents as a bug in Aburi rather than in the caller's IR.
  */
 function identityFieldsOf(
   entry: unknown,

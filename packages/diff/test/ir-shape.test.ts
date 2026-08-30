@@ -4,19 +4,22 @@ import { buildDiff, DiffError } from "../src"
 import { component, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
- * `buildDiff` is public API and runs no integrity check, so an IR a caller assembled in
- * memory reaches the matcher unverified. Seven fields the diff reads used to crash it with a
- * bare `TypeError` naming neither the collection nor the index — measured, one field deleted
- * at a time from a well-formed pair.
+ * `buildDiff` is public API and ran no integrity check, so an IR a caller assembled in memory
+ * reached the matcher unverified — this file pins the gate that closed that.
  *
- * The gate is invariant #20 alone (`checkDocumentShape`), not all twenty. It establishes what
- * the `IR` brand asserts; the sixteen semantic rules are about a Document whose answer the
- * diff does not depend on, and running them would refuse an IR the diff can read.
+ * Measured beforehand, one field deleted at a time from a well-formed pair: `fingerprint` and
+ * `source` crashed `classifyStatus`, `rules` / `effects` / `calls` / `decorators` crashed
+ * `computeSymbolDelta`, `components[].roots` crashed `diffComponents`, and `stats` crashed
+ * `dependencySideView` — each a `TypeError` naming neither the record nor the field.
+ *
+ * The gate is invariant #20 alone (`checkDocumentShape`), not the whole checker. It
+ * establishes what the `IR` brand asserts; the semantic rules are about a Document whose
+ * answer the diff does not depend on, and running them would refuse an IR the diff can read.
  */
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
-/** A pair whose Symbol genuinely changed, so the delta path — where six of the seven crashes lived — runs. */
+/** A pair whose Symbol genuinely changed, so the delta path — where four of the crashes lived — runs. */
 function changedPair(): { base: IR; head: IR } {
   return {
     base: makeIR({ symbols: [makeSymbol({ id: "ts:src/a.ts#f", name: "f" })] }),
@@ -49,22 +52,21 @@ function withoutSymbolField(field: string): IR {
 
 describe("a Symbol missing a field the diff reads is named, not crashed on", () => {
   it.each([
-    ["fingerprint", "TypeError: Cannot read properties of undefined (reading 'api')"],
-    ["source", "reading 'file'"],
-    ["calls", "reading 'map'"],
-    ["decorators", "reading 'map'"],
-    ["effects", "reading 'map'"],
-    ["rules", "reading 'map'"],
-  ])("names headIR.symbols[0] and %s", async (field) => {
+    "fingerprint",
+    "source",
+    "calls",
+    "decorators",
+    "effects",
+    "rules",
+  ])("names headIR.symbols[0] and %s", (field) => {
     const { base } = changedPair()
     const error = caught(base, withoutSymbolField(field))
 
     expect(error.code).toBe("ir-shape-invalid")
+    // The record and the field are the whole point: the `TypeError` each of these used to
+    // raise named neither, and a caller holding a thousand Symbols had nowhere to look.
     expect(error.message).toContain("headIR.symbols[0]")
     expect(error.message).toContain(`"${field}"`)
-    // The index and the collection are the whole point: a `TypeError` from inside a matching
-    // stage names neither, and a caller holding a thousand Symbols has nowhere to look.
-    expect(error).toBeInstanceOf(DiffError)
   })
 
   it.each([
@@ -151,7 +153,7 @@ describe("the malformed entry is located, not merely reported", () => {
     expect(error.message).not.toContain("headIR")
   })
 
-  it("reports every breach at once, so they are not fixed one run at a time", () => {
+  it("quotes one breach, counts the rest, and carries all of them", () => {
     const { base } = changedPair()
     const symbol = { ...changedPair().head.symbols[0] } as Record<string, unknown>
     delete symbol.source
@@ -159,10 +161,86 @@ describe("the malformed entry is located, not merely reported", () => {
     delete symbol.rules
     const error = caught(base, { ...base, symbols: [symbol as unknown as IRSymbol] })
 
-    // Which of the three is quoted is the spec's field order, not this test's business. What
-    // matters is that the other two were counted rather than dropped.
+    // Which of the three is quoted is the spec's field order, not this test's business.
     expect(error.message).toMatch(/"(source|calls|rules)" is absent/)
     expect(error.message).toContain("2 more")
+    // A count is enough to know how much is left and not enough to act on. `violations`
+    // carries every breach, so a caller repairing a hand-assembled Document does not run the
+    // diff once per field to find the next one.
+    expect(error.violations?.map((v) => v.subject)).toEqual([
+      "headIR.symbols[0]",
+      "headIR.symbols[0]",
+      "headIR.symbols[0]",
+    ])
+    expect(error.violations?.map((v) => v.message).join(" ")).toMatch(/"source"/)
+    expect(error.violations?.every((v) => v.invariant === 20)).toBe(true)
+  })
+
+  it("puts the side on every violation, not only on the one the message quotes", () => {
+    const symbol = { ...makeSymbol({ id: "ts:src/a.ts#f", name: "f" }) } as Record<string, unknown>
+    delete symbol.source
+    const error = caught(makeIR({ symbols: [symbol as unknown as IRSymbol] }), makeIR())
+
+    // `checkDocumentShape` writes `symbols[0]`; which document that is comes from here, and
+    // an array a caller reads without the message is where it matters most.
+    expect(error.violations?.[0]?.subject).toBe("baseIR.symbols[0]")
+  })
+})
+
+describe("the Document's own records are gated too, not just the collections", () => {
+  it("refuses a minimal hand-assembled IR carrying only the three collections", () => {
+    // The shape someone reaches for after their first crash: `$schema` plus the arrays the
+    // matcher reads. It is not an `aburi.ir.v1` Document, and `dependencySideView` reads
+    // `stats.skippedFiles` off every side unconditionally.
+    const minimal = {
+      $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
+      symbols: [],
+      components: [],
+      dependencies: [],
+    } as unknown as IR
+    const error = caught(minimal, minimal)
+
+    expect(error.code).toBe("ir-shape-invalid")
+    expect(error.message).toContain("baseIR:")
+    expect(error.violations?.map((v) => v.message).join(" ")).toMatch(
+      /"generator".*"workspace".*"stats"/s,
+    )
+  })
+
+  it.each([
+    "stats",
+    "generator",
+    "workspace",
+  ])("refuses a Document missing %s, with no index to name", (field) => {
+    const { base, head } = changedPair()
+    const broken = { ...head } as Record<string, unknown>
+    delete broken[field]
+    const error = caught(base, broken as unknown as IR)
+
+    // A top-level breach has no collection and no index, so the subject is the side alone
+    // — `headIR: "stats" is absent`, not `headIR.document: …`.
+    expect(error.message).toBe(`headIR: "${field}" is absent, not an object.`)
+  })
+
+  it("names a nested record by the path to it", () => {
+    const { base, head } = changedPair()
+    const stats = { ...head.stats, effectPropagation: { sccCount: 0 } }
+    const error = caught(base, { ...head, stats } as unknown as IR)
+
+    // The only path that exercises stripping the `document.` prefix out of the middle of a
+    // subject rather than off the whole of it.
+    expect(error.message).toContain("headIR.stats.effectPropagation:")
+    expect(error.message).not.toContain("document")
+  })
+
+  it("refuses an empty $schema in the gate's own wording", () => {
+    const { base, head } = changedPair()
+    const error = caught({ ...base, $schema: "" } as unknown as IR, head)
+
+    // Two Documents that both say "" agree with each other, so `schema-mismatch` never fires
+    // on the pair. One code, one message shape.
+    expect(error.code).toBe("ir-shape-invalid")
+    expect(error.message).toBe(`baseIR: "$schema" is empty, not a schema URL.`)
   })
 })
 
@@ -181,7 +259,7 @@ describe("a Symbol with no id is the caller's fault, and says so", () => {
   })
 })
 
-describe("the gate is invariant #20, not all twenty", () => {
+describe("the gate is invariant #20, not the whole checker", () => {
   it("diffs an IR whose symbols[] is out of sort order", () => {
     // Array ordering is a semantic invariant the CLI enforces on a Document read off disk.
     // The diff's answer does not depend on it — stage 1 keys by id — so refusing this input

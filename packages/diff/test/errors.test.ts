@@ -111,7 +111,7 @@ describe("DiffError — ir-shape-invalid", () => {
         base: IR_REF,
         head: IR_REF,
       }),
-    ).toThrow(/\$schema must be a non-empty schema URL/)
+    ).toThrow(/baseIR: "\$schema" is empty, not a schema URL/)
   })
 
   it("throws when the IR argument is not an object", () => {
