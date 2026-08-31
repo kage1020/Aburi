@@ -44,6 +44,19 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
   }
 }
 
+/**
+ * The function a declaration's `value` field holds, or null when it holds anything else.
+ *
+ * One set, read wherever a binding is decided to be a function rather than data: `const f =
+ * () => …` at module level and `class C { f = () => … }` inside a class body answer the same
+ * question the same way. A generator (`function* () {}`) is outside it at both levels.
+ */
+export function functionValueOf(node: Node): Node | null {
+  const value = node.childForFieldName("value")
+  if (value === null) return null
+  return value.type === "arrow_function" || value.type === "function_expression" ? value : null
+}
+
 /** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */
 export function hasChildOfType(node: Node, typeName: string): boolean {
   for (const child of node.children) {

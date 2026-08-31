@@ -7,7 +7,7 @@ import type {
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild } from "./ast-helpers"
-import { isConstructorMember, memberHasOwnSymbol } from "./class-members"
+import { functionValuedField, isConstructorMember, memberHasOwnSymbol } from "./class-members"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -46,12 +46,16 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
 
 /**
  * A class Symbol's own body: what **defining and constructing** the class runs, per
- * `lang-plugin.md` LP20a–LP20e. Field initialisers, static blocks and the constructor stay; a
+ * `lang-plugin.md` LP20a–LP20f. Field initialisers, static blocks and the constructor stay; a
  * member whose body another Symbol records does not.
  *
- * Only the *body* is skipped, never the member. A member's `bodyNode` is its `statement_block`,
- * so a parameter default (`m(x = f())`) is outside it and would be lost with nothing to say so
- * — which is LP20d, and the reason this reaches for the `body` field rather than the member.
+ * Only the *body* is skipped, never the member. A member's `bodyNode` is whatever its `body`
+ * field holds — a `statement_block` for a method, the expression itself for an
+ * expression-bodied arrow — so a parameter default (`m(x = f())`) is outside it either way and
+ * would be lost with nothing to say so. That is LP20d, and the reason this reaches for the
+ * `body` field rather than for the member. A field holding a function is skipped the same way
+ * and for the same reason: constructing the class creates the closure, and only entering it
+ * runs the body (LP20f).
  *
  * And only for the Symbol's own bodies: a class written inside a function or a method is not
  * extracted, so every call in it belongs to the Symbol whose body encloses it (LP20e).
@@ -65,21 +69,43 @@ function visitOwnClassBody(
   for (const member of body.namedChildren) {
     if (member === null) continue
     const memberBody = memberBodySkippedHere(classNode, member)
-    if (memberBody === null) {
-      visit(member, rules, calls)
-      continue
-    }
-    for (const part of member.namedChildren) {
-      // By `id`, not by reference: a field read and a children read of the same node hand
-      // back different JS wrappers, so `===` never matches. `Node.equals()` answers the same
-      // question and would do; `id` is a field read rather than a call across the WASM
-      // boundary (`lang-plugin.md` §8.2). Not by type: a `method_definition` has exactly one
-      // `statement_block` today, but a member shape carrying a second would start dropping it
-      // without a word.
-      if (part === null || part.id === memberBody.id) continue
-      visit(part, rules, calls)
-    }
+    if (memberBody === null) visit(member, rules, calls)
+    else visitExcluding(member, memberBody, rules, calls)
   }
+}
+
+/**
+ * Everything under `node` except the subtree at `skipped`.
+ *
+ * A method's body is a direct child of the member. A field's is a child of the function the
+ * field holds, one level further down — so the walk follows the path to it rather than
+ * filtering direct children, which covers both depths with one rule and keeps whatever
+ * surrounds the body on the class: a parameter default (LP20d), a field's decorator, its type
+ * annotation.
+ *
+ * Descending an ancestor instead of visiting it reports nothing for the ancestor itself, which
+ * is what is wanted: the only nodes on the path are the member and the function it holds, and
+ * `visit` has no arm for either.
+ */
+function visitExcluding(node: Node, skipped: Node, rules: Rule[], calls: CallCandidate[]): void {
+  for (const part of node.namedChildren) {
+    // By `id`, not by reference: a field read and a children read of the same node hand back
+    // different JS wrappers, so `===` never matches. `Node.equals()` answers the same question
+    // and would do; `id` is a field read rather than a call across the WASM boundary
+    // (`lang-plugin.md` §8.2). Not by type: a `method_definition` has exactly one
+    // `statement_block` today, but a member shape carrying a second would start dropping it
+    // without a word.
+    if (part === null || part.id === skipped.id) continue
+    if (isAncestorOf(part, skipped)) visitExcluding(part, skipped, rules, calls)
+    else visit(part, rules, calls)
+  }
+}
+
+function isAncestorOf(node: Node, descendant: Node): boolean {
+  for (let parent = descendant.parent; parent !== null; parent = parent.parent) {
+    if (parent.id === node.id) return true
+  }
+  return false
 }
 
 /** The member's body when this class does not walk it, or null when the class still owns it. */
@@ -88,7 +114,8 @@ function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
   // The constructor's body is recorded on `#C.constructor` too, and stays here anyway: `new
   // C()` runs it and resolves to this Symbol (LP20b).
   if (isConstructorMember(member)) return null
-  return member.childForFieldName("body")
+  // A field's body belongs to the function it holds; a method's, to the method itself.
+  return (functionValuedField(member) ?? member).childForFieldName("body")
 }
 
 function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {

@@ -19,8 +19,8 @@ import type { LanguageId, SymbolId } from "@aburi/types"
  * value that lands in `IR.workspace.languages` cannot drift. Note this is a different
  * vocabulary from the manifest name (`lang-typescript`), which is a plugin ref.
  *
- * One token covers all four extensions this plugin claims — `.ts`, `.tsx`, `.js`, `.jsx`
- * all produce `ts:`-prefixed ids. That is deliberate: the id namespace is per plugin, and
+ * One token covers every extension this plugin claims — `.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+ * `.jsx`, `.mjs` and `.cjs` all produce `ts:`-prefixed ids. That is deliberate: the id namespace is per plugin, and
  * one plugin parsing a family of dialects should not fragment it. The component detector
  * keeps a finer vocabulary (`tsx`, `js`, `jsx` are separate tokens there), so a JavaScript
  * project reports `components[].languages: ["js"]` alongside `workspace.languages: ["ts"]`

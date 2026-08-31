@@ -1,6 +1,6 @@
 import type { DropHint, ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf } from "./ast-helpers"
+import { bodyNodesOf, functionValueOf } from "./ast-helpers"
 
 /**
  * Category-A skip patterns owned by this language plugin. Added on top of the core
@@ -75,8 +75,20 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
         allStaticLiteral = false
         break
       case "public_field_definition":
-      case "field_definition":
-      case "property_signature":
+        // The one field shape a `class_body` holds: `field_definition` is the JavaScript
+        // grammar's name for it and `property_signature` belongs to an `interface_body`, which
+        // the filter above already removed.
+        //
+        // A field holding a function is a method for this rule, because it declares behaviour
+        // rather than a shape. The question is the field's *value*, not whether the member got
+        // a Symbol: a computed-name arrow field has no Symbol and is still not data. What the
+        // value test does not recognise — a generator, a wrapped `withAuth(() => …)` — still
+        // reads as data, and a class of nothing else is dropped with its calls on it.
+        if (functionValueOf(member) !== null) {
+          hasMethod = true
+          allStaticLiteral = false
+          break
+        }
         hasAnyField = true
         if (!isStaticLiteralField(member)) allStaticLiteral = false
         break
