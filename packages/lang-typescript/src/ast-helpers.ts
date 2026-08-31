@@ -75,21 +75,31 @@ const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
 ])
 
 /**
- * `node` as a function, reading through any wrappers around it, or null when what is inside
- * them is not a function.
+ * The value inside every wrapper around `node`, or `node` itself when there are none.
  *
  * The wrapped expression is the wrapper's first non-comment named child in every one of these
- * shapes: `as` and `satisfies` put the type second, and the other two hold nothing else.
+ * shapes: `as` and `satisfies` put the type second, and the other two hold nothing else. An
+ * empty wrapper — only reachable from a half-edited file the grammar recovered — answers with
+ * the wrapper, since there is nothing inside to answer with.
  */
-export function asFunctionValue(node: Node): Node | null {
+export function unwrapValue(node: Node): Node {
   let cursor: Node = node
   while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
     const inner = firstNonCommentChild(cursor)
-    if (inner === null) return null
+    if (inner === null) return cursor
     cursor = inner
   }
-  const isFunction = cursor.type === "arrow_function" || cursor.type === "function_expression"
-  return isFunction ? cursor : null
+  return cursor
+}
+
+/**
+ * `node` as a function, reading through any wrappers around it, or null when what is inside
+ * them is not a function.
+ */
+export function asFunctionValue(node: Node): Node | null {
+  const value = unwrapValue(node)
+  const isFunction = value.type === "arrow_function" || value.type === "function_expression"
+  return isFunction ? value : null
 }
 
 /** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */

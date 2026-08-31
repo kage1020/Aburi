@@ -1,6 +1,6 @@
 import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { asFunctionValue, makeSourceRange } from "./ast-helpers"
+import { asFunctionValue, makeSourceRange, unwrapValue } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
 
 /**
@@ -129,12 +129,22 @@ function inlineHandlers(call: Node): Node[] {
   return found.sort((a, b) => a.startIndex - b.startIndex)
 }
 
-/** The call one step further left in a chain (`a.b(1).c(2)` — from `.c`'s call to `.b`'s). */
+/**
+ * The call one step further left in a chain (`a.b(1).c(2)` — from `.c`'s call to `.b`'s),
+ * or null where the chain ends.
+ *
+ * Read through the same wrappers a value is: `(app.route(p).get(h1)).post(h2)` is one chain
+ * with a parenthesis in it, and stopping at the parenthesis would leave `h1` in no Symbol.
+ * A step that is not a call after unwrapping ends the chain — `app.a.b.get(h)` walks left
+ * through member expressions that register nothing.
+ */
 function nextInChain(call: Node): Node | null {
   const callee = call.childForFieldName("function")
   if (callee === null || callee.type !== "member_expression") return null
   const object = callee.childForFieldName("object")
-  return object !== null && object.type === "call_expression" ? object : null
+  if (object === null) return null
+  const step = unwrapValue(object)
+  return step.type === "call_expression" ? step : null
 }
 
 interface MemberCall {

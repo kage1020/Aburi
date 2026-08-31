@@ -95,6 +95,15 @@ describe("a function behind a wrapper is a function", () => {
     expect(symbol.kind).toBe("const")
   })
 
+  it("stops at a call it is the callee of, which is not a wrapper either", async () => {
+    // An immediately-invoked function: `h` is what the call returned, not the function. The
+    // unwrap reads through what surrounds a value, never through what is done to it.
+    const symbol = await symbolOf("export const h = (() => { q() })()", "ts:src/a.ts#h")
+
+    expect(symbol.kind).toBe("const")
+    expect(symbol.bodyNode).toBeNull()
+  })
+
   it("gives a class field holding a wrapped function its own Symbol", async () => {
     // The predicate is shared, so the class field answers the same question the same way.
     const source = ["export class C {", "  f = (() => { q() })", "}"].join("\n")
@@ -152,6 +161,14 @@ describe("a registration call's inline handler is its body", () => {
     expect(await callsOf(source, "ts:src/a.ts#app__post__d0")).toEqual(["read", "write"])
   })
 
+  it("reads through a wrapper standing in the middle of a chain", async () => {
+    // The chain is walked through the same wrappers a value is read through; stopping at
+    // the parenthesis would leave the first handler in no Symbol at all.
+    const source = '(app.route("/x").get(() => { read() })).post(() => { write() })'
+
+    expect(await callsOf(source, "ts:src/a.ts#app__post__d0")).toEqual(["read", "write"])
+  })
+
   it("walks an awaited registration's handler", async () => {
     const source = ["await app.listen(() => { boot() })"].join("\n")
 
@@ -163,6 +180,7 @@ describe("a registration call's inline handler is its body", () => {
     const symbol = await symbolOf(source, "ts:src/a.ts#app__listen__d0")
 
     expect(symbol.bodyNode).toBeNull()
+    expect(symbol.derivedBy).toEqual(["call-statement:app.listen"])
     expect(await callsOf(source, "ts:src/a.ts#app__listen__d0")).toEqual([])
   })
 
@@ -172,6 +190,7 @@ describe("a registration call's inline handler is its body", () => {
     const source = ['app.get("/x", handler)'].join("\n")
     const symbol = await symbolOf(source, "ts:src/a.ts#app__get__$x__d0")
 
+    expect(symbol.derivedBy).toEqual(["call-statement:app.get", "path-literal:/x"])
     expect(symbol.bodyNode).toBeNull()
     expect(await callsOf(source, "ts:src/a.ts#app__get__$x__d0")).toEqual([])
   })
