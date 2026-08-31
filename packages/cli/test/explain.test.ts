@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { makeLanguageId } from "@aburi/core"
 import type { IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { EXIT, runExplain } from "../src"
+import { CliError, EXIT, runExplain } from "../src"
 import { symbolId } from "./fixtures"
 
 let scratch = ""
@@ -202,5 +202,82 @@ describe("runExplain — --debug-resolution (call-resolution.md §8.1)", () => {
       debugResolution: true,
     })
     expect(outcome.kind).toBe("not-found")
+  })
+})
+
+/**
+ * All three lookup arms write through the same path, and each is reached by a different
+ * argument shape — an arm that kept its own `writeFile` would pass the other two's tests.
+ */
+describe("CL26 — --output under directories that do not exist", () => {
+  it("creates them for an id lookup", async () => {
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "ts:src/a.ts#getUser",
+      noRescan: true,
+      outputPath: "generated/explain/get-user.md",
+    })
+
+    expect(outcome.kind).toBe("single")
+    if (outcome.kind !== "single") throw new Error("unreachable")
+    const written = resolve(scratch, "generated/explain/get-user.md")
+    expect(outcome.writtenTo).toBe(written)
+    expect(await readFile(written, "utf8")).toContain("getUser")
+  })
+
+  it("creates them for a file lookup", async () => {
+    // The file arm claims the argument only for a path on disk or one the IR skipped; the
+    // fixture IR names `src/a.ts` without the workspace holding it.
+    await mkdir(resolve(scratch, "src"), { recursive: true })
+    await writeFile(resolve(scratch, "src/a.ts"), "export function getUser() {}\n", "utf8")
+
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "src/a.ts",
+      noRescan: true,
+      outputPath: "generated/explain/a.md",
+    })
+
+    expect(outcome.kind).toBe("file")
+    if (outcome.kind !== "file") throw new Error("unreachable")
+    const written = resolve(scratch, "generated/explain/a.md")
+    expect(outcome.writtenTo).toBe(written)
+    expect(await readFile(written, "utf8")).toContain("getUser")
+  })
+
+  it("creates them for a pattern lookup", async () => {
+    const outcome = await runExplain({
+      cwd: scratch,
+      argument: "getUsers",
+      noRescan: true,
+      outputPath: "generated/explain/get-users.md",
+    })
+
+    expect(outcome.kind).toBe("single")
+    if (outcome.kind !== "single") throw new Error("unreachable")
+    const written = resolve(scratch, "generated/explain/get-users.md")
+    expect(outcome.writtenTo).toBe(written)
+    expect(await readFile(written, "utf8")).toContain("getUsers")
+  })
+})
+
+describe("CL27 — an --output that cannot hold a file", () => {
+  it("names the path and the remedy instead of surfacing the errno", async () => {
+    await writeFile(resolve(scratch, "generated"), "not a directory\n", "utf8")
+
+    const thrown = await runExplain({
+      cwd: scratch,
+      argument: "ts:src/a.ts#getUser",
+      noRescan: true,
+      outputPath: "generated/explain/get-user.md",
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("input-error")
+    expect((thrown as Error).message).toContain(resolve(scratch, "generated/explain/get-user.md"))
+    expect((thrown as Error).message).toContain("--output")
   })
 })

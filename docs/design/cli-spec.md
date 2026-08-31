@@ -73,7 +73,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 1. Detect the workspace root ([`component-detect.md`](./component-detect.md) §2.1)
 2. Run each detector (§3)
 3. Convert results into Component candidates
-4. Generate JSON and write it to `--output`
+4. Generate JSON and write it to `--output`, creating the directories that path names
 5. Print a summary to stdout
 
 ### 4.4 When the File Already Exists
@@ -87,7 +87,7 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 |---|---|
 | 0 | Generation succeeded |
 | 1 | Autodetect failure (permissions, etc.) |
-| 2 | Existing file present without `--force`, or invalid `--output` |
+| 2 | Existing file present without `--force`, or an `--output` that cannot hold a file — it names a directory, or a file stands on its parent path |
 
 ### 4.6 stdout Example
 
@@ -672,7 +672,7 @@ it is decided from the argument.
 
 | Option | Meaning |
 |---|---|
-| `--output <path>` | Write to a file (default: stdout) |
+| `--output <path>` | Write to a file (default: stdout). The directories the path names are created, as `--output-dir` creates its own; a path that cannot hold a file — it names a directory, or a file stands on its parent path — is exit 2 |
 | `--ir <path>` | Use an existing IR file. Resolved against the working directory, as every path-bearing flag is. Without it the command looks for `<output-dir>/aburi.ir.json` — `config.output.dir` when the config names one, otherwise `out` — starting at the working directory and walking up to the workspace root, taking the nearest — `aburi scan` writes under the directory it was run from, and a scan covers the whole workspace wherever it was started, so either place holds an answer about the same tree. Nothing found triggers a scan, or exits 2 under `--no-rescan` |
 | `--no-rescan` | Exit `2` when the lookup above finds no IR, instead of scanning. Staleness is not examined: an IR that is found is read whatever its age |
 | `--debug-resolution` | Append a `## Call resolution` table: one row per call site with the resolved callee, or the [`call-resolution.md`](./call-resolution.md) §8.1 bucket that explains the `null`, plus the competing candidates for `ambiguous`. Those buckets are per-run diagnostics that the IR deliberately does not persist, so the flag **always rescans** and is rejected (exit 2) alongside `--no-rescan` or `--ir`. It is a reporting flag, not a tuning knob — no IR or diff content changes |
@@ -761,7 +761,7 @@ about one Symbol, and answering it with an inventory of the run buries it.
 |---|---|
 | 0 | Success |
 | 1 | The requested symbol was not found |
-| 2 | Multiple candidates; disambiguation required |
+| 2 | Multiple candidates; disambiguation required, or an `--output` that cannot hold a file |
 | 3 | The answer would not be safe: the scan this command ran did not exit clean (§5.6), or the document names the file the question asked about as one it never analysed (§7.6) |
 
 Exit `3` outranks the other three, and the two routes to it are the same statement about
@@ -978,6 +978,9 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
 | CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |
 | CL24 | `aburi explain 'src/weird\name.ts'` where that file exists | exit 3, a line saying no IR can name it, nothing on stdout |
+| CL25 | `aburi init --output config/aburi.jsonc` where `config/` does not exist | Creates the directory, writes the file, exit 0 |
+| CL26 | `aburi explain <id> --output docs/alpha.md` where `docs/` does not exist | Creates the directory, writes the Markdown, exit 0 |
+| CL27 | `aburi init` or `aburi explain` with an `--output` that names a directory, or whose parent path is an existing file | exit 2, the path and the remedy on stderr |
 
 ## 18. Design Decisions
 

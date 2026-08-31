@@ -1,4 +1,4 @@
-import { access, writeFile } from "node:fs/promises"
+import { access } from "node:fs/promises"
 import { resolve } from "node:path"
 import {
   CoreError,
@@ -10,6 +10,7 @@ import {
 import type { Config } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
+import { writeOutputFile } from "../output-file"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
@@ -122,7 +123,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     suggestions,
   })
 
-  await writeFile(outputPath, contents, "utf8")
+  await writeOutputFile(outputPath, contents)
 
   return {
     outputPath,
@@ -155,7 +156,7 @@ async function resolveWorkspaceRoot(cwd: string): Promise<string> {
 /**
  * Existence probe that only treats "file is not here" as absence. EACCES / EIO / ELOOP
  * are re-thrown as CliError so a permission-denied on `aburi.json` cannot silently
- * bypass the overwrite guard (which would let `writeFile` clobber whatever the user is
+ * bypass the overwrite guard (which would let `writeOutputFile` clobber whatever the user is
  * unable to read).
  */
 async function pathExists(path: string): Promise<boolean> {

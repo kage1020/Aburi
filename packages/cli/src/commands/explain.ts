@@ -1,4 +1,4 @@
-import { access, writeFile } from "node:fs/promises"
+import { access } from "node:fs/promises"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { backslashSite, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
@@ -8,6 +8,7 @@ import { configuredOutputDir } from "../config-load"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
+import { writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan } from "./scan"
@@ -170,7 +171,7 @@ async function locate(
     const hit = ir.symbols.find((s) => s.id === arg)
     if (hit !== undefined) {
       const markdown = projectSymbolExplain(hit, explainContext)
-      if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+      if (outputPath !== null) await writeOutputFile(outputPath, markdown)
       return {
         kind: "single",
         markdown,
@@ -228,7 +229,7 @@ async function locate(
       const inFile = ir.symbols.filter((s) => s.source.file === relPath)
       if (inFile.length === 0) return missed(skipped, "path", coverage)
       const markdown = inFile.map((s) => projectSymbolExplain(s, explainContext)).join("\n---\n\n")
-      if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+      if (outputPath !== null) await writeOutputFile(outputPath, markdown)
       return {
         kind: "file",
         markdown,
@@ -247,7 +248,7 @@ async function locate(
   const only = matches[0]
   if (only === undefined) return { kind: "not-found", exitCode: EXIT.RUNTIME, coverage }
   const markdown = projectSymbolExplain(only, explainContext)
-  if (outputPath !== null) await writeFile(outputPath, markdown, "utf8")
+  if (outputPath !== null) await writeOutputFile(outputPath, markdown)
   return {
     kind: "single",
     markdown,

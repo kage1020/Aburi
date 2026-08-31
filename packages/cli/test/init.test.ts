@@ -160,3 +160,50 @@ describe("aburi init and .gitignore", () => {
     expect(JSON.parse(await readFile(report.outputPath, "utf8"))).toHaveProperty("$schema")
   })
 })
+
+describe("CL25 — --output under directories that do not exist", () => {
+  it("creates them and writes the config there", async () => {
+    await makeMinimalPnpmWorkspace()
+
+    const report = await runInit({ cwd: scratch, output: "generated/config/aburi.json" })
+
+    expect(report.exitCode).toBe(0)
+    expect(report.outputPath).toBe(resolve(scratch, "generated/config/aburi.json"))
+    expect(JSON.parse(await readFile(report.outputPath, "utf8"))).toHaveProperty("$schema")
+  })
+})
+
+describe("CL27 — an --output that cannot hold a file", () => {
+  it("names the path and the remedy instead of surfacing the errno", async () => {
+    await makeMinimalPnpmWorkspace()
+    await writeFile(resolve(scratch, "generated"), "not a directory\n", "utf8")
+
+    const thrown = await runInit({ cwd: scratch, output: "generated/aburi.json" }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    // The caller's path rather than the machine's refusal — cli-spec.md §4.5 puts an
+    // --output that cannot be written at exit 2.
+    expect((thrown as CliError).code).toBe("input-error")
+    expect((thrown as Error).message).toContain(resolve(scratch, "generated/aburi.json"))
+    expect((thrown as Error).message).toContain("--output")
+  })
+
+  it("names a directory standing on the path itself, past the overwrite guard", async () => {
+    await makeMinimalPnpmWorkspace()
+    await mkdir(resolve(scratch, "generated"), { recursive: true })
+
+    // --force, because the overwrite guard sees the directory first and answers about that.
+    const thrown = await runInit({ cwd: scratch, output: "generated", force: true }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("input-error")
+    expect((thrown as Error).message).toContain(resolve(scratch, "generated"))
+    expect((thrown as Error).message).toContain("--output")
+  })
+})
