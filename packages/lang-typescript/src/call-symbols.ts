@@ -1,6 +1,6 @@
 import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { makeSourceRange } from "./ast-helpers"
+import { asFunctionValue, makeSourceRange } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
 
 /**
@@ -76,6 +76,8 @@ export function visitCallStatement(
   const finalQname = `${baseQname}__d${count}`
 
   const qname = nestedQname([finalQname])
+  const handlers = inlineHandlers(call)
+  const [lead, ...rest] = handlers
   return {
     id: makeTsSymbolId(ctx.file.path, qname),
     kind: "call",
@@ -83,12 +85,56 @@ export function visitCallStatement(
     name: qname,
     visibility: "internal",
     decorators: [],
+    // The registration's own API, which is nothing: a route has no parameters, and reading
+    // the handler's would publish the framework's callback shape as the route's signature.
     signature: null,
     source: makeSourceRange(call, ctx),
-    derivedBy: makeDerivedBy(parsed, literalPath),
-    bodyNode: null,
+    derivedBy: makeDerivedBy(parsed, literalPath, handlers.length > 0),
+    bodyNode: lead === undefined ? null : (lead.childForFieldName("body") ?? null),
     fullNode: call,
+    mergedDeclarations: rest.map((handler) => ({
+      bodyNode: handler.childForFieldName("body") ?? null,
+      fullNode: handler,
+    })),
   }
+}
+
+/**
+ * Every function written as a direct argument of the registration, in source order.
+ *
+ * The Symbol stands for the whole statement, so the scan covers the calls the statement is
+ * made of, not only the outermost one: `app.route('/x').get(h1).post(h2)` registers two
+ * handlers and produces one Symbol, and reading only the leaf's arguments would leave `h1` in
+ * no Symbol at all.
+ *
+ * **Direct** arguments only. A function inside an argument (`app.get('/x', wrap(() => …))`) is
+ * a call's return value, which is the line `asFunctionValue` already draws: reading through a
+ * call would be a guess about what it returns.
+ *
+ * Ordered on `startIndex`, the way decorators are: the chain is walked outermost-first, which
+ * is the reverse of how it is written, and `bodyNodesOf` publishes these in the order the
+ * source has them.
+ */
+function inlineHandlers(call: Node): Node[] {
+  const found: Node[] = []
+  for (let cursor: Node | null = call; cursor !== null; cursor = nextInChain(cursor)) {
+    const args = cursor.childForFieldName("arguments") ?? findArgumentsChild(cursor)
+    if (args === null) continue
+    for (const argument of args.namedChildren) {
+      if (argument === null) continue
+      const handler = asFunctionValue(argument)
+      if (handler !== null) found.push(handler)
+    }
+  }
+  return found.sort((a, b) => a.startIndex - b.startIndex)
+}
+
+/** The call one step further left in a chain (`a.b(1).c(2)` — from `.c`'s call to `.b`'s). */
+function nextInChain(call: Node): Node | null {
+  const callee = call.childForFieldName("function")
+  if (callee === null || callee.type !== "member_expression") return null
+  const object = callee.childForFieldName("object")
+  return object !== null && object.type === "call_expression" ? object : null
 }
 
 interface MemberCall {
@@ -228,9 +274,15 @@ function mangleReceiver(name: string): string | null {
   return out
 }
 
-function makeDerivedBy(parsed: MemberCall, literalPath: string | null): string[] {
+function makeDerivedBy(
+  parsed: MemberCall,
+  literalPath: string | null,
+  hasInlineHandler: boolean,
+): string[] {
   const tags: string[] = [`call-statement:${parsed.receiver}.${parsed.method}`]
   if (parsed.chained) tags.push("chained-call")
   if (literalPath !== null) tags.push(`path-literal:${literalPath}`)
+  // Says why a Symbol whose declaration is a call has a body at all.
+  if (hasInlineHandler) tags.push("inline-handler")
   return tags
 }

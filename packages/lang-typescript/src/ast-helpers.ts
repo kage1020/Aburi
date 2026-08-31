@@ -53,8 +53,43 @@ export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSour
  */
 export function functionValueOf(node: Node): Node | null {
   const value = node.childForFieldName("value")
-  if (value === null) return null
-  return value.type === "arrow_function" || value.type === "function_expression" ? value : null
+  return value === null ? null : asFunctionValue(value)
+}
+
+/**
+ * The wrapper node types that say nothing about the value inside them.
+ *
+ * A `satisfies` or `as` names a type the value must fit, a `!` asserts it is not null, and a
+ * parenthesis groups. None of them replaces the value, so a function written inside one is
+ * still the function that binding holds — which is what the declaration extractor, the class
+ * field predicate and the argument scan all have to agree on.
+ *
+ * A **call** is not on this list. `withAuth(() => …)` returns a function by convention, and
+ * nothing in the tree says so; reading through it would be a guess rather than an unwrap.
+ */
+const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
+  "parenthesized_expression",
+  "as_expression",
+  "satisfies_expression",
+  "non_null_expression",
+])
+
+/**
+ * `node` as a function, reading through any wrappers around it, or null when what is inside
+ * them is not a function.
+ *
+ * The wrapped expression is the wrapper's first non-comment named child in every one of these
+ * shapes: `as` and `satisfies` put the type second, and the other two hold nothing else.
+ */
+export function asFunctionValue(node: Node): Node | null {
+  let cursor: Node = node
+  while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
+    const inner = firstNonCommentChild(cursor)
+    if (inner === null) return null
+    cursor = inner
+  }
+  const isFunction = cursor.type === "arrow_function" || cursor.type === "function_expression"
+  return isFunction ? cursor : null
 }
 
 /** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */

@@ -154,11 +154,14 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     )
     const sym = byId(symbols, "#app__get__$users__d0")
     expect(sym.kind).toBe("call")
-    expect(sym.bodyNode).toBeNull()
+    // The handler written as an argument is what the registration runs, so it is the Symbol's
+    // body. The Symbol's own signature stays null: a route has no parameters of its own.
+    expect(sym.bodyNode?.type).toBe("statement_block")
     expect(sym.signature).toBeNull()
     expect(sym.decorators).toEqual([])
     expect(sym.derivedBy).toContain("call-statement:app.get")
     expect(sym.derivedBy).toContain("path-literal:/users")
+    expect(sym.derivedBy).toContain("inline-handler")
   })
 
   it("CS2: slugifies dynamic route parameters", async () => {
