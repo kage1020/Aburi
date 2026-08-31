@@ -57,7 +57,7 @@ a config file.
 
 | Flag | Effect |
 |---|---|
-| `--output <path>` | Write somewhere other than `./aburi.json`. Directories in the path are created if they are missing. |
+| `--output <path>` | Write somewhere other than `./aburi.json`. Directories in the path are created if they are missing; a path that cannot hold a file — an existing directory, or a file sitting on its parent path — exits 2 and names it. |
 | `--force` | Overwrite an existing file. Without it, an existing file exits `2`. |
 | `--with-suggestions` | Add comments naming the plugin packages it detected but you have not installed. |
 | `--no-respect-gitignore` | Include git-ignored files when taking the language census. |
@@ -200,7 +200,7 @@ Prints the full detail for one symbol. The target can be:
 | Flag | Effect |
 |---|---|
 | `--ir <path>` | Read an existing analysis instead of scanning. |
-| `--output <path>` | Write to a file instead of stdout. Directories in the path are created if they are missing. |
+| `--output <path>` | Write to a file instead of stdout. Directories in the path are created if they are missing; a path that cannot hold a file — an existing directory, or a file sitting on its parent path — exits 2 and names it. |
 | `--no-rescan` | Fail rather than scanning when no analysis file is found. |
 | `--config <path>` | Use a different config file. |
 

@@ -1,6 +1,16 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
-import { CliError, errorMessage } from "./errors"
+import { CliError, errorCode, errorMessage } from "./errors"
+
+/**
+ * The remedy for an `--output` that names a directory already on disk.
+ *
+ * Exported because `aburi init` reaches that path before the write does — its overwrite guard
+ * probes for an existing file — and answering `--force` there would send the caller down a road
+ * whose end is this same sentence.
+ */
+export const OUTPUT_IS_A_DIRECTORY =
+  "that path is a directory. Pass --output <path> naming the file to write."
 
 /**
  * Write one of the single-file outputs — `aburi init --output`, `aburi explain --output` —
@@ -42,19 +52,13 @@ export async function writeOutputFile(path: string, contents: string): Promise<v
  * itself naming a directory that is already there.
  */
 function unusablePath(error: unknown): string | null {
-  switch (errnoOf(error)) {
+  switch (errorCode(error)) {
     case "EEXIST":
     case "ENOTDIR":
       return "a file stands where one of its parent directories would go. Remove that file, or pass --output <path> elsewhere."
     case "EISDIR":
-      return "that path is a directory. Pass --output <path> naming the file to write."
+      return OUTPUT_IS_A_DIRECTORY
     default:
       return null
   }
-}
-
-function errnoOf(error: unknown): string | null {
-  if (typeof error !== "object" || error === null) return null
-  const code = (error as { code?: unknown }).code
-  return typeof code === "string" ? code : null
 }

@@ -280,4 +280,24 @@ describe("CL27 — an --output that cannot hold a file", () => {
     expect((thrown as Error).message).toContain(resolve(scratch, "generated/explain/get-user.md"))
     expect((thrown as Error).message).toContain("--output")
   })
+
+  // No overwrite guard stands in front of this command, so the write is what answers.
+  it("names a directory standing on the path itself", async () => {
+    await mkdir(resolve(scratch, "generated"), { recursive: true })
+
+    const thrown = await runExplain({
+      cwd: scratch,
+      argument: "ts:src/a.ts#getUser",
+      noRescan: true,
+      outputPath: "generated",
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("input-error")
+    expect((thrown as Error).message).toContain(resolve(scratch, "generated"))
+    expect((thrown as Error).message).toContain("is a directory")
+  })
 })

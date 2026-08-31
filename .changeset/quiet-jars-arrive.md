@@ -27,3 +27,8 @@ path the caller typed, which is the side of the line `cli-spec.md` §9 draws bet
 exit 2 — who has to act — and each message names the path and what to do about it. Every other
 failure is rethrown untouched: a permission, a read-only mount or a full disk is not the reader's
 to fix, and Node's own message already names the path.
+
+`aburi init`'s overwrite guard learned the same distinction. It probed only for existence, so an
+`--output` naming a directory was answered with `Use --force to overwrite` — advice that cannot
+work, and whose only destination was the refusal from the write below it. The guard reads the
+kind now and gives the directory answer directly, whether or not `--force` was passed.

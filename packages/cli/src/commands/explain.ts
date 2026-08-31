@@ -5,7 +5,7 @@ import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/m
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { configuredOutputDir } from "../config-load"
-import { CliError, errorMessage } from "../errors"
+import { CliError, errorCode, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
 import { writeOutputFile } from "../output-file"
@@ -474,7 +474,6 @@ async function pathExistsStrict(path: string): Promise<boolean> {
 const BENIGN_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
 
 function isBenignErrno(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false
-  const code = (error as { code?: unknown }).code
-  return typeof code === "string" && BENIGN_ERRNOS.has(code)
+  const code = errorCode(error)
+  return code !== null && BENIGN_ERRNOS.has(code)
 }

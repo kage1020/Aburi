@@ -5,7 +5,7 @@ import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
 import { readEnv } from "./env"
-import { CliError } from "./errors"
+import { CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
@@ -378,12 +378,7 @@ function assertNeverOutcome(outcome: never): never {
 }
 
 function isCommanderError(value: unknown): value is { code: string; message: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { code?: unknown }).code === "string" &&
-    (value as { code: string }).code.startsWith("commander.")
-  )
+  return errorCode(value)?.startsWith("commander.") === true
 }
 
 /**

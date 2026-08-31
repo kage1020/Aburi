@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -191,12 +191,14 @@ describe("CL27 — an --output that cannot hold a file", () => {
     expect((thrown as Error).message).toContain("--output")
   })
 
-  it("names a directory standing on the path itself, past the overwrite guard", async () => {
+  // Both settings of --force, because the overwrite guard stands in front of the write and
+  // sees the directory first. Offering --force there would be advice whose only destination is
+  // the refusal below it.
+  it.each([false, true])("names a directory on the path itself (--force %s)", async (force) => {
     await makeMinimalPnpmWorkspace()
     await mkdir(resolve(scratch, "generated"), { recursive: true })
 
-    // --force, because the overwrite guard sees the directory first and answers about that.
-    const thrown = await runInit({ cwd: scratch, output: "generated", force: true }).then(
+    const thrown = await runInit({ cwd: scratch, output: "generated", force }).then(
       () => null,
       (error: unknown) => error,
     )
@@ -204,6 +206,31 @@ describe("CL27 — an --output that cannot hold a file", () => {
     expect(thrown).toBeInstanceOf(CliError)
     expect((thrown as CliError).code).toBe("input-error")
     expect((thrown as Error).message).toContain(resolve(scratch, "generated"))
-    expect((thrown as Error).message).toContain("--output")
+    expect((thrown as Error).message).toContain("is a directory")
+    expect((thrown as Error).message).not.toContain("--force")
+  })
+})
+
+// The permission has to actually deny the write, which it does not for root.
+const onPosixAsAUser = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
+
+describe("an --output failure that is not the path's shape", () => {
+  onPosixAsAUser("is rethrown as it was thrown, not called an input error", async () => {
+    await makeMinimalPnpmWorkspace()
+    const locked = resolve(scratch, "locked")
+    await mkdir(locked, { recursive: true })
+    await chmod(locked, 0o500)
+
+    const thrown = await runInit({ cwd: scratch, output: "locked/aburi.json" }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    // Before the assertions, so a failing one still leaves the scratch directory removable.
+    await chmod(locked, 0o700)
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(thrown).not.toBeInstanceOf(CliError)
+    expect((thrown as { code?: unknown }).code).toBe("EACCES")
   })
 })

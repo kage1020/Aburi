@@ -11,7 +11,7 @@ import {
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { configuredOutputDir } from "../config-load"
-import { CliError, errorMessage } from "../errors"
+import { CliError, errorCode, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
@@ -667,9 +667,7 @@ async function assertRefResolvable(
 }
 
 function isGitMissing(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false
-  const code = (error as { code?: unknown }).code
-  return code === "ENOENT"
+  return errorCode(error) === "ENOENT"
 }
 
 async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {

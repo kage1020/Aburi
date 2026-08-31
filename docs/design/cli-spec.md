@@ -80,6 +80,9 @@ aburi init [--output <path>] [--force] [--with-suggestions]
 
 - Without `--force` → exit with an error (exit 2): `Use --force or specify another path`
 - With `--force` → overwrite; warning goes to stderr
+- When a **directory** stands at the path, neither applies: nothing overwrites one, so the answer
+  names it and asks for a file path instead — the same sentence the write itself gives (§4.5).
+  Offering `--force` here would be advice whose only destination is that refusal
 
 ### 4.5 Exit Codes
 
