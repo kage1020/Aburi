@@ -290,6 +290,10 @@ describe("the two readers of \u201cdoes this member have a Symbol?\u201d agree",
     "  genField = function* () { genFieldBody() }",
     "  [computedField()] = () => { computedFieldBody() }",
     "  plainField = plainFieldInit()",
+    "  readonly roField = () => { roFieldBody() }",
+    "  optField?: H = () => { optFieldBody() }",
+    "  accessor accField = () => { accFieldBody() }",
+    "  static #staticHashField = () => { staticHashFieldBody() }",
     "}",
   ].join("\n")
 
@@ -333,6 +337,10 @@ describe("the two readers of \u201cdoes this member have a Symbol?\u201d agree",
       "computedField",
       "computedFieldBody",
       "plainFieldInit",
+      "roFieldBody",
+      "optFieldBody",
+      "accFieldBody",
+      "staticHashFieldBody",
     ]
     const counts = Object.fromEntries(written.map((t) => [t, owners.get(t)?.length ?? 0]))
 

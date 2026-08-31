@@ -9,7 +9,7 @@ import { firstNonCommentChild } from "./ast-helpers"
  * it in one of two places, decided by **where it is written relative to the `export`
  * keyword**, and both have to be read:
  *
- * - **Beside the declaration**, when nothing separates the two. A class member
+ * - **Beside the declaration**, when nothing separates the two. A decorated *method*
  *   (`class C { @A() m() {} }`) has its decorators as preceding siblings inside the class
  *   body, and a decorator written *before* `export` has them as preceding siblings inside the
  *   `export_statement`, whose rule is `decorator* 'export' ['default'] declaration`.
@@ -17,8 +17,9 @@ import { firstNonCommentChild } from "./ast-helpers"
  * - **Inside the declaration**, when the wrapper's rule cannot hold it. A decorator written
  *   *after* the keyword (`export @A() class C {}`, `export default @A() class C {}`) has
  *   nowhere in the wrapper to go, and one on a declaration that is not exported at all
- *   (`@A() class C {}`, `@A() abstract class C {}`) has no wrapper. Both become a
- *   `decorator:` field child of the declaration node itself.
+ *   (`@A() class C {}`, `@A() abstract class C {}`) has no wrapper. So does a decorated
+ *   **field** (`class C { @A() f = () => {} }`), whose rule holds it where a method's does
+ *   not. Both become a `decorator:` field child of the declaration node itself.
  *
  * The two sources cannot overlap: a node has one parent, so a preceding sibling of the
  * declaration is never also its child. That is why the union needs no deduplication.

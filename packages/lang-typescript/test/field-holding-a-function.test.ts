@@ -109,8 +109,10 @@ describe("a field holding a function is a member Symbol", () => {
   })
 
   it("takes the signature from the function, not from the field's type annotation", async () => {
+    // The annotation names a type; only the arrow says what the parameters are called, so
+    // `Handler` must not reach the signature in its place.
     const symbol = await symbolOf(
-      classOf("  create = (d: string, n: number) => d"),
+      classOf("  create: Handler = (d: string, n: number) => d"),
       "ts:src/a.ts#C.create",
     )
 
@@ -118,6 +120,38 @@ describe("a field holding a function is a member Symbol", () => {
       ["d", "string"],
       ["n", "number"],
     ])
+  })
+
+  it("reads the JSDoc written above the field", async () => {
+    // The scan walks back from the field, which is where a field's documentation is written —
+    // above the whole member, outside the arrow.
+    const source = classOf("  /** @throws {ValidationError} on a bad payload */", "  f = () => {}")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C.f")
+
+    expect(symbol.signature?.throws).toEqual(["ValidationError"])
+  })
+
+  it("marks an auto-accessor field the way it marks a getter", async () => {
+    // `accessor f = …` is a getter/setter pair over a hidden field. Without the token nothing
+    // downstream can tell the pair from a plain field holding a function.
+    const symbol = await symbolOf(classOf("  accessor af = () => { q() }"), "ts:src/a.ts#C.af")
+
+    expect(symbol.derivedBy).toEqual([
+      "class-method",
+      "field-assigned-function",
+      "accessor-declaration",
+    ])
+  })
+
+  it("declares one on every extension this plugin parses", async () => {
+    for (const path of ["src/a.ts", "src/a.tsx", "src/a.js", "src/a.jsx", "src/a.mts"]) {
+      const source = classOf("  f = () => { q() }")
+      const result = await parseTypescriptFile({ path, content: source })
+      const ctx = makeExtractionCtx(path, source)
+      const ids = extractSymbols(requireTree(result.tree), ctx).map((s) => s.id)
+
+      expect(ids).toEqual([`ts:${path}#C`, `ts:${path}#C.f`])
+    }
   })
 
   it("reports the field's own source range, not the function's", async () => {
@@ -315,6 +349,24 @@ describe("a class of function-valued fields is not a data model", () => {
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
     expect(await hintOf(source, "ts:src/a.ts#C")).toBeNull()
+  })
+
+  it("reads a class of fields holding functions it does not recognise as one", async () => {
+    // The recognised set is `arrow_function | function_expression`, and it is narrower than
+    // "holds a function": a generator and a wrapped closure both fall to the data branch, so
+    // the class is dropped and the calls it was carrying for them go with it. Pinned rather
+    // than fixed here, because widening the set is the same decision at three sites at once —
+    // this one, whether the member gets a Symbol, and whose body the walk records.
+    const generator = classOf("  gen = function* () { yield q() }")
+    const wrapped = classOf("  handle = withAuth(() => { inner() })")
+
+    expect(await hintOf(generator, "ts:src/a.ts#C")).toEqual({
+      reason: "pure DTO",
+      category: "B",
+    })
+    expect(await callsOf(generator, "ts:src/a.ts#C")).toEqual(["q"])
+    expect(await hintOf(wrapped, "ts:src/a.ts#C")).toEqual({ reason: "pure DTO", category: "B" })
+    expect(await callsOf(wrapped, "ts:src/a.ts#C")).toEqual(["withAuth", "inner"])
   })
 
   it("still reads a class of data fields as a pure DTO", async () => {

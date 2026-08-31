@@ -75,11 +75,15 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
         allStaticLiteral = false
         break
       case "public_field_definition":
-      case "field_definition":
-      case "property_signature":
-        // A field holding a function is a method however it is written, so a class of them is
-        // not a data model. The question here is the field's *shape*, not whether the member
-        // got a Symbol: a computed-name arrow field has no Symbol and is still not data.
+        // The one field shape a `class_body` holds: `field_definition` is the JavaScript
+        // grammar's name for it and `property_signature` belongs to an `interface_body`, which
+        // the filter above already removed.
+        //
+        // A field holding a function is a method for this rule, because it declares behaviour
+        // rather than a shape. The question is the field's *value*, not whether the member got
+        // a Symbol: a computed-name arrow field has no Symbol and is still not data. What the
+        // value test does not recognise — a generator, a wrapped `withAuth(() => …)` — still
+        // reads as data, and a class of nothing else is dropped with its calls on it.
         if (functionValueOf(member) !== null) {
           hasMethod = true
           allStaticLiteral = false

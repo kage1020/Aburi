@@ -25,12 +25,14 @@ the class the way a method's do, because that is where they run.
 The drop list follows: a class whose members are function-valued fields is no longer read as a
 pure DTO.
 
-Three shapes are deliberately left where they were. A computed, string-literal or numeric
+Four shapes are deliberately left where they were. A computed, string-literal or numeric
 member name gets no Symbol — admitting a name the qualified-name grammar refuses would turn a
 file that extracts today into a file lost at the per-file boundary. A generator field is
-outside the function set at both levels. And a field named `constructor`, which an engine
-refuses and the grammar accepts, is refused a Symbol rather than given the segment reserved
-for what `new C()` runs.
+outside the function set at both levels. A field whose value is a function behind a wrapper
+(`handle = withAuth(async (r) => …)`, `useCallback`, `memoize`) is a call expression, not a
+function, so it is a field: the report this fixes still reproduces on that spelling. And a
+field named `constructor`, which an engine refuses and the grammar accepts, is refused a
+Symbol rather than given the segment reserved for what `new C()` runs.
 
 The IR moves for every class with a function-valued field: one new Symbol per field, and the
 class's `fingerprint.logic` loses the bodies it was carrying, as do the callers whose

@@ -348,8 +348,8 @@ function addClassMembers(
   const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
     if (member === null || !memberHasOwnSymbol(classNode, member)) continue
-    // The one call that separates the two member shapes, so nothing asks twice: the
-    // predicate above admits a field only when this answers with the function it holds.
+    // Which of the two member shapes this is. A field the predicate admitted always answers
+    // with the function it holds, and a `method_definition` falls out on one type test.
     const fieldFunction = functionValuedField(member)
     const candidate =
       fieldFunction === null
@@ -493,17 +493,32 @@ function makeFieldFunctionCandidate(
     decorators: readDecorators(field),
     signature: buildSignature(value, jsDoc),
     // The field's range, not the function's: the member is declared where it is written, and a
-    // field's modifiers, decorator and type annotation are all outside the arrow.
+    // field's modifiers, decorator and type annotation are all outside the arrow. Which makes
+    // this wider than a decorated *method*'s range, where the grammar puts the decorator
+    // outside the member — one member spelled two ways, reported over two spans.
     source: makeSourceRange(field, ctx),
-    derivedBy: [isStatic ? "static-method" : "class-method", "field-assigned-function"],
+    derivedBy: fieldDerivedBy(field, isStatic),
     bodyNode: value.childForFieldName("body"),
     fullNode: value,
   }
 }
 
 /**
+ * How a field-written member was declared. `accessor` makes it an auto-accessor — a
+ * getter/setter pair over a hidden field — so it earns the same token `get v()` does, or
+ * nothing downstream can tell the pair from a plain field holding a function.
+ */
+function fieldDerivedBy(field: Node, isStatic: boolean): string[] {
+  const out = [isStatic ? "static-method" : "class-method", "field-assigned-function"]
+  if (hasChildOfType(field, "accessor")) out.push("accessor-declaration")
+  return out
+}
+
+/**
  * A member's visibility, from the two ways a class body writes it: a `#` name is private to the
- * language, an `accessibility_modifier` is private or protected to the type checker.
+ * language, an `accessibility_modifier` is private or protected to the type checker. No modifier
+ * is `public`, which is what `readAccessibilityKeyword` answers when it finds none — the same
+ * answer `public m() {}` gets, and the reason this needs no third branch.
  */
 function memberVisibility(member: Node, writtenName: string): Visibility {
   return writtenName.startsWith("#") ? "private" : readAccessibilityKeyword(member)

@@ -46,14 +46,16 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
 
 /**
  * A class Symbol's own body: what **defining and constructing** the class runs, per
- * `lang-plugin.md` LP20a–LP20e. Field initialisers, static blocks and the constructor stay; a
+ * `lang-plugin.md` LP20a–LP20f. Field initialisers, static blocks and the constructor stay; a
  * member whose body another Symbol records does not.
  *
- * Only the *body* is skipped, never the member. A member's `bodyNode` is its `statement_block`,
- * so a parameter default (`m(x = f())`) is outside it and would be lost with nothing to say so
- * — which is LP20d, and the reason this reaches for the `body` field rather than the member.
- * A field holding an arrow is skipped the same way and for the same reason: constructing the
- * class creates the closure, and only entering it runs the body.
+ * Only the *body* is skipped, never the member. A member's `bodyNode` is whatever its `body`
+ * field holds — a `statement_block` for a method, the expression itself for an
+ * expression-bodied arrow — so a parameter default (`m(x = f())`) is outside it either way and
+ * would be lost with nothing to say so. That is LP20d, and the reason this reaches for the
+ * `body` field rather than for the member. A field holding a function is skipped the same way
+ * and for the same reason: constructing the class creates the closure, and only entering it
+ * runs the body (LP20f).
  *
  * And only for the Symbol's own bodies: a class written inside a function or a method is not
  * extracted, so every call in it belongs to the Symbol whose body encloses it (LP20e).
