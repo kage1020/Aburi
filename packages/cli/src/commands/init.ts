@@ -1,4 +1,4 @@
-import { access, writeFile } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import {
   CoreError,
@@ -8,8 +8,9 @@ import {
   type UnresolvedDeclaration,
 } from "@aburi/core"
 import type { Config } from "@aburi/types"
-import { CliError, errorMessage } from "../errors"
+import { CliError, errorCode, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
+import { OUTPUT_IS_A_DIRECTORY, writeOutputFile } from "../output-file"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
@@ -69,8 +70,11 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
   const outputPath = resolve(cwd, options.output ?? "aburi.json")
 
-  const existed = await pathExists(outputPath)
-  if (existed && !options.force) {
+  const existing = await outputPathHolds(outputPath)
+  if (existing === "directory") {
+    throw new CliError(`Cannot write ${outputPath}: ${OUTPUT_IS_A_DIRECTORY}`, "input-error")
+  }
+  if (existing === "file" && !options.force) {
     throw new CliError(
       `${outputPath} already exists. Use --force to overwrite or pass --output <path> to write elsewhere.`,
       "input-error",
@@ -122,7 +126,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     suggestions,
   })
 
-  await writeFile(outputPath, contents, "utf8")
+  await writeOutputFile(outputPath, contents)
 
   return {
     outputPath,
@@ -138,7 +142,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     // `aburi init` has no `components[]` to defer to — it is the command that writes the
     // first one — so an empty candidate list is always detection's own answer here.
     fellBackToSingleComponent: managers.workspaces.length === 0,
-    overwrote: existed,
+    overwrote: existing === "file",
     exitCode: EXIT.SUCCESS,
   }
 }
@@ -153,17 +157,20 @@ async function resolveWorkspaceRoot(cwd: string): Promise<string> {
 }
 
 /**
- * Existence probe that only treats "file is not here" as absence. EACCES / EIO / ELOOP
- * are re-thrown as CliError so a permission-denied on `aburi.json` cannot silently
- * bypass the overwrite guard (which would let `writeFile` clobber whatever the user is
- * unable to read).
+ * What the `--output` path holds, as far as the overwrite guard is concerned. Only "nothing is
+ * here" counts as absence: EACCES / EIO / ELOOP are re-thrown as CliError so a permission-denied
+ * on `aburi.json` cannot silently bypass the guard (which would let `writeOutputFile` clobber
+ * whatever the user is unable to read).
+ *
+ * A directory is answered apart from a file because `--force` is no remedy for one. Overwriting
+ * is not what the caller needs to hear, and taking that advice only reaches the same refusal
+ * from the write itself.
  */
-async function pathExists(path: string): Promise<boolean> {
+async function outputPathHolds(path: string): Promise<"nothing" | "file" | "directory"> {
   try {
-    await access(path)
-    return true
+    return (await stat(path)).isDirectory() ? "directory" : "file"
   } catch (error) {
-    if (isBenignErrno(error)) return false
+    if (isBenignErrno(error)) return "nothing"
     throw new CliError(`Failed to probe ${path}: ${errorMessage(error)}`, "runtime-error", {
       cause: error,
     })
@@ -173,9 +180,8 @@ async function pathExists(path: string): Promise<boolean> {
 const BENIGN_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
 
 function isBenignErrno(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false
-  const code = (error as { code?: unknown }).code
-  return typeof code === "string" && BENIGN_ERRNOS.has(code)
+  const code = errorCode(error)
+  return code !== null && BENIGN_ERRNOS.has(code)
 }
 
 /**

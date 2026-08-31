@@ -34,3 +34,20 @@ export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
 }
+
+/**
+ * The `code` a thrown value carries, or `null` when it carries none.
+ *
+ * Beside `errorMessage` for the same reason, and against the same duplication: four modules
+ * held their own copy of these two lines. What differs between the callers is which codes they
+ * act on — an errno set for a filesystem probe, a `commander.` prefix for an argv fault — not
+ * how a code is read off a value whose type says nothing about it.
+ *
+ * `CliError` carries a `code` of its own, so this answers for one too; every caller is asking
+ * about a value it has already decided is not one.
+ */
+export function errorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? code : null
+}
