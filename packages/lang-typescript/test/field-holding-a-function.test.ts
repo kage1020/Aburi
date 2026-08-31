@@ -66,8 +66,7 @@ describe("a field holding a function is a member Symbol", () => {
     )
 
     expect(symbol.kind).toBe("method")
-    expect(symbol.derivedBy).toContain("class-method")
-    expect(symbol.derivedBy).toContain("field-assigned-function")
+    expect(symbol.derivedBy).toEqual(["class-method", "field-assigned-function"])
   })
 
   it("declares one for a function expression", async () => {
