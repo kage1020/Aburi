@@ -17,7 +17,8 @@
       "!**/src/generated",
       "!pnpm-lock.yaml",
       "!schema",
-      "!packages/e2e-integration/fixtures"
+      "!packages/e2e-integration/fixtures",
+      "!benchmarks/*/results"
     ]
   },
   "formatter": {
