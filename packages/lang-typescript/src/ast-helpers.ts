@@ -77,10 +77,15 @@ const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
 /**
  * The value inside every wrapper around `node`, or `node` itself when there are none.
  *
- * The wrapped expression is the wrapper's first non-comment named child in every one of these
- * shapes: `as` and `satisfies` put the type second, and the other two hold nothing else. An
- * empty wrapper — only reachable from a half-edited file the grammar recovered — answers with
- * the wrapper, since there is nothing inside to answer with.
+ * The wrapped expression comes first in all four: `as` and `satisfies` put the type second,
+ * and so does a parenthesis carrying one (`(f: T)`). An empty wrapper — only reachable from a
+ * half-edited file the grammar recovered — answers with the wrapper, since there is nothing
+ * inside to answer with.
+ *
+ * The old-style assertion `<T>(expr)` is deliberately not on the list. It is a `type_assertion`
+ * whose **first** named child is the type, so the rule above inverts on it, and it is
+ * deprecated and unparseable in `.tsx` — adding it would need its own reader for a spelling
+ * this plugin's own extensions cannot all use.
  */
 export function unwrapValue(node: Node): Node {
   let cursor: Node = node

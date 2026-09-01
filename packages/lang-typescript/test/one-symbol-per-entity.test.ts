@@ -378,7 +378,12 @@ describe("merged declarations are one Symbol", () => {
   })
 
   it("says nothing about merging on a file that merges nothing", async () => {
-    const symbols = await symbolsOf("export class A { m() {} }\nexport interface I {}")
+    // The call statement is here because a Symbol whose declaration is a call carries its
+    // further bodies on the same field, and it was the one producer with no reason of its own
+    // to keep the key absent — without it this fixture enforced the invariant everywhere else.
+    const symbols = await symbolsOf(
+      ["export class A { m() {} }", "export interface I {}", "app.get('/x', () => {})"].join("\n"),
+    )
     for (const symbol of symbols) {
       expect(symbol.derivedBy).not.toContain("declaration-merged")
       expect("mergedDeclarations" in symbol).toBe(false)

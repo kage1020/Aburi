@@ -1,7 +1,13 @@
 import type { BodyExtraction, DropHint, SymbolCandidate, WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { classifySymbolDropHint, extractSymbols, parseTypescriptFile, walkBody } from "../src/index"
+import {
+  classifySymbolDropHint,
+  extractSymbols,
+  normalizeAst,
+  parseTypescriptFile,
+  walkBody,
+} from "../src/index"
 import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
 
 /**
@@ -203,5 +209,102 @@ describe("a registration call's inline handler is its body", () => {
 
     expect(symbol.derivedBy).toContain("inline-handler")
     expect(symbol.signature).toBeNull()
+  })
+})
+
+describe("a registration Symbol is still described by the whole registration", () => {
+  const ROUTE = (middleware: string): string =>
+    `app.get("/users", ${middleware}async (req, res) => { res.json(1) })`
+
+  it("tells a route's middleware apart, which its body cannot", async () => {
+    // A body narrows the normalized string to what the registration *runs*. What it *is* — the
+    // path, the method, the middleware standing between them and the handler — is the whole
+    // call, and a route that gains an auth middleware has to say so somewhere.
+    const bare = await symbolOf(ROUTE(""), "ts:src/a.ts#app__get__$users__d0")
+    const authed = await symbolOf(ROUTE("authenticate, "), "ts:src/a.ts#app__get__$users__d0")
+    const limited = await symbolOf(
+      ROUTE("rateLimit({ max: 5 }), "),
+      "ts:src/a.ts#app__get__$users__d0",
+    )
+
+    expect(normalizeAst(bare)).not.toBe(normalizeAst(authed))
+    expect(normalizeAst(authed)).not.toBe(normalizeAst(limited))
+  })
+
+  it("describes an inline handler and a named one the same way", async () => {
+    // The two spellings had different change-detection power while one narrowed to a body and
+    // the other did not.
+    const inline = await symbolOf(ROUTE(""), "ts:src/a.ts#app__get__$users__d0")
+    const named = await symbolOf('app.get("/users", handler)', "ts:src/a.ts#app__get__$users__d0")
+
+    expect(normalizeAst(inline).startsWith("(call_expression")).toBe(true)
+    expect(normalizeAst(named).startsWith("(call_expression")).toBe(true)
+    expect(normalizeAst(inline)).not.toBe(normalizeAst(named))
+  })
+})
+
+describe("what the registration scan refuses", () => {
+  it("refuses a handler whose body the parser only recovered", async () => {
+    // `async (req, res) =>` with nothing after it still parses as an arrow, and its `body` is a
+    // zero-width error node. Adopting it would describe every broken handler in a workspace
+    // with the same string, and claim a handler where there is no body to walk.
+    const source = 'app.get("/users", async (req, res) =>)'
+    const symbol = await symbolOf(source, "ts:src/a.ts#app__get__$users__d0")
+
+    expect(symbol.bodyNode).toBeNull()
+    expect(symbol.derivedBy).not.toContain("inline-handler")
+    expect(normalizeAst(symbol).startsWith("(call_expression")).toBe(true)
+  })
+
+  it("refuses a generator argument, which is not a function at any site", async () => {
+    // Koa's middleware spelling. `generator_function` is outside the predicate's set at every
+    // reader, so it registers no body here either.
+    const source = "app.use(function* (ctx, next) { h1() })"
+    const symbol = await symbolOf(source, "ts:src/a.ts#app__use__d0")
+
+    expect(symbol.bodyNode).toBeNull()
+    expect(symbol.derivedBy).toEqual(["call-statement:app.use"])
+  })
+
+  it("leaves the merged key absent unless a second handler is written", async () => {
+    // `plugins.ts` and LP8i: absent, never empty.
+    const one = await symbolOf('app.get("/x", () => { a() })', "ts:src/a.ts#app__get__$x__d0")
+    const none = await symbolOf("app.listen(3000)", "ts:src/a.ts#app__listen__d0")
+    const two = await symbolOf("app.use(() => { a() }, () => { b() })", "ts:src/a.ts#app__use__d0")
+
+    expect("mergedDeclarations" in one).toBe(false)
+    expect("mergedDeclarations" in none).toBe(false)
+    expect(two.mergedDeclarations).toHaveLength(1)
+  })
+})
+
+describe("the statement's spine is one Symbol's worth of registrations", () => {
+  it("reaches a call standing behind a member step", async () => {
+    // `.use`'s call is not the object of `.get`'s callee — a property access stands between
+    // them — and stopping there left `h0` in no Symbol at all.
+    const source = "app.use(() => { h0() }).router.get(() => { h1() })"
+
+    expect(await callsOf(source, "ts:src/a.ts#app__get__d0")).toEqual(["h0", "h1"])
+  })
+
+  it("names the receiver through a wrapper, the way a value is read through one", async () => {
+    // Until the two readers shared the unwrap these produced no Symbol at all: the receiver
+    // walk hand-unwrapped parentheses and nothing else, so a route behind a type assertion was
+    // not a route.
+    for (const source of [
+      '(app as Express).get("/x", () => { read() })',
+      'app!.get("/x", () => { read() })',
+    ]) {
+      expect(await callsOf(source, "ts:src/a.ts#app__get__$x__d0")).toEqual(["read"])
+    }
+  })
+
+  it("walks an expression-bodied handler, the most common spelling", async () => {
+    // The arrow's `body` is the expression itself, not a `statement_block`.
+    const source = 'app.get("/x", (req, res) => res.json(x))'
+    const symbol = await symbolOf(source, "ts:src/a.ts#app__get__$x__d0")
+
+    expect(symbol.derivedBy).toContain("inline-handler")
+    expect(await callsOf(source, "ts:src/a.ts#app__get__$x__d0")).toEqual(["res.json"])
   })
 })

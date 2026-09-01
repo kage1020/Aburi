@@ -98,6 +98,17 @@ describe("scan — an Express route whose handler writes to a database", () => {
     ).toEqual(["db.write"])
   })
 
+  it("gives the two routes different logic fingerprints", async () => {
+    // The axis is rules plus effects, so while a route had no body every route in a file
+    // hashed identically here — a reader diffing two revisions could not see one route's
+    // handler start writing where another only read.
+    const result = await scanWorkspace()
+    const read = symbolNamed(result, "ts:src/app.ts#app__get__$users__d0")
+    const write = symbolNamed(result, "ts:src/app.ts#app__post__$users__d0")
+
+    expect(read.fingerprint.logic).not.toBe(write.fingerprint.logic)
+  })
+
   it("leaves the effect on the registration rather than moving it", async () => {
     // Nothing resolves a call to a route Symbol, so an effect found in a handler sits where
     // the handler is registered instead of propagating to a caller.

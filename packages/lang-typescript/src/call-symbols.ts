@@ -1,4 +1,4 @@
-import type { ExtractionContext, SymbolCandidate } from "@aburi/types"
+import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, makeSourceRange, unwrapValue } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
@@ -76,8 +76,7 @@ export function visitCallStatement(
   const finalQname = `${baseQname}__d${count}`
 
   const qname = nestedQname([finalQname])
-  const handlers = inlineHandlers(call)
-  const [lead, ...rest] = handlers
+  const [lead, ...rest] = inlineHandlers(call)
   return {
     id: makeTsSymbolId(ctx.file.path, qname),
     kind: "call",
@@ -89,62 +88,81 @@ export function visitCallStatement(
     // the handler's would publish the framework's callback shape as the route's signature.
     signature: null,
     source: makeSourceRange(call, ctx),
-    derivedBy: makeDerivedBy(parsed, literalPath, handlers.length > 0),
-    bodyNode: lead === undefined ? null : (lead.childForFieldName("body") ?? null),
+    derivedBy: makeDerivedBy(parsed, literalPath, lead !== undefined),
+    bodyNode: lead?.bodyNode ?? null,
     fullNode: call,
-    mergedDeclarations: rest.map((handler) => ({
-      bodyNode: handler.childForFieldName("body") ?? null,
-      fullNode: handler,
-    })),
+    // Absent, never empty — `plugins.ts` states the contract and LP8i pins it.
+    ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
   }
 }
 
 /**
- * Every function written as a direct argument of the registration, in source order.
+ * Every function written as a direct argument of the registration, as the bodies they
+ * contribute, in source order.
  *
- * The Symbol stands for the whole statement, so the scan covers the calls the statement is
- * made of, not only the outermost one: `app.route('/x').get(h1).post(h2)` registers two
- * handlers and produces one Symbol, and reading only the leaf's arguments would leave `h1` in
- * no Symbol at all.
+ * The Symbol stands for the whole statement, so the scan covers every call on the statement's
+ * spine, not only the outermost: `app.route('/x').get(h1).post(h2)` registers two handlers and
+ * produces one Symbol, and reading only the leaf's arguments would leave `h1` in no Symbol at
+ * all.
  *
  * **Direct** arguments only. A function inside an argument (`app.get('/x', wrap(() => …))`) is
- * a call's return value, which is the line `asFunctionValue` already draws: reading through a
- * call would be a guess about what it returns.
+ * a call's return value, which is the line `asFunctionValue` draws: reading through a call
+ * would be a guess about what it returns. `asFunctionValue`'s set is also the answer to what
+ * counts as a function here — an arrow or a function expression, wrapped or not. A generator
+ * argument (Koa's `app.use(function* (ctx, next) {…})`) is outside it at every site that reads
+ * the predicate, so it registers no body.
  *
- * Ordered on `startIndex`, the way decorators are: the chain is walked outermost-first, which
- * is the reverse of how it is written, and `bodyNodesOf` publishes these in the order the
- * source has them.
+ * A body of no width is refused. A half-written handler (`app.get('/x', async (req) =>)`) still
+ * parses as an arrow whose `body` field is a zero-width error node; adopting it would describe
+ * every broken handler in a workspace with the same string, and claim `inline-handler` for a
+ * function that has no body to walk.
+ *
+ * Ordered on `startIndex` because the spine is walked right-to-left, which is the reverse of
+ * how the statement is written.
  */
-function inlineHandlers(call: Node): Node[] {
-  const found: Node[] = []
-  for (let cursor: Node | null = call; cursor !== null; cursor = nextInChain(cursor)) {
-    const args = cursor.childForFieldName("arguments") ?? findArgumentsChild(cursor)
+function inlineHandlers(call: Node): MergedDeclaration<Node>[] {
+  const found: MergedDeclaration<Node>[] = []
+  for (const step of spineCalls(call)) {
+    const args = step.childForFieldName("arguments") ?? findArgumentsChild(step)
     if (args === null) continue
     for (const argument of args.namedChildren) {
       if (argument === null) continue
       const handler = asFunctionValue(argument)
-      if (handler !== null) found.push(handler)
+      if (handler === null) continue
+      const body = handler.childForFieldName("body")
+      if (body === null || body.text.length === 0) continue
+      found.push({ bodyNode: body, fullNode: handler })
     }
   }
-  return found.sort((a, b) => a.startIndex - b.startIndex)
+  return found.sort((a, b) => a.fullNode.startIndex - b.fullNode.startIndex)
 }
 
 /**
- * The call one step further left in a chain (`a.b(1).c(2)` — from `.c`'s call to `.b`'s),
- * or null where the chain ends.
+ * Every call on the statement's spine, outermost first.
  *
- * Read through the same wrappers a value is: `(app.route(p).get(h1)).post(h2)` is one chain
- * with a parenthesis in it, and stopping at the parenthesis would leave `h1` in no Symbol.
- * A step that is not a call after unwrapping ends the chain — `app.a.b.get(h)` walks left
- * through member expressions that register nothing.
+ * The spine is what `rootReceiver` walks to find the receiver, and this walks it for the same
+ * reason: one statement is one Symbol, so every registration written in it belongs to that
+ * Symbol. `app.use(h0).router.get(h1)` reaches `.use`'s call through a member step, and
+ * stopping at that step would leave `h0` in no Symbol at all.
+ *
+ * Read through the same wrappers a value is read through, so a chain does not end at a
+ * parenthesis or a type assertion written in the middle of it.
  */
-function nextInChain(call: Node): Node | null {
-  const callee = call.childForFieldName("function")
-  if (callee === null || callee.type !== "member_expression") return null
-  const object = callee.childForFieldName("object")
-  if (object === null) return null
-  const step = unwrapValue(object)
-  return step.type === "call_expression" ? step : null
+function* spineCalls(call: Node): Iterable<Node> {
+  let cursor: Node | null = call
+  while (cursor !== null) {
+    const step = unwrapValue(cursor)
+    if (step.type === "call_expression") {
+      yield step
+      cursor = step.childForFieldName("function")
+      continue
+    }
+    if (step.type === "member_expression") {
+      cursor = step.childForFieldName("object")
+      continue
+    }
+    cursor = null
+  }
 }
 
 interface MemberCall {
@@ -173,8 +191,16 @@ function parseMemberCallee(callee: Node): MemberCall | null {
   return { receiver: root.name, method, chained: root.chained }
 }
 
+/**
+ * The identifier the statement's chain starts from, and whether a call stands between it and
+ * the leaf method.
+ *
+ * Wrappers are read through by the same reader the value side uses, so `(app as Express).get()`
+ * and `app!.get()` name the same receiver `app.get()` does. Hand-unwrapping only parentheses
+ * here left the two readers disagreeing about what a wrapper is (LP7a).
+ */
 function rootReceiver(node: Node): { name: string; chained: boolean } | null {
-  let cursor: Node = node
+  let cursor: Node = unwrapValue(node)
   let chained = false
   while (true) {
     if (cursor.type === "identifier") {
@@ -186,20 +212,14 @@ function rootReceiver(node: Node): { name: string; chained: boolean } | null {
     if (cursor.type === "member_expression") {
       const object = cursor.childForFieldName("object")
       if (object === null) return null
-      cursor = object
+      cursor = unwrapValue(object)
       continue
     }
     if (cursor.type === "call_expression") {
       const inner = cursor.childForFieldName("function")
       if (inner === null) return null
       chained = true
-      cursor = inner
-      continue
-    }
-    if (cursor.type === "parenthesized_expression") {
-      const inner = cursor.namedChild(0)
-      if (inner === null) return null
-      cursor = inner
+      cursor = unwrapValue(inner)
       continue
     }
     return null
