@@ -294,9 +294,17 @@ describe("the statement's spine is one Symbol's worth of registrations", () => {
     for (const source of [
       '(app as Express).get("/x", () => { read() })',
       'app!.get("/x", () => { read() })',
+      // and where the wrapper sits further up the chain than the first step
+      '(app as Express).router.get("/x", () => { read() })',
+      'app!.router.get("/x", () => { read() })',
     ]) {
       expect(await callsOf(source, "ts:src/a.ts#app__get__$x__d0")).toEqual(["read"])
     }
+
+    // …and where it wraps a call rather than a receiver, which is the other arm of the walk
+    expect(
+      await callsOf("(app.route('/x') as R).get(() => { read() })", "ts:src/a.ts#app__get__d0"),
+    ).toEqual(["read"])
   })
 
   it("walks an expression-bodied handler, the most common spelling", async () => {
