@@ -17,6 +17,13 @@ import type { Node } from "web-tree-sitter"
  * function body). When it does not (`type` / `interface` / bare `const`), the full node
  * is normalized instead so type aliases and interface shapes still get a stable hash.
  *
+ * A Symbol whose declaration is a **call** is the exception, and is always described by its
+ * full node. Its body is a function written inside that call, so narrowing to the body would
+ * drop the registration itself: `app.get('/x', authenticate, h)` and `app.get('/x', h)` would
+ * serialize identically, and adding or removing a route's auth middleware would produce no
+ * signal on any axis. The body is what the registration *runs*, which is the walk's question;
+ * the whole call is what it *is*, which is this one.
+ *
  * A Symbol several declarations wrote — a getter beside its setter, an interface reopened —
  * gets each of the further bodies appended, in source order. A Symbol with one declaration
  * therefore serializes to exactly the string it did before that was possible, which is what
@@ -24,6 +31,7 @@ import type { Node } from "web-tree-sitter"
  * there is nothing to append.
  */
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
+  if (symbol.kind === "call") return serialize(symbol.fullNode)
   const merged = symbol.mergedDeclarations ?? []
   const primary = serialize(symbol.bodyNode ?? symbol.fullNode)
   if (merged.length === 0) return primary
