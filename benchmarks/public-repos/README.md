@@ -78,3 +78,17 @@ form of performance.md PF11; once the worker pool lands, the same equality acros
 `aburi diff` a real change set to project rather than a handful of commits.
 Numbers are only comparable within one pin — changing an entry is a documented
 event, and the results file records the commit each run measured.
+
+## Running it on a schedule
+
+The `Benchmark` workflow runs the whole sweep on the first of each month, and on
+demand from the Actions tab (`--only` and `--runs` are inputs). It builds the CLI
+from the commit it runs on, keeps its work directory in the runner's temporary
+space, uploads `results/` as an artifact, and opens a pull request holding the new
+`results/<date>.{json,md}` with the rendered tables as its body.
+
+The pull request is where the reading happens. A wall time that moved may mean the
+code moved or may mean the runner did — the counters are what carry across runners,
+and the workflow deliberately does not decide which one it was. Fixing the runner to
+`ubuntu-latest` and the commits to `repos.json` is what keeps the comparison honest;
+neither changes without a reason written down.
