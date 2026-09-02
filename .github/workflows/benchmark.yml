@@ -5,6 +5,12 @@ name: Benchmark
 # `ubuntu-latest` runner, and the pins in `benchmarks/public-repos/repos.json`.
 # Changing a pin is a documented event, not a routine bump.
 on:
+  # TEMPORARY, reverted before merge: `workflow_dispatch` does not exist until the file is
+  # on the default branch, so the 1st-of-month schedule would otherwise be this workflow's
+  # first real run. This proves report discovery, the commit, the push and `gh pr create`
+  # end to end on one repository.
+  push:
+    branches: [chore/public-repo-benchmark]
   schedule:
     - cron: "0 3 1 * *"
   workflow_dispatch:
@@ -61,8 +67,8 @@ jobs:
       # workspace root, and the harness refuses; `RUNNER_TEMP` is outside it.
       - name: Run the benchmark
         env:
-          ONLY: ${{ inputs.only }}
-          RUNS: ${{ inputs.runs || '3' }}
+          ONLY: ${{ inputs.only || 'zustand' }}
+          RUNS: ${{ inputs.runs || '1' }}
         run: |
           args=(--work-dir "$RUNNER_TEMP/aburi-bench-work" --runs "$RUNS")
           if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
