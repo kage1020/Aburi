@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "docs"
+  - "benchmarks/*"
 
 allowBuilds:
   esbuild: true
