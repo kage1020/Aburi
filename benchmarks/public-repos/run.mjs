@@ -5,11 +5,11 @@
  *
  * The synthetic corpus described in docs/design/performance.md §2 measures one shape on
  * purpose: many similar small files. Public repositories measure the shapes nobody
- * designs for — a 5,000-line generated file, a workspace with 80 packages, a `.d.ts`
- * wall, decorators on everything — and they are also the only way to find out whether
- * Aburi extracts anything sensible from code it has never seen. So each repo yields two
- * kinds of number: cost (wall time, peak RSS) and outcome (files parsed, symbols kept,
- * calls resolved, files lost).
+ * designs for — a generated file thousands of lines long, a workspace with a hundred
+ * packages, a `.d.ts` wall, decorators on everything — and they are also the only way to
+ * find out whether Aburi extracts anything sensible from code it has never seen. So each
+ * repo yields two kinds of number: cost (wall time, peak RSS) and outcome (files parsed,
+ * symbols kept, calls resolved, files lost).
  *
  *   node benchmarks/public-repos/run.mjs                    # every repo in repos.json
  *   node benchmarks/public-repos/run.mjs --only zod,nest    # a subset
@@ -17,19 +17,33 @@
  *   node benchmarks/public-repos/run.mjs --no-diff          # scan only
  *
  * Requires `pnpm build` first: the harness runs the built CLI from `packages/cli/dist`.
+ *
+ * What each measurement is allowed to claim lives in `report.mjs`, which holds every
+ * decision this file makes without touching the disk.
  */
 import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
-import { cpus, tmpdir, totalmem } from "node:os"
-import { dirname, relative, resolve, sep } from "node:path"
+import { cpus, totalmem } from "node:os"
+import { dirname, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import {
+  containsPath,
+  parseArgs,
+  renderReport,
+  resolveRepos,
+  scrubPaths,
+  summariseScans,
+} from "./report.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "../..")
 const CLI_ENTRY = resolve(REPO_ROOT, "packages/cli/dist/index.mjs")
 const CHILD = resolve(HERE, "bench-child.mjs")
+
+/** Enough of a failing run's output to read, taken from the head, where the first error is. */
+const CAPTURED_OUTPUT_BYTES = 4000
 
 /**
  * `aburi init` writes plugin refs as bare package names (`lang-typescript`), which the
@@ -48,26 +62,6 @@ const CHILD = resolve(HERE, "bench-child.mjs")
 function pluginRef(ref) {
   const name = ref.replace(/^@aburi\//, "")
   return pathToFileURL(resolve(REPO_ROOT, "packages", name, "dist/index.mjs")).href
-}
-
-function parseArgs(argv) {
-  const options = {
-    only: null,
-    runs: 3,
-    warmup: 1,
-    diff: true,
-    workDir: resolve(tmpdir(), "aburi-bench-work"),
-  }
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]
-    if (arg === "--only") options.only = new Set(argv[++i].split(","))
-    else if (arg === "--runs") options.runs = Number(argv[++i])
-    else if (arg === "--warmup") options.warmup = Number(argv[++i])
-    else if (arg === "--no-diff") options.diff = false
-    else if (arg === "--work-dir") options.workDir = resolve(argv[++i])
-    else throw new Error(`Unknown flag: ${arg}`)
-  }
-  return options
 }
 
 function run(command, args, options = {}) {
@@ -109,6 +103,9 @@ async function git(args, cwd) {
  * (it needs the base ref's history), while a partial clone keeps every commit and fetches
  * only the blobs a checkout actually touches. Over these nine repos that is ~125 MB of
  * fetch, and ~760 MB of work directory once every tree is materialised.
+ *
+ * `out` and `aburi.json` survive the clean because they are the harness's own: the rewritten
+ * config has to outlive the checkout, and the IR directory is emptied per run instead.
  */
 async function ensureClone(repo, workDir) {
   const dir = resolve(workDir, repo.id)
@@ -140,16 +137,14 @@ async function hashFile(path) {
     .digest("hex")
 }
 
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
-}
-
 /**
  * The outcome half of the measurement. Wall time alone cannot tell a fast scan from a
  * scan that gave up on half the workspace, so every timing below is reported next to what
  * the run actually produced.
+ *
+ * Every field reads as `null` when the IR does not carry it, including the ones the schema
+ * marks required. A `?? 0` there would render a renamed field as `Files 0 / Kept 0` — schema
+ * drift printed as a catastrophic regression, with nothing to say which it was.
  */
 function readIrMetrics(ir, irBytes) {
   const stats = ir.stats ?? {}
@@ -160,13 +155,13 @@ function readIrMetrics(ir, irBytes) {
     skippedByReason[entry.reason] = (skippedByReason[entry.reason] ?? 0) + 1
   }
   return {
-    components: ir.components?.length ?? 0,
-    totalFiles: stats.totalFiles ?? 0,
-    parsedFiles: stats.parsedFiles ?? 0,
-    keptSymbols: stats.keptSymbols ?? 0,
-    droppedSymbols: stats.droppedSymbols ?? 0,
-    symbols: ir.symbols?.length ?? 0,
-    dependencies: ir.dependencies?.length ?? 0,
+    components: ir.components?.length ?? null,
+    totalFiles: stats.totalFiles ?? null,
+    parsedFiles: stats.parsedFiles ?? null,
+    keptSymbols: stats.keptSymbols ?? null,
+    droppedSymbols: stats.droppedSymbols ?? null,
+    symbols: ir.symbols?.length ?? null,
+    dependencies: ir.dependencies?.length ?? null,
     totalCalls: calls?.totalCalls ?? null,
     resolvedCalls: calls?.resolvedCalls ?? null,
     unresolved: calls?.unresolved ?? null,
@@ -179,14 +174,21 @@ function readIrMetrics(ir, irBytes) {
 
 async function measureRepo(repo, options) {
   const started = Date.now()
+  const capture = (text) => scrubPaths(text, options.workDir).slice(0, CAPTURED_OUTPUT_BYTES)
   process.stderr.write(`\n=== ${repo.id} ===\n`)
   const dir = await ensureClone(repo, options.workDir)
-  await rm(resolve(dir, "out"), { recursive: true, force: true })
 
   const init = await bench(dir, ["init", "--force"], 300_000)
   process.stderr.write(`  init ${init.wallMs?.toFixed(0)} ms (exit ${init.exitCode})\n`)
   if (init.exitCode !== 0) {
-    return { id: repo.id, head: repo.head, failed: "init", init, elapsedMs: Date.now() - started }
+    return {
+      id: repo.id,
+      head: repo.head,
+      failed: "init",
+      fault: `exit ${init.exitCode}`,
+      init,
+      elapsedMs: Date.now() - started,
+    }
   }
 
   const configPath = resolve(dir, "aburi.json")
@@ -202,42 +204,47 @@ async function measureRepo(repo, options) {
   }
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`)
 
-  const scans = []
-  const hashes = []
+  const runs = []
   const irPath = resolve(dir, "out/aburi.ir.json")
+  let lastStderr = ""
   for (let i = 0; i < options.warmup + options.runs; i++) {
+    /**
+     * The previous run's IR goes before this one starts. Left in place, a run that dies is
+     * indistinguishable from one that succeeded: the file is there, it hashes to the same
+     * bytes, and the sweep records a fast deterministic scan having measured nothing.
+     */
+    await rm(irPath, { force: true })
     const measurement = await bench(dir, ["scan", "--no-timestamp"], 1_800_000)
     const warm = i < options.warmup
     process.stderr.write(
       `  scan${warm ? " (warmup)" : ""} ${measurement.wallMs?.toFixed(0)} ms · ` +
         `${(measurement.maxRssKb / 1024).toFixed(0)} MiB (exit ${measurement.exitCode})\n`,
     )
-    if (!existsSync(irPath)) {
-      return {
-        id: repo.id,
-        head: repo.head,
-        failed: "scan",
-        detected,
-        scan: { exitCode: measurement.exitCode, stderr: measurement.stderr.slice(-4000) },
-        elapsedMs: Date.now() - started,
-      }
-    }
+    lastStderr = measurement.stderr
     if (warm) continue
-    scans.push(measurement)
-    hashes.push(await hashFile(irPath))
+    const irWritten = existsSync(irPath)
+    runs.push({ measurement, irWritten, hash: irWritten ? await hashFile(irPath) : null })
+  }
+
+  const scan = summariseScans(runs, { warnings: capture(lastStderr) })
+  if (scan.failed) {
+    return {
+      id: repo.id,
+      head: repo.head,
+      failed: scan.failed,
+      fault: scan.fault,
+      detected,
+      scan: { warnings: scan.warnings },
+      elapsedMs: Date.now() - started,
+    }
   }
 
   const ir = JSON.parse(await readFile(irPath, "utf8"))
   const metrics = readIrMetrics(ir, (await stat(irPath)).size)
-  const wallMsSamples = scans.map((s) => s.wallMs)
-
-  /**
-   * `--no-timestamp` removes the only intentionally varying field, so two runs over an
-   * unchanged tree must serialise to the same bytes. This is the single-threaded form of
-   * performance.md PF11; when the worker pool lands, the same check across
-   * `--concurrency` values is the interesting one.
-   */
-  const deterministic = hashes.every((hash) => hash === hashes[0])
+  // Assigned rather than passed, so the file count the IR reports lands in the slot
+  // `summariseScans` already reserved for it.
+  scan.filesPerSecond =
+    metrics.totalFiles == null ? null : metrics.totalFiles / (scan.wallMsMedian / 1000)
 
   const result = {
     id: repo.id,
@@ -247,28 +254,21 @@ async function measureRepo(repo, options) {
     note: repo.note,
     detected,
     init: { wallMs: init.wallMs, maxRssKb: init.maxRssKb, exitCode: init.exitCode },
-    scan: {
-      runs: scans.length,
-      exitCode: scans[scans.length - 1].exitCode,
-      wallMsSamples,
-      wallMsMedian: median(wallMsSamples),
-      wallMsMin: Math.min(...wallMsSamples),
-      wallMsMax: Math.max(...wallMsSamples),
-      peakRssKb: Math.max(...scans.map((s) => s.maxRssKb)),
-      filesPerSecond: metrics.totalFiles / (median(wallMsSamples) / 1000),
-      irHash: hashes[0],
-      deterministic,
-      warnings: scans[scans.length - 1].stderr.slice(-4000),
-    },
+    scan,
     metrics,
   }
 
   if (options.diff) {
     /**
      * `--config` with an absolute path, because `aburi diff` scans the base ref inside a
-     * throwaway `git worktree`. The harness's `aburi.json` is untracked, so it does not
-     * exist in that worktree, and without it the base scan loads no language plugin and
-     * parses nothing.
+     * throwaway `git worktree`. The harness's `aburi.json` is untracked, so it does not exist
+     * in that worktree, and without it the base scan finds no language plugin and aborts with
+     * `No language plugin is configured` (exit 2).
+     *
+     * The CLI warns on every repo that the config sits outside the workspace root it detected
+     * for the worktree. The rewritten config carries nothing but absolute plugin refs, so
+     * nothing in it resolves against that root — but the warning is real and every diff run
+     * here carries it.
      */
     await rm(resolve(dir, "out-diff"), { recursive: true, force: true })
     const measurement = await bench(
@@ -294,96 +294,12 @@ async function measureRepo(repo, options) {
       // surfaces. Kept rather than flattened to pass / fail.
       exitCode: measurement.exitCode,
       summary: counts,
-      warnings: measurement.stderr.slice(-4000),
+      warnings: capture(measurement.stderr),
     }
   }
 
   result.elapsedMs = Date.now() - started
   return result
-}
-
-function formatMiB(kb) {
-  return kb == null ? "—" : (kb / 1024).toFixed(0)
-}
-
-function formatSeconds(ms) {
-  return ms == null ? "—" : (ms / 1000).toFixed(2)
-}
-
-function renderReport(report) {
-  const lines = []
-  const { environment, results } = report
-  lines.push("# Public-repository benchmark")
-  lines.push("")
-  lines.push(
-    `Run ${report.startedAt} · aburi ${report.generator ?? "workspace build"} · ` +
-      `Node ${environment.node} · ${environment.cpus}× ${environment.cpuModel} · ` +
-      `${environment.totalMemGiB} GiB RAM · ${report.options.runs} measured run(s) after ` +
-      `${report.options.warmup} warmup.`,
-  )
-  lines.push("")
-  lines.push("## Scan")
-  lines.push("")
-  lines.push(
-    "| Repo | Files | Kept | Dropped | Median | Min–max | files/s | Peak RSS | IR | Deterministic |",
-  )
-  lines.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|:--:|")
-  for (const result of results) {
-    if (result.failed) {
-      lines.push(`| \`${result.id}\` | — | — | — | — | — | — | — | — | ✗ (${result.failed}) |`)
-      continue
-    }
-    const scan = result.scan
-    lines.push(
-      `| \`${result.id}\` | ${result.metrics.totalFiles} | ${result.metrics.keptSymbols} | ` +
-        `${result.metrics.droppedSymbols} | ${formatSeconds(scan.wallMsMedian)} s | ` +
-        `${formatSeconds(scan.wallMsMin)}–${formatSeconds(scan.wallMsMax)} s | ` +
-        `${scan.filesPerSecond.toFixed(0)} | ${formatMiB(scan.peakRssKb)} MiB | ` +
-        `${(result.metrics.irBytes / 1024 / 1024).toFixed(1)} MiB | ` +
-        `${scan.deterministic ? "✓" : "✗"} |`,
-    )
-  }
-  lines.push("")
-  lines.push("## Call resolution and losses")
-  lines.push("")
-  lines.push("| Repo | Components | Calls | Resolved | Resolved % | Deps | Files lost | Reasons |")
-  lines.push("|---|---:|---:|---:|---:|---:|---:|---|")
-  for (const result of results) {
-    if (result.failed) continue
-    const metrics = result.metrics
-    const share =
-      metrics.totalCalls > 0
-        ? `${((metrics.resolvedCalls / metrics.totalCalls) * 100).toFixed(1)}%`
-        : "—"
-    const reasons =
-      Object.entries(metrics.skippedByReason)
-        .map(([reason, count]) => `${reason} ${count}`)
-        .join(", ") || "—"
-    lines.push(
-      `| \`${result.id}\` | ${metrics.components} | ${metrics.totalCalls ?? "—"} | ` +
-        `${metrics.resolvedCalls ?? "—"} | ${share} | ${metrics.dependencies} | ` +
-        `${metrics.skippedFiles} | ${reasons} |`,
-    )
-  }
-  if (results.some((result) => result.diff)) {
-    lines.push("")
-    lines.push("## Diff (`base..head`, 50 commits apart)")
-    lines.push("")
-    lines.push("| Repo | Wall | Peak RSS | Exit | Added | Removed | Changed | Moved |")
-    lines.push("|---|---:|---:|---:|---:|---:|---:|---:|")
-    for (const result of results) {
-      if (!result.diff) continue
-      const summary = result.diff.summary ?? {}
-      lines.push(
-        `| \`${result.id}\` | ${formatSeconds(result.diff.wallMs)} s | ` +
-          `${formatMiB(result.diff.peakRssKb)} MiB | ${result.diff.exitCode} | ` +
-          `${summary.added ?? "—"} | ${summary.removed ?? "—"} | ${summary.changed ?? "—"} | ` +
-          `${summary.moved ?? "—"} |`,
-      )
-    }
-  }
-  lines.push("")
-  return `${lines.join("\n")}\n`
 }
 
 async function main() {
@@ -397,15 +313,14 @@ async function main() {
    * id there — measuring a workspace nobody asked about. Refuse rather than report the
    * number that comes out of it.
    */
-  if (`${options.workDir}${sep}`.startsWith(`${REPO_ROOT}${sep}`)) {
+  if (containsPath(REPO_ROOT, options.workDir)) {
     throw new Error(
       `--work-dir must sit outside ${REPO_ROOT}; a clone below it is absorbed into this ` +
         "workspace and the scan measures the wrong tree.",
     )
   }
   const manifest = JSON.parse(await readFile(resolve(HERE, "repos.json"), "utf8"))
-  const repos = manifest.repos.filter((repo) => !options.only || options.only.has(repo.id))
-  if (repos.length === 0) throw new Error("No repository matched --only.")
+  const repos = resolveRepos(manifest, options.only)
 
   const report = {
     startedAt: new Date().toISOString(),
@@ -421,16 +336,39 @@ async function main() {
     },
     results: [],
   }
-  for (const repo of repos) {
-    report.results.push(await measureRepo(repo, options))
-  }
 
   const stamp = report.startedAt.slice(0, 10)
   await mkdir(resolve(HERE, "results"), { recursive: true })
   const jsonPath = resolve(HERE, "results", `${stamp}.json`)
   const mdPath = resolve(HERE, "results", `${stamp}.md`)
-  await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`)
-  await writeFile(mdPath, renderReport(report))
+  const write = async () => {
+    await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`)
+    await writeFile(mdPath, renderReport(report))
+  }
+
+  for (const repo of repos) {
+    try {
+      report.results.push(await measureRepo(repo, options))
+    } catch (error) {
+      /**
+       * A clone that will not check out, or an IR the harness cannot parse, costs that
+       * repository and no other. `bench-child` already contains a crash inside one measured
+       * invocation; this contains everything around it, which is the other half of the same
+       * promise — and the report is rewritten per repo so a sweep killed by the job timeout
+       * still leaves every repository it finished.
+       */
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(`  harness fault: ${message}\n`)
+      report.results.push({
+        id: repo.id,
+        head: repo.head,
+        failed: "harness",
+        fault: scrubPaths(message, options.workDir).slice(0, CAPTURED_OUTPUT_BYTES),
+      })
+    }
+    await write()
+  }
+
   process.stderr.write(`\n→ ${relative(REPO_ROOT, jsonPath)}\n→ ${relative(REPO_ROOT, mdPath)}\n`)
 }
 

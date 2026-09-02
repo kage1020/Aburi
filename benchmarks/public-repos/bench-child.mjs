@@ -10,8 +10,7 @@
  * Usage: node bench-child.mjs <path-to-cli-entry> <aburi argv...>
  *
  * The measurement is written to stdout as a final `##BENCH##{json}` line. It brackets
- * `runCli` only, so Node's own startup (~40 ms) is excluded; the parent separately records
- * process wall time, which includes it.
+ * `runCli` only, so Node's own startup (~40 ms) is excluded and no number here includes it.
  */
 import { pathToFileURL } from "node:url"
 
