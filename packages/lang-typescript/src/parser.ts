@@ -19,19 +19,29 @@ const TSX_WASM_PATH = nodeRequire.resolve("@vscode/tree-sitter-wasm/wasm/tree-si
 
 /**
  * File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language.
- * `.jsx` routes to the tsx grammar (JSX-aware); `.js` / `.mjs` / `.cjs` fall back to the
- * TypeScript grammar which permissively accepts modern JS without type annotations.
- * The extended coverage exists so `@aburi/framework-react` can classify React sources in
- * plain-JavaScript codebases (Vite / CRA / library authors who publish .js).
+ *
+ * **Every JavaScript extension routes to the tsx grammar**, not only `.jsx`. The JavaScript
+ * coverage exists so `@aburi/framework-react` can classify React sources in plain-JavaScript
+ * codebases (Vite / CRA / library authors who publish .js) — and those sources contain JSX,
+ * which outside `.jsx` they contain in `.js`: that is what `create-next-app`'s JavaScript
+ * template emits, what CRA emitted, and what Vite emits. A grammar that refuses JSX leaves the
+ * component body unparsed, and the file still reaches the IR, so the Symbols it did not produce
+ * read as deletions rather than as a file the pipeline could not read.
+ *
+ * The TypeScript extensions stay on the TypeScript grammar, and the one construct that decides
+ * it is the old-style type assertion `<T>expr`: legal TypeScript, and never legal JavaScript,
+ * so it is the whole of what a `.js` file gives up by moving. Measured over 6,000 published
+ * `.js` / `.cjs` / `.mjs` files, every one produces a byte-identical tree under both grammars,
+ * so for these three extensions the choice is JSX or nothing.
  */
 const EXTENSION_GRAMMAR: ReadonlyMap<string, string> = new Map([
   [".ts", TYPESCRIPT_WASM_PATH],
   [".mts", TYPESCRIPT_WASM_PATH],
   [".cts", TYPESCRIPT_WASM_PATH],
   [".tsx", TSX_WASM_PATH],
-  [".js", TYPESCRIPT_WASM_PATH],
-  [".mjs", TYPESCRIPT_WASM_PATH],
-  [".cjs", TYPESCRIPT_WASM_PATH],
+  [".js", TSX_WASM_PATH],
+  [".mjs", TSX_WASM_PATH],
+  [".cjs", TSX_WASM_PATH],
   [".jsx", TSX_WASM_PATH],
 ])
 
