@@ -2,6 +2,7 @@ import type {
   BodyExtraction,
   Call,
   CallCandidate,
+  ComponentId,
   Confidence,
   Config,
   DropHint,
@@ -137,6 +138,22 @@ export interface FilePipelineInput {
   registry: VocabRegistry
   config: Config
   dropCFilter: DropCFilter
+  /**
+   * The Component this file belongs to, or `null` when it sits under no `Component.roots[]`
+   * entry — the value every Symbol extracted from it carries on `Symbol.component`, and the
+   * one an effect plugin reads off `owner.component` while classifying its calls.
+   *
+   * Decided per *file* rather than per Symbol, by `buildComponentAttribution` in the caller:
+   * attribution is a question about a path, every Symbol here came out of this one path, and
+   * the caller is the side holding the Component list.
+   *
+   * Required rather than optional even though `null` is a legal answer, because the two are
+   * different facts — "this file is outside every Component" and "this caller never said" —
+   * and only the first is one a Symbol may carry (ir-schema.md §1.1, Class A). An optional
+   * key would spell them the same way and attribute a whole scan to nothing on a caller that
+   * simply forgot it.
+   */
+  component: ComponentId | null
   log: Logger
   /**
    * Collector for trees the language plugin failed to free. Appended to rather than
@@ -196,7 +213,8 @@ export interface TreeReleaseFailure {
  * bound the work still to come, and a file found over budget at one of them is abandoned.
  */
 export async function runFilePipeline(input: FilePipelineInput): Promise<FilePipelineResult> {
-  const { file, language, frameworks, effects, registry, config, dropCFilter, log } = input
+  const { file, language, frameworks, effects, registry, config, dropCFilter, component, log } =
+    input
 
   const deadline = startParseDeadline(config.parseTimeoutMs)
   // An abandoned file contributes nothing but its errors, for the reason `ParseTimeoutFile`
@@ -270,6 +288,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
             candidate,
             dropReason,
             extractLanguageFromId(candidate.id),
+            component,
             confidence,
           ),
         )
@@ -284,6 +303,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         effects,
         registry,
         config,
+        component,
         candidate,
         file,
         language: extractLanguageFromId(candidate.id),
@@ -305,6 +325,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         buildKeptSymbol({
           candidate,
           language: extractLanguageFromId(candidate.id),
+          component,
           rules: body.rules,
           effects: classifiedEffects,
           calls: keptCalls,
@@ -442,6 +463,8 @@ interface ClassifyCallsInput {
   effects: readonly EffectPlugin[]
   registry: VocabRegistry
   config: Config
+  /** The owning Symbol's Component, as `FilePipelineInput.component` decided it for the file. */
+  component: ComponentId | null
   candidate: SymbolCandidate<OpaqueAstNode>
   file: SourceFile
   language: LanguageId
@@ -593,7 +616,7 @@ function classifyCalls(input: ClassifyCallsInput): {
     name: input.candidate.name,
     extKind: input.candidate.extKind,
     decorators: input.candidate.decorators.map((d) => ({ name: d.name, boundary: d.boundary })),
-    component: null,
+    component: input.component,
   }
 
   for (const produced of input.calls) {
@@ -685,6 +708,7 @@ function buildDroppedSymbol(
   candidate: SymbolCandidate<OpaqueAstNode>,
   reason: string,
   language: LanguageId,
+  component: ComponentId | null,
   frameworkConfidence: Confidence,
 ): IRSymbol {
   return {
@@ -694,10 +718,10 @@ function buildDroppedSymbol(
     name: candidate.name,
     language,
     // Class A per ir-schema.md §1.1: the key is written on every Symbol, carrying `null`
-    // for "outside every Component". Symbol-to-Component attribution is not implemented,
-    // so `null` is the honest value rather than a placeholder -- but omitting the key
-    // would make this Symbol's shape differ from one that is attributed later.
-    component: null,
+    // for "outside every Component" -- which for a dropped Symbol is decided exactly as it
+    // is for a kept one. A drop is a statement about the Symbol's shape, not about where it
+    // lives, and the per-component Markdown lists both (markdown-projection.md §5).
+    component,
     visibility: candidate.visibility,
     decorators: [...candidate.decorators],
     signature: candidate.signature,
@@ -716,6 +740,8 @@ function buildDroppedSymbol(
 interface BuildKeptSymbolInput {
   candidate: SymbolCandidate<OpaqueAstNode>
   language: LanguageId
+  /** The file's Component, as `FilePipelineInput.component` decided it. */
+  component: ComponentId | null
   rules: import("@aburi/types").Rule[]
   effects: Effect[]
   calls: Call[]
@@ -731,9 +757,9 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     extKind: input.candidate.extKind,
     name: input.candidate.name,
     language: input.language,
-    // Class A per ir-schema.md §1.1 -- see buildDroppedSymbol for why `null` is written
-    // rather than the key omitted.
-    component: null,
+    // Class A per ir-schema.md §1.1 -- see buildDroppedSymbol for how the value is decided
+    // and why the key is written even when it is `null`.
+    component: input.component,
     visibility: input.candidate.visibility,
     // Sort every list-field by `.line` before it enters the IR. Integrity invariant
     // #11 (`checkArraySortOrder`) demands monotonic `.line` on `decorators` /

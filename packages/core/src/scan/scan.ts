@@ -28,6 +28,7 @@ import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
 import { enrichWithLsp, type ReadFile, type ServerFactory } from "../lsp"
 import { type PropagationStats, propagateEffects } from "../propagate"
+import { buildComponentAttribution } from "./attribute"
 import {
   type DiscoveredFile,
   discoverFiles,
@@ -209,6 +210,12 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   }
   const discovered = await discoverFiles(discoverOptions)
 
+  // Built before the loop and asked per file. `input.components` is the same list the IR
+  // records, so a Symbol's `component` and the Component it names are two readings of one
+  // input — which is what integrity invariant #3 (Symbol.component → Components[].id
+  // existence) checks at the end of this function.
+  const attribution = buildComponentAttribution(input.components ?? [])
+
   const dropCFilterInput: Parameters<typeof buildDropCFilter>[0] = {
     pluginDropCallees: input.effects.flatMap((e) => e.dropCallees ?? []),
   }
@@ -280,6 +287,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         registry: input.registry,
         config: input.config,
         dropCFilter,
+        // The file's Component, asked once here rather than once per Symbol: every Symbol the
+        // pipeline is about to build came out of this one path, and this is the side holding
+        // the Component list.
+        component: attribution.attribute(sourceFile.path),
         log: logger,
         treeReleaseFailures,
       })

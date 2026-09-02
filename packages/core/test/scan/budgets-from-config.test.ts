@@ -168,6 +168,7 @@ function run(config: { parseTimeoutMs?: number; classifyTimeoutMs?: number }, ef
     registry: noopRegistry,
     config,
     dropCFilter: buildDropCFilter(),
+    component: null,
     treeReleaseFailures: [],
     log: silentLog,
   })
@@ -214,6 +215,7 @@ describe("the parse budget comes from the config", () => {
       registry: noopRegistry,
       config: { parseTimeoutMs: 100 },
       dropCFilter: buildDropCFilter(),
+      component: null,
       treeReleaseFailures: [],
       log: silentLog,
     })

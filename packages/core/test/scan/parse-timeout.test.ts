@@ -165,6 +165,7 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
     // same object production hands it, so a test cannot exercise a path the CLI cannot.
     config: parseTimeoutMs === undefined ? {} : { parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
+    component: null,
     treeReleaseFailures: [],
     log: silentLog,
   }

@@ -371,6 +371,11 @@ Implementation guidance:
 | CD21 | `pnpm-workspace.yaml` with no `packages:` key, or with `packages: []` | Nothing is reported — pnpm includes only the root package either way |
 | CD22 | `turbo.json` alone, or `nx.json` with no `project.json` | Nothing is reported — neither declares package patterns |
 | CD23 | `packages:` whose entry carries a trailing colon, or a `workspaces` entry that is not a string | Detection aborts with `workspace-manifest-malformed` naming the manifest and the entry |
+| CD24 | Components at `.` and `packages/api`; a Symbol in `packages/api/src/orders.ts` | `Symbol.component` is `api` — the longest root wins, not the first that matches |
+| CD25 | A Component at `packages/api`; a Symbol in `packages/api-legacy/src/orders.ts` | `Symbol.component` is `null` — roots match whole path segments, not string prefixes |
+| CD26 | A Component at `packages/api`; a Symbol in `scripts/release.ts` | `Symbol.component` is `null` |
+| CD27 | Components `web` and `api` both declaring `roots: ["packages/shared"]` | Every Symbol under it is `api`, whichever order the two were declared in |
+| CD28 | A Symbol the Category B / C rules dropped, in `packages/api` | `Symbol.component` is `api`, as it is for a kept Symbol in the same file |
 
 ## 11. Design decisions
 
@@ -400,3 +405,20 @@ The public API expressed by `package.json#exports` is file-granular; it cannot e
 Autodetect currently stops at file glob output; if symbol-level filtering is needed, users specify it manually in the config.
 
 In the future, cross-referencing each language plugin's `extractSymbols` results with `package.json#exports` leaves room to extend to symbol-level output such as `publicApi: ["ts:src/index.ts#Invoice", "ts:src/index.ts#createInvoice"]`.
+
+## 12. Attributing Symbols to Components
+
+Detection writes `components[]`; this is how the scan reads it back to fill `symbols[].component` ([`ir-schema.md`](./ir-schema.md) §5).
+
+The rule is over paths and nothing else:
+
+- A Component claims a file when one of its `roots[]` is the file itself or a **whole-segment** prefix of it. `packages/api` claims `packages/api/src/orders.ts` and does not claim `packages/api-legacy/src/orders.ts`
+- When several roots claim the same file, the **longest** one wins. Nesting is ordinary rather than exceptional: a workspace root that is a package of its own has `roots: ["."]` containing every other component's root (§3.1.1), so "the first root that matches" would give the whole monorepo to it
+- A file under no root at all is attributed `null` — the Class A value [`ir-schema.md` §1.1](./ir-schema.md) defines as "outside every Component". §5 guarantees at least one Component, not that its roots cover every file: `scripts/` beside `packages/*` is the ordinary shape that lands here
+- Two Components may name the same root — nothing forbids it, and a config declaring one Component per framework over a shared directory produces it. The **lower `Component.id`** takes the files. Lowest rather than first, because `id` is unique ([`ir-schema.md`](./ir-schema.md) §14 #2) and already orders `components[]`, whereas "first" would make attribution depend on the order a config happened to list its components in
+- Roots and file paths are compared in NFC, in the shape [`ir-schema.md`](./ir-schema.md) §14 #10 fixes: no leading `./`, no trailing `/`, `.` for the workspace root
+- A **dropped** Symbol is attributed exactly like a kept one. The drop is a statement about the Symbol's shape, and the per-component page lists both
+
+What it deliberately does not do: read `publicApi[]`, the import graph, or the manifest. Attribution answers "which package is this file in", which is what `Component.roots[]` already says; a Symbol re-exported by another component's barrel stays with the file that declares it.
+
+The scan asks the question once per **file** rather than once per Symbol, since every Symbol from one file shares its answer. The value reaches an effect plugin as `owner.component` on `ClassifyContext`, and the call resolver's component-scope tier (§4.5 of [`call-resolution.md`](./call-resolution.md)) keys on it — so attribution narrows call resolution as well as filling the per-component views.
