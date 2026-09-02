@@ -1,0 +1,794 @@
+{
+  "startedAt": "2026-09-01T11:58:28.476Z",
+  "options": {
+    "runs": 3,
+    "warmup": 1,
+    "diff": true
+  },
+  "generator": "0.3.0",
+  "environment": {
+    "node": "v22.22.2",
+    "platform": "linux-x64",
+    "cpus": 4,
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "totalMemGiB": 16
+  },
+  "results": [
+    {
+      "id": "zustand",
+      "url": "https://github.com/pmndrs/zustand.git",
+      "head": "b57db4f86ef179285da216eeb291266da82c361c",
+      "base": "5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc",
+      "note": "Small single-package React state library — the floor of the size ladder.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 49.46934,
+        "maxRssKb": 84584,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          424.481217,
+          419.585418,
+          437.677431
+        ],
+        "wallMsMedian": 424.481217,
+        "wallMsMin": 419.585418,
+        "wallMsMax": 437.677431,
+        "peakRssKb": 114524,
+        "filesPerSecond": 115.43502524400272,
+        "irHash": "1b32e35901be67d3f280983336329216df84cc096fd80a3ce53d0500a224d623",
+        "deterministic": true,
+        "warnings": "⚠ 5 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 49,
+        "parsedFiles": 49,
+        "keptSymbols": 91,
+        "droppedSymbols": 81,
+        "symbols": 172,
+        "dependencies": 36,
+        "totalCalls": 357,
+        "resolvedCalls": 54,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 21,
+          "external": 53,
+          "localScope": 30,
+          "noMatch": 199
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 231731
+      },
+      "diff": {
+        "wallMs": 703.211092,
+        "peakRssKb": 125072,
+        "exitCode": 0,
+        "summary": {
+          "added": 3,
+          "changed": 3,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 1,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 0,
+          "unchanged": 165,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc\": Config <work-dir>/zustand/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc\": 5 file(s) had recoverable parse errors.\n⚠ head (working tree): 5 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 5, head 5) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 4165
+    },
+    {
+      "id": "express",
+      "url": "https://github.com/expressjs/express.git",
+      "head": "023767fe9872e029271df1418f73401bff20ff40",
+      "base": "bc7d155f53ef6457140dc2070b0b959869dd36da",
+      "note": "Plain JavaScript, no TypeScript — exercises the JS side of lang-typescript.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 46.266389,
+        "maxRssKb": 85140,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          538.620334,
+          537.248625,
+          525.089076
+        ],
+        "wallMsMedian": 537.248625,
+        "wallMsMin": 525.089076,
+        "wallMsMax": 538.620334,
+        "peakRssKb": 113168,
+        "filesPerSecond": 262.4483217616425,
+        "irHash": "b97255893fbbf3bd6b7bafe7863109dfe311c04b343fbcc03dfdf9f41be81a5b",
+        "deterministic": true,
+        "warnings": ""
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 141,
+        "parsedFiles": 141,
+        "keptSymbols": 662,
+        "droppedSymbols": 0,
+        "symbols": 662,
+        "dependencies": 20,
+        "totalCalls": 240,
+        "resolvedCalls": 29,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 31,
+          "external": 0,
+          "localScope": 57,
+          "noMatch": 123
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 548936
+      },
+      "diff": {
+        "wallMs": 1016.913678,
+        "peakRssKb": 129040,
+        "exitCode": 0,
+        "summary": {
+          "added": 4,
+          "changed": 1,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 0,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 6,
+          "unchanged": 657,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"bc7d155f53ef6457140dc2070b0b959869dd36da\": Config <work-dir>/express/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n"
+      },
+      "elapsedMs": 4918
+    },
+    {
+      "id": "hono",
+      "url": "https://github.com/honojs/hono.git",
+      "head": "e2740d5a1bd0b4254e517e3af8b60789284bc7bd",
+      "base": "b0c2d90eb07fefa6c06dc556c97ed8ecffc8b2c0",
+      "note": "Mid-size server framework, heavy on generics and re-exports.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 74.829156,
+        "maxRssKb": 84580,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          1836.306828,
+          1836.489897,
+          1857.161627
+        ],
+        "wallMsMedian": 1836.489897,
+        "wallMsMin": 1836.306828,
+        "wallMsMax": 1857.161627,
+        "peakRssKb": 155612,
+        "filesPerSecond": 209.0945344307549,
+        "irHash": "e230d4feb2a589760a8dd4d8c92d782faa58213d5e6ee4500b32320eaa91fd7a",
+        "deterministic": true,
+        "warnings": "⚠ 8 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 384,
+        "parsedFiles": 384,
+        "keptSymbols": 1094,
+        "droppedSymbols": 552,
+        "symbols": 1646,
+        "dependencies": 599,
+        "totalCalls": 4825,
+        "resolvedCalls": 764,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 804,
+          "external": 64,
+          "localScope": 483,
+          "noMatch": 2710
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 2543116
+      },
+      "diff": {
+        "wallMs": 3993.903708,
+        "peakRssKb": 177208,
+        "exitCode": 0,
+        "summary": {
+          "added": 13,
+          "changed": 63,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 18,
+          "depsRemoved": 5,
+          "depsUnknown": 0,
+          "droppedAdded": 0,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 1,
+          "removed": 3,
+          "unchanged": 1569,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"b0c2d90eb07fefa6c06dc556c97ed8ecffc8b2c0\": Config <work-dir>/hono/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"b0c2d90eb07fefa6c06dc556c97ed8ecffc8b2c0\": 8 file(s) had recoverable parse errors.\n⚠ head (working tree): 8 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 8, head 8) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 13208
+    },
+    {
+      "id": "zod",
+      "url": "https://github.com/colinhacks/zod.git",
+      "head": "cafbee4772ef481611fef6f5fb9ed9a1b9597069",
+      "base": "e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653",
+      "note": "pnpm workspace, type-heavy library plus a Next.js docs app.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 84.480928,
+        "maxRssKb": 90508,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 3,
+        "wallMsSamples": [
+          2638.872008,
+          2560.573568,
+          2633.750124
+        ],
+        "wallMsMedian": 2633.750124,
+        "wallMsMin": 2560.573568,
+        "wallMsMax": 2638.872008,
+        "peakRssKb": 190260,
+        "filesPerSecond": 193.26055093903813,
+        "irHash": "c7e944cb2d954fcb8e30f40500f92be11e0bf8b8be1b2054f97624cc71663b2c",
+        "deterministic": true,
+        "warnings": "warn: Skipped packages/zod/src/v3/types.ts: extraction threw — qualified name \"\"~validate\"\" contains the non-identifier segment \"\"~validate\"\"\n⚠ 4 file(s) had recoverable parse errors.\n⚠ 1 file(s) contributed no Symbols: extraction-failed=1\n⚠ extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.\n    packages/zod/src/v3/types.ts: qualified name \"\"~validate\"\" contains the non-identifier segment \"\"~validate\"\"\n"
+      },
+      "metrics": {
+        "components": 8,
+        "totalFiles": 509,
+        "parsedFiles": 508,
+        "keptSymbols": 2411,
+        "droppedSymbols": 1069,
+        "symbols": 3480,
+        "dependencies": 624,
+        "totalCalls": 5245,
+        "resolvedCalls": 983,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 261,
+          "external": 287,
+          "localScope": 692,
+          "noMatch": 3022
+        },
+        "skippedFiles": 1,
+        "skippedByReason": {
+          "extraction-failed": 1
+        },
+        "skippedSample": [
+          {
+            "path": "packages/zod/src/v3/types.ts",
+            "reason": "extraction-failed"
+          }
+        ],
+        "irBytes": 4937111
+      },
+      "diff": {
+        "wallMs": 5356.333321,
+        "peakRssKb": 249468,
+        "exitCode": 3,
+        "summary": {
+          "added": 70,
+          "changed": 84,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 70,
+          "depsRemoved": 26,
+          "depsUnknown": 0,
+          "droppedAdded": 16,
+          "droppedRemoved": 2,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 3,
+          "removed": 46,
+          "unchanged": 3307,
+          "unknown": 0
+        },
+        "warnings": "warn: Skipped packages/zod/src/v3/types.ts: extraction threw — qualified name \"\"~validate\"\" contains the non-identifier segment \"\"~validate\"\"\n⚠ base ref \"e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653\": Config <work-dir>/zod/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653\": 4 file(s) had recoverable parse errors.\n⚠ base ref \"e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653\": 1 file(s) contributed no Symbols: extraction-failed=1\n⚠ base ref \"e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653\": extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.\n    packages/zod/src/v3/types.ts: qualified name \"\"~validate\"\" contains the non-identifier segment \"\"~validate\"\"\nwarn: Skipped packages/zod/src/v3/types.ts: extraction threw — qualified name \"\"~validate\"\" contains the non-identifier segment \"\"~validate\"\"\n⚠ head (working tree): 4 file(s) had recoverable parse errors.\n⚠ head (working tree): 1 file(s) contributed no Symbols: extraction-failed=1\n⚠ head (working tree): extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.\n    packages/zod/src/v3/types.ts: qualified name \"\"~validate\"\" contains the non-identifier segment \"\"~validate\"\"\n⚠ 1 file(s) were skipped by both scans; see notCompared[] in diff.json: packages/zod/src/v3/types.ts.\n⚠ Files with recoverable parse errors (base 4, head 4) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n⚠ base: a plugin exception withdrew 1 file(s); head: a plugin exception withdrew 1 file(s). This run exits 3 even though the diff was written. Fix it, or the comparison is against a workspace one side could not read.\n"
+      },
+      "elapsedMs": 17737
+    },
+    {
+      "id": "trpc",
+      "url": "https://github.com/trpc/trpc.git",
+      "head": "4f5315219f947589c9ef0f67b7aa551243312d61",
+      "base": "b682e395881d3b6a49cf68338e58d5f714bc2e51",
+      "note": "Many small packages and example apps — the component detector's stress case.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-express",
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 179.54113,
+        "maxRssKb": 94500,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          2195.449548,
+          2373.191397,
+          2239.057221
+        ],
+        "wallMsMedian": 2239.057221,
+        "wallMsMin": 2195.449548,
+        "wallMsMax": 2373.191397,
+        "peakRssKb": 169556,
+        "filesPerSecond": 334.9624087163961,
+        "irHash": "57c8df7554f4607595d5e6a629c35f4f77102fcbf6b401fdd9845be6645efc4c",
+        "deterministic": true,
+        "warnings": "⚠ 3 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 50,
+        "totalFiles": 750,
+        "parsedFiles": 750,
+        "keptSymbols": 1525,
+        "droppedSymbols": 905,
+        "symbols": 2430,
+        "dependencies": 557,
+        "totalCalls": 5209,
+        "resolvedCalls": 731,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 469,
+          "external": 876,
+          "localScope": 442,
+          "noMatch": 2691
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 3499517
+      },
+      "diff": {
+        "wallMs": 4440.140823,
+        "peakRssKb": 189152,
+        "exitCode": 0,
+        "summary": {
+          "added": 72,
+          "changed": 66,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 65,
+          "depsRemoved": 2,
+          "depsUnknown": 0,
+          "droppedAdded": 56,
+          "droppedRemoved": 2,
+          "droppedToggled": 0,
+          "moved": 41,
+          "movedChanged": 3,
+          "removed": 6,
+          "unchanged": 2192,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"b682e395881d3b6a49cf68338e58d5f714bc2e51\": Config <work-dir>/trpc/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"b682e395881d3b6a49cf68338e58d5f714bc2e51\": 3 file(s) had recoverable parse errors.\n⚠ head (working tree): 3 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 3, head 3) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 15564
+    },
+    {
+      "id": "tanstack-query",
+      "url": "https://github.com/TanStack/query.git",
+      "head": "a85d4f16c9b44b5f9107e42cd2146739e2020788",
+      "base": "80fbf73e77892d702c107e14a84c219a8ed825dc",
+      "note": "Multi-framework monorepo — React, Solid, Svelte and Vue adapters over one core.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 377.675705,
+        "maxRssKb": 94648,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          3653.452851,
+          3696.95305,
+          3753.669176
+        ],
+        "wallMsMedian": 3696.95305,
+        "wallMsMin": 3653.452851,
+        "wallMsMax": 3753.669176,
+        "peakRssKb": 196792,
+        "filesPerSecond": 292.4029559964252,
+        "irHash": "0d25242850512a275f6f674c59fa21aab86e23c5f389d1e50268f91c78ac757f",
+        "deterministic": true,
+        "warnings": "⚠ 5 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 101,
+        "totalFiles": 1081,
+        "parsedFiles": 1081,
+        "keptSymbols": 2234,
+        "droppedSymbols": 740,
+        "symbols": 2974,
+        "dependencies": 626,
+        "totalCalls": 8476,
+        "resolvedCalls": 777,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 1468,
+          "external": 1756,
+          "localScope": 409,
+          "noMatch": 4066
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 4694417
+      },
+      "diff": {
+        "wallMs": 7381.060556,
+        "peakRssKb": 247928,
+        "exitCode": 0,
+        "summary": {
+          "added": 4,
+          "changed": 50,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 20,
+          "depsRemoved": 21,
+          "depsUnknown": 0,
+          "droppedAdded": 0,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 7,
+          "movedChanged": 0,
+          "removed": 6,
+          "unchanged": 2913,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"80fbf73e77892d702c107e14a84c219a8ed825dc\": Config <work-dir>/tanstack-query/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"80fbf73e77892d702c107e14a84c219a8ed825dc\": 5 file(s) had recoverable parse errors.\n⚠ head (working tree): 5 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 5, head 5) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 24296
+    },
+    {
+      "id": "shadcn-ui",
+      "url": "https://github.com/shadcn-ui/ui.git",
+      "head": "63c1308d112b6b1205d86244a156cca1abef5087",
+      "base": "43b8fb0f5250d52ab3a87fb38706b276ceeb3e40",
+      "note": "Next.js App Router site plus a large .tsx component registry.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 188.861604,
+        "maxRssKb": 94732,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          11860.721147,
+          11616.018499,
+          11321.183543
+        ],
+        "wallMsMedian": 11616.018499,
+        "wallMsMin": 11321.183543,
+        "wallMsMax": 11860.721147,
+        "peakRssKb": 437960,
+        "filesPerSecond": 336.7763231727615,
+        "irHash": "2393a58f5e5980c9cf5438b0e7225a9c7063e8c7e599e91baa77c84733fc5ded",
+        "deterministic": true,
+        "warnings": "⚠ 115 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 5,
+        "totalFiles": 3912,
+        "parsedFiles": 3912,
+        "keptSymbols": 10098,
+        "droppedSymbols": 578,
+        "symbols": 10676,
+        "dependencies": 1534,
+        "totalCalls": 20559,
+        "resolvedCalls": 1944,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 1191,
+          "external": 6795,
+          "localScope": 1068,
+          "noMatch": 9561
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 20315161
+      },
+      "diff": {
+        "wallMs": 25730.226879,
+        "peakRssKb": 842140,
+        "exitCode": 0,
+        "summary": {
+          "added": 248,
+          "changed": 87,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 142,
+          "depsRemoved": 1,
+          "depsUnknown": 0,
+          "droppedAdded": 41,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 5,
+          "unchanged": 10300,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"43b8fb0f5250d52ab3a87fb38706b276ceeb3e40\": Config <work-dir>/shadcn-ui/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"43b8fb0f5250d52ab3a87fb38706b276ceeb3e40\": 115 file(s) had recoverable parse errors.\n⚠ head (working tree): 115 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 115, head 115) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 74574
+    },
+    {
+      "id": "nest",
+      "url": "https://github.com/nestjs/nest.git",
+      "head": "39fbddae51281ca56bf2fed9123d98e61509066c",
+      "base": "55425779a1e2a1523b062a7dff872826641834d8",
+      "note": "NestJS itself: decorators everywhere, and past the 1,000-file roadmap target.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-express",
+          "framework-nestjs"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 231.743398,
+        "maxRssKb": 91080,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          3949.667017,
+          3932.178871,
+          3846.479646
+        ],
+        "wallMsMedian": 3932.178871,
+        "wallMsMin": 3846.479646,
+        "wallMsMax": 3949.667017,
+        "peakRssKb": 185964,
+        "filesPerSecond": 486.7530350960985,
+        "irHash": "d3fda2cdc78e4814ce6ccf52c29fed2f2c6c270eb39542b43db58890486506da",
+        "deterministic": true,
+        "warnings": "⚠ 2 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 9,
+        "totalFiles": 1914,
+        "parsedFiles": 1914,
+        "keptSymbols": 4534,
+        "droppedSymbols": 750,
+        "symbols": 5284,
+        "dependencies": 142,
+        "totalCalls": 9761,
+        "resolvedCalls": 192,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 3591,
+          "external": 2056,
+          "localScope": 870,
+          "noMatch": 3052
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 7400758
+      },
+      "diff": {
+        "wallMs": 8626.602854,
+        "peakRssKb": 277172,
+        "exitCode": 0,
+        "summary": {
+          "added": 27,
+          "changed": 85,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 3,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 1,
+          "movedChanged": 1,
+          "removed": 0,
+          "unchanged": 5167,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"55425779a1e2a1523b062a7dff872826641834d8\": Config <work-dir>/nest/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"55425779a1e2a1523b062a7dff872826641834d8\": 2 file(s) had recoverable parse errors.\n⚠ head (working tree): 2 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 2, head 2) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 26792
+    },
+    {
+      "id": "cal-com",
+      "url": "https://github.com/calcom/cal.com.git",
+      "head": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+      "base": "46eb533dbd20b74686efa520684e662c0f21051c",
+      "note": "Large production Next.js + tRPC + Prisma monorepo — the top of the ladder.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-nestjs",
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 620.912426,
+        "maxRssKb": 101196,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          15092.072287,
+          14739.383506,
+          14089.946024
+        ],
+        "wallMsMedian": 14739.383506,
+        "wallMsMin": 14089.946024,
+        "wallMsMax": 15092.072287,
+        "peakRssKb": 477492,
+        "filesPerSecond": 339.3629046943397,
+        "irHash": "7c0e093bb8621f4563f59e5e776db2ceafedb0acb266776c1c84f74d1828fd6d",
+        "deterministic": true,
+        "warnings": "⚠ 23 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 113,
+        "totalFiles": 5002,
+        "parsedFiles": 5002,
+        "keptSymbols": 13458,
+        "droppedSymbols": 3687,
+        "symbols": 17145,
+        "dependencies": 2858,
+        "totalCalls": 51535,
+        "resolvedCalls": 3352,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 8278,
+          "external": 14283,
+          "localScope": 3283,
+          "noMatch": 22339
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 29831415
+      },
+      "diff": {
+        "wallMs": 32844.669373,
+        "peakRssKb": 674012,
+        "exitCode": 0,
+        "summary": {
+          "added": 21,
+          "changed": 90,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 10,
+          "depsRemoved": 8,
+          "depsUnknown": 0,
+          "droppedAdded": 1,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 1,
+          "removed": 0,
+          "unchanged": 17032,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"46eb533dbd20b74686efa520684e662c0f21051c\": Config <work-dir>/cal-com/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"46eb533dbd20b74686efa520684e662c0f21051c\": 23 file(s) had recoverable parse errors.\n⚠ head (working tree): 23 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 23, head 23) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 94199
+    }
+  ]
+}

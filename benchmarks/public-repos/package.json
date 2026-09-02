@@ -1,0 +1,13 @@
+{
+  "name": "@aburi/benchmark-public-repos",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Measures `aburi scan` and `aburi diff` against pinned commits of public repositories.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}

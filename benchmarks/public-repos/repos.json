@@ -1,0 +1,68 @@
+{
+  "$comment": "Public repositories the scan/diff benchmark runs against. Every commit is pinned so a rerun measures the same code. `base` is `head~50` on the default branch at the time the entry was added, which gives `aburi diff base..head` a real, non-trivial change set to project. Changing an entry is a documented event: the numbers in results/ are only comparable within one pin.",
+  "repos": [
+    {
+      "id": "zustand",
+      "url": "https://github.com/pmndrs/zustand.git",
+      "head": "b57db4f86ef179285da216eeb291266da82c361c",
+      "base": "5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc",
+      "note": "Small single-package React state library — the floor of the size ladder."
+    },
+    {
+      "id": "express",
+      "url": "https://github.com/expressjs/express.git",
+      "head": "023767fe9872e029271df1418f73401bff20ff40",
+      "base": "bc7d155f53ef6457140dc2070b0b959869dd36da",
+      "note": "Plain JavaScript, no TypeScript — exercises the JS side of lang-typescript."
+    },
+    {
+      "id": "hono",
+      "url": "https://github.com/honojs/hono.git",
+      "head": "e2740d5a1bd0b4254e517e3af8b60789284bc7bd",
+      "base": "b0c2d90eb07fefa6c06dc556c97ed8ecffc8b2c0",
+      "note": "Mid-size server framework, heavy on generics and re-exports."
+    },
+    {
+      "id": "zod",
+      "url": "https://github.com/colinhacks/zod.git",
+      "head": "cafbee4772ef481611fef6f5fb9ed9a1b9597069",
+      "base": "e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653",
+      "note": "pnpm workspace, type-heavy library plus a Next.js docs app."
+    },
+    {
+      "id": "trpc",
+      "url": "https://github.com/trpc/trpc.git",
+      "head": "4f5315219f947589c9ef0f67b7aa551243312d61",
+      "base": "b682e395881d3b6a49cf68338e58d5f714bc2e51",
+      "note": "Many small packages and example apps — the component detector's stress case."
+    },
+    {
+      "id": "tanstack-query",
+      "url": "https://github.com/TanStack/query.git",
+      "head": "a85d4f16c9b44b5f9107e42cd2146739e2020788",
+      "base": "80fbf73e77892d702c107e14a84c219a8ed825dc",
+      "note": "Multi-framework monorepo — React, Solid, Svelte and Vue adapters over one core."
+    },
+    {
+      "id": "shadcn-ui",
+      "url": "https://github.com/shadcn-ui/ui.git",
+      "head": "63c1308d112b6b1205d86244a156cca1abef5087",
+      "base": "43b8fb0f5250d52ab3a87fb38706b276ceeb3e40",
+      "note": "Next.js App Router site plus a large .tsx component registry."
+    },
+    {
+      "id": "nest",
+      "url": "https://github.com/nestjs/nest.git",
+      "head": "39fbddae51281ca56bf2fed9123d98e61509066c",
+      "base": "55425779a1e2a1523b062a7dff872826641834d8",
+      "note": "NestJS itself: decorators everywhere, and past the 1,000-file roadmap target."
+    },
+    {
+      "id": "cal-com",
+      "url": "https://github.com/calcom/cal.com.git",
+      "head": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+      "base": "46eb533dbd20b74686efa520684e662c0f21051c",
+      "note": "Large production Next.js + tRPC + Prisma monorepo — the top of the ladder."
+    }
+  ]
+}
