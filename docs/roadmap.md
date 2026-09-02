@@ -32,9 +32,9 @@ comments.
 
 **Performance.** Measured monthly against nine public repositories at pinned
 commits, from `zustand`'s 49 files to `cal-com`'s 5,002. On a 4-core runner a
-1,081-file scan takes 3.7 s and a 5,002-file one 14.7 s, single-threaded, at
-under 470 MiB peak — cost is linear in file count. Three consecutive scans of an
-unchanged tree produce byte-identical IR.
+1,081-file scan takes 3.7 s and a 5,002-file one 14.7 s, single-threaded, with no
+scan passing 470 MiB peak — cost is roughly linear in file count. Three
+consecutive scans of an unchanged tree produce byte-identical IR.
 
 ## Not yet
 
@@ -66,10 +66,11 @@ unchanged tree produce byte-identical IR.
   monorepo.
 - **More effects plugins.** Django, FastAPI, SQLAlchemy, GORM.
 - **Large monorepos.** A 1,000-file scan finishes in under 30 seconds
-  single-threaded, so the [worker pool](./design/performance.md) buys roughly 4×
-  on a workload already inside its budget. What is left to parallelise is
-  `aburi diff`, which runs two scans and costs 1.7–2.2× one — two independent
-  scans are cheaper to run at once than one sharded scan.
+  single-threaded, so the [worker pool](./design/performance.md) would buy at
+  best ~4× on a 4-core runner — the ideal scaling, unmeasured — on a workload
+  already inside its budget. What is left to parallelise is `aburi diff`, which
+  runs two scans and costs a measured 1.7–2.2× one; two independent scans are
+  cheaper to run at once than one sharded scan.
 - **A functional language.** Scala or Rust, proving that the extension
   vocabulary can express pattern matching and algebraic data types.
 
