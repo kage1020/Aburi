@@ -1,0 +1,101 @@
+{
+  "startedAt": "2026-09-02T12:57:18.418Z",
+  "options": {
+    "runs": 1,
+    "warmup": 1,
+    "diff": true
+  },
+  "generator": "0.3.0",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "linux-x64",
+    "cpus": 4,
+    "cpuModel": "AMD EPYC 7763 64-Core Processor",
+    "totalMemGiB": 16
+  },
+  "results": [
+    {
+      "id": "zustand",
+      "url": "https://github.com/pmndrs/zustand.git",
+      "head": "b57db4f86ef179285da216eeb291266da82c361c",
+      "base": "5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc",
+      "note": "Small single-package React state library — the floor of the size ladder.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 42.445615,
+        "maxRssKb": 88092,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 1,
+        "exitCode": 0,
+        "wallMsSamples": [
+          332.52452
+        ],
+        "wallMsMedian": 332.52452,
+        "wallMsMin": 332.52452,
+        "wallMsMax": 332.52452,
+        "peakRssKb": 138600,
+        "filesPerSecond": 147.35755426396827,
+        "irHash": "2318088d7d2b1de0de2fc0fce3cf4b31acfa38b81f5ece68d08bb0097b482bab",
+        "deterministic": null,
+        "warnings": "⚠ 5 file(s) had recoverable parse errors.\n"
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 49,
+        "parsedFiles": 49,
+        "keptSymbols": 91,
+        "droppedSymbols": 81,
+        "symbols": 172,
+        "dependencies": 39,
+        "totalCalls": 360,
+        "resolvedCalls": 57,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 21,
+          "external": 53,
+          "localScope": 30,
+          "noMatch": 199
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 233824
+      },
+      "diff": {
+        "wallMs": 1522.867366,
+        "peakRssKb": 159096,
+        "exitCode": 0,
+        "summary": {
+          "added": 3,
+          "changed": 3,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 1,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 0,
+          "unchanged": 165,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc\": Config <work-dir>/zustand/aburi.json sits below the workspace root <base-worktree>/base. Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, and the scan covers the whole workspace.\n⚠ base ref \"5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc\": 5 file(s) had recoverable parse errors.\n⚠ head (working tree): 5 file(s) had recoverable parse errors.\n⚠ Files with recoverable parse errors (base 5, head 5) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 4696
+    }
+  ]
+}
