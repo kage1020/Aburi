@@ -40,7 +40,8 @@ The resolver runs after all files have been parsed and `Symbol[]` is available. 
 | Input | Origin | Notes |
 |---|---|---|
 | `symbolTable` | `@aburi/core` | index of every Symbol keyed by id and by `(file, qname)` |
-| `symbolCandidate` | `@aburi/lang-typescript` (`extractSymbols`) | the caller — provides `id`, `component`, `SourceRange.file` |
+| `symbolCandidate` | `@aburi/lang-typescript` (`extractSymbols`) | the caller — provides `id` and `SourceRange.file` |
+| `Symbol.component` | `@aburi/core` (`runFilePipeline`) | the caller's Component, which §4.5 scopes its search to. Not a language-plugin field: `SymbolCandidate` has none, and the core writes it from the file's path against `Component.roots[]` ([`component-detect.md`](./component-detect.md) §12) |
 | `call` | `walkBody` `CallCandidate` | provides `target`, `line`, `argumentCount`, `inAwait`, `inNew`, `literalArgs` |
 | `importTable` | `parseFile().imports` | per-file `ImportEdge[]` (`lang-plugin.md` §4.2) — the resolver reads this to know what a bare identifier binds to |
 | `localScope` | derived per Symbol | in-file local declarations shadowing imports / module-level names |

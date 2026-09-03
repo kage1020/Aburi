@@ -149,9 +149,12 @@ export interface FilePipelineInput {
    *
    * Required rather than optional even though `null` is a legal answer, because the two are
    * different facts — "this file is outside every Component" and "this caller never said" —
-   * and only the first is one a Symbol may carry (ir-schema.md §1.1, Class A). An optional
-   * key would spell them the same way and attribute a whole scan to nothing on a caller that
-   * simply forgot it.
+   * and only the first is one a Symbol may carry (ir-schema.md §1.1, Class A). At this
+   * boundary the distinction is enforceable: the pipeline is handed one file at a time and
+   * cannot re-derive the answer, so an optional key would spell the two the same way and
+   * attribute a whole file to nothing on a caller that simply forgot it. `ScanInput.components`
+   * one layer up stays optional for the opposite reason — a caller there may have no
+   * Components to declare at all, and its own doc comment says what omitting it means.
    */
   component: ComponentId | null
   log: Logger
@@ -463,7 +466,6 @@ interface ClassifyCallsInput {
   effects: readonly EffectPlugin[]
   registry: VocabRegistry
   config: Config
-  /** The owning Symbol's Component, as `FilePipelineInput.component` decided it for the file. */
   component: ComponentId | null
   candidate: SymbolCandidate<OpaqueAstNode>
   file: SourceFile
@@ -717,10 +719,10 @@ function buildDroppedSymbol(
     extKind: candidate.extKind,
     name: candidate.name,
     language,
-    // Class A per ir-schema.md §1.1: the key is written on every Symbol, carrying `null`
-    // for "outside every Component" -- which for a dropped Symbol is decided exactly as it
-    // is for a kept one. A drop is a statement about the Symbol's shape, not about where it
-    // lives, and the per-component Markdown lists both (markdown-projection.md §5).
+    // Class A per ir-schema.md §1.1, decided by `FilePipelineInput.component` -- which is
+    // where the whole rule is. A dropped Symbol is attributed exactly as a kept one is: a
+    // drop is a statement about the Symbol's shape, not about where it lives, and the
+    // per-component Markdown lists both (markdown-projection.md §5).
     component,
     visibility: candidate.visibility,
     decorators: [...candidate.decorators],
@@ -740,7 +742,6 @@ function buildDroppedSymbol(
 interface BuildKeptSymbolInput {
   candidate: SymbolCandidate<OpaqueAstNode>
   language: LanguageId
-  /** The file's Component, as `FilePipelineInput.component` decided it. */
   component: ComponentId | null
   rules: import("@aburi/types").Rule[]
   effects: Effect[]
@@ -757,8 +758,8 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     extKind: input.candidate.extKind,
     name: input.candidate.name,
     language: input.language,
-    // Class A per ir-schema.md §1.1 -- see buildDroppedSymbol for how the value is decided
-    // and why the key is written even when it is `null`.
+    // Class A per ir-schema.md §1.1 -- see `FilePipelineInput.component` for how the value
+    // is decided and why the key is written even when it is `null`.
     component: input.component,
     visibility: input.candidate.visibility,
     // Sort every list-field by `.line` before it enters the IR. Integrity invariant

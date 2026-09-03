@@ -52,6 +52,17 @@ export interface ScanInput {
   registry: VocabRegistry
   logger?: Logger
   workspaceManagers?: readonly WorkspaceManager[]
+  /**
+   * The workspace's Components, which the scan both records on `IR.components` and reads
+   * back to attribute each file (component-detect.md §12).
+   *
+   * Optional, and omitting it is a statement: a run with no Components attributes every
+   * Symbol `null`, so the per-component views have nothing to group by. It stays optional
+   * because a caller may legitimately have none to declare — the CLI always resolves them,
+   * from the config or by detection, and a Document with an empty `components[]` is one
+   * detection was never run for rather than one that found nothing (§5 guarantees at least
+   * one Component).
+   */
   components?: readonly Component[]
   /** Generator metadata for `IR.generator`. Callers (the CLI) fill in name + version. */
   generator?: { name: string; version: string }
@@ -214,7 +225,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   // records, so a Symbol's `component` and the Component it names are two readings of one
   // input — which is what integrity invariant #3 (Symbol.component → Components[].id
   // existence) checks at the end of this function.
-  const attribution = buildComponentAttribution(input.components ?? [])
+  const attribute = buildComponentAttribution(input.components ?? [])
 
   const dropCFilterInput: Parameters<typeof buildDropCFilter>[0] = {
     pluginDropCallees: input.effects.flatMap((e) => e.dropCallees ?? []),
@@ -287,10 +298,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         registry: input.registry,
         config: input.config,
         dropCFilter,
-        // The file's Component, asked once here rather than once per Symbol: every Symbol the
-        // pipeline is about to build came out of this one path, and this is the side holding
-        // the Component list.
-        component: attribution.attribute(sourceFile.path),
+        component: attribute(sourceFile.path),
         log: logger,
         treeReleaseFailures,
       })

@@ -21,7 +21,13 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { buildComponentAttribution, makeComponentId, makeLanguageId, scan } from "../../src"
+import {
+  buildComponentAttribution,
+  makeComponentId,
+  makeLanguageId,
+  scan,
+  serializeCanonical,
+} from "../../src"
 import { symbolId } from "../fixtures/ir"
 
 /**
@@ -55,37 +61,37 @@ describe("buildComponentAttribution", () => {
       component("api-internal", ["packages/api/internal"]),
     ])
 
-    expect(attribution.attribute("packages/api/internal/db.ts")).toBe("api-internal")
-    expect(attribution.attribute("packages/api/src/orders.ts")).toBe("api")
-    expect(attribution.attribute("scripts/release.ts")).toBe("root")
+    expect(attribution("packages/api/internal/db.ts")).toBe("api-internal")
+    expect(attribution("packages/api/src/orders.ts")).toBe("api")
+    expect(attribution("scripts/release.ts")).toBe("root")
   })
 
   it("answers null for a file under no root at all", () => {
     const attribution = buildComponentAttribution([component("api", ["packages/api"])])
 
-    expect(attribution.attribute("scripts/release.ts")).toBeNull()
-    expect(attribution.attribute("index.ts")).toBeNull()
+    expect(attribution("scripts/release.ts")).toBeNull()
+    expect(attribution("index.ts")).toBeNull()
   })
 
   it("answers null for every file when the caller declared no components", () => {
     const attribution = buildComponentAttribution([])
 
-    expect(attribution.attribute("packages/api/src/orders.ts")).toBeNull()
+    expect(attribution("packages/api/src/orders.ts")).toBeNull()
   })
 
   it("matches whole path segments, not string prefixes", () => {
     const attribution = buildComponentAttribution([component("api", ["packages/api"])])
 
-    expect(attribution.attribute("packages/api-legacy/src/orders.ts")).toBeNull()
+    expect(attribution("packages/api-legacy/src/orders.ts")).toBeNull()
   })
 
   it("lets a root name a single file", () => {
     const attribution = buildComponentAttribution([component("gen", ["packages/api/gen.ts"])])
 
-    expect(attribution.attribute("packages/api/gen.ts")).toBe("gen")
+    expect(attribution("packages/api/gen.ts")).toBe("gen")
   })
 
-  it("gives a root two components claim to the lower of their ids", () => {
+  it("gives a root two components claim to the lower of their ids, either way round", () => {
     const shared = ["packages/shared"]
     const forwards = buildComponentAttribution([component("web", shared), component("api", shared)])
     const backwards = buildComponentAttribution([
@@ -93,8 +99,21 @@ describe("buildComponentAttribution", () => {
       component("web", shared),
     ])
 
-    expect(forwards.attribute("packages/shared/util.ts")).toBe("api")
-    expect(backwards.attribute("packages/shared/util.ts")).toBe("api")
+    expect(forwards("packages/shared/util.ts")).toBe("api")
+    expect(backwards("packages/shared/util.ts")).toBe("api")
+  })
+
+  it("orders colliding ids as strings, not as numbers", () => {
+    // "Lower id" is `<` over the id, which is the order `components[]` itself is sorted in
+    // (ir-schema.md §1) — so `svc-10` precedes `svc-9`, as it does in the document. Spelled
+    // out because `api` / `web` above read the same under a numeric or a natural order.
+    const shared = ["packages/shared"]
+    const attribution = buildComponentAttribution([
+      component("svc-9", shared),
+      component("svc-10", shared),
+    ])
+
+    expect(attribution("packages/shared/util.ts")).toBe("svc-10")
   })
 
   it("reads a root spelled with a leading ./ or a trailing slash as the same directory", () => {
@@ -103,14 +122,58 @@ describe("buildComponentAttribution", () => {
       component("root", ["./"]),
     ])
 
-    expect(attribution.attribute("packages/api/src/orders.ts")).toBe("api")
-    expect(attribution.attribute("scripts/release.ts")).toBe("root")
+    expect(attribution("packages/api/src/orders.ts")).toBe("api")
+    expect(attribution("scripts/release.ts")).toBe("root")
+  })
+
+  it("reads a *file* spelled with a leading ./ as the same path", () => {
+    // The root side was normalized from the start; the file side was not, so `./apps/web/x.ts`
+    // missed `apps/web` and fell through to the workspace component — a wrong id rather than
+    // a missing one, which integrity invariant #3 cannot see because that id was declared.
+    const attribution = buildComponentAttribution([
+      component("root", ["."]),
+      component("web", ["apps/web"]),
+    ])
+
+    expect(attribution("./apps/web/x.ts")).toBe("web")
+    expect(attribution("apps/./web/x.ts")).toBe("web")
+  })
+
+  it("repairs an empty path segment on either side", () => {
+    // `packages//api` passes the config schema, `posixWorkspaceRelativeViolation` and
+    // integrity #10 alike — none of them refuses an empty *segment* — so before the repair
+    // the component at that root silently held no Symbols at all.
+    const attribution = buildComponentAttribution([component("api", ["packages//api"])])
+
+    expect(attribution("packages/api/src/orders.ts")).toBe("api")
+    expect(attribution("packages//api//src/orders.ts")).toBe("api")
+  })
+
+  it("claims nothing for a root that names nothing", () => {
+    // Not the workspace root: folding `""` there would hand that component every file in the
+    // workspace, and a caller driving `runFilePipeline` itself never reaches the integrity
+    // check that might have noticed.
+    const attribution = buildComponentAttribution([
+      component("nowhere", [""]),
+      component("also-nowhere", ["/"]),
+      component("outside", ["../vendor"]),
+    ])
+
+    expect(attribution("packages/api/src/orders.ts")).toBeNull()
+    expect(attribution("index.ts")).toBeNull()
+  })
+
+  it("claims nothing for a file that ascends out of the workspace", () => {
+    const attribution = buildComponentAttribution([component("root", ["."])])
+
+    expect(attribution("../outside/z.ts")).toBeNull()
+    expect(attribution("")).toBeNull()
   })
 
   it("matches a decomposed path against a composed root", () => {
     const attribution = buildComponentAttribution([component("cafe", ["packages/café"])])
 
-    expect(attribution.attribute("packages/café/menu.ts".normalize("NFD"))).toBe("cafe")
+    expect(attribution("packages/café/menu.ts".normalize("NFD"))).toBe("cafe")
   })
 })
 
@@ -294,16 +357,34 @@ describe("a scan of a two-component workspace", () => {
     expect(new Set(byComponent.get(null))).toEqual(new Set(["scripts/release.stub"]))
   })
 
-  it("writes the key on a dropped Symbol as well as a kept one", async () => {
+  it("attributes a dropped Symbol as it does a kept one", async () => {
     const { ir } = await scanWorkspace()
 
     const dropped = ir.symbols.filter((symbol) => symbol.dropped)
     expect(dropped.length).toBeGreaterThan(0)
-    for (const symbol of dropped) {
+    const inApi = dropped.filter((symbol) => symbol.source.file.startsWith("packages/api/"))
+    expect(inApi).toHaveLength(1)
+    expect(inApi[0]?.component).toBe("api")
+  })
+
+  it("writes the component key into the serialized bytes, `null` included", async () => {
+    // `Object.hasOwn` on the in-memory Symbol cannot see this: `serializeCanonical` drops a
+    // property whose value is `undefined`, so an omitted Class A key (ir-schema.md §1.1) is
+    // invisible in TypeScript and visible only in what lands on disk.
+    const { ir } = await scanWorkspace()
+    const written = JSON.parse(serializeCanonical(ir)) as {
+      symbols: Array<Record<string, unknown>>
+    }
+
+    expect(written.symbols.length).toBe(ir.symbols.length)
+    for (const symbol of written.symbols) {
       expect(Object.hasOwn(symbol, "component")).toBe(true)
     }
-    const inApi = dropped.filter((symbol) => symbol.source.file.startsWith("packages/api/"))
-    expect(inApi.map((symbol) => symbol.component)).toEqual(inApi.map(() => "api"))
+    const outside = written.symbols.filter(
+      (symbol) => (symbol.source as { file: string }).file === "scripts/release.stub",
+    )
+    expect(outside.length).toBeGreaterThan(0)
+    for (const symbol of outside) expect(symbol.component).toBeNull()
   })
 
   it("hands an effect plugin the owner's component rather than null", async () => {
@@ -311,5 +392,105 @@ describe("a scan of a two-component workspace", () => {
     await scanWorkspace(seen)
 
     expect(new Set(seen)).toEqual(new Set(["api", "web", null]))
+  })
+})
+
+/* --- what attribution changes for call resolution ------------------------------------- */
+
+/**
+ * A stub whose every `pricing.stub` file declares one method `Pricing.calc`, and whose every
+ * other file declares one function that calls it.
+ *
+ * The call resolver's component tier (call-resolution.md §4.5) keys on `Symbol.component`, so
+ * before attribution existed every Symbol sat in one "no component" bucket: two Symbols named
+ * `Pricing.calc` anywhere in the workspace made the tier ambiguous, and the call resolved to
+ * nothing. Populating the field is what separates them — and nothing else in this suite would
+ * notice if `runFilePipeline` went back to writing `null`.
+ */
+function pricingLanguage(): LanguagePlugin {
+  const isCallee = (file: string): boolean => file.endsWith("pricing.stub")
+  const plugin = {
+    ...(stubLanguage() as unknown as Record<string, unknown>),
+    extractSymbols: (_tree: OpaqueAstNode, ctx: ExtractionContext) => {
+      const file = ctx.file.path
+      const shared = {
+        extKind: null,
+        visibility: "public" as const,
+        decorators: [],
+        signature: null,
+        derivedBy: [],
+        bodyNode: {} as OpaqueAstNode,
+        fullNode: {} as OpaqueAstNode,
+        source: { file, startLine: 1, endLine: 2, startColumn: null, endColumn: null },
+      }
+      if (isCallee(file)) {
+        return [
+          {
+            ...shared,
+            id: symbolId(`stub:${file}#Pricing.calc`),
+            kind: "method" as const,
+            name: "Pricing.calc",
+          },
+        ]
+      }
+      const base = file.replace(/[^A-Za-z0-9]/g, "_")
+      return [
+        { ...shared, id: symbolId(`stub:${file}#${base}`), kind: "function" as const, name: base },
+      ]
+    },
+    walkBody: (symbol: SymbolCandidate<OpaqueAstNode>): BodyExtraction => ({
+      rules: [],
+      calls: isCallee(symbol.source.file)
+        ? []
+        : [
+            {
+              target: "Pricing.calc",
+              line: 1,
+              argumentCount: 0,
+              inAwait: false,
+              inNew: false,
+              literalArgs: [],
+            },
+          ],
+    }),
+  }
+  return plugin as unknown as LanguagePlugin
+}
+
+describe("call resolution over an attributed workspace", () => {
+  beforeEach(async () => {
+    await writeFile(join(workRoot, "packages", "api", "src", "pricing.stub"), "p", "utf8")
+    await writeFile(join(workRoot, "packages", "web", "pricing.stub"), "p", "utf8")
+  })
+
+  async function scanPricingWorkspace() {
+    return scan({
+      workspaceRoot: workRoot,
+      config: {},
+      languages: [pricingLanguage()],
+      frameworks: [],
+      effects: [],
+      registry: noopRegistry,
+      components: [component("api", ["packages/api"]), component("web", ["packages/web"])],
+    })
+  }
+
+  it("resolves a qualified name to the callee in the caller's own component", async () => {
+    const { ir } = await scanPricingWorkspace()
+
+    const resolvedFrom = (file: string): string | null | undefined =>
+      ir.symbols.find((symbol) => symbol.source.file === file)?.calls[0]?.resolved
+
+    // Same name in both packages. With every Symbol in one "no component" bucket both tiers
+    // called it ambiguous and neither call resolved at all.
+    expect(resolvedFrom("packages/api/src/orders.stub")).toBe(
+      "stub:packages/api/src/pricing.stub#Pricing.calc",
+    )
+    expect(resolvedFrom("packages/web/page.stub")).toBe(
+      "stub:packages/web/pricing.stub#Pricing.calc",
+    )
+    // The caller outside every component has no component scope to search, and the workspace
+    // scope still sees the two candidates it always did.
+    expect(resolvedFrom("scripts/release.stub")).toBeNull()
   })
 })

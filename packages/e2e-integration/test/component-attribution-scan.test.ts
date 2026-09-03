@@ -112,12 +112,15 @@ describe("e2e: a scanned two-package workspace fills its per-component views", (
 
     const md = projectWorkspace(ir, { suppressTimestamp: true })
     const dbWrite = md.split("\n").find((line) => line.startsWith("| db.write |"))
-    expect(dbWrite).toBeDefined()
-    expect(dbWrite).toContain("api")
-    expect(dbWrite).not.toContain("web")
+    // The whole row, so a `components` column reading `api-legacy` — or `—`, as it did for
+    // every row while attribution was unimplemented — is not mistaken for this one.
+    expect(dbWrite).toMatch(/^\| db\.write \| \d+ \| api \|$/)
   })
 
   it("gives components/<id>.md the Symbols the component holds", async () => {
+    // The artefact itself, written to disk by the CLI, is covered in
+    // `packages/cli/test/component-md.test.ts`; this is the same filter over a scan driven
+    // with the full plugin lineup.
     const { ir } = await scanWorkspace()
 
     const md = projectComponent({
@@ -129,6 +132,5 @@ describe("e2e: a scanned two-package workspace fills its per-component views", (
     expect(md).toContain("## Symbols")
     expect(md).toContain("packages/api/src/invoice.service.ts")
     expect(md).not.toContain("packages/web/")
-    expect(md).not.toContain("**Symbols**: 0 kept")
   })
 })
