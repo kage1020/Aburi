@@ -9,11 +9,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 /**
  * The reason the JavaScript extensions are covered at all, reached the way it reaches a user:
- * a React app whose sources are `.js` — a `create-next-app` JavaScript project, a CRA app, a
- * library published as plain JavaScript.
+ * a React app whose sources are `.js` — a `create-next-app` JavaScript project, or a CRA app.
  *
- * The components' bodies were unparsed, so nothing was classified and the file still reached
- * the IR: a diff read the Symbols it did not produce as deletions.
+ * A grammar that refuses JSX recovers past it, so the file still reached the IR and the
+ * declarations mostly survived. What did not: the JSX a classifier reads to recognise a
+ * component, every call written inside the markup, and a clean parse-error count — the one
+ * signal a reader has that a Symbol set may be short.
  */
 
 let workRoot: string
@@ -67,7 +68,7 @@ describe("scan — a React app written in plain JavaScript", () => {
       "",
       "export function Home() {",
       "  const { c, inc } = useCounter()",
-      "  return <main onClick={inc}>{c}</main>",
+      "  return <main onClick={() => track(inc)}>{format(c)}</main>",
       "}",
       "",
     ])
@@ -78,29 +79,40 @@ describe("scan — a React app written in plain JavaScript", () => {
   })
 
   it("classifies a component written in a .js file", async () => {
+    // The claim the JavaScript coverage exists for. A component is recognised by the JSX it
+    // returns, so under a grammar that refuses JSX all three of these were `null`; `OldButton`
+    // had no Symbol at all, because nothing survived recovery on a one-line file.
     const result = await scanWorkspace()
     const byName = new Map(result.ir.symbols.map((s) => [s.name, s]))
 
     expect(byName.get("RootLayout")?.extKind).toBe("framework:react:component")
     expect(byName.get("Home")?.extKind).toBe("framework:react:component")
-    expect(byName.get("useCounter")?.extKind).toBe("framework:react:hook")
     expect(byName.get("OldButton")?.extKind).toBe("framework:react:component")
+    // A sanity check rather than a guard: a hook is classified by its name, so this one
+    // passed before the routing changed too.
+    expect(byName.get("useCounter")?.extKind).toBe("framework:react:hook")
   })
 
-  it("walks the bodies the refusing grammar swallowed", async () => {
+  it("walks the calls written inside the markup", async () => {
+    // `useCounter` is before the first tag and survived recovery either way. `track` and
+    // `format` are inside the JSX, which is where the calls actually went missing.
+    //
+    // Sorted, because two calls on one line reach the IR in an order this test has no reason
+    // to hold. The plugin's own source order is pinned in `javascript-with-jsx.test.ts`.
     const result = await scanWorkspace()
     const home = result.ir.symbols.find((s) => s.name === "Home")
 
-    expect(home?.calls.map((c) => c.target)).toContain("useCounter")
+    expect(home?.calls.map((c) => c.target).sort()).toEqual(["format", "track", "useCounter"])
   })
 
   it("reports no parse error, so the files are not counted as doubtful", async () => {
     // A recoverable error leaves the file in the IR rather than in `stats.skippedFiles`, so
-    // the count is the only thing that says the Symbol set may be short. A React app in
-    // JavaScript used to put every one of its files in it.
+    // the parse-error count is the only thing that says the Symbol set may be short. A React
+    // app in JavaScript used to contribute every one of its files to that count.
     const result = await scanWorkspace()
 
     expect(result.parseErrors).toEqual([])
+    // A sanity check: a recoverable error never withdrew the file, so this held before too.
     expect(result.skipped).toEqual([])
   })
 })

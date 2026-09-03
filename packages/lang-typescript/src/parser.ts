@@ -22,17 +22,17 @@ const TSX_WASM_PATH = nodeRequire.resolve("@vscode/tree-sitter-wasm/wasm/tree-si
  *
  * **Every JavaScript extension routes to the tsx grammar**, not only `.jsx`. The JavaScript
  * coverage exists so `@aburi/framework-react` can classify React sources in plain-JavaScript
- * codebases (Vite / CRA / library authors who publish .js) — and those sources contain JSX,
- * which outside `.jsx` they contain in `.js`: that is what `create-next-app`'s JavaScript
- * template emits, what CRA emitted, and what Vite emits. A grammar that refuses JSX leaves the
- * component body unparsed, and the file still reaches the IR, so the Symbols it did not produce
- * read as deletions rather than as a file the pipeline could not read.
+ * codebases — and a React source written in `.js` contains JSX in `.js`: that is what
+ * `create-next-app`'s JavaScript template emits and what CRA emitted. A grammar that refuses
+ * JSX recovers past it rather than failing, so the file still reaches the IR: the declaration
+ * usually survives, its body is error soup from the first tag onwards, and nothing inside the
+ * markup — a handler's calls, the JSX a framework classifier looks for — is in the tree.
  *
- * The TypeScript extensions stay on the TypeScript grammar, and the one construct that decides
- * it is the old-style type assertion `<T>expr`: legal TypeScript, and never legal JavaScript,
- * so it is the whole of what a `.js` file gives up by moving. Measured over 6,000 published
- * `.js` / `.cjs` / `.mjs` files, every one produces a byte-identical tree under both grammars,
- * so for these three extensions the choice is JSX or nothing.
+ * The TypeScript extensions stay where they are, and one construct decides it: the old-style
+ * type assertion `<T>expr` is the only thing the tsx grammar refuses that the TypeScript
+ * grammar accepts. It is legal TypeScript and was never legal JavaScript, so it is the whole
+ * of what a `.js` file gives up by moving — which is what
+ * `test/javascript-with-jsx.test.ts` pins, from both directions.
  */
 const EXTENSION_GRAMMAR: ReadonlyMap<string, string> = new Map([
   [".ts", TYPESCRIPT_WASM_PATH],

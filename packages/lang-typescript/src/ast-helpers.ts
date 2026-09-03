@@ -84,8 +84,8 @@ const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
  *
  * The old-style assertion `<T>(expr)` is deliberately not on the list. It is a `type_assertion`
  * whose **first** named child is the type, so the rule above inverts on it, and it is
- * deprecated and unparseable in `.tsx` — adding it would need its own reader for a spelling
- * this plugin's own extensions cannot all use.
+ * deprecated and unparseable by the tsx grammar — adding it would need its own reader for a
+ * spelling most of this plugin's own extensions cannot use.
  */
 export function unwrapValue(node: Node): Node {
   let cursor: Node = node
