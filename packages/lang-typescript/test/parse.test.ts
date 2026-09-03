@@ -32,7 +32,7 @@ describe("parseTypescriptFile", () => {
     expect(result.tree?.rootNode).not.toBeNull()
   })
 
-  it("parses plain .js via the TypeScript grammar (permissively accepts modern JS)", async () => {
+  it("parses plain .js via the tsx grammar, which also accepts JS without JSX", async () => {
     const result = await parseTypescriptFile({
       path: "src/a.js",
       content: "export function add(a, b) { return a + b }",
@@ -42,7 +42,7 @@ describe("parseTypescriptFile", () => {
     expect(result.tree?.rootNode).not.toBeNull()
   })
 
-  it("parses .mjs and .cjs via the TypeScript grammar", async () => {
+  it("parses .mjs and .cjs via the tsx grammar", async () => {
     for (const path of ["src/a.mjs", "src/a.cjs"]) {
       const result = await parseTypescriptFile({
         path,

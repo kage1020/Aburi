@@ -19,19 +19,29 @@ const TSX_WASM_PATH = nodeRequire.resolve("@vscode/tree-sitter-wasm/wasm/tree-si
 
 /**
  * File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language.
- * `.jsx` routes to the tsx grammar (JSX-aware); `.js` / `.mjs` / `.cjs` fall back to the
- * TypeScript grammar which permissively accepts modern JS without type annotations.
- * The extended coverage exists so `@aburi/framework-react` can classify React sources in
- * plain-JavaScript codebases (Vite / CRA / library authors who publish .js).
+ *
+ * **Every JavaScript extension routes to the tsx grammar**, not only `.jsx`. The JavaScript
+ * coverage exists so `@aburi/framework-react` can classify React sources in plain-JavaScript
+ * codebases — and a React source written in `.js` contains JSX in `.js`: that is what
+ * `create-next-app`'s JavaScript template emits and what CRA emitted. A grammar that refuses
+ * JSX recovers past it rather than failing, so the file still reaches the IR: the declaration
+ * usually survives, its body is error soup from the first tag onwards, and nothing inside the
+ * markup — a handler's calls, the JSX a framework classifier looks for — is in the tree.
+ *
+ * The TypeScript extensions stay where they are, and one construct decides it: the old-style
+ * type assertion `<T>expr` is the only thing the tsx grammar refuses that the TypeScript
+ * grammar accepts. It is legal TypeScript and was never legal JavaScript, so it is the whole
+ * of what a `.js` file gives up by moving — which is what
+ * `test/javascript-with-jsx.test.ts` pins, from both directions.
  */
 const EXTENSION_GRAMMAR: ReadonlyMap<string, string> = new Map([
   [".ts", TYPESCRIPT_WASM_PATH],
   [".mts", TYPESCRIPT_WASM_PATH],
   [".cts", TYPESCRIPT_WASM_PATH],
   [".tsx", TSX_WASM_PATH],
-  [".js", TYPESCRIPT_WASM_PATH],
-  [".mjs", TYPESCRIPT_WASM_PATH],
-  [".cjs", TYPESCRIPT_WASM_PATH],
+  [".js", TSX_WASM_PATH],
+  [".mjs", TSX_WASM_PATH],
+  [".cjs", TSX_WASM_PATH],
   [".jsx", TSX_WASM_PATH],
 ])
 

@@ -181,9 +181,10 @@ describe("integration — framework-react on plain .js / .jsx", () => {
     expect(oldBtn?.classification?.extKind).toBe("framework:react:component")
   })
 
-  it("classifies a hook defined in plain .js (typescript grammar, no JSX in body)", async () => {
-    // .js routes to the TypeScript grammar which is JSX-blind. A hook whose body has no
-    // JSX still classifies correctly because the naming signal is all that matters.
+  it("classifies a hook defined in plain .js", async () => {
+    // A hook is classified by its name, so this one passed even while `.js` was read with a
+    // grammar that refuses JSX. It is the shape that did *not* need the grammar fixed, which
+    // is why the component above it is the one that says whether the routing is right.
     const results = await classifyEach(
       "src/useCount.js",
       "export function useCount() { const [c] = useState(0); return c }",
