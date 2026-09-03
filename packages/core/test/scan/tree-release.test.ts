@@ -233,6 +233,7 @@ function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
     // The budget travels on the config, which is where the pipeline reads it from.
     config: extras.parseTimeoutMs === undefined ? {} : { parseTimeoutMs: extras.parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
+    component: null,
     log: silentLog,
     treeReleaseFailures: failures,
   }

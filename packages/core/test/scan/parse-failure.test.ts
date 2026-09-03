@@ -181,6 +181,7 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
       registry: noopRegistry,
       config: {},
       dropCFilter: buildDropCFilter({ pluginDropCallees: [] }),
+      component: null,
       log: silent,
       treeReleaseFailures: [],
     })

@@ -91,6 +91,16 @@ A component you declare **replaces** the autodetected one with the same id.
 There is no partial merge, so write out every field you care about. Components
 you leave alone keep their autodetected definition.
 
+`roots` is also what decides which component a symbol counts towards: a file
+belongs to the component whose root is the deepest path containing it, so a
+component rooted at `apps/storefront/src/app/checkout` takes those files back
+from one rooted at `apps/storefront`. (A root usually names a directory, but one
+naming a single file works and claims exactly that file.) A file under no root
+at all — `scripts/` beside your packages, say — belongs to no component: its
+symbols are counted in `workspace.md`'s own kept/dropped totals and appear in the
+diff, but in neither the Components table, nor the effect surface's `components`
+column, nor any `components/*.md`.
+
 ## Quiet down noisy helpers
 
 Logging and metrics calls show up in almost every symbol without telling you

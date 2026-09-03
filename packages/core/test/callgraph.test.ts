@@ -421,6 +421,31 @@ describe("resolveCallGraph", () => {
     ])
   })
 
+  it("component scope: a unique name outside the caller's component falls through to §4.6", () => {
+    // The tier a cross-package qualified call lands on, which moved when the scan began
+    // populating `component`. With every Symbol carrying `null` the whole workspace was one
+    // component bucket, so this resolved at §4.5 (`medium`); now §4.5 finds nothing in `web`
+    // and §4.6 answers with the same callee at `low`. Same edge, weaker claim — and the
+    // claim is the honest one, since nothing about the two packages says they are one scope.
+    const caller = withCalls("ts:apps/web/a.ts#caller", [{ target: "Pricing.calc", line: 5 }], {
+      component: "web",
+    })
+    const callee = makeSymbol("ts:packages/api/pricing.ts#Pricing.calc", {
+      kind: "method",
+      component: "api",
+    })
+    const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: new Map() })
+    expect(result.edges).toEqual([
+      {
+        from: "ts:apps/web/a.ts#caller",
+        to: "ts:packages/api/pricing.ts#Pricing.calc",
+        via: "call",
+        confidence: "low",
+        line: 5,
+      },
+    ])
+  })
+
   it("component scope: does not cross component boundaries", () => {
     // Two same-named candidates exist workspace-wide but neither shares the
     // caller's component. §4.5 must NOT pick either (its filter is strict); §4.6

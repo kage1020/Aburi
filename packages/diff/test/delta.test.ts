@@ -5,6 +5,31 @@ import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "./
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
 // -----------------------------------------------------------------------------
+// Re-attribution — what a changed `Symbol.component` is, and is not, a change to
+// -----------------------------------------------------------------------------
+
+describe("a Symbol whose component moved under it", () => {
+  const inApi = makeSymbol({ id: "ts:packages/api/a.ts#f", name: "f", component: "api" })
+  const inShared = makeSymbol({ ...inApi, component: "shared" })
+
+  it("is unchanged: redrawing a boundary is not editing the code", () => {
+    // `Symbol.component` comes from `Component.roots[]` and from nothing in the file
+    // (component-detect.md §12), so a config that re-roots a package must not report every
+    // Symbol under it as a code change — `--fail-on changed` would fire on an edit nobody
+    // made. `classifyStatus` reads the three fingerprints and the path, and `component` is
+    // in none of them, which is what makes that true rather than incidental.
+    expect(classifyStatus(inApi, inShared)).toBe("unchanged")
+  })
+
+  it("still records the move on the delta, for a Symbol that changed for another reason", () => {
+    // The flag is therefore only ever read alongside another axis — the view showing
+    // `- component: changed` is describing a Symbol the diff had already picked up.
+    expect(computeSymbolDelta(inApi, inShared).componentChanged).toBe(true)
+    expect(computeSymbolDelta(inApi, inApi).componentChanged).toBe(false)
+  })
+})
+
+// -----------------------------------------------------------------------------
 // C2 — dropped-toggled coverage (§4.1 rationale + both directions + summary)
 // -----------------------------------------------------------------------------
 

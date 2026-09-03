@@ -286,7 +286,7 @@ The core entity of the review unit.
 }
 ```
 
-`component` is Class A per §1.1, so the key is on every Symbol and `null` means "outside every declared Component". Read the sample above as the shape the field is designed for, not as output you will see today: **the scan pipeline does not assign Symbols to Components yet**, so every Symbol it emits carries `null`. Consumers that group by Component — the per-component Markdown pages, the workspace overview's per-Component counts — therefore see empty groups on a real scan.
+`component` is Class A per §1.1, so the key is on every Symbol and `null` means "outside every declared Component". The scan assigns it from `components[].roots[]` alone: the Component whose root is the longest path-segment prefix of `symbols[].source.file` claims the Symbol, and a file under no root at all carries `null` — the rule, its tie-break, and what it does not attempt are [`component-detect.md` §12](./component-detect.md). Dropped Symbols are attributed like any other: a drop says something about a Symbol's shape, not about where it lives.
 
 ### 5.1 `kind` (core enum)
 

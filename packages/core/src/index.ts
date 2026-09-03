@@ -80,6 +80,10 @@ export {
   propagateEffects,
 } from "./propagate"
 export {
+  buildComponentAttribution,
+  type ComponentAttribution,
+} from "./scan/attribute"
+export {
   type CollidingFile,
   DEFAULT_MAX_FILE_SIZE_BYTES,
   type DiscoveredFile,

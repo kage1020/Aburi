@@ -187,6 +187,7 @@ async function runPipelineWithStubs(overrides: {
     registry: noopRegistry,
     config: {},
     dropCFilter: buildDropCFilter(),
+    component: null,
     treeReleaseFailures: [],
     log: silentLog,
   })
