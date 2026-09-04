@@ -202,6 +202,15 @@ describe("the construction path is spelled two ways", () => {
     expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["r", "q"])
   })
 
+  it("reaches it through an escape as well", async () => {
+    // The comparison is against the decoded segment, so a spelling that only *decodes* to
+    // `constructor` is one too. Composing the two rules is not the same as pinning the pair.
+    const source = classOf(`  "construc${BACKSLASH}u0074or"() { real() }`)
+    const symbol = await symbolOf(source, "ts:src/a.ts#C.constructor")
+
+    expect(symbol.kind).toBe("constructor")
+  })
+
   it("refuses a quoted `constructor` field the way it refuses the bare one", async () => {
     // A field named `constructor` is a SyntaxError in an engine and parses here; its segment
     // is the one reserved for what `new C()` runs, and the quoted spelling reaches it too.

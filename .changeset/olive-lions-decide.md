@@ -9,9 +9,9 @@ Read a quoted class member name as the name it spells, instead of losing the fil
 as `C["ok"]` / `C[1]` — and both cost the file every Symbol it had. The plugin handed the name
 node's *source text* to the Symbol-id builder, which refuses anything that is not an identifier;
 the throw was caught at the per-file boundary, and the file was named in `stats.skippedFiles`
-with `reason: "extraction-failed"`. `#75` widened the qualified-name grammar to ECMAScript's
-IdentifierName and closed this for a Japanese or accented declaration; a quoted or numeric
-property name is a `PropertyName` and was outside that widening by construction.
+with `reason: "extraction-failed"`. Widening the qualified-name grammar to ECMAScript's
+IdentifierName closed this for a Japanese or accented declaration; a quoted or numeric property
+name is a `PropertyName` and was outside that widening by construction.
 
 A written name and a qualified-name segment are two different things now. One function answers
 what segment a member's name maps to, or `null` when the grammar has none for it — which is the
