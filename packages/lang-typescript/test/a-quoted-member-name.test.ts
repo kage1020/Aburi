@@ -143,6 +143,10 @@ describe("a name that is not an identifier has no Symbol, and the file keeps the
     ["a decimal", "  1.5() { s() }"],
     ["nothing", '  ""() { s() }'],
     ["the instance separator", '  "a.b"() { s() }'],
+    // A quoted `"#v"` is a public property whose characters begin with a `#`, and it decodes
+    // to `#v`, which the grammar has no segment for. That it never earns a Symbol is what
+    // keeps a member's *spelling* the only thing visibility has to read.
+    ["a private-looking string", '  "#v"() { s() }'],
     ["a hyphenated field", '  "a-b" = () => { s() }'],
     ["a numeric field", "  1 = () => { s() }"],
   ])("leaves %s on the class", async (_label, member) => {
