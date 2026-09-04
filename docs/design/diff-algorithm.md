@@ -83,7 +83,7 @@ The most common case. Symbols with no file move and no rename are settled here.
 
 ```
 if git available and ref-based diff:
-  renameMap = git diff --find-renames base..head
+  renameMap = git diff --find-renames --name-status -z base..head
               → {oldpath: newpath}
   
   claimants = {}
@@ -99,6 +99,27 @@ if git available and ref-based diff:
 ```
 
 git's rename detection returns a physical-level mapping, making it the most reliable move-detection mechanism.
+
+`-z` is part of the contract, not a detail of the invocation. Without it git separates the
+fields with a tab and renders a path outside printable ASCII the way `core.quotePath` asks —
+double-quoted and octal-escaped — so `src/a b.ts` and `src/日本語.ts` reach the reader in a shape
+that matches no `sym.source.file`, and the move they belong to degrades into the `removed` +
+`added` pair this stage exists to prevent. Under `-z` each field is NUL-terminated and git's path
+quoting is bypassed entirely; the record length is decided by the status, since `R` (rename) and
+`C` (copy) carry a second path and every other status carries one. Only `R` enters the map: a
+copy's source file is still there, so it is not a move.
+
+The reader has two obligations beyond splitting. It normalizes each path to NFC, because
+`sym.source.file` is normalized (`toRelativePosix`) and the lookup here is a bare `Map.get` — a
+repository holding a path decomposed would otherwise build a map that cannot match anything. And
+it refuses a stream whose records it cannot delimit rather than returning the part it read: a
+desynced reader produces plausible pairs, and a wrong rename settles a move between two unrelated
+Symbols, which is worse for this stage than having no hint at all.
+
+git can also succeed while declining to detect renames: over `diff.renameLimit` it exits 0, warns
+on stderr, and reports every move as a delete plus an add. That degradation is invisible in the
+records — they parse, the map is just empty — so the caller warns on any stderr from this
+invocation.
 
 Two base files renamed onto one target predict the same head id, so the claimants are collected before one is chosen and the lowest `base.id` is the move source. §3.8 does not apply — there is no score to order by — but the reason for fixing the choice is the one it gives.
 
