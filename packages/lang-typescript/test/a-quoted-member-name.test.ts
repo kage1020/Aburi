@@ -139,6 +139,10 @@ describe("a quoted name that spells an identifier is that member", () => {
 describe("a name that is not an identifier has no Symbol, and the file keeps the rest", () => {
   it.each([
     ["a hyphen", '  "a-b"() { s() }'],
+    // The shape that found this. The Standard Schema interface spells its members with a
+    // leading `~` so they cannot collide with a library's own, which makes a quoted
+    // non-identifier member a convention rather than a curiosity.
+    ["a tilde", '  "~validate"() { s() }'],
     ["an integer", "  1() { s() }"],
     ["a decimal", "  1.5() { s() }"],
     ["nothing", '  ""() { s() }'],
