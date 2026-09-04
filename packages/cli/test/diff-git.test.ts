@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { CliError, EXIT, type GitRunner, runDiff } from "../src"
+import { parseRenameRecords } from "../src/commands/diff"
 
 /**
  * Refspec-mode diff drives the injected `GitRunner` so we can exercise §6.4 without a
@@ -116,6 +117,99 @@ describe("runDiff refspec mode — collectRenames failure warns", () => {
       // The scan will fail because scratch is not a real workspace — that's expected.
     })
     expect(warnCalls.some((m) => m.includes("Failed to collect git renames"))).toBe(true)
+  })
+})
+
+describe("collectRenames — NUL-separated records", () => {
+  it("asks git for -z output, so paths arrive unquoted and unsplit", async () => {
+    const { runner, calls } = makeGit({
+      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
+      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
+      "diff --find-renames": () => ({ stdout: "", stderr: "" }),
+      "worktree add": () => ({ stdout: "", stderr: "" }),
+      "worktree remove": () => ({ stdout: "", stderr: "" }),
+    })
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: runner,
+      outputDir: resolve(scratch, "out"),
+      warn: () => {},
+    }).catch(() => {
+      // Scan-in-worktree will fail — the invocation is what this asserts.
+    })
+    const renameCall = calls.find((c) => c.args.slice(0, 2).join(" ") === "diff --find-renames")
+    expect(renameCall?.args).toContain("-z")
+    expect(renameCall?.args).toContain("--name-status")
+  })
+
+  it("reads a plain rename", () => {
+    expect(parseRenameRecords("R094\0src/a.ts\0src/b.ts\0")).toEqual(
+      new Map([["src/a.ts", "src/b.ts"]]),
+    )
+  })
+
+  it("keeps a target path containing a space whole (issue #81)", () => {
+    // Whitespace-splitting produced the bogus pair `src/a.ts -> src/a` here, so the stage-2
+    // match missed and the move degraded to removed + added.
+    expect(parseRenameRecords("R094\0src/a.ts\0src/a b.ts\0")).toEqual(
+      new Map([["src/a.ts", "src/a b.ts"]]),
+    )
+  })
+
+  it("keeps a non-ASCII path whole, unquoted and unescaped (issue #81)", () => {
+    expect(parseRenameRecords("R100\0src/日本語.ts\0src/請求 書.ts\0")).toEqual(
+      new Map([["src/日本語.ts", "src/請求 書.ts"]]),
+    )
+  })
+
+  it("returns an empty map for a diff that renamed nothing", () => {
+    expect(parseRenameRecords("")).toEqual(new Map())
+    expect(parseRenameRecords("M\0src/a.ts\0A\0src/b.ts\0D\0src/c.ts\0")).toEqual(new Map())
+  })
+
+  it("consumes a copy's second path, so records after it stay aligned", () => {
+    // `C` names both ends like `R` does. Skipping it on the status alone would read `src/c.ts`
+    // as the next status and pair the wrong two files.
+    expect(parseRenameRecords("C085\0src/a.ts\0src/b.ts\0R097\0src/c.ts\0src/d.ts\0")).toEqual(
+      new Map([["src/c.ts", "src/d.ts"]]),
+    )
+  })
+
+  it("reads renames mixed in among other statuses", () => {
+    expect(
+      parseRenameRecords(
+        "M\0src/keep.ts\0R061\0src/old name.ts\0src/new name.ts\0A\0src/added.ts\0",
+      ),
+    ).toEqual(new Map([["src/old name.ts", "src/new name.ts"]]))
+  })
+
+  it("refuses a stream it cannot read rather than inventing pairs", () => {
+    // A truncated record and a field that cannot be a status both mean the reader has lost the
+    // record boundaries; a plausible-looking wrong rename is worse than no rename hint at all.
+    expect(parseRenameRecords("R094\0src/a.ts\0")).toBeNull()
+    expect(parseRenameRecords("src/a.ts\0src/b.ts\0")).toBeNull()
+  })
+
+  it("warns and drops the hints when the record stream is unreadable", async () => {
+    const warnCalls: string[] = []
+    const { runner } = makeGit({
+      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
+      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
+      "diff --find-renames": () => ({ stdout: "R094\0src/a.ts\0", stderr: "" }),
+      "worktree add": () => ({ stdout: "", stderr: "" }),
+      "worktree remove": () => ({ stdout: "", stderr: "" }),
+    })
+    await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: runner,
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnCalls.push(m),
+    }).catch(() => {
+      // The scan will fail because scratch is not a real workspace — that's expected.
+    })
+    expect(warnCalls.some((m) => m.includes("could not read"))).toBe(true)
   })
 })
 

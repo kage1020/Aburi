@@ -83,7 +83,7 @@ The most common case. Symbols with no file move and no rename are settled here.
 
 ```
 if git available and ref-based diff:
-  renameMap = git diff --find-renames base..head
+  renameMap = git diff --find-renames --name-status -z base..head
               → {oldpath: newpath}
   
   claimants = {}
@@ -99,6 +99,14 @@ if git available and ref-based diff:
 ```
 
 git's rename detection returns a physical-level mapping, making it the most reliable move-detection mechanism.
+
+`-z` is part of the contract, not a detail of the invocation. Without it git separates the
+fields with a tab and renders a path outside printable ASCII the way `core.quotePath` asks —
+double-quoted and octal-escaped — so `src/a b.ts` and `src/日本語.ts` reach the reader in a shape
+that matches no `sym.source.file`, and the move they belong to degrades into the `removed` +
+`added` pair this stage exists to prevent. Under `-z` each field is NUL-terminated and quoting is
+off; the record length is decided by the status, since `R` and `C` name both ends of the move and
+every other status names one path.
 
 Two base files renamed onto one target predict the same head id, so the claimants are collected before one is chosen and the lowest `base.id` is the move source. §3.8 does not apply — there is no score to order by — but the reason for fixing the choice is the one it gives.
 

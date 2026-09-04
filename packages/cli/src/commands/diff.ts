@@ -681,10 +681,22 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
 }
 
 /**
- * `git diff --find-renames --name-status` powers the diff engine's stage-2 rename map.
+ * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map.
  * A failure here is non-fatal — the diff will still run, just without the rename hints —
  * so we warn on stderr instead of aborting, but the warning is loud enough that a
  * reviewer noticing "moved -> removed + added" churn can trace the cause.
+ *
+ * `-z` is what makes the paths readable. Without it git separates the fields with a tab, and
+ * renders any path outside printable ASCII the way `core.quotePath` asks — double-quoted, with
+ * the bytes octal-escaped — so `src/日本語.ts` arrives as `"src/\346\227\245..."` and matches no
+ * Symbol's `source.file`. Splitting such a line on whitespace, as this did, also tore
+ * `src/a b.ts` in half and mapped the rename onto `src/a`. `-z` terminates every field with NUL
+ * and turns the quoting off, so a path reaches us as the bytes it is — spaces, tabs, and
+ * non-ASCII included.
+ *
+ * A rename git found and we then failed to read is precisely the failure stage 2 exists to
+ * prevent: the move degrades into the `removed` + `added` pair that a `--fail-on removed` gate
+ * reds the build on.
  */
 async function collectRenames(
   git: GitRunner,
@@ -694,19 +706,15 @@ async function collectRenames(
 ): Promise<GitRenameMap | null> {
   try {
     const { stdout } = await git.run(
-      ["diff", "--find-renames", "--name-status", `${spec.base}..${spec.head}`],
+      ["diff", "--find-renames", "--name-status", "-z", `${spec.base}..${spec.head}`],
       { cwd },
     )
-    const map = new Map<string, string>()
-    for (const line of stdout.split(/\r?\n/)) {
-      const parts = line.split(/\s+/)
-      if (parts.length < 3) continue
-      const status = parts[0]
-      if (status === undefined || !status.startsWith("R")) continue
-      const oldPath = parts[1]
-      const newPath = parts[2]
-      if (oldPath === undefined || newPath === undefined) continue
-      map.set(oldPath, newPath)
+    const map = parseRenameRecords(stdout)
+    if (map === null) {
+      warn(
+        "⚠ git diff --name-status -z produced a record this parser could not read; the diff will treat renamed files as removed + added.",
+      )
+      return null
     }
     return map
   } catch (error) {
@@ -717,10 +725,64 @@ async function collectRenames(
   }
 }
 
+/**
+ * A `--name-status` status field: one letter, and on `R` / `C` a similarity score after it.
+ *
+ * Matching the score rather than assuming a one-character field is what keeps the shape check
+ * below honest about what git actually writes (`R094`, not `R`).
+ */
+const NAME_STATUS_FIELD = /^[A-Z]\d*$/
+
+/**
+ * NUL-separated `--name-status` records into `{oldPath: newPath}`.
+ *
+ * Under `-z` the output is a flat sequence of fields rather than lines: a status, then the one
+ * path it applies to — or, for the two statuses that name both ends of a move, `R` and `C`, two
+ * paths. The record length is therefore decided by the status, and every field of a record has
+ * to be consumed even when the record is not a rename: skipping a `C` by its status alone leaves
+ * the reader one field short and every record after it misread.
+ *
+ * `null`, not a partial map, when a field is not a status where one must be. A desynced reader
+ * produces *plausible* pairs — a path read as a status, the next path read as its target — and a
+ * wrong rename is worse for stage 2 than no rename at all: it pairs two unrelated Symbols and
+ * reports the move as settled. The caller degrades to no hints and says so, which is the fallback
+ * a `git` that failed outright already gets.
+ */
+export function parseRenameRecords(stdout: string): GitRenameMap | null {
+  const fields = stdout.split("\0")
+  // `-z` terminates each field rather than separating them, so a complete stream ends in an
+  // empty tail. Empty stdout — nothing changed between the refs — is that tail and nothing else.
+  if (fields[fields.length - 1] === "") fields.pop()
+  const map = new Map<string, string>()
+  let index = 0
+  while (index < fields.length) {
+    const status = fields[index]
+    if (status === undefined || !NAME_STATUS_FIELD.test(status)) return null
+    const pathCount = status.startsWith("R") || status.startsWith("C") ? 2 : 1
+    // A record the stream ends in the middle of is truncated output, not a record we can read.
+    if (index + pathCount >= fields.length) return null
+    const oldPath = fields[index + 1]
+    const newPath = fields[index + 2]
+    index += 1 + pathCount
+    if (!status.startsWith("R")) continue
+    if (oldPath === undefined || newPath === undefined) return null
+    map.set(oldPath, newPath)
+  }
+  return map
+}
+
 function irRef(refName: string, ir: IR): IRRef {
   return { ref: refName, irSchema: ir.$schema }
 }
 
+/**
+ * Chunks are joined as bytes and decoded once, not decoded and then joined.
+ *
+ * A stream hands out whatever arrived, so a multi-byte character can straddle two chunks —
+ * decoding each one on its own replaces the halves with U+FFFD. It takes a listing long enough
+ * to split for a `src/請求書.ts` to come back unusable, which is exactly the size of listing
+ * nobody reads by hand and every path here is compared against a Symbol's `source.file`.
+ */
 const defaultGitRunner: GitRunner = {
   async run(
     args: readonly string[],
@@ -728,16 +790,18 @@ const defaultGitRunner: GitRunner = {
   ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolvePromise, rejectPromise) => {
       const child = spawn("git", args, { cwd: options?.cwd })
-      let stdout = ""
-      let stderr = ""
+      const stdoutChunks: Buffer[] = []
+      const stderrChunks: Buffer[] = []
       child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8")
+        stdoutChunks.push(chunk)
       })
       child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8")
+        stderrChunks.push(chunk)
       })
       child.on("error", rejectPromise)
       child.on("close", (code) => {
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8")
+        const stderr = Buffer.concat(stderrChunks).toString("utf8")
         if (code === 0) resolvePromise({ stdout, stderr })
         else rejectPromise(new Error(`git ${args.join(" ")} exited with code ${code}: ${stderr}`))
       })
