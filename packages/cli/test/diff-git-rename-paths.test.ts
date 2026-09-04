@@ -2,19 +2,19 @@ import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { parseRenameRecords } from "../src/commands/diff"
 
 /**
  * The rename reader against real `git` output, on the path shapes the mocked runner in
- * `diff-git.test.ts` cannot produce (issue #81).
+ * `diff-git.test.ts` cannot produce.
  *
- * A mock asserts what we believe git writes; this asserts what it writes. The two failures
- * this guards against are only visible on a real repository: a path with a space, which the
- * old whitespace split tore in half, and a non-ASCII path, which git double-quotes and
- * octal-escapes unless `-z` turns `core.quotePath` off — set to `true` here explicitly, so a
- * future invocation that drops `-z` fails the test rather than depending on the developer's
- * global config.
+ * A mock asserts what we believe git writes; this asserts what it writes. The two failures it
+ * guards against are only visible on a real repository: a path with a space, which a whitespace
+ * split tears in half, and a non-ASCII path, which git double-quotes and octal-escapes unless
+ * `-z` bypasses its path quoting entirely. `core.quotePath` is set to `true` here so this test's
+ * own invocation decides what it observes rather than the developer's global config — the
+ * production call site is guarded by the `-z` argument assertion in `diff-git.test.ts`.
  */
 
 let scratch = ""
@@ -27,8 +27,8 @@ function git(args: readonly string[], cwd: string): Promise<string> {
       env: {
         ...process.env,
         // Whatever the developer's ~/.gitconfig says must not decide what this test observes.
-        GIT_CONFIG_GLOBAL: resolve(scratch, "absent-gitconfig"),
-        GIT_CONFIG_SYSTEM: resolve(scratch, "absent-gitconfig"),
+        GIT_CONFIG_GLOBAL: resolve(cwd, "absent-gitconfig"),
+        GIT_CONFIG_SYSTEM: resolve(cwd, "absent-gitconfig"),
         GIT_AUTHOR_NAME: "Aburi Test",
         GIT_AUTHOR_EMAIL: "test@example.invalid",
         GIT_COMMITTER_NAME: "Aburi Test",
@@ -51,29 +51,35 @@ function git(args: readonly string[], cwd: string): Promise<string> {
 }
 
 /**
- * macOS stores a filename decomposed, so a path written as NFC can come back as NFD. The
- * comparison is about which bytes belong to which path, not about which normal form the
- * filesystem chose.
+ * macOS stores a filename decomposed, so a path written as NFC can come back as NFD. The reader
+ * normalizes to NFC, so what this asserts is that its output is in the form `source.file` is
+ * compared in — which means normalizing the *expectation*, and nothing else.
  */
-function nfc(map: ReadonlyMap<string, string>): Map<string, string> {
-  return new Map(
-    [...map].map(([from, to]) => [from.normalize("NFC"), to.normalize("NFC")] as const),
-  )
+function nfc(value: string): string {
+  return value.normalize("NFC")
 }
 
-// Long enough that git's similarity detection reports the move as a rename rather than as a
-// delete plus an add.
-const BODY = Array.from({ length: 12 }, (_, i) => `export const value${i} = ${i}\n`).join("")
+/**
+ * The probe's error, kept rather than reduced to a boolean: EACCES on the binary, a spawn EPERM
+ * under a sandbox and an absent git are three different problems, and "git is not on PATH" is
+ * wrong for two of them.
+ */
+let gitProbeError: unknown = null
 
-let hasGit = true
+beforeAll(async () => {
+  const probeDir = await mkdtemp(resolve(tmpdir(), "aburi-git-probe-"))
+  try {
+    await git(["--version"], probeDir)
+  } catch (error) {
+    gitProbeError = error
+  } finally {
+    await rm(probeDir, { recursive: true, force: true })
+  }
+})
 
 beforeEach(async () => {
+  expect(gitProbeError, `git probe failed: ${String(gitProbeError)}`).toBeNull()
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-git-paths-"))
-  try {
-    await git(["--version"], scratch)
-  } catch {
-    hasGit = false
-  }
 })
 
 afterEach(async () => {
@@ -82,20 +88,22 @@ afterEach(async () => {
 
 describe("rename records from a real git repository", () => {
   it("maps paths with spaces and non-ASCII characters to their targets", async () => {
-    expect(hasGit, "these tests need a git executable on PATH").toBe(true)
     await git(["init", "-q", "-b", "main"], scratch)
     // Quoting on, to prove `-z` is what suppresses it rather than the ambient config.
     await git(["config", "core.quotePath", "true"], scratch)
     await mkdir(resolve(scratch, "src"), { recursive: true })
-    await writeFile(resolve(scratch, "src/a.ts"), BODY, "utf8")
-    await writeFile(resolve(scratch, "src/plain.ts"), BODY, "utf8")
-    await writeFile(resolve(scratch, "src/kept.ts"), BODY, "utf8")
+    // Distinct contents: git pairs a rename by blob, so identical files would leave the pairing
+    // up to tie-breaking rather than to the input.
+    await writeFile(resolve(scratch, "src/a.ts"), "export const spaced = 1\n", "utf8")
+    await writeFile(resolve(scratch, "src/plain.ts"), "export const nonAscii = 2\n", "utf8")
+    await writeFile(resolve(scratch, "src/kept.ts"), "export const kept = 3\n", "utf8")
     await git(["add", "-A"], scratch)
     await git(["commit", "-q", "-m", "base"], scratch)
 
+    // `git mv` stages the move itself, so no `git add` is needed for either rename.
     await git(["mv", "src/a.ts", "src/a b.ts"], scratch)
     await git(["mv", "src/plain.ts", "src/日本語 ファイル.ts"], scratch)
-    await writeFile(resolve(scratch, "src/kept.ts"), `${BODY}export const extra = 1\n`, "utf8")
+    await writeFile(resolve(scratch, "src/kept.ts"), "export const kept = 4\n", "utf8")
     await writeFile(resolve(scratch, "src/new.ts"), "export const fresh = 1\n", "utf8")
     await git(["add", "-A"], scratch)
     await git(["commit", "-q", "-m", "head"], scratch)
@@ -104,41 +112,19 @@ describe("rename records from a real git repository", () => {
       ["diff", "--find-renames", "--name-status", "-z", "HEAD~1..HEAD"],
       scratch,
     )
-    const map = parseRenameRecords(stdout)
-    expect(map).not.toBeNull()
-    expect(nfc(map ?? new Map())).toEqual(
-      nfc(
-        new Map([
-          ["src/a.ts", "src/a b.ts"],
-          ["src/plain.ts", "src/日本語 ファイル.ts"],
-        ]),
-      ),
+    const parsed = parseRenameRecords(stdout)
+    expect(parsed.ok, `parser refused real git output: ${stdout}`).toBe(true)
+    expect(parsed.ok ? parsed.renames : null).toEqual(
+      new Map([
+        ["src/a.ts", nfc("src/a b.ts")],
+        ["src/plain.ts", nfc("src/日本語 ファイル.ts")],
+      ]),
     )
-  })
 
-  it("would have mis-read the same output when split on whitespace", async () => {
-    // The old reader, kept here as the regression's witness: it is what turned `src/a b.ts`
-    // into `src/a` and left stage 2 with no match to make.
-    expect(hasGit, "these tests need a git executable on PATH").toBe(true)
-    await git(["init", "-q", "-b", "main"], scratch)
-    await mkdir(resolve(scratch, "src"), { recursive: true })
-    await writeFile(resolve(scratch, "src/a.ts"), BODY, "utf8")
-    await git(["add", "-A"], scratch)
-    await git(["commit", "-q", "-m", "base"], scratch)
-    await git(["mv", "src/a.ts", "src/a b.ts"], scratch)
-    await git(["add", "-A"], scratch)
-    await git(["commit", "-q", "-m", "head"], scratch)
-
-    const legacy = await git(["diff", "--find-renames", "--name-status", "HEAD~1..HEAD"], scratch)
-    const [status, oldPath, newPath] = legacy.split(/\r?\n/)[0]?.split(/\s+/) ?? []
-    expect(status?.startsWith("R")).toBe(true)
-    expect(oldPath).toBe("src/a.ts")
-    expect(newPath).toBe("src/a")
-
-    const fixed = await git(
-      ["diff", "--find-renames", "--name-status", "-z", "HEAD~1..HEAD"],
-      scratch,
-    )
-    expect(parseRenameRecords(fixed)).toEqual(new Map([["src/a.ts", "src/a b.ts"]]))
+    // What the same output looks like without `-z`, and why the reader cannot be fed it: the
+    // fields are tab-separated, and a whitespace split reports this rename as `src/a.ts ->
+    // src/a`. It is also where the quoting `-z` bypasses becomes visible.
+    const quoted = await git(["diff", "--find-renames", "--name-status", "HEAD~1..HEAD"], scratch)
+    expect(quoted).toContain("\\346\\227\\245")
   })
 })

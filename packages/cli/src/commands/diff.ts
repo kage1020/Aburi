@@ -681,22 +681,18 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
 }
 
 /**
- * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map.
- * A failure here is non-fatal — the diff will still run, just without the rename hints —
- * so we warn on stderr instead of aborting, but the warning is loud enough that a
- * reviewer noticing "moved -> removed + added" churn can trace the cause.
+ * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map
+ * (`diff-algorithm.md` §3.2, which is where the `-z` contract is stated and why).
  *
- * `-z` is what makes the paths readable. Without it git separates the fields with a tab, and
- * renders any path outside printable ASCII the way `core.quotePath` asks — double-quoted, with
- * the bytes octal-escaped — so `src/日本語.ts` arrives as `"src/\346\227\245..."` and matches no
- * Symbol's `source.file`. Splitting such a line on whitespace, as this did, also tore
- * `src/a b.ts` in half and mapped the rename onto `src/a`. `-z` terminates every field with NUL
- * and turns the quoting off, so a path reaches us as the bytes it is — spaces, tabs, and
- * non-ASCII included.
+ * A failure here is non-fatal — the diff still runs, just without the rename hints — so it warns
+ * on stderr instead of aborting, loudly enough that a reviewer noticing "moved -> removed +
+ * added" churn can trace the cause.
  *
- * A rename git found and we then failed to read is precisely the failure stage 2 exists to
- * prevent: the move degrades into the `removed` + `added` pair that a `--fail-on removed` gate
- * reds the build on.
+ * Three ways this comes back useless, and only one of them is an error. git can fail; the record
+ * stream can be unreadable; and git can *succeed* having quietly given up on rename detection —
+ * over `diff.renameLimit` it exits 0, writes a warning to stderr, and reports every move as a
+ * `D` plus an `A`. That last one used to be invisible here, and it fires on exactly the large
+ * refactor where stage 2 matters most.
  */
 async function collectRenames(
   git: GitRunner,
@@ -704,26 +700,49 @@ async function collectRenames(
   spec: RefSpec,
   warn: WarnFn,
 ): Promise<GitRenameMap | null> {
+  let stdout: string
   try {
-    const { stdout } = await git.run(
+    const result = await git.run(
       ["diff", "--find-renames", "--name-status", "-z", `${spec.base}..${spec.head}`],
       { cwd },
     )
-    const map = parseRenameRecords(stdout)
-    if (map === null) {
+    stdout = result.stdout
+    // A diagnostic on a run that exited 0 — `diff.renameLimit` exceeded, a file it could not
+    // read. Nothing here can act on it, and the hints it costs are silent by construction: the
+    // records parse, the map is merely emptier than the refactor was.
+    if (result.stderr.trim().length > 0) {
       warn(
-        "⚠ git diff --name-status -z produced a record this parser could not read; the diff will treat renamed files as removed + added.",
+        `⚠ git reported while collecting renames for ${spec.base}..${spec.head}: ${result.stderr.trim()}. ` +
+          `Rename hints may be missing (raise diff.renameLimit if it says so); moves without one are reported as removed + added.`,
       )
-      return null
     }
-    return map
   } catch (error) {
     warn(
       `⚠ Failed to collect git renames (${errorMessage(error)}); the diff will treat renamed files as removed + added.`,
     )
     return null
   }
+  // Outside the `try`, so a defect in the parser is never reported as git having failed.
+  const parsed = parseRenameRecords(stdout)
+  if (!parsed.ok) {
+    warn(
+      `⚠ git diff --name-status -z for ${spec.base}..${spec.head} produced a record this parser could not read ` +
+        `(field ${parsed.index}: ${describeBadField(parsed.field)}); the diff will treat renamed files as removed + added.`,
+    )
+    return null
+  }
+  return parsed.renames
 }
+
+/** A field goes into a warning quoted and capped: it is a path, so it can carry control bytes. */
+function describeBadField(field: string): string {
+  const quoted = JSON.stringify(field)
+  return quoted.length <= MAX_REPORTED_FIELD_LENGTH
+    ? quoted
+    : `${quoted.slice(0, MAX_REPORTED_FIELD_LENGTH)}…`
+}
+
+const MAX_REPORTED_FIELD_LENGTH = 120
 
 /**
  * A `--name-status` status field: one letter, and on `R` / `C` a similarity score after it.
@@ -734,41 +753,66 @@ async function collectRenames(
 const NAME_STATUS_FIELD = /^[A-Z]\d*$/
 
 /**
+ * What the reader made of the stream: the renames, or where it stopped being readable.
+ *
+ * The failure carries its position because the caller has to write the warning somebody reads in
+ * a CI log, and "could not read the output" with nothing else in it is a dead end for whoever
+ * has to reproduce it.
+ */
+export type RenameRecords =
+  | { ok: true; renames: GitRenameMap }
+  | { ok: false; index: number; field: string }
+
+/**
  * NUL-separated `--name-status` records into `{oldPath: newPath}`.
  *
  * Under `-z` the output is a flat sequence of fields rather than lines: a status, then the one
- * path it applies to — or, for the two statuses that name both ends of a move, `R` and `C`, two
- * paths. The record length is therefore decided by the status, and every field of a record has
- * to be consumed even when the record is not a rename: skipping a `C` by its status alone leaves
- * the reader one field short and every record after it misread.
+ * path it applies to — or, for the two statuses that carry a second path, `R` (rename) and `C`
+ * (copy), two of them. The record length is therefore decided by the status, and every field of
+ * a record has to be consumed even when the record is not a rename: skipping a `C` by its status
+ * alone leaves the reader one field short and every record after it misread. Only `R` enters the
+ * map — a copy's source file is still there, so it is not a move.
  *
- * `null`, not a partial map, when a field is not a status where one must be. A desynced reader
- * produces *plausible* pairs — a path read as a status, the next path read as its target — and a
- * wrong rename is worse for stage 2 than no rename at all: it pairs two unrelated Symbols and
- * reports the move as settled. The caller degrades to no hints and says so, which is the fallback
- * a `git` that failed outright already gets.
+ * Paths are normalized to NFC because that is the form they are compared against:
+ * `toRelativePosix` normalizes every `source.file`, and `matchStageGitRename` looks a path up in
+ * this map with a bare `Map.get`. A repository holding a path decomposed (macOS with
+ * `core.precomposeUnicode` off) would otherwise produce a map that cannot match anything — the
+ * failure this whole reader exists to prevent, on the class of path it is about.
+ *
+ * A failure, not a partial map, when a field is not a status where one must be or the stream
+ * stops mid-field. A desynced reader produces *plausible* pairs — a path read as a status, the
+ * next path read as its target — and a wrong rename is worse for stage 2 than no rename at all:
+ * it pairs two unrelated Symbols and reports the move as settled. The caller degrades to no hints
+ * and says so, which is the fallback a `git` that failed outright already gets.
  */
-export function parseRenameRecords(stdout: string): GitRenameMap | null {
+export function parseRenameRecords(stdout: string): RenameRecords {
   const fields = stdout.split("\0")
-  // `-z` terminates each field rather than separating them, so a complete stream ends in an
-  // empty tail. Empty stdout — nothing changed between the refs — is that tail and nothing else.
-  if (fields[fields.length - 1] === "") fields.pop()
-  const map = new Map<string, string>()
+  // `-z` *terminates* each field, so a complete stream ends in an empty tail and anything else
+  // there is a stream that was cut mid-field — the one truncation that would otherwise read as a
+  // whole record, mapping a rename onto a chopped path. Empty stdout, nothing changed between
+  // the refs, is that tail and nothing else.
+  const tail = fields.pop()
+  if (tail !== "") return { ok: false, index: fields.length, field: tail ?? "" }
+  const renames = new Map<string, string>()
   let index = 0
   while (index < fields.length) {
     const status = fields[index]
-    if (status === undefined || !NAME_STATUS_FIELD.test(status)) return null
+    if (status === undefined || !NAME_STATUS_FIELD.test(status)) {
+      return { ok: false, index, field: status ?? "" }
+    }
     const pathCount = status.startsWith("R") || status.startsWith("C") ? 2 : 1
     // A record the stream ends in the middle of is truncated output, not a record we can read.
-    if (index + pathCount >= fields.length) return null
-    const oldPath = fields[index + 1]
-    const newPath = fields[index + 2]
+    if (index + pathCount > fields.length - 1) return { ok: false, index, field: status }
     index += 1 + pathCount
     if (!status.startsWith("R")) continue
-    if (oldPath === undefined || newPath === undefined) return null
-    map.set(oldPath, newPath)
+    const oldPath = fields[index - 2]
+    const newPath = fields[index - 1]
+    // Unreachable — the bounds check above is what makes both defined — but `fields` is indexed
+    // under `noUncheckedIndexedAccess`, so the guard is what makes this typecheck.
+    if (oldPath === undefined || newPath === undefined) return { ok: false, index, field: status }
+    renames.set(oldPath.normalize("NFC"), newPath.normalize("NFC"))
   }
-  return map
+  return { ok: true, renames }
 }
 
 function irRef(refName: string, ir: IR): IRRef {
@@ -776,12 +820,8 @@ function irRef(refName: string, ir: IR): IRRef {
 }
 
 /**
- * Chunks are joined as bytes and decoded once, not decoded and then joined.
- *
- * A stream hands out whatever arrived, so a multi-byte character can straddle two chunks —
- * decoding each one on its own replaces the halves with U+FFFD. It takes a listing long enough
- * to split for a `src/請求書.ts` to come back unusable, which is exactly the size of listing
- * nobody reads by hand and every path here is compared against a Symbol's `source.file`.
+ * Chunks are joined as bytes and decoded once: a stream splits wherever it splits, so decoding
+ * each chunk on its own turns a multi-byte character that straddles two of them into U+FFFD.
  */
 const defaultGitRunner: GitRunner = {
   async run(
@@ -799,11 +839,15 @@ const defaultGitRunner: GitRunner = {
         stderrChunks.push(chunk)
       })
       child.on("error", rejectPromise)
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         const stdout = Buffer.concat(stdoutChunks).toString("utf8")
         const stderr = Buffer.concat(stderrChunks).toString("utf8")
-        if (code === 0) resolvePromise({ stdout, stderr })
-        else rejectPromise(new Error(`git ${args.join(" ")} exited with code ${code}: ${stderr}`))
+        if (code === 0) return resolvePromise({ stdout, stderr })
+        // A killed git has a null code and a signal; "exited with code null" would drop the one
+        // fact that explains it, and this string is what the caller puts in front of the user.
+        const how =
+          code === null ? `was killed by ${signal ?? "a signal"}` : `exited with code ${code}`
+        rejectPromise(new Error(`git ${args.join(" ")} ${how}: ${stderr}`))
       })
     })
   },
