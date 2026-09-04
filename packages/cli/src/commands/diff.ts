@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { resolve } from "node:path"
+import { basename, resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
 import {
   formatCallResolutionLine,
@@ -17,6 +17,7 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
+import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
 
 export type { WarnFn }
@@ -142,6 +143,8 @@ export type DiffSide = "base" | "head"
  *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
+ *   The worktree's own directory is named after the head workspace's — see
+ *   `baseWorktreeLeaf`, since Component detection reads that name.
  *   NOTE: the head is always the working tree — a mismatched `<head>` label in the
  *   ref spec (e.g. `main..v1.1.0` when the checkout is `v1.0.0`) does NOT rescope the
  *   head scan; it only labels the report. This mirrors the design's "head is always
@@ -547,8 +550,13 @@ async function resolveViaGit(
   await assertRefResolvable(git, cwd, spec.head, "head")
   await assertNotShallow(git, cwd)
 
+  const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
-  const worktreeDir = resolve(tempParent, "base")
+  // Under a directory of its own, so the leaf below is free to be any name the head workspace
+  // has — including `base-out` or `head-out`, which as siblings would be the temp run's own
+  // output directories.
+  const worktreeParent = resolve(tempParent, "base")
+  const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
   const baseOutputDir = resolve(tempParent, "base-out")
   const headOutputDir = resolve(tempParent, "head-out")
   let baseIR: IR
@@ -556,6 +564,9 @@ async function resolveViaGit(
   let scans: ScanPair
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
+    // git creates leading directories for a worktree path itself; doing it here keeps the
+    // one thing this run invented — the nesting — out of what a `worktree add` failure means.
+    await mkdir(worktreeParent, { recursive: true })
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
     const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, {
       side: "base",
@@ -601,6 +612,26 @@ async function resolveViaGit(
     gitRenames: renames,
     scans,
   }
+}
+
+/**
+ * The directory name to materialise the base revision under.
+ *
+ * The head workspace's own leaf, not a fixed word, because Component autodetection falls back
+ * to the directory name when no manifest declares one (component-detect.md §4.1). A worktree
+ * at `<temp>/base` therefore gave the base side a Component called `base` while the head side
+ * carried the project's real directory name, and every ref diff of a project without a
+ * declared `name` — or without explicit `components[]` — reported one Component added and one
+ * removed, on a PR that changed nothing structural. The two sides are the same workspace at
+ * two revisions, so the one thing the temporary path must not do is change its identity.
+ *
+ * `basename` of an absolute path is empty only at the filesystem root, which no workspace is
+ * in practice; `base` is kept for that case because a path ending in a separator is not a
+ * directory git can create.
+ */
+function baseWorktreeLeaf(headWorkspaceRoot: string): string {
+  const leaf = basename(headWorkspaceRoot)
+  return leaf.length === 0 ? "base" : leaf
 }
 
 /**

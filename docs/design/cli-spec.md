@@ -460,6 +460,8 @@ If git is unavailable, pass existing IR files via the `--base / --head` pair.
 With refs:
 1. **Pre-validation** (§6.4.1)
 2. Create a temporary git worktree and check out the base ref
+   - **Directory name**: the worktree's own directory is named after the head workspace's directory (`<temp>/base/<head-workspace-dirname>`)
+   - Rationale: component autodetection falls back to the directory name when no manifest declares one ([`component-detect.md`](./component-detect.md) §4.1). A fixed name would give the base side a different Component id from the head's, so every diff of a project without a declared package name — or without explicit `components[]` — would report one Component added and one removed
 3. Run `aburi scan` on the base and store the IR temporarily
    - **Config used**: apply the **head-side `aburi.json`** to the base scan as well (the base is interpreted through the head's view; a stale config remaining in the base is ignored)
    - Rationale: using the config as of the base ref would make "config change = the entire IR changes", breaking the diff. Fixing the view to the head automatically resolves config differences
