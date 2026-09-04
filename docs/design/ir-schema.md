@@ -193,6 +193,8 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | function/class expression assigned to a variable | the variable name becomes the qname (e.g. `const handler = () => ...` → `handler`) |
 | destructuring declaration | one Symbol per **binding**, each named by the binding (e.g. `const { GET, POST } = handlers` → `GET` and `POST`). The pattern's text is not a name; `{ a: b }` binds `b`, and `{ a = fallback }` binds `a` and reads `fallback` |
 | class member with a computed name (`[Symbol.iterator]() {}`) | **no Symbol**, and no diagnostic. The brackets are not a name static analysis can record, and mangling them into a segment would invent one the source does not contain |
+| class member with a quoted name (`"createInvoice"() {}`) | the segment the literal *decodes* to, when that is an identifier — a property key is a string, so `"createInvoice"` and `createInvoice` are one member and fold onto one Symbol |
+| class member with a quoted name that is not an identifier (`"a-b"() {}`), or a numeric one (`1() {}`) | **no Symbol**, and no diagnostic, as for a computed name. `C["a-b"]` is how the source addresses it and `C.a-b` is not a qualified name; the body stays on the class |
 
 ### 3.3 Handling anonymous symbols
 

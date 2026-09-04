@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { CoreError, DEFAULT_EXPORT_QNAME, makeSymbolId } from "../src"
+import {
+  CoreError,
+  DEFAULT_EXPORT_QNAME,
+  isQnameSegment,
+  isQualifiedName,
+  makeSymbolId,
+} from "../src"
 
 /**
  * The qualified-name segment grammar used to be `[A-Za-z_$][A-Za-z0-9_$]*`, which refuses
@@ -125,5 +131,43 @@ describe("what is not a name is still refused, and named", () => {
     // it ever reached it. It does not, and this is what says so.
     expect(build(DEFAULT_EXPORT_QNAME)).toBe(`ts:src/a.ts#${DEFAULT_EXPORT_QNAME}`)
     expect(refusalFor("<other>").code).toBe("anonymous-symbol-id-attempted")
+  })
+})
+
+describe("a producer can ask whether a name is a segment before it builds one", () => {
+  // A plugin holding a candidate name has somewhere to go other than build-and-catch: a class
+  // member whose name is not a segment has no Symbol, and its body stays on the class. That is
+  // a decision, not a fault, so it needs a predicate rather than a throw.
+  it.each([
+    ["a plain identifier", "ok"],
+    ["a dollar first", "$x"],
+    ["an underscore first", "_x"],
+    ["a digit after the first character", "ok1"],
+    ["a non-ASCII identifier", "ユーザー取得"],
+    ["an accented identifier", "café"],
+  ])("accepts %s", (_label, segment) => {
+    expect(isQnameSegment(segment)).toBe(true)
+  })
+
+  it.each([
+    ["a hyphen", "a-b"],
+    ["the instance separator", "a.b"],
+    ["the static separator", "a::b"],
+    ["a number", "1"],
+    ["a decimal", "1.5"],
+    ["nothing", ""],
+    ["a private name", "#v"],
+    ["a space", "a b"],
+    ["the default sentinel", DEFAULT_EXPORT_QNAME],
+  ])("refuses %s", (_label, segment) => {
+    expect(isQnameSegment(segment)).toBe(false)
+  })
+
+  it("is stricter than the whole-qname predicate, which is the reason it exists", () => {
+    // `isQualifiedName` answers a question about a *finished* name, so it admits the
+    // separators. A caller that reached for it to vet one member name would accept `"a.b"()`
+    // and mint `C.a.b` — a nested qname built out of a single member.
+    expect(isQualifiedName("a.b")).toBe(true)
+    expect(isQnameSegment("a.b")).toBe(false)
   })
 })

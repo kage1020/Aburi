@@ -5,10 +5,10 @@ import { describe, expect, it } from "vitest"
 import { scanFixture } from "../src/scan-helper"
 
 /**
- * A destructuring declaration, a non-ASCII identifier and a computed member name each fed
- * something that is not a name into the Symbol-id builder, which threw — and the throw was
- * caught at the per-file boundary, so the file was skipped as `extraction-failed` and every
- * Symbol in it went too.
+ * A destructuring declaration, a non-ASCII identifier, a computed member name and a quoted or
+ * numeric one each fed something that is not a name into the Symbol-id builder, which threw —
+ * and the throw was caught at the per-file boundary, so the file was skipped as
+ * `extraction-failed` and every Symbol in it went too.
  *
  * The unit tests pin what extraction now produces. What these pin is the half only a scan can
  * see: the file reaches the IR at all, and `skipped` is empty.
@@ -48,6 +48,16 @@ describe("a file that names things legally keeps its Symbols", () => {
     [
       "a computed member name",
       "export class A {\n  [Symbol.iterator]() {}\n  m() {}\n}\n",
+      ["ts:bad.ts#A", "ts:bad.ts#A.m"],
+    ],
+    [
+      "a quoted member name",
+      'export class A {\n  "ok"() {}\n  m() {}\n}\n',
+      ["ts:bad.ts#A", "ts:bad.ts#A.m", "ts:bad.ts#A.ok"],
+    ],
+    [
+      "a member name that is not an identifier once decoded",
+      'export class A {\n  "a-b"() {}\n  1() {}\n  m() {}\n}\n',
       ["ts:bad.ts#A", "ts:bad.ts#A.m"],
     ],
   ])("scans %s without losing the file", async (_label, source, expected) => {

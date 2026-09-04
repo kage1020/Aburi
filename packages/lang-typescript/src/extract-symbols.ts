@@ -21,9 +21,10 @@ import {
 } from "./call-symbols"
 import {
   functionValuedField,
+  hasPrivateName,
   isConstructorMember,
   memberHasOwnSymbol,
-  memberSegment,
+  memberNameSegment,
 } from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
@@ -39,6 +40,23 @@ function requireDeclarationName(node: Node, kind: string, file: string): string 
   if (name !== null) return name
   throw new CoreError(
     `Missing name field on ${kind} declaration in ${file}:${node.startPosition.row + 1}; the tree-sitter grammar produced an unexpected shape and this plugin refuses to fabricate a placeholder id`,
+    { code: "anonymous-symbol-id-attempted", value: `${file}:${kind}` },
+  )
+}
+
+/**
+ * The qualified-name segment of a class member `memberHasOwnSymbol` has already admitted.
+ *
+ * Defensive rather than reachable: the predicate answers on the same `memberNameSegment`, so a
+ * member with no segment never reaches a candidate builder. Throwing rather than inventing a
+ * placeholder is the rule `requireDeclarationName` follows, and for the same reason — a
+ * fabricated segment would collide every such member in the file on one id.
+ */
+function requireMemberSegment(member: Node, kind: string, file: string): string {
+  const segment = memberNameSegment(member)
+  if (segment !== null) return segment
+  throw new CoreError(
+    `The ${kind} at ${file}:${member.startPosition.row + 1} was admitted as a member and has no qualified-name segment; the member predicate and the id builder disagree`,
     { code: "anonymous-symbol-id-attempted", value: `${file}:${kind}` },
   )
 }
@@ -417,11 +435,11 @@ function makeFunctionCandidate(
 
 /**
  * One class member that `memberHasOwnSymbol` has already admitted, which is why this answers a
- * candidate rather than `null`: a computed member never reaches it.
+ * candidate rather than `null`: a member whose name has no qualified-name segment — computed,
+ * quoted into something that is not an identifier, numeric — never reaches it.
  *
- * It can still throw. The predicate admits any `method_definition` with a written name, and a
- * name that is not an identifier — `class C { "ok"() {} }`, `class C { 1() {} }` — is one the
- * qualified-name grammar refuses, which costs the file at the per-file boundary.
+ * That is also why it no longer throws on a name the id builder refuses. The predicate and the
+ * qname are read off one `memberNameSegment`, so what was admitted is what is built.
  */
 function makeMethodCandidate(
   node: Node,
@@ -429,12 +447,12 @@ function makeMethodCandidate(
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
   const kind: SymbolKind = isConstructorMember(node) ? "constructor" : "method"
-  const methodName = requireDeclarationName(node, "method", ctx.file.path)
+  const segment = requireMemberSegment(node, "method", ctx.file.path)
   const isStatic = hasChildOfType(node, "static")
   const qname =
     kind === "constructor"
       ? classMemberQname(ownerChain, "constructor", "instance")
-      : classMemberQname(ownerChain, memberSegment(methodName), isStatic ? "static" : "instance")
+      : classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(node)
   const signature = buildSignature(node, jsDoc)
   const derivedBy: string[] = [isStatic ? "static-method" : "class-method"]
@@ -449,7 +467,7 @@ function makeMethodCandidate(
     kind,
     extKind: null,
     name: qname,
-    visibility: memberVisibility(node, methodName),
+    visibility: memberVisibility(node),
     decorators: readDecorators(node),
     signature,
     source: makeSourceRange(node, ctx),
@@ -476,20 +494,16 @@ function makeFieldFunctionCandidate(
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
-  const fieldName = requireDeclarationName(field, "class field", ctx.file.path)
+  const segment = requireMemberSegment(field, "class field", ctx.file.path)
   const isStatic = hasChildOfType(field, "static")
-  const qname = classMemberQname(
-    ownerChain,
-    memberSegment(fieldName),
-    isStatic ? "static" : "instance",
-  )
+  const qname = classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(field)
   return {
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind: "method",
     extKind: null,
     name: qname,
-    visibility: memberVisibility(field, fieldName),
+    visibility: memberVisibility(field),
     decorators: readDecorators(field),
     signature: buildSignature(value, jsDoc),
     // The field's range, not the function's: the member is declared where it is written, and a
@@ -520,8 +534,8 @@ function fieldDerivedBy(field: Node, isStatic: boolean): string[] {
  * is `public`, which is what `readAccessibilityKeyword` answers when it finds none — the same
  * answer `public m() {}` gets, and the reason this needs no third branch.
  */
-function memberVisibility(member: Node, writtenName: string): Visibility {
-  return writtenName.startsWith("#") ? "private" : readAccessibilityKeyword(member)
+function memberVisibility(member: Node): Visibility {
+  return hasPrivateName(member) ? "private" : readAccessibilityKeyword(member)
 }
 
 function makeInterfaceCandidate(
