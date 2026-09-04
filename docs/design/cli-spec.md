@@ -900,6 +900,12 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 
 Passing `--cwd` changes the cwd and therefore the search origin.
 
+`aburi diff` in ref mode runs this list **once**, against the invoking cwd, before it
+materialises the base worktree — and hands the single answer (an absolute path, or "nothing
+found, autodetect") to both scans. Re-running the list from inside the worktree would resolve
+steps 1 and 3-6 to the base revision's copy of the file, which is exactly what §6.4 step 3
+forbids.
+
 ## 14. Concurrency
 
 - Parser concurrency for `aburi scan`: default = `max(1, CPU_count - 1)`

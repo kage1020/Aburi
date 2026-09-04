@@ -1,14 +1,26 @@
 import { resolve } from "node:path"
-import {
-  ConfigError,
-  type LoadedConfig,
-  loadConfig,
-  normalizeFrameworkHints,
-  readConfigFile,
-} from "@aburi/config"
+import { ConfigError, findConfig, type LoadedConfig, loadConfigFrom } from "@aburi/config"
 import { CliError, errorMessage } from "./errors"
 
 /**
+ * Which config a run reads, decided once and carried as an absolute path.
+ *
+ * `autodetect` is a decision too, not the absence of one: it says "no config on disk, run
+ * the detector", and a caller handed it must not go looking for a config of its own.
+ *
+ * The type exists because a config path is only unambiguous while the working directory
+ * stays put. `aburi diff` changes it — the base scan runs with its cwd inside a temporary
+ * worktree — so anything still expressed as "discover from cwd" or "this path, relative to
+ * cwd" answers differently for the two scans. Pinning happens once, against the original
+ * cwd, and both scans are then handed the same answer.
+ */
+export type PinnedConfig =
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "autodetect" }
+
+/**
+ * Decide which config a run reads, without reading it.
+ *
  * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the process `cwd`,
  * per `cli-spec.md §13 Config Resolution Order`. A config in the current package therefore
  * wins over one in an ancestor.
@@ -17,6 +29,38 @@ import { CliError, errorMessage } from "./errors"
  * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for
  * relative plugin specifiers — but not for locating the config, which is why a
  * package-local config can name paths that resolve against a directory above it.
+ *
+ * Separated from the read so that `aburi diff` can pin the head's answer before it moves the
+ * working directory (cli-spec.md §6.4 step 3). Both halves of a diff then read one file, and
+ * a commit touching only `aburi.json` stops reading as a change to every Symbol in the
+ * workspace.
+ */
+export async function pinConfig(
+  cwd: string,
+  overridePath: string | undefined,
+): Promise<PinnedConfig> {
+  // An override is a path the caller typed, so it is resolved rather than probed: naming a
+  // file that is not there is an error the read reports, not a fall-through to discovery.
+  if (overridePath !== undefined) return { kind: "file", path: resolve(cwd, overridePath) }
+  try {
+    const found = await findConfig({ cwd })
+    return found === null ? { kind: "autodetect" } : { kind: "file", path: found }
+  } catch (error) {
+    throw classifyConfigError(error)
+  }
+}
+
+/** Read the config a `PinnedConfig` names, whatever the working directory is now. */
+export async function loadPinnedConfig(pinned: PinnedConfig): Promise<LoadedConfig> {
+  try {
+    return await loadConfigFrom(pinned.kind === "file" ? pinned.path : null)
+  } catch (error) {
+    throw classifyConfigError(error)
+  }
+}
+
+/**
+ * Decide which config to read and read it, both anchored to `cwd`.
  *
  * Shared rather than `aburi scan`'s own, because `aburi diff` and `aburi explain` have to
  * answer the same question: the first to place `diff.json`, the second to know where a scan
@@ -27,23 +71,7 @@ export async function resolveConfig(
   cwd: string,
   overridePath: string | undefined,
 ): Promise<LoadedConfig> {
-  // Outside the `try` so the `catch` below spans the config read and nothing else, which is
-  // what it names. No behaviour rides on it: `resolve` does not throw for a `string`.
-  const absolute = overridePath === undefined ? null : resolve(cwd, overridePath)
-  try {
-    if (absolute !== null) {
-      const config = await readConfigFile(absolute)
-      return {
-        found: true,
-        source: absolute,
-        config,
-        syntheticPlugins: normalizeFrameworkHints(config),
-      }
-    }
-    return await loadConfig({ cwd })
-  } catch (error) {
-    throw classifyConfigError(error)
-  }
+  return loadPinnedConfig(await pinConfig(cwd, overridePath))
 }
 
 /**

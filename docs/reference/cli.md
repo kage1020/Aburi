@@ -43,6 +43,10 @@ Paths you give to `--config` resolve against the working directory. Paths
 *inside* the config resolve against the workspace root, which need not be the
 same directory. `aburi scan` warns you when the two differ.
 
+`aburi diff` in ref mode settles all of this once, before it checks the base
+revision out, and scans **both** revisions with the config it found. See
+[`aburi diff`](#aburi-diff) below.
+
 ---
 
 ## `aburi init`
@@ -131,6 +135,14 @@ Compares two revisions and writes `diff.json` and `diff.md`.
 **Ref mode** verifies both refs with git, checks out the base into a temporary
 worktree, and scans it. Aburi scans the head from your working tree, and uses
 its ref as a label in the report.
+
+Both scans read the **head**'s config — the one discovery finds from your
+working directory, or the one `--config` names there. The base revision's own
+`aburi.json` is ignored, even when the base ref carries a different one, and a
+head with no config at all scans the base by autodetect too. Otherwise editing
+`ignore` would count as a change to every Symbol the setting covers, and
+`aburi diff HEAD~1..HEAD --fail-on added` would fail a pull request that
+touched no source.
 
 **File mode** compares two `aburi.ir.json` files you already have. No git, no
 scanning.

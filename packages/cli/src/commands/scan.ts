@@ -38,7 +38,7 @@ import {
   resolveOutputDir,
   WORKSPACE_MD_FILENAME,
 } from "../artifact-paths"
-import { resolveConfig } from "../config-load"
+import { loadPinnedConfig, type PinnedConfig, resolveConfig } from "../config-load"
 import type { LogLevel } from "../env"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -52,6 +52,18 @@ import { resolveWorkspaceRoot } from "../workspace-root"
 export interface ScanOptions {
   cwd?: string
   configPath?: string
+  /**
+   * A config already decided by the caller, which supersedes both `configPath` and discovery.
+   *
+   * `aburi diff` sets it. Its base scan runs with `cwd` inside a temporary worktree, where
+   * discovery finds the base revision's `aburi.json` and a relative `configPath` resolves to
+   * the base copy of the file — either of which makes a commit that only edits the config
+   * read as a change to every Symbol in the workspace (cli-spec.md §6.4 step 3).
+   *
+   * `{ kind: "autodetect" }` is meaningful rather than equivalent to omitting the field: it
+   * says the head has no config, so the base must not be scanned with one either.
+   */
+  pinnedConfig?: PinnedConfig
   outputDir?: string
   format?: "json" | "md" | "both"
   ignore?: readonly string[]
@@ -276,7 +288,10 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
 
-  const loaded = await resolveConfig(cwd, options.configPath)
+  const loaded =
+    options.pinnedConfig === undefined
+      ? await resolveConfig(cwd, options.configPath)
+      : await loadPinnedConfig(options.pinnedConfig)
   const config = mergeCliOverrides(loaded.config, options)
 
   const plugins = await loadPlugins({

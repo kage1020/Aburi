@@ -10,7 +10,7 @@ import {
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
-import { configuredOutputDir } from "../config-load"
+import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
 import { CliError, errorCode, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
@@ -547,6 +547,13 @@ async function resolveViaGit(
   await assertRefResolvable(git, cwd, spec.head, "head")
   await assertNotShallow(git, cwd)
 
+  // Pinned before the worktree exists, and therefore against the caller's own directory.
+  // §6.4 step 3 gives the base scan the *head* `aburi.json`: a config as of the base ref
+  // would make any commit that edits one read as "the entire IR changed". Discovery from
+  // inside the worktree returns the base copy, and so does a relative `--config`, so the
+  // rule holds only if the answer is fixed here and handed to both scans.
+  const pinnedConfig = await pinConfig(cwd, options.configPath)
+
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   const worktreeDir = resolve(tempParent, "base")
   const baseOutputDir = resolve(tempParent, "base-out")
@@ -557,7 +564,7 @@ async function resolveViaGit(
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
-    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, {
+    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, pinnedConfig, {
       side: "base",
       ref: spec.base,
     })
@@ -566,7 +573,9 @@ async function resolveViaGit(
     }
     baseIR = await readIR(baseReport.irPath)
 
-    const headReport = await runScanInDir(cwd, options, headOutputDir, warn, { side: "head" })
+    const headReport = await runScanInDir(cwd, options, headOutputDir, warn, pinnedConfig, {
+      side: "head",
+    })
     if (headReport.irPath === null) {
       throw new CliError("scan for head ref produced no IR file.", "runtime-error")
     }
@@ -616,11 +625,19 @@ function labelFor(target: ScanTarget): string {
   return target.side === "base" ? `base ref "${target.ref}"` : "head (working tree)"
 }
 
+/**
+ * One scan of one side, reading the config both sides share.
+ *
+ * `pinnedConfig` replaces `options.configPath` rather than accompanying it. The two would
+ * otherwise disagree for the base: the flag's value is relative to the caller's directory
+ * and this scan runs in the worktree.
+ */
 async function runScanInDir(
   cwd: string,
   options: DiffOptions,
   outputDir: string,
   warn: WarnFn,
+  pinnedConfig: PinnedConfig,
   target: ScanTarget,
 ): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
@@ -628,7 +645,7 @@ async function runScanInDir(
     outputDir,
     format: "json",
     incidents: { warn, label: labelFor(target) },
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    pinnedConfig,
     ...(options.compact === undefined ? {} : { compact: options.compact }),
   }
   return runScan(scanOptions)
