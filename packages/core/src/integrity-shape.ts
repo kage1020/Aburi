@@ -159,6 +159,14 @@ const EFFECT_PROPAGATION_STATS: RecordSpec = {
 
 const EFFECT_CLASSIFY_TIMEOUT: RecordSpec = { plugin: str, symbolId: str, timeoutMs: num }
 
+const LSP_HINT_REJECTIONS: RecordSpec = {
+  unparseableHover: num,
+  ownerClassNotFound: num,
+  memberNotFound: num,
+  kindMismatch: num,
+  targetDropped: num,
+}
+
 const LSP_ENRICHMENT_STATS: RecordSpec = {
   enabled: bool,
   filesEnriched: num,
@@ -167,6 +175,9 @@ const LSP_ENRICHMENT_STATS: RecordSpec = {
   requestsTimedOut: num,
   requestsFailed: num,
   languagesDisabled: strs,
+  hintsProduced: optional(num),
+  hintsConsumed: optional(num),
+  hintsRejected: optional(record(LSP_HINT_REJECTIONS)),
 }
 
 const UNRESOLVED_CALL_BUCKETS: RecordSpec = {
@@ -236,6 +247,7 @@ export const DOCUMENT_SHAPE: Readonly<Record<string, RecordSpec>> = {
   EffectPropagationStats: EFFECT_PROPAGATION_STATS,
   EffectClassifyTimeout: EFFECT_CLASSIFY_TIMEOUT,
   LspEnrichmentStats: LSP_ENRICHMENT_STATS,
+  LspHintRejections: LSP_HINT_REJECTIONS,
   CallResolutionStats: CALL_RESOLUTION_STATS,
   UnresolvedCallBuckets: UNRESOLVED_CALL_BUCKETS,
   SkippedFile: SKIPPED_FILE,

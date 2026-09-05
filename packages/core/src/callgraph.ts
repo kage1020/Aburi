@@ -14,6 +14,7 @@ import { CoreError } from "./errors"
 import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
+import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -95,6 +96,13 @@ export interface ResolveCallGraphResult {
    * `UnresolvedCallDiagnostic`.
    */
   diagnostics: UnresolvedCallDiagnostic[]
+  /**
+   * What the LSP tier did with the hints it was handed — the consumer half of
+   * `stats.lspEnrichment` (lsp-enrichment.md §7.2). All zero when no hints were
+   * supplied. See `LspHintUsage` for why it comes back as a value; the caller
+   * folds it into the producer half with `withHintUsage`.
+   */
+  lspHintUsage: Readonly<LspHintUsage>
 }
 
 const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]
@@ -138,6 +146,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   const edges: CallEdge[] = []
   const diagnostics: UnresolvedCallDiagnostic[] = []
   const dynamicCallSites = input.dynamicCallSites ?? EMPTY_CALL_SITE_KEYS
+  const lspHintUsage = emptyHintUsage()
   let totalCalls = 0
   let resolvedCalls = 0
 
@@ -182,13 +191,15 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         return { target: call.target, line: call.line, resolved: resolved.id }
       }
       // Untyped tier missed — try LSP tier via receiverHints (§5.2 / §5.3).
-      const lspHit = resolveViaLspHint({
+      const lspOutcome = resolveViaLspHint({
         caller: symbol,
         call,
         receiverHints,
         implementerHints,
         keptSymbolIds,
       })
+      if (lspOutcome.outcome === "rejected") lspHintUsage[lspOutcome.reason] += 1
+      const lspHit = lspOutcome.outcome === "hit" ? lspOutcome.hit : null
       if (lspHit === null) {
         diagnostics.push(
           classifyUnresolved({
@@ -205,6 +216,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         return call
       }
       resolvedCalls++
+      lspHintUsage.consumed += 1
       edges.push({
         from: symbol.id,
         to: lspHit.id,
@@ -224,6 +236,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
     edges,
     stats: buildCallResolutionStats(totalCalls, resolvedCalls, diagnostics),
     diagnostics,
+    lspHintUsage,
   }
 }
 
@@ -442,11 +455,24 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  *   edge the LSP-off run did not have, never a re-rated one. Turning LSP on can
  *   add edges to the graph but cannot downgrade any edge already in it.
  *
- * A hint whose `targetSymbolId` is not in `keptSymbolIds` returns null instead
- * of an edge. A dropped Symbol carries an empty body and zeroed fingerprints, so
- * an edge into it would be a silent lie about what the caller actually reaches;
- * the call falls through to `classifyUnresolved` and is reported like any other
- * miss.
+ * A hint whose `targetSymbolId` is not in `keptSymbolIds` produces no edge. A
+ * dropped Symbol carries an empty body and zeroed fingerprints, so an edge into
+ * it would be a silent lie about what the caller actually reaches; the call
+ * falls through to `classifyUnresolved` and is reported like any other miss.
+ *
+ * Both refusals — the `kind` disagreement and the dropped target — are reported
+ * rather than merely taken: the reason rides back to `resolveCallGraph`, which
+ * counts it into `stats.lspEnrichment.hintsRejected` (lsp-enrichment.md §7.2).
+ * A hint declined here and not counted is indistinguishable, in the finished IR,
+ * from one the language server never had — the enrichment pass has returned by
+ * now and cannot see either outcome. A hint the key never reaches is not a
+ * refusal and is not counted: the untyped tier resolving a call first is the
+ * ordinary case, not a fault.
+ *
+ * The order of the two checks is part of §7.2's contract rather than an accident
+ * of writing: a hint that fails both is counted as `kindMismatch` alone. Without
+ * a fixed order the same input could be bucketed two ways, which is the kind of
+ * drift LE15's byte-identical guarantee exists to forbid.
  *
  * Interface-tier resolution (§5.3) is out of scope until the IR carries
  * `implements` edges — until then any `implementerHints` entries pass through
@@ -458,15 +484,33 @@ function resolveViaLspHint(input: {
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   keptSymbolIds: ReadonlySet<SymbolId>
-}): ResolutionHit | null {
+}): LspHintOutcome {
   const key = makeCallSiteKey(input.caller.source.file, input.call.line, input.call.target)
   const hint = input.receiverHints.get(key)
-  if (hint === undefined) return null
-  if (receiverHead(input.call.target) !== hint.kind) return null
+  if (hint === undefined) return NO_HINT
+  if (receiverHead(input.call.target) !== hint.kind) {
+    return { outcome: "rejected", reason: "kindMismatch" }
+  }
   const target = hint.targetSymbolId
-  if (!input.keptSymbolIds.has(target)) return null
-  return { id: target, confidence: "high" }
+  if (!input.keptSymbolIds.has(target)) {
+    return { outcome: "rejected", reason: "targetDropped" }
+  }
+  return { outcome: "hit", hit: { id: target, confidence: "high" } }
 }
+
+/**
+ * What the LSP tier made of one call site: an edge, no hint at all, or a hint it
+ * refused and the bucket that refusal belongs in. The third case is why this is
+ * a variant rather than `ResolutionHit | null` — the caller has to tell "no hint
+ * was offered" apart from "a hint was offered and declined", and only the second
+ * is worth counting.
+ */
+type LspHintOutcome =
+  | { outcome: "hit"; hit: ResolutionHit }
+  | { outcome: "absent" }
+  | { outcome: "rejected"; reason: LspConsumerRejection }
+
+const NO_HINT: LspHintOutcome = { outcome: "absent" }
 
 /**
  * Rebuild the resolved `CallEdge[]` for an already-scanned IR by walking every

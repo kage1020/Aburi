@@ -303,6 +303,93 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(lines).toEqual(["⚠ LSP requests: 10 issued · 0 timed out · 2 failed."])
   })
 
+  it("says what the typed tier bought, on a run every other counter calls healthy", () => {
+    // The whole point of the hint counters (lsp-enrichment.md §7.2): 12 hovers came back on
+    // time with nothing usable, so the census line above cannot fire and every number it
+    // would have printed reads clean. Without this line the CLI reports a perfect run.
+    const lines = linesFrom(
+      reportWith({
+        lspEnrichment: {
+          enabled: true,
+          filesEnriched: 10,
+          filesFellBack: 0,
+          languagesDisabled: [],
+          requestsIssued: 22,
+          requestsTimedOut: 0,
+          requestsFailed: 0,
+          hintsProduced: 0,
+          hintsConsumed: 0,
+          hintsRejected: {
+            unparseableHover: 9,
+            ownerClassNotFound: 2,
+            memberNotFound: 1,
+            kindMismatch: 0,
+            targetDropped: 0,
+          },
+        },
+      }),
+      null,
+    )
+    expect(lines).toEqual(["⚠ LSP receiver hints: 0 produced · 0 resolved a call · 12 rejected."])
+  })
+
+  it("stays quiet when the run neither produced nor refused a hint", () => {
+    // Not the same as "produced none and refused none because the server was broken": a
+    // workspace with no `this.` / `super.` call sites left for the LSP tier has nothing to
+    // report, and a zeroed line there would be noise on every ordinary scan.
+    const lines = linesFrom(
+      reportWith({
+        lspEnrichment: {
+          enabled: true,
+          filesEnriched: 10,
+          filesFellBack: 0,
+          languagesDisabled: [],
+          requestsIssued: 10,
+          requestsTimedOut: 0,
+          requestsFailed: 0,
+          hintsProduced: 0,
+          hintsConsumed: 0,
+          hintsRejected: {
+            unparseableHover: 0,
+            ownerClassNotFound: 0,
+            memberNotFound: 0,
+            kindMismatch: 0,
+            targetDropped: 0,
+          },
+        },
+      }),
+      null,
+    )
+    expect(lines).toEqual([])
+  })
+
+  it("reports a healthy typed tier too, so the line is a census and not an alarm", () => {
+    const lines = linesFrom(
+      reportWith({
+        lspEnrichment: {
+          enabled: true,
+          filesEnriched: 10,
+          filesFellBack: 0,
+          languagesDisabled: [],
+          requestsIssued: 40,
+          requestsTimedOut: 0,
+          requestsFailed: 0,
+          hintsProduced: 30,
+          hintsConsumed: 28,
+          hintsRejected: {
+            unparseableHover: 0,
+            ownerClassNotFound: 0,
+            memberNotFound: 0,
+            kindMismatch: 0,
+            targetDropped: 2,
+          },
+        },
+      }),
+      null,
+    )
+    expect(lines).toEqual(["⚠ LSP receiver hints: 30 produced · 28 resolved a call · 2 rejected."])
+  })
+
   it("caps each reason's listing and leaves the tail unlabelled with the rest of it", () => {
     const skipped = Array.from({ length: 12 }, (_, i) => ({
       path: `src/f${i}.ts`,

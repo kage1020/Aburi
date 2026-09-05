@@ -68,6 +68,7 @@ export type {
   IR,
   LanguageId,
   LspEnrichmentStats,
+  LspHintRejections,
   PluginRef,
   RelativePath,
   Rule,

@@ -29,7 +29,6 @@ import type {
   Symbol as IRSymbol,
   LanguageId,
   Logger,
-  LspEnrichmentStats,
   LspServerConfig,
   SymbolId,
 } from "@aburi/types"
@@ -45,7 +44,13 @@ import {
 } from "./client"
 import { createFallbackState, type FallbackState } from "./fallback"
 import { requestDocumentSymbols, requestHover } from "./requests"
-import { createStatsBuilder, finalizeStats, type LspStatsBuilder } from "./stats"
+import {
+  countProducerRejection,
+  createStatsBuilder,
+  finalizeStats,
+  type LspProducerStats,
+  type LspStatsBuilder,
+} from "./stats"
 import { type SpawnedServer, spawnStdioServer } from "./transport"
 
 /** A file the caller read: what was in it, and the name it was read under. */
@@ -93,7 +98,13 @@ export interface EnrichmentResult {
   symbols: IRSymbol[]
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
-  stats: LspEnrichmentStats | undefined
+  /**
+   * The producer half of `stats.lspEnrichment` (lsp-enrichment.md §7.2), or `undefined` when
+   * the pass was a no-op. `hintsConsumed` and two of the five rejection buckets are the
+   * resolver's to fill and are `0` here; `withHintUsage` folds its report in. A caller
+   * assembling the passes itself has to do that fold, or those three stay at `0` in the IR.
+   */
+  stats: LspProducerStats | undefined
 }
 
 /**
@@ -377,7 +388,13 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
           const job = jobs[index]
           if (job === undefined || !answered[index]) continue
           try {
-            applyJobResult(job, responses[index], input.receiverHints, input.workingById)
+            applyJobResult(
+              job,
+              responses[index],
+              input.receiverHints,
+              input.workingById,
+              input.stats,
+            )
           } catch (error) {
             input.logger.debug?.(
               `[aburi:lsp] applying hover for ${file}:${job.callLine} threw: ${errorMessage(error)}`,
@@ -511,20 +528,41 @@ async function executeJob(
   return await requestHover(client, uri, position, timeoutMs)
 }
 
+/**
+ * Turn one hover answer into a receiver hint, or say why it could not be one.
+ *
+ * Each early return is a way for the typed tier to do nothing while every request counter
+ * reports a healthy run: a hover that answers on time with no readable body is
+ * `requestsIssued += 1` and nothing else, and its file still lands in `filesEnriched`. The
+ * bucket each one writes is the only record that the answer arrived and was unusable
+ * (lsp-enrichment.md §7.2).
+ */
 function applyJobResult(
   job: RequestJob,
   result: unknown,
   receiverHints: Map<string, ReceiverHint>,
   workingById: Map<SymbolId, IRSymbol>,
+  stats: LspStatsBuilder,
 ): void {
   const caller = workingById.get(job.symbolId)
+  // Not a rejection and not counted as one: jobs are built from the same Symbols this map
+  // holds, so a miss here is an internal inconsistency rather than something the server did.
   if (caller === undefined) return
   const text = extractHoverPayload(result)
-  if (text === null) return
+  if (text === null) {
+    countProducerRejection(stats, "unparseableHover")
+    return
+  }
   const ownerClassName = extractOwnerClassName(text)
-  if (ownerClassName === null) return
+  if (ownerClassName === null) {
+    countProducerRejection(stats, "ownerClassNotFound")
+    return
+  }
   const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
-  if (ownerClassId === null) return
+  if (ownerClassId === null) {
+    countProducerRejection(stats, "ownerClassNotFound")
+    return
+  }
   const memberId = findMemberSymbolId(
     caller.language,
     caller.source.file,
@@ -532,7 +570,14 @@ function applyJobResult(
     job.calleeText,
     workingById,
   )
-  if (memberId === null) return
+  if (memberId === null) {
+    countProducerRejection(stats, "memberNotFound")
+    return
+  }
+  // Counted before the write, not inside it: the hover was read all the way to a callee
+  // either way, and it is that reading — not which of two identical call sites reached the
+  // key first — that the producer sum in §7.2 accounts for.
+  stats.hintsProduced += 1
   // First hint for a call site wins. Results are applied in job order, so
   // "first" is the lowest-sorted job rather than the quickest response — and
   // the only jobs that can collide now are two identical call sites, which

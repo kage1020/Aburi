@@ -211,11 +211,47 @@ Under any fallback:
       "requestsIssued": 5170,
       "requestsTimedOut": 12,
       "requestsFailed": 4,
-      "languagesDisabled": []
+      "languagesDisabled": [],
+      "hintsProduced": 340,
+      "hintsConsumed": 331,
+      "hintsRejected": {
+        "unparseableHover": 18,
+        "ownerClassNotFound": 4,
+        "memberNotFound": 2,
+        "kindMismatch": 0,
+        "targetDropped": 9
+      }
     }
   }
 }
 ```
+
+**Why the hint counters exist.** The seven counters above them describe requests, not answers. A request that comes back on time, with a body this pass cannot read a callee out of, is a healthy row in every one of them: it counts in `requestsIssued`, in neither failure counter, it resets the consecutive-failure counter in §6.1, and its file still lands in `filesEnriched`. So `requestsIssued: 5170, requestsFailed: 0` describes a run that resolved 331 extra call sites and a run that resolved none, and nothing in the document tells the two apart. The hint counters are that distinction, and they are the only place it is recorded — §6.2 keeps errors out of the IR, and a hint the pass declined to write leaves no other trace anywhere.
+
+The five buckets are one per place a hint can be lost, and they split across the two passes that can lose one:
+
+| Counter | Written by | Meaning |
+|---|---|---|
+| `hintsProduced` | enrichment (§5) | Hovers read all the way to a callee Symbol. Equal to the number of hints handed to the resolver except where two identical call sites share a key (§10.3): both are counted, and the first of them to be applied keeps the key. |
+| `hintsRejected.unparseableHover` | enrichment | The hover answered with no text payload the pass could read. A server correctly answering the specified `null` for a position it has nothing to say about lands here too, so a systematic mistake in *which* position the pass hovers surfaces in this bucket rather than in a failure counter. |
+| `hintsRejected.ownerClassNotFound` | enrichment | Text was read, but no owner class name appears in it, or the name it carries is not a class in the Symbol table. These are one bucket and not two — a hover-parser gap and a scan-coverage gap — because the outcome per call site is the same and the hover text that separates them is not in the IR to split them by. |
+| `hintsRejected.memberNotFound` | enrichment | The owner class is in the Symbol table and the member is not — usually a method inherited from a dependency the scan never read. |
+| `hintsConsumed` | resolver ([`call-resolution.md`](./call-resolution.md) §5.2) | Call sites the LSP tier turned into an edge. |
+| `hintsRejected.kindMismatch` | resolver | A hint was found at the call site's key, but its receiver kind is not the one the call site writes. The key already carries the target (§10.1), so this is the check that holds for a `receiverHints` map a caller assembled by hand: the resolver declines rather than emit an edge the hover never justified. |
+| `hintsRejected.targetDropped` | resolver | The hint named a Symbol dropped by a Category B/C rule, whose body is empty and whose fingerprints are zeroed. |
+
+**Precedence.** A hint can fail both resolver checks at once. The receiver kind is checked first and the buckets are exclusive, so such a hint counts as `kindMismatch` alone. The order is part of the contract for the same reason [`call-resolution.md`](./call-resolution.md) §8.1's bucket precedence is: without it the same input can be bucketed two ways, and §10's byte-identical guarantee does not hold across implementations.
+
+**Two sums hold inside the pipeline, and the document does not let a reader check either.** They are stated because they are what the counters mean, not as an integrity invariant — unlike `stats.callResolution`, whose sum *is* checked (invariant #15), because `totalCalls` can be recomputed from `symbols[]`. Neither right-hand side here can be:
+
+- **Producer**: `hintsProduced + unparseableHover + ownerClassNotFound + memberNotFound` = the hover requests that came back without a §6.1 failure. That count is not in the IR: `requestsIssued` also carries one `documentSymbol` per enriched file, so it cannot be reduced to hovers by subtracting the two failure counters. One case is carved out of the identity as well — a job whose caller Symbol has left the table between building the job and applying its answer is not counted anywhere, being an internal inconsistency rather than something the server did.
+- **Consumer**: `hintsConsumed + kindMismatch + targetDropped` = the call sites that found a hint at their key. That count is recorded nowhere at all. Only calls the untyped tiers all missed reach the LSP tier (§5.4), so a hint the untyped tier made unnecessary is neither consumed nor rejected, and a `hintsProduced` well above the consumer sum is the ordinary shape of a healthy scan rather than a fault. Both counters are call sites rather than distinct hints, which two identical call sites make visible: they share a key, so the one hint standing there is consumed twice.
+
+Making the producer sum checkable would mean emitting the hover count as its own field and adding an integrity invariant over it. That is a reasonable follow-up; it is not done here, because it would leave the consumer half still unverifiable and the asymmetry would read as an oversight rather than a decision. LE25..LE28 hold both sums from the test side instead.
+
+`hintsConsumed: 0` with a non-zero `hintsProduced` and empty rejection buckets therefore says the untyped tier got there first; `hintsConsumed: 0` with the buckets carrying the whole of `hintsProduced` says the typed tier ran and bought nothing.
+
+All three counters are Class B per [`ir-schema.md`](./ir-schema.md) §1.1 and are written whenever `stats.lspEnrichment` itself is, `hintsRejected` with all five buckets present and zeroed rather than omitted. Their absence means the document predates them.
 
 Stats live outside the fingerprint hash inputs ([`fingerprint.md`](./fingerprint.md) §3.1, §4.1, §5.1 — none of them list `stats.*`).
 
@@ -323,6 +359,13 @@ Concrete rules:
 - LE16 (`CallEdge.confidence` monotone): for any Symbol whose LSP-off `CallEdge.confidence` for a given edge is `C_untyped`, the LSP-on value `C_lsp` MUST satisfy `C_lsp ≥ C_untyped` on the `high > medium > low` lattice. The pass MUST NEVER lower a confidence.
 - LE17 (`inferredThrows` omit-vs-empty): for a Symbol whose LSP `hover` on called declarations returned no throws (either no calls declared throws, or LSP fell back), the emitted `Signature` JSON MUST NOT contain an `inferredThrows` key at all (per §6.2 / §7.1). Assert with a JSON-key existence check, not an array-length check.
 - LE18 (no silent retry): inject a request that fails with a transient error at time `t` and succeeds at time `t + Δ`. The pass MUST NOT reissue that request within the same scan; the field stays at the untyped-tier value and `stats.lspEnrichment.requestsTimedOut` (or the appropriate bucket) increments by 1.
+
+### 11.7 Hint observability — LE25..LE28
+
+- LE25 (a hover that answers nothing is counted, not absorbed): a `hover` that resolves with no readable text → `hintsRejected.unparseableHover` increments by 1, `hintsProduced` does not move, and the file still counts in `filesEnriched` with `requestsFailed` / `requestsTimedOut` at 0 — the counter is the only thing separating this run from one that produced a hint.
+- LE26 (a hover naming what the Symbol table does not have is bucketed by which half is missing): hover text carrying no owner class name, or one naming a class no Symbol carries → `hintsRejected.ownerClassNotFound` increments by 1; hover text naming a class the table has and a member it does not → `hintsRejected.memberNotFound` increments by 1. Neither moves `hintsProduced`.
+- LE27 (a hint the resolver declines is counted, not lost): a hand-built hint whose receiver kind is not the one its call site writes → `hintsRejected.kindMismatch` increments by 1; a hint naming a dropped Symbol → `hintsRejected.targetDropped` increments by 1. In both cases the call stays `resolved: null`, is bucketed into the `call-resolution.md` §8.1 diagnostics like any other miss, and `hintsConsumed` does not move.
+- LE28 (an all-rejected scan says so): a scan in which every produced hint is refused reports `hintsConsumed: 0` with the rejection buckets accounting for every hover, and reports it identically on a rerun (§10, LE15).
 
 ## 12. Config Surface
 

@@ -2,6 +2,7 @@ import type { LspClient, LspFailure, ServerFactory } from "@aburi/core"
 import type { Symbol as IRSymbol, LspServerConfig } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { checkoutFixture } from "../src/fixture"
+import { irValidator } from "../src/ir-schema"
 import { scanFixture } from "../src/scan-helper"
 
 /**
@@ -221,6 +222,89 @@ describe("receiver hints survive the trip from enrichment to the resolver", () =
         on.ir.symbols.find((sym) => sym.id.endsWith("#Service.helper"))?.id,
       )
       expect(resolvedByTarget.get("this.repo.save")).toBeNull()
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+/**
+ * lsp-enrichment.md §7.2 / §11.7, through the whole pipeline rather than the pass alone. The
+ * consumer half of the counters is written by the call resolver, which runs after enrichment
+ * has returned and holds none of its state, so only a scan can show that both halves reach
+ * `IR.stats`.
+ */
+describe("LSP hint counters in the scanned IR", () => {
+  it("says the typed tier bought nothing when every hover answers empty", async () => {
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        healthyMockFactory(),
+      )
+      const lsp = on.ir.stats.lspEnrichment
+      expect(lsp?.hintsProduced).toBe(0)
+      expect(lsp?.hintsConsumed).toBe(0)
+      expect(lsp?.hintsRejected?.unparseableHover).toBe(1)
+      // Everything else about this run reads as healthy, which is the point: without the
+      // counters above, it is indistinguishable from one whose server had answers.
+      expect(lsp?.requestsIssued ?? 0).toBeGreaterThan(0)
+      expect(lsp?.requestsFailed).toBe(0)
+      expect(lsp?.requestsTimedOut).toBe(0)
+      expect(lsp?.filesFellBack).toBe(0)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("reports a hint produced and consumed across the pass boundary", async () => {
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        hoveringMockFactory([]),
+      )
+      const lsp = on.ir.stats.lspEnrichment
+      expect(lsp?.hintsProduced).toBe(1)
+      // No untyped tier resolves a `this.` receiver, so the hint is the only thing that can
+      // have resolved `this.helper()` — and `hintsConsumed` has to say so from the other side
+      // of a pass boundary the enrichment stats do not cross on their own.
+      expect(lsp?.hintsConsumed).toBe(1)
+      expect(lsp?.hintsRejected).toEqual({
+        unparseableHover: 0,
+        ownerClassNotFound: 0,
+        memberNotFound: 0,
+        kindMismatch: 0,
+        targetDropped: 0,
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("emits a document ajv accepts, with the hint counters actually in it", async () => {
+    // `ir-schema-conformance.test.ts` scans with LSP off, so `stats.lspEnrichment` — and with
+    // it the whole `LspHintRejections` definition, its five required fields and its
+    // `additionalProperties: false` — is never put in front of the validator. This is the one
+    // place a real document carries them.
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const violations = await irValidator()
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        hoveringMockFactory([]),
+      )
+      expect(on.ir.stats.lspEnrichment?.hintsRejected).toBeDefined()
+      expect(violations(on.ir)).toEqual([])
     } finally {
       await cleanup()
     }
