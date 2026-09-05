@@ -9,10 +9,10 @@ import type {
   UnresolvedCallBuckets,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
+import { makeCallSiteKey } from "./call-site"
 import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
-import { makeReceiverHintKey } from "./lsp/enrich"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -44,9 +44,11 @@ export interface ResolveCallGraphInput {
   fileExtensions?: readonly string[]
   /**
    * LSP-derived per-call-site hints (call-resolution.md §5.2 / §5.3). Keys are
-   * `${file}:${line}`. Present only when the LSP enrichment pass ran; consulted
-   * as the LSP tier before the resolver would otherwise return `null`. Non-null
-   * `Call.resolved` values are still never overwritten (§5.4).
+   * `makeCallSiteKey(file, line, target)` — the same identity the hint producer
+   * files them under, so a hint reaches the one call it was resolved for and no
+   * other call sharing its line. Present only when the LSP enrichment pass ran;
+   * consulted as the LSP tier before the resolver would otherwise return
+   * `null`. Non-null `Call.resolved` values are still never overwritten (§5.4).
    */
   receiverHints?: ReadonlyMap<string, ReceiverHint>
   /**
@@ -64,17 +66,6 @@ export interface ResolveCallGraphInput {
    * The set feeds diagnostics only — it never changes which calls resolve.
    */
   dynamicCallSites?: ReadonlySet<string>
-}
-
-/**
- * Identity of one call site for the side channels that cannot ride along in the
- * IR. `line` alone would collide on `a().b(c().d())`; adding the normalized
- * target separates the two. The key survives the `(target, line)` re-sort the
- * extraction pipeline applies to `calls[]` because it depends on neither
- * position nor order.
- */
-export function makeCallSiteKey(file: string, line: number, target: string): string {
-  return `${file}\t${line}\t${target}`
 }
 
 export interface ResolveCallGraphResult {
@@ -384,8 +375,18 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  * dispatch therefore lands at `high` today. Splitting it needs a walk-depth
  * field on the hint, not a change in this function.
  *
- * Two invariants of the LSP tier are load-bearing, and both hold by the shape of
- * the surrounding pass rather than by a check inside this function:
+ * A hint is looked up by the full call-site key — file, line, **and** target —
+ * and is then checked against the call it would resolve: `ReceiverHint.kind`
+ * must match the receiver the target leads with. Keying by line alone made a
+ * hint for `this.foo()` apply to every other call on that line, so an unrelated
+ * callee resolved to a class method, dropped out of the `unresolved`
+ * diagnostics, and reached `propagateEffects` as an edge no source line
+ * justifies. Both checks are cheap and neither is redundant: the key stops the
+ * collision the producer could create, the `kind` check stops one a hand-built
+ * hint map could.
+ *
+ * Two further invariants of the LSP tier are load-bearing, and both hold by the
+ * shape of the surrounding pass rather than by a check inside this function:
  *
  * - **An already-resolved call is never overwritten (§5.4).** Two guards in
  *   `resolveCallGraph` stand between a resolved call and this function, and both
@@ -421,12 +422,25 @@ function resolveViaLspHint(input: {
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   keptSymbolIds: ReadonlySet<SymbolId>
 }): ResolutionHit | null {
-  const key = makeReceiverHintKey(input.caller.source.file, input.call.line)
+  const key = makeCallSiteKey(input.caller.source.file, input.call.line, input.call.target)
   const hint = input.receiverHints.get(key)
   if (hint === undefined) return null
+  if (receiverHead(input.call.target) !== hint.kind) return null
   const target = hint.targetSymbolId
   if (!input.keptSymbolIds.has(target)) return null
   return { id: target, confidence: "high" }
+}
+
+/**
+ * The receiver segment of a normalized call target: `"this"` for `this.foo`,
+ * `"super"` for `super.a.foo`, and whatever else the target leads with
+ * otherwise. Compared against `ReceiverHint.kind` so a hint can only ever be
+ * spent on the receiver shape it was produced for — the key already carries the
+ * target, so this is the second lock on the same door, and it is the one that
+ * holds if a caller assembles `receiverHints` by hand.
+ */
+function receiverHead(target: string): string | undefined {
+  return target.split(".").find((segment) => segment.length > 0)
 }
 
 /**

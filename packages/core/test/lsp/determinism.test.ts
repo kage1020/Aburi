@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { makeCallSiteKey } from "../../src/call-site"
+import { resolveCallGraph } from "../../src/callgraph"
 import { enrichWithLsp } from "../../src/lsp"
 import {
   makeClassSymbol,
@@ -78,6 +80,73 @@ describe("LSP determinism", () => {
       const sorted = [...impls].sort()
       expect(impls).toEqual(sorted)
     }
+  })
+
+  it("gives each call on a shared line its own hint, whichever hover answers first", async () => {
+    // LE24. `this.foo(this.baz())` is one line and two call sites. Keyed by line
+    // alone the two collided, and the surviving hint was whichever hover
+    // answered last: the same input resolved `this.foo` to `C.baz` against a
+    // fast server and to `C.foo` against a slow one. The two runs below invert
+    // exactly that latency, so a key that cannot tell the calls apart — or an
+    // apply order taken from the responses instead of from the jobs — changes
+    // the answer between them.
+    const symbols = () => [
+      makeClassSymbol("src/a.ts", "C", 1),
+      makeMethodSymbol("src/a.ts", "C", "foo", 2),
+      makeMethodSymbol("src/a.ts", "C", "baz", 3),
+      makeMethodSymbol("src/a.ts", "C", "bar", 4, [
+        { target: "this.foo", line: 5 },
+        { target: "this.baz", line: 5 },
+      ]),
+    ]
+    const contents = {
+      "src/a.ts": "class C {\n  foo(v) {}\n  baz() {}\n  bar() {\n    this.foo(this.baz())\n  }\n}",
+    }
+    // Columns of the two receivers on line 5, as `findMethodColumn` reports them.
+    const FOO_COLUMN = 13
+    const BAZ_COLUMN = 22
+    const makeFactory = (slowColumn: number) =>
+      mockServerFactory((_lang, client) => {
+        client.installHandler(DOC_SYMBOL_METHOD, () => [])
+        client.installHandler(HOVER_METHOD, async (params) => {
+          const character = (params as { position: { character: number } }).position.character
+          if (character === slowColumn) await new Promise((r) => setTimeout(r, 20))
+          const method = character === FOO_COLUMN ? "foo" : "baz"
+          return { contents: `(method) C.${method}(): void` }
+        })
+      })
+    const run = async (slowColumn: number) =>
+      await enrichWithLsp(
+        makeEnrichmentInput({
+          symbols: symbols(),
+          fileContents: contents,
+          serverFactory: makeFactory(slowColumn),
+        }),
+      )
+    const slowFoo = await run(FOO_COLUMN)
+    const slowBaz = await run(BAZ_COLUMN)
+
+    expect(serialize(slowFoo.receiverHints)).toBe(serialize(slowBaz.receiverHints))
+    expect([...slowFoo.receiverHints].sort()).toEqual([
+      [
+        makeCallSiteKey("src/a.ts", 5, "this.baz"),
+        { kind: "this", targetSymbolId: "ts:src/a.ts#C.baz" },
+      ],
+      [
+        makeCallSiteKey("src/a.ts", 5, "this.foo"),
+        { kind: "this", targetSymbolId: "ts:src/a.ts#C.foo" },
+      ],
+    ])
+
+    // And the hints reach the resolver as two distinct edges rather than one
+    // doubled: this is the shape `propagateEffects` consumes.
+    const resolved = resolveCallGraph({
+      symbols: slowFoo.symbols,
+      importsByFile: new Map(),
+      receiverHints: slowFoo.receiverHints,
+      implementerHints: slowFoo.implementerHints,
+    })
+    expect(resolved.edges.map((e) => e.to)).toEqual(["ts:src/a.ts#C.baz", "ts:src/a.ts#C.foo"])
   })
 
   it("produces identical stats when run twice back to back", async () => {

@@ -272,9 +272,9 @@ The pass is a pure function of `(SymbolCandidate[], lspConfig, serverResponses)`
 
 Concrete rules:
 
-1. Every LSP response is captured in an in-memory cache keyed by `(file, line, column, requestKind)` **before** any IR field is written. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5.
+1. Every LSP response is captured in an in-memory cache keyed by `(file, line, column, requestKind)` **before** any IR field is written. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5. A per-call-site *output* of the pass — a receiver hint (§5) — is keyed by `(file, line, target)`, never by `(file, line)`: one line holds as many call sites as it has calls, and a hint filed without the target is spent on whichever of them the resolver reaches.
 2. Ambiguity (multi-result `textDocument/implementation`, multi-result `textDocument/typeDefinition`) is resolved by lexicographic tiebreak on destination Symbol id. In the multi-implementer case for `textDocument/implementation`, the pass **does not** apply the tiebreak — it leaves `Call.resolved` at `null` (matches [`call-resolution.md`](./call-resolution.md) §5.3 semantics: pick a single implementer only when there is exactly one, unless a framework hook narrows the set).
-3. Parallel LSP workers (from §4.3 concurrency) populate the cache in nondeterministic wall-clock order but the cache is consumed in a fixed order — Symbol id ascending, then call-site line ascending — when writing to `SymbolCandidate` records.
+3. Parallel LSP workers (from §4.3 concurrency) populate the cache in nondeterministic wall-clock order but the cache is consumed in a fixed order — Symbol id ascending, then call-site line ascending, then call target ascending — when writing to `SymbolCandidate` records. Consumption starts only once every worker for the file has stopped: a write issued from inside a worker takes its order from the server's pace, which is what this rule denies it. Where two entries would write the same call site, the first in that order wins.
 4. Cold-cache warm-up differences between runs are irrelevant because the pass does not use per-response timing as a signal.
 5. Silent retries with exponential backoff are prohibited. A request either succeeds within `requestTimeoutMs` or triggers per-request fallback. Retry-on-load would make outcomes depend on machine load.
 6. Fallback state (§6.1) is derived deterministically from the cache. Given identical `serverResponses`, identical files will fall back and identical files will succeed.
@@ -315,6 +315,7 @@ Concrete rules:
 - LE13: reorder file processing (single-threaded vs concurrent workers) → byte-identical IR.
 - LE14: language server returns implementers in reverse order between two runs → byte-identical `Call.resolved` values (tiebreak in §10.2).
 - LE15: identical scan run twice back-to-back on the same fixture → byte-identical IR including `stats.lspEnrichment` counts.
+- LE24: two `this.*` calls on one line (`this.foo(this.baz())`), with the server answering one of the two hovers slowly → each call resolves to its own callee, and inverting which hover is the slow one between runs changes nothing in the IR. Guards both halves of §10.3: a hint keyed without the target resolves both calls to one callee, and a response applied from inside its worker lets the slower hover decide which.
 
 ### 11.6 Behavioral guards — LE16..LE18
 

@@ -1,5 +1,6 @@
 import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import { makeCallSiteKey } from "../src/call-site"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
 import { makeLanguageId } from "../src/id"
 import { makeSymbol, minimalIR, type SymbolOverrides, symbolId } from "./fixtures/ir"
@@ -222,12 +223,69 @@ describe("resolveCallGraph", () => {
       symbols: [caller, helper, other],
       importsByFile: new Map(),
       receiverHints: new Map([
-        ["src/a.ts:7", { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.other") }],
+        [
+          makeCallSiteKey("src/a.ts", 7, "this.helper"),
+          { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.other") },
+        ],
       ]),
     })
     expect(result.symbols[0]?.calls[0]?.resolved).toBe("ts:src/a.ts#Svc.helper")
     expect(result.edges).toEqual([])
     expect(result.diagnostics).toEqual([])
+  })
+
+  it("spends a receiver hint only on the call it was produced for, not on its line-mates", () => {
+    // A hint keyed by `(file, line)` alone was applied to whatever else shared
+    // the line, so `sendPaymentToBank()` next to `this.charge()` resolved to
+    // `Svc.charge`: an edge no source line justifies, a `Dependency` the reader
+    // cannot find, and — because the call had a `resolved` — one fewer entry in
+    // the `unresolved` diagnostics that would have shown the mistake.
+    const caller = withCalls("ts:src/a.ts#Svc.run", [
+      { target: "this.charge", line: 4 },
+      { target: "sendPaymentToBank", line: 4 },
+    ])
+    const charge = makeSymbol("ts:src/a.ts#Svc.charge", { kind: "method" })
+    const result = resolveCallGraph({
+      symbols: [caller, charge],
+      importsByFile: new Map(),
+      receiverHints: new Map([
+        [
+          makeCallSiteKey("src/a.ts", 4, "this.charge"),
+          { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.charge") },
+        ],
+      ]),
+    })
+    const resolvedByTarget = new Map(
+      (result.symbols[0]?.calls ?? []).map((c) => [c.target, c.resolved]),
+    )
+    expect(resolvedByTarget.get("this.charge")).toBe("ts:src/a.ts#Svc.charge")
+    expect(resolvedByTarget.get("sendPaymentToBank")).toBeNull()
+    expect(result.edges.map((e) => e.to)).toEqual(["ts:src/a.ts#Svc.charge"])
+    expect(result.diagnostics.map((d) => d.target)).toEqual(["sendPaymentToBank"])
+    expect(result.stats.resolvedCalls).toBe(1)
+  })
+
+  it("refuses a hint whose kind disagrees with the receiver the call names", () => {
+    // The key already carries the target, so the producer cannot file a `super`
+    // hint against a `this.` call — but `receiverHints` is a public input and a
+    // caller assembling one by hand can. A mismatched hint is a hint for some
+    // other call site, and spending it would fabricate the same edge the key
+    // now prevents.
+    const caller = withCalls("ts:src/a.ts#Sub.run", [{ target: "this.foo", line: 3 }])
+    const foo = makeSymbol("ts:src/a.ts#Base.foo", { kind: "method" })
+    const result = resolveCallGraph({
+      symbols: [caller, foo],
+      importsByFile: new Map(),
+      receiverHints: new Map([
+        [
+          makeCallSiteKey("src/a.ts", 3, "this.foo"),
+          { kind: "super", targetSymbolId: symbolId("ts:src/a.ts#Base.foo") },
+        ],
+      ]),
+    })
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+    expect(result.edges).toEqual([])
+    expect(result.diagnostics.map((d) => d.target)).toEqual(["this.foo"])
   })
 
   it("skips dropped Symbols as call targets and does not fabricate edges into them", () => {

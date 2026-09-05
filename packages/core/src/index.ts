@@ -1,6 +1,6 @@
+export { makeCallSiteKey } from "./call-site"
 export {
   type CallEdge,
-  makeCallSiteKey,
   type ResolveCallGraphInput,
   type ResolveCallGraphResult,
   reconstructCallEdgesFromIR,
@@ -69,7 +69,6 @@ export {
   type LspError,
   type LspFailure,
   type LspTimeout,
-  makeReceiverHintKey,
   type ReceiverHint,
   type ServerFactory,
 } from "./lsp"

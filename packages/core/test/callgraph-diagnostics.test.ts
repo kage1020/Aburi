@@ -1,6 +1,7 @@
 import type { ImportEdge, Symbol as IRSymbol, Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { makeCallSiteKey, resolveCallGraph } from "../src/callgraph"
+import { makeCallSiteKey } from "../src/call-site"
+import { resolveCallGraph } from "../src/callgraph"
 import { makeSymbol, type SymbolOverrides, symbolId } from "./fixtures/ir"
 
 // call-resolution.md §8.1 — every `resolved: null` is a first-class outcome and the
@@ -273,7 +274,10 @@ describe("resolveCallGraph — unresolved-call diagnostics (§8.1)", () => {
       symbols: [caller, droppedTarget],
       importsByFile: new Map(),
       receiverHints: new Map([
-        ["src/a.ts:6", { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.helper") }],
+        [
+          makeCallSiteKey("src/a.ts", 6, "this.helper"),
+          { kind: "this", targetSymbolId: symbolId("ts:src/a.ts#Svc.helper") },
+        ],
       ]),
     })
     expect(result.edges).toEqual([])

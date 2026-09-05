@@ -1,5 +1,6 @@
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import { makeCallSiteKey } from "../../src/call-site"
 import { resolveCallGraph } from "../../src/callgraph"
 import { enrichWithLsp } from "../../src/lsp"
 import { makeClassSymbol, makeEnrichmentInput, makeMethodSymbol } from "./fixtures/enrichment-ctx"
@@ -28,7 +29,7 @@ describe("LSP enrichment", () => {
         serverFactory: factory,
       }),
     )
-    const hint = enrichment.receiverHints.get("src/a.ts:4")
+    const hint = enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 4, "this.foo"))
     expect(hint).toBeDefined()
     expect(hint?.kind).toBe("this")
     expect(hint?.targetSymbolId).toBe("ts:src/a.ts#C.foo")
@@ -95,7 +96,7 @@ describe("LSP enrichment", () => {
         serverFactory: factory,
       }),
     )
-    const hint = enrichment.receiverHints.get("src/a.ts:6")
+    const hint = enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 6, "super.foo"))
     expect(hint?.kind).toBe("super")
     expect(hint?.targetSymbolId).toBe("ts:src/a.ts#Base.foo")
   })
