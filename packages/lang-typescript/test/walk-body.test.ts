@@ -93,6 +93,44 @@ describe("walkBody — rules (LP16-LP20)", () => {
     const call = calls.find((c) => c.target === "doThing")
     expect(call?.literalArgs).toEqual(["users", "42", null])
   })
+
+  it("counts arguments, not the comments written between them", async () => {
+    // Comments are grammar `extras`, so tree-sitter hangs them wherever they were
+    // written — a comment inside the parentheses is a named child of the argument list
+    // like any argument is. Counting it made `db.delete(\n  users, // why\n)` a
+    // two-argument call, which an effect plugin reads as a different API entirely.
+    const { calls } = await walkFirstSymbol(
+      "export function f() { doThing(\n  users, // soft delete is not used\n) }",
+    )
+    const call = calls.find((c) => c.target === "doThing")
+    expect(call?.argumentCount).toBe(1)
+    expect(call?.literalArgs).toEqual([null])
+  })
+
+  it("keeps literalArgs aligned when a comment leads the argument list", async () => {
+    // The positional damage is the worse half: a leading comment took slot 0, so a
+    // reader asking whether the first argument is a literal was asking about a comment.
+    const { calls } = await walkFirstSymbol(
+      "export function f() { doThing(/* the table */ 'users', x) }",
+    )
+    const call = calls.find((c) => c.target === "doThing")
+    expect(call?.argumentCount).toBe(2)
+    expect(call?.literalArgs).toEqual(["users", null])
+  })
+
+  it("counts a block comment between two arguments as neither", async () => {
+    const { calls } = await walkFirstSymbol("export function f() { doThing(a, /* and */ b) }")
+    const call = calls.find((c) => c.target === "doThing")
+    expect(call?.argumentCount).toBe(2)
+    expect(call?.literalArgs).toEqual([null, null])
+  })
+
+  it("reports a call whose arguments are only a comment as zero-argument", async () => {
+    const { calls } = await walkFirstSymbol("export function f() { doThing(/* nothing */) }")
+    const call = calls.find((c) => c.target === "doThing")
+    expect(call?.argumentCount).toBe(0)
+    expect(call?.literalArgs).toEqual([])
+  })
 })
 
 // The `dynamic` diagnostic bucket of call-resolution.md §8.1 cannot be recovered

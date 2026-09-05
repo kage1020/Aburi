@@ -38,6 +38,7 @@ async function classifyCalls(
     symbolName: string
     target: string
     effectId: string | null
+    confidence: string | null
     derivedBy: string | null
   }> = []
   for (const symbol of candidates) {
@@ -55,6 +56,7 @@ async function classifyCalls(
         symbolName: symbol.name,
         target: call.target,
         effectId: classification?.effectId ?? null,
+        confidence: classification?.confidence ?? null,
         derivedBy: classification?.derivedBy ?? null,
       })
     }
@@ -221,6 +223,68 @@ export async function bulk(db: ReturnType<typeof drizzle>) {
     const writes = results.filter((r) => r.effectId === "db.write")
     expect(writes).toHaveLength(2)
     for (const w of writes) expect(w.target).toBe("db.insert")
+  })
+
+  it("does not classify an Express route registration beside the queries", async () => {
+    // The reported reproduction: Express and Drizzle in one file, which the import gate
+    // waves through wholesale. `router.delete("/users/:id", handler)` was recorded as a
+    // high-confidence db.write; the argument shape is what rules it out, since no Drizzle
+    // root takes a string literal or a second argument.
+    const results = await classifyCalls(
+      "src/routes/users.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js"
+import type { Router } from "express"
+import { users } from "./schema"
+export function mountUserRoutes(router: Router, db: ReturnType<typeof drizzle>) {
+  router.delete("/users/:id", async (req, res) => {
+    await db.delete(users)
+    res.json({ ok: true })
+  })
+}`,
+      [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
+    const route = results.find((r) => r.target === "router.delete")
+    expect(route).toBeDefined()
+    expect(route?.effectId).toBeNull()
+    const write = results.find((r) => r.target === "db.delete")
+    expect(write?.effectId).toBe("db.write")
+    expect(write?.confidence).toBe("high")
+  })
+
+  it("keeps a write whose argument list carries a comment", async () => {
+    // Comments are grammar `extras`: tree-sitter hangs them inside the argument list, and
+    // counting them made this a two-argument call. Nothing downstream would have said so —
+    // the root would answer null and the `.where` link is dropped by chain-collapse, so the
+    // DELETE would simply not exist in the IR.
+    const results = await classifyCalls(
+      "src/services/commented.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js"
+import { users } from "./schema"
+export async function removeAll(db: ReturnType<typeof drizzle>) {
+  return await db.delete(
+    users, // soft delete is not used here
+  )
+}`,
+      [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
+    const write = results.find((r) => r.target === "db.delete")
+    expect(write?.effectId).toBe("db.write")
+    expect(write?.confidence).toBe("high")
+  })
+
+  it("records a query on an unrecognized binding at medium rather than dropping it", async () => {
+    const results = await classifyCalls(
+      "src/services/house-style.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js"
+import { users } from "./schema"
+export async function listUsers(gateway: ReturnType<typeof drizzle>) {
+  return await gateway.select().from(users)
+}`,
+      [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
+    const read = results.find((r) => r.target === "gateway.select")
+    expect(read?.effectId).toBe("db.read")
+    expect(read?.confidence).toBe("medium")
   })
 
   it("emits derivedBy under the shared effects-plugin:drizzle prefix", async () => {

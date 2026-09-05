@@ -17,3 +17,9 @@ export {
   isDrizzleWriteMethod,
 } from "./methods"
 export { DrizzleEffectsPlugin, drizzleEffectsPlugin } from "./plugin"
+export {
+  classificationConfidence,
+  DRIZZLE_CLIENT_WORDS,
+  type DrizzleClientWord,
+  namesDrizzleClient,
+} from "./receivers"

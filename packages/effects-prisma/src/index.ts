@@ -14,3 +14,11 @@ export {
   type PrismaWriteMethod,
 } from "./methods"
 export { PrismaEffectsPlugin, prismaEffectsPlugin } from "./plugin"
+export {
+  classificationConfidence,
+  namesPrismaClient,
+  PRISMA_CLIENT_WORDS,
+  PRISMA_DELEGATE_MAX_ARGUMENTS,
+  PRISMA_TRANSACTION_MAX_ARGUMENTS,
+  type PrismaClientWord,
+} from "./receivers"
