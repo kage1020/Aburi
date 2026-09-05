@@ -69,9 +69,12 @@ export {
   type LspClient,
   type LspError,
   type LspFailure,
+  type LspHintUsage,
+  type LspProducerStats,
   type LspTimeout,
   type ReceiverHint,
   type ServerFactory,
+  withHintUsage,
 } from "./lsp"
 export {
   type PropagateInput,

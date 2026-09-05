@@ -298,7 +298,7 @@ requestsFailed: number
  */
 languagesDisabled: LanguageId[]
 /**
- * Receiver hints the pass wrote from a hover it could read all the way to a callee Symbol (lsp-enrichment.md §7.2). Counts conversions, not surviving map entries: two call sites on one line share a hint key, so the second replaces the first. Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was produced.
+ * Hovers the pass read all the way to a callee Symbol (lsp-enrichment.md §7.2). Equal to the number of hints handed to the resolver except where two identical call sites share a key: both are counted here, and the first of them to be applied is the one that keeps the key. Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was produced.
  */
 hintsProduced?: number
 /**
@@ -312,11 +312,11 @@ hintsRejected?: LspHintRejections
  */
 export interface LspHintRejections {
 /**
- * Hover requests that answered without a text payload the pass could read. The request itself succeeded, so it is counted in requestsIssued and in neither failure counter.
+ * Hover requests that answered without a text payload the pass could read. The request itself succeeded, so it is counted in requestsIssued and in neither failure counter. A server answering the LSP-specified null for a position it has nothing to say about lands here too, so a systematic mistake in which position the pass hovers shows up in this bucket rather than in a failure counter.
  */
 unparseableHover: number
 /**
- * Hover text the pass read but could not attribute to a class: either no owner class name appears in it, or the name it names is not a class in the Symbol table.
+ * Hover text the pass read but could not attribute to a class the Symbol table holds: either no owner class name appears in it, or the name it carries is not a class the scan produced. One bucket rather than two because the outcome per call site is the same and the hover text that separates the two causes is not in the IR.
  */
 ownerClassNotFound: number
 /**
@@ -324,11 +324,11 @@ ownerClassNotFound: number
  */
 memberNotFound: number
 /**
- * Call sites where a hint was found for the line but its receiver kind is not the one the call site writes. Hints are keyed by file and line, so a line holding both a this. and a super. call offers each of them the other's hint; the resolver declines rather than emitting an edge the hover never justified.
+ * Call sites where a hint was found at the call site's key but its receiver kind is not the one the call site writes. The key carries the target, so this is the check that holds for a receiverHints map a caller assembled by hand: the resolver declines rather than emitting an edge the hover never justified. It is checked before the target is looked up, so a hint failing this and targetDropped both is counted here only.
  */
 kindMismatch: number
 /**
- * Call sites whose hint named a Symbol dropped by a Category B/C rule. A dropped Symbol carries an empty body and zeroed fingerprints, so an edge into it would misstate what the caller reaches.
+ * Call sites whose hint named a Symbol dropped by a Category B/C rule. A dropped Symbol carries an empty body and zeroed fingerprints, so an edge into it would misstate what the caller reaches. Counted only for a hint whose receiver kind already matched, per kindMismatch.
  */
 targetDropped: number
 }

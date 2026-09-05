@@ -612,7 +612,37 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
         `LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.`,
       )
     }
+    reportHints(lsp, say)
   }
+}
+
+/**
+ * What the typed tier actually bought, on the one channel a person reads.
+ *
+ * The request line above cannot answer it: a hover that comes back on time carrying nothing
+ * usable is a healthy row in every counter it prints (lsp-enrichment.md §7.2). So this line
+ * fires whenever the pass produced a hint or refused one, and stays quiet only for a run with
+ * neither — a workspace with no `this.` / `super.` call sites left for the LSP tier, where
+ * there is nothing to report rather than nothing to say.
+ *
+ * The rejection total is printed rather than the five buckets: a count is what says whether to
+ * go and look, and `stats.lspEnrichment.hintsRejected` in the IR is where looking happens.
+ */
+function reportHints(lsp: LspEnrichmentStats, say: (line: string) => void): void {
+  const produced = lsp.hintsProduced ?? 0
+  const rejected = lsp.hintsRejected
+  const refused =
+    rejected === undefined
+      ? 0
+      : rejected.unparseableHover +
+        rejected.ownerClassNotFound +
+        rejected.memberNotFound +
+        rejected.kindMismatch +
+        rejected.targetDropped
+  if (produced === 0 && refused === 0) return
+  say(
+    `LSP receiver hints: ${produced} produced · ${lsp.hintsConsumed ?? 0} resolved a call · ${refused} rejected.`,
+  )
 }
 
 /**

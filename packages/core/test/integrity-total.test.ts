@@ -80,6 +80,17 @@ function richIR(): IR {
     requestsTimedOut: 0,
     requestsFailed: 0,
     languagesDisabled: [],
+    // The §7.2 hint counters, so #20 actually walks `LspHintRejections` — the nested record
+    // is the one container in the Document that no other fixture here reaches.
+    hintsProduced: 0,
+    hintsConsumed: 0,
+    hintsRejected: {
+      unparseableHover: 0,
+      ownerClassNotFound: 0,
+      memberNotFound: 0,
+      kindMismatch: 0,
+      targetDropped: 0,
+    },
   }
   ir.stats.effectClassifyTimeouts = [{ plugin: "p", symbolId: "ts:src/a.ts#foo", timeoutMs: 10 }]
   return ir

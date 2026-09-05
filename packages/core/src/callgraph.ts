@@ -14,7 +14,7 @@ import { CoreError } from "./errors"
 import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
-import { emptyHintUsage, type LspHintUsage } from "./lsp/stats"
+import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -98,11 +98,11 @@ export interface ResolveCallGraphResult {
   diagnostics: UnresolvedCallDiagnostic[]
   /**
    * What the LSP tier did with the hints it was handed — the consumer half of
-   * `stats.lspEnrichment` (lsp-enrichment.md §7.2), which the enrichment pass
-   * cannot see because it has already returned by the time this runs. All zero
-   * when no hints were supplied. The caller folds it in with `withHintUsage`.
+   * `stats.lspEnrichment` (lsp-enrichment.md §7.2). All zero when no hints were
+   * supplied. See `LspHintUsage` for why it comes back as a value; the caller
+   * folds it into the producer half with `withHintUsage`.
    */
-  lspHintUsage: LspHintUsage
+  lspHintUsage: Readonly<LspHintUsage>
 }
 
 const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]
@@ -469,6 +469,11 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  * refusal and is not counted: the untyped tier resolving a call first is the
  * ordinary case, not a fault.
  *
+ * The order of the two checks is part of §7.2's contract rather than an accident
+ * of writing: a hint that fails both is counted as `kindMismatch` alone. Without
+ * a fixed order the same input could be bucketed two ways, which is the kind of
+ * drift LE15's byte-identical guarantee exists to forbid.
+ *
  * Interface-tier resolution (§5.3) is out of scope until the IR carries
  * `implements` edges — until then any `implementerHints` entries pass through
  * untouched.
@@ -503,7 +508,7 @@ function resolveViaLspHint(input: {
 type LspHintOutcome =
   | { outcome: "hit"; hit: ResolutionHit }
   | { outcome: "absent" }
-  | { outcome: "rejected"; reason: "kindMismatch" | "targetDropped" }
+  | { outcome: "rejected"; reason: LspConsumerRejection }
 
 const NO_HINT: LspHintOutcome = { outcome: "absent" }
 

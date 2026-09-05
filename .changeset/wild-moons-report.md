@@ -1,9 +1,10 @@
 ---
+"@aburi/cli": minor
 "@aburi/core": minor
 "@aburi/types": minor
 ---
 
-Say how many receiver hints the typed tier produced, used, and threw away
+`stats.lspEnrichment` says how many receiver hints the typed tier produced, used, and threw away
 
 `stats.lspEnrichment` counted requests and files and nothing about answers, so the one number a
 reader reaches for — did turning LSP on buy anything? — was not in the document. A hover that
@@ -27,10 +28,19 @@ The three are additive optional fields on `LspEnrichmentStats` in `aburi.ir.v1`,
 `hintsRejected` carrying five zeroes rather than being omitted, so absence means the document
 predates the counters. A new `LspHintRejections` definition holds the buckets.
 
+Neither sum is checkable from the finished document, and §7.2 now says so rather than reading
+like an integrity invariant: `requestsIssued` also carries a `documentSymbol` per file, so the
+hover count the producer identity balances against is not an IR quantity, and the call sites that
+found a hint at their key are recorded nowhere. The tests hold both sums instead.
+
 The two halves are written by two passes, and the second cannot reach the first: the resolver
 runs after `enrichWithLsp` has returned. `ResolveCallGraphResult` therefore carries a new
 `lspHintUsage` — what the LSP tier consumed and what it declined — rather than the resolver being
 handed a stats builder it would otherwise depend on having, and `withHintUsage` folds the two
-together in the scan pipeline. A caller assembling those passes itself gets the producer half from
-`enrichWithLsp` and has to fold in the consumer half the same way; without that, `hintsConsumed`
-and the resolver's two buckets stay at `0`.
+together. `enrichWithLsp` returns the producer half as `LspProducerStats`, whose three counters
+are required where the IR type has them optional, so a caller assembling the passes itself is
+told by the type that `withHintUsage` is what finishes the record. Without that fold
+`hintsConsumed` and the resolver's two buckets stay at `0`.
+
+`aburi scan` prints the three totals when a run produced or refused a hint, so the question the
+counters answer does not require reading the IR.

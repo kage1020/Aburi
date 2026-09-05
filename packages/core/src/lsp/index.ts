@@ -16,7 +16,21 @@ export {
   requestImplementation,
   requestTypeDefinition,
 } from "./requests"
-export type { LspHintRejectionCounts, LspHintUsage, LspStatsBuilder } from "./stats"
-export { createStatsBuilder, emptyHintUsage, finalizeStats, withHintUsage } from "./stats"
+export type {
+  LspConsumerRejection,
+  LspHintRejectionCounts,
+  LspHintRejectionReason,
+  LspHintUsage,
+  LspProducerRejection,
+  LspProducerStats,
+  LspStatsBuilder,
+} from "./stats"
+export {
+  countProducerRejection,
+  createStatsBuilder,
+  emptyHintUsage,
+  finalizeStats,
+  withHintUsage,
+} from "./stats"
 export type { SpawnedServer } from "./transport"
 export { spawnStdioServer } from "./transport"

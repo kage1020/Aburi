@@ -254,7 +254,7 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 |---|---|---|
 | `local-scope` | resolved to a local variable / parameter | `callback(x)` inside `foo(callback: () => void)` |
 | `external` | resolved to a bare specifier import | `lodash.sortBy(...)` |
-| `dynamic` | receiver is an expression, not a name | `getRepo().save(...)` |
+| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)` |
 | `ambiguous` | multiple candidates | two `User.save` in different components with no explicit import |
 | `no-match` | no candidate found | typo, or callee not in workspace and not imported |
 
@@ -263,7 +263,7 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 A single call can fit several descriptions at once — a parameter that happens to share a name with an imported package, an ambiguous qname reached through an expression receiver. The reviewer needs one stable answer per call site, so the resolver assigns the **most specific cause** in this fixed order:
 
 1. `local-scope` — the §4.2 shadow guard fired, so the resolver never looked outward at all.
-2. `dynamic` — the receiver is not a name: an expression receiver reported by the language plugin, or `this` / `super` with no LSP hint (§4.7). `this.save()` is filed here because in the untyped tier the receiver's identity is a runtime property of the class hierarchy, exactly like `getRepo().save()`; there is no name for the resolver to look up.
+2. `dynamic` — the receiver is not a name: an expression receiver reported by the language plugin, or `this` / `super` with no *usable* LSP hint (§4.7) — no hint at all, or one the LSP tier declined (§5.2). `this.save()` is filed here because in the untyped tier the receiver's identity is a runtime property of the class hierarchy, exactly like `getRepo().save()`; there is no name for the resolver to look up. The bucket therefore does not separate a call site the type layer never spoke about from one whose hint was refused; `stats.lspEnrichment.hintsRejected` ([`lsp-enrichment.md`](./lsp-enrichment.md) §7.2) is where that distinction is recorded, per run rather than per call site.
 3. `ambiguous` — some tier found the callee and refused to choose between candidates (§7.1). The competing Symbol ids are recorded, deduplicated and lex-sorted.
 4. `external` — the head of the target is bound in the caller's file by an import whose specifier is not relative. §4.4.1 resolves relative specifiers only, so such a callee is out of reach by construction rather than by accident.
 5. `no-match` — nothing matched anywhere.

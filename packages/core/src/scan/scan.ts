@@ -502,10 +502,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols: resolvedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
-    // The consumer half of `stats.lspEnrichment` (lsp-enrichment.md §7.2) is folded in here
-    // rather than inside the resolver: the resolver runs whether or not the LSP pass did, and
-    // handing it the pass's builder would make a counter that describes hints depend on a
-    // pass that may never have produced any.
+    // Where the two halves of `stats.lspEnrichment` meet — see `LspHintUsage` for why the
+    // resolver reports rather than writes. This is the only call site that completes the
+    // §7.2 record.
     lspEnrichment:
       enrichment.stats === undefined
         ? undefined

@@ -2,6 +2,7 @@ import type { LspClient, LspFailure, ServerFactory } from "@aburi/core"
 import type { Symbol as IRSymbol, LspServerConfig } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { checkoutFixture } from "../src/fixture"
+import { irValidator } from "../src/ir-schema"
 import { scanFixture } from "../src/scan-helper"
 
 /**
@@ -282,6 +283,28 @@ describe("LSP hint counters in the scanned IR", () => {
         kindMismatch: 0,
         targetDropped: 0,
       })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("emits a document ajv accepts, with the hint counters actually in it", async () => {
+    // `ir-schema-conformance.test.ts` scans with LSP off, so `stats.lspEnrichment` — and with
+    // it the whole `LspHintRejections` definition, its five required fields and its
+    // `additionalProperties: false` — is never put in front of the validator. This is the one
+    // place a real document carries them.
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const violations = await irValidator()
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        hoveringMockFactory([]),
+      )
+      expect(on.ir.stats.lspEnrichment?.hintsRejected).toBeDefined()
+      expect(violations(on.ir)).toEqual([])
     } finally {
       await cleanup()
     }
