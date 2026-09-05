@@ -143,8 +143,8 @@ export type DiffSide = "base" | "head"
  *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
- *   The worktree's own directory is named after the head workspace's — see
- *   `baseWorktreeLeaf`, since Component detection reads that name.
+ *   The worktree's own directory is named after the head workspace's (§6.4 step 2),
+ *   since Component detection reads that name — see `baseWorktreeLeaf`.
  *   NOTE: the head is always the working tree — a mismatched `<head>` label in the
  *   ref spec (e.g. `main..v1.1.0` when the checkout is `v1.0.0`) does NOT rescope the
  *   head scan; it only labels the report. This mirrors the design's "head is always
@@ -562,12 +562,19 @@ async function resolveViaGit(
   let baseIR: IR
   let headIR: IR
   let scans: ScanPair
+  // Whether there is a worktree to clean up. `finally` ran `worktree remove` unconditionally,
+  // so anything that threw before the checkout existed — a failing `worktree add`, and now the
+  // `mkdir` above it — was reported first as a cleanup failure advising `git worktree prune`.
+  // The reader followed that, watched it succeed against bookkeeping that was never written,
+  // and only then reached the exception that actually ended the run.
+  let worktreeAdded = false
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
-    // git creates leading directories for a worktree path itself; doing it here keeps the
-    // one thing this run invented — the nesting — out of what a `worktree add` failure means.
+    // git creates the leading directories of a worktree path itself, so this is belt and
+    // braces for the one level this run invented rather than something git needs.
     await mkdir(worktreeParent, { recursive: true })
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
+    worktreeAdded = true
     const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, {
       side: "base",
       ref: spec.base,
@@ -584,12 +591,14 @@ async function resolveViaGit(
     headIR = await readIR(headReport.irPath)
     scans = { base: baseReport, head: headReport }
   } finally {
-    try {
-      await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
-    } catch (error) {
-      warn(
-        `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
-      )
+    if (worktreeAdded) {
+      try {
+        await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
+      } catch (error) {
+        warn(
+          `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
+        )
+      }
     }
     try {
       await rm(tempParent, { recursive: true, force: true })
@@ -615,23 +624,30 @@ async function resolveViaGit(
 }
 
 /**
- * The directory name to materialise the base revision under.
+ * The directory name to materialise the base revision under: the head workspace's own leaf.
  *
- * The head workspace's own leaf, not a fixed word, because Component autodetection falls back
- * to the directory name when no manifest declares one (component-detect.md §4.1). A worktree
- * at `<temp>/base` therefore gave the base side a Component called `base` while the head side
- * carried the project's real directory name, and every ref diff of a project without a
- * declared `name` — or without explicit `components[]` — reported one Component added and one
- * removed, on a PR that changed nothing structural. The two sides are the same workspace at
- * two revisions, so the one thing the temporary path must not do is change its identity.
+ * Why it is not a fixed word is `cli-spec.md` §6.4 step 2 — one statement of the rule, where
+ * the rest of the ref-diff contract is. In short: detection reads the directory name for a
+ * Component rooted at the workspace root, so a constant here made the base side a different
+ * Component from the head side. This function is only the two names that rule cannot use.
  *
- * `basename` of an absolute path is empty only at the filesystem root, which no workspace is
- * in practice; `base` is kept for that case because a path ending in a separator is not a
- * directory git can create.
+ * The two are an empty leaf — `basename` of an absolute path, only at the filesystem root —
+ * and `@`. `git worktree add` writes its bookkeeping under `.git/worktrees/<leaf>` and cannot
+ * spell that one: it fails with `fatal: not a git repository: <repo>/.git/worktrees/@`, which
+ * reads as the reader's own repository being broken. `@x`, `HEAD`, `a^b`, `~x` and `x.lock`
+ * are all fine, so `@` alone is the exception.
+ *
+ * Substituting is safe rather than lucky, and for one reason covering both: a substitution can
+ * only reinstate the defect by supplying a Component id that differs from the head's, and
+ * neither of these leaves can supply an id at all. `toKebabCase` maps both to the empty string,
+ * which `makeComponentId` rejects as `invalid-component-id` (`packages/core/src/component.ts`),
+ * so where detection decides ids the head scan refuses the workspace and names the directory
+ * that did it; where `components[]` declares them, no directory name is read on either side.
+ * What is left for this default to be is a name git can create.
  */
 function baseWorktreeLeaf(headWorkspaceRoot: string): string {
   const leaf = basename(headWorkspaceRoot)
-  return leaf.length === 0 ? "base" : leaf
+  return leaf.length === 0 || leaf === "@" ? "base" : leaf
 }
 
 /**

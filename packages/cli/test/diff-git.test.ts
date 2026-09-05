@@ -299,6 +299,35 @@ describe("runDiff refspec mode — worktree cleanup runs on failure", () => {
     const cleanup = calls.find((c) => c.args.slice(0, 2).join(" ") === "worktree remove")
     expect(cleanup).toBeDefined()
   })
+
+  it("does not remove a worktree that `worktree add` never created", async () => {
+    // Cleanup used to run unconditionally, so a failing `add` reported itself first as
+    // `⚠ git worktree cleanup failed … Consider running \`git worktree prune\`` — sending the
+    // reader after git's bookkeeping, which was never written, ahead of the real error.
+    const warnCalls: string[] = []
+    const { runner, calls } = makeGit({
+      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
+      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
+      "diff --find-renames": () => ({ stdout: "", stderr: "" }),
+      "worktree add": () => Promise.reject(new Error("fatal: could not create work tree dir")),
+      "worktree remove": () => Promise.reject(new Error("worktree remove must not be reached")),
+    })
+
+    const thrown = await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: runner,
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnCalls.push(m),
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect((thrown as Error).message).toMatch(/could not create work tree dir/)
+    expect(calls.some((c) => c.args.slice(0, 2).join(" ") === "worktree remove")).toBe(false)
+    expect(warnCalls.some((m) => m.includes("git worktree cleanup failed"))).toBe(false)
+  })
 })
 
 describe("--fail-on empty string via runCli", () => {
