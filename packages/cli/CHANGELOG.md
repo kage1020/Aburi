@@ -1,5 +1,381 @@
 # @aburi/cli
 
+## 0.4.0
+
+### Minor Changes
+
+- c1de8f5: Stop reporting Aburi's own faults, and the filesystem's, as a malformed config
+
+  Loading the config turned every thrown value into `config-error`, which `cli-spec.md` §9 spends
+  exit 2 on — the code that tells a reader to go and edit `aburi.json`. Two kinds of failure arrive
+  there that no edit fixes.
+
+  **Aburi's own invariants.** `formatAjvErrors` throws a bare `Error` when ajv reports failure with
+  an empty `errors[]`, and its own docblock says that means ajv is in an unexpected state rather
+  than the config being wrong. It reached the reader as `Failed to load Aburi config: ajv invariant
+violation…` on exit 2. Anything that is not a `ConfigError` now exits 1 and says it is a bug in
+  Aburi, with where to report it — the same treatment `classifyDiffError` gives
+  `slice-invariant-violated`.
+
+  **A config that is there and cannot be read.** `config-read-failed` now exits 1 rather than 2. A
+  permission, a mount, or a directory named `aburi.json` is IO, and its message keeps the
+  `Failed to load Aburi config:` prefix, which names the phase that failed rather than who is
+  answerable for it.
+
+  Absence is no longer part of that code. `readConfigFile` stamped `config-read-failed` on every
+  read failure, `ENOENT` included, so a mistyped `--config ./typo.json` would have moved to exit 1
+  with it — where §9 lists "missing" under exit 2, because a path the reader named is theirs to
+  fix. `@aburi/config` gains **`config-not-found`** for that case, with the message `No config
+file at <path>` rather than `Failed to read config at <path> (ENOENT)`, and the CLI keeps it on
+  exit 2. Only the explicit `--config` path raises it: discovery answers absence with `null` and
+  lets autodetect run, as before. `ENOENT`/`ENOTDIR` is now one set shared by the reader and the
+  prober, so the two cannot drift apart on what "nothing there" means.
+
+  The mapping is a switch that is total over `ConfigErrorCode`, so a code added upstream is a type
+  error rather than a silent arm. At runtime it degrades instead of throwing: `@aburi/config` and
+  `@aburi/cli` version independently, so a compiled switch can meet a code it never saw, and
+  throwing there would discard the message the reader needs. `classifyDiffError` had the same hole
+  and takes the same fix. Both now put the "report it" instruction on its own line, since nothing
+  reaching them ends in punctuation.
+
+  `classifyConfigError` is exported alongside `classifyDiffError`: it is where the two exit codes
+  are decided, and the branch that matters most is not otherwise reachable from a fixture.
+
+  Three commands read the config — `scan`, `diff` and `explain` — so all three inherit this;
+  `init` writes one and is unaffected. `cli-spec.md` §9 and §5.4 and `EXIT`'s own doc all state the
+  rule now, rather than three different ones.
+
+- 3774de6: Free the parse tree the language plugin hands over
+
+  A WASM parse tree is not something the JavaScript garbage collector can reach. `lang-plugin.md`
+  §8.1 says so and names the consequence — `RangeError: WebAssembly.Memory()` after some thousands
+  of files — but told the plugin to free a tree it had already given away, and nobody on the other
+  side picked it up. `@aburi/core` contained no `delete` call at all, so every file that parsed
+  successfully left its tree in the WASM heap for the rest of the run.
+
+  `LanguagePlugin` gains an optional `releaseTree(tree)`. `runFilePipeline` calls it once per
+  non-null tree, in a `finally` that covers every way out of the file: the success path, a file
+  withdrawn by a `recoverable: false` error, a file abandoned on `parseTimeoutMs`, and a throw out
+  of `extractSymbols`, `walkBody` or `normalizeAst`. A plugin whose trees are ordinary
+  garbage-collected objects omits the method and nothing changes for it.
+
+  The core is the only side that can do this. `parseFile` gives the handle away at step 1 and the
+  tree stays live until `normalizeAst` has read the last node out of it — a plugin that deleted
+  its own tree on the way out would be handing back something already dead. The one place the
+  plugin still frees it is a `parseFile` that fails _after_ parsing, where the caller never
+  receives the handle.
+
+  A release that fails is recorded rather than propagated. It runs in a `finally`, so a throw
+  there would silently become the file's outcome — replacing the diagnostic a failing file was
+  already carrying, and turning a file that produced a perfectly good set of Symbols into an
+  extraction failure. The record is structural: `ScanResult.treeReleaseFailures` names the
+  plugin, the file and what went wrong, because a leak is silent until the run dies of it, and
+  by then it presents as `RangeError: WebAssembly.Memory()` charged to whichever unrelated file
+  was being read when the heap ran out. `ScanReport` carries it to the CLI, which prints it
+  grouped by plugin with what the leak costs. It moves no exit code: every one of those files is
+  in the IR, so the artifact describes the workspace completely.
+
+  A `releaseTree` declared as something other than a function is recorded there too, in its own
+  words — a contract violation is deterministic and fixable in a line, and reading it through the
+  same `TypeError` catch as a parser failure would describe it as one. A `null` `releaseTree` is
+  read as "nothing to free", the way the optional call it replaced did.
+
+  `@aburi/lang-typescript` implements it as `tree.delete()`, and is exported with `satisfies` so
+  the method stays required on the exported type.
+
+- ff059d7: Say which manifest declared packages and found none
+
+  A `packages:` list whose patterns matched no manifest reaches the same single-project fallback
+  as a manifest that declared no packages at all, and only the second wants it. The first is a
+  workspace whose every declared package is missing from the Document — from a mistyped pattern,
+  from a monorepo with no packages in it yet, or from packages whose manifest Aburi does not
+  recognize — and nothing said so.
+
+  The IR keeps no trace a reader can act on. `workspace.managers[].roots` comes back empty, which
+  is also what a `turbo.json` co-marker writes on purpose, so the two cannot be told apart from
+  the artifact.
+
+  `DetectManagersResult` now carries `unresolved`: one entry per **manifest** that declared package
+  patterns and resolved none, with its workspace-relative path and every string it listed. Per
+  manifest rather than per manager, because `pnpm-lock.yaml` beside a `package.json#workspaces`
+  makes both of a repository's manifests spell `pnpm` — the path is what a reader opens and what
+  orders two entries. `aburi scan` and `aburi init` name the manifest and the patterns on stderr,
+  and add a second line when nothing resolved anywhere and the whole repository was therefore
+  described as one component — not when `components[]` in the config decided them, since
+  detection's answer never reached the IR then.
+
+  A `packages:` key that is absent or holds an empty list is not a failed declaration: pnpm reads
+  both as "only the root package is included in the workspace", and so does this. Neither is
+  turbo, which declares no patterns, nor nx, which has no pattern list at all.
+
+  A `packages:` or `workspaces` that is present and is **not a list of strings** is now refused
+  with `workspace-manifest-malformed` naming the manifest and the offending entry, rather than
+  filtered away. A trailing colon on an entry — `- tools/*:`, which YAML reads as a map — is the
+  most ordinary slip there is, and it silently put every package the manifest declared on the
+  single-project fallback. pnpm refuses that shape, a bare scalar and a non-string element alike.
+
+  `ScanReport` gains `unresolvedDeclarations` and `fellBackToSingleComponent`; `InitReport` gains
+  the same two. Both are required, so external code assembling either needs the new fields —
+  `coverageFault` and `unrepresentableFiles` set the precedent for the minor bump.
+
+- c58a7a4: `aburi diff` scans the base revision with the head's config, as the spec always said it did
+
+  `cli-spec.md` §6.4 step 3 requires the base scan to read the **head**'s `aburi.json`, because
+  a base read through its own config makes "config change" and "the entire IR changed" the same
+  event. The implementation did the opposite. `runScanInDir` handed the base scan a cwd inside
+  the temporary worktree, and config discovery walks up from cwd — so a commit that edited
+  nothing but `ignore` reported the Symbols that setting covers as added or removed:
+
+  ```
+  $ aburi diff HEAD~1..HEAD --fail-on added
+  +1 -0 ~0 ↔0 ⤴0
+  --fail-on added tripped (observed: 1 added)
+  EXIT=3
+  ```
+
+  `--config` was not an escape, and neither was `ABURI_CONFIG`: both arrive as one value that
+  resolves against the scan's cwd, so a relative path named the base revision's copy of the file
+  for the base scan and the head's for the head scan — the same defect wearing a flag.
+
+  Both routes are now settled once, before the worktree exists, and both scans are handed that
+  one answer. `pinConfig(cwd, overridePath)` returns a `ConfigSource` — an absolute path, or
+  `autodetect` — and `loadPinnedConfig` reads it wherever the working directory has since moved
+  to. `runScan` spends whichever it was given: `options.pinnedConfig ?? (await pinConfig(cwd,
+options.configPath))`, so the precedence between a decided config and one still to decide is
+  the operator rather than a sentence.
+
+  `autodetect` is carried rather than left implicit, because the defect is symmetric: a head
+  revision with no config on disk must not send the base scan back to discovery, where the base
+  ref's own `aburi.json` is waiting. Today both sides then stop on "no language plugin is
+  configured" rather than producing an IR, so what this buys is that they stop _identically_ —
+  the guarantee only starts paying out when autodetect can reach a plugin set of its own.
+
+  Two things the pinning exposed, fixed here rather than left for a reader to trip over:
+
+  - **A relative plugin ref in the head's config was resolved inside the base worktree**, so a
+    commit that added `./plugins/new.mjs` and registered it made the base scan die on a config
+    the head reads fine. §6.4.1.5 pins the plugin set to the head environment — the worktree
+    materialises sources only, `node_modules` is the caller's — so the ref resolves there too.
+    `ScanOptions.pluginRefRoot` carries it; everything else inside the config (`ignore`,
+    `components[].roots`) still resolves against each scan's own workspace root, because those
+    name sources and the worktree is where the base's sources are.
+  - **The "config sits below the workspace root" warning fired on every ref-mode diff.** It
+    compares the config's directory against the workspace root, which for a pinned base scan can
+    never match — the head's `aburi.json` is not below the worktree, it is in another tree, and
+    nobody ran anything from a monorepo package. `ScanReport.configPinnedByCaller` exempts it,
+    and the half of the sentence that stays true moves into the `aburi diff` section of the CLI
+    reference, where a reader meets it once instead of on every run.
+
+  `@aburi/config` gains a `ConfigSource` union and `loadConfigFrom` / `configSourceFrom`, so a
+  caller that has already chosen a file can say so without rebuilding the `LoadedConfig` shape.
+  The input side is discriminated the way `LoadedConfig.found` already discriminates the output
+  side: `loadConfigFrom(null)` would read as "read from the default", which is the opposite of
+  what it would have meant.
+
+  `@aburi/cli` gains `ScanOptions.pinnedConfig`, `ScanOptions.pluginRefRoot`,
+  `ScanReport.configPinnedByCaller`, and the `pinConfig` / `loadPinnedConfig` / `PinnedConfig`
+  exports. `loadPinnedConfig` rejects a relative path outright, since the whole contract is that
+  the answer no longer depends on where the process is standing. Nothing changes for a caller
+  that sets none of the new fields.
+
+- ba9e505: `stats.lspEnrichment` says how many receiver hints the typed tier produced, used, and threw away
+
+  `stats.lspEnrichment` counted requests and files and nothing about answers, so the one number a
+  reader reaches for — did turning LSP on buy anything? — was not in the document. A hover that
+  comes back on time carrying nothing this pass can read is a healthy row in every counter there
+  was: it lands in `requestsIssued`, in neither failure counter, it resets the consecutive-failure
+  tally, and its file still counts in `filesEnriched`. `requestsIssued: 40, requestsFailed: 0`
+  described a run that resolved forty extra call sites and a run that resolved none, and §6.2 keeps
+  errors out of the IR, so nothing else recorded the difference either.
+
+  Three counters now do. `hintsProduced` is the hovers read all the way to a callee Symbol,
+  `hintsConsumed` the call sites the resolver turned into an edge, and `hintsRejected` the five
+  places in between where a hint is lost — `unparseableHover`, `ownerClassNotFound`,
+  `memberNotFound` on the enrichment side, `kindMismatch` and `targetDropped` on the resolver's.
+  Two sums hold and neither crosses the halves: every hover that came back without a failure is
+  either produced or in one of the first three buckets, and every call site that found a hint at
+  its key is either consumed or in one of the last two. A hint the untyped tier made unnecessary is
+  in neither, which is the ordinary shape of a healthy scan rather than a fault.
+
+  The three are additive optional fields on `LspEnrichmentStats` in `aburi.ir.v1`, Class B per
+  `ir-schema.md` §1.1: the pipeline writes all of them whenever it writes the record, with
+  `hintsRejected` carrying five zeroes rather than being omitted, so absence means the document
+  predates the counters. A new `LspHintRejections` definition holds the buckets.
+
+  Neither sum is checkable from the finished document, and §7.2 now says so rather than reading
+  like an integrity invariant: `requestsIssued` also carries a `documentSymbol` per file, so the
+  hover count the producer identity balances against is not an IR quantity, and the call sites that
+  found a hint at their key are recorded nowhere. The tests hold both sums instead.
+
+  The two halves are written by two passes, and the second cannot reach the first: the resolver
+  runs after `enrichWithLsp` has returned. `ResolveCallGraphResult` therefore carries a new
+  `lspHintUsage` — what the LSP tier consumed and what it declined — rather than the resolver being
+  handed a stats builder it would otherwise depend on having, and `withHintUsage` folds the two
+  together. `enrichWithLsp` returns the producer half as `LspProducerStats`, whose three counters
+  are required where the IR type has them optional, so a caller assembling the passes itself is
+  told by the type that `withHintUsage` is what finishes the record. Without that fold
+  `hintsConsumed` and the resolver's two buckets stay at `0`.
+
+  `aburi scan` prints the three totals when a run produced or refused a hint, so the question the
+  counters answer does not require reading the IR.
+
+### Patch Changes
+
+- aae9e73: Read git's rename table as NUL-separated records, so a path with a space or a non-ASCII
+  character still matches
+
+  `git diff --name-status` is tab-separated and this split its output on `/\s+/`, so
+  `R094\tsrc/a.ts\tsrc/a b.ts` produced the pair `src/a.ts -> src/a`. A path outside printable
+  ASCII was worse: git double-quotes and octal-escapes it under `core.quotePath`, and nothing
+  decoded that, so `src/日本語.ts` arrived as `"src/\346\227\245..."`. Either way stage 2 of the
+  match had a rename map that matched no Symbol's `source.file`, the move degraded into the
+  `removed` + `added` pair the stage exists to prevent, and a `--fail-on removed` gate turned a
+  build red for a file somebody had only renamed.
+
+  The invocation is `git diff --find-renames --name-status -z` now; `diff-algorithm.md` §3.2
+  carries the contract. Three things the reader now gets right that it did not:
+
+  - Paths arrive unquoted and undivided, because `-z` NUL-terminates every field and bypasses
+    git's path quoting entirely.
+  - They are normalized to NFC, the form `sym.source.file` is compared in. A repository holding a
+    path decomposed built a map that could not match anything — the same failure, on the same
+    class of path.
+  - A stream whose records cannot be delimited is refused outright, position reported, rather than
+    yielding the part that parsed. That now includes a stream cut inside a field, which used to map
+    a rename onto a chopped path.
+
+  `collectRenames` also stopped discarding git's stderr. Over `diff.renameLimit` git exits 0, says
+  on stderr that it gave up, and reports every move as a delete plus an add: the records parse, the
+  map is merely empty, and the run that loses every hint is the large refactor where the hints
+  matter most. Any stderr from the rename invocation is now warned about, quoting git.
+
+  `defaultGitRunner` decodes stdout once, from the joined bytes, instead of decoding each chunk as
+  it arrives — a multi-byte character straddling a chunk boundary came back as U+FFFD — and a git
+  killed by a signal is now reported as such rather than as "exited with code null".
+
+- 47d0b66: A ref diff names the base worktree after the workspace, so a Component is not reported added and removed
+
+  `aburi diff <base>..<head>` materialised the base revision in a directory literally named
+  `base`. Component autodetection falls back to the directory name for a Component rooted at the
+  workspace root (`component-detect.md` §4.1), so the base side of the diff was a Component called
+  `base` while the head side carried the project's real directory name — two ids for one workspace.
+  A workspace whose Component is the root itself, declaring neither a package name nor explicit
+  `components[]`, therefore got
+
+  ```json
+  "summary": { "componentsAdded": 1, "componentsRemoved": 1 }
+  ```
+
+  and a "Component changes / Added / Removed" section in `diff.md`, on a PR that changed nothing
+  structural. It reproduced on every run, which is the shape of a signal a reviewer learns to
+  scroll past. A Component under `packages/*` takes its name from its own directory and was never
+  affected, and either a declared package name or an explicit `components[]` was already enough to
+  immunise a project.
+
+  The worktree is now created at `<temp>/base/<head-workspace-dirname>` — the rule and its two
+  exceptions are `cli-spec.md` §6.4 step 2 — so the name detection reads is the same on both
+  sides. It sits under a directory of its own so the leaf is free to be any name the head
+  workspace has, including `base-out` and `head-out`, which as siblings would be the run's own
+  temporary output directories.
+
+  Cleanup no longer runs `git worktree remove` for a worktree that was never created: a failure
+  before the checkout existed used to report itself first as a cleanup failure advising `git
+worktree prune`, ahead of the exception that actually ended the run.
+
+- e257d20: Create the directories a single-file `--output` names
+
+  `aburi scan` and `aburi diff` have always created their `--output-dir` recursively. The two
+  commands whose output flag names a _file_ — `aburi init --output` and `aburi explain --output` —
+  did not, so both of the examples the CLI reference hands the reader
+  (`--output config/aburi.jsonc`, `--output docs/alpha.md`) ended in Node's raw `ENOENT` at exit 1
+  in any tree that did not already hold those directories. The failure came after the whole run:
+  `init` had detected the workspace and `explain` had resolved and projected the Symbol, and both
+  threw the answer away on the last line.
+
+  Both write through one helper now, which creates the parent directories first. `aburi explain`
+  has three of those write sites — the id, file and pattern arms each project their own Markdown —
+  and each is reached by a different argument shape, so all three are covered rather than the one
+  the reported example happened to take.
+
+  What creation cannot get past is a path that cannot hold a file at all, and those are now the
+  input errors they are, at exit 2 rather than the exit 1 a raw errno produced. A recursive `mkdir`
+  is silent on a directory that already exists, so `EEXIST` from it is a non-directory standing
+  exactly where the parent belongs, and `ENOTDIR` is that same file further up the path; `EISDIR`
+  can only come from the write, which truncates rather than refusing an existing file, so it is the
+  `--output` itself naming a directory that is already there. All three are a statement about the
+  path the caller typed, which is the side of the line `cli-spec.md` §9 draws between exit 1 and
+  exit 2 — who has to act — and each message names the path and what to do about it. Every other
+  failure is rethrown untouched: a permission, a read-only mount or a full disk is not the reader's
+  to fix, and Node's own message already names the path.
+
+  `aburi init`'s overwrite guard learned the same distinction. It probed only for existence, so an
+  `--output` naming a directory was answered with `Use --force to overwrite` — advice that cannot
+  work, and whose only destination was the refusal from the write below it. The guard reads the
+  kind now and gives the directory answer directly, whether or not `--force` was passed.
+
+- e0f470f: Three-dot ref specs are refused by name instead of half-parsed
+
+  `aburi diff main...HEAD` split on every `..`, which made the head ref `.HEAD` — two parts,
+  both non-empty, so it passed the syntax check. What the reader saw was git failing on a ref
+  they never typed:
+
+  ```
+  Head ref '.HEAD' could not be resolved. If this is a CI shallow clone, run: git fetch --deepen=50 origin .HEAD
+  ```
+
+  That is exit 1 (a computation error, someone else's problem to fix) for what `cli-spec.md`
+  §6.5 classifies as a syntax violation, exit 2. And three-dot is a realistic thing to type: it
+  is the form in a GitHub compare URL and in `git diff a...b`.
+
+  The spec is now split at the first `..` with the whole dot run measured, so the three-dot form
+  is recognised rather than mangled. It is rejected — `aburi diff` compares the two revisions
+  directly and has no merge-base form — with the two-dot rewrite and the command that resolves a
+  merge base spelled out:
+
+  ```
+  diff argument "main...HEAD" uses the three-dot form. aburi diff compares the two revisions
+  directly, so write it as "main..HEAD". To compare the head against the merge base instead,
+  resolve it yourself with: git merge-base <base> <head>.
+  ```
+
+  Refusing beats quietly reading it as `main..HEAD`: the two forms answer different questions, and
+  a diff against the wrong base is a report the reader has no reason to distrust. The `git
+merge-base` is named with placeholders rather than as a command with the caller's refs pasted
+  in: `$ ( ) " ; & |` and backticks all pass `git check-ref-format`, so a copy-pasteable command
+  built from a ref name would hand the reader a shell substitution to run.
+
+  The three checks are ordered by what each can still say truthfully. Emptiness first, so `main...`
+  reads as a missing head ref rather than as a three-dot spec whose suggested rewrite would be
+  `main..`. A second separator next, so `a..b..c` and `a...b..c` alike keep the generic message —
+  judged the other way round, the second would be answered with the rewrite `a..b..c`, which this
+  same function rejects, and with `b..c` named as a ref, which is the defect this change removes.
+  The dot run last, where a rewrite naming two refs is finally something that parses; a longer run
+  (`main....HEAD`) has no such rewrite to guess at and keeps the generic message too.
+
+  Two-dot specs are untouched, including tags that carry dots of their own — `v1.2.0..v1.3.0`
+  parses as it always did.
+
+- Updated dependencies [be8e2b9]
+- Updated dependencies [81dadb6]
+- Updated dependencies [c1de8f5]
+- Updated dependencies [a358a5a]
+- Updated dependencies [3774de6]
+- Updated dependencies [ff059d7]
+- Updated dependencies [c58a7a4]
+- Updated dependencies [6676ca7]
+- Updated dependencies [6d4730f]
+- Updated dependencies [e7f1d49]
+- Updated dependencies [203ea78]
+- Updated dependencies [3e180e8]
+- Updated dependencies [a4d3cff]
+- Updated dependencies [ba9e505]
+  - @aburi/types@0.4.0
+  - @aburi/core@0.4.0
+  - @aburi/config@0.3.0
+  - @aburi/diff@0.4.0
+  - @aburi/markdown-projection@0.3.1
+  - @aburi/plugin-registry@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

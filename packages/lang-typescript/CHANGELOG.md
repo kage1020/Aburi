@@ -1,5 +1,457 @@
 # @aburi/lang-typescript
 
+## 0.4.0
+
+### Minor Changes
+
+- be8e2b9: One Symbol per declared entity, however many declarations wrote it
+
+  A getter beside its setter, an overload beside its implementation, and a reopened namespace or
+  interface each made `extractSymbols` emit two SymbolCandidates under one id. Integrity invariant 1
+  (`ir-schema.md` §14) refuses that, and it is checked once over the finished document rather than
+  per file — so `class Box { get value() {} set value(n) {} }` did not cost its own file, it ended
+  the run and took every other file's Symbols with it.
+
+  TypeScript models all three the same way: one entity, several declarations. So does extraction
+  now. The first declaration claims the Symbol and every scalar on it; later declarations of the
+  same id contribute their `derivedBy` and their body instead of becoming a second Symbol. First
+  wins because legal source already orders them — TypeScript requires the class or function to
+  precede the namespace merged into it, and requires a merge's declarations to agree on whether
+  they are exported.
+
+  Two constructs are handled before that rule rather than by it, because it would answer them
+  wrongly:
+
+  - **An overload declaration is skipped.** A `method_signature` in a class body declares nothing
+    the implementation beside it does not, and it is written _first_ — so folding it as the leading
+    declaration would report the member as body-less and give it the overload's parameter types.
+    Top-level overloads have always behaved this way (`function_signature` is not in the statement
+    switch); a class matches now, so the same source does not answer differently depending on where
+    it is written.
+  - **An accessor pair is led by the getter.** A property's type is what reading it answers, so
+    taking the setter's signature would report the member as `(n) => void`.
+
+  `SymbolCandidate` gains `mergedDeclarations?: MergedDeclaration<TNode>[]`: the further
+  declarations, in source order, each carrying both its `bodyNode` and its `fullNode`. Without the
+  field, folding a pair would drop the setter's body — a `set password(v)` that hashes the value has
+  effects. Without `fullNode` on the entry, a reopened `enum E {}` would fingerprint as though the
+  second declaration had never been written, because an enum candidate has no body at all. Only the
+  bodies reach `walkBody`, which is what keeps a merged namespace from being walked twice. The key is
+  absent, never empty, on a Symbol with one declaration, so the single-declaration path is untouched
+  and no existing fingerprint moves.
+
+  `derivedBy` and `decorators` join the same way. A lost `boundary` decorator is not cosmetic:
+  `interface P {}` written above `@Controller() class P {}` is legal, so the declaration that claims
+  the Symbol is the one carrying none.
+
+  Two drop rules were reading one declaration where they should read all of them, and one was reading
+  decorators nowhere. `classifySymbolDropHint` now honours a boundary decorator for every kind rather
+  than only for classes — core's `decideSymbolDrop` answers `null` on a boundary and then defers to
+  this hint, so an unguarded arm here is the one that decides. `classifyClassBody` reads class bodies
+  only, so a merged `interface C {}` does not contribute members the class does not have.
+
+  Two namespace fixes come with it, because folding a reopened namespace requires reaching one.
+
+  An unexported `namespace` at statement position is parented under an `expression_statement`, which
+  the statement switch never looked through — so every unexported namespace lost its own Symbol
+  _and_ everything declared inside it.
+
+  And a dotted `namespace A.B {}` is sugar for `namespace A { namespace B {} }`. Reading the dotted
+  text as one qualified-name segment is what the id builder refuses, and the throw cost the file every
+  Symbol it had; it declares one Symbol per segment now, with the body under all of them.
+
+- f9195d6: A class member written as a field holding a function is a member
+
+  `create(data) { … }` and `create = async (data) => { … }` are the same member written two
+  ways, and only the first had a Symbol. The second was a `public_field_definition`, so its body
+  stayed on the class — and because `new C()` resolves to the class Symbol
+  (`call-resolution.md` CR15), a factory whose whole body is `return new UserService(prisma)`
+  was reported as writing to the database. The same report the class-body change was about,
+  reproduced on the other common way to write a service.
+
+  A field whose value is an arrow or a function expression now gets a member Symbol of its own:
+  `kind: "method"`, named by the class-member convention (`C.create`, `C::create` for a static
+  one), with the function's signature and the field's decorators. The class stops carrying its
+  body. `arrow_function` and `function_expression` are the set, which is exactly the set
+  `const f = …` already used at module level, so the two levels are one decision.
+
+  What separates it from a field that is not a member is when the value runs: `seed = makeSeed()`
+  runs on construction and stays on the class; `seed = () => makeSeed()` runs when it is called
+  and moves. A parameter default (`create = (x = f()) => …`) and a decorator's arguments stay on
+  the class the way a method's do, because that is where they run.
+
+  The drop list follows: a class whose members are function-valued fields is no longer read as a
+  pure DTO.
+
+  Four shapes are deliberately left where they were. A computed, string-literal or numeric
+  member name gets no Symbol — admitting a name the qualified-name grammar refuses would turn a
+  file that extracts today into a file lost at the per-file boundary. A generator field is
+  outside the function set at both levels. A field whose value is a function behind a wrapper
+  (`handle = withAuth(async (r) => …)`, `useCallback`, `memoize`) is a call expression, not a
+  function, so it is a field: the report this fixes still reproduces on that spelling. And a
+  field named `constructor`, which an engine refuses and the grammar accepts, is refused a
+  Symbol rather than given the segment reserved for what `new C()` runs.
+
+  The IR moves for every class with a function-valued field: one new Symbol per field, and the
+  class's `fingerprint.logic` loses the bodies it was carrying, as do the callers whose
+  propagated effects came through one.
+
+- 3774de6: Free the parse tree the language plugin hands over
+
+  A WASM parse tree is not something the JavaScript garbage collector can reach. `lang-plugin.md`
+  §8.1 says so and names the consequence — `RangeError: WebAssembly.Memory()` after some thousands
+  of files — but told the plugin to free a tree it had already given away, and nobody on the other
+  side picked it up. `@aburi/core` contained no `delete` call at all, so every file that parsed
+  successfully left its tree in the WASM heap for the rest of the run.
+
+  `LanguagePlugin` gains an optional `releaseTree(tree)`. `runFilePipeline` calls it once per
+  non-null tree, in a `finally` that covers every way out of the file: the success path, a file
+  withdrawn by a `recoverable: false` error, a file abandoned on `parseTimeoutMs`, and a throw out
+  of `extractSymbols`, `walkBody` or `normalizeAst`. A plugin whose trees are ordinary
+  garbage-collected objects omits the method and nothing changes for it.
+
+  The core is the only side that can do this. `parseFile` gives the handle away at step 1 and the
+  tree stays live until `normalizeAst` has read the last node out of it — a plugin that deleted
+  its own tree on the way out would be handing back something already dead. The one place the
+  plugin still frees it is a `parseFile` that fails _after_ parsing, where the caller never
+  receives the handle.
+
+  A release that fails is recorded rather than propagated. It runs in a `finally`, so a throw
+  there would silently become the file's outcome — replacing the diagnostic a failing file was
+  already carrying, and turning a file that produced a perfectly good set of Symbols into an
+  extraction failure. The record is structural: `ScanResult.treeReleaseFailures` names the
+  plugin, the file and what went wrong, because a leak is silent until the run dies of it, and
+  by then it presents as `RangeError: WebAssembly.Memory()` charged to whichever unrelated file
+  was being read when the heap ran out. `ScanReport` carries it to the CLI, which prints it
+  grouped by plugin with what the leak costs. It moves no exit code: every one of those files is
+  in the IR, so the artifact describes the workspace completely.
+
+  A `releaseTree` declared as something other than a function is recorded there too, in its own
+  words — a contract violation is deterministic and fixable in a line, and reading it through the
+  same `TypeError` catch as a parser failure would describe it as one. A `null` `releaseTree` is
+  read as "nothing to free", the way the optional call it replaced did.
+
+  `@aburi/lang-typescript` implements it as `tree.delete()`, and is exported with `satisfies` so
+  the method stays required on the exported type.
+
+- 0a74d65: Parse JavaScript with a grammar that accepts JSX
+
+  `.js`, `.mjs` and `.cjs` were read with the TypeScript grammar, which does not accept JSX. The
+  JavaScript coverage exists so `@aburi/framework-react` can classify React sources in
+  plain-JavaScript codebases, and a React source written in `.js` contains JSX in `.js` — which
+  is what `create-next-app`'s JavaScript template emits and what CRA emitted.
+
+  The grammar recovers past JSX rather than failing, so the file still reached the IR and the
+  declarations mostly survived. What did not survive is everything from the first tag onwards:
+  the JSX a classifier reads to recognise a component, and every call written inside the markup.
+  On the `create-next-app` JavaScript template, both components came out `extKind: null` and a
+  handler written `onClick={() => track(c)}` contributed no call to any Symbol. A hook still
+  classified, because a hook is recognised by its name.
+
+  The three JavaScript extensions now route to the tsx grammar, which is where `.jsx` already
+  went. The TypeScript extensions do not move.
+
+  What a JavaScript file gives up is the old-style type assertion `<T>expr` — legal TypeScript,
+  never legal JavaScript, and accepted in a `.js` file only because that file was being read as
+  TypeScript. It is the only thing the tsx grammar refuses that the TypeScript grammar accepts:
+  measured over 6,000
+  published `.js` / `.cjs` / `.mjs` files, every one produces a byte-identical tree under both.
+
+  A React app written in JavaScript therefore gains the calls inside its markup, its framework
+  classification, and — where a declaration did not survive recovery — Symbols it did not have.
+  It also stops contributing to the recoverable-parse-error count, which is the only signal a
+  reader gets that a file's Symbol set may be short.
+
+- 2dfb45d: A function written in plain sight has its body walked
+
+  Two shapes where the extractor was looking straight at a function and did not see it.
+
+  **Behind a wrapper.** `const h = (() => { … })`, `… satisfies H`, `… as any`, `…!` — a
+  parenthesis, a type assertion and a non-null assertion all leave the value exactly what it was,
+  but the test for "is this binding a function" only accepted a bare arrow or function
+  expression. The binding came out `kind: "const"` with no body, so everything it did was in no
+  Symbol. It now reads through those wrappers, in the one predicate the whole plugin shares, so a
+  module-level binding, a class field and a registration argument cannot answer differently.
+
+  A **call** is not a wrapper. `withAuth(() => …)` returns a function by convention and nothing
+  in the tree says so; reading through it would be a guess rather than an unwrap.
+
+  **In argument position.** `app.post("/users", async (req, res) => { … })` already produced a
+  Symbol for the registration, with no body — so a route whose handler wrote to the database
+  reported nothing, and every route in a file shared one `fingerprint.logic`, because they all
+  had zero rules and zero effects. The functions written as direct arguments of the calls on the
+  statement's spine are now the Symbol's bodies, in source order: `app.route(p).get(h1).post(h2)`
+  and `app.use(h0).router.get(h1)` are each one statement and one Symbol, and both handlers are
+  walked. "Function" is the same predicate as above and no wider — a generator argument
+  registers no body — and a half-written handler the parser only recovered registers none either.
+
+  The registration's own `signature` stays `null`: it is the registration, not the handler, and
+  reading the handler's would publish the framework's callback shape as the route's API. Its
+  **normalized string stays the whole call**, for the same reason from the other direction: what
+  the registration runs is the walk's question, and what it _is_ — its path, its method, the
+  middleware standing between them and the handler — is the fingerprint's. Narrowing to the body
+  would have made `app.get(p, authenticate, h)` and `app.get(p, h)` serialize identically, so a
+  route gaining or losing its auth middleware would have produced no signal on any axis.
+
+  The receiver side reads through wrappers too, which it did not: it hand-unwrapped parentheses
+  and nothing else, so `(app as Express).get(p, h)` and `app!.get(p, h)` were not registrations
+  at all. They are now, which means **new Symbol ids appear** in a workspace that writes them.
+
+  What else moves: a registration Symbol with an inline handler gains that handler's calls, rules
+  and effects, and its `fingerprint.logic` changes wherever the handler contributes a rule or an
+  effect. `fingerprint.syntax` and `fingerprint.api` do not move at all. A registration with no
+  function argument (`app.listen(3000)`), or one whose handler is passed by name
+  (`app.get("/x", handler)`), is unchanged.
+
+- 6676ca7: Read a quoted class member name as the name it spells, instead of losing the file
+
+  `class C { "ok"() {} }` and `class C { 1() {} }` are legal TypeScript — the member is addressed
+  as `C["ok"]` / `C[1]` — and both cost the file every Symbol it had. The plugin handed the name
+  node's _source text_ to the Symbol-id builder, which refuses anything that is not an identifier;
+  the throw was caught at the per-file boundary, and the file was named in `stats.skippedFiles`
+  with `reason: "extraction-failed"`. Widening the qualified-name grammar to ECMAScript's
+  IdentifierName closed this for a Japanese or accented declaration; a quoted or numeric property
+  name is a `PropertyName` and was outside that widening by construction.
+
+  A written name and a qualified-name segment are two different things now. One function answers
+  what segment a member's name maps to, or `null` when the grammar has none for it — which is the
+  answer `ir-schema.md` §3.2 already gives a computed name: **no Symbol, no diagnostic**, and the
+  body stays on the class, where its calls and rules are still reported.
+
+  **A quoted name that decodes to an identifier is that identifier.** A property key is a string,
+  so `"ok"() {}` and `ok() {}` declare the same property — `tsc` calls the pair TS2393, a
+  duplicate _implementation_ — and they fold onto one Symbol the way a field and a method of
+  the same name already do. The literal is decoded rather than unquoted, so an escaped spelling
+  names the member it spells.
+
+  **A name the parser guessed at is refused**, and it arrives in two shapes. A literal that parsed
+  in part keeps its node and is read as incomplete. One that did not parse at all leaves no
+  literal behind: recovery re-emits the surviving characters as a plain name, so `"\uZZZZ"() {}`
+  used to record a member called `ZZZZ` — a name the source does not spell. Both now have no
+  Symbol, which makes the second the one case where this removes a Symbol the previous release
+  produced. What says the name is a guess is an ERROR among the member's own children, so a
+  member whose _body_ fails to parse keeps its Symbol as before.
+
+  Two things follow from having one answer rather than two:
+
+  - **`"constructor"() {}` is the constructor.** A class element whose property name is
+    `constructor` is the constructor whatever the spelling. Read as a method it took the instance
+    qualified name, where it collided with a real constructor's. Two spellings that carry the
+    segment stay off the construction path, because neither is a property name: a `static` member,
+    and a `#`-private one, whose `#` is exactly what the segment drops.
+  - **A field holding a function is gated the same way a method is.** The field gate refused every
+    name not written as an identifier, because a name the id builder refuses was a lost file. That
+    reason is gone, so `"ok" = () => {}` is now the member `ok` — a Symbol where there was none.
+
+  One diagnostic is corrected on the way past. A module specifier written as a line continuation
+  followed by an escape the grammar refuses — `import x from "\<newline>\uZZZZ"` — was reported as
+  naming no module, on top of the syntax errors that already said why the name could not be read.
+  The continuation contributes no character, so the read came back empty and was indistinguishable
+  from an empty literal; reading whether the literal was _wholly_ read tells them apart.
+
+  `@aburi/core` exports `isQnameSegment`, the single-segment predicate a producer needs to ask
+  _before_ it builds. `isQualifiedName` is the wrong one for that question and fails quietly: it
+  answers about a finished name, so it admits `.` and `::`, and a caller vetting one member name
+  with it would accept `"a.b"` and mint the nested qualified name `C.a.b` out of a single member.
+
+- e0df71f: A class body is what defining and constructing the class runs
+
+  A class Symbol's `bodyNode` is the whole `class_body`, and `walkBody` descended into every
+  member — so each method's calls and rules were recorded a second time on the class. That is
+  not only duplication in the IR: `new C()` resolves to the class Symbol (`call-resolution.md`
+  CR15), so effect propagation carried the duplicates up into callers that touch nothing. A
+  factory whose whole body is `return new UserService(prisma)` was reported as writing to the
+  database.
+
+  A class Symbol's body is now what **defining and constructing** the class runs: field
+  initialisers, static blocks, and the constructor. A method body belongs to the method's own
+  Symbol.
+
+  The constructor stays for the same reason the rest goes. `new C()` runs it, and the Symbol
+  the instantiation resolves to is the class — drop it and a `constructor() { prisma.user.create(...) }`
+  becomes invisible to every caller that instantiates the class. It is recorded on
+  `#C.constructor` too, and propagates nowhere twice, because nothing resolves a call to a
+  constructor.
+
+  Only the _body_ is skipped, and only for a member that has a Symbol of its own. Both halves
+  are load-bearing:
+
+  - A parameter default (`m(x = f())`) sits outside the member's own `bodyNode`, which is its
+    `statement_block`. Skipping the whole member would lose it.
+  - A computed member (`[Symbol.iterator]() {}`) and a member of an anonymous default class are
+    not Symbols at all, so their bodies have nowhere else to be recorded and stay on the class.
+
+  Which member has a Symbol is now one predicate, `memberHasOwnSymbol`, that extraction and the
+  walk both read — and both ask about the same node. The walk reads the class off the body it is
+  walking rather than off the Symbol, because a folded Symbol's `fullNode` is its **leading**
+  declaration: `const C = 1` written above `class C { m() {} }` heads the Symbol with a
+  `lexical_declaration`, and asking that node whether the class has member Symbols answered no.
+
+  `static constructor()` is not the construction path. `new C()` never runs a static member, and
+  the check now says so — it used to put the static member's body on the class and give it the
+  instance qualified name, where it collided with the real constructor's. `tsc` refuses the
+  source; this plugin also parses `.js`, where it is legal.
+
+  The skip reaches the Symbol's own body nodes and no others: a class written inside a function
+  or a method is not extracted, so every call in it still belongs to the Symbol whose body
+  encloses it.
+
+  Class Symbols' `calls`, `rules`, `effects` and `fingerprint.logic` move as a result, and so do
+  the callers those effects reached. `fingerprint.api` and `fingerprint.syntax` do not: the
+  normalized AST still covers the whole class body.
+
+  **Scope.** A member written as a field holding an arrow — `create = async (d) => { ... }` — is
+  not a `method_definition`, so it has no Symbol of its own and its body stays on the class, where
+  it propagates to callers that construct the class. Constructing the class creates the closure and
+  does not run it, so the heading above does not describe that shape; nothing here changes it, and
+  it is a common way to write a service.
+
+- a4d3cff: Keep a file that names things legally
+
+  Three shapes fed something that is not a name into the Symbol-id builder, which threw — and
+  the throw cost the file every Symbol it had, not the one declaration:
+
+  | source                                             | before       | now             |
+  | -------------------------------------------------- | ------------ | --------------- |
+  | `export const { GET, POST } = handlers`            | file skipped | `#GET`, `#POST` |
+  | `export const [a, b] = pair`                       | file skipped | `#a`, `#b`      |
+  | `export function ユーザー取得() {}`                | file skipped | `#ユーザー取得` |
+  | `export function café() {}`                        | file skipped | `#café`         |
+  | `export class A { [Symbol.iterator]() {} m() {} }` | file skipped | `#A`, `#A.m`    |
+
+  The last row states it sharpest: one member nobody can name cost the class and every sibling.
+
+  **The qualified-name grammar is ECMAScript's IdentifierName.** `[A-Za-z_$][A-Za-z0-9_$]*`
+  becomes `[$_\p{ID_Start}][$\p{ID_Continue}]*`. Only `$` and `_` are named:
+  `$` is in neither property, `_` is in `ID_Continue` and not `ID_Start`, and ZWNJ and ZWJ —
+  which ECMAScript names separately — are already inside `ID_Continue` here, measured. `schema/aburi.ir.v1.json#/$defs/SymbolId` already accepted every
+  one of these, so this closes a gap between the two rather than opening one. What it still
+  refuses is what is not a name — a pattern's text, a computed member's brackets.
+
+  **A destructuring declaration produces one Symbol per binding.** `{ a: b }` binds `b`, not the
+  key `a`; `{ a = fallback }` and `[a = fallback]` bind `a` and read `fallback`, which is a name
+  from another file and not a declaration here. Each binding is a `const` carrying
+  `destructured-binding` in `derivedBy` — declared in the plugin manifest alongside the other
+  language-level rationales — and that token is what explains several Symbols sharing one source
+  range.
+
+  A node type the pattern walk does not model is **refused** rather than passed over. Binding
+  nothing for an unmodelled wrapper is indistinguishable from a pattern that declares nothing,
+  and a binding lost that way leaves no Symbol, no diagnostic and no `skipped` entry — which is
+  worse than the throw this change replaces, because that one was at least named.
+
+  **A class member with a computed name produces no Symbol, and no diagnostic.** Mangling the
+  brackets into a segment would invent a name the source does not contain, and two different
+  computed keys can collapse onto one segment. A computed name is not a name static analysis can
+  record — the position `lang-plugin.md` LP26e takes on a computed module specifier.
+
+  **One integrity consequence.** `symbols[].name` was excluded from invariant #19 (Unicode NFC)
+  because the qualified-name grammar was ASCII and NFC leaves ASCII alone. Measured, that no
+  longer holds — `isQualifiedName("cafe" + U+0301)` is `true` now — so the field moves onto #19's
+  list, which is what the exclusion said should happen if the grammar widened. `symbols[].id`
+  stays excluded on a reason that does still hold: `symbolIdViolation` checks NFC in its own
+  right rather than as a side effect of an ASCII grammar.
+
+  No existing Symbol id changes: measured by scanning the `nestjs-billing` fixture before and
+  after and diffing the id sets — 38 ids, identical.
+
+### Patch Changes
+
+- 203ea78: Read the three import forms that lost their dependency edge
+
+  `import x = require('./m')`, an `import()` behind a magic comment, and an `import()` whose
+  specifier is a template all produced no `ImportEdge` and no diagnostic — a file importing only
+  through `require` looked import-free, and the calls through the missing binding fell out of
+  relative resolution into the `no-match` bucket with nothing saying why.
+
+  Each missed for its own reason. A require-equals hangs its specifier off an
+  `import_require_clause` rather than the statement's `source` field, so the reader found
+  nothing. A magic comment is a _named_ node, so the first argument of `import()` was the comment
+  rather than the specifier. A template is a `template_string`, not a `string`, so the literal
+  reader refused it.
+
+  The require-equals edge is a **namespace** edge — `symbols: "*"` with the binding on
+  `namespaceBinding` — and not the default binding it superficially resembles. `x` names the
+  module object the way `import * as x from './m'` does, and call resolution acts on the
+  difference: the namespace arm strips the head off `x.foo()` and looks for `foo` in the target
+  file, where a `symbols: ["x"]` edge would send it looking for `x.foo` there, which the target
+  does not have. `dynamic` is false because the field means "written as `import()`" and this
+  form is not — and because both loops in `callgraph.ts` that read a file's edges skip a
+  dynamic one, the value is also what keeps this import in reach of call resolution.
+
+  A clause that did not parse is not read at all. The grammar admits nothing but a string
+  literal for the specifier, so `require("a" + b)` is a syntax error — but error recovery
+  leaves the operand it could read as a direct child of the clause with the `source` field
+  attached, and reading it would answer `a`. `require('./m', 'y')` would answer the second
+  argument.
+
+  A template _with_ a substitution stays computed and stays silent, which is the boundary this
+  change is careful about: joining a substituting template's fragments would answer `"./"` for
+  `` `./${p}` `` — an edge to a module the author never named, and a worse answer than none.
+
+  An empty specifier written in either new form (`import x = require("")`, `import(`)``) goes
+  through the same gate as `import("")` and is reported as the empty specifier it is.
+  `firstNonCommentChild` moves to `ast-helpers.ts`, where the decorator reader takes it too;
+  `imports.ts` drops its private `findChildByType`, a duplicate of `ast-helpers`' `findChild`.
+
+- 8443f90: Decode the escapes in a module specifier instead of deleting them
+
+  `readLiteralSpecifier` joined only a literal's `string_fragment` children, and tree-sitter puts
+  an escape in a sibling `escape_sequence` node — so the escape was deleted rather than decoded
+  and the reader handed back a shorter string that looked perfectly well-formed.
+
+  | written        | before | now               |
+  | -------------- | ------ | ----------------- |
+  | `"\x2E/e"`     | `/e`   | `./e`             |
+  | `"./a\u002Fb"` | `./ab` | `./a/b`           |
+  | `"./a\tb"`     | `./ab` | `./a` + TAB + `b` |
+
+  The first row is the one that costs the most. `isRelativeSpecifier` accepts a `./` or `../`
+  prefix and nothing else, so an escaped leading dot left a specifier that names a sibling file
+  bucketed as `external` — "out of reach by construction" rather than "we misread the string" —
+  and call resolution's relative tier never consulted the edge. The rest are edges pointing at
+  modules that do not exist, indistinguishable in the IR from ones that do. None of it produced a
+  diagnostic.
+
+  `decodeEscapeSequence` is a new unit with its own table: the control escapes, the quoted
+  characters, `\xHH` / `\uHHHH` / `\u{...}` (by code point, so an astral escape is not truncated
+  to its low 16 bits), the line continuation, and the identity case. It is wired into the
+  specifier reader only, and reaches the dynamic, re-export and require-equals paths with it.
+
+  **One behaviour change beyond decoding.** A literal that is nothing but a line continuation
+  decodes to the empty string, so it now hits the empty-specifier diagnostic instead of producing
+  an edge whose source was a backslash and a newline. A literal made only of _other_ escapes
+  (`"\n\t"`) still gets an ordinary edge — the gate tests emptiness, not blankness.
+
+  An ill-formed escape never reaches the decoder: `"\uZZZZ"`, `"\u12b"`, `"\u{}"` and `"\xZZ"` parse
+  as ERROR nodes rather than `escape_sequence` and are already reported as recoverable syntax
+  errors. A literal made of nothing else still comes back as its own source text rather than as
+  the empty string, so the parser's syntax error stays the only thing said about it — calling it
+  empty as well would be a third diagnostic claiming the author wrote no module name, and they
+  did.
+
+  **A braced escape is different**: the grammar checks its shape, not its range, so
+  `"\u{110000}"` does arrive — and `String.fromCodePoint` throws a `RangeError` on it, which would
+  leave `parseFile`, land on the per-file boundary and cost the whole file. It is range-checked
+  and handled the way `\1` and `\8` are: an escape with no legal value comes back as its own text,
+  because inventing one would put a module name in the IR that the source does not contain.
+  Nothing downstream learns the specifier was illegal, which stays true of all three.
+
+- Updated dependencies [be8e2b9]
+- Updated dependencies [81dadb6]
+- Updated dependencies [a358a5a]
+- Updated dependencies [3774de6]
+- Updated dependencies [ff059d7]
+- Updated dependencies [6676ca7]
+- Updated dependencies [6d4730f]
+- Updated dependencies [e7f1d49]
+- Updated dependencies [203ea78]
+- Updated dependencies [3e180e8]
+- Updated dependencies [a4d3cff]
+- Updated dependencies [ba9e505]
+  - @aburi/types@0.4.0
+  - @aburi/core@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes

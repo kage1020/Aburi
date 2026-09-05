@@ -1,5 +1,101 @@
 # @aburi/github-action
 
+## 0.3.0
+
+### Minor Changes
+
+- aa21622: Run the CLI the project installed, so a config that names a plugin by package has one
+
+  The action resolved `aburi` one way: `pnpm dlx @aburi/cli@<version>`, which installs the CLI into
+  the pnpm store rather than into the checkout. The CLI resolves a plugin ref from its own location,
+  so `languages: ["lang-typescript"]` — the line `aburi init` writes into every TypeScript workspace
+  it detects — resolved from the store copy of `@aburi/cli` and found nothing:
+
+  ```
+  Failed to import plugin "lang-typescript" (resolved to "@aburi/lang-typescript"):
+  Cannot find package '@aburi/lang-typescript'
+  ```
+
+  That is exit 3 before a single file is parsed, and no `pnpm add` in the consumer's project changes
+  it, because the consumer's `node_modules` is not on that resolution path. The documented quick
+  start installs the CLI and its plugins as devDependencies; the documented action could use neither.
+  (A plugin named by relative path was always fine: those resolve against the workspace root.)
+
+  The new `cli` input picks the resolution. `dlx` is the old behaviour and stays the default — it
+  needs no install step, and it suits a config that names no plugin by package. `workspace` runs the
+  `@aburi/cli` the project installed, resolved from `working-directory`, with the project's plugins
+  beside it and the project's lockfile deciding the version. `version`, `node-version` and
+  `pnpm-version` do not apply there: the caller installed the workspace with a toolchain of their
+  own, and re-running `actions/setup-node` would swap it out from under that install, so the two
+  setup steps are skipped as well.
+
+  Resolution goes through Node's resolver — `@aburi/cli`'s manifest, then its `bin.aburi` — rather
+  than through a `node_modules/.bin` entry, which npm, yarn and bun projects have no `pnpm exec` to
+  reach and a workspace that builds its own CLI does not have at all: the bin file is not there when
+  the install writes the links, and no later install recreates it, the tree being up to date by then.
+  Yarn PnP is the one arrangement this does not serve, having no `node_modules`; it needs `cli: dlx`.
+
+  The resolver is a script (`scripts/resolve-cli-bin.mjs`) rather than a heredoc, so it is testable
+  and tested. It answers with the bin's path, or with one line saying which of three things is wrong:
+  `@aburi/cli` is not installed where it looked, the manifest declares no `aburi` command, or the bin
+  it names does not exist — the last being a workspace that installed and did not build, which
+  otherwise reached the runner as the CLI's own `MODULE_NOT_FOUND` and got reported as a runtime
+  error in the analysed project.
+
+  A `cli` value that is neither `dlx` nor `workspace` is exit 2 from the input-validation step, next
+  to the `format` check. So is `comment`, now: every value but `true` read as false there, so
+  `comment: yes` ran green, posted nothing, and cleared the `comment=true` + `format=json` check on
+  the way past.
+
+  `@aburi/github-action`'s contract now has a design doc, `docs/design/github-action.md`.
+
+### Patch Changes
+
+- aa21622: Stop documenting an expression the runner tries to evaluate
+
+  The `refspec` input's description quoted the fallback it documents —
+  `${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}` — as prose.
+  The runner parses a manifest's descriptions as templates, with a context set that has no `github`
+  in it, so loading the action failed before its first step ran:
+
+  ```
+  action.yml (Line: 19, Col: 18): Unrecognized named-value: 'github'.
+  Located at position 1 within expression: github.event.pull_request.base.sha
+  ```
+
+  Every consumer of the action got that, whatever their inputs: the manifest never loaded. The
+  description now names those context paths as plain text, and a test asserts that no description
+  holds a `${{ … }}` and that no input `default` does either, apart from the `${{ github.token }}`
+  every action uses — defaults are template-evaluated in the same way, so the next instance of this
+  outage would otherwise be one `default:` away. Nothing else catches it: the manifest is parsed by
+  the runner rather than by anything that runs in CI.
+
+  While there: the description also said the fallback applies on `pull_request`, where the step has
+  always accepted `pull_request_target` too.
+
+- aa21622: Keep a failing step from taking the gate's verdict down with it
+
+  Three ways the action could fail while saying something other than what happened.
+
+  **A warning could be read as a path.** The workspace resolver's stderr was merged into the captured
+  stdout, so anything Node wrote there while still exiting 0 — an `ExperimentalWarning` from the
+  caller's `NODE_OPTIONS`, a corepack notice — was prepended to the path and then run as one. The
+  result was `Cannot find module '(node:1234) ExperimentalWarning: …'`: exit 1, reported as the
+  CLI's runtime error, pointing the reader at the code being analysed. stderr goes to a file now, and
+  is quoted back only when the resolve actually failed.
+
+  **A misconfiguration could read as success.** The resolver's failure exits before the step writes
+  its outputs, so `cli-exit-code` came back empty rather than `2`. A caller testing
+  `cli-exit-code != '0'` passed on the empty string; one writing `cli-exit-code || '0'` read the
+  failure as clean. The outputs are written before that exit now, and the output's own description
+  says which value means what.
+
+  **A tripped gate could vanish behind an API error.** The step that propagates the CLI's exit code
+  had no `if: always()`, and a composite action stops at its first failing step — so a 403 or a rate
+  limit while posting the comment ended the job on a GitHub API failure, with `--fail-on` having
+  fired and nothing in the log saying so. It runs unconditionally now; an empty exit code, from an
+  earlier step failing on its own terms, reads as 0 and leaves that failure standing.
+
 ## 0.2.0
 
 ### Minor Changes

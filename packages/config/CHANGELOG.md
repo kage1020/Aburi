@@ -1,5 +1,118 @@
 # @aburi/config
 
+## 0.3.0
+
+### Minor Changes
+
+- c1de8f5: Stop reporting Aburi's own faults, and the filesystem's, as a malformed config
+
+  Loading the config turned every thrown value into `config-error`, which `cli-spec.md` §9 spends
+  exit 2 on — the code that tells a reader to go and edit `aburi.json`. Two kinds of failure arrive
+  there that no edit fixes.
+
+  **Aburi's own invariants.** `formatAjvErrors` throws a bare `Error` when ajv reports failure with
+  an empty `errors[]`, and its own docblock says that means ajv is in an unexpected state rather
+  than the config being wrong. It reached the reader as `Failed to load Aburi config: ajv invariant
+violation…` on exit 2. Anything that is not a `ConfigError` now exits 1 and says it is a bug in
+  Aburi, with where to report it — the same treatment `classifyDiffError` gives
+  `slice-invariant-violated`.
+
+  **A config that is there and cannot be read.** `config-read-failed` now exits 1 rather than 2. A
+  permission, a mount, or a directory named `aburi.json` is IO, and its message keeps the
+  `Failed to load Aburi config:` prefix, which names the phase that failed rather than who is
+  answerable for it.
+
+  Absence is no longer part of that code. `readConfigFile` stamped `config-read-failed` on every
+  read failure, `ENOENT` included, so a mistyped `--config ./typo.json` would have moved to exit 1
+  with it — where §9 lists "missing" under exit 2, because a path the reader named is theirs to
+  fix. `@aburi/config` gains **`config-not-found`** for that case, with the message `No config
+file at <path>` rather than `Failed to read config at <path> (ENOENT)`, and the CLI keeps it on
+  exit 2. Only the explicit `--config` path raises it: discovery answers absence with `null` and
+  lets autodetect run, as before. `ENOENT`/`ENOTDIR` is now one set shared by the reader and the
+  prober, so the two cannot drift apart on what "nothing there" means.
+
+  The mapping is a switch that is total over `ConfigErrorCode`, so a code added upstream is a type
+  error rather than a silent arm. At runtime it degrades instead of throwing: `@aburi/config` and
+  `@aburi/cli` version independently, so a compiled switch can meet a code it never saw, and
+  throwing there would discard the message the reader needs. `classifyDiffError` had the same hole
+  and takes the same fix. Both now put the "report it" instruction on its own line, since nothing
+  reaching them ends in punctuation.
+
+  `classifyConfigError` is exported alongside `classifyDiffError`: it is where the two exit codes
+  are decided, and the branch that matters most is not otherwise reachable from a fixture.
+
+  Three commands read the config — `scan`, `diff` and `explain` — so all three inherit this;
+  `init` writes one and is unaffected. `cli-spec.md` §9 and §5.4 and `EXIT`'s own doc all state the
+  rule now, rather than three different ones.
+
+- c58a7a4: `aburi diff` scans the base revision with the head's config, as the spec always said it did
+
+  `cli-spec.md` §6.4 step 3 requires the base scan to read the **head**'s `aburi.json`, because
+  a base read through its own config makes "config change" and "the entire IR changed" the same
+  event. The implementation did the opposite. `runScanInDir` handed the base scan a cwd inside
+  the temporary worktree, and config discovery walks up from cwd — so a commit that edited
+  nothing but `ignore` reported the Symbols that setting covers as added or removed:
+
+  ```
+  $ aburi diff HEAD~1..HEAD --fail-on added
+  +1 -0 ~0 ↔0 ⤴0
+  --fail-on added tripped (observed: 1 added)
+  EXIT=3
+  ```
+
+  `--config` was not an escape, and neither was `ABURI_CONFIG`: both arrive as one value that
+  resolves against the scan's cwd, so a relative path named the base revision's copy of the file
+  for the base scan and the head's for the head scan — the same defect wearing a flag.
+
+  Both routes are now settled once, before the worktree exists, and both scans are handed that
+  one answer. `pinConfig(cwd, overridePath)` returns a `ConfigSource` — an absolute path, or
+  `autodetect` — and `loadPinnedConfig` reads it wherever the working directory has since moved
+  to. `runScan` spends whichever it was given: `options.pinnedConfig ?? (await pinConfig(cwd,
+options.configPath))`, so the precedence between a decided config and one still to decide is
+  the operator rather than a sentence.
+
+  `autodetect` is carried rather than left implicit, because the defect is symmetric: a head
+  revision with no config on disk must not send the base scan back to discovery, where the base
+  ref's own `aburi.json` is waiting. Today both sides then stop on "no language plugin is
+  configured" rather than producing an IR, so what this buys is that they stop _identically_ —
+  the guarantee only starts paying out when autodetect can reach a plugin set of its own.
+
+  Two things the pinning exposed, fixed here rather than left for a reader to trip over:
+
+  - **A relative plugin ref in the head's config was resolved inside the base worktree**, so a
+    commit that added `./plugins/new.mjs` and registered it made the base scan die on a config
+    the head reads fine. §6.4.1.5 pins the plugin set to the head environment — the worktree
+    materialises sources only, `node_modules` is the caller's — so the ref resolves there too.
+    `ScanOptions.pluginRefRoot` carries it; everything else inside the config (`ignore`,
+    `components[].roots`) still resolves against each scan's own workspace root, because those
+    name sources and the worktree is where the base's sources are.
+  - **The "config sits below the workspace root" warning fired on every ref-mode diff.** It
+    compares the config's directory against the workspace root, which for a pinned base scan can
+    never match — the head's `aburi.json` is not below the worktree, it is in another tree, and
+    nobody ran anything from a monorepo package. `ScanReport.configPinnedByCaller` exempts it,
+    and the half of the sentence that stays true moves into the `aburi diff` section of the CLI
+    reference, where a reader meets it once instead of on every run.
+
+  `@aburi/config` gains a `ConfigSource` union and `loadConfigFrom` / `configSourceFrom`, so a
+  caller that has already chosen a file can say so without rebuilding the `LoadedConfig` shape.
+  The input side is discriminated the way `LoadedConfig.found` already discriminates the output
+  side: `loadConfigFrom(null)` would read as "read from the default", which is the opposite of
+  what it would have meant.
+
+  `@aburi/cli` gains `ScanOptions.pinnedConfig`, `ScanOptions.pluginRefRoot`,
+  `ScanReport.configPinnedByCaller`, and the `pinConfig` / `loadPinnedConfig` / `PinnedConfig`
+  exports. `loadPinnedConfig` rejects a relative path outright, since the whole contract is that
+  the answer no longer depends on where the process is standing. Nothing changes for a caller
+  that sets none of the new fields.
+
+### Patch Changes
+
+- Updated dependencies [be8e2b9]
+- Updated dependencies [3774de6]
+- Updated dependencies [203ea78]
+- Updated dependencies [ba9e505]
+  - @aburi/types@0.4.0
+
 ## 0.2.0
 
 ### Minor Changes
