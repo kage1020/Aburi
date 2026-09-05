@@ -490,22 +490,70 @@ interface RefSpec {
   head: string
 }
 
+/**
+ * `<base>..<head>`, split at the first separator rather than at every `..`
+ * (`cli-spec.md` §6.3).
+ *
+ * `"main...HEAD".split("..")` is `["main", ".HEAD"]` — two parts, both non-empty, so the
+ * three-dot form passed the syntax check and the run continued with `.HEAD` as the head ref.
+ * What the reader then saw was a git failure naming a ref they never typed (`Head ref '.HEAD'
+ * could not be resolved…`, exit 1), for an input `cli-spec.md` §6.5 classifies as a syntax
+ * violation (exit 2). Three-dot is a realistic input: it is the form in a GitHub compare URL
+ * and in `git diff a...b`.
+ *
+ * So the separator is located once and the dot run measured, which lets the three-dot case be
+ * named for what it is instead of falling into the generic message. `aburi diff` compares the
+ * two revisions directly and has no merge-base form, so the message says that and names the
+ * `git merge-base` that resolves one — as a two-placeholder form rather than a command with
+ * the caller's own refs pasted in, both because resolving it here would silently answer a
+ * different question than the one asked, and because a ref name is not shell-safe: `$ ( ) " ;
+ * & |` and backticks all pass `git check-ref-format`, so a copy-pasteable command built from
+ * one hands the reader a substitution to run.
+ *
+ * The three checks below are ordered by what each can still say truthfully:
+ *
+ * - **Emptiness first**, so `main...` reads as a missing head ref rather than as a three-dot
+ *   spec whose suggested rewrite would be `main..`.
+ * - **A second separator next**, so `a...b..c` — a three-dot run *followed* by another `..` —
+ *   gets the generic message. Judged first, the three-dot branch would suggest `a..b..c`,
+ *   which this same function rejects, and would name `b..c` as a ref: the very defect this
+ *   parse fixes. `base` cannot hold one, `indexOf` having taken the first, so `head` is the
+ *   whole test.
+ * - **The dot run last**, where a rewrite naming two refs is finally something that parses.
+ */
 function parseRefSpec(spec: string): RefSpec {
-  const parts = spec.split("..")
-  if (parts.length !== 2) {
-    throw new CliError(
-      `diff argument "${spec}" is not a valid ref spec. Use <base>..<head> (e.g. main..HEAD) or supply --base and --head with IR paths.`,
-      "input-error",
-    )
-  }
-  const [base, head] = parts
-  if (base === undefined || base.length === 0 || head === undefined || head.length === 0) {
+  const separator = spec.indexOf("..")
+  if (separator === -1) throw malformedRefSpec(spec)
+  // The whole run of dots, so `a...b` is one separator the caller spelled wrong rather than a
+  // `..` followed by a ref whose name begins with a dot (git refuses those anyway).
+  let afterDots = separator + 2
+  while (spec[afterDots] === ".") afterDots++
+  const base = spec.slice(0, separator)
+  const head = spec.slice(afterDots)
+  if (base.length === 0 || head.length === 0) {
     throw new CliError(
       `diff argument "${spec}" must contain non-empty base and head refs on either side of "..".`,
       "input-error",
     )
   }
+  if (head.includes("..")) throw malformedRefSpec(spec)
+  if (afterDots - separator === 3) {
+    throw new CliError(
+      `diff argument "${spec}" uses the three-dot form. aburi diff compares the two revisions directly, so write it as "${base}..${head}". To compare the head against the merge base instead, resolve it yourself with: git merge-base <base> <head>.`,
+      "input-error",
+    )
+  }
+  // A longer dot run: it names two refs, but nothing about it says where the separator was
+  // meant to end, so there is no rewrite worth guessing at.
+  if (afterDots - separator !== 2) throw malformedRefSpec(spec)
   return { base, head }
+}
+
+function malformedRefSpec(spec: string): CliError {
+  return new CliError(
+    `diff argument "${spec}" is not a valid ref spec. Use <base>..<head> (e.g. main..HEAD) or supply --base and --head with IR paths.`,
+    "input-error",
+  )
 }
 
 type ScanPair = Record<DiffSide, ScanReport>
