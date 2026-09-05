@@ -24,13 +24,22 @@ merge base spelled out:
 ```
 diff argument "main...HEAD" uses the three-dot form. aburi diff compares the two revisions
 directly, so write it as "main..HEAD". To compare the head against the merge base instead,
-resolve that yourself: aburi diff "$(git merge-base main HEAD)..HEAD".
+resolve it yourself with: git merge-base <base> <head>.
 ```
 
 Refusing beats quietly reading it as `main..HEAD`: the two forms answer different questions, and
-a diff against the wrong base is a report the reader has no reason to distrust.
+a diff against the wrong base is a report the reader has no reason to distrust. The `git
+merge-base` is named with placeholders rather than as a command with the caller's refs pasted
+in: `$ ( ) " ; & |` and backticks all pass `git check-ref-format`, so a copy-pasteable command
+built from a ref name would hand the reader a shell substitution to run.
 
-Emptiness is checked before the dot run is judged, so `main...` still reads as a missing head
-ref rather than as a three-dot spec whose suggested rewrite would be `main..`. Longer dot runs
-and a second separator (`a..b..c`) keep the generic message. Two-dot specs are untouched,
-including tags that carry dots of their own — `v1.2.0..v1.3.0` parses as it always did.
+The three checks are ordered by what each can still say truthfully. Emptiness first, so `main...`
+reads as a missing head ref rather than as a three-dot spec whose suggested rewrite would be
+`main..`. A second separator next, so `a..b..c` and `a...b..c` alike keep the generic message —
+judged the other way round, the second would be answered with the rewrite `a..b..c`, which this
+same function rejects, and with `b..c` named as a ref, which is the defect this change removes.
+The dot run last, where a rewrite naming two refs is finally something that parses; a longer run
+(`main....HEAD`) has no such rewrite to guess at and keeps the generic message too.
+
+Two-dot specs are untouched, including tags that carry dots of their own — `v1.2.0..v1.3.0`
+parses as it always did.

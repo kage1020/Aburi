@@ -455,8 +455,9 @@ Ref forms:
 
 Exactly one `..` separates the two refs. The three-dot form `main...HEAD` — what a GitHub
 compare URL and `git diff a...b` spell — is **rejected as a syntax violation** (exit 2, §6.5)
-with a message naming the two-dot rewrite and the `git merge-base` command that resolves the
-merge base. It is refused rather than accepted-as-two-dot because the two forms answer
+with a message naming the two-dot rewrite and pointing at `git merge-base <base> <head>`
+(placeholders, not the caller's own refs pasted into a runnable command: a ref name may legally
+contain `$`, backticks and `;`). It is refused rather than accepted-as-two-dot because the two forms answer
 different questions, and silently answering the other one is worse than saying so. A
 merge-base form of its own is under consideration (see the [roadmap](../roadmap.md)).
 

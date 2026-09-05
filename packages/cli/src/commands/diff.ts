@@ -491,23 +491,35 @@ interface RefSpec {
 }
 
 /**
- * `<base>..<head>`, split at the first separator rather than at every `..` (§6.3).
+ * `<base>..<head>`, split at the first separator rather than at every `..`
+ * (`cli-spec.md` §6.3).
  *
  * `"main...HEAD".split("..")` is `["main", ".HEAD"]` — two parts, both non-empty, so the
  * three-dot form passed the syntax check and the run continued with `.HEAD` as the head ref.
  * What the reader then saw was a git failure naming a ref they never typed (`Head ref '.HEAD'
- * could not be resolved…`, exit 1), for an input §6.5 classifies as a syntax violation (exit
- * 2). Three-dot is a realistic input: it is the form in a GitHub compare URL and in
- * `git diff a...b`.
+ * could not be resolved…`, exit 1), for an input `cli-spec.md` §6.5 classifies as a syntax
+ * violation (exit 2). Three-dot is a realistic input: it is the form in a GitHub compare URL
+ * and in `git diff a...b`.
  *
  * So the separator is located once and the dot run measured, which lets the three-dot case be
  * named for what it is instead of falling into the generic message. `aburi diff` compares the
- * two revisions directly and has no merge-base form, so the message says that and hands over
- * the command that resolves one — a `git merge-base` the caller substitutes themselves,
- * because resolving it here would silently answer a different question than the one asked.
+ * two revisions directly and has no merge-base form, so the message says that and names the
+ * `git merge-base` that resolves one — as a two-placeholder form rather than a command with
+ * the caller's own refs pasted in, both because resolving it here would silently answer a
+ * different question than the one asked, and because a ref name is not shell-safe: `$ ( ) " ;
+ * & |` and backticks all pass `git check-ref-format`, so a copy-pasteable command built from
+ * one hands the reader a substitution to run.
  *
- * Both sides are checked for emptiness before the dot run is judged, so `main...` reads as a
- * missing head ref rather than as a three-dot spec whose suggested rewrite is `main..`.
+ * The three checks below are ordered by what each can still say truthfully:
+ *
+ * - **Emptiness first**, so `main...` reads as a missing head ref rather than as a three-dot
+ *   spec whose suggested rewrite would be `main..`.
+ * - **A second separator next**, so `a...b..c` — a three-dot run *followed* by another `..` —
+ *   gets the generic message. Judged first, the three-dot branch would suggest `a..b..c`,
+ *   which this same function rejects, and would name `b..c` as a ref: the very defect this
+ *   parse fixes. `base` cannot hold one, `indexOf` having taken the first, so `head` is the
+ *   whole test.
+ * - **The dot run last**, where a rewrite naming two refs is finally something that parses.
  */
 function parseRefSpec(spec: string): RefSpec {
   const separator = spec.indexOf("..")
@@ -524,15 +536,16 @@ function parseRefSpec(spec: string): RefSpec {
       "input-error",
     )
   }
+  if (head.includes("..")) throw malformedRefSpec(spec)
   if (afterDots - separator === 3) {
     throw new CliError(
-      `diff argument "${spec}" uses the three-dot form. aburi diff compares the two revisions directly, so write it as "${base}..${head}". To compare the head against the merge base instead, resolve that yourself: aburi diff "$(git merge-base ${base} ${head})..${head}".`,
+      `diff argument "${spec}" uses the three-dot form. aburi diff compares the two revisions directly, so write it as "${base}..${head}". To compare the head against the merge base instead, resolve it yourself with: git merge-base <base> <head>.`,
       "input-error",
     )
   }
-  // A longer dot run, or a second separator (`a..b..c`): neither names two refs, and neither
-  // has a rewrite worth guessing at.
-  if (afterDots - separator !== 2 || head.includes("..")) throw malformedRefSpec(spec)
+  // A longer dot run: it names two refs, but nothing about it says where the separator was
+  // meant to end, so there is no rewrite worth guessing at.
+  if (afterDots - separator !== 2) throw malformedRefSpec(spec)
   return { base, head }
 }
 
