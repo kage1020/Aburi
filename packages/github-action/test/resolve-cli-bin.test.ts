@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -45,6 +45,19 @@ async function runFrom(cwd: string): Promise<RunResult> {
 const workspaces: string[] = []
 
 /**
+ * A temporary directory, resolved through `realpath`.
+ *
+ * macOS's `tmpdir()` is a symlink (`/var` → `/private/var`), and Node reports `process.cwd()`
+ * resolved — so a fixture path kept as handed out disagrees with every path the child process
+ * prints, and the assertions fail there and only there.
+ */
+async function workspace(prefix: string): Promise<string> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), prefix)))
+  workspaces.push(root)
+  return root
+}
+
+/**
  * A workspace holding one installed `@aburi/cli`, described by the manifest fields under test.
  * `bin` absent writes no `bin` field at all; `binFile: false` writes the manifest but not the file
  * it points at, which is the state of a workspace that installed but has not built.
@@ -54,8 +67,7 @@ async function fixture(options: {
   bin?: unknown
   binFile?: boolean
 }): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "aburi-resolve-"))
-  workspaces.push(root)
+  const root = await workspace("aburi-resolve-")
   const packageDir = join(root, "node_modules", "@aburi", "cli")
   await mkdir(join(packageDir, "dist", "bin"), { recursive: true })
   const manifest =
@@ -91,8 +103,7 @@ describe("resolve-cli-bin.mjs", () => {
     // This repository has @aburi/cli installed, and the script lives inside it. Resolution from a
     // temporary directory that holds no such package therefore has to fail — if it did not, the
     // script would be answering with its own tree, and `working-directory` would mean nothing.
-    const empty = await mkdtemp(join(tmpdir(), "aburi-resolve-empty-"))
-    workspaces.push(empty)
+    const empty = await workspace("aburi-resolve-empty-")
     const { status, stderr } = await runFrom(empty)
     expect(status).toBe(2)
     expect(stderr).toContain("not resolvable")
@@ -139,10 +150,28 @@ describe("resolve-cli-bin.mjs", () => {
   it("reports every failure on a single line", async () => {
     // `::error::` renders one line in the Checks UI. A message that wraps loses everything after
     // the first newline exactly where the reader needs it.
-    const empty = await mkdtemp(join(tmpdir(), "aburi-resolve-oneline-"))
-    workspaces.push(empty)
+    const empty = await workspace("aburi-resolve-oneline-")
     const { stderr } = await runFrom(empty)
     expect(stderr.trimEnd().split("\n")).toHaveLength(1)
+  })
+
+  it("answers with the real path when the working directory is reached through a symlink", async (ctx) => {
+    // What `process.cwd()` reports is resolved, so the answer is a real path however the caller
+    // arrived. This is macOS's default state rather than an exotic one — `tmpdir()` there is
+    // `/var` → `/private/var` — and it is why the fixtures above go through `realpath`.
+    const root = await fixture({ bin: { aburi: "./dist/bin/aburi.mjs" } })
+    const link = join(await workspace("aburi-resolve-link-"), "linked")
+    try {
+      await symlink(root, link, "junction")
+    } catch {
+      // Creating one needs a privilege Windows does not grant by default. The behaviour under
+      // test is the platform's, not ours, so there is nothing to assert where it cannot be set up.
+      ctx.skip()
+      return
+    }
+    const { status, stdout } = await runFrom(link)
+    expect(status).toBe(0)
+    expect(stdout).toBe(join(root, "node_modules", "@aburi", "cli", "dist", "bin", "aburi.mjs"))
   })
 
   it("keeps the @aburi/cli manifest resolvable and its bin where the resolver looks", async () => {
