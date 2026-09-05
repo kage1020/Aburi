@@ -40,6 +40,7 @@ export {
   isComponentId,
   isDefaultExportQname,
   isLanguageId,
+  isQnameSegment,
   isQualifiedName,
   isSymbolId,
   makeComponentId,

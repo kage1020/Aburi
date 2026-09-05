@@ -649,6 +649,23 @@ export function isQualifiedName(value: string): boolean {
   return qualifiedNameViolation(value) === null
 }
 
+/**
+ * Is a single string a segment the qualified-name grammar admits?
+ *
+ * For a producer holding a *candidate* name with somewhere to go other than a throw. A
+ * language plugin reads names the grammar has no segment for — a quoted or numeric class
+ * member, a computed one — and for those `ir-schema.md` §3.2 says no Symbol rather than an
+ * error, so the plugin has to ask before it builds. Without this it could only build and
+ * catch, and catching an id-builder throw means catching every other reason one is thrown.
+ *
+ * `isQualifiedName` is the wrong predicate for that question and would fail quietly: it
+ * answers about a *finished* name, so it admits `.` and `::`. A caller vetting one member
+ * name with it would accept `"a.b"` and mint the nested qname `C.a.b` out of a single member.
+ */
+export function isQnameSegment(value: string): boolean {
+  return QNAME_SEGMENT_PATTERN.test(value)
+}
+
 function qualifiedNameViolation(qname: string): GrammarViolation | null {
   if (qname.length === 0) {
     return {

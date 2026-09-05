@@ -1,7 +1,7 @@
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild } from "./ast-helpers"
-import { decodeEscapeSequence } from "./string-escape"
+import { decodeStringLiteral } from "./string-escape"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -323,14 +323,24 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * `isRelativeSpecifier` (neither `./` nor `../`) and sent every call through that binding to
  * the `external` bucket instead of to the sibling file it names.
  *
- * Those are not the only named children a literal can have. An ERROR node is one too, and it
- * is passed over rather than read: `"./a\uZZZZb"` comes back as `./a`, with the parser's own
- * syntax error accounting for the rest. What this reader answers is what parsed.
+ * Those are not the only named children a literal can have. An ERROR node is one too, and a
+ * specifier keeps what parsed around it: `"./a\uZZZZb"` comes back as `./a`, with the
+ * parser's own syntax error accounting for the rest. `decodeStringLiteral` reports the
+ * partial read as well, and this caller is the one that does not act on it — a class member's
+ * name, which becomes part of a Symbol id, refuses the same read.
  *
- * The quote-stripping fallback below is what a literal reaches when nothing was read at all,
- * which is now two cases and not three: an empty literal, and one whose contents are entirely
- * an ERROR node. A literal made only of escapes used to land there and come back as its own
- * source text; it has a decoded value now.
+ * The quote-stripping fallback below is what a literal reaches when the read came back empty
+ * *and* incomplete — a literal whose contents are entirely an ERROR node. Stripping the quotes
+ * is what leaves the parser's own syntax error as the only thing said about it; calling it
+ * empty as well would be a third diagnostic claiming the author wrote no module name, and they
+ * did.
+ *
+ * Which is why `whole` is read here after all, for the one shape that needs it and no more. An
+ * escape can decode to nothing — a line continuation joins two source lines and contributes no
+ * character — so a literal that is only one comes back empty and *whole*, and reaches the
+ * empty-specifier diagnostic it should. `"\uZZZZ"` comes back empty and not whole, and reaches
+ * the fallback. Reading emptiness alone cannot tell those two apart, and sends the second to
+ * the diagnostic this paragraph says it avoids.
  */
 function readLiteralSpecifier(node: Node): string | null {
   if (node.type === "template_string") {
@@ -338,20 +348,8 @@ function readLiteralSpecifier(node: Node): string | null {
   } else if (node.type !== "string") {
     return null
   }
-  const parts: string[] = []
-  for (const child of node.namedChildren) {
-    if (child === null) continue
-    if (child.type === "string_fragment") parts.push(child.text)
-    else if (child.type === "escape_sequence") parts.push(decodeEscapeSequence(child.text))
-  }
-  // An escape can decode to nothing — a line continuation joins two lines and contributes no
-  // character — so a literal that is only one comes back empty and reaches the caller's gate.
-  if (parts.length > 0) return parts.join("")
-  // Nothing was read: either the literal is empty, or its contents did not parse and stand as
-  // an ERROR node (`"\uZZZZ"`). Stripping the quotes tells them apart — the first is empty and
-  // the caller reports it, the second comes back non-empty, which is the answer that leaves
-  // the parser's own syntax error as the only thing said about it. Calling it empty as well
-  // would be a third diagnostic claiming the author wrote no module name, and they did.
+  const { value, whole } = decodeStringLiteral(node)
+  if (whole || value !== "") return value
   const raw = node.text
   if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
   return raw

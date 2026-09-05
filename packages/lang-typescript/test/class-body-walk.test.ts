@@ -294,6 +294,11 @@ describe("the two readers of \u201cdoes this member have a Symbol?\u201d agree",
     "  optField?: H = () => { optFieldBody() }",
     "  accessor accField = () => { accFieldBody() }",
     "  static #staticHashField = () => { staticHashFieldBody() }",
+    '  "quoted"() { quotedBody() }',
+    '  "not-a-name"() { hyphenBody() }',
+    "  1() { numericBody() }",
+    '  "quotedField" = () => { quotedFieldBody() }',
+    '  "not-a-field" = () => { hyphenFieldBody() }',
     "}",
   ].join("\n")
 
@@ -341,6 +346,11 @@ describe("the two readers of \u201cdoes this member have a Symbol?\u201d agree",
       "optFieldBody",
       "accFieldBody",
       "staticHashFieldBody",
+      "quotedBody",
+      "hyphenBody",
+      "numericBody",
+      "quotedFieldBody",
+      "hyphenFieldBody",
     ]
     const counts = Object.fromEntries(written.map((t) => [t, owners.get(t)?.length ?? 0]))
 

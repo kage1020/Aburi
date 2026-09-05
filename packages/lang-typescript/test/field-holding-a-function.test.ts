@@ -211,14 +211,15 @@ describe("a field that is not a function stays a field", () => {
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["comp"])
   })
 
-  it("leaves a string or numeric member name on the class rather than costing the file", async () => {
-    // `"ok"` and `1` are `PropertyName`s the qualified-name grammar refuses, and the refusal
-    // is a throw at the per-file boundary. Admitting only a written identifier keeps this
-    // shape where it was instead of turning it into a lost file.
+  it("takes a quoted name that spells an identifier, and leaves a numeric one", async () => {
+    // The field gate is the method gate now: what decides is the *segment* the written name
+    // maps to, so `"ok"` is the member `ok` and `1` is a `PropertyName` with no segment at
+    // all. See `a-quoted-member-name.test.ts` for the rule itself.
     const source = classOf('  "ok" = () => { s() }', "  1 = () => { n() }")
 
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
-    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["s", "n"])
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.ok"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["n"])
+    expect(await callsOf(source, "ts:src/a.ts#C.ok")).toEqual(["s"])
   })
 
   it("leaves a generator field on the class", async () => {
