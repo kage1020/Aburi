@@ -78,6 +78,9 @@ consecutive scans of an unchanged tree produce byte-identical IR.
 
 Nothing here is committed.
 
+- A merge-base ref form, `aburi diff main...HEAD`, comparing the head against
+  the point it branched from the way a GitHub compare URL reads. Today the
+  three-dot spelling is rejected with a message pointing at `git merge-base`.
 - Expose Aburi as an MCP server, callable from AI coding agents.
 - `aburi review`, feeding the diff to a model for automated review comments.
 - Name Slice View clusters automatically. They carry ids today.

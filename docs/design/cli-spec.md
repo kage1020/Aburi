@@ -453,6 +453,13 @@ Ref forms:
 - `v1.2.0..v1.3.0` — tag comparison
 - `abc123..def456` — direct commit specification
 
+Exactly one `..` separates the two refs. The three-dot form `main...HEAD` — what a GitHub
+compare URL and `git diff a...b` spell — is **rejected as a syntax violation** (exit 2, §6.5)
+with a message naming the two-dot rewrite and the `git merge-base` command that resolves the
+merge base. It is refused rather than accepted-as-two-dot because the two forms answer
+different questions, and silently answering the other one is worse than saying so. A
+merge-base form of its own is under consideration (see the [roadmap](../roadmap.md)).
+
 If git is unavailable, pass existing IR files via the `--base / --head` pair.
 
 ### 6.4 Behavior
