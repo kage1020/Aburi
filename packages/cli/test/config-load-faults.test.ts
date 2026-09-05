@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 import { ConfigError, type ConfigErrorCode } from "@aburi/config"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, classifyConfigError, EXIT, runCli } from "../src"
-import { resolveConfig } from "../src/config-load"
+import { loadPinnedConfig, resolveConfig } from "../src/config-load"
 
 /**
  * Every failure of the config load used to be reported as the config being malformed, which
@@ -218,5 +218,49 @@ describe("resolveConfig — what the caller catches", () => {
     expect(thrown).toBeInstanceOf(CliError)
     expect((thrown as CliError).code).toBe("runtime-error")
     expect((thrown as Error).message).toContain("Failed to load Aburi config: ")
+  })
+})
+
+describe("loadPinnedConfig — the invariant the type only states", () => {
+  let workRoot = ""
+
+  beforeEach(async () => {
+    workRoot = await mkdtemp(resolve(tmpdir(), "aburi-pinned-config-"))
+  })
+
+  afterEach(async () => {
+    await rm(workRoot, { recursive: true, force: true })
+  })
+
+  it("refuses a relative path rather than resolving it against the process cwd", async () => {
+    // A pinned config's whole contract is that the answer no longer depends on where the
+    // process is standing. `readConfigFile` calls `readFile` with the string it is handed, so
+    // a relative path would quietly re-acquire that dependence — and then ride
+    // `LoadedConfig.source` into `ScanReport.configSource`, where every consumer compares it
+    // against an absolute workspace root.
+    const thrown = await loadPinnedConfig({ kind: "file", path: "./aburi.json" }).then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as Error).message).toContain("is not absolute")
+    expect((thrown as Error).message).toContain("Internal error while loading the Aburi config")
+  })
+
+  it("reads an absolute path whatever the working directory is", async () => {
+    await writeFile(
+      resolve(workRoot, "elsewhere.json"),
+      JSON.stringify({ languages: ["lang-typescript"] }),
+      "utf8",
+    )
+
+    const loaded = await loadPinnedConfig({
+      kind: "file",
+      path: resolve(workRoot, "elsewhere.json"),
+    })
+
+    expect(loaded.found).toBe(true)
+    expect(loaded.source).toBe(resolve(workRoot, "elsewhere.json"))
   })
 })

@@ -17,6 +17,7 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
+import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
 
 export type { WarnFn }
@@ -158,6 +159,19 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
+  // One pin for the whole command, and not one taken before something needs it.
+  //
+  // Eager would be simpler to read and wrong twice over: a `--base` / `--head` run that named
+  // its own `--output-dir` consults no config at all today, and pinning walks the filesystem
+  // and can raise `config-read-failed` on an EACCES that run would never have met. Lazy but
+  // unmemoised is the state this replaces, where the destination and the scans each ran the
+  // resolution list — same answer, since both anchor to `cwd`, but "decided once" was a
+  // description of the intent rather than of the code.
+  let pinned: PinnedConfig | null = null
+  const pinConfigOnce = async (): Promise<PinnedConfig> => {
+    pinned ??= await pinConfig(cwd, options.configPath)
+    return pinned
+  }
   // Before anything expensive. The destination is decided from `cwd` alone, and a run that
   // cannot be filed is a run not worth computing: resolved after the diff, a broken config
   // would cost two scans or two IR reads and then report `Failed to load Aburi config`, which
@@ -170,13 +184,12 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const outputDir = resolveOutputDir(
     cwd,
     options.outputDir,
-    options.outputDir === undefined
-      ? await configuredOutputDir(cwd, options.configPath)
-      : undefined,
+    options.outputDir === undefined ? await configuredOutputDir(await pinConfigOnce()) : undefined,
   )
   const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
     options,
     cwd,
+    pinConfigOnce,
     warn,
   )
 
@@ -505,7 +518,12 @@ interface ResolvedIRs {
   scans: ScanPair | null
 }
 
-async function resolveIRs(options: DiffOptions, cwd: string, warn: WarnFn): Promise<ResolvedIRs> {
+async function resolveIRs(
+  options: DiffOptions,
+  cwd: string,
+  pinConfigOnce: () => Promise<PinnedConfig>,
+  warn: WarnFn,
+): Promise<ResolvedIRs> {
   if (options.refSpec !== undefined && options.refSpec !== null && options.refSpec.length > 0) {
     if (options.base !== undefined && options.base !== null) {
       throw new CliError(
@@ -513,7 +531,7 @@ async function resolveIRs(options: DiffOptions, cwd: string, warn: WarnFn): Prom
         "input-error",
       )
     }
-    return resolveViaGit(options, cwd, parseRefSpec(options.refSpec), warn)
+    return resolveViaGit(options, cwd, parseRefSpec(options.refSpec), pinConfigOnce, warn)
   }
   if (options.base === undefined || options.base === null || options.base.length === 0) {
     throw new CliError(
@@ -540,6 +558,7 @@ async function resolveViaGit(
   options: DiffOptions,
   cwd: string,
   spec: RefSpec,
+  pinConfigOnce: () => Promise<PinnedConfig>,
   warn: WarnFn,
 ): Promise<ResolvedIRs> {
   const git = options.git ?? defaultGitRunner
@@ -552,7 +571,12 @@ async function resolveViaGit(
   // would make any commit that edits one read as "the entire IR changed". Discovery from
   // inside the worktree returns the base copy, and so does a relative `--config`, so the
   // rule holds only if the answer is fixed here and handed to both scans.
-  const pinnedConfig = await pinConfig(cwd, options.configPath)
+  const pinnedConfig = await pinConfigOnce()
+  // The other half of "the base is read through the head's view": §6.4.1.5 pins the plugin
+  // set to the head environment, and a relative `./plugins/*.mjs` ref is part of that set.
+  // The worktree materialises the base *sources*; it has no claim on where the head's config
+  // says its plugins live.
+  const headPluginRefRoot = await resolveWorkspaceRoot(cwd)
 
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   const worktreeDir = resolve(tempParent, "base")
@@ -564,18 +588,29 @@ async function resolveViaGit(
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
-    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, pinnedConfig, {
-      side: "base",
-      ref: spec.base,
-    })
+    const baseReport = await runScanInDir(
+      worktreeDir,
+      options,
+      baseOutputDir,
+      warn,
+      pinnedConfig,
+      headPluginRefRoot,
+      { side: "base", ref: spec.base },
+    )
     if (baseReport.irPath === null) {
       throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
     }
     baseIR = await readIR(baseReport.irPath)
 
-    const headReport = await runScanInDir(cwd, options, headOutputDir, warn, pinnedConfig, {
-      side: "head",
-    })
+    const headReport = await runScanInDir(
+      cwd,
+      options,
+      headOutputDir,
+      warn,
+      pinnedConfig,
+      headPluginRefRoot,
+      { side: "head" },
+    )
     if (headReport.irPath === null) {
       throw new CliError("scan for head ref produced no IR file.", "runtime-error")
     }
@@ -630,7 +665,9 @@ function labelFor(target: ScanTarget): string {
  *
  * `pinnedConfig` replaces `options.configPath` rather than accompanying it. The two would
  * otherwise disagree for the base: the flag's value is relative to the caller's directory
- * and this scan runs in the worktree.
+ * and this scan runs in the worktree. `pluginRefRoot` is passed to both sides for the same
+ * reason — it is a no-op for the head, whose workspace root it already is, and stating it
+ * once keeps the two scans provably identical in everything but their sources.
  */
 async function runScanInDir(
   cwd: string,
@@ -638,6 +675,7 @@ async function runScanInDir(
   outputDir: string,
   warn: WarnFn,
   pinnedConfig: PinnedConfig,
+  pluginRefRoot: string,
   target: ScanTarget,
 ): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
@@ -646,6 +684,7 @@ async function runScanInDir(
     format: "json",
     incidents: { warn, label: labelFor(target) },
     pinnedConfig,
+    pluginRefRoot,
     ...(options.compact === undefined ? {} : { compact: options.compact }),
   }
   return runScan(scanOptions)

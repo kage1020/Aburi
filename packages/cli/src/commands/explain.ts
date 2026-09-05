@@ -4,7 +4,7 @@ import { backslashSite, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
-import { configuredOutputDir } from "../config-load"
+import { configuredOutputDir, pinConfig } from "../config-load"
 import { CliError, errorCode, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readIR } from "../ir-io"
@@ -361,7 +361,7 @@ async function resolveIR(
     // Only now, after `--ir` has had its chance: that flag names the document outright, so a
     // run using it has no reason to care where a scan would have put one, and no reason to
     // fail on a config it does not consult.
-    const outputDir = await configuredOutputDir(cwd, options.configPath)
+    const outputDir = await configuredOutputDir(await pinConfig(cwd, options.configPath))
     const candidates = irSearchPath(cwd, workspaceRoot, outputDir)
     const [nearest] = candidates
     for (const candidate of candidates) {

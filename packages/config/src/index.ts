@@ -7,5 +7,11 @@ export {
   type ValuedConfigErrorCode,
 } from "./errors"
 export { normalizeFrameworkHints } from "./framework-hints"
-export { type LoadedConfig, loadConfig, loadConfigFrom } from "./load"
+export {
+  type ConfigSource,
+  configSourceFrom,
+  type LoadedConfig,
+  loadConfig,
+  loadConfigFrom,
+} from "./load"
 export { parseConfig, readConfigFile } from "./parser"

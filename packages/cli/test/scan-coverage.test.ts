@@ -282,6 +282,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       callResolutionLine: "",
       unresolvedCalls: [],
       configSource: null,
+      configPinnedByCaller: false,
       workspaceRoot: "/repo",
       coverageFault: null,
       unrepresentableFiles: [],

@@ -43,9 +43,9 @@ Paths you give to `--config` resolve against the working directory. Paths
 *inside* the config resolve against the workspace root, which need not be the
 same directory. `aburi scan` warns you when the two differ.
 
-`aburi diff` in ref mode settles all of this once, before it checks the base
-revision out, and scans **both** revisions with the config it found. See
-[`aburi diff`](#aburi-diff) below.
+`aburi diff` in ref mode settles *which config file to read* once, before it
+checks the base revision out, and scans **both** revisions with it. The workspace
+root stays per-scan. See [`aburi diff`](#aburi-diff) below.
 
 ---
 
@@ -143,6 +143,13 @@ head with no config at all scans the base by autodetect too. Otherwise editing
 `ignore` would count as a change to every Symbol the setting covers, and
 `aburi diff HEAD~1..HEAD --fail-on added` would fail a pull request that
 touched no source.
+
+The paths *inside* that config still resolve per scan: `ignore` and
+`components[].roots` are matched against each revision's own workspace root, so
+for the base that is the temporary worktree. A relative plugin ref
+(`./plugins/x.mjs`) is the exception — it belongs to the plugin set, which
+[comes from the head](https://aburi.kage1020.com/extend/architecture) along with
+`node_modules`, so it is loaded from your working tree for both scans.
 
 **File mode** compares two `aburi.ir.json` files you already have. No git, no
 scanning.

@@ -1,29 +1,35 @@
-import { resolve } from "node:path"
-import { ConfigError, findConfig, type LoadedConfig, loadConfigFrom } from "@aburi/config"
+import { isAbsolute, resolve } from "node:path"
+import {
+  ConfigError,
+  type ConfigSource,
+  configSourceFrom,
+  findConfig,
+  type LoadedConfig,
+  loadConfigFrom,
+} from "@aburi/config"
 import { CliError, errorMessage } from "./errors"
 
 /**
- * Which config a run reads, decided once and carried as an absolute path.
+ * Which config a run reads, decided once so the answer survives a change of directory.
  *
- * `autodetect` is a decision too, not the absence of one: it says "no config on disk, run
- * the detector", and a caller handed it must not go looking for a config of its own.
+ * `@aburi/config`'s own type, re-exported rather than restated: one concept spelled two ways
+ * across the package boundary would need a translation step, and that step is where the two
+ * spellings drift.
  *
  * The type exists because a config path is only unambiguous while the working directory
- * stays put. `aburi diff` changes it — the base scan runs with its cwd inside a temporary
+ * stays put. `aburi diff` moves it — the base scan runs with its cwd inside a temporary
  * worktree — so anything still expressed as "discover from cwd" or "this path, relative to
- * cwd" answers differently for the two scans. Pinning happens once, against the original
+ * cwd" answers differently for the two scans. Pinning happens once, against the invoking
  * cwd, and both scans are then handed the same answer.
  */
-export type PinnedConfig =
-  | { readonly kind: "file"; readonly path: string }
-  | { readonly kind: "autodetect" }
+export type PinnedConfig = ConfigSource
 
 /**
  * Decide which config a run reads, without reading it.
  *
- * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the process `cwd`,
- * per `cli-spec.md §13 Config Resolution Order`. A config in the current package therefore
- * wins over one in an ancestor.
+ * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the given `cwd`,
+ * per `cli-spec.md §13 Config Resolution Order`. A config in that directory therefore wins
+ * over one in an ancestor.
  *
  * The marker-detected workspace root plays no part here. It is the base for Symbol id
  * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for
@@ -43,29 +49,45 @@ export async function pinConfig(
   // file that is not there is an error the read reports, not a fall-through to discovery.
   if (overridePath !== undefined) return { kind: "file", path: resolve(cwd, overridePath) }
   try {
-    const found = await findConfig({ cwd })
-    return found === null ? { kind: "autodetect" } : { kind: "file", path: found }
-  } catch (error) {
-    throw classifyConfigError(error)
-  }
-}
-
-/** Read the config a `PinnedConfig` names, whatever the working directory is now. */
-export async function loadPinnedConfig(pinned: PinnedConfig): Promise<LoadedConfig> {
-  try {
-    return await loadConfigFrom(pinned.kind === "file" ? pinned.path : null)
+    return configSourceFrom(await findConfig({ cwd }))
   } catch (error) {
     throw classifyConfigError(error)
   }
 }
 
 /**
- * Decide which config to read and read it, both anchored to `cwd`.
+ * Read the config a `PinnedConfig` names, wherever the working directory has since moved to.
  *
- * Shared rather than `aburi scan`'s own, because `aburi diff` and `aburi explain` have to
- * answer the same question: the first to place `diff.json`, the second to know where a scan
- * would have left its IR. A second copy would be a second answer to "which file is the
- * config", and the two would disagree the first time this precedence changed.
+ * The absolute-path check is the one thing that makes that sentence true, so it is enforced
+ * here rather than stated in a docblock. `readConfigFile` calls `readFile` with the string
+ * it is given, so a relative `path` would silently re-acquire the cwd dependence pinning
+ * exists to remove — and would then ride `LoadedConfig.source` into `ScanReport.configSource`,
+ * where every consumer expects a path it can compare against the workspace root. `@aburi/core`
+ * guards its own root the same way, for the same reason (`assertWorkspaceRootAbsolute`).
+ */
+export async function loadPinnedConfig(pinned: PinnedConfig): Promise<LoadedConfig> {
+  if (pinned.kind === "file" && !isAbsolute(pinned.path)) {
+    throw internalFault(
+      `pinned config path ${JSON.stringify(pinned.path)} is not absolute, so which file it ` +
+        `names depends on the working directory`,
+      undefined,
+    )
+  }
+  try {
+    return await loadConfigFrom(pinned)
+  } catch (error) {
+    throw classifyConfigError(error)
+  }
+}
+
+/**
+ * Decide which config to read, anchored to `cwd`, and read it — the two halves composed, for
+ * a caller that reads a config once and never moves.
+ *
+ * The composition is the point rather than the convenience: it is what lets `runScan` write
+ * the precedence between a caller-decided config and one still to decide as a single `??`,
+ * instead of a branch whose two arms could drift into two answers to "which file is the
+ * config".
  */
 export async function resolveConfig(
   cwd: string,
@@ -144,16 +166,16 @@ function internalFault(detail: string, cause: unknown): CliError {
  * `config.output.dir`, or `undefined` when nothing sets one — for the two commands that need
  * the name without needing the rest of the config.
  *
+ * Takes the config already decided rather than a `cwd` to decide it from, so that `aburi
+ * diff` can settle the question once and spend it here and on both of its scans.
+ *
  * A config that cannot be read stops the caller rather than falling back to `out`. This
  * setting decides where the artefacts are, so an unread config means their location is
  * unknown: writing to `out` anyway leaves them where the next step does not look, and reading
  * from `out` anyway reports "no IR file" about a directory the workspace never uses. Either
  * is a confident wrong answer laid over a swallowed error.
  */
-export async function configuredOutputDir(
-  cwd: string,
-  configPath: string | undefined,
-): Promise<string | undefined> {
-  const loaded = await resolveConfig(cwd, configPath)
+export async function configuredOutputDir(pinned: PinnedConfig): Promise<string | undefined> {
+  const loaded = await loadPinnedConfig(pinned)
   return loaded.config.output?.dir
 }

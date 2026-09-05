@@ -211,6 +211,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       callResolutionLine: "",
       unresolvedCalls: [],
       configSource: null,
+      configPinnedByCaller: false,
       workspaceRoot: "/repo",
       coverageFault: null,
       unrepresentableFiles: [],
@@ -461,6 +462,24 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     )
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('⚠ base ref "main": Config /repo/apps/web/aburi.json sits below')
+  })
+
+  it("stays quiet about a config the caller pinned, however far from the root it is", () => {
+    // The shape of every ref-mode `aburi diff`: the base scan reads the head tree's config
+    // against a workspace root that is the temporary worktree, so the directories never match
+    // and the line above would fire on every run. It would also be describing something that
+    // did not happen — the head config is not below the worktree, and nobody ran anything from
+    // a monorepo package.
+    expect(
+      linesFrom(
+        reportWith({
+          configSource: "/repo/aburi.json",
+          workspaceRoot: "/tmp/aburi-worktree-x/base",
+          configPinnedByCaller: true,
+        }),
+        'base ref "main"',
+      ),
+    ).toEqual([])
   })
 })
 
