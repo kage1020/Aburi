@@ -1,9 +1,9 @@
 # @aburi/github-action
 
 Composite GitHub Action that runs `aburi diff` on a pull request and upserts the
-semantic-diff Markdown as a hidden-marker PR comment. The `@aburi/cli` binary is
-resolved through `pnpm dlx @aburi/cli@<version>`, so consumers pin the CLI version
-rather than this action's tag.
+semantic-diff Markdown as a hidden-marker PR comment. `@aburi/cli` is either fetched
+with `pnpm dlx @aburi/cli@<version>`, so consumers pin the CLI version rather than this
+action's tag, or taken from the project's own install — see [Choosing `cli`](#choosing-cli).
 
 ## Usage
 
@@ -39,18 +39,18 @@ jobs:
 
 | Input | Default | Purpose |
 |---|---|---|
-| `version` | `latest` | npm dist-tag or exact version of `@aburi/cli`. |
+| `version` | `latest` | npm dist-tag or exact version of `@aburi/cli`. `cli: dlx` only. |
 | `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`. Falls back to the PR's `base.sha..head.sha` for `pull_request` / `pull_request_target` events. |
 | `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` §6.7 for the grammar. Empty = report only. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.config.jsonc`. |
 | `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`, relative to `working-directory`. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Directory to run the CLI from. |
-| `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). |
+| `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). See [Choosing `cli`](#choosing-cli). |
 | `comment` | `true` | Upsert the produced Markdown as a PR comment. |
 | `token` | `${{ github.token }}` | Token used for the comment API. |
-| `node-version` | `24` | Node.js version installed via `actions/setup-node`. |
-| `pnpm-version` | `10` | pnpm version installed via `pnpm/action-setup`. |
+| `node-version` | `24` | Node.js version installed via `actions/setup-node`. `cli: dlx` only. |
+| `pnpm-version` | `10` | pnpm version installed via `pnpm/action-setup`. `cli: dlx` only. |
 
 ## Outputs
 
@@ -58,35 +58,31 @@ jobs:
 |---|---|
 | `diff-json-path` | Path to `diff.json` (empty when `format=md`). |
 | `diff-md-path` | Path to `diff.md` (empty when `format=json`). |
-| `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). |
+| `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). Also `2` when `cli: workspace` finds no CLI to run. |
 | `comment-id` | Numeric id of the created/updated comment (empty when `comment=false`). |
 | `comment-action` | `created` / `updated` / `unchanged`. |
 
 ## Choosing `cli`
 
-`dlx` needs no install step, and cannot load plugins. `pnpm dlx` puts `@aburi/cli`
-in the pnpm store, and Node resolves a config's plugin refs from the CLI's own
-location — so a config that names `languages: ["lang-typescript"]` fails there with
-`Cannot find package '@aburi/lang-typescript'`, whatever your project has installed.
-It fits a workspace whose config names no plugin.
+`dlx` needs no install step, and cannot load a plugin your config names **by package**.
+`pnpm dlx` puts `@aburi/cli` in the pnpm store, and the CLI resolves plugin refs from its
+own location — so `languages: ["lang-typescript"]` fails there with `Cannot find package
+'@aburi/lang-typescript'`, whatever your project has installed. A ref written as a relative
+path (`./plugins/x.mjs`) resolves against your workspace root and works fine.
 
-`workspace` resolves `@aburi/cli` from `working-directory` and runs its bin on `node`, so
-the CLI and its plugins come from your `node_modules` — the install the [quick
-start](../../README.md#quick-start) prescribes. Install the workspace first; `version`,
-`node-version`, and `pnpm-version` are ignored, because the toolchain that installed the
-workspace is the one that should run it.
-
-Resolution goes through Node rather than a `node_modules/.bin` entry, so it holds for npm,
-yarn and bun as well as pnpm — and for a workspace that builds the CLI from source, which
-has no bin link at all: the bin file does not exist when the install writes the links, and a
-later install does not recreate it, because by then the tree is up to date. `@aburi/cli`
-missing from `working-directory` is exit 2 with a message that says so.
+`workspace` runs the `@aburi/cli` your project installed, resolved from `working-directory`,
+with its plugins beside it — the install the [quick start](../../README.md#quick-start)
+prescribes. Install the workspace first (and build it, if the CLI comes from source);
+`version`, `node-version` and `pnpm-version` do not apply, because the toolchain that
+installed the workspace is the one that should run it.
 
 ```yaml
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0
 - uses: pnpm/action-setup@v4
+  with:
+    version: 10
 - uses: actions/setup-node@v4
   with:
     node-version: 24
@@ -100,6 +96,13 @@ missing from `working-directory` is exit 2 with a message that says so.
 
 This repository runs itself that way; [`.github/workflows/aburi.yml`](../../.github/workflows/aburi.yml)
 is the whole file.
+
+Resolution goes through Node's resolver rather than a `node_modules/.bin` entry, so npm, yarn
+and bun projects work the same way, as does a workspace that builds the CLI from source and
+therefore has no bin link at all. The exception is **Yarn PnP**, which has no `node_modules`
+and needs `yarn node` to load `.pnp.cjs`: `cli: workspace` exits 2 there. Anything it cannot
+resolve is exit 2 with a message naming the directory it looked in —
+[`docs/design/github-action.md`](../../docs/design/github-action.md) §3 has the details.
 
 ## Behaviour
 

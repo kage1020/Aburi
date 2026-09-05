@@ -75,6 +75,7 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
 - uses: pnpm/action-setup@v4
+  with: { version: 10 }
 - uses: actions/setup-node@v4
   with: { node-version: 24, cache: pnpm }
 - run: pnpm install --frozen-lockfile
@@ -87,10 +88,11 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 The action posts the report as a pull request comment, and rewrites that same
 comment on every push.
 
-`cli: workspace` runs the CLI your lockfile pinned, which is also what makes the
-plugins above resolve. Drop the install steps and set `version: latest` instead and
-the action fetches the CLI with `pnpm dlx` — no install, but no plugins either.
-Aburi runs itself this way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
+`cli: workspace` runs the `@aburi/cli` those install steps put in your `node_modules`, which
+is also what lets it load the plugins your `aburi.json` names. Set `cli: dlx` instead and the
+action fetches the CLI itself, with no install step — and no plugin named by package, since it
+resolves those from the pnpm store rather than from your project. Aburi runs itself the first
+way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
 
 ## Documentation
 

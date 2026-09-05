@@ -1,7 +1,7 @@
 {
   "name": "@aburi/github-action",
   "version": "0.2.0",
-  "description": "GitHub Action wrapper around @aburi/cli: runs `aburi diff` for a pull request, uploads the semantic diff Markdown as a PR comment (upserted by a hidden marker), and forwards `--fail-on` so CI gates fire off Aburi's status/count clauses. Composite action; the runtime binary is resolved via `pnpm dlx @aburi/cli@<version>` so consumers pin the CLI, not this wrapper.",
+  "description": "GitHub Action wrapper around @aburi/cli: runs `aburi diff` for a pull request, uploads the semantic diff Markdown as a PR comment (upserted by a hidden marker), and forwards `--fail-on` so CI gates fire off Aburi's status/count clauses. Composite action; the CLI is either fetched with `pnpm dlx @aburi/cli@<version>`, so consumers pin the CLI rather than this wrapper, or taken from the project's own install (`cli: workspace`), which is what lets a config name its plugins by package.",
   "license": "Apache-2.0",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/github-action#readme",
@@ -27,6 +27,7 @@
   "files": [
     "dist",
     "src",
+    "scripts",
     "action.yml",
     "README.md"
   ],

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { DEFAULT_OUTPUT_DIRNAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
@@ -7,6 +7,15 @@ import { parse } from "yaml"
 import { ABURI_COMMENT_MARKER } from "../src/comment"
 
 const ACTION_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "action.yml")
+/** The opening of a GitHub expression, escaped so this file does not hold one it forbids. */
+const EXPRESSION_OPEN = `\${{`
+
+const RESOLVER_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "scripts",
+  "resolve-cli-bin.mjs",
+)
 
 interface ActionShape {
   readonly name: string
@@ -72,25 +81,31 @@ describe("action.yml", () => {
     expect(raw).toMatch(/pnpm dlx "@aburi\/cli@\$VERSION"/)
   })
 
-  it("keeps `${{ … }}` out of every input and output description", async () => {
-    // The runner parses a manifest's descriptions as templates, with a context set that
-    // does not include `github`. A description that quoted an expression it was documenting
-    // — the refspec fallback did, as prose — failed the whole manifest to load before any
-    // step ran:
-    //
-    //   action.yml (Line: 19, Col: 18): Unrecognized named-value: 'github'.
-    //   Located at position 1 within expression: github.event.pull_request.base.sha
-    //
-    // Nothing catches that until a workflow actually calls the action, so document context
-    // paths as prose (`github.event.pull_request.base.sha`) rather than as expressions.
+  it("keeps a template expression out of every description, and out of every default but the token", async () => {
+    // The runner parses a manifest's descriptions and defaults as templates, with a context set
+    // that does not include `github` — so an expression written as prose in a description fails
+    // the whole manifest to load, for every consumer, before any step runs. Nothing catches that
+    // until a workflow actually calls the action. See `docs/design/github-action.md` §2.
     const action = await loadAction()
     const described = [
+      ["the action description", action.description] as const,
       ...Object.entries(action.inputs).map(([id, v]) => [`input ${id}`, v.description] as const),
       ...Object.entries(action.outputs).map(([id, v]) => [`output ${id}`, v.description] as const),
     ]
     for (const [where, description] of described) {
       expect(description, `missing description: ${where}`).toBeDefined()
-      expect(description, `${where} description holds an expression`).not.toContain("${{")
+      expect(description, `${where} holds an expression`).not.toContain(EXPRESSION_OPEN)
+    }
+
+    // Defaults are template-evaluated too — `token`'s `${{ github.token }}` is the proof that they
+    // are — so the same outage is one `default: ${{ github.event… }}` away. `github.token` is the
+    // documented exception every action uses; nothing else has a reason to be an expression.
+    for (const [id, input] of Object.entries(action.inputs)) {
+      const value = input.default ?? ""
+      if (!value.includes(EXPRESSION_OPEN)) continue
+      expect(value.trim(), `input ${id} default holds an expression`).toBe(
+        `${EXPRESSION_OPEN} github.token }}`,
+      )
     }
   })
 
@@ -99,30 +114,65 @@ describe("action.yml", () => {
     expect(action.inputs.cli?.default).toBe("dlx")
   })
 
-  it("runs the workspace's own CLI when `cli: workspace`", async () => {
-    // `pnpm dlx` installs the CLI outside the checkout, so Node resolves a config's
-    // plugin refs (`languages: ["lang-typescript"]`) from the store copy of @aburi/cli
-    // and finds nothing. A project that installed @aburi/cli plus its plugins — the
-    // install the README's quick start prescribes — needs the CLI that sits in its own
-    // node_modules instead, which is what this mode runs.
+  it("runs the workspace's own CLI through the resolver script when `cli: workspace`", async () => {
+    // `pnpm dlx` installs the CLI outside the checkout, so a plugin ref named by package
+    // (`languages: ["lang-typescript"]`) resolves from the store copy of @aburi/cli and finds
+    // nothing. This mode runs the CLI that sits in the project's own node_modules instead.
     //
-    // Resolved through Node's own resolver rather than off `node_modules/.bin`: a
-    // workspace that builds its own CLI has no bin link, because the bin file did not
-    // exist when the install created the links and no later install recreates it. That
-    // is this repository, and it is every consumer who builds the CLI from source.
+    // What the step must do with it is asserted here; what the resolver itself answers is asserted
+    // by running it, in `resolve-cli-bin.test.ts`.
     const action = await loadAction()
     const diffStep = action.runs.steps.find((s) => s.id === "diff")
-    expect(diffStep?.run).toContain('require.resolve("@aburi/cli/package.json")')
-    expect(diffStep?.run).toContain('runner=(node "$cli_bin")')
+    const run = diffStep?.run ?? ""
+    expect(run).toContain('node "$GITHUB_ACTION_PATH/scripts/resolve-cli-bin.mjs"')
+    expect(run).toContain('runner=(node "$cli_bin")')
+    await expect(stat(RESOLVER_PATH)).resolves.toBeDefined()
+  })
+
+  it("captures the resolver's stdout with its stderr sent elsewhere", async () => {
+    // `2>&1` on this capture prepends any warning Node writes on the success path — an
+    // ExperimentalWarning from the caller's NODE_OPTIONS, a corepack notice — to the path, which
+    // then fails as `Cannot find module '(node:1234) ExperimentalWarning: …'`: exit 1, reported as
+    // a CLI runtime error, pointing the reader at their own code.
+    const action = await loadAction()
+    const run = action.runs.steps.find((s) => s.id === "diff")?.run ?? ""
+    const capture = run.split("\n").find((line) => line.includes("cli_bin=$("))
+    expect(capture).toBeDefined()
+    expect(capture).not.toContain("2>&1")
+    expect(capture).toContain('2>"$resolve_error"')
+  })
+
+  it("reports the resolver's own failure as exit 2, with `cli-exit-code` set", async () => {
+    // The failure exits before the step's own output writes at the end, so without this the output
+    // comes back empty and a caller testing `cli-exit-code != '0'` reads a misconfiguration as
+    // success.
+    const action = await loadAction()
+    const run = action.runs.steps.find((s) => s.id === "diff")?.run ?? ""
+    const guard = run.slice(run.indexOf('if [ "$resolve_status" != "0" ]'))
+    expect(guard).toContain('echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"')
+    expect(guard.slice(0, guard.indexOf("exit 2"))).toContain("cli-exit-code=2")
   })
 
   it("rejects a `cli` value that is neither `dlx` nor `workspace`", async () => {
+    // Bound to this arm rather than to `exit 2`: the same step already holds two of those from the
+    // `format` checks, so the coarser assertion survives deleting this branch outright.
     const action = await loadAction()
     const validateStep = action.runs.steps.find(
       (s) => typeof s.run === "string" && s.run.includes("cli must be one of"),
     )
-    expect(validateStep).toBeDefined()
-    expect(validateStep?.run).toContain("exit 2")
+    expect(validateStep?.run).toMatch(/case "\$CLI" in\s+dlx\|workspace\) : ;;/)
+    expect(validateStep?.run).toContain("cli must be one of: dlx | workspace")
+  })
+
+  it("rejects a `comment` value that is neither `true` nor `false`", async () => {
+    // Every non-`true` value reads as false downstream, so `comment: yes` would otherwise run
+    // green, post nothing, and clear the `comment=true` + `format=json` check on the way past.
+    const action = await loadAction()
+    const validateStep = action.runs.steps.find(
+      (s) => typeof s.run === "string" && s.run.includes("comment must be"),
+    )
+    expect(validateStep?.run).toMatch(/case "\$COMMENT" in\s+true\|false\) : ;;/)
+    expect(validateStep?.run).toContain("comment must be true or false")
   })
 
   it("installs Node and pnpm only for the dlx path", async () => {
@@ -213,6 +263,9 @@ describe("action.yml", () => {
       (s) => typeof s.run === "string" && s.run.includes('exit "$CLI_EXIT"'),
     )
     expect(propagate).toBeDefined()
+    // A composite action stops at its first failing step. Without `always()`, a 403 in the comment
+    // step ends the job on a GitHub API error and the tripped gate is never reported.
+    expect(propagate?.if).toBe("always()")
   })
 
   it("declares outputs for artefact paths and the comment id", async () => {

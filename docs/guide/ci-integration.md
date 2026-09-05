@@ -31,7 +31,7 @@ in place instead of piling up a new one.
 
 | Input | Effect |
 |---|---|
-| `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, and so on). |
+| `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, and so on). Applies to `cli: dlx`. |
 | `fail-on` | Passed to `aburi diff --fail-on`. Leave it empty to report without ever failing. |
 | `cli` | How the binary is resolved: `dlx` (default) or `workspace`. See below. |
 
@@ -43,24 +43,24 @@ you a wrong diff.
 
 ### Running the CLI your project installed
 
-By default the action fetches the CLI with `pnpm dlx`, which needs no install step
-and puts `@aburi/cli` in the pnpm store rather than in your checkout. Node resolves
-plugin refs from the CLI's own location, so a config naming
-`languages: ["lang-typescript"]` fails there — `Cannot find package
-'@aburi/lang-typescript'` — no matter what your project has installed. Which is to
-say: the default fits a config that names no plugin, and most configs name one.
+By default the action fetches the CLI with `pnpm dlx`, which needs no install step and puts
+`@aburi/cli` in the pnpm store rather than in your checkout. The CLI resolves plugin refs
+from its own location, so a config naming a plugin **by package** —
+`languages: ["lang-typescript"]`, which is what `aburi init` writes — fails there with
+`Cannot find package '@aburi/lang-typescript'`, no matter what your project has installed.
+A plugin named by relative path (`./plugins/x.mjs`) resolves against your workspace root and
+is fine either way.
 
-Set `cli: workspace` and the action resolves `@aburi/cli` from your own `node_modules`
+Set `cli: workspace` and the action runs the `@aburi/cli` in your own `node_modules`
 instead, plugins beside it — the install [Getting started](./getting-started.md) walks
 through. Install the workspace first; `version` then has nothing to pin, because your
-lockfile already pinned it. Resolution goes through Node rather than a `node_modules/.bin`
-entry, so npm, yarn and bun projects work the same way, as does a workspace that builds the
-CLI from source.
+lockfile already pinned it.
 
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
 - uses: pnpm/action-setup@v4
+  with: { version: 10 }
 - uses: actions/setup-node@v4
   with:
     node-version: 24
@@ -71,6 +71,11 @@ CLI from source.
     cli: workspace
     fail-on: "removed"
 ```
+
+The CLI is located with Node's own resolver rather than a `node_modules/.bin` entry, so npm,
+yarn and bun projects work the same way, as does a workspace that builds the CLI from source.
+Yarn PnP is the exception — it has no `node_modules`, and `.pnp.cjs` loads through `yarn node`
+— so `cli: workspace` exits 2 there.
 
 Aburi analyses its own pull requests this way, with the CLI each pull request builds:
 [`.github/workflows/aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml).

@@ -22,6 +22,14 @@ jobs:
   diff:
     name: semantic diff
     runs-on: ubuntu-latest
+    env:
+      # A read-only token cannot post a comment, and the `permissions:` block above does not change
+      # that for either case: a fork's pull request, or Dependabot's, whose branch lives inside the
+      # repository and so passes the fork check on its own. Decided once, because two steps below
+      # both need the answer.
+      CAN_COMMENT: >-
+        ${{ github.event.pull_request.head.repo.full_name == github.repository
+            && github.actor != 'dependabot[bot]' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,28 +49,40 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # `cli: workspace` runs `packages/cli`'s bin, so it and `packages/lang-typescript`
-      # have to be built first. (There is no `node_modules/.bin/aburi` to run instead: the
-      # bin file does not exist when the install writes the links, and a second install
-      # does not recreate it — the tree is up to date by then. The action resolves the
-      # package rather than the link, which is what makes this work.)
+      # `cli: workspace` runs `packages/cli`'s own bin, which is build output.
       - name: Build
         run: pnpm build
 
-      # `cli: workspace` runs the CLI this checkout builds, so the report on a pull request
-      # comes from the analyser that pull request contains. It is also the only mode that can
-      # load `lang-typescript`: under `pnpm dlx` the CLI lives in the pnpm store, and a plugin
-      # ref resolves from there rather than from this workspace.
+      # `cli: workspace` runs the CLI this checkout builds, so the report on a pull request comes
+      # from the analyser that pull request contains. It is also the only mode that can load
+      # `lang-typescript`, which `aburi.json` names by package: see
+      # `docs/design/github-action.md` §3.
       - name: Aburi diff
+        id: aburi
         uses: ./packages/github-action
         with:
           cli: workspace
-          # A fork's pull request carries a read-only token, so the comment step would
-          # 403. The diff and the gate still run; only the comment is skipped.
-          comment: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
-          # The gate the docs recommend starting with, applied to ourselves: a deleted
-          # symbol, or a batch of emptied bodies, is worth a human's attention. Both are
-          # quiet on this repository's history — neither fires on any of the last several
-          # merges — which is the point: a gate that fires on every pull request is a gate
-          # everyone learns to ignore.
+          # The diff and the gate run either way; only the comment depends on this.
+          comment: ${{ env.CAN_COMMENT }}
+          # The gate the docs recommend starting with, applied to ourselves: a deleted symbol, or a
+          # batch of emptied bodies, is worth a human's attention, and neither is routine here. A
+          # gate that fires on every pull request is a gate everyone learns to ignore.
           fail-on: "removed,dropped-toggled:to-dropped:>10"
+
+      # The run that cannot comment is the run whose report is worth the most: a red check saying
+      # `--fail-on removed tripped` does not say *which* symbol went away, and on those pull
+      # requests nothing else will. `always()` because a tripped gate fails the step above.
+      - name: Upload the report
+        if: always() && hashFiles('out/diff.md') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: aburi-diff
+          path: out/
+          retention-days: 14
+
+      # Otherwise the comment step simply renders as skipped, and a reader cannot tell "we chose
+      # not to post" from "posting failed".
+      - name: Say why no comment was posted
+        if: always() && env.CAN_COMMENT != 'true'
+        run: |
+          echo "::notice::No comment was posted: this pull request's token is read-only (a fork, or Dependabot). The report is in the 'aburi-diff' artifact."
