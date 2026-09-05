@@ -68,6 +68,25 @@ export function isDrizzleQueryMethod(name: string): name is DrizzleQueryMethod {
 }
 
 /**
+ * The most arguments a query-builder root takes.
+ *
+ * Every root takes one — an optional projection for `select`, a table reference for
+ * `insert` / `update` / `delete`, an optional options object for the relational query
+ * terminals — with a single exception: Postgres' `selectDistinctOn(columns, projection)`
+ * takes two. A classifier that used a flat "one argument" rule would answer `null` for a
+ * valid `db.selectDistinctOn([users.id], { ... })`, so the exception lives next to the
+ * vocabulary that defines it rather than as a magic number at the call site.
+ *
+ * Annotated as `DrizzleReadMethod` so renaming or dropping the terminal breaks the build
+ * instead of leaving an arity exception that silently matches nothing.
+ */
+const DRIZZLE_TWO_ARGUMENT_ROOT: DrizzleReadMethod = "selectDistinctOn"
+
+export function maxBuilderArguments(method: string): number {
+  return method === DRIZZLE_TWO_ARGUMENT_ROOT ? 2 : 1
+}
+
+/**
  * The set of verbs that anchor a fluent chain at its root. A CallCandidate whose target
  * has any of these as an INTERNAL segment (i.e. neither first nor last) is a downstream
  * link of an already-classified chain and must be rejected to preserve the

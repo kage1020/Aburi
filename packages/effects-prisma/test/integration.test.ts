@@ -39,6 +39,7 @@ async function classifyCalls(
     symbolName: string
     target: string
     effectId: string | null
+    confidence: string | null
     derivedBy: string | null
   }> = []
   for (const symbol of candidates) {
@@ -56,6 +57,7 @@ async function classifyCalls(
         symbolName: symbol.name,
         target: call.target,
         effectId: classification?.effectId ?? null,
+        confidence: classification?.confidence ?? null,
         derivedBy: classification?.derivedBy ?? null,
       })
     }
@@ -163,6 +165,51 @@ export async function moveUser(prisma: PrismaClient) {
     const innerCall = results.find((r) => r.target === "tx.user.create")
     expect(outerTx?.effectId).toBe("db.transaction")
     expect(innerCall?.effectId).toBe("db.write")
+  })
+
+  it("does not fabricate a high-confidence db.write for a Map beside the client (issue #87)", async () => {
+    // The reported reproduction: one class holding both a PrismaClient and a plain Map
+    // cache. `this.cache.items.delete(key)` has three segments and a delegate verb inside
+    // a file that imports Prisma, which is everything the old shape gate asked for. The
+    // receiver is the only thing that separates it from the write on the next line.
+    const results = await classifyCalls(
+      "src/cache.ts",
+      `import { PrismaClient } from "@prisma/client"
+export class Repo {
+  private prisma = new PrismaClient()
+  private cache = { items: new Map<string, string>() }
+  async evict(key: string) {
+    this.cache.items.delete(key)
+    return true
+  }
+  async removeUser(id: string) {
+    return this.prisma.user.delete({ where: { id } })
+  }
+}`,
+    )
+    const evicted = results.find((r) => r.target === "this.cache.items.delete")
+    expect(evicted).toBeDefined()
+    expect(evicted?.confidence).not.toBe("high")
+    const removed = results.find((r) => r.target === "this.prisma.user.delete")
+    expect(removed?.effectId).toBe("db.write")
+    expect(removed?.confidence).toBe("high")
+  })
+
+  it("drops a Map delete keyed by a literal outright", async () => {
+    const results = await classifyCalls(
+      "src/cache-literal.ts",
+      `import { PrismaClient } from "@prisma/client"
+export class Repo {
+  private prisma = new PrismaClient()
+  private cache = { items: new Map<string, string>() }
+  evictSession() {
+    this.cache.items.delete("session")
+  }
+}`,
+    )
+    const evicted = results.find((r) => r.target === "this.cache.items.delete")
+    expect(evicted).toBeDefined()
+    expect(evicted?.effectId).toBeNull()
   })
 
   it("emits derivedBy under the shared effects-plugin:prisma prefix", async () => {

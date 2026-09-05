@@ -40,12 +40,45 @@ null today. A future revision may add it as `db.read`.
 
 A file that imports `drizzle-orm` (or any driver subpath like
 `drizzle-orm/postgres-js` / `drizzle-orm/node-postgres` / `drizzle-orm/d1` /
-`drizzle-orm/neon-http` / ...) is a prerequisite. Files that only reference
-identifiers like `db` without pulling in Drizzle are ignored, so an unrelated
-`store.select(...)` (RxJS) or `router.delete(...)` (Express) will not
-false-classify. The import gate uses a **prefix match** rather than a closed
-allowlist because Drizzle publishes 20+ driver-specific subpaths and adds new
-drivers per release.
+`drizzle-orm/neon-http` / ...) is a prerequisite. Files that never pull in
+Drizzle are ignored outright. The import gate uses a **prefix match** rather
+than a closed allowlist because Drizzle publishes 20+ driver-specific subpaths
+and adds new drivers per release.
+
+### Receiver identification
+
+The import gate is not a receiver check: it answers "does this file use
+Drizzle", and an Express router file is free to answer yes — Express + Drizzle
+is one of the most common pairings there is, and `router.delete("/users/:id", h)`
+has the same 2-segment shape as `db.delete(users)`. Two further checks decide
+what is recorded:
+
+- **Argument shape.** `select` takes an optional projection, `insert` /
+  `update` / `delete` take one table reference, and the relational query
+  terminals take an optional options object — none of them takes a bare
+  literal, and only Postgres' `selectDistinctOn(columns, projection)` takes a
+  second argument. So `router.delete("/users/:id", handler)` and
+  `store.select("name")` are not classified at all. `transaction` / `batch`
+  keep the looser rule their own signature needs (`transaction(cb, config)`):
+  only the literal check applies.
+- **Receiver name.** The client segment — `db` in `db.select`, in
+  `this.db.select` and in `db.query.users.findMany` — is matched word-wise
+  against the client vocabulary (`drizzle` / `db` / `database` / `client` /
+  `conn` / `connection` / `orm` / `tx` / `trx` / `transaction`), so `drizzleDb`,
+  `readReplicaDb` and `_db` all count and `router`, `store` and `cache` do not.
+  A match gives `confidence: "high"`; anything else still records the effect, at
+  `confidence: "medium"`.
+
+The `medium` tier is deliberate. Without the AST — which effect plugins never
+see — a client bound under a house naming convention and an unrelated object of
+the same shape are indistinguishable from the callee string, so the uncertainty
+is stated rather than resolved by guessing. A receiver the language plugin
+flagged as dynamic (`getDb().select()`) is capped at `medium` for the same
+reason: the name in the target is a collapsed expression, not a binding.
+
+Naming your client something this vocabulary does not know is not an error — it
+costs the effect its `high` tier, and the table in `src/receivers.ts` is one
+literal list if a house convention deserves to be in it.
 
 ## Install
 

@@ -278,6 +278,15 @@ Contracts:
   `packages/effects-prisma` for the reference pattern. A random `foo.findMany()`
   in a file that never imports `@prisma/client` should return `null`, and so
   should `prisma.foo.bar()` in a file that never uses Prisma's method vocabulary.
+- **If your verbs are shared vocabulary, weigh the receiver too.** The import
+  gate says the file uses your library, not that *this* call does — a file is
+  free to hold an Express router beside its queries, and `delete` / `create` /
+  `select` belong to `Map`, the DOM and every HTTP router as much as to an ORM.
+  Reject argument shapes your library's own signatures cannot produce, and let
+  the receiver's name set the tier: `high` when it names a client binding,
+  `medium` when it does not, rather than `high` for everything the shape
+  matched. [`effect-plugin.md` §5.4](../design/effect-plugin.md) has the rule and
+  the reasoning.
 - **Use the shared input guards, do not re-implement them.**
   `@aburi/plugin-registry/plugin-input` exports `assertNonEmptySegments` (splits
   a `CallCandidate.target` and rejects an empty target or empty segment) and
@@ -285,10 +294,19 @@ Contracts:
   `ImportEdge.source`). Both enforce the language plugin's normalized-output
   contract from the [language plugin spec](../design/lang-plugin.md), and both
   take a `{ plugin, filePath }` record so the thrown message names your plugin
-  and the offending file:
+  and the offending file. The same module carries the readers for the receiver
+  check — `identifierWords` / `identifierMentions` (a word split, so `feedback`
+  does not read as `db`) and `hasLiteralFirstArgument`:
 
   ```ts
-  import { assertNonEmptySegments, hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
+  import {
+    assertNonEmptySegments,
+    hasLiteralFirstArgument,
+    hasMatchingImport,
+    identifierMentions,
+  } from "@aburi/plugin-registry/plugin-input"
+
+  const MY_CLIENT_WORDS = new Set(["mytool", "client"])
 
   classify(call, ctx) {
     const origin = { plugin: "effects-mytool", filePath: ctx.file.path }
@@ -300,7 +318,15 @@ Contracts:
     if (!hasMatchingImport(ctx.file.imports, origin, (source) => source === "mytool")) return null
 
     if (segments.length < 2 || !MY_VERBS.has(last)) return null
-    return { effectId: "net.fetch", confidence: "high", derivedBy: `effects-plugin:mytool:${last}` }
+    // A shape your library's signatures cannot produce is not your call.
+    if (hasLiteralFirstArgument(call)) return null
+
+    // The receiver sets the tier, it does not gate the classification.
+    const receiver = segments.at(-2)
+    const named = receiver !== undefined && identifierMentions(receiver, MY_CLIENT_WORDS)
+    const confidence = named && call.dynamicReceiver !== true ? "high" : "medium"
+
+    return { effectId: "net.fetch", confidence, derivedBy: `effects-plugin:mytool:${last}` }
   }
   ```
 

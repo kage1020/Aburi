@@ -168,6 +168,121 @@ describe("classifyDrizzleCall — chain-collapse (one classification per fluent 
   })
 })
 
+describe("classifyDrizzleCall — receiver identification (issue #87)", () => {
+  const ctx = makeCtx({ imports: [makeDrizzleImport()] })
+
+  it("returns null for an Express route registration", () => {
+    // The bug this suite exists for: `router.delete("/users/:id", handler)` in a file that
+    // also uses Drizzle was a high-confidence db.write, because the import gate was the
+    // only defense and Express + Drizzle share a file all the time. No Drizzle root takes
+    // a string literal or a second argument, so the shape rules the call out entirely.
+    expect(
+      classifyDrizzleCall(
+        makeCall({
+          target: "router.delete",
+          argumentCount: 2,
+          literalArgs: ["/users/:id", null],
+          line: 12,
+        }),
+        ctx,
+      ),
+    ).toBeNull()
+  })
+
+  it("keeps Postgres selectDistinctOn(columns, projection), a two-argument root", () => {
+    // The arity limit reads off the terminal: a flat "one argument" rule would answer null
+    // for a valid `db.selectDistinctOn([users.id], { ... })`.
+    const result = classifyDrizzleCall(
+      makeCall({
+        target: "db.selectDistinctOn",
+        argumentCount: 2,
+        literalArgs: [null, null],
+      }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.read")
+    expect(result?.confidence).toBe("high")
+  })
+
+  it("returns null for any root verb handed a literal first argument", () => {
+    for (const target of ["app.get", "router.update", "router.insert", "emitter.select"]) {
+      expect(
+        classifyDrizzleCall(makeCall({ target, argumentCount: 1, literalArgs: ["/path"] }), ctx),
+      ).toBeNull()
+    }
+  })
+
+  it("keeps `high` for the receivers Drizzle is actually written with", () => {
+    expect(classifyDrizzleCall(makeCall({ target: "db.select" }), ctx)?.confidence).toBe("high")
+    expect(classifyDrizzleCall(makeCall({ target: "this.db.select" }), ctx)?.confidence).toBe(
+      "high",
+    )
+    expect(
+      classifyDrizzleCall(makeCall({ target: "container.services.db.select" }), ctx)?.confidence,
+    ).toBe("high")
+    expect(
+      classifyDrizzleCall(makeCall({ target: "tx.insert", argumentCount: 1 }), ctx)?.confidence,
+    ).toBe("high")
+    expect(
+      classifyDrizzleCall(makeCall({ target: "db.query.users.findMany", argumentCount: 1 }), ctx)
+        ?.confidence,
+    ).toBe("high")
+    expect(
+      classifyDrizzleCall(
+        makeCall({ target: "this.db.query.users.findFirst", argumentCount: 1 }),
+        ctx,
+      )?.confidence,
+    ).toBe("high")
+    expect(
+      classifyDrizzleCall(makeCall({ target: "db.transaction", argumentCount: 1 }), ctx)
+        ?.confidence,
+    ).toBe("high")
+  })
+
+  it("still classifies an unrecognized receiver, at medium — recall is not the price", () => {
+    // A client bound under a house convention (`store.select(...)`) is not distinguishable
+    // from an unrelated object with the same shape, so the effect is recorded with the
+    // uncertainty stated rather than dropped.
+    const result = classifyDrizzleCall(makeCall({ target: "store.select" }), ctx)
+    expect(result?.effectId).toBe("db.read")
+    expect(result?.confidence).toBe("medium")
+    expect(result?.derivedBy).toBe("effects-plugin:drizzle:read")
+  })
+
+  it("caps a dynamic receiver at medium", () => {
+    const result = classifyDrizzleCall(
+      makeCall({ target: "getDb.select", dynamicReceiver: true }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.read")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("tiers the relational query API on the client at index -4", () => {
+    expect(
+      classifyDrizzleCall(makeCall({ target: "cache.query.users.findMany" }), ctx)?.confidence,
+    ).toBe("medium")
+  })
+
+  it("still throws for transaction/batch with argCount=0 before any shape check", () => {
+    // Ordering matters: a zero-argument call has no first argument for the shape check to
+    // reject, so running the shape check first would turn a loud upstream signal into a
+    // silent null.
+    expect(() =>
+      classifyDrizzleCall(makeCall({ target: "log.transaction", argumentCount: 0 }), ctx),
+    ).toThrow(/argCount=0/)
+  })
+
+  it("returns null for a transaction verb handed a literal", () => {
+    expect(
+      classifyDrizzleCall(
+        makeCall({ target: "log.transaction", argumentCount: 1, literalArgs: ["begin"] }),
+        ctx,
+      ),
+    ).toBeNull()
+  })
+})
+
 describe("classifyDrizzleCall — negative paths", () => {
   const ctxWithDrizzle = makeCtx({ imports: [makeDrizzleImport()] })
 
@@ -280,7 +395,8 @@ describe("classifyDrizzleCall — purity", () => {
     // the data slices the classifier actually reads (file + owner + language) plus the
     // CallCandidate.
     const ctx = makeCtx({ imports: [makeDrizzleImport()] })
-    const call = makeCall({ target: "db.insert", argumentCount: 1, literalArgs: ["users"] })
+    // `literalArgs: [null]` — `db.insert(users)` passes a table reference, not a literal.
+    const call = makeCall({ target: "db.insert", argumentCount: 1, literalArgs: [null] })
     const fileSnapshot = structuredClone(ctx.file)
     const ownerSnapshot = structuredClone(ctx.owner)
     const languageSnapshot = ctx.language

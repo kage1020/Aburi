@@ -1,11 +1,12 @@
-// Fail-fast guards over the values a language plugin hands to an effect plugin.
+// Fail-fast guards, and the shared readers, over the values a language plugin hands to an
+// effect plugin.
 //
 // Deliberately import-light: this module pulls in nothing but a type from `@aburi/types`,
 // which is what lets it ship as the `@aburi/plugin-registry/plugin-input` subpath without
 // dragging the barrel's eager ajv schema compilation into every effect plugin's startup.
 // Keep it that way — a value import from a sibling module here would silently undo it.
 
-import type { ImportEdge } from "@aburi/types"
+import type { CallCandidate, ImportEdge } from "@aburi/types"
 
 /**
  * A `.`-split callee target that has been checked for emptiness. The tuple shape records
@@ -173,4 +174,59 @@ export function hasMatchingImport(
 ): boolean {
   for (const edge of imports) assertImportEdgeSource(edge, origin)
   return imports.some((edge) => matches(edge.source))
+}
+
+/**
+ * The words an identifier spells, lowercased and in source order: `prismaClient` →
+ * `["prisma", "client"]`, `read_replica_db` → `["read", "replica", "db"]`, `_prisma` →
+ * `["prisma"]`, `DBClient` → `["db", "client"]`.
+ *
+ * This is what lets a classifier ask whether a receiver segment *names* the client it is
+ * about to attribute an effect to, instead of trusting the call's shape alone. A raw
+ * substring test cannot: `"db"` is inside `"feedback"` and `"tx"` is inside `"context"`,
+ * so a receiver called `feedback` would answer yes to both. Splitting on case and
+ * separator boundaries first asks the question the naming convention actually answers —
+ * "is one of the words in this name the client's word".
+ *
+ * Digits are boundaries, not words: `db2` gives `["db"]`, and `v2Client` gives
+ * `["v", "client"]`. A vocabulary is a set of words, so a numeric chunk could only ever
+ * miss, and dropping it keeps `db2` matching the same vocabulary entry `db` does.
+ */
+export function identifierWords(name: string): string[] {
+  const words: string[] = []
+  for (const chunk of name.split(/[^A-Za-z0-9]+/)) {
+    // `[A-Z]+(?![a-z])` takes an acronym run whole (`DBClient` → `DB`, `Client`), and
+    // `[A-Z]?[a-z]+` takes an ordinary camel word with its leading capital if it has one.
+    for (const word of chunk.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+/g) ?? []) {
+      words.push(word.toLowerCase())
+    }
+  }
+  return words
+}
+
+/**
+ * True when any word of `name` (per `identifierWords`) is in `vocabulary`.
+ *
+ * The vocabulary belongs to the calling plugin — Prisma's client words are not Drizzle's —
+ * so this holds only the splitting rule the two share, in one place where it can be tested
+ * once instead of drifting per plugin.
+ */
+export function identifierMentions(name: string, vocabulary: ReadonlySet<string>): boolean {
+  return identifierWords(name).some((word) => vocabulary.has(word))
+}
+
+/**
+ * True when the call's first argument was a literal (`"users"`, `42`, `true`, `null`).
+ *
+ * The negative is what classifiers use: an ORM client method takes a table reference, an
+ * options object or a callback, never a bare literal — so `router.delete("/users/:id", h)`
+ * is not the `db.delete(users)` it shares a method name with. Reading `literalArgs[0]`
+ * inline instead would need the `?? null` on every call site to survive
+ * `noUncheckedIndexedAccess`, which is exactly the kind of detail that gets one site wrong.
+ *
+ * A call with no arguments answers `false`: there is no first argument to be a literal, and
+ * a zero-argument call is a shape its own arity check should decide on, not this one.
+ */
+export function hasLiteralFirstArgument(call: Pick<CallCandidate, "literalArgs">): boolean {
+  return (call.literalArgs[0] ?? null) !== null
 }

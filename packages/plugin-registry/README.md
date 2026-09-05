@@ -54,7 +54,8 @@ plugin's name). Callers that only need the name read `owner.name`.
 A second, deliberately tiny surface: the fail-fast guards that enforce the
 language plugin's normalized-output contract
 ([`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) §4.4) before an
-effect plugin reads the value.
+effect plugin reads the value, plus the readers every classifier ends up needing
+over the same values.
 
 ```ts
 import { assertNonEmptySegments, hasMatchingImport } from "@aburi/plugin-registry/plugin-input"
@@ -71,6 +72,30 @@ const usesMyTool = hasMatchingImport(ctx.file.imports, origin, (source) => sourc
 
 They live here rather than in each effect plugin so every plugin throws the same
 message, naming the plugin and the file that produced the bad value.
+
+The readers answer the two questions a classifier that matches on shared method
+vocabulary has to ask before it commits — is this receiver the client, and is
+this argument shape one the library could have produced
+([`docs/design/effect-plugin.md`](../../docs/design/effect-plugin.md) §5.4):
+
+```ts
+import {
+  hasLiteralFirstArgument,
+  identifierMentions,
+  identifierWords,
+} from "@aburi/plugin-registry/plugin-input"
+
+// A word split, not a substring search: "feedback" does not contain the word "db".
+identifierWords("readReplicaDb") // ["read", "replica", "db"]
+identifierMentions("readReplicaDb", new Set(["db"])) // true
+identifierMentions("feedback", new Set(["db"])) // false
+
+// `router.delete("/users/:id", handler)` is not `db.delete(users)`.
+hasLiteralFirstArgument(call)
+```
+
+The vocabulary stays with the calling plugin — Prisma's client words are not
+Drizzle's — so only the splitting rule is shared.
 
 **Import them from the `/plugin-input` subpath, not the package root.** The root
 barrel compiles the plugin JSON Schema with ajv at module scope. The subpath is a

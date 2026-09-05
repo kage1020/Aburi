@@ -14,3 +14,10 @@ export {
   type PrismaWriteMethod,
 } from "./methods"
 export { PrismaEffectsPlugin, prismaEffectsPlugin } from "./plugin"
+export {
+  hasDelegateArgumentShape,
+  namesPrismaClient,
+  PRISMA_CLIENT_WORDS,
+  type PrismaClientWord,
+  receiverConfidence,
+} from "./receivers"

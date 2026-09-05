@@ -17,3 +17,11 @@ export {
   isDrizzleWriteMethod,
 } from "./methods"
 export { DrizzleEffectsPlugin, drizzleEffectsPlugin } from "./plugin"
+export {
+  DRIZZLE_CLIENT_WORDS,
+  type DrizzleClientWord,
+  hasBuilderArgumentShape,
+  hasTransactionArgumentShape,
+  namesDrizzleClient,
+  receiverConfidence,
+} from "./receivers"

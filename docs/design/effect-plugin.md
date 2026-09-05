@@ -175,6 +175,30 @@ Priority control such as "the Prisma plugin should return `x-prisma:create` inst
 
 Conversely, when a higher-priority plugin wants to defer specific calls to lower ones, it simply returns `null` and the call flows down.
 
+### 5.4 Receiver identification and confidence
+
+A method name is not a library. `delete`, `create`, `update` and `select` are shared vocabulary across `Map`, `Set`, the DOM, RxJS stores and every HTTP router, so a classifier that recognizes a call by its terminal alone will attribute other libraries' calls to its own.
+
+The file-level import gate does not settle this. It answers "does this file use the library", which a file is free to answer yes to while most of its calls belong to something else — an Express router beside its Drizzle queries, a `Map` cache beside a Prisma client. A gate that a mixed file passes wholesale cannot be the last word for the individual calls inside it.
+
+A plugin that matches on shared vocabulary therefore weighs two more things before it commits:
+
+1. **Argument shape.** The library's own signatures rule out collisions for free: no Prisma delegate method and no Drizzle query-builder root takes a bare literal, and neither takes a second argument (bar Postgres' `selectDistinctOn(columns, projection)`) — which is exactly what `router.delete("/users/:id", handler)` is. A shape the library's API cannot produce is `null`, not a low-confidence effect. Read the arity off the library's own vocabulary table rather than flattening it to a constant, so the one method that takes two arguments does not become a false negative. `hasLiteralFirstArgument` from `@aburi/plugin-registry/plugin-input` is the shared reader for the literal half.
+
+2. **Receiver name.** The segment holding the client (`prisma` in `this.prisma.user.create`, `db` in `db.select`) is matched word-wise against the plugin's own vocabulary of client binding names — `identifierWords` / `identifierMentions` in the same module, so `prismaClient` and `readReplicaDb` match while `feedback` does not match `db`.
+
+The receiver check sets the **tier**, it does not gate the classification:
+
+| receiver | outcome |
+|---|---|
+| names a client binding | `confidence: "high"` |
+| a name the plugin cannot place | `confidence: "medium"` |
+| `dynamicReceiver` (a collapsed expression) | `confidence: "medium"`, whatever it is spelled |
+
+`medium` rather than `null` because the two cases behind an unrecognized name — a client under a house naming convention, and an unrelated object of the same shape — are not separable from the callee string, and effect plugins never see the AST (§11.1) where the binding that would separate them lives. Dropping the first is as wrong as claiming the second at the tier a hand-annotated effect gets, so the uncertainty is recorded instead of resolved by guessing. This is the same tier `@aburi/framework-express` assigns a route that matches the shape without an import anchor.
+
+A plugin whose vocabulary is its own (`$transaction`, `$queryRaw`, a `@Controller` decorator) has nothing to disambiguate and stays at `high` on shape alone.
+
 ## 6. Cooperation with Language Plugins
 
 ### 6.1 Information reaching the effect plugin
@@ -228,7 +252,11 @@ Implementation details of each plugin live in their respective READMEs. Today Ne
 ### 9.1 Prisma effect plugin (pseudocode)
 
 ```ts
-import { assertNonEmptySegments } from '@aburi/plugin-registry/plugin-input'
+import {
+  assertNonEmptySegments,
+  hasLiteralFirstArgument,
+  identifierMentions,
+} from '@aburi/plugin-registry/plugin-input'
 
 const READ_METHODS = /^(findUnique|findFirst|findMany|count|aggregate|groupBy)$/
 const WRITE_METHODS = /^(create|createMany|update|updateMany|upsert|delete|deleteMany)$/
@@ -255,14 +283,18 @@ export const plugin: EffectPlugin = {
     // `string | undefined` under noUncheckedIndexedAccess.
     const root = parts[parts.length - 3]
 
-    // check whether root looks like prisma
-    if (!isPrismaIdentifier(root, ctx.file.imports)) return null
+    // A delegate method takes one options object or nothing — a literal first argument or a
+    // second argument means this is some other library's `delete` (§5.4).
+    if (call.argumentCount > 1 || hasLiteralFirstArgument(call)) return null
+
+    // The receiver sets the tier rather than gating the classification (§5.4).
+    const confidence = isPrismaIdentifier(root) && !call.dynamicReceiver ? 'high' : 'medium'
 
     if (READ_METHODS.test(method)) {
-      return { effectId: 'db.read', confidence: 'high', derivedBy: 'effects-plugin:prisma:read' }
+      return { effectId: 'db.read', confidence, derivedBy: 'effects-plugin:prisma:read' }
     }
     if (WRITE_METHODS.test(method)) {
-      return { effectId: 'db.write', confidence: 'high', derivedBy: 'effects-plugin:prisma:write' }
+      return { effectId: 'db.write', confidence, derivedBy: 'effects-plugin:prisma:write' }
     }
     if (TX_METHODS.test('$' + method)) {
       return { effectId: 'db.transaction', confidence: 'high', derivedBy: 'effects-plugin:prisma:tx' }
@@ -271,10 +303,11 @@ export const plugin: EffectPlugin = {
   }
 }
 
-function isPrismaIdentifier(name, imports) {
-  // imports contains '@prisma/client' and name looks like an instance of PrismaClient from there
-  // currently a heuristic on the level of "if '@prisma/client' is imported, trust prisma-looking identifiers"
-  return imports.some(i => i.source === '@prisma/client')
+function isPrismaIdentifier(name) {
+  // The import gate has already run; what is left is whether THIS receiver is the client.
+  // Word-wise against the client vocabulary, so `prismaClient` / `readReplicaDb` match and
+  // `cache` / `router` do not — see §5.4, and `namesPrismaClient` in @aburi/effects-prisma.
+  return identifierMentions(name, PRISMA_CLIENT_WORDS)
 }
 ```
 
@@ -346,6 +379,7 @@ export const plugin: EffectPlugin = {
 | EP8 | logger-only plugin with `effects: []` and `dropCallees: ["pino"]` | classify keeps returning null, but pino.* is dropped |
 | EP9 | returning any id under `effectPrefixes: ["x-stripe"]` | OK (no individual declaration needed) |
 | EP10 | classify returns `confidence: 'low'` | Symbol.effects[].confidence = "low" goes into the IR as-is |
+| EP11 | a call matching a plugin's shared-vocabulary shape on a receiver the plugin cannot identify (§5.4) | the effect is still recorded, at `confidence: "medium"` — not `high`, and not dropped |
 
 ## 11. Design Decisions
 
