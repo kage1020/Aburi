@@ -19,8 +19,14 @@ export interface LoadedPlugins {
 
 export interface LoadPluginsOptions {
   config: Config
-  /** Workspace root — used to resolve relative `./plugins/*.mjs` refs. */
+  /** Workspace root — the base for everything the scan reads out of the config. */
   workspaceRoot: string
+  /**
+   * Where a relative `./plugins/*.mjs` ref resolves from. Defaults to `workspaceRoot`, and
+   * differs from it only for `aburi diff`'s base scan, whose config comes from the head tree
+   * while its workspace root is the temporary worktree (`cli-spec.md` §6.4.1.5).
+   */
+  pluginRefRoot?: string
   /** Dynamic import hook for testing (default: real ESM import). */
   importModule?: (specifier: string) => Promise<unknown>
   /**
@@ -39,7 +45,8 @@ export interface LoadPluginsOptions {
  * - manifest name (`effects-prisma`) — resolved against `node_modules` via the runtime's
  *   ESM resolver, prefixed with `@aburi/` when no scope is present.
  * - npm package (`@aburi/lang-typescript`) — resolved verbatim.
- * - relative path (`./plugins/x.mjs`) — resolved from the workspace root.
+ * - relative path (`./plugins/x.mjs`) — resolved from `pluginRefRoot`, which is the
+ *   workspace root unless the caller says otherwise.
  *
  * Once imported, the loader accepts the following export shapes:
  *   1. `default` export whose value has a `manifest` field
@@ -59,7 +66,7 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
   const importFn = options.importModule ?? defaultImport
   const refs = collectRefs(options.config)
   for (const { ref, bucket } of refs) {
-    const specifier = resolveSpecifier(ref, options.workspaceRoot)
+    const specifier = resolveSpecifier(ref, options.pluginRefRoot ?? options.workspaceRoot)
     const module = await tryImport(importFn, specifier, ref)
     const plugin = pickPlugin(module, ref)
     registry.register(plugin.manifest)

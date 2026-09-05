@@ -38,7 +38,7 @@ import {
   resolveOutputDir,
   WORKSPACE_MD_FILENAME,
 } from "../artifact-paths"
-import { resolveConfig } from "../config-load"
+import { loadPinnedConfig, type PinnedConfig, pinConfig } from "../config-load"
 import type { LogLevel } from "../env"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -52,6 +52,30 @@ import { resolveWorkspaceRoot } from "../workspace-root"
 export interface ScanOptions {
   cwd?: string
   configPath?: string
+  /**
+   * A config already decided by the caller, which supersedes both `configPath` and discovery.
+   *
+   * `aburi diff` sets it. Its base scan runs with `cwd` inside a temporary worktree, where
+   * discovery finds the base revision's `aburi.json` and a relative `configPath` resolves to
+   * the base copy of the file — either of which makes a commit that only edits the config
+   * read as a change to every Symbol in the workspace (cli-spec.md §6.4 step 3).
+   *
+   * `{ kind: "autodetect" }` is meaningful rather than equivalent to omitting the field: it
+   * says the caller looked and found nothing, so this scan must not look again.
+   */
+  pinnedConfig?: PinnedConfig
+  /**
+   * Where a relative plugin ref (`./plugins/x.mjs`) in the config resolves from. Defaults to
+   * this scan's own workspace root, which is right whenever the config came out of the tree
+   * being scanned.
+   *
+   * `aburi diff`'s base scan is the case where it did not: §6.4.1.5 pins the plugin set to
+   * the head environment — the worktree materialises sources only, and `node_modules` is the
+   * caller's — so a relative ref in the head's config has to resolve there too. Left to the
+   * worktree, a head commit that adds `./plugins/new.mjs` makes the base scan die on a file
+   * the head reads fine.
+   */
+  pluginRefRoot?: string
   outputDir?: string
   format?: "json" | "md" | "both"
   ignore?: readonly string[]
@@ -223,6 +247,15 @@ export interface ScanReport {
    * arguments and belongs on the report.
    */
   configSource: string | null
+  /**
+   * Whether `configSource` was decided by the caller rather than found from `cwd`.
+   *
+   * Only one thing reads it, and it is the reason the field exists: a pinned config is
+   * routinely outside this scan's workspace root — `aburi diff` hands the base scan the head
+   * tree's `aburi.json` — and `reportConfigOutsideWorkspaceRoot` would then fire on every
+   * ref-mode diff with a sentence about a monorepo package that is not what happened.
+   */
+  configPinnedByCaller: boolean
   /** Marker-detected root; the base for Symbol id paths and the config's relative globs. */
   workspaceRoot: string
   /**
@@ -276,12 +309,17 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
 
-  const loaded = await resolveConfig(cwd, options.configPath)
+  // `??` rather than a branch: `resolveConfig` is exactly these two composed, so the
+  // precedence between the decided config and the one to decide is the operator itself
+  // rather than a sentence a later edit can contradict.
+  const pinnedConfig = options.pinnedConfig ?? (await pinConfig(cwd, options.configPath))
+  const loaded = await loadPinnedConfig(pinnedConfig)
   const config = mergeCliOverrides(loaded.config, options)
 
   const plugins = await loadPlugins({
     config,
     workspaceRoot,
+    pluginRefRoot: options.pluginRefRoot ?? workspaceRoot,
     syntheticPlugins: loaded.syntheticPlugins,
   })
   requireLanguagePlugin(plugins.languages.length, loaded.source)
@@ -375,6 +413,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
     configSource: loaded.source,
+    configPinnedByCaller: options.pinnedConfig !== undefined,
     workspaceRoot,
     coverageFault,
     unrepresentableFiles: scanResult.unrepresentableFiles.map((f) => ({ ...f })),
@@ -660,10 +699,21 @@ function reportCoverageFault(fault: CoverageFault | null, say: (line: string) =>
  * root. When the two directories differ — running inside a monorepo package that has its
  * own `aburi.json` — a relative path in that file points somewhere other than where its
  * author was looking, and the scan still covers the whole workspace. Both are deliberate
- * (see `resolveConfig`), and neither is visible from the command line, so say it.
+ * (see `pinConfig`), and neither is visible from the command line, so say it.
+ *
+ * A pinned config is exempt, because for it the condition is not evidence of anything. The
+ * base scan of `aburi diff` reads the head tree's `aburi.json` against a workspace root that
+ * is the temporary worktree, so the two directories *never* match and the line would fire on
+ * every ref-mode diff in a configured repo. It would also be describing the wrong thing: the
+ * head config does not sit below the worktree, it sits in another tree entirely, and nobody
+ * ran anything from a monorepo package. The half of the sentence that stays true for a pinned
+ * scan — that paths inside the config resolve against the root, which for the base scan is
+ * the worktree — is documented under `aburi diff` in `docs/reference/cli.md` instead, where a
+ * reader meets it once rather than on every run.
  */
 function reportConfigOutsideWorkspaceRoot(report: ScanReport, say: (line: string) => void): void {
   if (report.configSource === null) return
+  if (report.configPinnedByCaller) return
   if (dirname(report.configSource) === report.workspaceRoot) return
   say(
     `Config ${report.configSource} sits below the workspace root ${report.workspaceRoot}. ` +

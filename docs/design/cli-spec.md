@@ -492,6 +492,7 @@ Before creating the worktree, the following checks run in order; on failure, exi
 When scanning the base ref for `aburi diff <base>..<head>`, Aburi **shares the head's `node_modules`** (the worktree only materializes the base sources at a separate path; dependency resolution uses the original cwd's `node_modules`).
 
 - **Rationale**: since §6.4 decided to "apply the head's `aburi.json` to the base scan as well", the plugin set also comes from the head. Reinstalling from the base ref's `package.json` for the base scan would explode build time, and `--frozen-lockfile` does not work on shallow clones
+- A **relative plugin ref** (`./plugins/x.mjs`) in that config resolves against the head's workspace root, not the worktree, for the same reason: the ref belongs to the head's plugin set, and a commit that adds a plugin file would otherwise make the base scan fail to load a config the head reads fine. Everything else inside the config — `ignore`, `components[].roots` — keeps resolving against the scan's own workspace root, which for the base scan is the worktree, because those name *sources* and the base's sources are what the worktree holds
 - **Known limitation**: when the base ref's sources cannot be extracted with the head's plugins (e.g. the base uses syntax from an older framework version and the head's framework plugin only supports the newer one), parsing/extraction may fail
   - This is a consequence of the "IR generator is pinned to the head environment" design
   - On failure, the affected file is skipped with a warning log
@@ -902,6 +903,14 @@ Can also be enabled via an explicit `--ci` flag (for CI environments where the e
 ```
 
 Passing `--cwd` changes the cwd and therefore the search origin.
+
+`aburi diff` in ref mode runs this list **once**, against the invoking cwd, before it
+materialises the base worktree — and hands the single answer (an absolute path, or "nothing
+found, autodetect") to both scans. Re-running it from inside the worktree would resolve steps
+1-5 against the base revision instead of the head — a relative `ABURI_CONFIG` relocates
+exactly like a relative `--config`, since both arrive as the same value — and would turn a
+head-side step 6 into a step 3-5 hit whenever the base ref still carries a config the head
+deleted. Either is what §6.4 step 3 forbids.
 
 ## 14. Concurrency
 

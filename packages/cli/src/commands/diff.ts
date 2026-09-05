@@ -10,7 +10,7 @@ import {
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
-import { configuredOutputDir } from "../config-load"
+import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
 import { CliError, errorCode, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
@@ -161,6 +161,19 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
+  // One pin for the whole command, and not one taken before something needs it.
+  //
+  // Eager would be simpler to read and wrong twice over: a `--base` / `--head` run that named
+  // its own `--output-dir` consults no config at all today, and pinning walks the filesystem
+  // and can raise `config-read-failed` on an EACCES that run would never have met. Lazy but
+  // unmemoised is the state this replaces, where the destination and the scans each ran the
+  // resolution list — same answer, since both anchor to `cwd`, but "decided once" was a
+  // description of the intent rather than of the code.
+  let pinned: PinnedConfig | null = null
+  const pinConfigOnce = async (): Promise<PinnedConfig> => {
+    pinned ??= await pinConfig(cwd, options.configPath)
+    return pinned
+  }
   // Before anything expensive. The destination is decided from `cwd` alone, and a run that
   // cannot be filed is a run not worth computing: resolved after the diff, a broken config
   // would cost two scans or two IR reads and then report `Failed to load Aburi config`, which
@@ -173,13 +186,12 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const outputDir = resolveOutputDir(
     cwd,
     options.outputDir,
-    options.outputDir === undefined
-      ? await configuredOutputDir(cwd, options.configPath)
-      : undefined,
+    options.outputDir === undefined ? await configuredOutputDir(await pinConfigOnce()) : undefined,
   )
   const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
     options,
     cwd,
+    pinConfigOnce,
     warn,
   )
 
@@ -508,7 +520,12 @@ interface ResolvedIRs {
   scans: ScanPair | null
 }
 
-async function resolveIRs(options: DiffOptions, cwd: string, warn: WarnFn): Promise<ResolvedIRs> {
+async function resolveIRs(
+  options: DiffOptions,
+  cwd: string,
+  pinConfigOnce: () => Promise<PinnedConfig>,
+  warn: WarnFn,
+): Promise<ResolvedIRs> {
   if (options.refSpec !== undefined && options.refSpec !== null && options.refSpec.length > 0) {
     if (options.base !== undefined && options.base !== null) {
       throw new CliError(
@@ -516,7 +533,7 @@ async function resolveIRs(options: DiffOptions, cwd: string, warn: WarnFn): Prom
         "input-error",
       )
     }
-    return resolveViaGit(options, cwd, parseRefSpec(options.refSpec), warn)
+    return resolveViaGit(options, cwd, parseRefSpec(options.refSpec), pinConfigOnce, warn)
   }
   if (options.base === undefined || options.base === null || options.base.length === 0) {
     throw new CliError(
@@ -543,6 +560,7 @@ async function resolveViaGit(
   options: DiffOptions,
   cwd: string,
   spec: RefSpec,
+  pinConfigOnce: () => Promise<PinnedConfig>,
   warn: WarnFn,
 ): Promise<ResolvedIRs> {
   const git = options.git ?? defaultGitRunner
@@ -550,6 +568,17 @@ async function resolveViaGit(
   await assertRefResolvable(git, cwd, spec.head, "head")
   await assertNotShallow(git, cwd)
 
+  // Pinned before the worktree exists, and therefore against the caller's own directory.
+  // §6.4 step 3 gives the base scan the *head* `aburi.json`: a config as of the base ref
+  // would make any commit that edits one read as "the entire IR changed". Discovery from
+  // inside the worktree returns the base copy, and so does a relative `--config`, so the
+  // rule holds only if the answer is fixed here and handed to both scans.
+  const pinnedConfig = await pinConfigOnce()
+  // Two things read this, and both are "the base is interpreted through the head's view":
+  // the name to materialise the base under (§6.4 step 2), and where a relative
+  // `./plugins/*.mjs` ref in the head's config resolves from (§6.4.1.5, which pins the plugin
+  // set to the head environment). The worktree materialises the base *sources*; it has no
+  // claim on either.
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   // Under a directory of its own, so the leaf below is free to be any name the head workspace
@@ -575,16 +604,29 @@ async function resolveViaGit(
     await mkdir(worktreeParent, { recursive: true })
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
     worktreeAdded = true
-    const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, {
-      side: "base",
-      ref: spec.base,
-    })
+    const baseReport = await runScanInDir(
+      worktreeDir,
+      options,
+      baseOutputDir,
+      warn,
+      pinnedConfig,
+      headWorkspaceRoot,
+      { side: "base", ref: spec.base },
+    )
     if (baseReport.irPath === null) {
       throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
     }
     baseIR = await readIR(baseReport.irPath)
 
-    const headReport = await runScanInDir(cwd, options, headOutputDir, warn, { side: "head" })
+    const headReport = await runScanInDir(
+      cwd,
+      options,
+      headOutputDir,
+      warn,
+      pinnedConfig,
+      headWorkspaceRoot,
+      { side: "head" },
+    )
     if (headReport.irPath === null) {
       throw new CliError("scan for head ref produced no IR file.", "runtime-error")
     }
@@ -663,11 +705,22 @@ function labelFor(target: ScanTarget): string {
   return target.side === "base" ? `base ref "${target.ref}"` : "head (working tree)"
 }
 
+/**
+ * One scan of one side, reading the config both sides share.
+ *
+ * `pinnedConfig` replaces `options.configPath` rather than accompanying it. The two would
+ * otherwise disagree for the base: the flag's value is relative to the caller's directory
+ * and this scan runs in the worktree. `pluginRefRoot` is passed to both sides for the same
+ * reason — it is a no-op for the head, whose workspace root it already is, and stating it
+ * once keeps the two scans provably identical in everything but their sources.
+ */
 async function runScanInDir(
   cwd: string,
   options: DiffOptions,
   outputDir: string,
   warn: WarnFn,
+  pinnedConfig: PinnedConfig,
+  pluginRefRoot: string,
   target: ScanTarget,
 ): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
@@ -675,7 +728,8 @@ async function runScanInDir(
     outputDir,
     format: "json",
     incidents: { warn, label: labelFor(target) },
-    ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
+    pinnedConfig,
+    pluginRefRoot,
     ...(options.compact === undefined ? {} : { compact: options.compact }),
   }
   return runScan(scanOptions)
