@@ -1,5 +1,183 @@
 # @aburi/types
 
+## 0.4.0
+
+### Minor Changes
+
+- be8e2b9: One Symbol per declared entity, however many declarations wrote it
+
+  A getter beside its setter, an overload beside its implementation, and a reopened namespace or
+  interface each made `extractSymbols` emit two SymbolCandidates under one id. Integrity invariant 1
+  (`ir-schema.md` §14) refuses that, and it is checked once over the finished document rather than
+  per file — so `class Box { get value() {} set value(n) {} }` did not cost its own file, it ended
+  the run and took every other file's Symbols with it.
+
+  TypeScript models all three the same way: one entity, several declarations. So does extraction
+  now. The first declaration claims the Symbol and every scalar on it; later declarations of the
+  same id contribute their `derivedBy` and their body instead of becoming a second Symbol. First
+  wins because legal source already orders them — TypeScript requires the class or function to
+  precede the namespace merged into it, and requires a merge's declarations to agree on whether
+  they are exported.
+
+  Two constructs are handled before that rule rather than by it, because it would answer them
+  wrongly:
+
+  - **An overload declaration is skipped.** A `method_signature` in a class body declares nothing
+    the implementation beside it does not, and it is written _first_ — so folding it as the leading
+    declaration would report the member as body-less and give it the overload's parameter types.
+    Top-level overloads have always behaved this way (`function_signature` is not in the statement
+    switch); a class matches now, so the same source does not answer differently depending on where
+    it is written.
+  - **An accessor pair is led by the getter.** A property's type is what reading it answers, so
+    taking the setter's signature would report the member as `(n) => void`.
+
+  `SymbolCandidate` gains `mergedDeclarations?: MergedDeclaration<TNode>[]`: the further
+  declarations, in source order, each carrying both its `bodyNode` and its `fullNode`. Without the
+  field, folding a pair would drop the setter's body — a `set password(v)` that hashes the value has
+  effects. Without `fullNode` on the entry, a reopened `enum E {}` would fingerprint as though the
+  second declaration had never been written, because an enum candidate has no body at all. Only the
+  bodies reach `walkBody`, which is what keeps a merged namespace from being walked twice. The key is
+  absent, never empty, on a Symbol with one declaration, so the single-declaration path is untouched
+  and no existing fingerprint moves.
+
+  `derivedBy` and `decorators` join the same way. A lost `boundary` decorator is not cosmetic:
+  `interface P {}` written above `@Controller() class P {}` is legal, so the declaration that claims
+  the Symbol is the one carrying none.
+
+  Two drop rules were reading one declaration where they should read all of them, and one was reading
+  decorators nowhere. `classifySymbolDropHint` now honours a boundary decorator for every kind rather
+  than only for classes — core's `decideSymbolDrop` answers `null` on a boundary and then defers to
+  this hint, so an unguarded arm here is the one that decides. `classifyClassBody` reads class bodies
+  only, so a merged `interface C {}` does not contribute members the class does not have.
+
+  Two namespace fixes come with it, because folding a reopened namespace requires reaching one.
+
+  An unexported `namespace` at statement position is parented under an `expression_statement`, which
+  the statement switch never looked through — so every unexported namespace lost its own Symbol
+  _and_ everything declared inside it.
+
+  And a dotted `namespace A.B {}` is sugar for `namespace A { namespace B {} }`. Reading the dotted
+  text as one qualified-name segment is what the id builder refuses, and the throw cost the file every
+  Symbol it had; it declares one Symbol per segment now, with the body under all of them.
+
+- 3774de6: Free the parse tree the language plugin hands over
+
+  A WASM parse tree is not something the JavaScript garbage collector can reach. `lang-plugin.md`
+  §8.1 says so and names the consequence — `RangeError: WebAssembly.Memory()` after some thousands
+  of files — but told the plugin to free a tree it had already given away, and nobody on the other
+  side picked it up. `@aburi/core` contained no `delete` call at all, so every file that parsed
+  successfully left its tree in the WASM heap for the rest of the run.
+
+  `LanguagePlugin` gains an optional `releaseTree(tree)`. `runFilePipeline` calls it once per
+  non-null tree, in a `finally` that covers every way out of the file: the success path, a file
+  withdrawn by a `recoverable: false` error, a file abandoned on `parseTimeoutMs`, and a throw out
+  of `extractSymbols`, `walkBody` or `normalizeAst`. A plugin whose trees are ordinary
+  garbage-collected objects omits the method and nothing changes for it.
+
+  The core is the only side that can do this. `parseFile` gives the handle away at step 1 and the
+  tree stays live until `normalizeAst` has read the last node out of it — a plugin that deleted
+  its own tree on the way out would be handing back something already dead. The one place the
+  plugin still frees it is a `parseFile` that fails _after_ parsing, where the caller never
+  receives the handle.
+
+  A release that fails is recorded rather than propagated. It runs in a `finally`, so a throw
+  there would silently become the file's outcome — replacing the diagnostic a failing file was
+  already carrying, and turning a file that produced a perfectly good set of Symbols into an
+  extraction failure. The record is structural: `ScanResult.treeReleaseFailures` names the
+  plugin, the file and what went wrong, because a leak is silent until the run dies of it, and
+  by then it presents as `RangeError: WebAssembly.Memory()` charged to whichever unrelated file
+  was being read when the heap ran out. `ScanReport` carries it to the CLI, which prints it
+  grouped by plugin with what the leak costs. It moves no exit code: every one of those files is
+  in the IR, so the artifact describes the workspace completely.
+
+  A `releaseTree` declared as something other than a function is recorded there too, in its own
+  words — a contract violation is deterministic and fixable in a line, and reading it through the
+  same `TypeError` catch as a parser failure would describe it as one. A `null` `releaseTree` is
+  read as "nothing to free", the way the optional call it replaced did.
+
+  `@aburi/lang-typescript` implements it as `tree.delete()`, and is exported with `satisfies` so
+  the method stays required on the exported type.
+
+- ba9e505: `stats.lspEnrichment` says how many receiver hints the typed tier produced, used, and threw away
+
+  `stats.lspEnrichment` counted requests and files and nothing about answers, so the one number a
+  reader reaches for — did turning LSP on buy anything? — was not in the document. A hover that
+  comes back on time carrying nothing this pass can read is a healthy row in every counter there
+  was: it lands in `requestsIssued`, in neither failure counter, it resets the consecutive-failure
+  tally, and its file still counts in `filesEnriched`. `requestsIssued: 40, requestsFailed: 0`
+  described a run that resolved forty extra call sites and a run that resolved none, and §6.2 keeps
+  errors out of the IR, so nothing else recorded the difference either.
+
+  Three counters now do. `hintsProduced` is the hovers read all the way to a callee Symbol,
+  `hintsConsumed` the call sites the resolver turned into an edge, and `hintsRejected` the five
+  places in between where a hint is lost — `unparseableHover`, `ownerClassNotFound`,
+  `memberNotFound` on the enrichment side, `kindMismatch` and `targetDropped` on the resolver's.
+  Two sums hold and neither crosses the halves: every hover that came back without a failure is
+  either produced or in one of the first three buckets, and every call site that found a hint at
+  its key is either consumed or in one of the last two. A hint the untyped tier made unnecessary is
+  in neither, which is the ordinary shape of a healthy scan rather than a fault.
+
+  The three are additive optional fields on `LspEnrichmentStats` in `aburi.ir.v1`, Class B per
+  `ir-schema.md` §1.1: the pipeline writes all of them whenever it writes the record, with
+  `hintsRejected` carrying five zeroes rather than being omitted, so absence means the document
+  predates the counters. A new `LspHintRejections` definition holds the buckets.
+
+  Neither sum is checkable from the finished document, and §7.2 now says so rather than reading
+  like an integrity invariant: `requestsIssued` also carries a `documentSymbol` per file, so the
+  hover count the producer identity balances against is not an IR quantity, and the call sites that
+  found a hint at their key are recorded nowhere. The tests hold both sums instead.
+
+  The two halves are written by two passes, and the second cannot reach the first: the resolver
+  runs after `enrichWithLsp` has returned. `ResolveCallGraphResult` therefore carries a new
+  `lspHintUsage` — what the LSP tier consumed and what it declined — rather than the resolver being
+  handed a stats builder it would otherwise depend on having, and `withHintUsage` folds the two
+  together. `enrichWithLsp` returns the producer half as `LspProducerStats`, whose three counters
+  are required where the IR type has them optional, so a caller assembling the passes itself is
+  told by the type that `withHintUsage` is what finishes the record. Without that fold
+  `hintsConsumed` and the resolver's two buckets stay at `0`.
+
+  `aburi scan` prints the three totals when a run produced or refused a hint, so the question the
+  counters answer does not require reading the IR.
+
+### Patch Changes
+
+- 203ea78: Read the three import forms that lost their dependency edge
+
+  `import x = require('./m')`, an `import()` behind a magic comment, and an `import()` whose
+  specifier is a template all produced no `ImportEdge` and no diagnostic — a file importing only
+  through `require` looked import-free, and the calls through the missing binding fell out of
+  relative resolution into the `no-match` bucket with nothing saying why.
+
+  Each missed for its own reason. A require-equals hangs its specifier off an
+  `import_require_clause` rather than the statement's `source` field, so the reader found
+  nothing. A magic comment is a _named_ node, so the first argument of `import()` was the comment
+  rather than the specifier. A template is a `template_string`, not a `string`, so the literal
+  reader refused it.
+
+  The require-equals edge is a **namespace** edge — `symbols: "*"` with the binding on
+  `namespaceBinding` — and not the default binding it superficially resembles. `x` names the
+  module object the way `import * as x from './m'` does, and call resolution acts on the
+  difference: the namespace arm strips the head off `x.foo()` and looks for `foo` in the target
+  file, where a `symbols: ["x"]` edge would send it looking for `x.foo` there, which the target
+  does not have. `dynamic` is false because the field means "written as `import()`" and this
+  form is not — and because both loops in `callgraph.ts` that read a file's edges skip a
+  dynamic one, the value is also what keeps this import in reach of call resolution.
+
+  A clause that did not parse is not read at all. The grammar admits nothing but a string
+  literal for the specifier, so `require("a" + b)` is a syntax error — but error recovery
+  leaves the operand it could read as a direct child of the clause with the `source` field
+  attached, and reading it would answer `a`. `require('./m', 'y')` would answer the second
+  argument.
+
+  A template _with_ a substitution stays computed and stays silent, which is the boundary this
+  change is careful about: joining a substituting template's fragments would answer `"./"` for
+  `` `./${p}` `` — an edge to a module the author never named, and a worse answer than none.
+
+  An empty specifier written in either new form (`import x = require("")`, `import(`)``) goes
+  through the same gate as `import("")` and is reported as the empty specifier it is.
+  `firstNonCommentChild` moves to `ast-helpers.ts`, where the decorator reader takes it too;
+  `imports.ts` drops its private `findChildByType`, a duplicate of `ast-helpers`' `findChild`.
+
 ## 0.3.0
 
 ### Minor Changes

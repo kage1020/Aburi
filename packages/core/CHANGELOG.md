@@ -1,5 +1,514 @@
 # @aburi/core
 
+## 0.4.0
+
+### Minor Changes
+
+- 81dadb6: One outcome per file, and one place a budget comes from
+
+  `FilePipelineResult` spread a file's fate across `terminalParseFailure: boolean` and
+  `parseTimeout: ParseTimeoutEvent | null`. Four combinations typechecked, three were reachable,
+  and the fourth was forbidden by a rule that lived in a comment: the caller records one skip
+  entry per file, so a result carrying both would have been labelled by whichever it tested
+  first — a plugin's outright refusal reported as a file that was merely slow, sending the
+  reader to raise a budget that was never the problem.
+
+  It is a union of three now: `ExtractedFile`, `ParseFailedFile` and `ParseTimeoutFile`,
+  discriminated on `kind`. The variants carry what they actually have, which the widened product could only
+  describe as "empty here, present there": a withdrawn file has its `imports` and no `symbols` key
+  at all, an abandoned one has neither and carries its `ParseTimeoutEvent` non-null.
+
+  The type names are their discriminants, and the discriminant strings are
+  `SkippedFile["reason"]`'s two withdrawal values, so `scan.ts`
+  assigns `reason: result.kind` rather than restating them. Its two order-dependent `if`s become a
+  `switch` whose `default` is a compile-time `never` — the exclusivity that was a paragraph of
+  prose is what the type says now, and a fate added later is a type error rather than a file that
+  reaches neither the IR nor the skip list.
+
+  `FilePipelineInput.parseTimeoutMs` and `classifyTimeoutMs` are gone. They duplicated fields the
+  `config` on the same input already carried and existed only so a test could pass a budget without
+  building a `Config`, which meant the tested path and the production path were not the same path.
+  Both budgets are read from `config` now, the two conditional spreads in `scan.ts` that maintained
+  the duplication are gone, and the tests pass their budgets the way the CLI does.
+
+  `CoreErrorCode` gains `scan-outcome-unhandled` for the switch's compile-time guard to raise if it
+  is ever reached anyway.
+
+- a358a5a: Name the field a diffed IR is missing, instead of crashing on it
+
+  `buildDiff` is public API and ran no integrity check, so an IR a caller assembled in memory
+  reached the matcher unverified. Every field the diff dereferences crashed it with a bare
+  `TypeError` naming neither the record nor the field — measured, one field deleted at a time
+  from a well-formed pair:
+
+  | deleted                                                | crashed in                                                            |
+  | ------------------------------------------------------ | --------------------------------------------------------------------- |
+  | `symbols[].fingerprint`, `.source`                     | `classifyStatus`                                                      |
+  | `symbols[].calls`, `.decorators`, `.effects`, `.rules` | `computeSymbolDelta`                                                  |
+  | `components[].roots`                                   | `diffComponents`                                                      |
+  | `stats`                                                | `dependencySideView`, which reads `stats.skippedFiles` off every side |
+
+  That list is the shape of the class rather than the whole of it: it is one matcher change
+  away from being out of date, which is the argument for a gate that is not scoped to it.
+
+  `buildDiff` now runs `checkDocumentShape` on each side before the identity pass. The refusal
+  is a `DiffError` with code `ir-shape-invalid`, naming the side, the record and the field:
+  `headIR.symbols[3]: "fingerprint" is absent, not an object.` A breach at the top level has no
+  index to name and says so — `headIR: "stats" is absent, not an object.`
+
+  **Invariant #20, and only #20.** The semantic invariants are statements about a Document whose
+  answer the diff does not depend on — an unsorted `symbols[]` diffs correctly, because stage 1
+  keys by id — so running them would withhold an answer the matcher can give, and `aburi diff`
+  would re-pay the full checker on a Document `readIR` already checked. It re-pays the structural
+  walk instead: 1.8ms per side at 1,000 Symbols, 17ms at 10,000.
+
+  **This refuses IRs that used to produce an answer.** A Symbol missing `visibility`, `name` or
+  `kind` was diffed happily, because nothing in the matcher dereferenced it; so was a Document
+  with no `generator` or `workspace`. The gate is scoped to what the `IR` brand asserts rather
+  than to what today's matcher touches: a scope that moved with the matcher would leave a
+  caller's Document conditionally valid, and `integrity-shape.ts` makes that argument for itself
+  while naming this consumer.
+
+  `DiffErrorDetail` gains `violations?: readonly IntegrityViolation[]`, matching
+  `CoreErrorDetail`. The message quotes the first breach and counts the rest, which is enough to
+  start on and not enough to finish; the array carries all of them, each subject prefixed with
+  the side it came from. Additive — no existing field changed.
+
+  `checkDocumentShape` and `DOCUMENT_SUBJECT` are now exported from `@aburi/core`. The first was
+  module-exported only, reachable solely through `checkIRIntegrity`, which runs it and then the
+  semantic checks this deliberately avoids. The second is what tells a root-level breach from a
+  nested one, and a hand-copied literal on the diff side would go quietly wrong if core renamed
+  it.
+
+  The messages are the ones `checkDocumentShape` writes, subject naming the record and message
+  naming the field, rather than a second wording for the same breach — including the empty
+  `$schema`, which is `buildDiff`'s own requirement and now reads in the same shape. Callers
+  matching on `DiffError.message` for a malformed Document see the new form; `code` is unchanged.
+
+- 3774de6: Free the parse tree the language plugin hands over
+
+  A WASM parse tree is not something the JavaScript garbage collector can reach. `lang-plugin.md`
+  §8.1 says so and names the consequence — `RangeError: WebAssembly.Memory()` after some thousands
+  of files — but told the plugin to free a tree it had already given away, and nobody on the other
+  side picked it up. `@aburi/core` contained no `delete` call at all, so every file that parsed
+  successfully left its tree in the WASM heap for the rest of the run.
+
+  `LanguagePlugin` gains an optional `releaseTree(tree)`. `runFilePipeline` calls it once per
+  non-null tree, in a `finally` that covers every way out of the file: the success path, a file
+  withdrawn by a `recoverable: false` error, a file abandoned on `parseTimeoutMs`, and a throw out
+  of `extractSymbols`, `walkBody` or `normalizeAst`. A plugin whose trees are ordinary
+  garbage-collected objects omits the method and nothing changes for it.
+
+  The core is the only side that can do this. `parseFile` gives the handle away at step 1 and the
+  tree stays live until `normalizeAst` has read the last node out of it — a plugin that deleted
+  its own tree on the way out would be handing back something already dead. The one place the
+  plugin still frees it is a `parseFile` that fails _after_ parsing, where the caller never
+  receives the handle.
+
+  A release that fails is recorded rather than propagated. It runs in a `finally`, so a throw
+  there would silently become the file's outcome — replacing the diagnostic a failing file was
+  already carrying, and turning a file that produced a perfectly good set of Symbols into an
+  extraction failure. The record is structural: `ScanResult.treeReleaseFailures` names the
+  plugin, the file and what went wrong, because a leak is silent until the run dies of it, and
+  by then it presents as `RangeError: WebAssembly.Memory()` charged to whichever unrelated file
+  was being read when the heap ran out. `ScanReport` carries it to the CLI, which prints it
+  grouped by plugin with what the leak costs. It moves no exit code: every one of those files is
+  in the IR, so the artifact describes the workspace completely.
+
+  A `releaseTree` declared as something other than a function is recorded there too, in its own
+  words — a contract violation is deterministic and fixable in a line, and reading it through the
+  same `TypeError` catch as a parser failure would describe it as one. A `null` `releaseTree` is
+  read as "nothing to free", the way the optional call it replaced did.
+
+  `@aburi/lang-typescript` implements it as `tree.delete()`, and is exported with `satisfies` so
+  the method stays required on the exported type.
+
+- ff059d7: Say which manifest declared packages and found none
+
+  A `packages:` list whose patterns matched no manifest reaches the same single-project fallback
+  as a manifest that declared no packages at all, and only the second wants it. The first is a
+  workspace whose every declared package is missing from the Document — from a mistyped pattern,
+  from a monorepo with no packages in it yet, or from packages whose manifest Aburi does not
+  recognize — and nothing said so.
+
+  The IR keeps no trace a reader can act on. `workspace.managers[].roots` comes back empty, which
+  is also what a `turbo.json` co-marker writes on purpose, so the two cannot be told apart from
+  the artifact.
+
+  `DetectManagersResult` now carries `unresolved`: one entry per **manifest** that declared package
+  patterns and resolved none, with its workspace-relative path and every string it listed. Per
+  manifest rather than per manager, because `pnpm-lock.yaml` beside a `package.json#workspaces`
+  makes both of a repository's manifests spell `pnpm` — the path is what a reader opens and what
+  orders two entries. `aburi scan` and `aburi init` name the manifest and the patterns on stderr,
+  and add a second line when nothing resolved anywhere and the whole repository was therefore
+  described as one component — not when `components[]` in the config decided them, since
+  detection's answer never reached the IR then.
+
+  A `packages:` key that is absent or holds an empty list is not a failed declaration: pnpm reads
+  both as "only the root package is included in the workspace", and so does this. Neither is
+  turbo, which declares no patterns, nor nx, which has no pattern list at all.
+
+  A `packages:` or `workspaces` that is present and is **not a list of strings** is now refused
+  with `workspace-manifest-malformed` naming the manifest and the offending entry, rather than
+  filtered away. A trailing colon on an entry — `- tools/*:`, which YAML reads as a map — is the
+  most ordinary slip there is, and it silently put every package the manifest declared on the
+  single-project fallback. pnpm refuses that shape, a bare scalar and a non-string element alike.
+
+  `ScanReport` gains `unresolvedDeclarations` and `fellBackToSingleComponent`; `InitReport` gains
+  the same two. Both are required, so external code assembling either needs the new fields —
+  `coverageFault` and `unrepresentableFiles` set the precedent for the minor bump.
+
+- 6676ca7: Read a quoted class member name as the name it spells, instead of losing the file
+
+  `class C { "ok"() {} }` and `class C { 1() {} }` are legal TypeScript — the member is addressed
+  as `C["ok"]` / `C[1]` — and both cost the file every Symbol it had. The plugin handed the name
+  node's _source text_ to the Symbol-id builder, which refuses anything that is not an identifier;
+  the throw was caught at the per-file boundary, and the file was named in `stats.skippedFiles`
+  with `reason: "extraction-failed"`. Widening the qualified-name grammar to ECMAScript's
+  IdentifierName closed this for a Japanese or accented declaration; a quoted or numeric property
+  name is a `PropertyName` and was outside that widening by construction.
+
+  A written name and a qualified-name segment are two different things now. One function answers
+  what segment a member's name maps to, or `null` when the grammar has none for it — which is the
+  answer `ir-schema.md` §3.2 already gives a computed name: **no Symbol, no diagnostic**, and the
+  body stays on the class, where its calls and rules are still reported.
+
+  **A quoted name that decodes to an identifier is that identifier.** A property key is a string,
+  so `"ok"() {}` and `ok() {}` declare the same property — `tsc` calls the pair TS2393, a
+  duplicate _implementation_ — and they fold onto one Symbol the way a field and a method of
+  the same name already do. The literal is decoded rather than unquoted, so an escaped spelling
+  names the member it spells.
+
+  **A name the parser guessed at is refused**, and it arrives in two shapes. A literal that parsed
+  in part keeps its node and is read as incomplete. One that did not parse at all leaves no
+  literal behind: recovery re-emits the surviving characters as a plain name, so `"\uZZZZ"() {}`
+  used to record a member called `ZZZZ` — a name the source does not spell. Both now have no
+  Symbol, which makes the second the one case where this removes a Symbol the previous release
+  produced. What says the name is a guess is an ERROR among the member's own children, so a
+  member whose _body_ fails to parse keeps its Symbol as before.
+
+  Two things follow from having one answer rather than two:
+
+  - **`"constructor"() {}` is the constructor.** A class element whose property name is
+    `constructor` is the constructor whatever the spelling. Read as a method it took the instance
+    qualified name, where it collided with a real constructor's. Two spellings that carry the
+    segment stay off the construction path, because neither is a property name: a `static` member,
+    and a `#`-private one, whose `#` is exactly what the segment drops.
+  - **A field holding a function is gated the same way a method is.** The field gate refused every
+    name not written as an identifier, because a name the id builder refuses was a lost file. That
+    reason is gone, so `"ok" = () => {}` is now the member `ok` — a Symbol where there was none.
+
+  One diagnostic is corrected on the way past. A module specifier written as a line continuation
+  followed by an escape the grammar refuses — `import x from "\<newline>\uZZZZ"` — was reported as
+  naming no module, on top of the syntax errors that already said why the name could not be read.
+  The continuation contributes no character, so the read came back empty and was indistinguishable
+  from an empty literal; reading whether the literal was _wholly_ read tells them apart.
+
+  `@aburi/core` exports `isQnameSegment`, the single-segment predicate a producer needs to ask
+  _before_ it builds. `isQualifiedName` is the wrong one for that question and fails quietly: it
+  answers about a finished name, so it admits `.` and `::`, and a caller vetting one member name
+  with it would accept `"a.b"` and mint the nested qualified name `C.a.b` out of a single member.
+
+- e7f1d49: A receiver hint is spent on the call it was produced for
+
+  `makeReceiverHintKey` keyed an LSP receiver hint by file and line, while
+  `makeCallSiteKey` — the key for the other side channel of the same call sites —
+  deliberately carries the target too, because "line alone collides in
+  `a().b(c().d())`". For a hint channel that collision is not a near-miss.
+
+  **A hint applied to a line applied to every call on it.** `this.charge()` beside
+  `sendPaymentToBank()` resolved the second call to `Svc.charge`: an edge no source
+  line justifies, a `Dependency` the reader cannot find in the file, and one fewer
+  entry in the `unresolved` diagnostics that would have shown the mistake. The
+  fabricated edge reached `propagateEffects` like any other, so the effects
+  attributed to the caller were wrong in the same direction — an external function
+  contributing whatever the class method touches.
+
+  **And when both calls on the line were `this.*`, the hint that survived was
+  whichever hover answered last.** `this.foo(this.baz())` resolved `this.foo` to
+  `C.baz` against a fast server and to `C.foo` against a slow one — the same input,
+  the same server configuration, different `calls[].resolved` and different
+  `dependencies[]`. The module docstring claimed LSP arrival order never affects
+  output; the jobs it credited for that were not sorted, and sorting alone would
+  not have helped while the last write won.
+
+  Hints are now filed and read under `makeCallSiteKey(file, line, target)` — one
+  key function for both channels, so they cannot drift apart again — and
+  `resolveViaLspHint` additionally checks the hint's `kind` against the receiver
+  its call names. The `kind` derivation moved next to the key as `receiverHead`
+  for the same reason the key did: both halves of the handshake are computed in
+  one place, and a hint that disagrees on either is discarded without a word.
+
+  **A third source of the same fabricated edge is closed by not asking.** The pass
+  locates a callee by searching the source line for `<receiver>.<method>`, which
+  for `this.emitter.emit` is `this.emit` and matches inside `this.emitter`. The
+  server answers about the property, the pass still believes it asked about the
+  method, and the hint that comes back is well-formed, correctly keyed,
+  `kind`-consistent — and names a callee the call site never reaches. No check on
+  a hint can see that, because the hint's target is right and only its position
+  was wrong. `this.*` targets of more than two segments therefore issue no hover
+  at all; such a call keeps the `null` and the `dynamic` diagnostic it has with LSP
+  off, which is the honest answer until the locator can address a whole receiver
+  chain.
+
+  Every response for a file is held until all of its jobs have stopped and applied
+  in job order (Symbol id, then call line, then target), so what a file produces is
+  decided by the sort and not by the server's pace, and the first hint for a call
+  site wins. Each apply carries its own `catch`: a throw from inside a `finally`
+  replaces the exception unwinding through it, which would erase the server-side
+  failure that caused the unwind. A file's responses are still applied on the way
+  out of a thrown job, so a per-language fallback keeps what it had already earned.
+
+  `makeReceiverHintKey` and the `ReceiverHintKey` type are gone from the public API;
+  `makeCallSiteKey`, now exported from its own module alongside `receiverHead`,
+  replaces both. A caller building `receiverHints` by hand must key with it — and
+  because both spellings are `string`, a map keyed the old way would compile,
+  type-check, miss every lookup, and lose the LSP tier with nothing to show for it.
+  `resolveCallGraph` now raises `receiver-hint-key-malformed` on a non-empty map
+  keyed any other way rather than handing back a graph quietly missing its typed
+  tier.
+
+- 3e180e8: Every Symbol says which Component it belongs to
+
+  `Symbol.component` was `null` on every Symbol the scan produced, and the views that count by it
+  said so. A workspace of nineteen Symbols reported `0` against each of its components in
+  `workspace.md`, the effect-surface table's `components` column was `—` on every row, and
+  `out/components/api.md` was four header lines with nothing beneath them — reviewing a change at
+  the level of module boundaries did not work, which is the point of the per-component views.
+
+  The scan attributes each file to the Component whose `roots[]` entry is the longest whole-segment
+  prefix of it, and `null` stays the answer for a file under no root at all. Longest rather than
+  first, because nesting is ordinary: a workspace root that is a package of its own has
+  `roots: ["."]` containing every other component's root, so "the first root that matches" would
+  give the whole monorepo to it. Roots are matched by path segment, so `packages/api` does not
+  claim `packages/api-legacy/`, and two Components declaring one root are separated by the lower
+  `Component.id` rather than by the order the config listed them in.
+
+  The question is asked once per file rather than once per Symbol, which is also what puts the
+  answer in front of the plugins: an effect classifier reads it as `owner.component`, and the call
+  resolver's component-scope tier keys on it. That tier used to see every Symbol in one "no
+  component" bucket, so call resolution moves in both directions on a multi-package workspace:
+
+  - A qualified name declared in **two packages at once** now resolves, inside the caller's own
+    component. The two candidates used to make both the component tier and the workspace tier
+    ambiguous, so the call resolved to nothing at all — visible in `symbols[].calls[].resolved`,
+    in `dependencies[]`, and in the `ambiguous` bucket of `stats.callResolution`.
+  - A qualified call **crossing a package boundary** now falls through the component tier to the
+    workspace one, so its edge carries `low` confidence where it carried `medium`. The callee is
+    the same and the tier is internal — `CallEdge.confidence` is not serialized — but it is the
+    weaker claim, and the honest one: nothing about two packages says they are one scope.
+
+  Dropped Symbols are attributed like kept ones — a drop describes a Symbol's shape, not where it
+  lives. A Symbol whose component changed with no edit to its code stays `unchanged`, since status
+  is decided by the fingerprints and the path: re-rooting a package in the config must not report
+  every Symbol under it as a change somebody made.
+
+  `FilePipelineInput` gains a required `component: ComponentId | null`, and
+  `buildComponentAttribution` is exported for callers driving the pipeline themselves. Required
+  rather than optional because "outside every Component" and "this caller never said" are different
+  facts, and an optional key would spell them the same way — attributing a whole scan to nothing on
+  a caller that simply forgot it.
+
+- a4d3cff: Keep a file that names things legally
+
+  Three shapes fed something that is not a name into the Symbol-id builder, which threw — and
+  the throw cost the file every Symbol it had, not the one declaration:
+
+  | source                                             | before       | now             |
+  | -------------------------------------------------- | ------------ | --------------- |
+  | `export const { GET, POST } = handlers`            | file skipped | `#GET`, `#POST` |
+  | `export const [a, b] = pair`                       | file skipped | `#a`, `#b`      |
+  | `export function ユーザー取得() {}`                | file skipped | `#ユーザー取得` |
+  | `export function café() {}`                        | file skipped | `#café`         |
+  | `export class A { [Symbol.iterator]() {} m() {} }` | file skipped | `#A`, `#A.m`    |
+
+  The last row states it sharpest: one member nobody can name cost the class and every sibling.
+
+  **The qualified-name grammar is ECMAScript's IdentifierName.** `[A-Za-z_$][A-Za-z0-9_$]*`
+  becomes `[$_\p{ID_Start}][$\p{ID_Continue}]*`. Only `$` and `_` are named:
+  `$` is in neither property, `_` is in `ID_Continue` and not `ID_Start`, and ZWNJ and ZWJ —
+  which ECMAScript names separately — are already inside `ID_Continue` here, measured. `schema/aburi.ir.v1.json#/$defs/SymbolId` already accepted every
+  one of these, so this closes a gap between the two rather than opening one. What it still
+  refuses is what is not a name — a pattern's text, a computed member's brackets.
+
+  **A destructuring declaration produces one Symbol per binding.** `{ a: b }` binds `b`, not the
+  key `a`; `{ a = fallback }` and `[a = fallback]` bind `a` and read `fallback`, which is a name
+  from another file and not a declaration here. Each binding is a `const` carrying
+  `destructured-binding` in `derivedBy` — declared in the plugin manifest alongside the other
+  language-level rationales — and that token is what explains several Symbols sharing one source
+  range.
+
+  A node type the pattern walk does not model is **refused** rather than passed over. Binding
+  nothing for an unmodelled wrapper is indistinguishable from a pattern that declares nothing,
+  and a binding lost that way leaves no Symbol, no diagnostic and no `skipped` entry — which is
+  worse than the throw this change replaces, because that one was at least named.
+
+  **A class member with a computed name produces no Symbol, and no diagnostic.** Mangling the
+  brackets into a segment would invent a name the source does not contain, and two different
+  computed keys can collapse onto one segment. A computed name is not a name static analysis can
+  record — the position `lang-plugin.md` LP26e takes on a computed module specifier.
+
+  **One integrity consequence.** `symbols[].name` was excluded from invariant #19 (Unicode NFC)
+  because the qualified-name grammar was ASCII and NFC leaves ASCII alone. Measured, that no
+  longer holds — `isQualifiedName("cafe" + U+0301)` is `true` now — so the field moves onto #19's
+  list, which is what the exclusion said should happen if the grammar widened. `symbols[].id`
+  stays excluded on a reason that does still hold: `symbolIdViolation` checks NFC in its own
+  right rather than as a side effect of an ASCII grammar.
+
+  No existing Symbol id changes: measured by scanning the `nestjs-billing` fixture before and
+  after and diffing the id sets — 38 ids, identical.
+
+- ba9e505: `stats.lspEnrichment` says how many receiver hints the typed tier produced, used, and threw away
+
+  `stats.lspEnrichment` counted requests and files and nothing about answers, so the one number a
+  reader reaches for — did turning LSP on buy anything? — was not in the document. A hover that
+  comes back on time carrying nothing this pass can read is a healthy row in every counter there
+  was: it lands in `requestsIssued`, in neither failure counter, it resets the consecutive-failure
+  tally, and its file still counts in `filesEnriched`. `requestsIssued: 40, requestsFailed: 0`
+  described a run that resolved forty extra call sites and a run that resolved none, and §6.2 keeps
+  errors out of the IR, so nothing else recorded the difference either.
+
+  Three counters now do. `hintsProduced` is the hovers read all the way to a callee Symbol,
+  `hintsConsumed` the call sites the resolver turned into an edge, and `hintsRejected` the five
+  places in between where a hint is lost — `unparseableHover`, `ownerClassNotFound`,
+  `memberNotFound` on the enrichment side, `kindMismatch` and `targetDropped` on the resolver's.
+  Two sums hold and neither crosses the halves: every hover that came back without a failure is
+  either produced or in one of the first three buckets, and every call site that found a hint at
+  its key is either consumed or in one of the last two. A hint the untyped tier made unnecessary is
+  in neither, which is the ordinary shape of a healthy scan rather than a fault.
+
+  The three are additive optional fields on `LspEnrichmentStats` in `aburi.ir.v1`, Class B per
+  `ir-schema.md` §1.1: the pipeline writes all of them whenever it writes the record, with
+  `hintsRejected` carrying five zeroes rather than being omitted, so absence means the document
+  predates the counters. A new `LspHintRejections` definition holds the buckets.
+
+  Neither sum is checkable from the finished document, and §7.2 now says so rather than reading
+  like an integrity invariant: `requestsIssued` also carries a `documentSymbol` per file, so the
+  hover count the producer identity balances against is not an IR quantity, and the call sites that
+  found a hint at their key are recorded nowhere. The tests hold both sums instead.
+
+  The two halves are written by two passes, and the second cannot reach the first: the resolver
+  runs after `enrichWithLsp` has returned. `ResolveCallGraphResult` therefore carries a new
+  `lspHintUsage` — what the LSP tier consumed and what it declined — rather than the resolver being
+  handed a stats builder it would otherwise depend on having, and `withHintUsage` folds the two
+  together. `enrichWithLsp` returns the producer half as `LspProducerStats`, whose three counters
+  are required where the IR type has them optional, so a caller assembling the passes itself is
+  told by the type that `withHintUsage` is what finishes the record. Without that fold
+  `hintsConsumed` and the resolver's two buckets stay at `0`.
+
+  `aburi scan` prints the three totals when a run produced or refused a hint, so the question the
+  counters answer does not require reading the IR.
+
+### Patch Changes
+
+- be8e2b9: One Symbol per declared entity, however many declarations wrote it
+
+  A getter beside its setter, an overload beside its implementation, and a reopened namespace or
+  interface each made `extractSymbols` emit two SymbolCandidates under one id. Integrity invariant 1
+  (`ir-schema.md` §14) refuses that, and it is checked once over the finished document rather than
+  per file — so `class Box { get value() {} set value(n) {} }` did not cost its own file, it ended
+  the run and took every other file's Symbols with it.
+
+  TypeScript models all three the same way: one entity, several declarations. So does extraction
+  now. The first declaration claims the Symbol and every scalar on it; later declarations of the
+  same id contribute their `derivedBy` and their body instead of becoming a second Symbol. First
+  wins because legal source already orders them — TypeScript requires the class or function to
+  precede the namespace merged into it, and requires a merge's declarations to agree on whether
+  they are exported.
+
+  Two constructs are handled before that rule rather than by it, because it would answer them
+  wrongly:
+
+  - **An overload declaration is skipped.** A `method_signature` in a class body declares nothing
+    the implementation beside it does not, and it is written _first_ — so folding it as the leading
+    declaration would report the member as body-less and give it the overload's parameter types.
+    Top-level overloads have always behaved this way (`function_signature` is not in the statement
+    switch); a class matches now, so the same source does not answer differently depending on where
+    it is written.
+  - **An accessor pair is led by the getter.** A property's type is what reading it answers, so
+    taking the setter's signature would report the member as `(n) => void`.
+
+  `SymbolCandidate` gains `mergedDeclarations?: MergedDeclaration<TNode>[]`: the further
+  declarations, in source order, each carrying both its `bodyNode` and its `fullNode`. Without the
+  field, folding a pair would drop the setter's body — a `set password(v)` that hashes the value has
+  effects. Without `fullNode` on the entry, a reopened `enum E {}` would fingerprint as though the
+  second declaration had never been written, because an enum candidate has no body at all. Only the
+  bodies reach `walkBody`, which is what keeps a merged namespace from being walked twice. The key is
+  absent, never empty, on a Symbol with one declaration, so the single-declaration path is untouched
+  and no existing fingerprint moves.
+
+  `derivedBy` and `decorators` join the same way. A lost `boundary` decorator is not cosmetic:
+  `interface P {}` written above `@Controller() class P {}` is legal, so the declaration that claims
+  the Symbol is the one carrying none.
+
+  Two drop rules were reading one declaration where they should read all of them, and one was reading
+  decorators nowhere. `classifySymbolDropHint` now honours a boundary decorator for every kind rather
+  than only for classes — core's `decideSymbolDrop` answers `null` on a boundary and then defers to
+  this hint, so an unguarded arm here is the one that decides. `classifyClassBody` reads class bodies
+  only, so a merged `interface C {}` does not contribute members the class does not have.
+
+  Two namespace fixes come with it, because folding a reopened namespace requires reaching one.
+
+  An unexported `namespace` at statement position is parented under an `expression_statement`, which
+  the statement switch never looked through — so every unexported namespace lost its own Symbol
+  _and_ everything declared inside it.
+
+  And a dotted `namespace A.B {}` is sugar for `namespace A { namespace B {} }`. Reading the dotted
+  text as one qualified-name segment is what the id builder refuses, and the throw cost the file every
+  Symbol it had; it declares one Symbol per segment now, with the body under all of them.
+
+- 6d4730f: Keep a throw inside LSP enrichment from ending the scan and stranding the server
+
+  `enrichWithLsp` called `processLanguage` with nothing around it, so anything thrown between
+  starting a language's server and shutting it down left that server running — a real
+  `typescript-language-server` child process with neither `shutdown` nor the SIGKILL behind it
+  ever reached. The same throw travelled out of the pass and ended the whole scan, over an
+  enrichment that is optional by design and whose every value has an untyped-tier one already
+  written underneath it.
+
+  `didOpen`, `didClose` and each request were individually guarded; the code that _applies_ their
+  results was not. `applyDocumentSymbols` recursed over the server's `DocumentSymbol` tree without
+  a bound, and a tree deeper than the JavaScript call stack — a depth the server chooses — arrived
+  as `RangeError: Maximum call stack size exceeded` thrown out of the pass.
+
+  Both halves are closed. The language body now runs in a `try`/`catch`/`finally` that opens once
+  the server exists and before it is asked for anything: a throw is the per-language tier of §6.1
+  — warn once, disable the language, keep going — and the `finally` shuts the server down on every
+  exit, including the two that previously each had their own call. Whatever the language enriched
+  before the throw is kept, per §6.2. A `shutdown` that itself fails is now warned about rather
+  than silently swallowed; it means a server that may still be running, which is the whole thing
+  that call prevents.
+
+  `applyDocumentSymbols` walks an explicit stack instead of recursing, so the depth is the
+  server's to choose again. Children are pushed in reverse so the visit order is unchanged —
+  pre-order, parent before children, siblings in source order — because matching takes the first
+  entry at a given line and name, and the order decides which columns a Symbol gets. The shape is
+  the server's to choose too: a `children` that is `null` rather than absent reads as no children,
+  the way the recursion's `?? []` did.
+
+  `runJobsWithConcurrency` no longer settles on the first rejection. `Promise.all` cancelled
+  nothing, so the surviving workers went on calling a client that had been shut down and writing
+  into Symbols the pass had already returned — which is the determinism guarantee in §10.6, not
+  untidiness. Workers now record their failures instead of rejecting, every worker is awaited, and
+  the lowest-indexed failure is rethrown. Running the remaining jobs rather than abandoning them
+  keeps the set of writes a failing file produces the same on a rerun.
+
+  `safeShutdown` is bounded. It was the only client call in the pass without a deadline, awaited
+  from a `finally`, so an injected client whose `shutdown` never settled stopped the scan with
+  nothing to read. A hang now reports the same "it may still be running" line a failure does.
+
+  `lsp-enrichment.md` §6.2 gains the rule the retention rests on — columns already written when a
+  fallback fires are kept, which is not what "remain `null`" says — and §6.1 cites it. §6.3 names
+  the third per-language condition's rules: the pass must not propagate an exception, a started
+  server must be shut down exactly once on every exit, a shutdown warning is not counted by rule
+  3, and the pass must not write to the Document after it has returned.
+
+- Updated dependencies [be8e2b9]
+- Updated dependencies [3774de6]
+- Updated dependencies [203ea78]
+- Updated dependencies [ba9e505]
+  - @aburi/types@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
