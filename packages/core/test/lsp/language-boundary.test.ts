@@ -1,6 +1,7 @@
 import type { Symbol as IRSymbol, LanguageId, Logger } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { DocumentSymbol, SymbolInformation } from "vscode-languageserver-protocol"
+import { makeCallSiteKey } from "../../src/call-site"
 import { makeLanguageId } from "../../src/id"
 import { enrichWithLsp } from "../../src/lsp"
 import { makeSymbol } from "../fixtures/ir"
@@ -599,6 +600,33 @@ describe("a throw from a concurrent job", () => {
 
     expect(result.receiverHints.size).toBe(atReturn)
     expect(clients.get(makeLanguageId("ts"))?.requests.length).toBe(requestsAtReturn)
+  })
+
+  it("keeps what the file earned before the throw: the three hovers that answered", async () => {
+    // §6.2 — a fallback leaves what was already written alone. Responses are
+    // held until every worker has stopped and applied from a `finally`, so the
+    // throw does not cost the siblings their results. Asserted as a count and
+    // by key, because "unchanged 200ms later" also holds when the answer is
+    // zero — which is what it would be if the `finally` were a plain block.
+    const clients = new Map<LanguageId, MockLspClient>()
+    const { logger } = capturingLogger()
+
+    const result = await enrichWithLsp({
+      ...makeEnrichmentInput({
+        ...fileWithFourCalls(),
+        serverFactory: slowExplodingFactory(clients),
+      }),
+      logger,
+    })
+
+    // Four call sites, the first hover throws, the other three answer.
+    expect(result.receiverHints.size).toBe(3)
+    expect([...result.receiverHints.keys()].sort()).toEqual(
+      [5, 6, 7].map((line) => makeCallSiteKey("src/a.ts", line, "this.foo")),
+    )
+    for (const hint of result.receiverHints.values()) {
+      expect(hint.targetSymbolId).toBe("ts:src/a.ts#C.foo")
+    }
   })
 
   it("still reaches the language boundary, so the language is disabled and the server closed", async () => {

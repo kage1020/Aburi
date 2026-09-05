@@ -212,4 +212,16 @@ describe("an escape the grammar refuses never reaches the decoder", () => {
     expect(errors.some((e) => e.message === "syntax error")).toBe(true)
     expect(emptySpecifierErrors(errors)).toEqual([])
   })
+
+  it("does not call one empty either when a line continuation stands beside the ERROR", async () => {
+    // The combination the two rows above miss. A line continuation joins two source lines
+    // and contributes no character, so the literal *is* read and the read is empty — which
+    // used to be indistinguishable from a whole empty literal, and produced the third
+    // diagnostic the row above exists to prevent. What separates them is whether the read
+    // was whole, not whether it was empty.
+    const { errors } = await parse(`import x from "${BS}\n${BS}uZZZZ"`)
+
+    expect(errors.some((e) => e.message === "syntax error")).toBe(true)
+    expect(emptySpecifierErrors(errors)).toEqual([])
+  })
 })

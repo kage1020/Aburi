@@ -1,7 +1,8 @@
 import type { LspEnrichmentStats, SymbolId } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import { makeCallSiteKey } from "../../src/call-site"
 import { resolveCallGraph } from "../../src/callgraph"
-import { type EnrichmentResult, enrichWithLsp, makeReceiverHintKey } from "../../src/lsp"
+import { type EnrichmentResult, enrichWithLsp } from "../../src/lsp"
 import { makeSymbol } from "../fixtures/ir"
 import { makeClassSymbol, makeEnrichmentInput, makeMethodSymbol } from "./fixtures/enrichment-ctx"
 import { mockServerFactory } from "./fixtures/mock-server"
@@ -26,7 +27,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(stats.hintsRejected).toEqual(noRejections())
   })
 
-  // LE24
+  // LE25
   it("counts a hover that answers nothing as an unparseable hover, not as a healthy request", async () => {
     const enrichment = await enrichThisFoo(() => null)
     const stats = statsOf(enrichment)
@@ -39,7 +40,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(stats.filesFellBack).toBe(0)
   })
 
-  // LE24 — a payload arrived, but not one `extractHoverPayload` can read.
+  // LE25 — a payload arrived, but not one `extractHoverPayload` can read.
   it("counts a hover whose contents carry no text as an unparseable hover", async () => {
     const enrichment = await enrichThisFoo(() => ({ contents: { kind: "markdown" } }))
     const stats = statsOf(enrichment)
@@ -47,7 +48,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ unparseableHover: 1 }))
   })
 
-  // LE25
+  // LE26
   it("counts hover text with no owner class in it as ownerClassNotFound", async () => {
     const enrichment = await enrichThisFoo(() => ({ contents: "function foo(): void" }))
     const stats = statsOf(enrichment)
@@ -55,7 +56,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
   })
 
-  // LE25
+  // LE26
   it("counts hover text naming a class the Symbol table lacks as ownerClassNotFound", async () => {
     const enrichment = await enrichThisFoo(() => ({
       contents: "(method) Elsewhere.foo(): void",
@@ -65,7 +66,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
   })
 
-  // LE25
+  // LE26
   it("counts a known class whose member is missing as memberNotFound", async () => {
     // `C` is in the table; `C.foo` is not — the shape of a method inherited from a
     // dependency the scan never read.
@@ -83,7 +84,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
   })
 
-  // LE26
+  // LE27
   it("counts a hint carrying the other receiver kind as kindMismatch and leaves the call unresolved", () => {
     const caller = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
     const callee = makeMethodSymbol("src/a.ts", "Base", "foo", 2)
@@ -91,7 +92,10 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       symbols: [caller, callee],
       importsByFile: new Map(),
       receiverHints: new Map([
-        [makeReceiverHintKey("src/a.ts", 4), { kind: "super" as const, targetSymbolId: callee.id }],
+        [
+          makeCallSiteKey("src/a.ts", 4, "this.foo"),
+          { kind: "super" as const, targetSymbolId: callee.id },
+        ],
       ]),
     })
     expect(result.lspHintUsage).toEqual({ consumed: 0, kindMismatch: 1, targetDropped: 0 })
@@ -100,7 +104,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(result.diagnostics).toHaveLength(1)
   })
 
-  // LE26
+  // LE27
   it("counts a hint naming a dropped Symbol as targetDropped and leaves the call unresolved", () => {
     const caller = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
     const callee = makeSymbol("ts:src/a.ts#C.foo", { kind: "method", dropped: true })
@@ -108,7 +112,10 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       symbols: [caller, callee],
       importsByFile: new Map(),
       receiverHints: new Map([
-        [makeReceiverHintKey("src/a.ts", 4), { kind: "this" as const, targetSymbolId: callee.id }],
+        [
+          makeCallSiteKey("src/a.ts", 4, "this.foo"),
+          { kind: "this" as const, targetSymbolId: callee.id },
+        ],
       ]),
     })
     expect(result.lspHintUsage).toEqual({ consumed: 0, kindMismatch: 0, targetDropped: 1 })
@@ -123,7 +130,10 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       symbols: [caller, callee],
       importsByFile: new Map(),
       receiverHints: new Map([
-        [makeReceiverHintKey("src/a.ts", 4), { kind: "this" as const, targetSymbolId: callee.id }],
+        [
+          makeCallSiteKey("src/a.ts", 4, "this.foo"),
+          { kind: "this" as const, targetSymbolId: callee.id },
+        ],
       ]),
     })
     expect(result.lspHintUsage).toEqual({ consumed: 1, kindMismatch: 0, targetDropped: 0 })
@@ -144,7 +154,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       importsByFile: new Map(),
       receiverHints: new Map([
         [
-          makeReceiverHintKey("src/a.ts", 4),
+          makeCallSiteKey("src/a.ts", 4, "helper"),
           { kind: "this" as const, targetSymbolId: "ts:src/a.ts#Nope.foo" as SymbolId },
         ],
       ]),
@@ -153,8 +163,10 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(result.lspHintUsage).toEqual({ consumed: 0, kindMismatch: 0, targetDropped: 0 })
   })
 
-  // LE26 — the collision the `file:line` key makes possible, end to end.
-  it("declines to let one call site borrow the other's hint on a shared line", async () => {
+  // Both halves of the accounting over one line that holds two receivers. The key carries the
+  // target (§10.1), so neither call borrows the other's hint — and the counters have to add up
+  // per call site rather than per line for that to be visible.
+  it("counts a hint and a consumption for each receiver on a shared line", async () => {
     const base = makeClassSymbol("src/a.ts", "Base", 1)
     const baseFoo = makeMethodSymbol("src/a.ts", "Base", "foo", 2)
     const sub = makeClassSymbol("src/a.ts", "Sub", 4)
@@ -163,7 +175,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       { target: "super.foo", line: 7 },
       { target: "this.foo", line: 7 },
     ])
-    // `this.foo(super.foo())` — one line, two receivers, one hint key.
+    // `this.foo(super.foo())` — one line, two receivers, two call sites.
     const line = "    this.foo(super.foo())"
     const content = `class Base {\n  foo() {}\n}\n\nclass Sub extends Base {\n  bar() {\n${line}\n  }\n  foo() {}\n}`
     const enrichment = await enrichWithLsp(
@@ -178,9 +190,8 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
         })),
       }),
     )
-    // Both hovers converted; only one of them can hold the shared key.
     expect(statsOf(enrichment).hintsProduced).toBe(2)
-    expect(enrichment.receiverHints.size).toBe(1)
+    expect(enrichment.receiverHints.size).toBe(2)
 
     const result = resolveCallGraph({
       symbols: enrichment.symbols,
@@ -188,10 +199,14 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       receiverHints: enrichment.receiverHints,
       implementerHints: enrichment.implementerHints,
     })
-    expect(result.lspHintUsage).toEqual({ consumed: 1, kindMismatch: 1, targetDropped: 0 })
+    expect(result.lspHintUsage).toEqual({ consumed: 2, kindMismatch: 0, targetDropped: 0 })
+    expect(result.edges.map((e) => e.to).sort()).toEqual([
+      "ts:src/a.ts#Base.foo",
+      "ts:src/a.ts#Sub.foo",
+    ])
   })
 
-  // LE27
+  // LE28
   it("reports an all-rejected scan as all-rejected, identically on a rerun", async () => {
     const run = async (): Promise<LspEnrichmentStats> => {
       const enrichment = await enrichWithLsp(

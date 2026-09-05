@@ -58,6 +58,14 @@ export type CoreErrorCode =
    * a file quietly reaching neither the IR nor the skip list.
    */
   | "scan-outcome-unhandled"
+  /**
+   * `ResolveCallGraphInput.receiverHints` was non-empty and keyed by something other than
+   * `makeCallSiteKey`. Raised rather than ignored because the failure is otherwise invisible:
+   * every lookup misses, so the LSP tier contributes nothing and the run looks exactly like
+   * one where the language server had nothing to say. The keys carried `${file}:${line}` up
+   * to @aburi/core 0.3.0; they carry `makeCallSiteKey(file, line, target)` from 0.4.0.
+   */
+  | "receiver-hint-key-malformed"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to the ir-schema.md §14 numbering, which is the single source of the list. */

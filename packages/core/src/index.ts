@@ -1,6 +1,6 @@
+export { makeCallSiteKey, receiverHead } from "./call-site"
 export {
   type CallEdge,
-  makeCallSiteKey,
   type ResolveCallGraphInput,
   type ResolveCallGraphResult,
   reconstructCallEdgesFromIR,
@@ -40,6 +40,7 @@ export {
   isComponentId,
   isDefaultExportQname,
   isLanguageId,
+  isQnameSegment,
   isQualifiedName,
   isSymbolId,
   makeComponentId,
@@ -69,7 +70,6 @@ export {
   type LspError,
   type LspFailure,
   type LspTimeout,
-  makeReceiverHintKey,
   type ReceiverHint,
   type ServerFactory,
 } from "./lsp"

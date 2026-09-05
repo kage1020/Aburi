@@ -157,7 +157,7 @@ For `this.<method>` in a caller Symbol whose parent class C is known:
 
 For `super.<method>`: same but starting one level up the class hierarchy.
 
-A hint arriving from the enrichment pass is keyed by `file:line` and carries the receiver it was measured for, and the resolver applies it only to a call site that writes that same receiver. One line can hold both — `this.foo(super.foo())` is one line and two call sites — and the key they share holds one hint, so without the check the call that lost the key would take a `high`-confidence edge to a method no hover ever attributed to it. The declined call falls through to §8.1 like any other miss and is counted in `stats.lspEnrichment.hintsRejected.kindMismatch` ([`lsp-enrichment.md`](./lsp-enrichment.md) §7.2).
+A hint the resolver declines — one whose receiver kind is not the one its call site writes, or one naming a Symbol a drop rule removed — falls through to §8.1 like any other miss, and is counted in `stats.lspEnrichment.hintsRejected` ([`lsp-enrichment.md`](./lsp-enrichment.md) §7.2). It has to be counted here because the enrichment pass has returned by the time the hint is read, so nothing else in the pipeline can tell a hint that was refused from one that was never produced.
 
 ### 5.3 Interface-typed receivers
 

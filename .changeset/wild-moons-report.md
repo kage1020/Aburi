@@ -26,21 +26,11 @@ The three are additive optional fields on `LspEnrichmentStats` in `aburi.ir.v1`,
 `ir-schema.md` §1.1: the pipeline writes all of them whenever it writes the record, with
 `hintsRejected` carrying five zeroes rather than being omitted, so absence means the document
 predates the counters. A new `LspHintRejections` definition holds the buckets.
-`resolveCallGraph` reports its half as `lspHintUsage` on its result rather than writing into a
-builder it would otherwise have to be handed — it resolves whether or not the LSP pass ran — and
-the scan pipeline folds the two together.
 
-**Two behaviour changes came out of counting.** A receiver hint is keyed by `file:line`, and a
-line can hold two receivers: `this.foo(super.foo())` is one line, two call sites, and one key.
-
-The resolver now checks the hint's receiver kind against the one the call site writes. It did
-not, so the call that lost the key took the survivor's hint and emitted a `high`-confidence edge
-to a method no hover had attributed to it; it is left unresolved and counted in `kindMismatch`
-instead. Only a line holding two different receivers can reach this — an ordinary `this.` call
-site matches its own hint.
-
-And which of two colliding jobs keeps the key is now decided by `(Symbol id, column)` rather than
-by which hover answered first. The jobs run concurrently, so the survivor used to be a property
-of server latency, and the resolution it produced was not reproducible across runs of the same
-scan — a `lsp-enrichment.md` §10 violation that predates these counters and would have made them
-unstable too.
+The two halves are written by two passes, and the second cannot reach the first: the resolver
+runs after `enrichWithLsp` has returned. `ResolveCallGraphResult` therefore carries a new
+`lspHintUsage` — what the LSP tier consumed and what it declined — rather than the resolver being
+handed a stats builder it would otherwise depend on having, and `withHintUsage` folds the two
+together in the scan pipeline. A caller assembling those passes itself gets the producer half from
+`enrichWithLsp` and has to fold in the consumer half the same way; without that, `hintsConsumed`
+and the resolver's two buckets stay at `0`.

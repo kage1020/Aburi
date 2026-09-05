@@ -21,9 +21,9 @@ import {
 } from "./call-symbols"
 import {
   functionValuedField,
+  hasPrivateName,
   isConstructorMember,
-  memberHasOwnSymbol,
-  memberSegment,
+  memberSymbolSegment,
 } from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
@@ -347,14 +347,16 @@ function addClassMembers(
 ): void {
   const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
-    if (member === null || !memberHasOwnSymbol(classNode, member)) continue
+    if (member === null) continue
+    const segment = memberSymbolSegment(classNode, member)
+    if (segment === null) continue
     // Which of the two member shapes this is. A field the predicate admitted always answers
     // with the function it holds, and a `method_definition` falls out on one type test.
     const fieldFunction = functionValuedField(member)
     const candidate =
       fieldFunction === null
-        ? makeMethodCandidate(member, ctx, ownerChain)
-        : makeFieldFunctionCandidate(member, fieldFunction, ctx, ownerChain)
+        ? makeMethodCandidate(member, segment, ctx, ownerChain)
+        : makeFieldFunctionCandidate(member, fieldFunction, segment, ctx, ownerChain)
     const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
     const group = declared.get(candidate.id)
     if (group === undefined) declared.set(candidate.id, [entry])
@@ -416,25 +418,26 @@ function makeFunctionCandidate(
 }
 
 /**
- * One class member that `memberHasOwnSymbol` has already admitted, which is why this answers a
- * candidate rather than `null`: a computed member never reaches it.
+ * One class member `memberSymbolSegment` has already admitted, and the segment it admitted it
+ * by: a member whose name has no qualified-name segment — computed, quoted into something that
+ * is not an identifier, numeric — never reaches here, and the name is not read a second time.
  *
- * It can still throw. The predicate admits any `method_definition` with a written name, and a
- * name that is not an identifier — `class C { "ok"() {} }`, `class C { 1() {} }` — is one the
- * qualified-name grammar refuses, which costs the file at the per-file boundary.
+ * Taking the segment as an argument is what leaves no way for this to refuse a name. Reading
+ * the name here instead would mean handing its text to the id builder, which throws on
+ * anything that is not an identifier and costs the file at the per-file boundary.
  */
 function makeMethodCandidate(
   node: Node,
+  segment: string,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
   const kind: SymbolKind = isConstructorMember(node) ? "constructor" : "method"
-  const methodName = requireDeclarationName(node, "method", ctx.file.path)
   const isStatic = hasChildOfType(node, "static")
   const qname =
     kind === "constructor"
       ? classMemberQname(ownerChain, "constructor", "instance")
-      : classMemberQname(ownerChain, memberSegment(methodName), isStatic ? "static" : "instance")
+      : classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(node)
   const signature = buildSignature(node, jsDoc)
   const derivedBy: string[] = [isStatic ? "static-method" : "class-method"]
@@ -449,7 +452,7 @@ function makeMethodCandidate(
     kind,
     extKind: null,
     name: qname,
-    visibility: memberVisibility(node, methodName),
+    visibility: memberVisibility(node),
     decorators: readDecorators(node),
     signature,
     source: makeSourceRange(node, ctx),
@@ -460,8 +463,9 @@ function makeMethodCandidate(
 }
 
 /**
- * A class field whose value is a function, which `memberHasOwnSymbol` has already admitted —
- * `value` is the function it answered with, so nothing is re-derived here.
+ * A class field whose value is a function, which `memberSymbolSegment` has already admitted —
+ * `value` is the function `functionValuedField` answered with and `segment` is the name it was
+ * admitted by, so nothing is re-derived here.
  *
  * `kind` is `method` rather than `function`: the Symbol is a member of a class, named by the
  * member convention, and every reader that asks what a class member is gets one answer
@@ -473,23 +477,19 @@ function makeMethodCandidate(
 function makeFieldFunctionCandidate(
   field: Node,
   value: Node,
+  segment: string,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
-  const fieldName = requireDeclarationName(field, "class field", ctx.file.path)
   const isStatic = hasChildOfType(field, "static")
-  const qname = classMemberQname(
-    ownerChain,
-    memberSegment(fieldName),
-    isStatic ? "static" : "instance",
-  )
+  const qname = classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(field)
   return {
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind: "method",
     extKind: null,
     name: qname,
-    visibility: memberVisibility(field, fieldName),
+    visibility: memberVisibility(field),
     decorators: readDecorators(field),
     signature: buildSignature(value, jsDoc),
     // The field's range, not the function's: the member is declared where it is written, and a
@@ -520,8 +520,8 @@ function fieldDerivedBy(field: Node, isStatic: boolean): string[] {
  * is `public`, which is what `readAccessibilityKeyword` answers when it finds none — the same
  * answer `public m() {}` gets, and the reason this needs no third branch.
  */
-function memberVisibility(member: Node, writtenName: string): Visibility {
-  return writtenName.startsWith("#") ? "private" : readAccessibilityKeyword(member)
+function memberVisibility(member: Node): Visibility {
+  return hasPrivateName(member) ? "private" : readAccessibilityKeyword(member)
 }
 
 function makeInterfaceCandidate(

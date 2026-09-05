@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { decodeEscapeSequence } from "../src/string-escape"
+import { parseTypescriptFile } from "../src/index"
+import { decodeEscapeSequence, decodeStringLiteral } from "../src/string-escape"
+import { requireTree } from "./fixtures/ctx"
 
 /**
  * The decoder is its own unit because the table is the interesting part: one row per class of
@@ -125,5 +127,47 @@ describe("anything else keeps what the author typed", () => {
     expect(decodeEscapeSequence("ab")).toBe("ab")
     expect(decodeEscapeSequence("")).toBe("")
     expect(decodeEscapeSequence(BS)).toBe(BS)
+  })
+})
+
+/**
+ * `whole` is the half the decoder answers that its value cannot: an escape may decode to
+ * nothing, so an empty read and an unread literal look identical from the value alone. One
+ * caller acts on the difference — a class member's name refuses a partial read — and one turns
+ * it into which diagnostic a module specifier gets, so the bit is pinned here rather than only
+ * through whichever of them happens to exercise it.
+ */
+describe("what a literal decodes to, and whether that is all of it", () => {
+  async function literalOf(written: string) {
+    // An import, because that is where a literal survives recovery: a declaration whose
+    // whole literal failed to parse leaves no `string` node at all, and a specifier
+    // position keeps one. It is also the reader this bit exists for.
+    const source = `import x from ${written}`
+    const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
+    const value = requireTree(result.tree).rootNode.descendantsOfType("string")[0]
+    if (value === undefined || value === null) throw new Error(`no string node in ${source}`)
+    return decodeStringLiteral(value)
+  }
+
+  it.each([
+    ["a plain literal", '"./m"', "./m", true],
+    ["an escape", `"./a${BS}tb"`, "./a\tb", true],
+    ["an empty literal", '""', "", true],
+    ["a literal that is only a line continuation", `"${BS}\n"`, "", true],
+    ["a literal that is entirely an ERROR", `"${BS}uZZZZ"`, "", false],
+    ["a literal with an ERROR after a fragment", `"a${BS}uZZZZb"`, "a", false],
+  ])("reads %s", async (_label, written, value, whole) => {
+    expect(await literalOf(written)).toEqual({ value, whole })
+  })
+
+  it("tells an empty read from an unread literal, which the value alone cannot", async () => {
+    // Both answer `value: ""`. Only `whole` says which one the author wrote, and the
+    // specifier reader turns exactly that into "this import names no module" versus "the
+    // parser has already said why the name is missing".
+    const continuation = await literalOf(`"${BS}\n"`)
+    const unparsed = await literalOf(`"${BS}uZZZZ"`)
+
+    expect([continuation.value, unparsed.value]).toEqual(["", ""])
+    expect([continuation.whole, unparsed.whole]).toEqual([true, false])
   })
 })

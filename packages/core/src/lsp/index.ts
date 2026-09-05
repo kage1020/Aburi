@@ -5,10 +5,9 @@ export type {
   EnrichmentResult,
   ReadFile,
   ReceiverHint,
-  ReceiverHintKey,
   ServerFactory,
 } from "./enrich"
-export { enrichWithLsp, makeReceiverHintKey } from "./enrich"
+export { enrichWithLsp } from "./enrich"
 export type { FallbackConfig, FallbackState } from "./fallback"
 export { createFallbackState, DEFAULT_FALLBACK_CONFIG } from "./fallback"
 export {
