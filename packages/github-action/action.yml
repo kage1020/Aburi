@@ -18,9 +18,10 @@ inputs:
   refspec:
     description: >-
       `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls
-      back to `${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}`
-      on `pull_request` events. Any other event with an empty `refspec` fails with
-      exit code 2.
+      back to the event's own `github.event.pull_request.base.sha` and
+      `github.event.pull_request.head.sha` on `pull_request` events (written as prose, not as
+      an expression: the runner parses this description as a template and has no `github`
+      context for it). Any other event with an empty `refspec` fails with exit code 2.
     required: false
     default: ""
   fail-on:

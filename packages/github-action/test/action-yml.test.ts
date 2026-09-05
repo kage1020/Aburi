@@ -72,6 +72,28 @@ describe("action.yml", () => {
     expect(raw).toMatch(/pnpm dlx "@aburi\/cli@\$VERSION"/)
   })
 
+  it("keeps `${{ … }}` out of every input and output description", async () => {
+    // The runner parses a manifest's descriptions as templates, with a context set that
+    // does not include `github`. A description that quoted an expression it was documenting
+    // — the refspec fallback did, as prose — failed the whole manifest to load before any
+    // step ran:
+    //
+    //   action.yml (Line: 19, Col: 18): Unrecognized named-value: 'github'.
+    //   Located at position 1 within expression: github.event.pull_request.base.sha
+    //
+    // Nothing catches that until a workflow actually calls the action, so document context
+    // paths as prose (`github.event.pull_request.base.sha`) rather than as expressions.
+    const action = await loadAction()
+    const described = [
+      ...Object.entries(action.inputs).map(([id, v]) => [`input ${id}`, v.description] as const),
+      ...Object.entries(action.outputs).map(([id, v]) => [`output ${id}`, v.description] as const),
+    ]
+    for (const [where, description] of described) {
+      expect(description, `missing description: ${where}`).toBeDefined()
+      expect(description, `${where} description holds an expression`).not.toContain("${{")
+    }
+  })
+
   it("defaults `cli` to the dlx resolution the `version` input describes", async () => {
     const action = await loadAction()
     expect(action.inputs.cli?.default).toBe("dlx")
