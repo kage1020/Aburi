@@ -38,6 +38,14 @@ macOS, and Windows.
    `pnpm changeset`.
 4. Open a pull request against `main`.
 
+Two workflows then run. CI runs the four commands above on Ubuntu, macOS and Windows,
+and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml)
+builds your branch, diffs it against the pull request's base with the CLI your branch
+contains, and posts the report as a comment it rewrites on every push. Its gate
+(`removed,dropped-toggled:to-dropped:>10`) turns the check red when a symbol disappears
+or bodies are emptied in bulk. That is a question, not a veto — answer it in the pull
+request when the removal is deliberate.
+
 ## Design docs
 
 Behaviour is specified before it is implemented. Every package's contract

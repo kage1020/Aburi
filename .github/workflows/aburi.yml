@@ -1,0 +1,65 @@
+name: Aburi
+
+# Aburi on Aburi. Every pull request gets the semantic diff its own code produces,
+# so a regression in extraction, matching, or the Markdown projection shows up as a
+# wrong report on the pull request that caused it — before it is released.
+on:
+  pull_request:
+
+# Same reasoning as CI: a superseded run on a pull request branch has nothing left
+# to say, and the comment it would post describes a head that no longer exists.
+concurrency:
+  group: aburi-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # The action upserts one marker comment per pull request; without this the
+  # github-script step gets a 403 on the first create.
+  pull-requests: write
+
+jobs:
+  diff:
+    name: semantic diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `aburi diff` checks out the base revision into a worktree to analyse it,
+          # and a shallow clone cannot give it one.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The action runs `pnpm exec aburi`, which needs `packages/cli` and
+      # `packages/lang-typescript` built.
+      - name: Build
+        run: pnpm build
+
+      # `cli: workspace` runs the CLI this checkout builds, so the report on a pull request
+      # comes from the analyser that pull request contains. It is also the only mode that can
+      # load `lang-typescript`: under `pnpm dlx` the CLI lives in the pnpm store, and a plugin
+      # ref resolves from there rather than from this workspace.
+      - name: Aburi diff
+        uses: ./packages/github-action
+        with:
+          cli: workspace
+          # A fork's pull request carries a read-only token, so the comment step would
+          # 403. The diff and the gate still run; only the comment is skipped.
+          comment: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          # The gate the docs recommend starting with, applied to ourselves: a deleted
+          # symbol, or a batch of emptied bodies, is worth a human's attention. Both are
+          # quiet on this repository's history — neither fires on any of the last several
+          # merges — which is the point: a gate that fires on every pull request is a gate
+          # everyone learns to ignore.
+          fail-on: "removed,dropped-toggled:to-dropped:>10"

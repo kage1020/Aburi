@@ -74,14 +74,23 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 ```yaml
 - uses: actions/checkout@v4
   with: { fetch-depth: 0 }
+- uses: pnpm/action-setup@v4
+- uses: actions/setup-node@v4
+  with: { node-version: 24, cache: pnpm }
+- run: pnpm install --frozen-lockfile
 - uses: kage1020/Aburi/packages/github-action@main
   with:
-    version: latest
+    cli: workspace
     fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
 The action posts the report as a pull request comment, and rewrites that same
 comment on every push.
+
+`cli: workspace` runs the CLI your lockfile pinned, which is also what makes the
+plugins above resolve. Drop the install steps and set `version: latest` instead and
+the action fetches the CLI with `pnpm dlx` — no install, but no plugins either.
+Aburi runs itself this way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
 
 ## Documentation
 

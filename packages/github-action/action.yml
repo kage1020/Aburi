@@ -46,6 +46,17 @@ inputs:
     description: "Directory to run the CLI from (defaults to the repository root)."
     required: false
     default: "."
+  cli:
+    description: >-
+      How the `aburi` binary is resolved. `dlx` (default) runs `pnpm dlx @aburi/cli@<version>`,
+      which needs no install step but cannot load plugins: `pnpm dlx` puts the CLI outside your
+      checkout, so a config naming `languages: ["lang-typescript"]` resolves that plugin from the
+      store copy of `@aburi/cli` and finds nothing. `workspace` runs `pnpm exec aburi` from
+      `working-directory` instead — the binary a project installed alongside its plugins, as the
+      quick start prescribes — and ignores `version`, `node-version`, and `pnpm-version`, because
+      the caller installed the workspace with a toolchain of their own.
+    required: false
+    default: "dlx"
   comment:
     description: "Upsert the produced Markdown as a PR comment. Set to `false` to run diff only."
     required: false
@@ -88,6 +99,7 @@ runs:
       env:
         FORMAT: ${{ inputs.format }}
         COMMENT: ${{ inputs.comment }}
+        CLI: ${{ inputs.cli }}
       run: |
         set -euo pipefail
         if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
@@ -97,6 +109,10 @@ runs:
         case "$FORMAT" in
           json|md|both) : ;;
           *) echo "::error::format must be one of: json | md | both (got '$FORMAT')." >&2; exit 2 ;;
+        esac
+        case "$CLI" in
+          dlx|workspace) : ;;
+          *) echo "::error::cli must be one of: dlx | workspace (got '$CLI')." >&2; exit 2 ;;
         esac
 
     - name: "Aburi: resolve refspec"
@@ -123,12 +139,18 @@ runs:
         fi
         echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
+    # Only the dlx path needs a toolchain of its own. Under `cli: workspace` the caller
+    # has already installed the workspace, which they could not have done without Node and
+    # pnpm; re-running these would swap that toolchain out from under the install and run
+    # the CLI on a Node it was never built against.
     - name: "Setup pnpm"
+      if: inputs.cli == 'dlx'
       uses: "pnpm/action-setup@v4"
       with:
         version: ${{ inputs.pnpm-version }}
 
     - name: "Setup Node.js"
+      if: inputs.cli == 'dlx'
       uses: "actions/setup-node@v4"
       with:
         node-version: ${{ inputs.node-version }}
@@ -144,14 +166,25 @@ runs:
         OUTPUT_DIR: ${{ inputs.output-dir }}
         FAIL_ON: ${{ inputs.fail-on }}
         CONFIG: ${{ inputs.config }}
+        CLI: ${{ inputs.cli }}
       run: |
         set -euo pipefail
         args=(diff "$REFSPEC" --format "$FORMAT" --output-dir "$OUTPUT_DIR")
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
         if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
 
+        # `workspace` runs the binary the project installed, which is the only way a config
+        # that names plugins can work: Node resolves `languages: ["lang-typescript"]` from
+        # the CLI's own location, and under `pnpm dlx` that location is the store, not the
+        # checkout. See the `cli` input's description.
+        if [ "$CLI" = "workspace" ]; then
+          runner=(pnpm exec aburi)
+        else
+          runner=(pnpm dlx "@aburi/cli@$VERSION")
+        fi
+
         set +e
-        pnpm dlx "@aburi/cli@$VERSION" "${args[@]}"
+        "${runner[@]}" "${args[@]}"
         status=$?
         set -e
 

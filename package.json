@@ -26,6 +26,8 @@
     "release": "pnpm typecheck && pnpm test && pnpm build && changeset publish"
   },
   "devDependencies": {
+    "@aburi/cli": "workspace:*",
+    "@aburi/lang-typescript": "workspace:*",
     "@biomejs/biome": "^2.5.1",
     "@changesets/cli": "^2.31.0",
     "ajv": "^8.20.0",

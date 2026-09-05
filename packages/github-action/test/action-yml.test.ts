@@ -49,6 +49,7 @@ describe("action.yml", () => {
       "output-dir",
       "format",
       "working-directory",
+      "cli",
       "comment",
       "token",
       "node-version",
@@ -69,6 +70,46 @@ describe("action.yml", () => {
   it("resolves the CLI through `pnpm dlx @aburi/cli@<version>`", async () => {
     const raw = await readFile(ACTION_PATH, "utf8")
     expect(raw).toMatch(/pnpm dlx "@aburi\/cli@\$VERSION"/)
+  })
+
+  it("defaults `cli` to the dlx resolution the `version` input describes", async () => {
+    const action = await loadAction()
+    expect(action.inputs.cli?.default).toBe("dlx")
+  })
+
+  it("runs the workspace's own binary when `cli: workspace`", async () => {
+    // `pnpm dlx` installs the CLI outside the checkout, so Node resolves a config's
+    // plugin refs (`languages: ["lang-typescript"]`) from the store copy of @aburi/cli
+    // and finds nothing. A project that installed @aburi/cli plus its plugins — the
+    // install the README's quick start prescribes — needs the binary that sits in its
+    // own node_modules instead, which is what this mode runs.
+    const raw = await readFile(ACTION_PATH, "utf8")
+    expect(raw).toContain("pnpm exec aburi")
+  })
+
+  it("rejects a `cli` value that is neither `dlx` nor `workspace`", async () => {
+    const action = await loadAction()
+    const validateStep = action.runs.steps.find(
+      (s) => typeof s.run === "string" && s.run.includes("cli must be one of"),
+    )
+    expect(validateStep).toBeDefined()
+    expect(validateStep?.run).toContain("exit 2")
+  })
+
+  it("installs Node and pnpm only for the dlx path", async () => {
+    // `cli: workspace` means the caller already installed the CLI, which they cannot have
+    // done without their own Node and pnpm. Re-running the setup actions there would
+    // replace the toolchain the workspace was installed with — a Node version skew between
+    // `pnpm install` and the run that follows it is exactly the kind of failure this
+    // action should not introduce.
+    const action = await loadAction()
+    const setupSteps = action.runs.steps.filter(
+      (s) => s.uses?.startsWith("pnpm/action-setup@") || s.uses?.startsWith("actions/setup-node@"),
+    )
+    expect(setupSteps).toHaveLength(2)
+    for (const step of setupSteps) {
+      expect(step.if, `missing guard on ${step.uses}`).toContain("inputs.cli == 'dlx'")
+    }
   })
 
   it("has a diff step whose id is `diff` and a comment step guarded by `inputs.comment == 'true'`", async () => {

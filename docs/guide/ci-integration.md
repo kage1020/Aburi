@@ -33,12 +33,45 @@ in place instead of piling up a new one.
 |---|---|
 | `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, and so on). |
 | `fail-on` | Passed to `aburi diff --fail-on`. Leave it empty to report without ever failing. |
+| `cli` | How the binary is resolved: `dlx` (default) or `workspace`. See below. |
 
 ::: warning `fetch-depth: 0` is required
 Aburi checks out the base revision to analyse it, and a shallow clone cannot
 give it one. Without the full history the run stops early rather than handing
 you a wrong diff.
 :::
+
+### Running the CLI your project installed
+
+By default the action fetches the CLI with `pnpm dlx`, which needs no install step
+and puts `@aburi/cli` in the pnpm store rather than in your checkout. Node resolves
+plugin refs from the CLI's own location, so a config naming
+`languages: ["lang-typescript"]` fails there — `Cannot find package
+'@aburi/lang-typescript'` — no matter what your project has installed. Which is to
+say: the default fits a config that names no plugin, and most configs name one.
+
+Set `cli: workspace` and the action runs `pnpm exec aburi` instead, resolving the
+binary and its plugins from your own `node_modules` — the install
+[Getting started](./getting-started.md) walks through. Install the workspace first;
+`version` then has nothing to pin, because your lockfile already pinned it.
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- uses: pnpm/action-setup@v4
+- uses: actions/setup-node@v4
+  with:
+    node-version: 24
+    cache: pnpm
+- run: pnpm install --frozen-lockfile
+- uses: kage1020/Aburi/packages/github-action@main
+  with:
+    cli: workspace
+    fail-on: "removed"
+```
+
+Aburi analyses its own pull requests this way, with the CLI each pull request builds:
+[`.github/workflows/aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml).
 
 ## Any other CI
 
