@@ -138,6 +138,7 @@ Invariants across the table:
 - The pass MUST NOT overwrite an already non-`null` `Call.resolved`. This mirrors [`call-resolution.md`](./call-resolution.md) §5.4.
 - The pass MUST NOT lower `CallEdge.confidence`.
 - The pass MUST NOT emit fields not listed here.
+- The pass MUST NOT request a hint for a `this.*` / `super.*` target of more than two segments. It locates the callee by searching the source line for `<receiver>.<method>`, which for `this.emitter.emit` is `this.emit` and matches inside `this.emitter` — so the server answers about the property while the pass still believes it asked about the method, and the hint it files is well-formed, correctly keyed, and names a callee the call site never reaches. Such a call keeps the `null` and the `dynamic` diagnostic ([`call-resolution.md`](./call-resolution.md) §8.1 rule 2) it has with LSP off. Lifting this needs a locator that can address a whole receiver chain, not a check on the hint.
 
 ## 6. Fallback Semantics
 
@@ -272,9 +273,9 @@ The pass is a pure function of `(SymbolCandidate[], lspConfig, serverResponses)`
 
 Concrete rules:
 
-1. Every LSP response is captured in an in-memory cache keyed by `(file, line, column, requestKind)` **before** any IR field is written. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5. A per-call-site *output* of the pass — a receiver hint (§5) — is keyed by `(file, line, target)`, never by `(file, line)`: one line holds as many call sites as it has calls, and a hint filed without the target is spent on whichever of them the resolver reaches.
+1. Every LSP response for a file is captured **before** any IR field is written — held as issued, against the identity of the job that issued it, `(Symbol id, call-site line, call target)`. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5; there is no cache that outlives the file. A per-call-site *output* of the pass — a receiver hint (§5) — is keyed by `(file, line, target)`, never by `(file, line)`: one line holds as many call sites as it has calls, and a hint filed without the target is spent on whichever of them the resolver reaches. The pass declines to request a hint it could not key honestly: a `this.*` target of more than two segments, where the position searched for is not the position of the callee.
 2. Ambiguity (multi-result `textDocument/implementation`, multi-result `textDocument/typeDefinition`) is resolved by lexicographic tiebreak on destination Symbol id. In the multi-implementer case for `textDocument/implementation`, the pass **does not** apply the tiebreak — it leaves `Call.resolved` at `null` (matches [`call-resolution.md`](./call-resolution.md) §5.3 semantics: pick a single implementer only when there is exactly one, unless a framework hook narrows the set).
-3. Parallel LSP workers (from §4.3 concurrency) populate the cache in nondeterministic wall-clock order but the cache is consumed in a fixed order — Symbol id ascending, then call-site line ascending, then call target ascending — when writing to `SymbolCandidate` records. Consumption starts only once every worker for the file has stopped: a write issued from inside a worker takes its order from the server's pace, which is what this rule denies it. Where two entries would write the same call site, the first in that order wins.
+3. Parallel LSP workers (from §4.3 concurrency) answer in nondeterministic wall-clock order but their held responses are consumed in a fixed order — Symbol id ascending, then call-site line ascending, then call target ascending — when writing to `SymbolCandidate` records. Consumption starts only once every worker for the file has stopped: a write issued from inside a worker takes its order from the server's pace, which is what this rule denies it. Where two entries would write the same call site, the first in that order wins. This rule governs *what* is written and in *which order*; which jobs get far enough to be written at all is the per-file budget's question, and §6.1 owns it.
 4. Cold-cache warm-up differences between runs are irrelevant because the pass does not use per-response timing as a signal.
 5. Silent retries with exponential backoff are prohibited. A request either succeeds within `requestTimeoutMs` or triggers per-request fallback. Retry-on-load would make outcomes depend on machine load.
 6. Fallback state (§6.1) is derived deterministically from the cache. Given identical `serverResponses`, identical files will fall back and identical files will succeed.
@@ -310,12 +311,12 @@ Concrete rules:
 - LE11: same LSP-off vs LSP-on comparison as LE9, but the fixture contains at least one call where the untyped tier leaves `Call.resolved: null` and whose actual callee has a `db.write` in its transitive downstream. The transitive callers of that callee MUST have a different `logic` fingerprint between the two runs (matching [`effect-propagation.md`](./effect-propagation.md) §11.1 "propagation is monotone in resolved edges"). Symbols outside that transitive closure MUST have byte-identical `logic` fingerprints.
 - LE12: LSP-off vs LSP-on comparison of `signature.throws` — MUST be byte-identical for every Symbol (LSP-inferred throws land in `signature.inferredThrows`, never in `signature.throws`; guards §14.2).
 
-### 11.5 Determinism — LE13..LE15
+### 11.5 Determinism — LE13..LE15, LE24
 
 - LE13: reorder file processing (single-threaded vs concurrent workers) → byte-identical IR.
 - LE14: language server returns implementers in reverse order between two runs → byte-identical `Call.resolved` values (tiebreak in §10.2).
 - LE15: identical scan run twice back-to-back on the same fixture → byte-identical IR including `stats.lspEnrichment` counts.
-- LE24: two `this.*` calls on one line (`this.foo(this.baz())`), with the server answering one of the two hovers slowly → each call resolves to its own callee, and inverting which hover is the slow one between runs changes nothing in the IR. Guards both halves of §10.3: a hint keyed without the target resolves both calls to one callee, and a response applied from inside its worker lets the slower hover decide which.
+- LE24 (§10.1's key shape): two `this.*` calls on one line (`this.foo(this.baz())`), with the server answering one of the two hovers slowly → each call resolves to its own callee, and inverting which hover is the slow one between runs changes nothing in the IR. A hint keyed without the target collapses the two into one and fails this. It does **not** exercise §10.3's consumption order: once the key carries the target, distinct call sites write distinct entries and `inferredThrows` merges through a sorted set, so applying responses from inside their workers produces the same IR. §10.3 is a structural guarantee here, not a behaviour any input distinguishes.
 
 ### 11.6 Behavioral guards — LE16..LE18
 

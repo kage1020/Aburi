@@ -1,4 +1,4 @@
-export { makeCallSiteKey } from "./call-site"
+export { makeCallSiteKey, receiverHead } from "./call-site"
 export {
   type CallEdge,
   type ResolveCallGraphInput,

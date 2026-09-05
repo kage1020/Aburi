@@ -99,35 +99,53 @@ describe("LSP determinism", () => {
         { target: "this.baz", line: 5 },
       ]),
     ]
+    const CALL_LINE = "    this.foo(this.baz())"
     const contents = {
-      "src/a.ts": "class C {\n  foo(v) {}\n  baz() {}\n  bar() {\n    this.foo(this.baz())\n  }\n}",
+      "src/a.ts": `class C {\n  foo(v) {}\n  baz() {}\n  bar() {\n${CALL_LINE}\n  }\n}`,
     }
-    // Columns of the two receivers on line 5, as `findMethodColumn` reports them.
-    const FOO_COLUMN = 13
-    const BAZ_COLUMN = 22
-    const makeFactory = (slowColumn: number) =>
+    // Derived from the fixture rather than written down, because a hard-coded
+    // column that misses is invisible: every hover would take the same branch,
+    // both runs would be the same execution, and the assertions below would
+    // hold for a mock that never dispatched on position at all. This is
+    // `findMethodColumn`'s formula — the index of `this.<method>` plus the
+    // receiver and its dot — and `assertDispatched` proves it landed.
+    const columnOf = (method: string) => CALL_LINE.indexOf(`this.${method}`) + "this.".length
+    const FOO_COLUMN = columnOf("foo")
+    const BAZ_COLUMN = columnOf("baz")
+    const makeFactory = (slowColumn: number, seen: number[]) =>
       mockServerFactory((_lang, client) => {
         client.installHandler(DOC_SYMBOL_METHOD, () => [])
         client.installHandler(HOVER_METHOD, async (params) => {
           const character = (params as { position: { character: number } }).position.character
+          seen.push(character)
           if (character === slowColumn) await new Promise((r) => setTimeout(r, 20))
           const method = character === FOO_COLUMN ? "foo" : "baz"
           return { contents: `(method) C.${method}(): void` }
         })
       })
-    const run = async (slowColumn: number) =>
-      await enrichWithLsp(
+    const run = async (slowColumn: number) => {
+      const seen: number[] = []
+      const result = await enrichWithLsp(
         makeEnrichmentInput({
           symbols: symbols(),
           fileContents: contents,
-          serverFactory: makeFactory(slowColumn),
+          serverFactory: makeFactory(slowColumn, seen),
         }),
       )
+      return { result, seen }
+    }
     const slowFoo = await run(FOO_COLUMN)
     const slowBaz = await run(BAZ_COLUMN)
 
-    expect(serialize(slowFoo.receiverHints)).toBe(serialize(slowBaz.receiverHints))
-    expect([...slowFoo.receiverHints].sort()).toEqual([
+    // The latency inversion the test is named for actually happened: each run
+    // hovered both receivers, so in each one exactly one of them was the slow
+    // hover, and it was the other one between the two runs.
+    for (const { seen } of [slowFoo, slowBaz]) {
+      expect([...seen].sort((a, b) => a - b)).toEqual([FOO_COLUMN, BAZ_COLUMN])
+    }
+
+    expect(serialize(slowFoo.result.receiverHints)).toBe(serialize(slowBaz.result.receiverHints))
+    expect([...slowFoo.result.receiverHints].sort()).toEqual([
       [
         makeCallSiteKey("src/a.ts", 5, "this.baz"),
         { kind: "this", targetSymbolId: "ts:src/a.ts#C.baz" },
@@ -141,10 +159,10 @@ describe("LSP determinism", () => {
     // And the hints reach the resolver as two distinct edges rather than one
     // doubled: this is the shape `propagateEffects` consumes.
     const resolved = resolveCallGraph({
-      symbols: slowFoo.symbols,
+      symbols: slowFoo.result.symbols,
       importsByFile: new Map(),
-      receiverHints: slowFoo.receiverHints,
-      implementerHints: slowFoo.implementerHints,
+      receiverHints: slowFoo.result.receiverHints,
+      implementerHints: slowFoo.result.implementerHints,
     })
     expect(resolved.edges.map((e) => e.to)).toEqual(["ts:src/a.ts#C.baz", "ts:src/a.ts#C.foo"])
   })

@@ -99,6 +99,64 @@ describe("LSP enrichment", () => {
     const hint = enrichment.receiverHints.get(makeCallSiteKey("src/a.ts", 6, "super.foo"))
     expect(hint?.kind).toBe("super")
     expect(hint?.targetSymbolId).toBe("ts:src/a.ts#Base.foo")
+
+    // Round-trip through the consumer, as the `this` case above does. The
+    // resolver gained a `kind` gate, and a producer that files `super` under a
+    // key the resolver reads as `this` would otherwise show up as nothing at
+    // all: no edge, no diagnostic saying why.
+    const result = resolveCallGraph({
+      symbols: enrichment.symbols,
+      importsByFile: new Map(),
+      receiverHints: enrichment.receiverHints,
+      implementerHints: enrichment.implementerHints,
+    })
+    const edge = result.edges.find((e) => e.from === "ts:src/a.ts#Sub.foo")
+    expect(edge?.to).toBe("ts:src/a.ts#Base.foo")
+    expect(edge?.confidence).toBe("high")
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("asks for no hint on a `this.a.b` target, whose callee is not where it would look", async () => {
+    // `findMethodColumn` searches for `<head>.<method>` — here `this.emit` —
+    // and finds it inside `this.emitter`, so hover answers about the property
+    // and `calleeText` still says `emit`. The hint that came back was
+    // well-formed, correctly keyed and `kind`-consistent, and named a callee
+    // the call site never reaches: `C.emit`. Neither guard in the resolver can
+    // see that, so the request is not made.
+    const cls = makeClassSymbol("src/a.ts", "C", 1)
+    const emit = makeMethodSymbol("src/a.ts", "C", "emit", 2)
+    const run = makeMethodSymbol("src/a.ts", "C", "run", 3, [
+      { target: "this.emitter.emit", line: 4 },
+    ])
+    let hovers = 0
+    const factory = mockServerFactory((_lang, client) => {
+      client.installHandler(DOC_SYMBOL_METHOD, () => [])
+      client.installHandler(HOVER_METHOD, () => {
+        hovers += 1
+        return { contents: "(property) C.emitter: EventEmitter" }
+      })
+    })
+    const enrichment = await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: [cls, emit, run],
+        fileContents: {
+          "src/a.ts": "class C {\n  emit() {}\n  run() {\n    this.emitter.emit(1)\n  }\n}",
+        },
+        serverFactory: factory,
+      }),
+    )
+    expect(hovers).toBe(0)
+    expect(enrichment.receiverHints.size).toBe(0)
+
+    // The call keeps the honest answer it has without LSP.
+    const result = resolveCallGraph({
+      symbols: enrichment.symbols,
+      importsByFile: new Map(),
+      receiverHints: enrichment.receiverHints,
+      implementerHints: enrichment.implementerHints,
+    })
+    expect(result.edges).toEqual([])
+    expect(result.symbols.find((sym) => sym.id === run.id)?.calls[0]?.resolved).toBeNull()
   })
 
   it("only touches SourceRange columns when the file has no this./super. call sites", async () => {

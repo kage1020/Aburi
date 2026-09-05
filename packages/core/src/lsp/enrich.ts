@@ -13,8 +13,11 @@
  * order, sorting each file's jobs by (Symbol id, call line, call target), and
  * — because concurrent workers finish in whatever order the server answers —
  * holding every job's response until all of them have stopped and only then
- * applying them in that sorted order. Arrival order decides nothing that is
- * written. Interface-typed receiver resolution (call-resolution.md §5.3) is
+ * applying them in that sorted order. So the content of what is written, and
+ * the order it is written in, do not depend on arrival. *Which* jobs get that
+ * far still does: the per-file budget and the §6.1 escalation both read the
+ * clock, and a file that runs out mid-way keeps what it had. That axis is
+ * §6.1's, not this one's. Interface-typed receiver resolution (call-resolution.md §5.3) is
  * deferred until `IRSymbol.implements` lands; the `implementerHints` output
  * channel exists but is populated as an empty map today so downstream
  * consumers can flip on interface resolution without an API change.
@@ -31,7 +34,7 @@ import type {
   SymbolId,
 } from "@aburi/types"
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
-import { makeCallSiteKey } from "../call-site"
+import { makeCallSiteKey, receiverHead } from "../call-site"
 import { trySymbolId } from "../id"
 import {
   createLspClient,
@@ -325,12 +328,18 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
-      // Responses are held, not applied, while workers are running. Applying
-      // them inside the worker makes every write land in server-response order,
-      // which §10.3 says decides nothing: two jobs that answer with different
-      // hints for one call site would resolve it differently between two runs
-      // of the same input. Collected here and applied below in job order, the
-      // slow server and the fast one produce the same file.
+      // Responses are held, not applied, while workers are running: §10.3 wants
+      // the cache consumed in job order, and a write issued from inside a
+      // worker takes its order from the server's pace instead.
+      //
+      // With the target in the key no *live* collision remains for this to
+      // settle — distinct call sites key apart, identical ones hover the same
+      // position and answer the same thing, and `appendInferredThrows` merges
+      // through a sorted set — so nothing here is load-bearing today, and no
+      // test would fail if the apply moved back inside the worker. It is the
+      // structural half of the guarantee: what the file produces is decided by
+      // the sort, and a future writer of `applyJobResult` cannot reintroduce an
+      // arrival-order dependency by adding a field that does not merge.
       const responses: unknown[] = new Array(jobs.length)
       const answered: boolean[] = new Array(jobs.length).fill(false)
       try {
@@ -356,10 +365,24 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
         // already earned, and every worker has stopped by the time
         // `runJobsWithConcurrency` settles either way, so nothing is still
         // writing here.
+        //
+        // Each apply carries its own `catch` for two reasons. A `finally` that
+        // throws *replaces* the exception unwinding through it, so a throw here
+        // would erase the server-side failure that caused the unwind and leave
+        // a stack pointing at the wrong cause; and inside the worker, where
+        // these applies used to run, a throwing one cost only its own result.
+        // Both properties are worth keeping even though `applyJobResult`'s
+        // lookups all return `null` rather than throw today.
         for (let index = 0; index < jobs.length; index += 1) {
           const job = jobs[index]
           if (job === undefined || !answered[index]) continue
-          applyJobResult(job, responses[index], input.receiverHints, input.workingById)
+          try {
+            applyJobResult(job, responses[index], input.receiverHints, input.workingById)
+          } catch (error) {
+            input.logger.debug?.(
+              `[aburi:lsp] applying hover for ${file}:${job.callLine} threw: ${errorMessage(error)}`,
+            )
+          }
         }
       }
     }
@@ -417,6 +440,18 @@ type RequestJob = {
  * that is not yet in the IR, so we do not spend budget on `typeDefinition`
  * requests whose result we cannot act on. When that seam lands the interface
  * job type returns here.
+ *
+ * Exactly two segments, because `findMethodColumn` searches for
+ * `<head>.<method>` — the first segment and the last — and a longer target
+ * makes that needle match the wrong token: `this.emitter.emit` searches for
+ * `this.emit`, finds it inside `this.emitter`, and hovers the property. The
+ * server then answers about `emitter` while `calleeText` still says `emit`, so
+ * the hint that comes back is well-formed, correctly keyed, `kind`-consistent
+ * — and names a callee the call site never reaches. Neither lock in
+ * `resolveViaLspHint` can see that, because both are about the target and the
+ * target is right; only declining the request stops it. Such a call keeps the
+ * `resolved: null` and the `dynamic` diagnostic it has without LSP, which is
+ * the honest answer until `findMethodColumn` can address the whole chain.
  */
 function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): RequestJob[] {
   const jobs: RequestJob[] = []
@@ -427,9 +462,9 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
       const line = lines[call.line - 1]
       if (line === undefined) continue
       const segments = call.target.split(".").filter((s) => s.length > 0)
-      if (segments.length < 2) continue
-      const head = segments[0] as string
-      const method = segments[segments.length - 1] as string
+      if (segments.length !== 2) continue
+      const head = receiverHead(call.target)
+      const method = segments[1] as string
       if (head !== "this" && head !== "super") continue
       const column = findMethodColumn(line, head, method)
       if (column === null) continue
@@ -450,16 +485,20 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
 
 /**
  * The §10.3 consumption order: Symbol id ascending, then call-site line
- * ascending, with the call target as a final tiebreak so two calls on one line
- * are ordered too. `symbols` arrives in extraction order and `calls[]` in
- * `(target, line)` order, neither of which is the order results must be applied
- * in, so the sort belongs here rather than being inherited from the caller.
+ * ascending, then call target — the three components of a job's identity, and a
+ * total order over the jobs of one file because no two of them share all three.
+ *
+ * On the scan path this sort changes nothing: `scan.ts` sorts `symbols` by id
+ * before calling `enrichWithLsp`, and `calls[]` reaches here in `(line, then
+ * target)` order from `pipeline.ts`'s stable re-sort by line. It is here
+ * because `enrichWithLsp` is public API and may be handed symbols in any order,
+ * and a determinism guarantee that holds only for one caller's habits is not
+ * one — not because the pipeline's order is wrong.
  */
 function compareRequestJob(a: RequestJob, b: RequestJob): number {
   if (a.symbolId !== b.symbolId) return a.symbolId < b.symbolId ? -1 : 1
   if (a.callLine !== b.callLine) return a.callLine - b.callLine
-  if (a.target !== b.target) return a.target < b.target ? -1 : 1
-  return a.column - b.column
+  return a.target < b.target ? -1 : a.target > b.target ? 1 : 0
 }
 
 async function executeJob(
@@ -498,6 +537,7 @@ function applyJobResult(
   // "first" is the lowest-sorted job rather than the quickest response — and
   // the only jobs that can collide now are two identical call sites, which
   // hover at the same position and therefore answer the same thing anyway.
+  // The guard is what makes that last sentence something other than a promise.
   const key = makeCallSiteKey(caller.source.file, job.callLine, job.target)
   if (!receiverHints.has(key)) {
     receiverHints.set(key, { kind: job.receiverKind, targetSymbolId: memberId })

@@ -9,7 +9,8 @@ import type {
   UnresolvedCallBuckets,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
-import { makeCallSiteKey } from "./call-site"
+import { CALL_SITE_KEY_SEPARATOR, makeCallSiteKey, receiverHead } from "./call-site"
+import { CoreError } from "./errors"
 import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
@@ -49,6 +50,8 @@ export interface ResolveCallGraphInput {
    * other call sharing its line. Present only when the LSP enrichment pass ran;
    * consulted as the LSP tier before the resolver would otherwise return
    * `null`. Non-null `Call.resolved` values are still never overwritten (§5.4).
+   * A non-empty map keyed any other way raises `receiver-hint-key-malformed`
+   * rather than missing every lookup in silence — see `assertReceiverHintKeys`.
    */
   receiverHints?: ReadonlyMap<string, ReceiverHint>
   /**
@@ -117,6 +120,7 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
 export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraphResult {
   const extensions = input.fileExtensions ?? DEFAULT_EXTENSIONS
   const receiverHints = input.receiverHints ?? EMPTY_RECEIVER_HINTS
+  assertReceiverHintKeys(receiverHints)
   const implementerHints = input.implementerHints ?? EMPTY_IMPLEMENTER_HINTS
 
   // Every downstream lookup uses `keptSymbolIds` (i.e. `dropped: false`) so
@@ -359,6 +363,31 @@ function compareDiagnostic(a: UnresolvedCallDiagnostic, b: UnresolvedCallDiagnos
   return 0
 }
 
+/**
+ * Refuse a `receiverHints` map keyed by anything but `makeCallSiteKey`.
+ *
+ * Every other way this could go wrong announces itself: a hint for a call that
+ * is not there is simply never read, a `kind` that disagrees is refused, a
+ * dropped target falls through to the diagnostics. A map keyed the wrong way
+ * announces nothing — every lookup misses, so the LSP tier contributes no edges
+ * and the run is indistinguishable from one where the language server had
+ * nothing to say. There is no counter for hints consumed, so nobody finds out.
+ *
+ * That failure is reachable by ordinary means: the keys were `${file}:${line}`
+ * through @aburi/core 0.3.0, both spellings are `string`, and a caller who
+ * upgrades keeps compiling. Better to name it once, at the entry, than to hand
+ * back a graph that is quietly missing its typed tier.
+ */
+function assertReceiverHintKeys(hints: ReadonlyMap<string, ReceiverHint>): void {
+  for (const key of hints.keys()) {
+    if (key.includes(CALL_SITE_KEY_SEPARATOR)) continue
+    throw new CoreError(
+      `resolveCallGraph: receiverHints key ${JSON.stringify(key)} was not built by makeCallSiteKey(file, line, target)`,
+      { code: "receiver-hint-key-malformed", value: key },
+    )
+  }
+}
+
 const EMPTY_RECEIVER_HINTS: ReadonlyMap<string, ReceiverHint> = new Map()
 const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new Map()
 
@@ -377,13 +406,21 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  *
  * A hint is looked up by the full call-site key — file, line, **and** target —
  * and is then checked against the call it would resolve: `ReceiverHint.kind`
+ * (via `receiverHead`, the same derivation the producer files the hint under)
  * must match the receiver the target leads with. Keying by line alone made a
  * hint for `this.foo()` apply to every other call on that line, so an unrelated
  * callee resolved to a class method, dropped out of the `unresolved`
  * diagnostics, and reached `propagateEffects` as an edge no source line
- * justifies. Both checks are cheap and neither is redundant: the key stops the
- * collision the producer could create, the `kind` check stops one a hand-built
- * hint map could.
+ * justifies. Both checks are cheap and neither is redundant: the key stops a
+ * producer keyed to the line rather than the call site, the `kind` check stops
+ * a hand-built hint map aimed at a target it does not describe.
+ *
+ * Neither check can vouch for a hint whose *target* is right and whose
+ * *position* was wrong — `findMethodColumn` hovering the wrong token would file
+ * a well-formed hint for a callee the call site never names. That is why
+ * `buildRequestJobs` declines the shape where it can happen (a `this.*` target
+ * of more than two segments) rather than leaving it to be caught here: by the
+ * time a hint exists, this function has nothing left to compare it against.
  *
  * Two further invariants of the LSP tier are load-bearing, and both hold by the
  * shape of the surrounding pass rather than by a check inside this function:
@@ -429,18 +466,6 @@ function resolveViaLspHint(input: {
   const target = hint.targetSymbolId
   if (!input.keptSymbolIds.has(target)) return null
   return { id: target, confidence: "high" }
-}
-
-/**
- * The receiver segment of a normalized call target: `"this"` for `this.foo`,
- * `"super"` for `super.a.foo`, and whatever else the target leads with
- * otherwise. Compared against `ReceiverHint.kind` so a hint can only ever be
- * spent on the receiver shape it was produced for — the key already carries the
- * target, so this is the second lock on the same door, and it is the one that
- * holds if a caller assembles `receiverHints` by hand.
- */
-function receiverHead(target: string): string | undefined {
-  return target.split(".").find((segment) => segment.length > 0)
 }
 
 /**
