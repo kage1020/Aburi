@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { resolve } from "node:path"
+import { basename, resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
 import {
   formatCallResolutionLine,
@@ -143,6 +143,8 @@ export type DiffSide = "base" | "head"
  *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
+ *   The worktree's own directory is named after the head workspace's (§6.4 step 2),
+ *   since Component detection reads that name — see `baseWorktreeLeaf`.
  *   NOTE: the head is always the working tree — a mismatched `<head>` label in the
  *   ref spec (e.g. `main..v1.1.0` when the checkout is `v1.0.0`) does NOT rescope the
  *   head scan; it only labels the report. This mirrors the design's "head is always
@@ -572,29 +574,43 @@ async function resolveViaGit(
   // inside the worktree returns the base copy, and so does a relative `--config`, so the
   // rule holds only if the answer is fixed here and handed to both scans.
   const pinnedConfig = await pinConfigOnce()
-  // The other half of "the base is read through the head's view": §6.4.1.5 pins the plugin
-  // set to the head environment, and a relative `./plugins/*.mjs` ref is part of that set.
-  // The worktree materialises the base *sources*; it has no claim on where the head's config
-  // says its plugins live.
-  const headPluginRefRoot = await resolveWorkspaceRoot(cwd)
-
+  // Two things read this, and both are "the base is interpreted through the head's view":
+  // the name to materialise the base under (§6.4 step 2), and where a relative
+  // `./plugins/*.mjs` ref in the head's config resolves from (§6.4.1.5, which pins the plugin
+  // set to the head environment). The worktree materialises the base *sources*; it has no
+  // claim on either.
+  const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
-  const worktreeDir = resolve(tempParent, "base")
+  // Under a directory of its own, so the leaf below is free to be any name the head workspace
+  // has — including `base-out` or `head-out`, which as siblings would be the temp run's own
+  // output directories.
+  const worktreeParent = resolve(tempParent, "base")
+  const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
   const baseOutputDir = resolve(tempParent, "base-out")
   const headOutputDir = resolve(tempParent, "head-out")
   let baseIR: IR
   let headIR: IR
   let scans: ScanPair
+  // Whether there is a worktree to clean up. `finally` ran `worktree remove` unconditionally,
+  // so anything that threw before the checkout existed — a failing `worktree add`, and now the
+  // `mkdir` above it — was reported first as a cleanup failure advising `git worktree prune`.
+  // The reader followed that, watched it succeed against bookkeeping that was never written,
+  // and only then reached the exception that actually ended the run.
+  let worktreeAdded = false
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
+    // git creates the leading directories of a worktree path itself, so this is belt and
+    // braces for the one level this run invented rather than something git needs.
+    await mkdir(worktreeParent, { recursive: true })
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
+    worktreeAdded = true
     const baseReport = await runScanInDir(
       worktreeDir,
       options,
       baseOutputDir,
       warn,
       pinnedConfig,
-      headPluginRefRoot,
+      headWorkspaceRoot,
       { side: "base", ref: spec.base },
     )
     if (baseReport.irPath === null) {
@@ -608,7 +624,7 @@ async function resolveViaGit(
       headOutputDir,
       warn,
       pinnedConfig,
-      headPluginRefRoot,
+      headWorkspaceRoot,
       { side: "head" },
     )
     if (headReport.irPath === null) {
@@ -617,12 +633,14 @@ async function resolveViaGit(
     headIR = await readIR(headReport.irPath)
     scans = { base: baseReport, head: headReport }
   } finally {
-    try {
-      await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
-    } catch (error) {
-      warn(
-        `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
-      )
+    if (worktreeAdded) {
+      try {
+        await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
+      } catch (error) {
+        warn(
+          `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
+        )
+      }
     }
     try {
       await rm(tempParent, { recursive: true, force: true })
@@ -645,6 +663,33 @@ async function resolveViaGit(
     gitRenames: renames,
     scans,
   }
+}
+
+/**
+ * The directory name to materialise the base revision under: the head workspace's own leaf.
+ *
+ * Why it is not a fixed word is `cli-spec.md` §6.4 step 2 — one statement of the rule, where
+ * the rest of the ref-diff contract is. In short: detection reads the directory name for a
+ * Component rooted at the workspace root, so a constant here made the base side a different
+ * Component from the head side. This function is only the two names that rule cannot use.
+ *
+ * The two are an empty leaf — `basename` of an absolute path, only at the filesystem root —
+ * and `@`. `git worktree add` writes its bookkeeping under `.git/worktrees/<leaf>` and cannot
+ * spell that one: it fails with `fatal: not a git repository: <repo>/.git/worktrees/@`, which
+ * reads as the reader's own repository being broken. `@x`, `HEAD`, `a^b`, `~x` and `x.lock`
+ * are all fine, so `@` alone is the exception.
+ *
+ * Substituting is safe rather than lucky, and for one reason covering both: a substitution can
+ * only reinstate the defect by supplying a Component id that differs from the head's, and
+ * neither of these leaves can supply an id at all. `toKebabCase` maps both to the empty string,
+ * which `makeComponentId` rejects as `invalid-component-id` (`packages/core/src/component.ts`),
+ * so where detection decides ids the head scan refuses the workspace and names the directory
+ * that did it; where `components[]` declares them, no directory name is read on either side.
+ * What is left for this default to be is a name git can create.
+ */
+function baseWorktreeLeaf(headWorkspaceRoot: string): string {
+  const leaf = basename(headWorkspaceRoot)
+  return leaf.length === 0 || leaf === "@" ? "base" : leaf
 }
 
 /**
@@ -737,10 +782,18 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
 }
 
 /**
- * `git diff --find-renames --name-status` powers the diff engine's stage-2 rename map.
- * A failure here is non-fatal — the diff will still run, just without the rename hints —
- * so we warn on stderr instead of aborting, but the warning is loud enough that a
- * reviewer noticing "moved -> removed + added" churn can trace the cause.
+ * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map
+ * (`diff-algorithm.md` §3.2, which is where the `-z` contract is stated and why).
+ *
+ * A failure here is non-fatal — the diff still runs, just without the rename hints — so it warns
+ * on stderr instead of aborting, loudly enough that a reviewer noticing "moved -> removed +
+ * added" churn can trace the cause.
+ *
+ * Three ways this comes back useless, and only one of them is an error. git can fail; the record
+ * stream can be unreadable; and git can *succeed* having quietly given up on rename detection —
+ * over `diff.renameLimit` it exits 0, writes a warning to stderr, and reports every move as a
+ * `D` plus an `A`. That last one used to be invisible here, and it fires on exactly the large
+ * refactor where stage 2 matters most.
  */
 async function collectRenames(
   git: GitRunner,
@@ -748,35 +801,129 @@ async function collectRenames(
   spec: RefSpec,
   warn: WarnFn,
 ): Promise<GitRenameMap | null> {
+  let stdout: string
   try {
-    const { stdout } = await git.run(
-      ["diff", "--find-renames", "--name-status", `${spec.base}..${spec.head}`],
+    const result = await git.run(
+      ["diff", "--find-renames", "--name-status", "-z", `${spec.base}..${spec.head}`],
       { cwd },
     )
-    const map = new Map<string, string>()
-    for (const line of stdout.split(/\r?\n/)) {
-      const parts = line.split(/\s+/)
-      if (parts.length < 3) continue
-      const status = parts[0]
-      if (status === undefined || !status.startsWith("R")) continue
-      const oldPath = parts[1]
-      const newPath = parts[2]
-      if (oldPath === undefined || newPath === undefined) continue
-      map.set(oldPath, newPath)
+    stdout = result.stdout
+    // A diagnostic on a run that exited 0 — `diff.renameLimit` exceeded, a file it could not
+    // read. Nothing here can act on it, and the hints it costs are silent by construction: the
+    // records parse, the map is merely emptier than the refactor was.
+    if (result.stderr.trim().length > 0) {
+      warn(
+        `⚠ git reported while collecting renames for ${spec.base}..${spec.head}: ${result.stderr.trim()}. ` +
+          `Rename hints may be missing (raise diff.renameLimit if it says so); moves without one are reported as removed + added.`,
+      )
     }
-    return map
   } catch (error) {
     warn(
       `⚠ Failed to collect git renames (${errorMessage(error)}); the diff will treat renamed files as removed + added.`,
     )
     return null
   }
+  // Outside the `try`, so a defect in the parser is never reported as git having failed.
+  const parsed = parseRenameRecords(stdout)
+  if (!parsed.ok) {
+    warn(
+      `⚠ git diff --name-status -z for ${spec.base}..${spec.head} produced a record this parser could not read ` +
+        `(field ${parsed.index}: ${describeBadField(parsed.field)}); the diff will treat renamed files as removed + added.`,
+    )
+    return null
+  }
+  return parsed.renames
+}
+
+/** A field goes into a warning quoted and capped: it is a path, so it can carry control bytes. */
+function describeBadField(field: string): string {
+  const quoted = JSON.stringify(field)
+  return quoted.length <= MAX_REPORTED_FIELD_LENGTH
+    ? quoted
+    : `${quoted.slice(0, MAX_REPORTED_FIELD_LENGTH)}…`
+}
+
+const MAX_REPORTED_FIELD_LENGTH = 120
+
+/**
+ * A `--name-status` status field: one letter, and on `R` / `C` a similarity score after it.
+ *
+ * Matching the score rather than assuming a one-character field is what keeps the shape check
+ * below honest about what git actually writes (`R094`, not `R`).
+ */
+const NAME_STATUS_FIELD = /^[A-Z]\d*$/
+
+/**
+ * What the reader made of the stream: the renames, or where it stopped being readable.
+ *
+ * The failure carries its position because the caller has to write the warning somebody reads in
+ * a CI log, and "could not read the output" with nothing else in it is a dead end for whoever
+ * has to reproduce it.
+ */
+export type RenameRecords =
+  | { ok: true; renames: GitRenameMap }
+  | { ok: false; index: number; field: string }
+
+/**
+ * NUL-separated `--name-status` records into `{oldPath: newPath}`.
+ *
+ * Under `-z` the output is a flat sequence of fields rather than lines: a status, then the one
+ * path it applies to — or, for the two statuses that carry a second path, `R` (rename) and `C`
+ * (copy), two of them. The record length is therefore decided by the status, and every field of
+ * a record has to be consumed even when the record is not a rename: skipping a `C` by its status
+ * alone leaves the reader one field short and every record after it misread. Only `R` enters the
+ * map — a copy's source file is still there, so it is not a move.
+ *
+ * Paths are normalized to NFC because that is the form they are compared against:
+ * `toRelativePosix` normalizes every `source.file`, and `matchStageGitRename` looks a path up in
+ * this map with a bare `Map.get`. A repository holding a path decomposed (macOS with
+ * `core.precomposeUnicode` off) would otherwise produce a map that cannot match anything — the
+ * failure this whole reader exists to prevent, on the class of path it is about.
+ *
+ * A failure, not a partial map, when a field is not a status where one must be or the stream
+ * stops mid-field. A desynced reader produces *plausible* pairs — a path read as a status, the
+ * next path read as its target — and a wrong rename is worse for stage 2 than no rename at all:
+ * it pairs two unrelated Symbols and reports the move as settled. The caller degrades to no hints
+ * and says so, which is the fallback a `git` that failed outright already gets.
+ */
+export function parseRenameRecords(stdout: string): RenameRecords {
+  const fields = stdout.split("\0")
+  // `-z` *terminates* each field, so a complete stream ends in an empty tail and anything else
+  // there is a stream that was cut mid-field — the one truncation that would otherwise read as a
+  // whole record, mapping a rename onto a chopped path. Empty stdout, nothing changed between
+  // the refs, is that tail and nothing else.
+  const tail = fields.pop()
+  if (tail !== "") return { ok: false, index: fields.length, field: tail ?? "" }
+  const renames = new Map<string, string>()
+  let index = 0
+  while (index < fields.length) {
+    const status = fields[index]
+    if (status === undefined || !NAME_STATUS_FIELD.test(status)) {
+      return { ok: false, index, field: status ?? "" }
+    }
+    const pathCount = status.startsWith("R") || status.startsWith("C") ? 2 : 1
+    // A record the stream ends in the middle of is truncated output, not a record we can read.
+    if (index + pathCount > fields.length - 1) return { ok: false, index, field: status }
+    index += 1 + pathCount
+    if (!status.startsWith("R")) continue
+    const oldPath = fields[index - 2]
+    const newPath = fields[index - 1]
+    // Unreachable — the bounds check above is what makes both defined — but `fields` is indexed
+    // under `noUncheckedIndexedAccess`, so the guard is what makes this typecheck.
+    if (oldPath === undefined || newPath === undefined) return { ok: false, index, field: status }
+    renames.set(oldPath.normalize("NFC"), newPath.normalize("NFC"))
+  }
+  return { ok: true, renames }
 }
 
 function irRef(refName: string, ir: IR): IRRef {
   return { ref: refName, irSchema: ir.$schema }
 }
 
+/**
+ * Chunks are joined as bytes and decoded once: a stream splits wherever it splits, so decoding
+ * each chunk on its own turns a multi-byte character that straddles two of them into U+FFFD.
+ */
 const defaultGitRunner: GitRunner = {
   async run(
     args: readonly string[],
@@ -784,18 +931,24 @@ const defaultGitRunner: GitRunner = {
   ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolvePromise, rejectPromise) => {
       const child = spawn("git", args, { cwd: options?.cwd })
-      let stdout = ""
-      let stderr = ""
+      const stdoutChunks: Buffer[] = []
+      const stderrChunks: Buffer[] = []
       child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8")
+        stdoutChunks.push(chunk)
       })
       child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8")
+        stderrChunks.push(chunk)
       })
       child.on("error", rejectPromise)
-      child.on("close", (code) => {
-        if (code === 0) resolvePromise({ stdout, stderr })
-        else rejectPromise(new Error(`git ${args.join(" ")} exited with code ${code}: ${stderr}`))
+      child.on("close", (code, signal) => {
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8")
+        const stderr = Buffer.concat(stderrChunks).toString("utf8")
+        if (code === 0) return resolvePromise({ stdout, stderr })
+        // A killed git has a null code and a signal; "exited with code null" would drop the one
+        // fact that explains it, and this string is what the caller puts in front of the user.
+        const how =
+          code === null ? `was killed by ${signal ?? "a signal"}` : `exited with code ${code}`
+        rejectPromise(new Error(`git ${args.join(" ")} ${how}: ${stderr}`))
       })
     })
   },
