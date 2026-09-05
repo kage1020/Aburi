@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { resolve } from "node:path"
+import { basename, resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
 import {
   formatCallResolutionLine,
@@ -17,6 +17,7 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import type { WarnFn } from "../warn"
+import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
 
 export type { WarnFn }
@@ -142,6 +143,8 @@ export type DiffSide = "base" | "head"
  *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
+ *   The worktree's own directory is named after the head workspace's (§6.4 step 2),
+ *   since Component detection reads that name — see `baseWorktreeLeaf`.
  *   NOTE: the head is always the working tree — a mismatched `<head>` label in the
  *   ref spec (e.g. `main..v1.1.0` when the checkout is `v1.0.0`) does NOT rescope the
  *   head scan; it only labels the report. This mirrors the design's "head is always
@@ -547,16 +550,31 @@ async function resolveViaGit(
   await assertRefResolvable(git, cwd, spec.head, "head")
   await assertNotShallow(git, cwd)
 
+  const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
-  const worktreeDir = resolve(tempParent, "base")
+  // Under a directory of its own, so the leaf below is free to be any name the head workspace
+  // has — including `base-out` or `head-out`, which as siblings would be the temp run's own
+  // output directories.
+  const worktreeParent = resolve(tempParent, "base")
+  const worktreeDir = resolve(worktreeParent, baseWorktreeLeaf(headWorkspaceRoot))
   const baseOutputDir = resolve(tempParent, "base-out")
   const headOutputDir = resolve(tempParent, "head-out")
   let baseIR: IR
   let headIR: IR
   let scans: ScanPair
+  // Whether there is a worktree to clean up. `finally` ran `worktree remove` unconditionally,
+  // so anything that threw before the checkout existed — a failing `worktree add`, and now the
+  // `mkdir` above it — was reported first as a cleanup failure advising `git worktree prune`.
+  // The reader followed that, watched it succeed against bookkeeping that was never written,
+  // and only then reached the exception that actually ended the run.
+  let worktreeAdded = false
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
+    // git creates the leading directories of a worktree path itself, so this is belt and
+    // braces for the one level this run invented rather than something git needs.
+    await mkdir(worktreeParent, { recursive: true })
     await git.run(["worktree", "add", "--detach", worktreeDir, spec.base], { cwd })
+    worktreeAdded = true
     const baseReport = await runScanInDir(worktreeDir, options, baseOutputDir, warn, {
       side: "base",
       ref: spec.base,
@@ -573,12 +591,14 @@ async function resolveViaGit(
     headIR = await readIR(headReport.irPath)
     scans = { base: baseReport, head: headReport }
   } finally {
-    try {
-      await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
-    } catch (error) {
-      warn(
-        `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
-      )
+    if (worktreeAdded) {
+      try {
+        await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
+      } catch (error) {
+        warn(
+          `⚠ git worktree cleanup failed for "${worktreeDir}"; ${errorMessage(error)}. Consider running \`git worktree prune\`.`,
+        )
+      }
     }
     try {
       await rm(tempParent, { recursive: true, force: true })
@@ -601,6 +621,33 @@ async function resolveViaGit(
     gitRenames: renames,
     scans,
   }
+}
+
+/**
+ * The directory name to materialise the base revision under: the head workspace's own leaf.
+ *
+ * Why it is not a fixed word is `cli-spec.md` §6.4 step 2 — one statement of the rule, where
+ * the rest of the ref-diff contract is. In short: detection reads the directory name for a
+ * Component rooted at the workspace root, so a constant here made the base side a different
+ * Component from the head side. This function is only the two names that rule cannot use.
+ *
+ * The two are an empty leaf — `basename` of an absolute path, only at the filesystem root —
+ * and `@`. `git worktree add` writes its bookkeeping under `.git/worktrees/<leaf>` and cannot
+ * spell that one: it fails with `fatal: not a git repository: <repo>/.git/worktrees/@`, which
+ * reads as the reader's own repository being broken. `@x`, `HEAD`, `a^b`, `~x` and `x.lock`
+ * are all fine, so `@` alone is the exception.
+ *
+ * Substituting is safe rather than lucky, and for one reason covering both: a substitution can
+ * only reinstate the defect by supplying a Component id that differs from the head's, and
+ * neither of these leaves can supply an id at all. `toKebabCase` maps both to the empty string,
+ * which `makeComponentId` rejects as `invalid-component-id` (`packages/core/src/component.ts`),
+ * so where detection decides ids the head scan refuses the workspace and names the directory
+ * that did it; where `components[]` declares them, no directory name is read on either side.
+ * What is left for this default to be is a name git can create.
+ */
+function baseWorktreeLeaf(headWorkspaceRoot: string): string {
+  const leaf = basename(headWorkspaceRoot)
+  return leaf.length === 0 || leaf === "@" ? "base" : leaf
 }
 
 /**
