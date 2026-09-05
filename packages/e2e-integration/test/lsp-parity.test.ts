@@ -59,6 +59,41 @@ function erroringMockFactory(): ServerFactory {
 }
 
 /**
+ * Hover-answering LSP mock: `documentSymbol` returns [], and `hover` answers
+ * with the owner class of whatever the pass asked about — but only for the
+ * positions the fixture's own `this.*` call sites occupy, so a pass that hovers
+ * somewhere else gets nothing rather than a free pass. Records every hovered
+ * position so a test can assert which requests were issued at all.
+ */
+function hoveringMockFactory(hovered: Array<{ line: number; character: number }>): ServerFactory {
+  return () => {
+    const client: LspClient = {
+      async initialize() {
+        return { capabilities: {} }
+      },
+      async didOpen() {
+        return null
+      },
+      async didClose() {
+        return null
+      },
+      async request<T>(method: string, params: unknown): Promise<T | LspFailure> {
+        if (method === "textDocument/documentSymbol") return [] as unknown as T
+        if (method !== "textDocument/hover") return null as unknown as T
+        const position = (params as { position: { line: number; character: number } }).position
+        hovered.push({ line: position.line, character: position.character })
+        // `service.ts:21` is `    this.helper()` — 0-based line 20, and column
+        // 9 is where `findMethodColumn` puts the callee.
+        if (position.line !== 20 || position.character !== 9) return null as unknown as T
+        return { contents: "(method) Service.helper(): void" } as unknown as T
+      },
+      async shutdown() {},
+    }
+    return client
+  }
+}
+
+/**
  * Fingerprint parity across LSP toggles. The theorem the LSP enrichment
  * design commits to is: for every Symbol S, `S.fingerprint.api` and
  * `S.fingerprint.syntax` are byte-identical between an LSP-off scan and an
@@ -144,6 +179,48 @@ describe("LSP fingerprint parity across enablement", () => {
           offS.fingerprint.logic,
         )
       }
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+/**
+ * The receiver-hint key is an agreement between two packages' worth of code:
+ * `enrichWithLsp` files a hint under `makeCallSiteKey(file, line, target)` and
+ * `resolveCallGraph` reads it back with the same call. Both sides changed
+ * together in the fix for #86, and both sides are exercised by core unit tests
+ * that build the map themselves. This is the one place the real `scan` pipeline
+ * carries a hint from the producer to the consumer, so a future edit to either
+ * key site fails here rather than silently losing the LSP tier.
+ */
+describe("receiver hints survive the trip from enrichment to the resolver", () => {
+  it("resolves `this.helper()` through a real scan, and declines `this.repo.save()`", async () => {
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const hovered: Array<{ line: number; character: number }> = []
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        hoveringMockFactory(hovered),
+      )
+      // `this.helper()` is the fixture's only two-segment `this.*` call site;
+      // `this.repo.save()` and `this.repo.load()` are three-segment, and the
+      // pass declines those because the position it would hover is the `repo`
+      // property rather than the callee.
+      expect(hovered).toEqual([{ line: 20, character: 9 }])
+
+      const handle = on.ir.symbols.find((sym) => sym.id.endsWith("#Service.handle"))
+      expect(handle).toBeDefined()
+      const resolvedByTarget = new Map(
+        (handle?.calls ?? []).map((call) => [call.target, call.resolved]),
+      )
+      expect(resolvedByTarget.get("this.helper")).toBe(
+        on.ir.symbols.find((sym) => sym.id.endsWith("#Service.helper"))?.id,
+      )
+      expect(resolvedByTarget.get("this.repo.save")).toBeNull()
     } finally {
       await cleanup()
     }

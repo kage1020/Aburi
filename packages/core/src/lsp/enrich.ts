@@ -9,9 +9,15 @@
  *
  * The pass is a no-op when `lsp.enabled !== true`, when no server is configured
  * for any language present in the symbol set, or when a server fails to start.
- * Determinism is guaranteed by processing files in ascending path order and
- * jobs by a fixed (Symbol id, call line) sort — LSP arrival order never affects
- * output. Interface-typed receiver resolution (call-resolution.md §5.3) is
+ * Determinism (§10.3) is guaranteed by processing files in ascending path
+ * order, sorting each file's jobs by (Symbol id, call line, call target), and
+ * — because concurrent workers finish in whatever order the server answers —
+ * holding every job's response until all of them have stopped and only then
+ * applying them in that sorted order. So the content of what is written, and
+ * the order it is written in, do not depend on arrival. *Which* jobs get that
+ * far still does: the per-file budget and the §6.1 escalation both read the
+ * clock, and a file that runs out mid-way keeps what it had. That axis is
+ * §6.1's, not this one's. Interface-typed receiver resolution (call-resolution.md §5.3) is
  * deferred until `IRSymbol.implements` lands; the `implementerHints` output
  * channel exists but is populated as an empty map today so downstream
  * consumers can flip on interface resolution without an API change.
@@ -28,6 +34,7 @@ import type {
   SymbolId,
 } from "@aburi/types"
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
+import { makeCallSiteKey, receiverHead } from "../call-site"
 import { trySymbolId } from "../id"
 import {
   createLspClient,
@@ -113,11 +120,6 @@ export type ServerFactory = (
   serverConfig: LspServerConfig,
   workspaceRoot: string,
 ) => Promise<LspClient | null> | LspClient | null
-
-export type ReceiverHintKey = string
-export function makeReceiverHintKey(file: string, line: number): ReceiverHintKey {
-  return `${file}:${line}`
-}
 
 const CLIENT_CAPABILITIES = {
   textDocument: {
@@ -326,22 +328,63 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
-      await runJobsWithConcurrency(jobs, concurrency, async (job) => {
-        if (fileFellBack) return
-        if (overBudget(input.now, fileStart, fileBudget)) {
-          fileFellBack = true
-          return
+      // Responses are held, not applied, while workers are running: §10.3 wants
+      // the cache consumed in job order, and a write issued from inside a
+      // worker takes its order from the server's pace instead.
+      //
+      // With the target in the key no *live* collision remains for this to
+      // settle — distinct call sites key apart, identical ones hover the same
+      // position and answer the same thing, and `appendInferredThrows` merges
+      // through a sorted set — so nothing here is load-bearing today, and no
+      // test would fail if the apply moved back inside the worker. It is the
+      // structural half of the guarantee: what the file produces is decided by
+      // the sort, and a future writer of `applyJobResult` cannot reintroduce an
+      // arrival-order dependency by adding a field that does not merge.
+      const responses: unknown[] = new Array(jobs.length)
+      const answered: boolean[] = new Array(jobs.length).fill(false)
+      try {
+        await runJobsWithConcurrency(jobs, concurrency, async (job, index) => {
+          if (fileFellBack) return
+          if (overBudget(input.now, fileStart, fileBudget)) {
+            fileFellBack = true
+            return
+          }
+          input.stats.requestsIssued += 1
+          const result = await executeJob(job, input.client, uri, requestTimeout)
+          const jobOk = !isLspFailure(result)
+          if (!jobOk) accountForFailure(input.stats, result)
+          const outcome = input.fallback.onRequest(file, jobOk)
+          if (outcome.escalate) fileFellBack = true
+          if (jobOk) {
+            responses[index] = result
+            answered[index] = true
+          }
+        })
+      } finally {
+        // Also on the way out of a throw: §6.2 keeps what a fallback had
+        // already earned, and every worker has stopped by the time
+        // `runJobsWithConcurrency` settles either way, so nothing is still
+        // writing here.
+        //
+        // Each apply carries its own `catch` for two reasons. A `finally` that
+        // throws *replaces* the exception unwinding through it, so a throw here
+        // would erase the server-side failure that caused the unwind and leave
+        // a stack pointing at the wrong cause; and inside the worker, where
+        // these applies used to run, a throwing one cost only its own result.
+        // Both properties are worth keeping even though `applyJobResult`'s
+        // lookups all return `null` rather than throw today.
+        for (let index = 0; index < jobs.length; index += 1) {
+          const job = jobs[index]
+          if (job === undefined || !answered[index]) continue
+          try {
+            applyJobResult(job, responses[index], input.receiverHints, input.workingById)
+          } catch (error) {
+            input.logger.debug?.(
+              `[aburi:lsp] applying hover for ${file}:${job.callLine} threw: ${errorMessage(error)}`,
+            )
+          }
         }
-        input.stats.requestsIssued += 1
-        const result = await executeJob(job, input.client, uri, requestTimeout)
-        const jobOk = !isLspFailure(result)
-        if (!jobOk) accountForFailure(input.stats, result)
-        const outcome = input.fallback.onRequest(file, jobOk)
-        if (outcome.escalate) fileFellBack = true
-        if (jobOk) {
-          applyJobResult(job, result, input.receiverHints, input.workingById)
-        }
-      })
+      }
     }
 
     // `didClose` draws on the per-request budget (§4.4). Its outcome cannot
@@ -380,6 +423,12 @@ type RequestJob = {
   symbolId: SymbolId
   callLine: number
   column: number
+  /**
+   * The originating `Call.target`, verbatim. It is the third component of the
+   * call-site key the hint is filed under, and without it a line carrying more
+   * than one call cannot say which of them a hint answers for.
+   */
+  target: string
   calleeText: string
   receiverKind: "this" | "super"
 }
@@ -391,6 +440,18 @@ type RequestJob = {
  * that is not yet in the IR, so we do not spend budget on `typeDefinition`
  * requests whose result we cannot act on. When that seam lands the interface
  * job type returns here.
+ *
+ * Exactly two segments, because `findMethodColumn` searches for
+ * `<head>.<method>` — the first segment and the last — and a longer target
+ * makes that needle match the wrong token: `this.emitter.emit` searches for
+ * `this.emit`, finds it inside `this.emitter`, and hovers the property. The
+ * server then answers about `emitter` while `calleeText` still says `emit`, so
+ * the hint that comes back is well-formed, correctly keyed, `kind`-consistent
+ * — and names a callee the call site never reaches. Neither lock in
+ * `resolveViaLspHint` can see that, because both are about the target and the
+ * target is right; only declining the request stops it. Such a call keeps the
+ * `resolved: null` and the `dynamic` diagnostic it has without LSP, which is
+ * the honest answer until `findMethodColumn` can address the whole chain.
  */
 function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): RequestJob[] {
   const jobs: RequestJob[] = []
@@ -401,9 +462,9 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
       const line = lines[call.line - 1]
       if (line === undefined) continue
       const segments = call.target.split(".").filter((s) => s.length > 0)
-      if (segments.length < 2) continue
-      const head = segments[0] as string
-      const method = segments[segments.length - 1] as string
+      if (segments.length !== 2) continue
+      const head = receiverHead(call.target)
+      const method = segments[1] as string
       if (head !== "this" && head !== "super") continue
       const column = findMethodColumn(line, head, method)
       if (column === null) continue
@@ -412,12 +473,32 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
         symbolId: symbol.id,
         callLine: call.line,
         column,
+        target: call.target,
         calleeText: method,
         receiverKind: head,
       })
     }
   }
+  jobs.sort(compareRequestJob)
   return jobs
+}
+
+/**
+ * The §10.3 consumption order: Symbol id ascending, then call-site line
+ * ascending, then call target — the three components of a job's identity, and a
+ * total order over the jobs of one file because no two of them share all three.
+ *
+ * On the scan path this sort changes nothing: `scan.ts` sorts `symbols` by id
+ * before calling `enrichWithLsp`, and `calls[]` reaches here in `(line, then
+ * target)` order from `pipeline.ts`'s stable re-sort by line. It is here
+ * because `enrichWithLsp` is public API and may be handed symbols in any order,
+ * and a determinism guarantee that holds only for one caller's habits is not
+ * one — not because the pipeline's order is wrong.
+ */
+function compareRequestJob(a: RequestJob, b: RequestJob): number {
+  if (a.symbolId !== b.symbolId) return a.symbolId < b.symbolId ? -1 : 1
+  if (a.callLine !== b.callLine) return a.callLine - b.callLine
+  return a.target < b.target ? -1 : a.target > b.target ? 1 : 0
 }
 
 async function executeJob(
@@ -452,10 +533,15 @@ function applyJobResult(
     workingById,
   )
   if (memberId === null) return
-  receiverHints.set(makeReceiverHintKey(caller.source.file, job.callLine), {
-    kind: job.receiverKind,
-    targetSymbolId: memberId,
-  })
+  // First hint for a call site wins. Results are applied in job order, so
+  // "first" is the lowest-sorted job rather than the quickest response — and
+  // the only jobs that can collide now are two identical call sites, which
+  // hover at the same position and therefore answer the same thing anyway.
+  // The guard is what makes that last sentence something other than a promise.
+  const key = makeCallSiteKey(caller.source.file, job.callLine, job.target)
+  if (!receiverHints.has(key)) {
+    receiverHints.set(key, { kind: job.receiverKind, targetSymbolId: memberId })
+  }
   const throws = extractInferredThrowsFromHover(text)
   if (throws.length > 0) appendInferredThrows(caller, throws)
 }
@@ -562,7 +648,7 @@ function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void
 async function runJobsWithConcurrency<T>(
   jobs: readonly T[],
   concurrency: number,
-  run: (job: T) => Promise<void>,
+  run: (job: T, index: number) => Promise<void>,
 ): Promise<void> {
   if (jobs.length === 0) return
   const workers = Math.max(1, Math.min(concurrency, jobs.length))
@@ -575,7 +661,7 @@ async function runJobsWithConcurrency<T>(
       const job = jobs[idx]
       if (job === undefined) return
       try {
-        await run(job)
+        await run(job, idx)
       } catch (error) {
         failures.set(idx, error)
       }
