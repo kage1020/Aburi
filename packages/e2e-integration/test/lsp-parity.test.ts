@@ -34,6 +34,34 @@ function healthyMockFactory(): ServerFactory {
 }
 
 /**
+ * Hovering LSP mock: answers `hover` the way tsserver answers over `this.helper()` in the
+ * fixture's `Service`. The one call site whose receiver the enrichment pass can locate is that
+ * one — `this.repo.save(x)` names its method on a property, not on `this` — so this is the
+ * mock that gets a hint all the way through to an edge.
+ */
+function hoveringMockFactory(): ServerFactory {
+  return () => {
+    const client: LspClient = {
+      async initialize() {
+        return { capabilities: {} }
+      },
+      async didOpen() {
+        return null
+      },
+      async didClose() {
+        return null
+      },
+      async request(method: string): Promise<never | LspFailure> {
+        if (method !== "textDocument/hover") return [] as never
+        return { contents: "(method) Service.helper(): void" } as never
+      },
+      async shutdown() {},
+    }
+    return client
+  }
+}
+
+/**
  * Erroring LSP mock: initialize succeeds but every request returns an
  * `LspError`. Every request path exercises per-request fallback bookkeeping.
  */
@@ -144,6 +172,70 @@ describe("LSP fingerprint parity across enablement", () => {
           offS.fingerprint.logic,
         )
       }
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+/**
+ * lsp-enrichment.md §7.2 / §11.7, through the whole pipeline rather than the pass alone. The
+ * consumer half of the counters is written by the call resolver, which runs after enrichment
+ * has returned, so only a scan can show that both halves reach `IR.stats`.
+ */
+describe("LSP hint counters in the scanned IR", () => {
+  it("says the typed tier bought nothing when every hover answers empty", async () => {
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        healthyMockFactory(),
+      )
+      const lsp = on.ir.stats.lspEnrichment
+      expect(lsp?.hintsProduced).toBe(0)
+      expect(lsp?.hintsConsumed).toBe(0)
+      expect(lsp?.hintsRejected?.unparseableHover ?? 0).toBeGreaterThan(0)
+      // Everything else about this run reads as healthy, which is the point: without the
+      // counters above, it is indistinguishable from one whose server had answers.
+      expect(lsp?.requestsIssued ?? 0).toBeGreaterThan(0)
+      expect(lsp?.requestsFailed).toBe(0)
+      expect(lsp?.requestsTimedOut).toBe(0)
+      expect(lsp?.filesFellBack).toBe(0)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("reports produced, consumed and rejected hints from one scan", async () => {
+    const { root, cleanup } = await checkoutFixture("lsp-parity")
+    try {
+      const on = await scanFixture(
+        root,
+        { lsp: { enabled: true, servers: { ts: baseServerConfig } } },
+        {},
+        [],
+        hoveringMockFactory(),
+      )
+      const lsp = on.ir.stats.lspEnrichment
+      expect(lsp?.hintsProduced).toBe(1)
+      // No untyped tier resolves a `this.` receiver, so the hint is the only thing that can
+      // have resolved this call — and the counter has to say so from the other side of a pass
+      // boundary the enrichment stats do not cross on their own.
+      expect(lsp?.hintsConsumed).toBe(1)
+      expect(lsp?.hintsRejected).toEqual({
+        unparseableHover: 0,
+        ownerClassNotFound: 0,
+        memberNotFound: 0,
+        kindMismatch: 0,
+        targetDropped: 0,
+      })
+      const handle = on.ir.symbols.find((s) => s.id.endsWith("#Service.handle"))
+      expect(handle?.calls.find((c) => c.target === "this.helper")?.resolved).toBe(
+        "ts:src/service.ts#Service.helper",
+      )
     } finally {
       await cleanup()
     }

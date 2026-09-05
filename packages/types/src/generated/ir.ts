@@ -297,6 +297,40 @@ requestsFailed: number
  * Languages that were disabled mid-run via per-language fallback. Sorted ascending.
  */
 languagesDisabled: LanguageId[]
+/**
+ * Receiver hints the pass wrote from a hover it could read all the way to a callee Symbol (lsp-enrichment.md §7.2). Counts conversions, not surviving map entries: two call sites on one line share a hint key, so the second replaces the first. Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was produced.
+ */
+hintsProduced?: number
+/**
+ * Call sites the resolver turned into an edge from a receiver hint (call-resolution.md §5.2). Counts call sites rather than distinct hints, and only those the untyped tiers had already missed — a hint the untyped tier made unnecessary is neither consumed nor rejected. Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was consumed.
+ */
+hintsConsumed?: number
+hintsRejected?: LspHintRejections
+}
+/**
+ * Why the remaining hover results and receiver hints produced no edge (lsp-enrichment.md §7.2). Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counters rather than that nothing was rejected.
+ */
+export interface LspHintRejections {
+/**
+ * Hover requests that answered without a text payload the pass could read. The request itself succeeded, so it is counted in requestsIssued and in neither failure counter.
+ */
+unparseableHover: number
+/**
+ * Hover text the pass read but could not attribute to a class: either no owner class name appears in it, or the name it names is not a class in the Symbol table.
+ */
+ownerClassNotFound: number
+/**
+ * Hover text naming an owner class the Symbol table has, but whose member the table does not — typically a method inherited from a dependency the scan never read.
+ */
+memberNotFound: number
+/**
+ * Call sites where a hint was found for the line but its receiver kind is not the one the call site writes. Hints are keyed by file and line, so a line holding both a this. and a super. call offers each of them the other's hint; the resolver declines rather than emitting an edge the hover never justified.
+ */
+kindMismatch: number
+/**
+ * Call sites whose hint named a Symbol dropped by a Category B/C rule. A dropped Symbol carries an empty body and zeroed fingerprints, so an edge into it would misstate what the caller reaches.
+ */
+targetDropped: number
 }
 /**
  * Aggregate call-resolution outcome counters (call-resolution.md §8.1). Class B per ir-schema.md §1.1, optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all, so absence means "this document predates the counter" rather than "nothing was unresolved".

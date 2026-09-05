@@ -17,7 +17,7 @@ export {
   requestImplementation,
   requestTypeDefinition,
 } from "./requests"
-export type { LspStatsBuilder } from "./stats"
-export { createStatsBuilder, finalizeStats } from "./stats"
+export type { LspHintRejectionCounts, LspHintUsage, LspStatsBuilder } from "./stats"
+export { createStatsBuilder, emptyHintUsage, finalizeStats, withHintUsage } from "./stats"
 export type { SpawnedServer } from "./transport"
 export { spawnStdioServer } from "./transport"

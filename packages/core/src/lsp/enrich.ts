@@ -9,12 +9,14 @@
  *
  * The pass is a no-op when `lsp.enabled !== true`, when no server is configured
  * for any language present in the symbol set, or when a server fails to start.
- * Determinism is guaranteed by processing files in ascending path order and
- * jobs by a fixed (Symbol id, call line) sort — LSP arrival order never affects
- * output. Interface-typed receiver resolution (call-resolution.md §5.3) is
- * deferred until `IRSymbol.implements` lands; the `implementerHints` output
- * channel exists but is populated as an empty map today so downstream
- * consumers can flip on interface resolution without an API change.
+ * Determinism is guaranteed by processing files in ascending path order, by
+ * building the per-file job list from the Symbols in a fixed order, and by
+ * settling two jobs that contend for one hint key on a (Symbol id, column)
+ * tiebreak — LSP arrival order never affects output. Interface-typed receiver
+ * resolution (call-resolution.md §5.3) is deferred until `IRSymbol.implements`
+ * lands; the `implementerHints` output channel exists but is populated as an
+ * empty map today so downstream consumers can flip on interface resolution
+ * without an API change.
  */
 
 import { pathToFileURL } from "node:url"
@@ -326,6 +328,8 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
+      // Per file, because a hint key carries the file: two files cannot contend for one.
+      const hintClaims = new Map<string, HintClaim>()
       await runJobsWithConcurrency(jobs, concurrency, async (job) => {
         if (fileFellBack) return
         if (overBudget(input.now, fileStart, fileBudget)) {
@@ -339,7 +343,14 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
         const outcome = input.fallback.onRequest(file, jobOk)
         if (outcome.escalate) fileFellBack = true
         if (jobOk) {
-          applyJobResult(job, result, input.receiverHints, input.workingById)
+          applyJobResult(
+            job,
+            result,
+            input.receiverHints,
+            hintClaims,
+            input.workingById,
+            input.stats,
+          )
         }
       })
     }
@@ -430,20 +441,42 @@ async function executeJob(
   return await requestHover(client, uri, position, timeoutMs)
 }
 
+/**
+ * Turn one hover answer into a receiver hint, or say why it could not be one.
+ *
+ * Every early return here used to be silent, and each of them is a way for the typed tier to
+ * do nothing while every request counter reports a healthy run: a hover that answers on time
+ * with no readable body is `requestsIssued += 1` and nothing else, and its file still lands
+ * in `filesEnriched`. The buckets it writes are the only record that the answer arrived and
+ * was unusable (lsp-enrichment.md §7.2).
+ */
 function applyJobResult(
   job: RequestJob,
   result: unknown,
   receiverHints: Map<string, ReceiverHint>,
+  hintClaims: Map<string, HintClaim>,
   workingById: Map<SymbolId, IRSymbol>,
+  stats: LspStatsBuilder,
 ): void {
   const caller = workingById.get(job.symbolId)
+  // Not a rejection and not counted as one: jobs are built from the same Symbols this map
+  // holds, so a miss here is an internal inconsistency rather than something the server did.
   if (caller === undefined) return
   const text = extractHoverPayload(result)
-  if (text === null) return
+  if (text === null) {
+    stats.hintsRejected.unparseableHover += 1
+    return
+  }
   const ownerClassName = extractOwnerClassName(text)
-  if (ownerClassName === null) return
+  if (ownerClassName === null) {
+    stats.hintsRejected.ownerClassNotFound += 1
+    return
+  }
   const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
-  if (ownerClassId === null) return
+  if (ownerClassId === null) {
+    stats.hintsRejected.ownerClassNotFound += 1
+    return
+  }
   const memberId = findMemberSymbolId(
     caller.language,
     caller.source.file,
@@ -451,13 +484,58 @@ function applyJobResult(
     job.calleeText,
     workingById,
   )
-  if (memberId === null) return
-  receiverHints.set(makeReceiverHintKey(caller.source.file, job.callLine), {
+  if (memberId === null) {
+    stats.hintsRejected.memberNotFound += 1
+    return
+  }
+  stats.hintsProduced += 1
+  claimHint(receiverHints, hintClaims, job, caller.source.file, {
     kind: job.receiverKind,
     targetSymbolId: memberId,
   })
   const throws = extractInferredThrowsFromHover(text)
   if (throws.length > 0) appendInferredThrows(caller, throws)
+}
+
+/** Which job owns the hint standing at a `file:line` key — see `claimHint`. */
+interface HintClaim {
+  symbolId: SymbolId
+  column: number
+}
+
+/**
+ * Write a hint at its `file:line` key, letting the lowest-sorting job win the key rather than
+ * the fastest one.
+ *
+ * A key holds one hint and a line can hold two call sites — `this.foo(super.foo())` builds two
+ * jobs at the same key — so the two collide. The jobs run concurrently (§4.3), which made the
+ * survivor whichever hover answered last: a property of server latency, not of the input, and
+ * so a §10 violation on both `Call.resolved` and, now, on the counters that say which call
+ * site got its hint. Ordering by `(Symbol id, column)` is independent of arrival order, and
+ * within one key the file and line are equal by construction, so the pair is a total order
+ * over the jobs that can contend for it.
+ *
+ * `hintsProduced` counts both conversions regardless of which one keeps the key: the hover was
+ * read all the way to a callee either way, and hiding the loser would make the producer sum in
+ * §7.2 not add up.
+ */
+function claimHint(
+  receiverHints: Map<string, ReceiverHint>,
+  hintClaims: Map<string, HintClaim>,
+  job: RequestJob,
+  file: string,
+  hint: ReceiverHint,
+): void {
+  const key = makeReceiverHintKey(file, job.callLine)
+  const held = hintClaims.get(key)
+  if (held !== undefined && !claimWins(job, held)) return
+  hintClaims.set(key, { symbolId: job.symbolId, column: job.column })
+  receiverHints.set(key, hint)
+}
+
+function claimWins(job: RequestJob, held: HintClaim): boolean {
+  if (job.symbolId !== held.symbolId) return job.symbolId < held.symbolId
+  return job.column < held.column
 }
 
 /**

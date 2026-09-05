@@ -13,6 +13,7 @@ import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
 import { makeReceiverHintKey } from "./lsp/enrich"
+import { emptyHintUsage, type LspHintUsage } from "./lsp/stats"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -101,6 +102,13 @@ export interface ResolveCallGraphResult {
    * `UnresolvedCallDiagnostic`.
    */
   diagnostics: UnresolvedCallDiagnostic[]
+  /**
+   * What the LSP tier did with the hints it was handed — the consumer half of
+   * `stats.lspEnrichment` (lsp-enrichment.md §7.2), which the enrichment pass
+   * cannot see because it has already returned by the time this runs. All zero
+   * when no hints were supplied. The caller folds it in with `withHintUsage`.
+   */
+  lspHintUsage: LspHintUsage
 }
 
 const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]
@@ -143,6 +151,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   const edges: CallEdge[] = []
   const diagnostics: UnresolvedCallDiagnostic[] = []
   const dynamicCallSites = input.dynamicCallSites ?? EMPTY_CALL_SITE_KEYS
+  const lspHintUsage = emptyHintUsage()
   let totalCalls = 0
   let resolvedCalls = 0
 
@@ -187,13 +196,15 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         return { target: call.target, line: call.line, resolved: resolved.id }
       }
       // Untyped tier missed — try LSP tier via receiverHints (§5.2 / §5.3).
-      const lspHit = resolveViaLspHint({
+      const lspOutcome = resolveViaLspHint({
         caller: symbol,
         call,
         receiverHints,
         implementerHints,
         keptSymbolIds,
       })
+      if (lspOutcome.outcome === "rejected") lspHintUsage[lspOutcome.reason] += 1
+      const lspHit = lspOutcome.outcome === "hit" ? lspOutcome.hit : null
       if (lspHit === null) {
         diagnostics.push(
           classifyUnresolved({
@@ -210,6 +221,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         return call
       }
       resolvedCalls++
+      lspHintUsage.consumed += 1
       edges.push({
         from: symbol.id,
         to: lspHit.id,
@@ -229,6 +241,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
     edges,
     stats: buildCallResolutionStats(totalCalls, resolvedCalls, diagnostics),
     diagnostics,
+    lspHintUsage,
   }
 }
 
@@ -404,11 +417,24 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  *   edge the LSP-off run did not have, never a re-rated one. Turning LSP on can
  *   add edges to the graph but cannot downgrade any edge already in it.
  *
- * A hint whose `targetSymbolId` is not in `keptSymbolIds` returns null instead
- * of an edge. A dropped Symbol carries an empty body and zeroed fingerprints, so
- * an edge into it would be a silent lie about what the caller actually reaches;
- * the call falls through to `classifyUnresolved` and is reported like any other
- * miss.
+ * A hint whose `targetSymbolId` is not in `keptSymbolIds` produces no edge. A
+ * dropped Symbol carries an empty body and zeroed fingerprints, so an edge into
+ * it would be a silent lie about what the caller actually reaches; the call
+ * falls through to `classifyUnresolved` and is reported like any other miss.
+ *
+ * A hint written for the other receiver kind produces no edge either. Hints are
+ * keyed by `file:line` and a line can hold two receivers — `this.foo(super.foo())`
+ * is one line and two call sites — so the key each of them looks up is the same
+ * one, and only one hint can be standing there. Matching `kind` against the
+ * receiver the call site actually writes is what keeps the survivor from being
+ * handed to the call it was not measured for; without it the loser of that
+ * collision gets a `high`-confidence edge to a method no hover ever attributed
+ * to it.
+ *
+ * Both refusals are reported rather than merely taken: the reason rides back to
+ * `resolveCallGraph`, which counts it into `stats.lspEnrichment.hintsRejected`
+ * (lsp-enrichment.md §7.2). A hint that is declined and not counted is
+ * indistinguishable, in the finished IR, from one the language server never had.
  *
  * Interface-tier resolution (§5.3) is out of scope until the IR carries
  * `implements` edges — until then any `implementerHints` entries pass through
@@ -420,13 +446,42 @@ function resolveViaLspHint(input: {
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   keptSymbolIds: ReadonlySet<SymbolId>
-}): ResolutionHit | null {
+}): LspHintOutcome {
   const key = makeReceiverHintKey(input.caller.source.file, input.call.line)
   const hint = input.receiverHints.get(key)
-  if (hint === undefined) return null
+  if (hint === undefined) return NO_HINT
+  if (receiverHeadOf(input.call.target) !== hint.kind) {
+    return { outcome: "rejected", reason: "kindMismatch" }
+  }
   const target = hint.targetSymbolId
-  if (!input.keptSymbolIds.has(target)) return null
-  return { id: target, confidence: "high" }
+  if (!input.keptSymbolIds.has(target)) {
+    return { outcome: "rejected", reason: "targetDropped" }
+  }
+  return { outcome: "hit", hit: { id: target, confidence: "high" } }
+}
+
+/**
+ * What the LSP tier made of one call site: an edge, no hint at all, or a hint it
+ * refused and the bucket that refusal belongs in. The third case is why this is
+ * a variant rather than `ResolutionHit | null` — the caller has to tell "no hint
+ * was offered" apart from "a hint was offered and declined", and only the second
+ * is worth counting.
+ */
+type LspHintOutcome =
+  | { outcome: "hit"; hit: ResolutionHit }
+  | { outcome: "absent" }
+  | { outcome: "rejected"; reason: "kindMismatch" | "targetDropped" }
+
+const NO_HINT: LspHintOutcome = { outcome: "absent" }
+
+/**
+ * The receiver a call site writes, for the `kind` check above: `"this"` for
+ * `this.save`, `"super"` for `super.save`, and `null` for everything else —
+ * including a bare `save`, which names no receiver and so matches no hint.
+ */
+function receiverHeadOf(target: string): "this" | "super" | null {
+  const head = splitTargetSegments(target)[0]
+  return head === "this" || head === "super" ? head : null
 }
 
 /**

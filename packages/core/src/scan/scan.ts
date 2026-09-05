@@ -26,7 +26,7 @@ import { serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
-import { enrichWithLsp, type ReadFile, type ServerFactory } from "../lsp"
+import { enrichWithLsp, type ReadFile, type ServerFactory, withHintUsage } from "../lsp"
 import { type PropagationStats, propagateEffects } from "../propagate"
 import { buildComponentAttribution } from "./attribute"
 import {
@@ -502,7 +502,14 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols: resolvedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
-    lspEnrichment: enrichment.stats,
+    // The consumer half of `stats.lspEnrichment` (lsp-enrichment.md §7.2) is folded in here
+    // rather than inside the resolver: the resolver runs whether or not the LSP pass did, and
+    // handing it the pass's builder would make a counter that describes hints depend on a
+    // pass that may never have produced any.
+    lspEnrichment:
+      enrichment.stats === undefined
+        ? undefined
+        : withHintUsage(enrichment.stats, callGraph.lspHintUsage),
     callResolution: callGraph.stats,
   })
 
