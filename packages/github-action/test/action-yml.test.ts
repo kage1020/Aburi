@@ -99,14 +99,21 @@ describe("action.yml", () => {
     expect(action.inputs.cli?.default).toBe("dlx")
   })
 
-  it("runs the workspace's own binary when `cli: workspace`", async () => {
+  it("runs the workspace's own CLI when `cli: workspace`", async () => {
     // `pnpm dlx` installs the CLI outside the checkout, so Node resolves a config's
     // plugin refs (`languages: ["lang-typescript"]`) from the store copy of @aburi/cli
     // and finds nothing. A project that installed @aburi/cli plus its plugins — the
-    // install the README's quick start prescribes — needs the binary that sits in its
-    // own node_modules instead, which is what this mode runs.
-    const raw = await readFile(ACTION_PATH, "utf8")
-    expect(raw).toContain("pnpm exec aburi")
+    // install the README's quick start prescribes — needs the CLI that sits in its own
+    // node_modules instead, which is what this mode runs.
+    //
+    // Resolved through Node's own resolver rather than off `node_modules/.bin`: a
+    // workspace that builds its own CLI has no bin link, because the bin file did not
+    // exist when the install created the links and no later install recreates it. That
+    // is this repository, and it is every consumer who builds the CLI from source.
+    const action = await loadAction()
+    const diffStep = action.runs.steps.find((s) => s.id === "diff")
+    expect(diffStep?.run).toContain('require.resolve("@aburi/cli/package.json")')
+    expect(diffStep?.run).toContain('runner=(node "$cli_bin")')
   })
 
   it("rejects a `cli` value that is neither `dlx` nor `workspace`", async () => {

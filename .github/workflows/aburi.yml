@@ -41,8 +41,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The action runs `pnpm exec aburi`, which needs `packages/cli` and
-      # `packages/lang-typescript` built.
+      # `cli: workspace` runs `packages/cli`'s bin, so it and `packages/lang-typescript`
+      # have to be built first. (There is no `node_modules/.bin/aburi` to run instead: the
+      # bin file does not exist when the install writes the links, and a second install
+      # does not recreate it — the tree is up to date by then. The action resolves the
+      # package rather than the link, which is what makes this work.)
       - name: Build
         run: pnpm build
 

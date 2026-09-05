@@ -50,10 +50,12 @@ plugin refs from the CLI's own location, so a config naming
 '@aburi/lang-typescript'` — no matter what your project has installed. Which is to
 say: the default fits a config that names no plugin, and most configs name one.
 
-Set `cli: workspace` and the action runs `pnpm exec aburi` instead, resolving the
-binary and its plugins from your own `node_modules` — the install
-[Getting started](./getting-started.md) walks through. Install the workspace first;
-`version` then has nothing to pin, because your lockfile already pinned it.
+Set `cli: workspace` and the action resolves `@aburi/cli` from your own `node_modules`
+instead, plugins beside it — the install [Getting started](./getting-started.md) walks
+through. Install the workspace first; `version` then has nothing to pin, because your
+lockfile already pinned it. Resolution goes through Node rather than a `node_modules/.bin`
+entry, so npm, yarn and bun projects work the same way, as does a workspace that builds the
+CLI from source.
 
 ```yaml
 - uses: actions/checkout@v4

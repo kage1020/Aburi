@@ -46,7 +46,7 @@ jobs:
 | `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`, relative to `working-directory`. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Directory to run the CLI from. |
-| `cli` | `dlx` | How the binary is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (`pnpm exec aburi`, the CLI your project installed). |
+| `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). |
 | `comment` | `true` | Upsert the produced Markdown as a PR comment. |
 | `token` | `${{ github.token }}` | Token used for the comment API. |
 | `node-version` | `24` | Node.js version installed via `actions/setup-node`. |
@@ -70,11 +70,17 @@ location — so a config that names `languages: ["lang-typescript"]` fails there
 `Cannot find package '@aburi/lang-typescript'`, whatever your project has installed.
 It fits a workspace whose config names no plugin.
 
-`workspace` runs `pnpm exec aburi` from `working-directory`, so the binary and its
-plugins come from your `node_modules` — the install the [quick
-start](../../README.md#quick-start) prescribes. Install and build the workspace first;
-`version`, `node-version`, and `pnpm-version` are ignored, because the toolchain that
-installed the workspace is the one that should run it.
+`workspace` resolves `@aburi/cli` from `working-directory` and runs its bin on `node`, so
+the CLI and its plugins come from your `node_modules` — the install the [quick
+start](../../README.md#quick-start) prescribes. Install the workspace first; `version`,
+`node-version`, and `pnpm-version` are ignored, because the toolchain that installed the
+workspace is the one that should run it.
+
+Resolution goes through Node rather than a `node_modules/.bin` entry, so it holds for npm,
+yarn and bun as well as pnpm — and for a workspace that builds the CLI from source, which
+has no bin link at all: the bin file does not exist when the install writes the links, and a
+later install does not recreate it, because by then the tree is up to date. `@aburi/cli`
+missing from `working-directory` is exit 2 with a message that says so.
 
 ```yaml
 - uses: actions/checkout@v4

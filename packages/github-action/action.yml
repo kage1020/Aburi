@@ -52,10 +52,11 @@ inputs:
       How the `aburi` binary is resolved. `dlx` (default) runs `pnpm dlx @aburi/cli@<version>`,
       which needs no install step but cannot load plugins: `pnpm dlx` puts the CLI outside your
       checkout, so a config naming `languages: ["lang-typescript"]` resolves that plugin from the
-      store copy of `@aburi/cli` and finds nothing. `workspace` runs `pnpm exec aburi` from
-      `working-directory` instead — the binary a project installed alongside its plugins, as the
-      quick start prescribes — and ignores `version`, `node-version`, and `pnpm-version`, because
-      the caller installed the workspace with a toolchain of their own.
+      store copy of `@aburi/cli` and finds nothing. `workspace` resolves `@aburi/cli` from
+      `working-directory` instead and runs its bin on `node` — the CLI a project installed
+      alongside its plugins, as the quick start prescribes — and ignores `version`,
+      `node-version`, and `pnpm-version`, because the caller installed the workspace with a
+      toolchain of their own.
     required: false
     default: "dlx"
   comment:
@@ -174,12 +175,42 @@ runs:
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
         if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
 
-        # `workspace` runs the binary the project installed, which is the only way a config
-        # that names plugins can work: Node resolves `languages: ["lang-typescript"]` from
-        # the CLI's own location, and under `pnpm dlx` that location is the store, not the
-        # checkout. See the `cli` input's description.
+        # `workspace` runs the CLI the project installed, which is the only way a config that
+        # names plugins can work: Node resolves `languages: ["lang-typescript"]` from the CLI's
+        # own location, and under `pnpm dlx` that location is the store, not the checkout. See
+        # the `cli` input's description.
+        #
+        # The bin is resolved through Node from the working directory rather than run off a
+        # `node_modules/.bin` entry. A workspace that builds its own CLI has no such entry —
+        # the bin file did not exist when the install linked it, and no later install recreates
+        # it, because by then the tree is already up to date — and a project on npm, yarn or bun
+        # never had a `pnpm exec` to reach it with. Resolution from `@aburi/cli`'s manifest
+        # answers for all of them.
         if [ "$CLI" = "workspace" ]; then
-          runner=(pnpm exec aburi)
+          set +e
+          cli_bin=$(node --input-type=module -e '
+            import { createRequire } from "node:module"
+            import { readFileSync } from "node:fs"
+            import { dirname, resolve } from "node:path"
+            const require = createRequire(`${process.cwd()}/`)
+            try {
+              const manifestPath = require.resolve("@aburi/cli/package.json")
+              const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
+              const bin = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.aburi
+              if (!bin) throw new Error(`${manifestPath} declares no "aburi" bin`)
+              process.stdout.write(resolve(dirname(manifestPath), bin))
+            } catch (error) {
+              process.stderr.write(error instanceof Error ? error.message.split("\n")[0] : String(error))
+              process.exit(2)
+            }
+          ' 2>&1)
+          resolve_status=$?
+          set -e
+          if [ "$resolve_status" != "0" ]; then
+            echo "::error::cli=workspace, but @aburi/cli could not be resolved from '$PWD'. Install it (and its plugins) before this step, or use cli=dlx. Resolver said: $cli_bin" >&2
+            exit 2
+          fi
+          runner=(node "$cli_bin")
         else
           runner=(pnpm dlx "@aburi/cli@$VERSION")
         fi
