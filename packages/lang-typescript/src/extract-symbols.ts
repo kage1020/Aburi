@@ -23,8 +23,7 @@ import {
   functionValuedField,
   hasPrivateName,
   isConstructorMember,
-  memberHasOwnSymbol,
-  memberNameSegment,
+  memberSymbolSegment,
 } from "./class-members"
 import { readDecorators } from "./decorators"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
@@ -40,23 +39,6 @@ function requireDeclarationName(node: Node, kind: string, file: string): string 
   if (name !== null) return name
   throw new CoreError(
     `Missing name field on ${kind} declaration in ${file}:${node.startPosition.row + 1}; the tree-sitter grammar produced an unexpected shape and this plugin refuses to fabricate a placeholder id`,
-    { code: "anonymous-symbol-id-attempted", value: `${file}:${kind}` },
-  )
-}
-
-/**
- * The qualified-name segment of a class member `memberHasOwnSymbol` has already admitted.
- *
- * Defensive rather than reachable: the predicate answers on the same `memberNameSegment`, so a
- * member with no segment never reaches a candidate builder. Throwing rather than inventing a
- * placeholder is the rule `requireDeclarationName` follows, and for the same reason — a
- * fabricated segment would collide every such member in the file on one id.
- */
-function requireMemberSegment(member: Node, kind: string, file: string): string {
-  const segment = memberNameSegment(member)
-  if (segment !== null) return segment
-  throw new CoreError(
-    `The ${kind} at ${file}:${member.startPosition.row + 1} was admitted as a member and has no qualified-name segment; the member predicate and the id builder disagree`,
     { code: "anonymous-symbol-id-attempted", value: `${file}:${kind}` },
   )
 }
@@ -365,14 +347,16 @@ function addClassMembers(
 ): void {
   const declared = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
-    if (member === null || !memberHasOwnSymbol(classNode, member)) continue
+    if (member === null) continue
+    const segment = memberSymbolSegment(classNode, member)
+    if (segment === null) continue
     // Which of the two member shapes this is. A field the predicate admitted always answers
     // with the function it holds, and a `method_definition` falls out on one type test.
     const fieldFunction = functionValuedField(member)
     const candidate =
       fieldFunction === null
-        ? makeMethodCandidate(member, ctx, ownerChain)
-        : makeFieldFunctionCandidate(member, fieldFunction, ctx, ownerChain)
+        ? makeMethodCandidate(member, segment, ctx, ownerChain)
+        : makeFieldFunctionCandidate(member, fieldFunction, segment, ctx, ownerChain)
     const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
     const group = declared.get(candidate.id)
     if (group === undefined) declared.set(candidate.id, [entry])
@@ -434,20 +418,21 @@ function makeFunctionCandidate(
 }
 
 /**
- * One class member that `memberHasOwnSymbol` has already admitted, which is why this answers a
- * candidate rather than `null`: a member whose name has no qualified-name segment — computed,
- * quoted into something that is not an identifier, numeric — never reaches it.
+ * One class member `memberSymbolSegment` has already admitted, and the segment it admitted it
+ * by: a member whose name has no qualified-name segment — computed, quoted into something that
+ * is not an identifier, numeric — never reaches here, and the name is not read a second time.
  *
- * That is also why it no longer throws on a name the id builder refuses. The predicate and the
- * qname are read off one `memberNameSegment`, so what was admitted is what is built.
+ * Taking the segment as an argument is what leaves no way for this to refuse a name. Reading
+ * the name here instead would mean handing its text to the id builder, which throws on
+ * anything that is not an identifier and costs the file at the per-file boundary.
  */
 function makeMethodCandidate(
   node: Node,
+  segment: string,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
   const kind: SymbolKind = isConstructorMember(node) ? "constructor" : "method"
-  const segment = requireMemberSegment(node, "method", ctx.file.path)
   const isStatic = hasChildOfType(node, "static")
   const qname =
     kind === "constructor"
@@ -478,8 +463,9 @@ function makeMethodCandidate(
 }
 
 /**
- * A class field whose value is a function, which `memberHasOwnSymbol` has already admitted —
- * `value` is the function it answered with, so nothing is re-derived here.
+ * A class field whose value is a function, which `memberSymbolSegment` has already admitted —
+ * `value` is the function `functionValuedField` answered with and `segment` is the name it was
+ * admitted by, so nothing is re-derived here.
  *
  * `kind` is `method` rather than `function`: the Symbol is a member of a class, named by the
  * member convention, and every reader that asks what a class member is gets one answer
@@ -491,10 +477,10 @@ function makeMethodCandidate(
 function makeFieldFunctionCandidate(
   field: Node,
   value: Node,
+  segment: string,
   ctx: ExtractionContext,
   ownerChain: readonly string[],
 ): SymbolCandidate<Node> {
-  const segment = requireMemberSegment(field, "class field", ctx.file.path)
   const isStatic = hasChildOfType(field, "static")
   const qname = classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(field)

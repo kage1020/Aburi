@@ -7,22 +7,16 @@ import type { Node } from "web-tree-sitter"
  * than picking one. A module specifier keeps whatever parsed — the parser's own syntax error
  * already accounts for the rest, and a second diagnostic would claim the author wrote no
  * module name. A name that is about to become part of a Symbol id refuses a partial read
- * instead: `"o\uZZZZk"` decodes to `ok`, which is an id for a name the source does not
- * contain.
+ * instead, because what it would be believing is a name the source does not contain.
+ *
+ * *How much* a partial read drops is the grammar's business rather than this contract's — an
+ * ERROR node's extent is whatever recovery gave it, and for the invalid escapes measured here
+ * it runs to the end of the literal, so `"o\uZZZZk"` reads as `o` and not as `ok`.
  */
 export interface DecodedLiteral {
-  /**
-   * The characters the literal's `string_fragment`s and `escape_sequence`s name, in order, or
-   * `null` when there were none of either to read — an empty literal, or one whose contents
-   * stand as an ERROR node.
-   *
-   * Empty and unread are different answers, which is why this is nullable rather than `""`:
-   * an escape can decode to nothing (a line continuation joins two source lines and
-   * contributes no character), so a literal that is only one *was* read and its value is
-   * empty.
-   */
-  value: string | null
-  /** True when the literal held nothing else — no ERROR node stood in for part of it. */
+  /** The characters the literal's `string_fragment`s and `escape_sequence`s name, in order. */
+  value: string
+  /** True when every named child read was a `string_fragment` or an `escape_sequence`. */
   whole: boolean
 }
 
@@ -30,8 +24,12 @@ export interface DecodedLiteral {
  * Read a `string` or `template_string` node's contents into the characters they name.
  *
  * **An escape is decoded, not skipped.** `"./a\tb"` reads as `./a`, a tab, `b`; dropping the
- * escape answered `./ab`, a module that does not exist and is indistinguishable in the IR
+ * escape answers `./ab`, a module that does not exist and is indistinguishable in the IR
  * from one that does.
+ *
+ * An empty `value` is not the same question as an empty literal, and `whole` is what separates
+ * them: a literal whose only content is a line continuation was read, decodes to nothing, and
+ * is whole; one whose content stands as an ERROR was not read and is not.
  */
 export function decodeStringLiteral(node: Node): DecodedLiteral {
   const parts: string[] = []
@@ -42,7 +40,7 @@ export function decodeStringLiteral(node: Node): DecodedLiteral {
     else if (child.type === "escape_sequence") parts.push(decodeEscapeSequence(child.text))
     else whole = false
   }
-  return { value: parts.length > 0 ? parts.join("") : null, whole }
+  return { value: parts.join(""), whole }
 }
 
 /**

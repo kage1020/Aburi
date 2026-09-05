@@ -11,10 +11,10 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * 1() {} }` are legal TypeScript, and the throw cost the file every Symbol it had.
  *
  * A property key is a string. `"ok"() {}` and `ok() {}` declare the *same* property — `tsc`
- * calls the pair TS2300 — so the quoted spelling maps onto the `ok` segment and the two fold,
- * the way a field and a method of the same name already do. What is not an identifier once
- * decoded has no segment, and so no Symbol: its body stays on the class, which is the answer
- * `ir-schema.md` §3.2 already gives a computed name.
+ * calls the pair TS2393, a duplicate *implementation* — so the quoted spelling maps onto the
+ * `ok` segment and the two fold, the way a field and a method of the same name already do.
+ * What is not an identifier once decoded has no segment, and so no Symbol: its body stays on
+ * the class, which is the answer `ir-schema.md` §3.2 already gives a computed name.
  */
 
 const BACKSLASH = String.fromCharCode(92)
@@ -85,8 +85,8 @@ describe("a quoted name that spells an identifier is that member", () => {
   })
 
   it("names the member the source names, not the source text", async () => {
-    // The escape is decoded, so `"okay"` is `okay`. Reading the literal's text instead
-    // would put the backslash and the four hex digits in the id.
+    // The escape is decoded, so `"o\u006bay"` is `okay`. Reading the literal's text
+    // instead would put the backslash and the four hex digits in the id.
     const source = classOf(`  "o${BACKSLASH}u006bay"() { s() }`)
 
     expect(await errorsOf(source)).toBe(0)
@@ -94,7 +94,7 @@ describe("a quoted name that spells an identifier is that member", () => {
   })
 
   it("is one member with the bare spelling written beside it", async () => {
-    // Two spellings of one property key, which is what `tsc` calls TS2300 — the same fold a
+    // Two spellings of one property key, which is what `tsc` calls TS2393 — the same fold a
     // field and a method of the same name already get.
     const source = classOf("  ok() { a() }", '  "ok"() { b() }')
 
@@ -114,6 +114,12 @@ describe("a quoted name that spells an identifier is that member", () => {
     expect(await callsOf(source, "ts:src/a.ts#C.v")).toEqual(["g", "s"])
   })
 
+  it("takes the single-quoted spelling too", async () => {
+    // The only row that would catch a regression to stripping quotes off `node.text`, which
+    // answers `ok` for one spelling and nothing recognisable for the other.
+    expect(await idsOf(classOf("  'ok'() { s() }"))).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.ok"])
+  })
+
   it("declares one for a field holding a function", async () => {
     // The field gate used to refuse every name that was not written as an identifier, because
     // a name the id builder refuses was a lost file. Refusal is `null` now, so it does not
@@ -124,6 +130,19 @@ describe("a quoted name that spells an identifier is that member", () => {
     expect(symbol.kind).toBe("method")
     expect(symbol.derivedBy).toEqual(["class-method", "field-assigned-function"])
     expect(await callsOf(source, "ts:src/a.ts#C.ok")).toEqual(["s"])
+  })
+
+  it("marks a quoted auto-accessor field the way it marks a bare one", async () => {
+    // `accessor` is read off the field and the name off the segment, so the two are
+    // independent — which is only worth saying because the fixture that checks extraction and
+    // the walk against each other carries the bare spelling.
+    const symbol = await symbolOf(classOf('  accessor "ok" = () => { s() }'), "ts:src/a.ts#C.ok")
+
+    expect(symbol.derivedBy).toEqual([
+      "class-method",
+      "field-assigned-function",
+      "accessor-declaration",
+    ])
   })
 
   it("reports the quoted spelling as public, and the private one as private", async () => {
@@ -172,14 +191,53 @@ describe("a name that is not an identifier has no Symbol, and the file keeps the
   })
 
   it("gets no Symbol when the literal itself did not parse", async () => {
-    // `\uZZZZ` stands as an ERROR node beside the fragments, so joining what parsed would
-    // answer `ok` — an id for a name the source does not contain, minted on top of the syntax
-    // error already reported.
+    // `\uZZZZ` stands as an ERROR node beside the one fragment that parsed, so believing the
+    // read would answer `o` — an id for a name the source does not contain, minted on top of
+    // the syntax error already reported. How much the ERROR swallows is recovery's choice,
+    // which is why what is asserted is that there is no Symbol rather than which name.
     const source = classOf(`  "o${BACKSLASH}uZZZZk"() { s() }`)
 
     expect(await errorsOf(source)).toBeGreaterThan(0)
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["s"])
+  })
+
+  it("gets no Symbol when the literal did not parse at all", async () => {
+    // The other half, and it arrives in a different shape: there is no `string` node left to
+    // refuse. Recovery re-emits the surviving characters as a bare `property_identifier` and
+    // drops an ERROR beside it, so what would be believed here is a member named `ZZZZ`.
+    const source = classOf(`  "${BACKSLASH}uZZZZ"() { s() }`)
+
+    expect(await errorsOf(source)).toBeGreaterThan(0)
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["s"])
+  })
+
+  it("keeps a member whose body did not parse", async () => {
+    // The other side of that gate, and the reason it reads the member's *own* children rather
+    // than `hasError`: a broken statement nests its ERROR inside the body, and a typo there
+    // does not make the member anonymous.
+    const source = classOf("  m() { s(( }")
+
+    expect(await errorsOf(source)).toBeGreaterThan(0)
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.m"])
+  })
+
+  it("leaves a bare identifier written with an escape on the class", async () => {
+    // `okay` is an ECMAScript IdentifierName and tree-sitter hands it back as a
+    // `property_identifier` whose text still carries the backslash, which the qualified-name
+    // grammar refuses — it is IdentifierName *less the escape forms*. So one property key
+    // spelled two ways gets two answers: quoted it decodes to `#C.okay`, bare it has no
+    // Symbol. Pinned in both directions rather than left to be discovered.
+    const source = classOf(`  o${BACKSLASH}u006bay() { s() }`)
+
+    expect(await errorsOf(source)).toBe(0)
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["s"])
+    expect(await idsOf(classOf(`  "o${BACKSLASH}u006bay"() { s() }`))).toEqual([
+      "ts:src/a.ts#C",
+      "ts:src/a.ts#C.okay",
+    ])
   })
 })
 
@@ -218,6 +276,34 @@ describe("the construction path is spelled two ways", () => {
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.real"])
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["c"])
+  })
+
+  it("leaves a quoted `constructor` off the path when it is static", async () => {
+    // Where the two rules meet: the segment says construction, `static` says the member is not
+    // on the path `new C()` runs, and `static` wins — so the pair are two members with two
+    // qnames rather than one id claimed twice.
+    const source = classOf("  constructor() { r() }", '  static "constructor"() { s() }')
+
+    expect(await idsOf(source)).toEqual([
+      "ts:src/a.ts#C",
+      "ts:src/a.ts#C.constructor",
+      "ts:src/a.ts#C::constructor",
+    ])
+    expect((await symbolOf(source, "ts:src/a.ts#C::constructor")).kind).toBe("method")
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["r"])
+  })
+
+  it("leaves a `#`-private `constructor` off the path", async () => {
+    // The segment drops the `#`, and the `#` is exactly what makes `#constructor` a
+    // `PrivateIdentifier` rather than a property name — `tsc` reports TS18012, a reserved
+    // word. Reading it as the constructor kept its body on the class as code `new C()` runs,
+    // which it is not.
+    const source = classOf("  #constructor() { s() }")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C.constructor")
+
+    expect(symbol.kind).toBe("method")
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual([])
+    expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["s"])
   })
 })
 

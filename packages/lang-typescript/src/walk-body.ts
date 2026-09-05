@@ -7,7 +7,7 @@ import type {
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild } from "./ast-helpers"
-import { functionValuedField, isConstructorMember, memberHasOwnSymbol } from "./class-members"
+import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -110,7 +110,7 @@ function isAncestorOf(node: Node, descendant: Node): boolean {
 
 /** The member's body when this class does not walk it, or null when the class still owns it. */
 function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
-  if (!memberHasOwnSymbol(classNode, member)) return null
+  if (memberSymbolSegment(classNode, member) === null) return null
   // The constructor's body is recorded on `#C.constructor` too, and stays here anyway: `new
   // C()` runs it and resolves to this Symbol (LP20b).
   if (isConstructorMember(member)) return null

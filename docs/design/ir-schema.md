@@ -195,6 +195,8 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | class member with a computed name (`[Symbol.iterator]() {}`) | **no Symbol**, and no diagnostic. The brackets are not a name static analysis can record, and mangling them into a segment would invent one the source does not contain |
 | class member with a quoted name (`"createInvoice"() {}`) | the segment the literal *decodes* to, when that is an identifier — a property key is a string, so `"createInvoice"` and `createInvoice` are one member and fold onto one Symbol |
 | class member with a quoted name that is not an identifier (`"a-b"() {}`), or a numeric one (`1() {}`) | **no Symbol**, and no diagnostic, as for a computed name. `C["a-b"]` is how the source addresses it and `C.a-b` is not a qualified name; the body stays on the class |
+| class member whose name is written with a unicode escape (`\u006bay() {}`) | **no Symbol**. The grammar is IdentifierName *less the escape forms*, and a bare name arrives as its own source text with the backslash still on it. Quoted, the same key decodes and is a member — one property spelled two ways, answered two ways |
+| class member whose name the parser recovered rather than read (`"\uZZZZ"() {}`) | **no Symbol**. A literal that failed entirely leaves no literal behind: recovery re-emits the surviving characters as a plain name, and believing it would record a member the source does not spell |
 
 ### 3.3 Handling anonymous symbols
 

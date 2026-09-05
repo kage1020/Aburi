@@ -19,20 +19,35 @@ answer `ir-schema.md` §3.2 already gives a computed name: **no Symbol, no diagn
 body stays on the class, where its calls and rules are still reported.
 
 **A quoted name that decodes to an identifier is that identifier.** A property key is a string,
-so `"ok"() {}` and `ok() {}` declare the same property — `tsc` calls the pair TS2300 — and they
-fold onto one Symbol the way a field and a method of the same name already do. The literal is
-decoded rather than unquoted, so an escaped spelling names the member it spells; a literal whose
-contents did not wholly parse is refused instead, because joining what parsed would mint an id
-for a name the source does not contain.
+so `"ok"() {}` and `ok() {}` declare the same property — `tsc` calls the pair TS2393, a
+duplicate *implementation* — and they fold onto one Symbol the way a field and a method of
+the same name already do. The literal is decoded rather than unquoted, so an escaped spelling
+names the member it spells.
+
+**A name the parser guessed at is refused**, and it arrives in two shapes. A literal that parsed
+in part keeps its node and is read as incomplete. One that did not parse at all leaves no
+literal behind: recovery re-emits the surviving characters as a plain name, so `"\uZZZZ"() {}`
+used to record a member called `ZZZZ` — a name the source does not spell. Both now have no
+Symbol, which makes the second the one case where this removes a Symbol the previous release
+produced. What says the name is a guess is an ERROR among the member's own children, so a
+member whose *body* fails to parse keeps its Symbol as before.
 
 Two things follow from having one answer rather than two:
 
 - **`"constructor"() {}` is the constructor.** A class element whose property name is
   `constructor` is the constructor whatever the spelling. Read as a method it took the instance
-  qualified name, where it collided with a real constructor's.
+  qualified name, where it collided with a real constructor's. Two spellings that carry the
+  segment stay off the construction path, because neither is a property name: a `static` member,
+  and a `#`-private one, whose `#` is exactly what the segment drops.
 - **A field holding a function is gated the same way a method is.** The field gate refused every
   name not written as an identifier, because a name the id builder refuses was a lost file. That
   reason is gone, so `"ok" = () => {}` is now the member `ok` — a Symbol where there was none.
+
+One diagnostic is corrected on the way past. A module specifier written as a line continuation
+followed by an escape the grammar refuses — `import x from "\<newline>\uZZZZ"` — was reported as
+naming no module, on top of the syntax errors that already said why the name could not be read.
+The continuation contributes no character, so the read came back empty and was indistinguishable
+from an empty literal; reading whether the literal was *wholly* read tells them apart.
 
 `@aburi/core` exports `isQnameSegment`, the single-segment predicate a producer needs to ask
 *before* it builds. `isQualifiedName` is the wrong one for that question and fails quietly: it
