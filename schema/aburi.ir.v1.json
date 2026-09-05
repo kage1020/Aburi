@@ -296,6 +296,60 @@
           "items": { "$ref": "#/$defs/LanguageId" },
           "uniqueItems": true,
           "description": "Languages that were disabled mid-run via per-language fallback. Sorted ascending."
+        },
+        "hintsProduced": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hovers the pass read all the way to a callee Symbol (lsp-enrichment.md \u00a77.2). Equal to the number of hints handed to the resolver except where two identical call sites share a key: both are counted here, and the first of them to be applied is the one that keeps the key. Class B per ir-schema.md \u00a71.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was produced."
+        },
+        "hintsConsumed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Call sites the resolver turned into an edge from a receiver hint (call-resolution.md \u00a75.2). Counts call sites rather than distinct hints, and only those the untyped tiers had already missed \u2014 a hint the untyped tier made unnecessary is neither consumed nor rejected. Class B per ir-schema.md \u00a71.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was consumed."
+        },
+        "hintsRejected": {
+          "$ref": "#/$defs/LspHintRejections",
+          "description": "Why the remaining hover results and receiver hints produced no edge (lsp-enrichment.md \u00a77.2). Class B per ir-schema.md \u00a71.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counters rather than that nothing was rejected."
+        }
+      }
+    },
+
+    "LspHintRejections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kindMismatch",
+        "memberNotFound",
+        "ownerClassNotFound",
+        "targetDropped",
+        "unparseableHover"
+      ],
+      "description": "Bucketed reasons a receiver hint was never turned into a call edge (lsp-enrichment.md \u00a77.2). The first three are the enrichment pass declining to write a hint; the last two are the resolver declining to use one. Without them a run whose typed tier produced nothing reads exactly like one whose language server had nothing to say.",
+      "properties": {
+        "unparseableHover": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hover requests that answered without a text payload the pass could read. The request itself succeeded, so it is counted in requestsIssued and in neither failure counter. A server answering the LSP-specified null for a position it has nothing to say about lands here too, so a systematic mistake in which position the pass hovers shows up in this bucket rather than in a failure counter."
+        },
+        "ownerClassNotFound": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hover text the pass read but could not attribute to a class the Symbol table holds: either no owner class name appears in it, or the name it carries is not a class the scan produced. One bucket rather than two because the outcome per call site is the same and the hover text that separates the two causes is not in the IR."
+        },
+        "memberNotFound": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hover text naming an owner class the Symbol table has, but whose member the table does not \u2014 typically a method inherited from a dependency the scan never read."
+        },
+        "kindMismatch": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Call sites where a hint was found at the call site's key but its receiver kind is not the one the call site writes. The key carries the target, so this is the check that holds for a receiverHints map a caller assembled by hand: the resolver declines rather than emitting an edge the hover never justified. It is checked before the target is looked up, so a hint failing this and targetDropped both is counted here only."
+        },
+        "targetDropped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Call sites whose hint named a Symbol dropped by a Category B/C rule. A dropped Symbol carries an empty body and zeroed fingerprints, so an edge into it would misstate what the caller reaches. Counted only for a hint whose receiver kind already matched, per kindMismatch."
         }
       }
     },

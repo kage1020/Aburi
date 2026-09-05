@@ -26,7 +26,7 @@ import { serializeCanonical } from "../canonical"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
-import { enrichWithLsp, type ReadFile, type ServerFactory } from "../lsp"
+import { enrichWithLsp, type ReadFile, type ServerFactory, withHintUsage } from "../lsp"
 import { type PropagationStats, propagateEffects } from "../propagate"
 import { buildComponentAttribution } from "./attribute"
 import {
@@ -502,7 +502,13 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     symbols: resolvedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
-    lspEnrichment: enrichment.stats,
+    // Where the two halves of `stats.lspEnrichment` meet — see `LspHintUsage` for why the
+    // resolver reports rather than writes. This is the only call site that completes the
+    // §7.2 record.
+    lspEnrichment:
+      enrichment.stats === undefined
+        ? undefined
+        : withHintUsage(enrichment.stats, callGraph.lspHintUsage),
     callResolution: callGraph.stats,
   })
 

@@ -9,10 +9,12 @@ import type {
   UnresolvedCallBuckets,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
+import { CALL_SITE_KEY_SEPARATOR, makeCallSiteKey, receiverHead } from "./call-site"
+import { CoreError } from "./errors"
 import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
-import { makeReceiverHintKey } from "./lsp/enrich"
+import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -44,9 +46,13 @@ export interface ResolveCallGraphInput {
   fileExtensions?: readonly string[]
   /**
    * LSP-derived per-call-site hints (call-resolution.md §5.2 / §5.3). Keys are
-   * `${file}:${line}`. Present only when the LSP enrichment pass ran; consulted
-   * as the LSP tier before the resolver would otherwise return `null`. Non-null
-   * `Call.resolved` values are still never overwritten (§5.4).
+   * `makeCallSiteKey(file, line, target)` — the same identity the hint producer
+   * files them under, so a hint reaches the one call it was resolved for and no
+   * other call sharing its line. Present only when the LSP enrichment pass ran;
+   * consulted as the LSP tier before the resolver would otherwise return
+   * `null`. Non-null `Call.resolved` values are still never overwritten (§5.4).
+   * A non-empty map keyed any other way raises `receiver-hint-key-malformed`
+   * rather than missing every lookup in silence — see `assertReceiverHintKeys`.
    */
   receiverHints?: ReadonlyMap<string, ReceiverHint>
   /**
@@ -64,17 +70,6 @@ export interface ResolveCallGraphInput {
    * The set feeds diagnostics only — it never changes which calls resolve.
    */
   dynamicCallSites?: ReadonlySet<string>
-}
-
-/**
- * Identity of one call site for the side channels that cannot ride along in the
- * IR. `line` alone would collide on `a().b(c().d())`; adding the normalized
- * target separates the two. The key survives the `(target, line)` re-sort the
- * extraction pipeline applies to `calls[]` because it depends on neither
- * position nor order.
- */
-export function makeCallSiteKey(file: string, line: number, target: string): string {
-  return `${file}\t${line}\t${target}`
 }
 
 export interface ResolveCallGraphResult {
@@ -101,6 +96,13 @@ export interface ResolveCallGraphResult {
    * `UnresolvedCallDiagnostic`.
    */
   diagnostics: UnresolvedCallDiagnostic[]
+  /**
+   * What the LSP tier did with the hints it was handed — the consumer half of
+   * `stats.lspEnrichment` (lsp-enrichment.md §7.2). All zero when no hints were
+   * supplied. See `LspHintUsage` for why it comes back as a value; the caller
+   * folds it into the producer half with `withHintUsage`.
+   */
+  lspHintUsage: Readonly<LspHintUsage>
 }
 
 const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]
@@ -126,6 +128,7 @@ const DEFAULT_EXTENSIONS: readonly string[] = ["ts", "tsx", "js", "jsx", "mts", 
 export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraphResult {
   const extensions = input.fileExtensions ?? DEFAULT_EXTENSIONS
   const receiverHints = input.receiverHints ?? EMPTY_RECEIVER_HINTS
+  assertReceiverHintKeys(receiverHints)
   const implementerHints = input.implementerHints ?? EMPTY_IMPLEMENTER_HINTS
 
   // Every downstream lookup uses `keptSymbolIds` (i.e. `dropped: false`) so
@@ -143,6 +146,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   const edges: CallEdge[] = []
   const diagnostics: UnresolvedCallDiagnostic[] = []
   const dynamicCallSites = input.dynamicCallSites ?? EMPTY_CALL_SITE_KEYS
+  const lspHintUsage = emptyHintUsage()
   let totalCalls = 0
   let resolvedCalls = 0
 
@@ -187,13 +191,15 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         return { target: call.target, line: call.line, resolved: resolved.id }
       }
       // Untyped tier missed — try LSP tier via receiverHints (§5.2 / §5.3).
-      const lspHit = resolveViaLspHint({
+      const lspOutcome = resolveViaLspHint({
         caller: symbol,
         call,
         receiverHints,
         implementerHints,
         keptSymbolIds,
       })
+      if (lspOutcome.outcome === "rejected") lspHintUsage[lspOutcome.reason] += 1
+      const lspHit = lspOutcome.outcome === "hit" ? lspOutcome.hit : null
       if (lspHit === null) {
         diagnostics.push(
           classifyUnresolved({
@@ -210,6 +216,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
         return call
       }
       resolvedCalls++
+      lspHintUsage.consumed += 1
       edges.push({
         from: symbol.id,
         to: lspHit.id,
@@ -229,6 +236,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
     edges,
     stats: buildCallResolutionStats(totalCalls, resolvedCalls, diagnostics),
     diagnostics,
+    lspHintUsage,
   }
 }
 
@@ -368,6 +376,31 @@ function compareDiagnostic(a: UnresolvedCallDiagnostic, b: UnresolvedCallDiagnos
   return 0
 }
 
+/**
+ * Refuse a `receiverHints` map keyed by anything but `makeCallSiteKey`.
+ *
+ * Every other way this could go wrong announces itself: a hint for a call that
+ * is not there is simply never read, a `kind` that disagrees is refused, a
+ * dropped target falls through to the diagnostics. A map keyed the wrong way
+ * announces nothing — every lookup misses, so the LSP tier contributes no edges
+ * and the run is indistinguishable from one where the language server had
+ * nothing to say. There is no counter for hints consumed, so nobody finds out.
+ *
+ * That failure is reachable by ordinary means: the keys were `${file}:${line}`
+ * through @aburi/core 0.3.0, both spellings are `string`, and a caller who
+ * upgrades keeps compiling. Better to name it once, at the entry, than to hand
+ * back a graph that is quietly missing its typed tier.
+ */
+function assertReceiverHintKeys(hints: ReadonlyMap<string, ReceiverHint>): void {
+  for (const key of hints.keys()) {
+    if (key.includes(CALL_SITE_KEY_SEPARATOR)) continue
+    throw new CoreError(
+      `resolveCallGraph: receiverHints key ${JSON.stringify(key)} was not built by makeCallSiteKey(file, line, target)`,
+      { code: "receiver-hint-key-malformed", value: key },
+    )
+  }
+}
+
 const EMPTY_RECEIVER_HINTS: ReadonlyMap<string, ReceiverHint> = new Map()
 const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new Map()
 
@@ -384,8 +417,26 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  * dispatch therefore lands at `high` today. Splitting it needs a walk-depth
  * field on the hint, not a change in this function.
  *
- * Two invariants of the LSP tier are load-bearing, and both hold by the shape of
- * the surrounding pass rather than by a check inside this function:
+ * A hint is looked up by the full call-site key — file, line, **and** target —
+ * and is then checked against the call it would resolve: `ReceiverHint.kind`
+ * (via `receiverHead`, the same derivation the producer files the hint under)
+ * must match the receiver the target leads with. Keying by line alone made a
+ * hint for `this.foo()` apply to every other call on that line, so an unrelated
+ * callee resolved to a class method, dropped out of the `unresolved`
+ * diagnostics, and reached `propagateEffects` as an edge no source line
+ * justifies. Both checks are cheap and neither is redundant: the key stops a
+ * producer keyed to the line rather than the call site, the `kind` check stops
+ * a hand-built hint map aimed at a target it does not describe.
+ *
+ * Neither check can vouch for a hint whose *target* is right and whose
+ * *position* was wrong — `findMethodColumn` hovering the wrong token would file
+ * a well-formed hint for a callee the call site never names. That is why
+ * `buildRequestJobs` declines the shape where it can happen (a `this.*` target
+ * of more than two segments) rather than leaving it to be caught here: by the
+ * time a hint exists, this function has nothing left to compare it against.
+ *
+ * Two further invariants of the LSP tier are load-bearing, and both hold by the
+ * shape of the surrounding pass rather than by a check inside this function:
  *
  * - **An already-resolved call is never overwritten (§5.4).** Two guards in
  *   `resolveCallGraph` stand between a resolved call and this function, and both
@@ -404,11 +455,24 @@ const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new 
  *   edge the LSP-off run did not have, never a re-rated one. Turning LSP on can
  *   add edges to the graph but cannot downgrade any edge already in it.
  *
- * A hint whose `targetSymbolId` is not in `keptSymbolIds` returns null instead
- * of an edge. A dropped Symbol carries an empty body and zeroed fingerprints, so
- * an edge into it would be a silent lie about what the caller actually reaches;
- * the call falls through to `classifyUnresolved` and is reported like any other
- * miss.
+ * A hint whose `targetSymbolId` is not in `keptSymbolIds` produces no edge. A
+ * dropped Symbol carries an empty body and zeroed fingerprints, so an edge into
+ * it would be a silent lie about what the caller actually reaches; the call
+ * falls through to `classifyUnresolved` and is reported like any other miss.
+ *
+ * Both refusals — the `kind` disagreement and the dropped target — are reported
+ * rather than merely taken: the reason rides back to `resolveCallGraph`, which
+ * counts it into `stats.lspEnrichment.hintsRejected` (lsp-enrichment.md §7.2).
+ * A hint declined here and not counted is indistinguishable, in the finished IR,
+ * from one the language server never had — the enrichment pass has returned by
+ * now and cannot see either outcome. A hint the key never reaches is not a
+ * refusal and is not counted: the untyped tier resolving a call first is the
+ * ordinary case, not a fault.
+ *
+ * The order of the two checks is part of §7.2's contract rather than an accident
+ * of writing: a hint that fails both is counted as `kindMismatch` alone. Without
+ * a fixed order the same input could be bucketed two ways, which is the kind of
+ * drift LE15's byte-identical guarantee exists to forbid.
  *
  * Interface-tier resolution (§5.3) is out of scope until the IR carries
  * `implements` edges — until then any `implementerHints` entries pass through
@@ -420,14 +484,33 @@ function resolveViaLspHint(input: {
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   keptSymbolIds: ReadonlySet<SymbolId>
-}): ResolutionHit | null {
-  const key = makeReceiverHintKey(input.caller.source.file, input.call.line)
+}): LspHintOutcome {
+  const key = makeCallSiteKey(input.caller.source.file, input.call.line, input.call.target)
   const hint = input.receiverHints.get(key)
-  if (hint === undefined) return null
+  if (hint === undefined) return NO_HINT
+  if (receiverHead(input.call.target) !== hint.kind) {
+    return { outcome: "rejected", reason: "kindMismatch" }
+  }
   const target = hint.targetSymbolId
-  if (!input.keptSymbolIds.has(target)) return null
-  return { id: target, confidence: "high" }
+  if (!input.keptSymbolIds.has(target)) {
+    return { outcome: "rejected", reason: "targetDropped" }
+  }
+  return { outcome: "hit", hit: { id: target, confidence: "high" } }
 }
+
+/**
+ * What the LSP tier made of one call site: an edge, no hint at all, or a hint it
+ * refused and the bucket that refusal belongs in. The third case is why this is
+ * a variant rather than `ResolutionHit | null` — the caller has to tell "no hint
+ * was offered" apart from "a hint was offered and declined", and only the second
+ * is worth counting.
+ */
+type LspHintOutcome =
+  | { outcome: "hit"; hit: ResolutionHit }
+  | { outcome: "absent" }
+  | { outcome: "rejected"; reason: LspConsumerRejection }
+
+const NO_HINT: LspHintOutcome = { outcome: "absent" }
 
 /**
  * Rebuild the resolved `CallEdge[]` for an already-scanned IR by walking every

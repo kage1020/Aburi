@@ -138,6 +138,7 @@ Invariants across the table:
 - The pass MUST NOT overwrite an already non-`null` `Call.resolved`. This mirrors [`call-resolution.md`](./call-resolution.md) §5.4.
 - The pass MUST NOT lower `CallEdge.confidence`.
 - The pass MUST NOT emit fields not listed here.
+- The pass MUST NOT request a hint for a `this.*` / `super.*` target of more than two segments. It locates the callee by searching the source line for `<receiver>.<method>`, which for `this.emitter.emit` is `this.emit` and matches inside `this.emitter` — so the server answers about the property while the pass still believes it asked about the method, and the hint it files is well-formed, correctly keyed, and names a callee the call site never reaches. Such a call keeps the `null` and the `dynamic` diagnostic ([`call-resolution.md`](./call-resolution.md) §8.1 rule 2) it has with LSP off. Lifting this needs a locator that can address a whole receiver chain, not a check on the hint.
 
 ## 6. Fallback Semantics
 
@@ -210,11 +211,47 @@ Under any fallback:
       "requestsIssued": 5170,
       "requestsTimedOut": 12,
       "requestsFailed": 4,
-      "languagesDisabled": []
+      "languagesDisabled": [],
+      "hintsProduced": 340,
+      "hintsConsumed": 331,
+      "hintsRejected": {
+        "unparseableHover": 18,
+        "ownerClassNotFound": 4,
+        "memberNotFound": 2,
+        "kindMismatch": 0,
+        "targetDropped": 9
+      }
     }
   }
 }
 ```
+
+**Why the hint counters exist.** The seven counters above them describe requests, not answers. A request that comes back on time, with a body this pass cannot read a callee out of, is a healthy row in every one of them: it counts in `requestsIssued`, in neither failure counter, it resets the consecutive-failure counter in §6.1, and its file still lands in `filesEnriched`. So `requestsIssued: 5170, requestsFailed: 0` describes a run that resolved 331 extra call sites and a run that resolved none, and nothing in the document tells the two apart. The hint counters are that distinction, and they are the only place it is recorded — §6.2 keeps errors out of the IR, and a hint the pass declined to write leaves no other trace anywhere.
+
+The five buckets are one per place a hint can be lost, and they split across the two passes that can lose one:
+
+| Counter | Written by | Meaning |
+|---|---|---|
+| `hintsProduced` | enrichment (§5) | Hovers read all the way to a callee Symbol. Equal to the number of hints handed to the resolver except where two identical call sites share a key (§10.3): both are counted, and the first of them to be applied keeps the key. |
+| `hintsRejected.unparseableHover` | enrichment | The hover answered with no text payload the pass could read. A server correctly answering the specified `null` for a position it has nothing to say about lands here too, so a systematic mistake in *which* position the pass hovers surfaces in this bucket rather than in a failure counter. |
+| `hintsRejected.ownerClassNotFound` | enrichment | Text was read, but no owner class name appears in it, or the name it carries is not a class in the Symbol table. These are one bucket and not two — a hover-parser gap and a scan-coverage gap — because the outcome per call site is the same and the hover text that separates them is not in the IR to split them by. |
+| `hintsRejected.memberNotFound` | enrichment | The owner class is in the Symbol table and the member is not — usually a method inherited from a dependency the scan never read. |
+| `hintsConsumed` | resolver ([`call-resolution.md`](./call-resolution.md) §5.2) | Call sites the LSP tier turned into an edge. |
+| `hintsRejected.kindMismatch` | resolver | A hint was found at the call site's key, but its receiver kind is not the one the call site writes. The key already carries the target (§10.1), so this is the check that holds for a `receiverHints` map a caller assembled by hand: the resolver declines rather than emit an edge the hover never justified. |
+| `hintsRejected.targetDropped` | resolver | The hint named a Symbol dropped by a Category B/C rule, whose body is empty and whose fingerprints are zeroed. |
+
+**Precedence.** A hint can fail both resolver checks at once. The receiver kind is checked first and the buckets are exclusive, so such a hint counts as `kindMismatch` alone. The order is part of the contract for the same reason [`call-resolution.md`](./call-resolution.md) §8.1's bucket precedence is: without it the same input can be bucketed two ways, and §10's byte-identical guarantee does not hold across implementations.
+
+**Two sums hold inside the pipeline, and the document does not let a reader check either.** They are stated because they are what the counters mean, not as an integrity invariant — unlike `stats.callResolution`, whose sum *is* checked (invariant #15), because `totalCalls` can be recomputed from `symbols[]`. Neither right-hand side here can be:
+
+- **Producer**: `hintsProduced + unparseableHover + ownerClassNotFound + memberNotFound` = the hover requests that came back without a §6.1 failure. That count is not in the IR: `requestsIssued` also carries one `documentSymbol` per enriched file, so it cannot be reduced to hovers by subtracting the two failure counters. One case is carved out of the identity as well — a job whose caller Symbol has left the table between building the job and applying its answer is not counted anywhere, being an internal inconsistency rather than something the server did.
+- **Consumer**: `hintsConsumed + kindMismatch + targetDropped` = the call sites that found a hint at their key. That count is recorded nowhere at all. Only calls the untyped tiers all missed reach the LSP tier (§5.4), so a hint the untyped tier made unnecessary is neither consumed nor rejected, and a `hintsProduced` well above the consumer sum is the ordinary shape of a healthy scan rather than a fault. Both counters are call sites rather than distinct hints, which two identical call sites make visible: they share a key, so the one hint standing there is consumed twice.
+
+Making the producer sum checkable would mean emitting the hover count as its own field and adding an integrity invariant over it. That is a reasonable follow-up; it is not done here, because it would leave the consumer half still unverifiable and the asymmetry would read as an oversight rather than a decision. LE25..LE28 hold both sums from the test side instead.
+
+`hintsConsumed: 0` with a non-zero `hintsProduced` and empty rejection buckets therefore says the untyped tier got there first; `hintsConsumed: 0` with the buckets carrying the whole of `hintsProduced` says the typed tier ran and bought nothing.
+
+All three counters are Class B per [`ir-schema.md`](./ir-schema.md) §1.1 and are written whenever `stats.lspEnrichment` itself is, `hintsRejected` with all five buckets present and zeroed rather than omitted. Their absence means the document predates them.
 
 Stats live outside the fingerprint hash inputs ([`fingerprint.md`](./fingerprint.md) §3.1, §4.1, §5.1 — none of them list `stats.*`).
 
@@ -272,9 +309,9 @@ The pass is a pure function of `(SymbolCandidate[], lspConfig, serverResponses)`
 
 Concrete rules:
 
-1. Every LSP response is captured in an in-memory cache keyed by `(file, line, column, requestKind)` **before** any IR field is written. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5.
+1. Every LSP response for a file is captured **before** any IR field is written — held as issued, against the identity of the job that issued it, `(Symbol id, call-site line, call target)`. This mirrors [`call-resolution.md`](./call-resolution.md) §5.5; there is no cache that outlives the file. A per-call-site *output* of the pass — a receiver hint (§5) — is keyed by `(file, line, target)`, never by `(file, line)`: one line holds as many call sites as it has calls, and a hint filed without the target is spent on whichever of them the resolver reaches. The pass declines to request a hint it could not key honestly: a `this.*` target of more than two segments, where the position searched for is not the position of the callee.
 2. Ambiguity (multi-result `textDocument/implementation`, multi-result `textDocument/typeDefinition`) is resolved by lexicographic tiebreak on destination Symbol id. In the multi-implementer case for `textDocument/implementation`, the pass **does not** apply the tiebreak — it leaves `Call.resolved` at `null` (matches [`call-resolution.md`](./call-resolution.md) §5.3 semantics: pick a single implementer only when there is exactly one, unless a framework hook narrows the set).
-3. Parallel LSP workers (from §4.3 concurrency) populate the cache in nondeterministic wall-clock order but the cache is consumed in a fixed order — Symbol id ascending, then call-site line ascending — when writing to `SymbolCandidate` records.
+3. Parallel LSP workers (from §4.3 concurrency) answer in nondeterministic wall-clock order but their held responses are consumed in a fixed order — Symbol id ascending, then call-site line ascending, then call target ascending — when writing to `SymbolCandidate` records. Consumption starts only once every worker for the file has stopped: a write issued from inside a worker takes its order from the server's pace, which is what this rule denies it. Where two entries would write the same call site, the first in that order wins. This rule governs *what* is written and in *which order*; which jobs get far enough to be written at all is the per-file budget's question, and §6.1 owns it.
 4. Cold-cache warm-up differences between runs are irrelevant because the pass does not use per-response timing as a signal.
 5. Silent retries with exponential backoff are prohibited. A request either succeeds within `requestTimeoutMs` or triggers per-request fallback. Retry-on-load would make outcomes depend on machine load.
 6. Fallback state (§6.1) is derived deterministically from the cache. Given identical `serverResponses`, identical files will fall back and identical files will succeed.
@@ -310,17 +347,25 @@ Concrete rules:
 - LE11: same LSP-off vs LSP-on comparison as LE9, but the fixture contains at least one call where the untyped tier leaves `Call.resolved: null` and whose actual callee has a `db.write` in its transitive downstream. The transitive callers of that callee MUST have a different `logic` fingerprint between the two runs (matching [`effect-propagation.md`](./effect-propagation.md) §11.1 "propagation is monotone in resolved edges"). Symbols outside that transitive closure MUST have byte-identical `logic` fingerprints.
 - LE12: LSP-off vs LSP-on comparison of `signature.throws` — MUST be byte-identical for every Symbol (LSP-inferred throws land in `signature.inferredThrows`, never in `signature.throws`; guards §14.2).
 
-### 11.5 Determinism — LE13..LE15
+### 11.5 Determinism — LE13..LE15, LE24
 
 - LE13: reorder file processing (single-threaded vs concurrent workers) → byte-identical IR.
 - LE14: language server returns implementers in reverse order between two runs → byte-identical `Call.resolved` values (tiebreak in §10.2).
 - LE15: identical scan run twice back-to-back on the same fixture → byte-identical IR including `stats.lspEnrichment` counts.
+- LE24 (§10.1's key shape): two `this.*` calls on one line (`this.foo(this.baz())`), with the server answering one of the two hovers slowly → each call resolves to its own callee, and inverting which hover is the slow one between runs changes nothing in the IR. A hint keyed without the target collapses the two into one and fails this. It does **not** exercise §10.3's consumption order: once the key carries the target, distinct call sites write distinct entries and `inferredThrows` merges through a sorted set, so applying responses from inside their workers produces the same IR. §10.3 is a structural guarantee here, not a behaviour any input distinguishes.
 
 ### 11.6 Behavioral guards — LE16..LE18
 
 - LE16 (`CallEdge.confidence` monotone): for any Symbol whose LSP-off `CallEdge.confidence` for a given edge is `C_untyped`, the LSP-on value `C_lsp` MUST satisfy `C_lsp ≥ C_untyped` on the `high > medium > low` lattice. The pass MUST NEVER lower a confidence.
 - LE17 (`inferredThrows` omit-vs-empty): for a Symbol whose LSP `hover` on called declarations returned no throws (either no calls declared throws, or LSP fell back), the emitted `Signature` JSON MUST NOT contain an `inferredThrows` key at all (per §6.2 / §7.1). Assert with a JSON-key existence check, not an array-length check.
 - LE18 (no silent retry): inject a request that fails with a transient error at time `t` and succeeds at time `t + Δ`. The pass MUST NOT reissue that request within the same scan; the field stays at the untyped-tier value and `stats.lspEnrichment.requestsTimedOut` (or the appropriate bucket) increments by 1.
+
+### 11.7 Hint observability — LE25..LE28
+
+- LE25 (a hover that answers nothing is counted, not absorbed): a `hover` that resolves with no readable text → `hintsRejected.unparseableHover` increments by 1, `hintsProduced` does not move, and the file still counts in `filesEnriched` with `requestsFailed` / `requestsTimedOut` at 0 — the counter is the only thing separating this run from one that produced a hint.
+- LE26 (a hover naming what the Symbol table does not have is bucketed by which half is missing): hover text carrying no owner class name, or one naming a class no Symbol carries → `hintsRejected.ownerClassNotFound` increments by 1; hover text naming a class the table has and a member it does not → `hintsRejected.memberNotFound` increments by 1. Neither moves `hintsProduced`.
+- LE27 (a hint the resolver declines is counted, not lost): a hand-built hint whose receiver kind is not the one its call site writes → `hintsRejected.kindMismatch` increments by 1; a hint naming a dropped Symbol → `hintsRejected.targetDropped` increments by 1. In both cases the call stays `resolved: null`, is bucketed into the `call-resolution.md` §8.1 diagnostics like any other miss, and `hintsConsumed` does not move.
+- LE28 (an all-rejected scan says so): a scan in which every produced hint is refused reports `hintsConsumed: 0` with the rejection buckets accounting for every hover, and reports it identically on a rerun (§10, LE15).
 
 ## 12. Config Surface
 

@@ -26,7 +26,7 @@ import type {
   VocabRegistry,
   WalkContext,
 } from "@aburi/types"
-import { makeCallSiteKey } from "../callgraph"
+import { makeCallSiteKey } from "../call-site"
 import { CoreError } from "../errors"
 import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
