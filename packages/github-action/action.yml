@@ -1,8 +1,8 @@
 name: "Aburi"
 description: >-
-  Run `aburi diff` on a pull request and upsert the semantic-diff Markdown as a PR
-  comment. The CLI is resolved via `pnpm dlx @aburi/cli@<version>` so consumers pin
-  the CLI version rather than this action.
+  Run `aburi diff` on a pull request and upsert the semantic-diff Markdown as a PR comment.
+  The CLI is either fetched with `pnpm dlx @aburi/cli@<version>`, so consumers pin the CLI
+  version rather than this action, or taken from the project's own install — see the `cli` input.
 author: "kage1020"
 branding:
   icon: "eye"
@@ -11,16 +11,20 @@ branding:
 inputs:
   version:
     description: >-
-      npm dist-tag or exact version of `@aburi/cli` to run (e.g. `latest`, `0.1.0`).
-      Passed straight to `pnpm dlx`.
+      npm dist-tag or exact version of `@aburi/cli` to run (e.g. `latest`, `0.1.0`). Passed
+      straight to `pnpm dlx`, and ignored under `cli: workspace`, where the project's own
+      lockfile decides the version.
     required: false
     default: "latest"
+  # The context paths below are written as prose on purpose. The runner parses a description as a
+  # template, with a context set that has no `github` in it, so an expression here fails the whole
+  # manifest to load. `test/action-yml.test.ts` holds the line.
   refspec:
     description: >-
-      `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls
-      back to `${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}`
-      on `pull_request` events. Any other event with an empty `refspec` fails with
-      exit code 2.
+      `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls back to the
+      event's own `github.event.pull_request.base.sha` and `github.event.pull_request.head.sha`,
+      on `pull_request` and `pull_request_target` events. Any other event with an empty `refspec`
+      fails with exit code 2.
     required: false
     default: ""
   fail-on:
@@ -46,6 +50,16 @@ inputs:
     description: "Directory to run the CLI from (defaults to the repository root)."
     required: false
     default: "."
+  cli:
+    description: >-
+      How the CLI is resolved. `dlx` (default) fetches it with `pnpm dlx @aburi/cli@<version>`:
+      no install step, but a plugin named by package (`lang-typescript`) cannot load, because the
+      CLI resolves it from the pnpm store rather than from your checkout. `workspace` runs the
+      `@aburi/cli` your project installed, resolved from `working-directory`, with its plugins
+      beside it; install (and, from source, build) the workspace before this step. `version`,
+      `node-version` and `pnpm-version` do not apply to it.
+    required: false
+    default: "dlx"
   comment:
     description: "Upsert the produced Markdown as a PR comment. Set to `false` to run diff only."
     required: false
@@ -55,11 +69,15 @@ inputs:
     required: false
     default: ${{ github.token }}
   node-version:
-    description: "Node.js version to install via `actions/setup-node`."
+    description: >-
+      Node.js version to install via `actions/setup-node`. Only for `cli: dlx`; under
+      `cli: workspace` the action installs nothing and runs on the caller's Node.
     required: false
     default: "24"
   pnpm-version:
-    description: "pnpm version to install via `pnpm/action-setup`."
+    description: >-
+      pnpm version to install via `pnpm/action-setup`. Only for `cli: dlx`; under
+      `cli: workspace` the action installs nothing and runs on the caller's pnpm.
     required: false
     default: "10"
 
@@ -71,7 +89,7 @@ outputs:
     description: "Path to the Markdown diff artefact produced by `aburi diff` (empty when `format=json`)."
     value: ${{ steps.diff.outputs.diff-md-path }}
   cli-exit-code:
-    description: "Numeric exit code from `aburi diff` (0=clean, 1=runtime error, 2=input error, 3=--fail-on gate or plugin error). Matches `packages/cli/src/exit-codes.ts`."
+    description: "Numeric exit code from `aburi diff` (0=clean, 1=runtime error, 2=input error, 3=--fail-on gate or plugin error). Matches `packages/cli/src/exit-codes.ts`. Also 2 when `cli: workspace` finds no CLI to run, which is the one value the diff itself did not produce."
     value: ${{ steps.diff.outputs.cli-exit-code }}
   comment-id:
     description: "Numeric id of the PR comment that was created or updated, or empty when `comment=false`."
@@ -88,6 +106,7 @@ runs:
       env:
         FORMAT: ${{ inputs.format }}
         COMMENT: ${{ inputs.comment }}
+        CLI: ${{ inputs.cli }}
       run: |
         set -euo pipefail
         if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
@@ -97,6 +116,17 @@ runs:
         case "$FORMAT" in
           json|md|both) : ;;
           *) echo "::error::format must be one of: json | md | both (got '$FORMAT')." >&2; exit 2 ;;
+        esac
+        case "$CLI" in
+          dlx|workspace) : ;;
+          *) echo "::error::cli must be one of: dlx | workspace (got '$CLI')." >&2; exit 2 ;;
+        esac
+        # Checked rather than compared: every other value of `comment` reads as false further down,
+        # so `comment: yes` would run green, post nothing, and slip past the format check above
+        # without ever saying why.
+        case "$COMMENT" in
+          true|false) : ;;
+          *) echo "::error::comment must be true or false (got '$COMMENT')." >&2; exit 2 ;;
         esac
 
     - name: "Aburi: resolve refspec"
@@ -123,12 +153,18 @@ runs:
         fi
         echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
+    # Only the dlx path needs a toolchain of its own. Under `cli: workspace` the caller
+    # has already installed the workspace, which they could not have done without Node and
+    # pnpm; re-running these would swap that toolchain out from under the install and run
+    # the CLI on a Node it was never built against.
     - name: "Setup pnpm"
+      if: inputs.cli == 'dlx'
       uses: "pnpm/action-setup@v4"
       with:
         version: ${{ inputs.pnpm-version }}
 
     - name: "Setup Node.js"
+      if: inputs.cli == 'dlx'
       uses: "actions/setup-node@v4"
       with:
         node-version: ${{ inputs.node-version }}
@@ -144,14 +180,43 @@ runs:
         OUTPUT_DIR: ${{ inputs.output-dir }}
         FAIL_ON: ${{ inputs.fail-on }}
         CONFIG: ${{ inputs.config }}
+        CLI: ${{ inputs.cli }}
       run: |
         set -euo pipefail
         args=(diff "$REFSPEC" --format "$FORMAT" --output-dir "$OUTPUT_DIR")
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
         if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
 
+        # `workspace` runs the CLI the project installed, which is the only way a config naming a
+        # plugin by package can work: the CLI resolves that plugin from its own location, and under
+        # `pnpm dlx` that location is the pnpm store, not the checkout. The resolver is a script
+        # rather than an inline heredoc so it can be tested; `docs/design/github-action.md` §3 is
+        # the contract it implements, and `test/resolve-cli-bin.test.ts` runs it.
+        if [ "$CLI" = "workspace" ]; then
+          # stderr goes to a file, never merged into the captured stdout: a Node warning on the
+          # success path (an `ExperimentalWarning` from the caller's NODE_OPTIONS, say) would
+          # otherwise be prepended to the path and run as one.
+          resolve_error="${RUNNER_TEMP:-/tmp}/aburi-resolve-cli-bin.err"
+          set +e
+          cli_bin=$(node "$GITHUB_ACTION_PATH/scripts/resolve-cli-bin.mjs" 2>"$resolve_error")
+          resolve_status=$?
+          set -e
+          if [ "$resolve_status" != "0" ]; then
+            # Written before the exit so a caller reading `cli-exit-code` gets the 2 this is,
+            # rather than the empty string an early exit would leave behind.
+            echo "diff-json-path=" >> "$GITHUB_OUTPUT"
+            echo "diff-md-path=" >> "$GITHUB_OUTPUT"
+            echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
+            echo "::error::cli=workspace: $(head -n 1 "$resolve_error")" >&2
+            exit 2
+          fi
+          runner=(node "$cli_bin")
+        else
+          runner=(pnpm dlx "@aburi/cli@$VERSION")
+        fi
+
         set +e
-        pnpm dlx "@aburi/cli@$VERSION" "${args[@]}"
+        "${runner[@]}" "${args[@]}"
         status=$?
         set -e
 
@@ -237,6 +302,11 @@ runs:
           core.setOutput('comment-id', String(data.id))
 
     - name: "Aburi: propagate CLI exit code"
+      # `always()` because a composite action stops at its first failing step: without it, a 403 or
+      # a rate limit in the comment step would end the job on a GitHub API error and never say that
+      # the gate had fired, which is the one fact that run existed to report. An empty CLI_EXIT
+      # (an earlier step failed on its own terms) reads as 0 here and leaves that failure standing.
+      if: always()
       shell: bash
       env:
         CLI_EXIT: ${{ steps.diff.outputs.cli-exit-code }}

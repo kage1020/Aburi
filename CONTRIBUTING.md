@@ -38,6 +38,30 @@ macOS, and Windows.
    `pnpm changeset`.
 4. Open a pull request against `main`.
 
+Two workflows then run. CI runs the four commands above on Ubuntu, macOS and Windows,
+and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml)
+builds your branch, diffs it against the pull request's base with the CLI your branch
+contains, and posts the report as a comment it rewrites on every push. (From a fork, the
+token is read-only: there is no comment, and the report is the `aburi-diff` artifact on
+the run.) Its gate (`removed,dropped-toggled:to-dropped:>10`) turns the check red when a
+symbol disappears or bodies are emptied in bulk.
+
+The job has no bypass switch: a tripped gate stays red for that commit. Say in the pull
+request why the removal is deliberate — merging past a red Aburi check is then a
+maintainer's call, and the design docs are what the argument is made against.
+
+Two things about this repository's own dogfooding are worth knowing before they surprise
+you:
+
+- A fresh `pnpm install` warns `Failed to create bin at …/node_modules/.bin/aburi`. That
+  is expected. The root `package.json` depends on `@aburi/cli`, whose bin is build output
+  and does not exist yet at install time; nothing needs the link, because the action
+  resolves the package rather than the link
+  ([`docs/design/github-action.md`](docs/design/github-action.md) §3).
+- There is an `aburi.json` at the repository root, and config discovery walks parent
+  directories to the filesystem root. A test fixture built inside the repository would
+  pick it up; build fixtures under `os.tmpdir()`, as the existing ones do.
+
 ## Design docs
 
 Behaviour is specified before it is implemented. Every package's contract

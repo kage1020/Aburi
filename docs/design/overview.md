@@ -110,7 +110,7 @@ aburi diff <base>..<head>        # semantic diff → out/diff.md (for pasting as
 aburi explain <file-or-symbol>   # L2 Markdown for a single symbol to stdout
 ```
 
-Automatic PR comment posting is bundled as a thin `@aburi/github-action`. Detailed CLI specification: [`cli-spec.md`](./cli-spec.md).
+Automatic PR comment posting is bundled as a thin `@aburi/github-action` ([`github-action.md`](./github-action.md)). Detailed CLI specification: [`cli-spec.md`](./cli-spec.md).
 
 ## 7. Diff Strategy
 

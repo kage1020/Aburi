@@ -87,6 +87,7 @@ export default defineConfig({
           { text: "Config", link: "/design/config" },
           { text: "Parallel parsing", link: "/design/performance" },
           { text: "LSP enrichment", link: "/design/lsp-enrichment" },
+          { text: "GitHub Action", link: "/design/github-action" },
         ],
       },
     ],

@@ -15,6 +15,12 @@ importers:
 
   .:
     devDependencies:
+      '@aburi/cli':
+        specifier: workspace:*
+        version: link:packages/cli
+      '@aburi/lang-typescript':
+        specifier: workspace:*
+        version: link:packages/lang-typescript
       '@biomejs/biome':
         specifier: ^2.5.1
         version: 2.5.1

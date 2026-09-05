@@ -1,0 +1,88 @@
+name: Aburi
+
+# Aburi on Aburi. Every pull request gets the semantic diff its own code produces,
+# so a regression in extraction, matching, or the Markdown projection shows up as a
+# wrong report on the pull request that caused it — before it is released.
+on:
+  pull_request:
+
+# Same reasoning as CI: a superseded run on a pull request branch has nothing left
+# to say, and the comment it would post describes a head that no longer exists.
+concurrency:
+  group: aburi-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # The action upserts one marker comment per pull request; without this the
+  # github-script step gets a 403 on the first create.
+  pull-requests: write
+
+jobs:
+  diff:
+    name: semantic diff
+    runs-on: ubuntu-latest
+    env:
+      # A read-only token cannot post a comment, and the `permissions:` block above does not change
+      # that for either case: a fork's pull request, or Dependabot's, whose branch lives inside the
+      # repository and so passes the fork check on its own. Decided once, because two steps below
+      # both need the answer.
+      CAN_COMMENT: >-
+        ${{ github.event.pull_request.head.repo.full_name == github.repository
+            && github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `aburi diff` checks out the base revision into a worktree to analyse it,
+          # and a shallow clone cannot give it one.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `cli: workspace` runs `packages/cli`'s own bin, which is build output.
+      - name: Build
+        run: pnpm build
+
+      # `cli: workspace` runs the CLI this checkout builds, so the report on a pull request comes
+      # from the analyser that pull request contains. It is also the only mode that can load
+      # `lang-typescript`, which `aburi.json` names by package: see
+      # `docs/design/github-action.md` §3.
+      - name: Aburi diff
+        id: aburi
+        uses: ./packages/github-action
+        with:
+          cli: workspace
+          # The diff and the gate run either way; only the comment depends on this.
+          comment: ${{ env.CAN_COMMENT }}
+          # The gate the docs recommend starting with, applied to ourselves: a deleted symbol, or a
+          # batch of emptied bodies, is worth a human's attention, and neither is routine here. A
+          # gate that fires on every pull request is a gate everyone learns to ignore.
+          fail-on: "removed,dropped-toggled:to-dropped:>10"
+
+      # The run that cannot comment is the run whose report is worth the most: a red check saying
+      # `--fail-on removed tripped` does not say *which* symbol went away, and on those pull
+      # requests nothing else will. `always()` because a tripped gate fails the step above.
+      - name: Upload the report
+        if: always() && hashFiles('out/diff.md') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: aburi-diff
+          path: out/
+          retention-days: 14
+
+      # Otherwise the comment step simply renders as skipped, and a reader cannot tell "we chose
+      # not to post" from "posting failed".
+      - name: Say why no comment was posted
+        if: always() && env.CAN_COMMENT != 'true'
+        run: |
+          echo "::notice::No comment was posted: this pull request's token is read-only (a fork, or Dependabot). The report is in the 'aburi-diff' artifact."
