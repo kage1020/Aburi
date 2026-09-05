@@ -50,24 +50,29 @@ and adds new drivers per release.
 The import gate is not a receiver check: it answers "does this file use
 Drizzle", and an Express router file is free to answer yes — Express + Drizzle
 is one of the most common pairings there is, and `router.delete("/users/:id", h)`
-has the same 2-segment shape as `db.delete(users)`. Two further checks decide
+has the same 2-segment shape as `db.delete(users)`. Three further checks decide
 what is recorded:
 
-- **Argument shape.** `select` takes an optional projection, `insert` /
-  `update` / `delete` take one table reference, and the relational query
-  terminals take an optional options object — none of them takes a bare
-  literal, and only Postgres' `selectDistinctOn(columns, projection)` takes a
-  second argument. So `router.delete("/users/:id", handler)` and
-  `store.select("name")` are not classified at all. `transaction` / `batch`
-  keep the looser rule their own signature needs (`transaction(cb, config)`):
-  only the literal check applies.
+- **Literal first argument.** A Drizzle root takes a table reference, a
+  projection object, a callback or a statement array — never a bare literal. So
+  `router.delete("/users/:id", handler)` and `store.select("name")` are not
+  classified at all.
 - **Receiver name.** The client segment — `db` in `db.select`, in
   `this.db.select` and in `db.query.users.findMany` — is matched word-wise
-  against the client vocabulary (`drizzle` / `db` / `database` / `client` /
-  `conn` / `connection` / `orm` / `tx` / `trx` / `transaction`), so `drizzleDb`,
-  `readReplicaDb` and `_db` all count and `router`, `store` and `cache` do not.
-  A match gives `confidence: "high"`; anything else still records the effect, at
-  `confidence: "medium"`.
+  against the client vocabulary (`drizzle` / `db` / `database` / `conn` /
+  `connection` / `orm` / `tx` / `trx`), so `drizzleDb`, `readReplicaDb` and
+  `_db` all count and `router`, `store`, `cache` and `httpClient` do not.
+  `client` is deliberately absent: it would hand `httpClient.delete(url)` the
+  top tier, which is the collision this check exists to catch.
+- **Argument count.** Most roots take one argument; `selectDistinctOn(columns,
+  projection)` and `transaction(callback, config)` take two, and the table in
+  `src/methods.ts` says so. More than the terminal takes is evidence against —
+  but only evidence: `argumentCount` is a syntactic count, and a drop would
+  erase a real query without logging anything, so an overflow costs the tier
+  instead.
+
+A match on all three gives `confidence: "high"`; anything short of that still
+records the effect, at `confidence: "medium"`.
 
 The `medium` tier is deliberate. Without the AST — which effect plugins never
 see — a client bound under a house naming convention and an unrelated object of

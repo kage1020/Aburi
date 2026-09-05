@@ -15,9 +15,10 @@ export {
 } from "./methods"
 export { PrismaEffectsPlugin, prismaEffectsPlugin } from "./plugin"
 export {
-  hasDelegateArgumentShape,
+  classificationConfidence,
   namesPrismaClient,
   PRISMA_CLIENT_WORDS,
+  PRISMA_DELEGATE_MAX_ARGUMENTS,
+  PRISMA_TRANSACTION_MAX_ARGUMENTS,
   type PrismaClientWord,
-  receiverConfidence,
 } from "./receivers"

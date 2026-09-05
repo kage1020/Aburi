@@ -282,10 +282,13 @@ Contracts:
   gate says the file uses your library, not that *this* call does — a file is
   free to hold an Express router beside its queries, and `delete` / `create` /
   `select` belong to `Map`, the DOM and every HTTP router as much as to an ORM.
-  Reject argument shapes your library's own signatures cannot produce, and let
-  the receiver's name set the tier: `high` when it names a client binding,
+  Reject the argument shapes your library's own signatures cannot produce at
+  all, and let the receiver's name and the argument count set the tier: `high`
+  when the receiver names a client binding and the call fits the signature,
   `medium` when it does not, rather than `high` for everything the shape
-  matched. [`effect-plugin.md` §5.4](../design/effect-plugin.md) has the rule and
+  matched. Keep the tier and the gate apart —  `argumentCount` is a syntactic
+  count, so an unexpected arity should cost confidence rather than erase the
+  effect. [`effect-plugin.md` §5.4](../design/effect-plugin.md) has the rule and
   the reasoning.
 - **Use the shared input guards, do not re-implement them.**
   `@aburi/plugin-registry/plugin-input` exports `assertNonEmptySegments` (splits
@@ -306,7 +309,10 @@ Contracts:
     identifierMentions,
   } from "@aburi/plugin-registry/plugin-input"
 
-  const MY_CLIENT_WORDS = new Set(["mytool", "client"])
+  // Words that actually separate your client from everything else sharing the verbs.
+  // `client` is not one: it matches `apiClient`, `httpClient`, `redisClient`, ...
+  const MY_CLIENT_WORDS = new Set(["mytool", "gateway"])
+  const MAX_ARGUMENTS = new Map([["send", 2]])
 
   classify(call, ctx) {
     const origin = { plugin: "effects-mytool", filePath: ctx.file.path }
@@ -318,13 +324,14 @@ Contracts:
     if (!hasMatchingImport(ctx.file.imports, origin, (source) => source === "mytool")) return null
 
     if (segments.length < 2 || !MY_VERBS.has(last)) return null
-    // A shape your library's signatures cannot produce is not your call.
+    // A first argument your library's signatures could never take is not your call.
     if (hasLiteralFirstArgument(call)) return null
 
-    // The receiver sets the tier, it does not gate the classification.
+    // The receiver and the arity set the tier; neither gates the classification.
     const receiver = segments.at(-2)
     const named = receiver !== undefined && identifierMentions(receiver, MY_CLIENT_WORDS)
-    const confidence = named && call.dynamicReceiver !== true ? "high" : "medium"
+    const fits = call.argumentCount <= (MAX_ARGUMENTS.get(last) ?? 1)
+    const confidence = named && fits && call.dynamicReceiver !== true ? "high" : "medium"
 
     return { effectId: "net.fetch", confidence, derivedBy: `effects-plugin:mytool:${last}` }
   }

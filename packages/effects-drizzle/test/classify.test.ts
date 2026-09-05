@@ -168,7 +168,7 @@ describe("classifyDrizzleCall — chain-collapse (one classification per fluent 
   })
 })
 
-describe("classifyDrizzleCall — receiver identification (issue #87)", () => {
+describe("classifyDrizzleCall — receiver identification", () => {
   const ctx = makeCtx({ imports: [makeDrizzleImport()] })
 
   it("returns null for an Express route registration", () => {
@@ -264,13 +264,24 @@ describe("classifyDrizzleCall — receiver identification (issue #87)", () => {
     ).toBe("medium")
   })
 
-  it("still throws for transaction/batch with argCount=0 before any shape check", () => {
-    // Ordering matters: a zero-argument call has no first argument for the shape check to
-    // reject, so running the shape check first would turn a loud upstream signal into a
-    // silent null.
+  it("still throws for transaction/batch with argCount=0, receiver notwithstanding", () => {
+    // The contract violation outranks the receiver: an unrecognized `log` does not turn
+    // the throw into a medium-confidence effect, or into a silent null.
     expect(() =>
       classifyDrizzleCall(makeCall({ target: "log.transaction", argumentCount: 0 }), ctx),
     ).toThrow(/argCount=0/)
+  })
+
+  it("downgrades an over-long argument list rather than dropping the call", () => {
+    // `db.delete(\n  users, // soft delete is not used\n)` reached this classifier as
+    // argumentCount=2 before `walkBody` stopped counting comments. A drop would have
+    // erased the write with nothing logged; the tier pays for the doubt instead.
+    const result = classifyDrizzleCall(
+      makeCall({ target: "db.delete", argumentCount: 2, literalArgs: [null, null] }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("medium")
   })
 
   it("returns null for a transaction verb handed a literal", () => {

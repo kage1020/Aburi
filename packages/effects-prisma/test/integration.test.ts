@@ -167,7 +167,7 @@ export async function moveUser(prisma: PrismaClient) {
     expect(innerCall?.effectId).toBe("db.write")
   })
 
-  it("does not fabricate a high-confidence db.write for a Map beside the client (issue #87)", async () => {
+  it("does not fabricate a high-confidence db.write for a Map beside the client", async () => {
     // The reported reproduction: one class holding both a PrismaClient and a plain Map
     // cache. `this.cache.items.delete(key)` has three segments and a delegate verb inside
     // a file that imports Prisma, which is everything the old shape gate asked for. The
@@ -188,11 +188,29 @@ export class Repo {
 }`,
     )
     const evicted = results.find((r) => r.target === "this.cache.items.delete")
-    expect(evicted).toBeDefined()
-    expect(evicted?.confidence).not.toBe("high")
+    expect(evicted?.effectId).toBe("db.write")
+    expect(evicted?.confidence).toBe("medium")
     const removed = results.find((r) => r.target === "this.prisma.user.delete")
     expect(removed?.effectId).toBe("db.write")
     expect(removed?.confidence).toBe("high")
+  })
+
+  it("keeps a write whose argument list carries a comment", async () => {
+    // Comments are grammar `extras`: tree-sitter hangs them inside the argument list, and
+    // counting them made this a two-argument call, which no delegate method takes.
+    const results = await classifyCalls(
+      "src/services/commented.ts",
+      `import { PrismaClient } from "@prisma/client"
+export async function removeUser(prisma: PrismaClient, id: string) {
+  return prisma.user.delete(
+    // hard delete: the row has no soft-delete column
+    { where: { id } },
+  )
+}`,
+    )
+    const write = results.find((r) => r.target === "prisma.user.delete")
+    expect(write?.effectId).toBe("db.write")
+    expect(write?.confidence).toBe("high")
   })
 
   it("drops a Map delete keyed by a literal outright", async () => {

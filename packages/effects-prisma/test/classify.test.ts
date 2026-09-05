@@ -73,7 +73,7 @@ describe("classifyPrismaCall — transaction", () => {
   })
 })
 
-describe("classifyPrismaCall — receiver identification (issue #87)", () => {
+describe("classifyPrismaCall — receiver identification", () => {
   const ctx = makeCtx({ imports: [makePrismaImport()] })
 
   it("does not claim `high` for a Map call that shares the delegate vocabulary", () => {
@@ -143,13 +143,29 @@ describe("classifyPrismaCall — receiver identification (issue #87)", () => {
     ).toBeNull()
   })
 
-  it("returns null for a delegate verb called with two arguments", () => {
-    expect(
-      classifyPrismaCall(
-        makeCall({ target: "emitter.user.update", argumentCount: 2, literalArgs: [null, null] }),
-        ctx,
-      ),
-    ).toBeNull()
+  it("downgrades a delegate verb called with two arguments rather than dropping it", () => {
+    // A delegate takes one options object, so a second argument is evidence against — but
+    // `argumentCount` is a syntactic count (a comment inside the parentheses used to
+    // inflate it), and a miscount that erases a write logs nothing at all. The tier pays
+    // for the doubt instead.
+    const result = classifyPrismaCall(
+      makeCall({ target: "prisma.user.update", argumentCount: 2, literalArgs: [null, null] }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("keeps a write whose argument list carries a comment", () => {
+    // `prisma.user.delete(\n  // hard delete\n  { where: { id } },\n)` reached this
+    // classifier as argumentCount=2 before `walkBody` stopped counting comments; the
+    // effect survives either way now.
+    const result = classifyPrismaCall(
+      makeCall({ target: "prisma.user.delete", argumentCount: 1, literalArgs: [null] }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("high")
   })
 
   it("leaves $transaction's own argument shapes alone", () => {

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
-  hasDelegateArgumentShape,
+  classificationConfidence,
   namesPrismaClient,
   PRISMA_CLIENT_WORDS,
-  receiverConfidence,
+  PRISMA_DELEGATE_MAX_ARGUMENTS,
+  PRISMA_TRANSACTION_MAX_ARGUMENTS,
 } from "../src/index"
 import { makeCall } from "./fixtures/context"
 
@@ -12,12 +13,9 @@ describe("namesPrismaClient", () => {
     "prisma",
     "db",
     "database",
-    "client",
-    "datasource",
     "orm",
     "tx",
     "trx",
-    "transaction",
   ])("recognizes the bare client word %s", (segment) => {
     expect(namesPrismaClient(segment)).toBe(true)
   })
@@ -28,6 +26,20 @@ describe("namesPrismaClient", () => {
     expect(namesPrismaClient("readReplicaDb")).toBe(true)
     expect(namesPrismaClient("dbClient")).toBe(true)
     expect(namesPrismaClient("prisma2")).toBe(true)
+  })
+
+  it("rejects an SDK client — `<client>.<resource>.<verb>` is a delegate's shape too", () => {
+    // `apiClient.users.update(payload)` reaches the same branch as `prisma.user.update`.
+    // A `client` word in the vocabulary would have handed it `high`, which is the bug
+    // class this module exists to close.
+    for (const segment of ["apiClient", "httpClient", "redisClient", "sdkClient", "s3Client"]) {
+      expect(namesPrismaClient(segment)).toBe(false)
+    }
+  })
+
+  it("rejects a domain noun that ends in `transaction`", () => {
+    expect(namesPrismaClient("paymentTransaction")).toBe(false)
+    expect(namesPrismaClient("transactionLog")).toBe(false)
   })
 
   it("rejects the everyday receivers that share Prisma's verb vocabulary", () => {
@@ -49,57 +61,66 @@ describe("namesPrismaClient", () => {
   })
 })
 
-describe("receiverConfidence", () => {
+describe("classificationConfidence", () => {
+  const delegateMax = PRISMA_DELEGATE_MAX_ARGUMENTS
+
   it("is high when the receiver names a client binding", () => {
-    expect(receiverConfidence("prisma", makeCall({ target: "prisma.user.create" }))).toBe("high")
-    expect(receiverConfidence("db", makeCall({ target: "this.db.user.create" }))).toBe("high")
+    expect(
+      classificationConfidence("prisma", makeCall({ target: "prisma.user.create" }), delegateMax),
+    ).toBe("high")
+    expect(
+      classificationConfidence("db", makeCall({ target: "this.db.user.create" }), delegateMax),
+    ).toBe("high")
   })
 
   it("is medium when the receiver is a name this plugin cannot place", () => {
     // Not null: a client under a house naming convention and an unrelated object of the
     // same shape are indistinguishable from the callee string alone, so the tier carries
     // the uncertainty instead of the classification being invented or dropped.
-    expect(receiverConfidence("cache", makeCall({ target: "this.cache.items.delete" }))).toBe(
-      "medium",
-    )
-    expect(receiverConfidence(undefined, makeCall({ target: "prisma.user.create" }))).toBe("medium")
+    expect(
+      classificationConfidence(
+        "cache",
+        makeCall({ target: "this.cache.items.delete" }),
+        delegateMax,
+      ),
+    ).toBe("medium")
+    expect(
+      classificationConfidence(undefined, makeCall({ target: "prisma.user.create" }), delegateMax),
+    ).toBe("medium")
   })
 
   it("caps a dynamic receiver at medium however it is spelled", () => {
     // `getPrisma().user.create()` normalizes to `getPrisma.user.create`: the segment is a
     // collapsed expression, not a binding, so its spelling is not evidence of anything.
     expect(
-      receiverConfidence(
+      classificationConfidence(
         "prisma",
         makeCall({ target: "prisma.user.create", dynamicReceiver: true }),
+        delegateMax,
       ),
     ).toBe("medium")
   })
-})
 
-describe("hasDelegateArgumentShape", () => {
-  it("accepts the shapes a Prisma delegate method actually takes", () => {
-    expect(hasDelegateArgumentShape(makeCall({ target: "prisma.user.findMany" }))).toBe(true)
+  it("caps an over-long argument list at medium rather than dropping the call", () => {
+    // `argumentCount` is a syntactic count and this is the first code to read it as a
+    // signature, so an overflow costs the tier instead of erasing the effect.
     expect(
-      hasDelegateArgumentShape(
-        makeCall({ target: "prisma.user.create", argumentCount: 1, literalArgs: [null] }),
+      classificationConfidence(
+        "prisma",
+        makeCall({ target: "prisma.user.update", argumentCount: 2, literalArgs: [null, null] }),
+        delegateMax,
       ),
-    ).toBe(true)
+    ).toBe("medium")
   })
 
-  it("rejects a literal first argument — no delegate method takes one", () => {
+  it("gives $transaction the wider arity its own signature takes", () => {
+    // `$transaction(fn, { timeout })` is two arguments and still Prisma's own API.
     expect(
-      hasDelegateArgumentShape(
-        makeCall({ target: "cache.items.delete", argumentCount: 1, literalArgs: ["session"] }),
+      classificationConfidence(
+        "prisma",
+        makeCall({ target: "prisma.$transaction", argumentCount: 2, literalArgs: [null, null] }),
+        PRISMA_TRANSACTION_MAX_ARGUMENTS,
       ),
-    ).toBe(false)
-  })
-
-  it("rejects a second argument — every delegate method takes one options object at most", () => {
-    expect(
-      hasDelegateArgumentShape(
-        makeCall({ target: "emitter.user.update", argumentCount: 2, literalArgs: [null, null] }),
-      ),
-    ).toBe(false)
+    ).toBe("high")
   })
 })

@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest"
-import {
-  DRIZZLE_CLIENT_WORDS,
-  hasBuilderArgumentShape,
-  hasTransactionArgumentShape,
-  namesDrizzleClient,
-  receiverConfidence,
-} from "../src/index"
-import { maxBuilderArguments } from "../src/methods"
+import { classificationConfidence, DRIZZLE_CLIENT_WORDS, namesDrizzleClient } from "../src/index"
+import { maxArgumentsFor } from "../src/methods"
 import { makeCall } from "./fixtures/context"
 
 describe("namesDrizzleClient", () => {
@@ -14,13 +8,11 @@ describe("namesDrizzleClient", () => {
     "drizzle",
     "db",
     "database",
-    "client",
     "conn",
     "connection",
     "orm",
     "tx",
     "trx",
-    "transaction",
   ])("recognizes the bare client word %s", (segment) => {
     expect(namesDrizzleClient(segment)).toBe(true)
   })
@@ -29,7 +21,21 @@ describe("namesDrizzleClient", () => {
     expect(namesDrizzleClient("drizzleDb")).toBe(true)
     expect(namesDrizzleClient("_db")).toBe(true)
     expect(namesDrizzleClient("readReplicaDb")).toBe(true)
+    // Matches on `db`, not on `client` — which is not in the vocabulary at all.
     expect(namesDrizzleClient("dbClient")).toBe(true)
+  })
+
+  it("rejects an SDK client — `client` alone would hand every one of these `high`", () => {
+    // `httpClient.delete(url)` is 2 segments with a write terminal and one non-literal
+    // argument: everything `db.delete(users)` is, on a receiver that is not a database.
+    for (const segment of ["httpClient", "apiClient", "redisClient", "sdkClient", "s3Client"]) {
+      expect(namesDrizzleClient(segment)).toBe(false)
+    }
+  })
+
+  it("rejects a domain noun that ends in `transaction`", () => {
+    expect(namesDrizzleClient("paymentTransaction")).toBe(false)
+    expect(namesDrizzleClient("transactionLog")).toBe(false)
   })
 
   it("rejects the everyday receivers that share Drizzle's terminal vocabulary", () => {
@@ -52,61 +58,39 @@ describe("namesDrizzleClient", () => {
   })
 })
 
-describe("receiverConfidence", () => {
-  it("is high when the receiver names a client binding", () => {
-    expect(receiverConfidence("db", makeCall({ target: "db.select" }))).toBe("high")
-    expect(receiverConfidence("tx", makeCall({ target: "tx.insert", argumentCount: 1 }))).toBe(
-      "high",
-    )
+describe("classificationConfidence", () => {
+  it("is high when the receiver names a client binding and the arity fits", () => {
+    expect(classificationConfidence("db", makeCall({ target: "db.select" }), 1)).toBe("high")
+    expect(
+      classificationConfidence("tx", makeCall({ target: "tx.insert", argumentCount: 1 }), 1),
+    ).toBe("high")
   })
 
   it("is medium when the receiver is a name this plugin cannot place", () => {
-    expect(receiverConfidence("store", makeCall({ target: "store.select" }))).toBe("medium")
-    expect(receiverConfidence(undefined, makeCall({ target: "db.select" }))).toBe("medium")
+    expect(classificationConfidence("store", makeCall({ target: "store.select" }), 1)).toBe(
+      "medium",
+    )
+    expect(classificationConfidence(undefined, makeCall({ target: "db.select" }), 1)).toBe("medium")
   })
 
   it("caps a dynamic receiver at medium however it is spelled", () => {
     // `getDb().select()` normalizes to `getDb.select`: a collapsed expression, not a
     // binding, so its spelling is not evidence of anything.
-    expect(receiverConfidence("db", makeCall({ target: "db.select", dynamicReceiver: true }))).toBe(
-      "medium",
-    )
-  })
-})
-
-describe("hasBuilderArgumentShape", () => {
-  it("accepts the shapes a query-builder root actually takes", () => {
-    expect(hasBuilderArgumentShape(makeCall({ target: "db.select" }), 1)).toBe(true)
     expect(
-      hasBuilderArgumentShape(
-        makeCall({ target: "db.insert", argumentCount: 1, literalArgs: [null] }),
-        1,
-      ),
-    ).toBe(true)
+      classificationConfidence("db", makeCall({ target: "db.select", dynamicReceiver: true }), 1),
+    ).toBe("medium")
   })
 
-  it("rejects an Express route registration outright", () => {
-    // `router.delete("/users/:id", handler)`: a string literal AND a second argument,
-    // neither of which any Drizzle root takes.
+  it("caps an over-long argument list at medium rather than dropping the call", () => {
+    // `argumentCount` is a syntactic count and this is the first code to read it as a
+    // signature, so an overflow costs the tier instead of erasing the effect.
     expect(
-      hasBuilderArgumentShape(
-        makeCall({
-          target: "router.delete",
-          argumentCount: 2,
-          literalArgs: ["/users/:id", null],
-        }),
+      classificationConfidence(
+        "db",
+        makeCall({ target: "db.delete", argumentCount: 2, literalArgs: [null, null] }),
         1,
       ),
-    ).toBe(false)
-  })
-
-  it("rejects a literal first argument even on its own", () => {
-    expect(
-      hasBuilderArgumentShape(
-        makeCall({ target: "router.delete", argumentCount: 1, literalArgs: ["/users/:id"] }),
-        1,
-      ),
-    ).toBe(false)
+    ).toBe("medium")
   })
 
   it("honours the arity the terminal allows", () => {
@@ -116,34 +100,18 @@ describe("hasBuilderArgumentShape", () => {
       argumentCount: 2,
       literalArgs: [null, null],
     })
-    expect(hasBuilderArgumentShape(call, maxBuilderArguments("selectDistinctOn"))).toBe(true)
-    expect(hasBuilderArgumentShape(call, maxBuilderArguments("select"))).toBe(false)
+    expect(classificationConfidence("db", call, maxArgumentsFor("selectDistinctOn"))).toBe("high")
+    expect(classificationConfidence("db", call, maxArgumentsFor("select"))).toBe("medium")
   })
 })
 
-describe("maxBuilderArguments", () => {
-  it("allows two arguments for selectDistinctOn and one for every other root", () => {
-    expect(maxBuilderArguments("selectDistinctOn")).toBe(2)
+describe("maxArgumentsFor", () => {
+  it("allows two arguments for selectDistinctOn and transaction, one for the rest", () => {
+    expect(maxArgumentsFor("selectDistinctOn")).toBe(2)
+    expect(maxArgumentsFor("transaction")).toBe(2)
     for (const method of ["select", "selectDistinct", "insert", "update", "delete", "findMany"]) {
-      expect(maxBuilderArguments(method)).toBe(1)
+      expect(maxArgumentsFor(method)).toBe(1)
     }
-  })
-})
-
-describe("hasTransactionArgumentShape", () => {
-  it("allows the second options argument `transaction(cb, config)` takes", () => {
-    expect(
-      hasTransactionArgumentShape(
-        makeCall({ target: "db.transaction", argumentCount: 2, literalArgs: [null, null] }),
-      ),
-    ).toBe(true)
-  })
-
-  it("rejects a literal first argument — a transaction takes a callback or statements", () => {
-    expect(
-      hasTransactionArgumentShape(
-        makeCall({ target: "log.transaction", argumentCount: 1, literalArgs: ["begin"] }),
-      ),
-    ).toBe(false)
+    expect(maxArgumentsFor("batch")).toBe(1)
   })
 })

@@ -1,4 +1,8 @@
-import { assertNonEmptySegments, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
+import {
+  assertNonEmptySegments,
+  hasLiteralFirstArgument,
+  type PluginInputOrigin,
+} from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
 import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, EFFECTS_DRIZZLE_PLUGIN_NAME } from "./constants"
 import { hasDrizzleImport } from "./imports"
@@ -8,13 +12,9 @@ import {
   isDrizzleReadMethod,
   isDrizzleTransactionMethod,
   isDrizzleWriteMethod,
-  maxBuilderArguments,
+  maxArgumentsFor,
 } from "./methods"
-import {
-  hasBuilderArgumentShape,
-  hasTransactionArgumentShape,
-  receiverConfidence,
-} from "./receivers"
+import { classificationConfidence } from "./receivers"
 
 /**
  * Classify a CallCandidate against Drizzle ORM conventions.
@@ -36,17 +36,16 @@ import {
  *    has the same shape. The import gate answers "does this file use Drizzle", which an
  *    Express router file is free to answer yes to: Express + Drizzle is one of the most
  *    common pairings there is, and a route table sits in the same file as the queries it
- *    runs often enough that the gate cannot be the last word. So the argument shape
- *    (`hasBuilderArgumentShape`) rejects the route registration outright — no Drizzle root
- *    takes a string literal, and only `selectDistinctOn` takes a second argument — and the
- *    receiver decides the tier.
+ *    runs often enough that the gate cannot be the last word. So a literal first argument
+ *    rejects the route registration outright — no Drizzle root takes one — and the
+ *    receiver and the argument count decide the tier.
  *
- * **3. An unrecognized receiver downgrades rather than drops.** Where the receiver names a
- *    client binding the classification lands at `high`; where it does not, the effect is
- *    still emitted at `medium`, because a syntactic classifier cannot tell a client under a
- *    house naming convention apart from an unrelated object of the same shape, and silently
- *    dropping the first is as wrong as confidently claiming the second. See
- *    `receiverConfidence`.
+ * **3. Everything short of that downgrades rather than drops.** Where the receiver names a
+ *    client binding and the call fits the terminal's signature the classification lands at
+ *    `high`; where it does not, the effect is still emitted at `medium`, because a
+ *    syntactic classifier cannot tell a client under a house naming convention apart from
+ *    an unrelated object of the same shape, and silently dropping the first is as wrong as
+ *    confidently claiming the second. See `classificationConfidence`.
  *
  * Throws when the language plugin emits a malformed target (empty string, adjacent
  * dots) — see `assertNonEmptySegments`. Callers should treat a thrown error as an
@@ -88,10 +87,10 @@ export function classifyDrizzleCall(
   // receiver segments prefix the chain (`db.query.users.findMany` at length 4,
   // `this.db.query.users.findMany` at length 5, ...) — which puts the client at -4.
   if (parts.length >= 4 && parts.at(-3) === "query" && isDrizzleQueryMethod(method)) {
-    if (!hasBuilderArgumentShape(call, maxBuilderArguments(method))) return null
+    if (hasLiteralFirstArgument(call)) return null
     return {
       effectId: "db.read",
-      confidence: receiverConfidence(parts.at(-4), call),
+      confidence: classificationConfidence(parts.at(-4), call, maxArgumentsFor(method)),
       derivedBy: `${EFFECTS_DRIZZLE_DERIVED_BY_PREFIX}:read`,
     }
   }
@@ -100,19 +99,19 @@ export function classifyDrizzleCall(
   const client = parts.at(-2)
 
   if (isDrizzleReadMethod(method)) {
-    if (!hasBuilderArgumentShape(call, maxBuilderArguments(method))) return null
+    if (hasLiteralFirstArgument(call)) return null
     return {
       effectId: "db.read",
-      confidence: receiverConfidence(client, call),
+      confidence: classificationConfidence(client, call, maxArgumentsFor(method)),
       derivedBy: `${EFFECTS_DRIZZLE_DERIVED_BY_PREFIX}:read`,
     }
   }
 
   if (isDrizzleWriteMethod(method)) {
-    if (!hasBuilderArgumentShape(call, maxBuilderArguments(method))) return null
+    if (hasLiteralFirstArgument(call)) return null
     return {
       effectId: "db.write",
-      confidence: receiverConfidence(client, call),
+      confidence: classificationConfidence(client, call, maxArgumentsFor(method)),
       derivedBy: `${EFFECTS_DRIZZLE_DERIVED_BY_PREFIX}:write`,
     }
   }
@@ -126,18 +125,19 @@ export function classifyDrizzleCall(
     // caller sees the problem loudly. This is a rare edge case — well-formed Drizzle
     // code never reaches this branch with argCount=0.
     //
-    // The throw stays ahead of the argument-shape check: a zero-argument call has no
-    // first argument for the shape check to reject, so ordering it second would only
-    // move the same input from a loud error to a silent null.
+    // It runs before anything else this branch does: a violated contract is not a
+    // classification decision, so nothing is spent weighing a call the caller has already
+    // been told is broken.
     if (call.argumentCount < 1) {
       throw new Error(
         `${EFFECTS_DRIZZLE_PLUGIN_NAME} (${ctx.file.path}, line ${call.line}): "${call.target}" call has argCount=0 but Drizzle's transaction/batch API requires at least one argument (callback or statement array)`,
       )
     }
-    if (!hasTransactionArgumentShape(call)) return null
+    // A transaction takes a callback or an array of statements, never `"a string"`.
+    if (hasLiteralFirstArgument(call)) return null
     return {
       effectId: "db.transaction",
-      confidence: receiverConfidence(client, call),
+      confidence: classificationConfidence(client, call, maxArgumentsFor(method)),
       derivedBy: `${EFFECTS_DRIZZLE_DERIVED_BY_PREFIX}:tx`,
     }
   }

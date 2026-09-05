@@ -225,7 +225,14 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
   const shape = describeCallee(callee)
   if (shape === null) return
   const argsNode = node.childForFieldName("arguments") ?? findChild(node, "arguments") ?? null
-  const argChildren = argsNode !== null ? argsNode.namedChildren : []
+  // Comments are `extras` in the grammar, so tree-sitter hangs them wherever they were
+  // written — including between the parentheses of a call. They are named children like
+  // any other, so `f(\n  x, // why\n)` would otherwise report two arguments and give
+  // `literalArgs` a slot that belongs to no argument at all, shifting every later one.
+  // An effect plugin reading either as a signature is then reading the source's comments.
+  const argChildren = (argsNode !== null ? argsNode.namedChildren : []).filter(
+    (arg) => arg !== null && arg.type !== "comment",
+  )
   const literalArgs: (string | null)[] = argChildren.map((arg) =>
     arg === null ? null : extractLiteral(arg),
   )

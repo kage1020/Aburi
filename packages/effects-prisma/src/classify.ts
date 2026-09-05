@@ -1,9 +1,17 @@
-import { assertNonEmptySegments, type PluginInputOrigin } from "@aburi/plugin-registry/plugin-input"
+import {
+  assertNonEmptySegments,
+  hasLiteralFirstArgument,
+  type PluginInputOrigin,
+} from "@aburi/plugin-registry/plugin-input"
 import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
 import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 import { hasPrismaImport } from "./imports"
 import { isPrismaReadMethod, isPrismaTransactionMethod, isPrismaWriteMethod } from "./methods"
-import { hasDelegateArgumentShape, receiverConfidence } from "./receivers"
+import {
+  classificationConfidence,
+  PRISMA_DELEGATE_MAX_ARGUMENTS,
+  PRISMA_TRANSACTION_MAX_ARGUMENTS,
+} from "./receivers"
 
 /**
  * Classify a CallCandidate against Prisma Client conventions.
@@ -18,8 +26,8 @@ import { hasDelegateArgumentShape, receiverConfidence } from "./receivers"
  *          from false-classifying.
  *        - `<...>.$transaction` (2+ segments) — the top-level transaction API on the
  *          client itself.
- *   3. The arguments must fit a delegate call (`hasDelegateArgumentShape`), and the
- *      receiver must be weighed rather than assumed (`receiverConfidence`).
+ *   3. A literal first argument rules the call out — no Prisma method takes one — and the
+ *      receiver and the argument count decide the tier (`classificationConfidence`).
  *   4. Malformed targets (empty string, adjacent / leading / trailing dots) throw — the
  *      language plugin's contract is a normalized non-empty callee, so a violation
  *      here is an upstream bug we surface loudly instead of silently miscategorizing.
@@ -55,12 +63,12 @@ export function classifyPrismaCall(
     // API only makes sense as a method on the client (`<client>.$transaction(...)`).
     if (parts.length < 2) return null
     // `$transaction` is a `$`-prefixed name Prisma owns outright, so the receiver is the
-    // only thing left to weigh — no argument-shape check here: the API takes either an
-    // array of promises or a callback, and the callback form takes a second options
-    // argument that the delegate shape would reject.
+    // main thing left to weigh. Its own arity is wider than a delegate's: the callback
+    // form takes a second options argument (`$transaction(fn, { timeout })`).
+    if (hasLiteralFirstArgument(call)) return null
     return {
       effectId: "db.transaction",
-      confidence: receiverConfidence(parts.at(-2), call),
+      confidence: classificationConfidence(parts.at(-2), call, PRISMA_TRANSACTION_MAX_ARGUMENTS),
       derivedBy: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:tx`,
     }
   }
@@ -71,11 +79,13 @@ export function classifyPrismaCall(
   // that colocate Prisma with another library.
   if (parts.length < 3) return null
 
-  if (!hasDelegateArgumentShape(call)) return null
+  // A delegate method takes an options object or nothing, so a literal first argument
+  // (`this.cache.items.delete("session")`, `map.delete("id")`) is some other API's call.
+  if (hasLiteralFirstArgument(call)) return null
 
   // The client sits immediately before the model, whatever precedes it: `prisma.user.create`,
   // `this.prisma.user.create` and `container.services.prisma.user.create` all put it at -3.
-  const confidence = receiverConfidence(parts.at(-3), call)
+  const confidence = classificationConfidence(parts.at(-3), call, PRISMA_DELEGATE_MAX_ARGUMENTS)
 
   if (isPrismaReadMethod(method)) {
     return {

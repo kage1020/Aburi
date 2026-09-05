@@ -181,23 +181,26 @@ A method name is not a library. `delete`, `create`, `update` and `select` are sh
 
 The file-level import gate does not settle this. It answers "does this file use the library", which a file is free to answer yes to while most of its calls belong to something else — an Express router beside its Drizzle queries, a `Map` cache beside a Prisma client. A gate that a mixed file passes wholesale cannot be the last word for the individual calls inside it.
 
-A plugin that matches on shared vocabulary therefore weighs two more things before it commits:
+A plugin that matches on shared vocabulary therefore weighs three more things before it commits:
 
-1. **Argument shape.** The library's own signatures rule out collisions for free: no Prisma delegate method and no Drizzle query-builder root takes a bare literal, and neither takes a second argument (bar Postgres' `selectDistinctOn(columns, projection)`) — which is exactly what `router.delete("/users/:id", handler)` is. A shape the library's API cannot produce is `null`, not a low-confidence effect. Read the arity off the library's own vocabulary table rather than flattening it to a constant, so the one method that takes two arguments does not become a false negative. `hasLiteralFirstArgument` from `@aburi/plugin-registry/plugin-input` is the shared reader for the literal half.
+1. **Argument shape.** The library's own signatures rule out collisions for free: no Prisma delegate method and no Drizzle query-builder root takes a bare literal, which is exactly what `router.delete("/users/:id", handler)` opens with. A first argument the library's API could never take is `null`, not a low-confidence effect. `hasLiteralFirstArgument` from `@aburi/plugin-registry/plugin-input` is the shared reader for it.
 
-2. **Receiver name.** The segment holding the client (`prisma` in `this.prisma.user.create`, `db` in `db.select`) is matched word-wise against the plugin's own vocabulary of client binding names — `identifierWords` / `identifierMentions` in the same module, so `prismaClient` and `readReplicaDb` match while `feedback` does not match `db`.
+2. **Receiver name.** The segment holding the client (`prisma` in `this.prisma.user.create`, `db` in `db.select`) is matched word-wise against the plugin's own vocabulary of client binding names — `identifierWords` / `identifierMentions` in the same module, so `prismaClient` and `readReplicaDb` match while `feedback` does not match `db`. Keep the vocabulary to words that actually separate a client from everything else sharing the verbs: `client` matches `apiClient` and `httpClient`, whose `<client>.<resource>.<verb>` shape is a Prisma delegate's exactly, so an entry like that hands the collision the top tier instead of catching it.
 
-The receiver check sets the **tier**, it does not gate the classification:
+3. **Argument count.** Read the arity off the library's own vocabulary table rather than flattening it to a constant — Postgres' `selectDistinctOn(columns, projection)` and `transaction(callback, config)` take two — and treat an overflow as evidence, not proof. `CallCandidate.argumentCount` is a syntactic count, and a classifier reading it as a signature is reading it for more than it promises; a miscount that drops the call erases a real effect and logs nothing, which is the one failure mode with no trace.
 
-| receiver | outcome |
+The last two set the **tier**, they do not gate the classification:
+
+| signal | outcome |
 |---|---|
-| names a client binding | `confidence: "high"` |
-| a name the plugin cannot place | `confidence: "medium"` |
+| receiver names a client binding, arity fits | `confidence: "high"` |
+| receiver is a name the plugin cannot place | `confidence: "medium"` |
 | `dynamicReceiver` (a collapsed expression) | `confidence: "medium"`, whatever it is spelled |
+| more arguments than the method takes | `confidence: "medium"` |
 
 `medium` rather than `null` because the two cases behind an unrecognized name — a client under a house naming convention, and an unrelated object of the same shape — are not separable from the callee string, and effect plugins never see the AST (§11.1) where the binding that would separate them lives. Dropping the first is as wrong as claiming the second at the tier a hand-annotated effect gets, so the uncertainty is recorded instead of resolved by guessing. This is the same tier `@aburi/framework-express` assigns a route that matches the shape without an import anchor.
 
-A plugin whose vocabulary is its own (`$transaction`, `$queryRaw`, a `@Controller` decorator) has nothing to disambiguate and stays at `high` on shape alone.
+A plugin whose vocabulary is its own — a `@Controller` decorator resolved back to the framework's package — has nothing to disambiguate and stays at `high` on shape alone. A `$`-prefixed name the library owns outright is close to that, but not the same thing: the receiver still decides whose `$transaction` it is.
 
 ## 6. Cooperation with Language Plugins
 
@@ -255,40 +258,56 @@ Implementation details of each plugin live in their respective READMEs. Today Ne
 import {
   assertNonEmptySegments,
   hasLiteralFirstArgument,
+  hasMatchingImport,
   identifierMentions,
 } from '@aburi/plugin-registry/plugin-input'
 
 const READ_METHODS = /^(findUnique|findFirst|findMany|count|aggregate|groupBy)$/
 const WRITE_METHODS = /^(create|createMany|update|updateMany|upsert|delete|deleteMany)$/
-const TX_METHODS = /^\$transaction$/
+const TX_METHOD = '$transaction'
+
+// Words a Prisma client binding is spelled with. `client` is deliberately absent: it
+// matches `apiClient` / `httpClient`, whose `<client>.<resource>.<verb>` shape is a
+// delegate call's shape exactly (§5.4).
+const PRISMA_CLIENT_WORDS = new Set(['prisma', 'db', 'database', 'orm', 'tx', 'trx'])
 
 export const plugin: EffectPlugin = {
   manifest: { /* see plugin-effects-prisma.json */ },
 
-  async init(ctx) {
-    // We want to look at imports to judge whether the Prisma client is imported from `@prisma/client`
-  },
+  async init(ctx) {},
 
   classify(call, ctx) {
+    const origin = { plugin: 'effects-prisma', filePath: ctx.file.path }
+
     // decompose the identifier chain: "prisma.invoice.create" → ["prisma", "invoice", "create"]
-    // The shared guard rejects an unnormalized callee instead of splitting it silently.
-    const { segments: parts, last: method } = assertNonEmptySegments(call.target, {
-      plugin: 'effects-prisma',
-      filePath: ctx.file.path,
-    })
+    // The shared guard rejects an unnormalized callee instead of splitting it silently, and
+    // runs before the import gate so an upstream bug is not narrowed to Prisma files.
+    const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
+
+    // Does this file use Prisma at all? Necessary, never sufficient (§5.4).
+    if (!hasMatchingImport(ctx.file.imports, origin, (source) => source === '@prisma/client')) {
+      return null
+    }
+
+    // No Prisma method takes a bare literal, so that shape is not a Prisma call at all.
+    if (hasLiteralFirstArgument(call)) return null
+
+    // `<client>.$transaction(...)` is 2 segments, and its callback form takes a second
+    // options argument — so it is dispatched before the 3-segment delegate shape and
+    // carries its own arity.
+    if (method === TX_METHOD) {
+      if (parts.length < 2) return null
+      return {
+        effectId: 'db.transaction',
+        confidence: tier(parts[parts.length - 2], call, 2),
+        derivedBy: 'effects-plugin:prisma:tx',
+      }
+    }
+
+    // A delegate call is `<client>.<model>.<verb>`; the client segment is what stops a
+    // two-segment `router.create(...)` from matching.
     if (parts.length < 3) return null
-
-    // `method` comes from the guard already typed as `string`. The receiver segments still
-    // need an index, so read them defensively — `slice(-3)` alone would hand back
-    // `string | undefined` under noUncheckedIndexedAccess.
-    const root = parts[parts.length - 3]
-
-    // A delegate method takes one options object or nothing — a literal first argument or a
-    // second argument means this is some other library's `delete` (§5.4).
-    if (call.argumentCount > 1 || hasLiteralFirstArgument(call)) return null
-
-    // The receiver sets the tier rather than gating the classification (§5.4).
-    const confidence = isPrismaIdentifier(root) && !call.dynamicReceiver ? 'high' : 'medium'
+    const confidence = tier(parts[parts.length - 3], call, 1)
 
     if (READ_METHODS.test(method)) {
       return { effectId: 'db.read', confidence, derivedBy: 'effects-plugin:prisma:read' }
@@ -296,18 +315,17 @@ export const plugin: EffectPlugin = {
     if (WRITE_METHODS.test(method)) {
       return { effectId: 'db.write', confidence, derivedBy: 'effects-plugin:prisma:write' }
     }
-    if (TX_METHODS.test('$' + method)) {
-      return { effectId: 'db.transaction', confidence: 'high', derivedBy: 'effects-plugin:prisma:tx' }
-    }
     return null
   }
 }
 
-function isPrismaIdentifier(name) {
-  // The import gate has already run; what is left is whether THIS receiver is the client.
+// The receiver and the argument count set the tier; neither gates the classification (§5.4).
+function tier(receiver, call, maxArguments) {
+  if (call.dynamicReceiver) return 'medium'
+  if (call.argumentCount > maxArguments) return 'medium'
   // Word-wise against the client vocabulary, so `prismaClient` / `readReplicaDb` match and
-  // `cache` / `router` do not — see §5.4, and `namesPrismaClient` in @aburi/effects-prisma.
-  return identifierMentions(name, PRISMA_CLIENT_WORDS)
+  // `cache` / `router` do not — see `namesPrismaClient` in @aburi/effects-prisma.
+  return identifierMentions(receiver ?? '', PRISMA_CLIENT_WORDS) ? 'high' : 'medium'
 }
 ```
 

@@ -18,10 +18,8 @@ export {
 } from "./methods"
 export { DrizzleEffectsPlugin, drizzleEffectsPlugin } from "./plugin"
 export {
+  classificationConfidence,
   DRIZZLE_CLIENT_WORDS,
   type DrizzleClientWord,
-  hasBuilderArgumentShape,
-  hasTransactionArgumentShape,
   namesDrizzleClient,
-  receiverConfidence,
 } from "./receivers"

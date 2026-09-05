@@ -225,7 +225,7 @@ export async function bulk(db: ReturnType<typeof drizzle>) {
     for (const w of writes) expect(w.target).toBe("db.insert")
   })
 
-  it("does not classify an Express route registration beside the queries (issue #87)", async () => {
+  it("does not classify an Express route registration beside the queries", async () => {
     // The reported reproduction: Express and Drizzle in one file, which the import gate
     // waves through wholesale. `router.delete("/users/:id", handler)` was recorded as a
     // high-confidence db.write; the argument shape is what rules it out, since no Drizzle
@@ -246,6 +246,27 @@ export function mountUserRoutes(router: Router, db: ReturnType<typeof drizzle>) 
     const route = results.find((r) => r.target === "router.delete")
     expect(route).toBeDefined()
     expect(route?.effectId).toBeNull()
+    const write = results.find((r) => r.target === "db.delete")
+    expect(write?.effectId).toBe("db.write")
+    expect(write?.confidence).toBe("high")
+  })
+
+  it("keeps a write whose argument list carries a comment", async () => {
+    // Comments are grammar `extras`: tree-sitter hangs them inside the argument list, and
+    // counting them made this a two-argument call. Nothing downstream would have said so —
+    // the root would answer null and the `.where` link is dropped by chain-collapse, so the
+    // DELETE would simply not exist in the IR.
+    const results = await classifyCalls(
+      "src/services/commented.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js"
+import { users } from "./schema"
+export async function removeAll(db: ReturnType<typeof drizzle>) {
+  return await db.delete(
+    users, // soft delete is not used here
+  )
+}`,
+      [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
     const write = results.find((r) => r.target === "db.delete")
     expect(write?.effectId).toBe("db.write")
     expect(write?.confidence).toBe("high")
