@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest"
 import {
   assertImportBinding,
   assertNonEmptySegments,
+  hasLiteralFirstArgument,
   hasMatchingImport,
+  identifierMentions,
+  identifierWords,
   type PluginInputOrigin,
 } from "../src/plugin-input"
 
@@ -163,6 +166,78 @@ describe("assertImportBinding", () => {
   })
 })
 
+describe("identifierWords", () => {
+  it("splits a camelCase identifier into lowercase words", () => {
+    expect(identifierWords("prismaClient")).toEqual(["prisma", "client"])
+    expect(identifierWords("readReplicaDb")).toEqual(["read", "replica", "db"])
+  })
+
+  it("splits on separators — underscores, dollars, dashes", () => {
+    expect(identifierWords("_prisma")).toEqual(["prisma"])
+    expect(identifierWords("read_replica_db")).toEqual(["read", "replica", "db"])
+    expect(identifierWords("$db")).toEqual(["db"])
+  })
+
+  it("keeps an acronym run whole", () => {
+    expect(identifierWords("DBClient")).toEqual(["db", "client"])
+    expect(identifierWords("HTTPClient")).toEqual(["http", "client"])
+    expect(identifierWords("DB")).toEqual(["db"])
+  })
+
+  it("treats digits as boundaries rather than words", () => {
+    expect(identifierWords("db2")).toEqual(["db"])
+    expect(identifierWords("v2Client")).toEqual(["v", "client"])
+  })
+
+  it("returns an empty list for a name with no letters", () => {
+    expect(identifierWords("")).toEqual([])
+    expect(identifierWords("__")).toEqual([])
+    expect(identifierWords("42")).toEqual([])
+  })
+
+  it("is a word split, not a substring search — the distinction the callers rely on", () => {
+    // `feedback` contains "db" and `context` contains "tx"; a substring test would call
+    // both a database client. This is the whole reason the helper exists.
+    expect(identifierWords("feedback")).toEqual(["feedback"])
+    expect(identifierWords("context")).toEqual(["context"])
+  })
+})
+
+describe("identifierMentions", () => {
+  const vocabulary: ReadonlySet<string> = new Set(["db", "prisma", "tx"])
+
+  it("is true when any word of the name is in the vocabulary", () => {
+    expect(identifierMentions("db", vocabulary)).toBe(true)
+    expect(identifierMentions("prismaClient", vocabulary)).toBe(true)
+    expect(identifierMentions("readReplicaDb", vocabulary)).toBe(true)
+    expect(identifierMentions("_tx", vocabulary)).toBe(true)
+  })
+
+  it("is false when no word is in the vocabulary", () => {
+    expect(identifierMentions("router", vocabulary)).toBe(false)
+    expect(identifierMentions("cache", vocabulary)).toBe(false)
+    expect(identifierMentions("feedback", vocabulary)).toBe(false)
+    expect(identifierMentions("context", vocabulary)).toBe(false)
+    expect(identifierMentions("", vocabulary)).toBe(false)
+  })
+})
+
+describe("hasLiteralFirstArgument", () => {
+  it("is true when the first argument was a literal", () => {
+    expect(hasLiteralFirstArgument({ literalArgs: ["/users/:id", null] })).toBe(true)
+    expect(hasLiteralFirstArgument({ literalArgs: ["42"] })).toBe(true)
+  })
+
+  it("is false when the first argument was not a literal", () => {
+    expect(hasLiteralFirstArgument({ literalArgs: [null, "second"] })).toBe(false)
+  })
+
+  it("is false for a call with no arguments", () => {
+    // Nothing to be a literal. Arity is a separate question, decided by the caller.
+    expect(hasLiteralFirstArgument({ literalArgs: [] })).toBe(false)
+  })
+})
+
 describe("plugin-input module", () => {
   it("has no value imports, so the subpath stays free of the barrel's ajv setup", () => {
     // The whole reason this module is a separate tsdown entry is that importing the
@@ -175,6 +250,10 @@ describe("plugin-input module", () => {
       "utf8",
     )
     const importLines = source.split("\n").filter((line) => line.startsWith("import "))
-    expect(importLines).toEqual(['import type { ImportEdge } from "@aburi/types"'])
+    // Asserted as a shape rather than as one pinned line: what must hold is that every
+    // import is type-only, and pinning the line made adding a second type to the same
+    // `import type` fail a test whose subject it is not.
+    expect(importLines.length).toBeGreaterThan(0)
+    for (const line of importLines) expect(line.startsWith("import type ")).toBe(true)
   })
 })

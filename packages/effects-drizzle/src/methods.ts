@@ -68,6 +68,38 @@ export function isDrizzleQueryMethod(name: string): name is DrizzleQueryMethod {
 }
 
 /**
+ * The most arguments each recognized terminal takes, for the terminals that take more than
+ * one. Everything else takes at most one — an optional projection for `select`, a table
+ * reference for `insert` / `update` / `delete`, an optional options object for the
+ * relational query terminals, a statement array for `batch`.
+ *
+ * Two exceptions, both from the library's own signatures: Postgres'
+ * `selectDistinctOn(columns, projection)` and `transaction(callback, config)`. A flat "one
+ * argument" rule would read both as some other API, so the exceptions live next to the
+ * vocabulary that defines them rather than as magic numbers at the call site.
+ *
+ * Keys are typed against the vocabulary unions, so renaming or dropping a terminal breaks
+ * the build instead of leaving an arity exception that silently matches nothing.
+ */
+const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
+  DrizzleReadMethod | DrizzleTransactionMethod,
+  number
+> = new Map<DrizzleReadMethod | DrizzleTransactionMethod, number>([
+  ["selectDistinctOn", 2],
+  ["transaction", 2],
+])
+
+/** The most arguments `method` takes before the call stops looking like Drizzle's own API. */
+export function maxArgumentsFor(method: string): number {
+  return (
+    (DRIZZLE_MULTI_ARGUMENT_TERMINALS as ReadonlyMap<string, number>).get(method) ??
+    DEFAULT_MAX_ARGUMENTS
+  )
+}
+
+const DEFAULT_MAX_ARGUMENTS = 1
+
+/**
  * The set of verbs that anchor a fluent chain at its root. A CallCandidate whose target
  * has any of these as an INTERNAL segment (i.e. neither first nor last) is a downstream
  * link of an already-classified chain and must be rejected to preserve the

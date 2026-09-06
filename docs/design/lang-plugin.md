@@ -195,7 +195,7 @@ interface BodyExtraction {
 interface CallCandidate {
   target: string                               // string representation of the callee (before whitespace normalization)
   line: number
-  argumentCount: number                        // effect plugins reference this as needed
+  argumentCount: number                        // arguments only — comments between them do not count
   inAwait: boolean                             // true when under an await
   inNew: boolean                               // true when a new expression
   literalArgs: (string | null)[]               // literal value of each argument (null if not a literal)
@@ -205,6 +205,20 @@ interface CallCandidate {
 
 walkBody **must not emit trivial returns as rules** (drop-list §5.3-5.5).
 For call-only returns such as `return foo()`, the call goes into CallCandidate but not into a Rule.
+
+#### Argument-list contract
+
+`argumentCount` is the number of **arguments**, and `literalArgs[i]` is the literal value of
+the i-th one. Comments are not arguments. Most grammars carry them as `extras` and hang them
+wherever they were written, including between the parentheses of a call, so a plugin that
+maps the argument node's children straight across reports `f(\n  x, // why\n)` as a
+two-argument call and gives `literalArgs` a slot that belongs to no argument — shifting
+every later one, so `literalArgs[0]` may describe a comment rather than the first argument.
+
+Effect plugins read both as a signature (effect-plugin.md §5.4), so the miscount lands as a
+call attributed to the wrong API, or as a real effect that never reaches the IR. Filter the
+comment nodes out; the count and the array are then the same length and the same order as
+the source's arguments.
 
 #### Normalized-callee contract
 

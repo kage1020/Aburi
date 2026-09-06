@@ -73,6 +73,113 @@ describe("classifyPrismaCall — transaction", () => {
   })
 })
 
+describe("classifyPrismaCall — receiver identification", () => {
+  const ctx = makeCtx({ imports: [makePrismaImport()] })
+
+  it("does not claim `high` for a Map call that shares the delegate vocabulary", () => {
+    // The bug this suite exists for: a repository that holds both a PrismaClient and a
+    // plain `Map` cache made `this.cache.items.delete(key)` a high-confidence db.write,
+    // because the file imports Prisma and the target has three segments and a write verb.
+    // The receiver is what separates them, so the receiver is what sets the tier.
+    const result = classifyPrismaCall(
+      makeCall({ target: "this.cache.items.delete", argumentCount: 1, literalArgs: [null] }),
+      ctx,
+    )
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("keeps `high` for the receivers Prisma is actually written with", () => {
+    for (const target of [
+      "prisma.user.findMany",
+      "this.prisma.user.create",
+      "db.user.update",
+      "this.prismaClient.user.upsert",
+      "container.services.prisma.user.findMany",
+      "tx.user.create",
+    ]) {
+      expect(classifyPrismaCall(makeCall({ target }), ctx)?.confidence).toBe("high")
+    }
+  })
+
+  it("still classifies an unrecognized receiver, at medium — recall is not the price", () => {
+    // A client bound under a house convention (`this.repo.user.create`) is not
+    // distinguishable from an unrelated object with the same shape, so the effect is
+    // recorded with the uncertainty stated rather than dropped.
+    const result = classifyPrismaCall(makeCall({ target: "this.repo.user.create" }), ctx)
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("medium")
+    expect(result?.derivedBy).toBe("effects-plugin:prisma:write")
+  })
+
+  it("caps a dynamic receiver at medium", () => {
+    // `getPrisma().user.create()` normalizes to `getPrisma.user.create`. The name is a
+    // collapsed expression rather than a binding, so it is not evidence of a client.
+    const result = classifyPrismaCall(
+      makeCall({ target: "getPrisma.user.create", dynamicReceiver: true }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("applies the same tiering to $transaction", () => {
+    expect(classifyPrismaCall(makeCall({ target: "prisma.$transaction" }), ctx)?.confidence).toBe(
+      "high",
+    )
+    expect(classifyPrismaCall(makeCall({ target: "queue.$transaction" }), ctx)?.confidence).toBe(
+      "medium",
+    )
+  })
+
+  it("returns null for a delegate verb called with a literal — no delegate takes one", () => {
+    // `map.delete("session")` / `set.delete("id")`: a Prisma delegate takes an options
+    // object or nothing, so a literal first argument rules the call out entirely rather
+    // than leaving it to the receiver's name.
+    expect(
+      classifyPrismaCall(
+        makeCall({ target: "this.cache.items.delete", argumentCount: 1, literalArgs: ["session"] }),
+        ctx,
+      ),
+    ).toBeNull()
+  })
+
+  it("downgrades a delegate verb called with two arguments rather than dropping it", () => {
+    // A delegate takes one options object, so a second argument is evidence against — but
+    // `argumentCount` is a syntactic count (a comment inside the parentheses used to
+    // inflate it), and a miscount that erases a write logs nothing at all. The tier pays
+    // for the doubt instead.
+    const result = classifyPrismaCall(
+      makeCall({ target: "prisma.user.update", argumentCount: 2, literalArgs: [null, null] }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("keeps a write whose argument list carries a comment", () => {
+    // `prisma.user.delete(\n  // hard delete\n  { where: { id } },\n)` reached this
+    // classifier as argumentCount=2 before `walkBody` stopped counting comments; the
+    // effect survives either way now.
+    const result = classifyPrismaCall(
+      makeCall({ target: "prisma.user.delete", argumentCount: 1, literalArgs: [null] }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("high")
+  })
+
+  it("leaves $transaction's own argument shapes alone", () => {
+    // `$transaction(fn, { timeout })` takes two arguments, which the delegate shape check
+    // would reject — the transaction branch deliberately does not run it.
+    expect(
+      classifyPrismaCall(
+        makeCall({ target: "prisma.$transaction", argumentCount: 2, literalArgs: [null, null] }),
+        ctx,
+      )?.effectId,
+    ).toBe("db.transaction")
+  })
+})
+
 describe("classifyPrismaCall — negative paths", () => {
   const ctxWithPrisma = makeCtx({ imports: [makePrismaImport()] })
 
