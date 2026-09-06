@@ -58,13 +58,17 @@ function requireDeclarationName(node: Node, kind: string, file: string): string 
  * name the same thing, and answering one candidate per *declaration* put two Symbols under
  * one id — which integrity invariant #1 refuses for the whole document, not for the file
  * that wrote it. See `makeCandidateSink` for what the second declaration contributes.
+ *
+ * A last pass links each `export default <identifier>` statement back to the declaration it
+ * names, which is the one export a declaration cannot carry on itself — see
+ * `promoteDefaultExports`.
  */
 export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandidate<Node>[] {
   const root = tree.rootNode
   if (root === null) return []
   const out = makeCandidateSink()
   visitModuleLevel(root, ctx, [], out, makeCallExtractionState())
-  return out.list()
+  return promoteDefaultExports(out.list(), defaultExportedNames(root))
 }
 
 /**
@@ -829,7 +833,7 @@ function collectDerivedBy(
   flags: { exportKeyword: boolean; exportDefault: boolean },
 ): string[] {
   const out: string[] = []
-  if (flags.exportDefault) out.push("export-default")
+  if (flags.exportDefault) out.push(EXPORT_DEFAULT)
   else if (flags.exportKeyword) out.push("export-keyword")
   return out
 }
@@ -854,10 +858,78 @@ function readAccessibilityKeyword(node: Node): Visibility {
 function isDefaultExport(node: Node): boolean {
   const parent = node.parent
   if (parent === null || parent.type !== "export_statement") return false
-  for (const child of parent.children) {
+  return hasDefaultKeyword(parent)
+}
+
+/** The `default` an `export_statement` is written with, which the grammar leaves anonymous. */
+function hasDefaultKeyword(statement: Node): boolean {
+  for (const child of statement.children) {
     if (child !== null && child.type === "default") return true
   }
   return false
+}
+
+/** What `derivedBy` says when a Symbol is the module's default export. */
+const EXPORT_DEFAULT = "export-default"
+
+/**
+ * Every name the module hands to `export default` as a bare identifier.
+ *
+ * `export default Page` is a statement of its own rather than a wrapper around a
+ * declaration, so nothing on the declaration node says that the declaration is exported —
+ * `isDefaultExport` reads the parent, and the parent of `const Page = () => …` is the
+ * module. The two are linked by name or not at all, which is why the names are collected up
+ * front: one pass over the module's own statements, asked once, instead of a search of the
+ * module per declaration (§8.2).
+ *
+ * Only the bare-identifier form is read. `export default withAuth(Page)` and `export default
+ * { Page }` export a value the module computes, which is not the declaration; and `export
+ * { Page as default }` is an export clause, a form this plugin does not yet read for
+ * visibility in any of its spellings.
+ */
+function defaultExportedNames(root: Node): ReadonlySet<string> {
+  const names = new Set<string>()
+  for (const stmt of root.namedChildren) {
+    if (stmt === null || stmt.type !== "export_statement") continue
+    if (!hasDefaultKeyword(stmt)) continue
+    const value = stmt.childForFieldName("value")
+    if (value === null || value.type !== "identifier") continue
+    names.add(value.text)
+  }
+  return names
+}
+
+/**
+ * Hand the declaration a separate `export default` names the boundary and the visibility the
+ * export puts on it.
+ *
+ * `const Page = () => …` followed by `export default Page` is an ordinary way to write a React
+ * component, and reported without this it was `internal` and carried no `export-default` —
+ * which is what the Next.js plugin reads to find the page, layout or route a file is. So the
+ * same component reported itself as an internal helper when it was written this way and as a
+ * public page boundary when it was written `export default function Page()`, on files the
+ * framework treats identically.
+ *
+ * Matching is by qualified name against the module's top-level names. A class member
+ * (`Page.render`) and a namespaced declaration (`Routes.Page`) carry a segment separator that
+ * no bare identifier can spell, so neither can be reached by accident; an identifier naming an
+ * import rather than a declaration matches nothing at all.
+ */
+function promoteDefaultExports(
+  candidates: SymbolCandidate<Node>[],
+  names: ReadonlySet<string>,
+): SymbolCandidate<Node>[] {
+  if (names.size === 0) return candidates
+  return candidates.map((candidate): SymbolCandidate<Node> => {
+    if (!names.has(candidate.name) || candidate.derivedBy.includes(EXPORT_DEFAULT)) {
+      return candidate
+    }
+    return {
+      ...candidate,
+      visibility: "public",
+      derivedBy: [...candidate.derivedBy, EXPORT_DEFAULT],
+    }
+  })
 }
 
 function hasExportKeywordAncestor(node: Node): boolean {
