@@ -254,7 +254,7 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 |---|---|---|
 | `local-scope` | resolved to a local variable / parameter | `callback(x)` inside `foo(callback: () => void)` |
 | `external` | resolved to a bare specifier import | `lodash.sortBy(...)` |
-| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)` |
+| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)`, `prisma[model].create(...)` |
 | `ambiguous` | multiple candidates | two `User.save` in different components with no explicit import |
 | `no-match` | no candidate found | typo, or callee not in workspace and not imported |
 

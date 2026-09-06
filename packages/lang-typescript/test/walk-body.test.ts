@@ -146,7 +146,7 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
 
   it("flags a subscript receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f(items: any[]) { items[0].save() }")
-    const call = calls.find((c) => c.target === "items.save")
+    const call = calls.find((c) => c.target === "items.<computed>.save")
     expect(call?.dynamicReceiver).toBe(true)
   })
 
@@ -213,5 +213,93 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
     const { calls } = await walkFirstSymbol("export function f(svc: any) { (svc).save() }")
     const call = calls.find((c) => c.target === "svc.save")
     expect(call?.dynamicReceiver).toBeUndefined()
+  })
+})
+
+// A bracket access in a callee (`lang-plugin.md` §4.4, LP20j / LP20k). Reading only the
+// object part answered `prisma.create` for `prisma["user"].create()` — a call that is
+// nowhere in the program, spelled like an ordinary two-segment method call, and one
+// segment short of the delegate shape `effects-prisma` needs, so the `db.write` went with
+// it. A literal index is the segment it spells; anything else is the `<computed>` segment,
+// which no id and no Symbol name can hold.
+describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
+  it("folds a string-literal index into the target as its own segment", async () => {
+    const { calls } = await walkFirstSymbol(
+      'export function f(prisma: any, data: unknown) { prisma["user"].create({ data }) }',
+    )
+    const call = calls.find((c) => c.target.endsWith(".create"))
+    expect(call?.target).toBe("prisma.user.create")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("decodes the literal rather than unquoting it", async () => {
+    const { calls } = await walkFirstSymbol(
+      'export function f(prisma: any) { prisma["us\\u0065r"].create({}) }',
+    )
+    expect(calls.find((c) => c.target.endsWith(".create"))?.target).toBe("prisma.user.create")
+  })
+
+  it("folds a template index that substitutes nothing", async () => {
+    const { calls } = await walkFirstSymbol(
+      "export function f(prisma: any) { prisma[`user`].create({}) }",
+    )
+    const call = calls.find((c) => c.target.endsWith(".create"))
+    expect(call?.target).toBe("prisma.user.create")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("folds a literal index the callee itself is written with", async () => {
+    const { calls } = await walkFirstSymbol(
+      'export function f(handlers: any) { handlers["run"]() }',
+    )
+    expect(calls.map((c) => c.target)).toEqual(["handlers.run"])
+  })
+
+  it("folds an optionally-chained literal index — `?.[` is the same access", async () => {
+    const { calls } = await walkFirstSymbol(
+      'export function f(prisma: any) { prisma?.["user"].create({}) }',
+    )
+    const call = calls.find((c) => c.target.endsWith(".create"))
+    expect(call?.target).toBe("prisma.user.create")
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("reports an identifier index as the `<computed>` segment", async () => {
+    const { calls } = await walkFirstSymbol(
+      "export function f(prisma: any, model: string) { prisma[model].create({}) }",
+    )
+    const call = calls.find((c) => c.target.endsWith(".create"))
+    expect(call?.target).toBe("prisma.<computed>.create")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("reports a numeric index as the `<computed>` segment", async () => {
+    const { calls } = await walkFirstSymbol("export function f(items: any[]) { items[0].save() }")
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call?.target).toBe("items.<computed>.save")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("reports a substituting template index as the `<computed>` segment", async () => {
+    const { calls } = await walkFirstSymbol(
+      `export function f(prisma: any, m: string) { prisma[\`\${m}s\`].create({}) }`,
+    )
+    const call = calls.find((c) => c.target.endsWith(".create"))
+    expect(call?.target).toBe("prisma.<computed>.create")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("reports a literal the qualified-name grammar has no segment for as `<computed>`", async () => {
+    const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["a-b"].m() }')
+    const call = calls.find((c) => c.target.endsWith(".m"))
+    expect(call?.target).toBe("obj.<computed>.m")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("keeps an expression receiver dynamic even where the index folds", async () => {
+    const { calls } = await walkFirstSymbol('export function f() { getRepo()["user"].save() }')
+    const call = calls.find((c) => c.target.endsWith(".save"))
+    expect(call?.target).toBe("getRepo.user.save")
+    expect(call?.dynamicReceiver).toBe(true)
   })
 })

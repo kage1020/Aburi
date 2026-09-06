@@ -1,3 +1,4 @@
+import { isQnameSegment } from "@aburi/core"
 import type {
   BodyExtraction,
   CallCandidate,
@@ -8,6 +9,7 @@ import type {
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import { decodeStringLiteral } from "./string-escape"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -313,6 +315,23 @@ function containsEarlyExit(node: Node): boolean {
 }
 
 /**
+ * The segment that stands where the source addressed a property through brackets with
+ * something that is not a name — `prisma[model].create()` is `prisma.<computed>.create`
+ * (`lang-plugin.md` §4.4).
+ *
+ * The alternative was to drop the index, and dropping it does not shorten the call, it
+ * renames it: `prisma["user"].create()` reported as `prisma.create` is a call the program
+ * does not contain, spelled like an ordinary two-segment method call, and one segment short
+ * of the delegate shape `effects-prisma` matches — so the `db.write` went missing with it.
+ *
+ * The spelling is what makes the segment safe to write. `<` is outside the qualified-name
+ * grammar, so `trySymbolId` refuses every candidate id built through a target carrying it and
+ * no Symbol `name` the component- or workspace-scope tiers compare against can hold it: the
+ * segment is unresolvable by construction rather than by a check somebody has to remember.
+ */
+const COMPUTED_SEGMENT = "<computed>"
+
+/**
  * What `describeCallee` learned about one callee expression.
  *
  * `target` is the normalized string that lands in `CallCandidate.target` and
@@ -364,7 +383,15 @@ function describeCallee(node: Node): CalleeShape | null {
       if (object === null) return null
       const inner = describeCallee(object)
       if (inner === null) return null
-      return { target: inner.target, dynamic: true, opaque: false }
+      const segment = subscriptSegment(node)
+      if (segment === null) {
+        return { target: `${inner.target}.${COMPUTED_SEGMENT}`, dynamic: true, opaque: false }
+      }
+      return {
+        target: `${inner.target}.${segment}`,
+        dynamic: inner.dynamic,
+        opaque: inner.opaque,
+      }
     }
     case "parenthesized_expression": {
       const innerNode = node.namedChild(0)
@@ -383,6 +410,26 @@ function describeCallee(node: Node): CalleeShape | null {
     default:
       return node.text.length > 0 ? { target: node.text, dynamic: false, opaque: true } : null
   }
+}
+
+/**
+ * The target segment a bracket access contributes, or null when the index names none.
+ *
+ * `prisma["user"]` addresses the property `prisma.user` addresses, so it answers the same
+ * segment — decoded rather than unquoted, so `prisma["us\u0065r"]` answers `user` too, and
+ * refused when the read was partial, which is the rule a class member's written name already
+ * follows (`memberNameSegment`).
+ *
+ * Everything else — an identifier, a number, a substituting template, a string the
+ * qualified-name grammar has no segment for — is null, and the caller writes
+ * `COMPUTED_SEGMENT` in its place.
+ */
+function subscriptSegment(node: Node): string | null {
+  const index = node.childForFieldName("index")
+  if (index === null) return null
+  if (index.type !== "string" && index.type !== "template_string") return null
+  const { value, whole } = decodeStringLiteral(index)
+  return whole && isQnameSegment(value) ? value : null
 }
 
 function normalizeCallee(node: Node): string | null {

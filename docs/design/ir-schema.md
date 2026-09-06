@@ -496,6 +496,13 @@ A call that does not qualify as an effect.
 
 `resolved` is filled in by the call-resolution feature (separate document). `null` while unresolved.
 
+`target` is the callee as the language plugin normalized it ([`lang-plugin.md`](./lang-plugin.md)
+§4.4), and one segment of it is reserved: **`<computed>`** stands where the source addressed a
+property through brackets with something that is not a name — `prisma[model].create()` is
+`prisma.<computed>.create`. It is a segment no `<qualified-name>` (§3.2) can contain, so a call
+carrying it resolves against nothing rather than against whatever the shortened name would have
+matched. `effects[].target` (§9) carries the same string under the same rule.
+
 ## 11. Dependency
 
 An edge between symbols or between components. Both endpoint kinds live in the same `dependencies[]` array — the schema for `from`/`to` is a plain `string`, and the endpoint kind is recovered from the id shape (`<language>:<file>#<qname>` for a Symbol id, ASCII kebab-case for a Component id).
