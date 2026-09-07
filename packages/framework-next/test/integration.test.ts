@@ -40,6 +40,7 @@ async function classifyEach(path: string, source: string) {
   return candidates.map((candidate) => ({
     id: candidate.id,
     name: candidate.name,
+    visibility: candidate.visibility,
     classification: classifyNextSymbol(candidate, ctx),
   }))
 }
@@ -115,6 +116,18 @@ describe("integration — lang-typescript → framework-next", () => {
     const page = results.find((r) => r.name === "Page")
     expect(helper?.classification).toBeNull()
     expect(page?.classification?.extKind).toBe("framework:next:page")
+  })
+
+  it("classifies a page whose default export is written apart from the declaration", async () => {
+    // `const Page = () => …` followed by `export default Page` is the other ordinary way to
+    // write a component, and the two files describe the same boundary to Next.js.
+    const results = await classifyEach(
+      "app/dashboard/page.tsx",
+      "const Page = () => {\n  return null\n}\nexport default Page",
+    )
+    const page = results.find((r) => r.name === "Page")
+    expect(page?.classification?.extKind).toBe("framework:next:page")
+    expect(page?.visibility).toBe("public")
   })
 
   it("returns null for components outside of app/", async () => {
