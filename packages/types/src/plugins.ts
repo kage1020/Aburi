@@ -181,7 +181,16 @@ export interface MergedDeclaration<TNode = OpaqueAstNode> {
  * classification. AST access is intentionally not exposed.
  */
 export interface CallCandidate {
-  /** Callee as a normalized string (e.g. `prisma.invoice.create`). */
+  /**
+   * Callee as a normalized string (e.g. `prisma.invoice.create`).
+   *
+   * One segment is reserved: `COMPUTED_TARGET_SEGMENT` stands where the source
+   * addressed a property through brackets with something that is not a name, so
+   * `prisma[model].create()` is `prisma.<computed>.create` rather than the
+   * `prisma.create` the program never calls (`lang-plugin.md` §4.4). Both sides
+   * read the exported constant rather than the literal, so a misspelling is a
+   * type error rather than a segment nothing matches.
+   */
   target: string
   line: number
   argumentCount: number

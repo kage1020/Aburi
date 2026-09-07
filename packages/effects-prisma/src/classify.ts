@@ -3,12 +3,18 @@ import {
   hasLiteralFirstArgument,
   type PluginInputOrigin,
 } from "@aburi/plugin-registry/plugin-input"
-import type { CallCandidate, ClassifyContext, EffectClassification } from "@aburi/types"
+import {
+  type CallCandidate,
+  type ClassifyContext,
+  COMPUTED_TARGET_SEGMENT,
+  type EffectClassification,
+} from "@aburi/types"
 import { EFFECTS_PRISMA_DERIVED_BY_PREFIX, EFFECTS_PRISMA_PLUGIN_NAME } from "./constants"
 import { hasPrismaImport } from "./imports"
 import { isPrismaReadMethod, isPrismaTransactionMethod, isPrismaWriteMethod } from "./methods"
 import {
   classificationConfidence,
+  namesPrismaClient,
   PRISMA_DELEGATE_MAX_ARGUMENTS,
   PRISMA_TRANSACTION_MAX_ARGUMENTS,
 } from "./receivers"
@@ -28,6 +34,10 @@ import {
  *          client itself.
  *   3. A literal first argument rules the call out — no Prisma method takes one — and the
  *      receiver and the argument count decide the tier (`classificationConfidence`).
+ *   3a. A model segment that names nothing — `prisma[model].create(…)`, which arrives as
+ *      `prisma.<computed>.create` — supplies the third segment without supplying a model, so
+ *      the receiver has to carry the claim on its own: it must name a client binding, or the
+ *      call is not classified at all.
  *   4. Malformed targets (empty string, adjacent / leading / trailing dots) throw — the
  *      language plugin's contract is a normalized non-empty callee, so a violation
  *      here is an upstream bug we surface loudly instead of silently miscategorizing.
@@ -85,7 +95,23 @@ export function classifyPrismaCall(
 
   // The client sits immediately before the model, whatever precedes it: `prisma.user.create`,
   // `this.prisma.user.create` and `container.services.prisma.user.create` all put it at -3.
-  const confidence = classificationConfidence(parts.at(-3), call, PRISMA_DELEGATE_MAX_ARGUMENTS)
+  const clientSegment = parts.at(-3)
+
+  // A model addressed through brackets (`prisma[model].create(…)`) arrives with `<computed>`
+  // where the model's name belongs — three segments, one of which names nothing. Segment
+  // count is what separates a delegate call from `router.create(payload)` here, so a segment
+  // that names nothing must not be what supplies it: `queues[id].upsert(job)` and
+  // `sets[key].delete(item)` are a queue and a Set, spelled exactly like this call.
+  //
+  // The receiver is what is left to weigh, and it decides. Where it names a client binding,
+  // this is a delegate call whose model the source computes: the write is real and the open
+  // question is which model it hits, which `classificationConfidence` already answers with
+  // `medium` on the same flag. Where it does not, nothing here is Prisma but a shared verb.
+  if (clientSegment !== undefined && parts.at(-2) === COMPUTED_TARGET_SEGMENT) {
+    if (!namesPrismaClient(clientSegment)) return null
+  }
+
+  const confidence = classificationConfidence(clientSegment, call, PRISMA_DELEGATE_MAX_ARGUMENTS)
 
   if (isPrismaReadMethod(method)) {
     return {

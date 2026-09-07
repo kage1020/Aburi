@@ -642,7 +642,11 @@
       "required": ["confidence", "derivedBy", "id", "plugin", "target"],
       "properties": {
         "id": { "$ref": "#/$defs/EffectId" },
-        "target": { "type": "string", "minLength": 1 },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Normalized callee string (lang-plugin.md §4.4). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md §3.1, so a target carrying it matches no Symbol id and no Symbol name."
+        },
         "line": {
           "type": "integer",
           "minimum": 1,
@@ -693,7 +697,11 @@
       "additionalProperties": false,
       "required": ["line", "resolved", "target"],
       "properties": {
-        "target": { "type": "string", "minLength": 1 },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Normalized callee string (lang-plugin.md §4.4). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md §3.1, so a target carrying it matches no Symbol id and no Symbol name."
+        },
         "line": { "type": "integer", "minimum": 1 },
         "resolved": {
           "oneOf": [

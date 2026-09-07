@@ -109,6 +109,36 @@ describe("classifyTrpcCall — recognized client shapes", () => {
   })
 })
 
+// A receiver written through brackets reaches the proxy's segment count without the proxy:
+// `handlers[key].query()` is `handlers.<computed>.query`, three segments of which one names
+// nothing. `dynamicReceiver` is the only thing that separates it from a real client call.
+describe("classifyTrpcCall — a receiver the language plugin could not read as a name", () => {
+  it("records the shape at medium rather than high", () => {
+    const result = classifyTrpcCall(
+      makeCall({ target: "handlers.<computed>.query", dynamicReceiver: true }),
+      clientCtx(),
+    )
+    expect(result?.effectId).toBe("network.rpc")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("caps a genuine client call reached through an expression too", () => {
+    // `getClient().user.byId.query()` — the path is a real one, the binding is not a name.
+    const result = classifyTrpcCall(
+      makeCall({ target: "getClient.user.byId.query", dynamicReceiver: true }),
+      clientCtx(),
+    )
+    expect(result?.confidence).toBe("medium")
+    expect(result?.derivedBy).toBe(`${EFFECTS_TRPC_DERIVED_BY_PREFIX}:query:user.byId`)
+  })
+
+  it("leaves a literal index at high — it is the call the dotted spelling is", () => {
+    // `client["user"].byId.query()` folds to `client.user.byId.query` and sets no flag.
+    const result = classifyTrpcCall(makeCall({ target: "client.user.byId.query" }), clientCtx())
+    expect(result?.confidence).toBe("high")
+  })
+})
+
 describe("classifyTrpcCall — import gate", () => {
   it("returns null for every recognized terminal when no tRPC client module is imported", () => {
     const ctx = makeCtx({ imports: [] })

@@ -354,3 +354,51 @@ describe("classifyPrismaCall — purity", () => {
     expect(ctx.language).toBe(languageSnapshot)
   })
 })
+
+// A model addressed through brackets arrives as `<computed>` in the model slot
+// (`lang-plugin.md` §4.4). That restores the third segment the delegate shape needs, and
+// segment count is exactly what keeps `queue.upsert(job)` unclassified — so the receiver
+// has to carry the claim alone.
+describe("classifyPrismaCall — a model segment that names nothing", () => {
+  const ctx = makeCtx({ imports: [makePrismaImport()] })
+
+  it("keeps the write when the receiver names a client, at the tier the flag sets", () => {
+    const result = classifyPrismaCall(
+      makeCall({ target: "prisma.<computed>.create", dynamicReceiver: true }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.write")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("reads a computed model on a client reached through a chain", () => {
+    expect(
+      classifyPrismaCall(
+        makeCall({ target: "this.prisma.<computed>.update", dynamicReceiver: true }),
+        ctx,
+      )?.effectId,
+    ).toBe("db.write")
+  })
+
+  it("does not let the sentinel buy the delegate shape for an unrelated receiver", () => {
+    // The same three two-segment calls the gate above already refuses, written with
+    // brackets: `queues[id].upsert(job)`, `sets[key].delete(item)`, `router[name].create(x)`.
+    for (const target of [
+      "queues.<computed>.upsert",
+      "sets.<computed>.delete",
+      "router.<computed>.create",
+    ]) {
+      expect(classifyPrismaCall(makeCall({ target, dynamicReceiver: true }), ctx)).toBeNull()
+    }
+  })
+
+  it("returns null when the verb itself is the segment that names nothing", () => {
+    // `prisma.user[verb]()` — three segments, a recognized client, and no method to match.
+    expect(
+      classifyPrismaCall(
+        makeCall({ target: "prisma.user.<computed>", dynamicReceiver: true }),
+        ctx,
+      ),
+    ).toBeNull()
+  })
+})

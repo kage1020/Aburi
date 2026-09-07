@@ -1,13 +1,16 @@
-import type {
-  BodyExtraction,
-  CallCandidate,
-  Rule,
-  SymbolCandidate,
-  WalkContext,
+import { isQnameSegment } from "@aburi/core"
+import {
+  type BodyExtraction,
+  type CallCandidate,
+  COMPUTED_TARGET_SEGMENT,
+  type Rule,
+  type SymbolCandidate,
+  type WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, findChild } from "./ast-helpers"
+import { bodyNodesOf, findChild, hasErrorChild } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import { decodeStringLiteral } from "./string-escape"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -316,8 +319,11 @@ function containsEarlyExit(node: Node): boolean {
  * What `describeCallee` learned about one callee expression.
  *
  * `target` is the normalized string that lands in `CallCandidate.target` and
- * eventually in `Symbol.calls[].target` — its computation is unchanged, so IR
- * bytes and fingerprints are untouched by the two flags beside it.
+ * eventually in `Symbol.calls[].target` and `Symbol.effects[].target`. The
+ * two flags beside it are passengers: neither is serialized, and neither
+ * changes what `target` says. What the *string* says is wire-visible — a
+ * bracket access contributes a segment (`lang-plugin.md` §4.4), and the logic
+ * fingerprint reads `effects[].target`, so a change here moves IR bytes.
  */
 interface CalleeShape {
   target: string
@@ -364,7 +370,19 @@ function describeCallee(node: Node): CalleeShape | null {
       if (object === null) return null
       const inner = describeCallee(object)
       if (inner === null) return null
-      return { target: inner.target, dynamic: true, opaque: false }
+      const segment = subscriptSegment(node)
+      if (segment === null) {
+        return {
+          target: `${inner.target}.${COMPUTED_TARGET_SEGMENT}`,
+          dynamic: true,
+          opaque: false,
+        }
+      }
+      return {
+        target: `${inner.target}.${segment}`,
+        dynamic: inner.dynamic,
+        opaque: inner.opaque,
+      }
     }
     case "parenthesized_expression": {
       const innerNode = node.namedChild(0)
@@ -383,6 +401,36 @@ function describeCallee(node: Node): CalleeShape | null {
     default:
       return node.text.length > 0 ? { target: node.text, dynamic: false, opaque: true } : null
   }
+}
+
+/**
+ * The target segment a bracket access contributes, or null when the index names none.
+ *
+ * `prisma["user"]` addresses the property `prisma.user` addresses, so it answers the same
+ * segment — decoded rather than unquoted, so `prisma["us\u0065r"]` answers `user` too, and
+ * refused when the parser guessed at any of it, which is the rule a class member's written
+ * name already follows (`memberNameSegment`): both of its guards, not just the one on the
+ * literal's own children.
+ *
+ * Position is not part of the question. The index of `handlers["run"]()` names the property
+ * being called exactly as the one in `prisma["user"].create()` names the receiver, so the
+ * terminal slot folds by the same rule (`lang-plugin.md` §4.4).
+ *
+ * Everything else — an identifier, a number, a substituting template, a string the
+ * qualified-name grammar has no segment for — is null, and the caller writes
+ * `COMPUTED_TARGET_SEGMENT` in its place.
+ */
+function subscriptSegment(node: Node): string | null {
+  // Both halves of the refusal `memberNameSegment` makes, and neither covers the other: a
+  // literal that parsed in part answers `whole: false`, while `prisma["user" "audit"]` parses
+  // its second literal as the index and drops an ERROR *beside* it, so the index reads whole
+  // and spells a model the source does not name.
+  if (hasErrorChild(node)) return null
+  const index = node.childForFieldName("index")
+  if (index === null) return null
+  if (index.type !== "string" && index.type !== "template_string") return null
+  const { value, whole } = decodeStringLiteral(index)
+  return whole && isQnameSegment(value) ? value : null
 }
 
 function normalizeCallee(node: Node): string | null {
