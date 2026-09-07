@@ -13,6 +13,7 @@ import {
   hasChildOfType,
   makeSourceRange,
   nameFieldText,
+  unwrapValue,
 } from "./ast-helpers"
 import {
   type CallExtractionState,
@@ -60,8 +61,9 @@ function requireDeclarationName(node: Node, kind: string, file: string): string 
  * that wrote it. See `makeCandidateSink` for what the second declaration contributes.
  *
  * A last pass links each `export default <identifier>` statement back to the declaration it
- * names, which is the one export a declaration cannot carry on itself — see
- * `promoteDefaultExports`.
+ * names: written apart from its declaration, that export leaves no evidence on the
+ * declaration node for the walk to read. Export clauses (`export { Page }`, `export { Page as
+ * default }`) are the same shape and stay unread. See `promoteDefaultExports`.
  */
 export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandidate<Node>[] {
   const root = tree.rootNode
@@ -873,18 +875,27 @@ function hasDefaultKeyword(statement: Node): boolean {
 const EXPORT_DEFAULT = "export-default"
 
 /**
- * Every name the module hands to `export default` as a bare identifier.
+ * Every name the module hands to `export default`, read through the wrappers that say
+ * nothing about the value.
  *
  * `export default Page` is a statement of its own rather than a wrapper around a
  * declaration, so nothing on the declaration node says that the declaration is exported —
  * `isDefaultExport` reads the parent, and the parent of `const Page = () => …` is the
  * module. The two are linked by name or not at all, which is why the names are collected up
  * front: one pass over the module's own statements, asked once, instead of a search of the
- * module per declaration (§8.2).
+ * module per declaration (`lang-plugin.md` §8.2).
  *
- * Only the bare-identifier form is read. `export default withAuth(Page)` and `export default
- * { Page }` export a value the module computes, which is not the declaration; and `export
- * { Page as default }` is an export clause, a form this plugin does not yet read for
+ * The wrappers are read by `unwrapValue`, the one reader that answers what a wrapper is for
+ * every question this plugin asks about a node (LP7a). `export default Page satisfies NextPage`
+ * is an ordinary spelling, and a `satisfies`, an `as`, a `!` and a parenthesis all leave the
+ * value exactly the declaration it names — so a framework reading `export-default` does not
+ * depend on which of them was written, which is the whole of what LP6a promises.
+ *
+ * What the unwrap stops at is what is not a reference to a declaration: `export default
+ * withAuth(Page)` is a call, where LP7b draws the line — it returns a value by convention and
+ * nothing in the tree says so; `export default { Page }` and `export default Routes.Page` are
+ * a value the module builds and a member of one, neither of which is the declaration; and
+ * `export { Page as default }` is an export clause, a form this plugin does not yet read for
  * visibility in any of its spellings.
  */
 function defaultExportedNames(root: Node): ReadonlySet<string> {
@@ -893,8 +904,10 @@ function defaultExportedNames(root: Node): ReadonlySet<string> {
     if (stmt === null || stmt.type !== "export_statement") continue
     if (!hasDefaultKeyword(stmt)) continue
     const value = stmt.childForFieldName("value")
-    if (value === null || value.type !== "identifier") continue
-    names.add(value.text)
+    if (value === null) continue
+    const inner = unwrapValue(value)
+    if (inner.type !== "identifier") continue
+    names.add(inner.text)
   }
   return names
 }
@@ -910,10 +923,17 @@ function defaultExportedNames(root: Node): ReadonlySet<string> {
  * public page boundary when it was written `export default function Page()`, on files the
  * framework treats identically.
  *
- * Matching is by qualified name against the module's top-level names. A class member
- * (`Page.render`) and a namespaced declaration (`Routes.Page`) carry a segment separator that
- * no bare identifier can spell, so neither can be reached by accident; an identifier naming an
- * import rather than a declaration matches nothing at all.
+ * Matching is by qualified name against the module's top-level names. A class member named
+ * `Page` (`Shell.Page`, or `Shell::Page` when it is static) and a namespaced declaration
+ * (`Routes.Page`) carry a segment separator that no bare identifier can spell, so neither can
+ * be reached by accident; an identifier naming an import rather than a declaration matches
+ * nothing at all.
+ *
+ * A **call** Symbol (LP20g) is the one qname that could collide: it is a single segment of
+ * identifier-legal characters (`app__get__$users__d0`), so a module exporting an identifier
+ * spelled exactly that way would otherwise promote it. Nobody writes that name, but a
+ * registration statement is not a declaration an `export default <identifier>` can be naming,
+ * so the kind is refused rather than left to the spelling.
  */
 function promoteDefaultExports(
   candidates: SymbolCandidate<Node>[],
@@ -921,9 +941,13 @@ function promoteDefaultExports(
 ): SymbolCandidate<Node>[] {
   if (names.size === 0) return candidates
   return candidates.map((candidate): SymbolCandidate<Node> => {
-    if (!names.has(candidate.name) || candidate.derivedBy.includes(EXPORT_DEFAULT)) {
-      return candidate
-    }
+    if (candidate.kind === "call" || !names.has(candidate.name)) return candidate
+    // Legal source cannot reach this: a declaration carrying `export default` itself has no
+    // `value` field for `defaultExportedNames` to read, so a module that reaches here at all
+    // wrote a *second* `export default` (TS2528). The grammar accepts the half-edited file
+    // either way, and a Symbol claiming the same evidence twice is not an answer this plugin
+    // should give about any input.
+    if (candidate.derivedBy.includes(EXPORT_DEFAULT)) return candidate
     return {
       ...candidate,
       visibility: "public",

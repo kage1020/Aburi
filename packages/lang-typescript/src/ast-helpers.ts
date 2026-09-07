@@ -62,7 +62,7 @@ export function functionValueOf(node: Node): Node | null {
  * A `satisfies` or `as` names a type the value must fit, a `!` asserts it is not null, and a
  * parenthesis groups. None of them replaces the value, so a function written inside one is
  * still the function that binding holds — which is what the declaration extractor, the class
- * field predicate and the argument scan all have to agree on.
+ * field predicate, the argument scan and the default-export reader all have to agree on.
  *
  * A **call** is not on this list. `withAuth(() => …)` returns a function by convention, and
  * nothing in the tree says so; reading through it would be a guess rather than an unwrap.
