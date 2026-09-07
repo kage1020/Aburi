@@ -605,6 +605,7 @@ Every language plugin must pass the following tests.
 | LP9 | `async function f()` | signature.async = true |
 | LP10 | `function* g()` | signature.generator = true |
 | LP11 | `f(a: number, b: string): boolean` | inputs = [{name:"a",type:"number"},{name:"b",type:"string"}], outputs = ["boolean"] |
+| LP11a | a function that states a parameter **without a parameter list** — TypeScript's parenthesis-free arrow, `x => x + 1` | inputs = [{name:"x",type:""}] — the binding the source states, untyped, which is what the parenthesised spelling of it (`(x) => x + 1`) also reports. Reading only the list form makes the function zero-arity, and `inputs` is compared positionally (fingerprint.md §3.1), so **both** directions go wrong: dropping the parameter is no change at all, and adding the parentheses is an api change |
 | LP12 | `function f<T>()` | typeParameters = ["T"] |
 | LP13 | `function f() { throw new MyError() }` | throws = ["MyError"] |
 

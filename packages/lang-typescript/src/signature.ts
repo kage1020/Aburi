@@ -54,7 +54,7 @@ function readTypeParameters(node: Node): string[] {
 
 function readParameters(node: Node): Array<{ name: string; type: string }> {
   const params = node.childForFieldName("parameters") ?? findChild(node, "formal_parameters")
-  if (params === null) return []
+  if (params === null) return readBareParameter(node)
   const out: Array<{ name: string; type: string }> = []
   for (const child of params.namedChildren) {
     if (child === null) continue
@@ -69,6 +69,26 @@ function readParameters(node: Node): Array<{ name: string; type: string }> {
     }
   }
   return out
+}
+
+/**
+ * A parenthesis-free arrow — `x => x + 1` — has no parameter list to read: the grammar
+ * hangs its single binding off a `parameter` field as a bare identifier, so the list
+ * lookup above finds nothing and the function would report itself zero-arity. The api
+ * fingerprint (fingerprint.md §3.1) compares `inputs` positionally, so that reading
+ * hides the arity change between `x => …` and `(x, y) => …` behind an unchanged
+ * signature.
+ *
+ * The form admits no type annotation, so the input is untyped: the same empty `type` an
+ * unannotated `(x) => …` produces, which keeps the two spellings of one parameter one
+ * signature.
+ */
+function readBareParameter(node: Node): Array<{ name: string; type: string }> {
+  const parameter = node.childForFieldName("parameter")
+  if (parameter === null) return []
+  const name = parameter.text.trim()
+  if (name.length === 0) return []
+  return [{ name, type: "" }]
 }
 
 function extractParamName(param: Node): string {
