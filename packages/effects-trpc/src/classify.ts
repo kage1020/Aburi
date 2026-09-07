@@ -60,6 +60,12 @@ const MIN_CLIENT_SEGMENTS = 3
  *    suppression is scoped to `query` alone because the server spells its other verbs
  *    `mutation` / `subscription`, which are absent from the client vocabulary.
  *
+ * **2a. A receiver that is not a name costs the tier.** `client["user"].byId.query()` is the
+ *    call `client.user.byId.query()` is, and reads the same; `handlers[key].query()` is not,
+ *    and reaches the same segment count carrying `<computed>` where a procedure name belongs.
+ *    `CallCandidate.dynamicReceiver` is what separates them, so a call it marks is recorded at
+ *    `medium` — the effect is real enough to report and the path is not one the source spells.
+ *
  * **3. One effect per call site.** tRPC is not a fluent builder, so no chain collapsing
  *    is needed — but `await client.user.byId.query().then(cb)` does emit a second
  *    candidate whose terminal is `then`. It falls out of the vocabulary naturally.
@@ -117,7 +123,13 @@ export function classifyTrpcCall(
 
   return {
     effectId: "network.rpc",
-    confidence: "high",
+    // A receiver the language plugin could not read as a name is not a client binding, and
+    // the path built from it is not a procedure path: `handlers[key].query()` normalizes to
+    // `handlers.<computed>.query`, which reaches the segment count a proxy call has with none
+    // of the evidence. The shape is still recorded — an RPC written through a lookup is an
+    // RPC — at the tier that says a signal is missing, which is how the Prisma and Drizzle
+    // classifiers already read the same flag.
+    confidence: call.dynamicReceiver === true ? "medium" : "high",
     derivedBy: `${EFFECTS_TRPC_DERIVED_BY_PREFIX}:${family}:${procedurePath}`,
   }
 }

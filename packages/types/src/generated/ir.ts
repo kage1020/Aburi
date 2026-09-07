@@ -66,6 +66,9 @@ loopKind: (("for" | "while" | "do") | null)
 export type RuleType = ("guard" | "throw" | "return" | "loop" | "try" | "switch" | "match")
 export interface Effect {
 id: EffectId
+/**
+ * Normalized callee string (lang-plugin.md §4.4). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md §3.1, so a target carrying it matches no Symbol id and no Symbol name.
+ */
 target: string
 /**
  * Source line of the call that produced this effect. Class B per ir-schema.md §1.1: meaningless on a propagated entry, whose origin is N hops away, so writers MUST omit the key there rather than emit null or a placeholder (effect-propagation.md §5.1). The allOf below turns that rule into a validation error.
@@ -184,6 +187,9 @@ generator: boolean
 typeParameters: string[]
 }
 export interface Call {
+/**
+ * Normalized callee string (lang-plugin.md §4.4). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md §3.1, so a target carrying it matches no Symbol id and no Symbol name.
+ */
 target: string
 line: number
 resolved: (SymbolId | null)

@@ -96,4 +96,49 @@ describe("scan — a Prisma delegate addressed through brackets", () => {
       create.effects.map((e) => ({ id: e.id, target: e.target, confidence: e.confidence })),
     ).toEqual([{ id: "db.write", target: "prisma.<computed>.create", confidence: "medium" }])
   })
+
+  it("says which model it could not read on the effect, because the call is not in calls[]", async () => {
+    const result = await scanWorkspace()
+    const create = symbolNamed(result, "ts:src/repo.ts#createAny")
+
+    // A classified call never reaches `calls[]` (`ir-schema.md` §9.3), so it is counted by no
+    // call-resolution bucket: the segment in `target` and the `medium` tier are the whole
+    // record of what the source computed.
+    expect(create.calls.map((c) => c.target)).not.toContain("prisma.create")
+    expect(create.calls.map((c) => c.target)).not.toContain("prisma.<computed>.create")
+  })
+})
+
+describe("scan — a bracket on something that is not a client", () => {
+  it("does not read a Map or a queue as a delegate call", async () => {
+    // Three segments and Prisma's own verbs — exactly the false positive that segment count
+    // alone would buy. Only the receiver separates these from `prisma[model].create(…)`.
+    await writeSource(
+      "src/queue.ts",
+      [
+        'import { PrismaClient } from "@prisma/client"',
+        "",
+        "const prisma = new PrismaClient()",
+        "const queues = new Map<string, any>()",
+        "const sets = new Map<string, any>()",
+        "",
+        "export function drain(id: string, item: string) {",
+        "  queues[id].upsert({ item })",
+        "  sets[id].delete(item)",
+        "  return prisma.job.findMany()",
+        "}",
+        "",
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const drain = symbolNamed(result, "ts:src/queue.ts#drain")
+
+    expect(drain.effects.map((e) => e.target)).toEqual(["prisma.job.findMany"])
+    // They are still calls, with the segment saying what the source computed.
+    expect(drain.calls.map((c) => c.target)).toEqual([
+      "queues.<computed>.upsert",
+      "sets.<computed>.delete",
+    ])
+  })
 })

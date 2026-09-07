@@ -251,15 +251,25 @@ upstream is genuinely broken.
 #### A bracket access in a callee
 
 `prisma["user"].create(data)` and `prisma.user.create(data)` are one call written two ways, and
-the target says so: a **string-literal index whose value is a §3.2 segment folds into the target
-as that segment**. The literal is decoded rather than unquoted, so `prisma["us\u0065r"]` is
-`prisma.user` too, and the receiver is still a name — no `dynamicReceiver`.
+the target says so: a **string-literal index whose value is a qualified-name
+segment ([`ir-schema.md`](./ir-schema.md) §3.1) folds into the target as that segment**. The literal is decoded rather than unquoted, so `prisma["us\u0065r"]` is
+`prisma.user` too, and it is refused when the parser guessed at any of it — a partial read
+(`obj["a\u12b"]`) and a whole literal standing beside an ERROR (`prisma["user" "audit"]`, a
+missing operator) both name a property the source does not spell. That is the pair of guards a
+class member's written name already answers with (§9.1, LP8m).
 
 Every other index names no segment: an identifier (`prisma[model]`), a number (`items[0]`), a
-substituting template, a string the grammar has no segment for (`obj["a-b"]`), a literal the
-parser only partly read. The bracket contributes the reserved segment **`<computed>`** instead,
-and the call carries `dynamicReceiver` — the receiver is an expression, which is what the
-brackets say.
+substituting template, a string the grammar has no segment for (`obj["a-b"]`, `obj["a.b"]`, `""`).
+The bracket contributes the reserved segment **`<computed>`** instead — the exported
+`COMPUTED_TARGET_SEGMENT`, so both sides of the boundary spell it from one place — and the call
+carries `dynamicReceiver`, because a property nothing names is a property reached by evaluating
+an expression.
+
+**Where the brackets sit is not part of the question.** The index of `handlers["run"]()` names
+the function being called exactly as the one in `prisma["user"].create()` names the receiver, so
+the terminal slot folds by the same rule and `handlers[name]()` answers `handlers.<computed>`.
+The flag then reports the callee rather than a receiver — which is what
+[`call-resolution.md`](./call-resolution.md) §8.1's `dynamic` bucket wants either way: nothing in the target is a name a tier could look up.
 
 Dropping the index is the one answer that is not available. `prisma["user"].create()` read as
 `prisma.create` is not a lossy spelling of the call, it is a different call: it never appears in
@@ -269,15 +279,32 @@ nothing anywhere to say that it did. Recording no call at all would at least be 
 costs the call site its diagnostic, its arguments and any effect on it, which is the same loss
 paid twice.
 
-`<computed>` cannot be mistaken for a name. `<` is outside §3.2's segment grammar, so every
-candidate id built through it is refused by `trySymbolId`, and no Symbol `name` a
-component-scope or workspace-scope lookup compares against can hold it
-([`call-resolution.md`](./call-resolution.md) §4.5, §4.6). The segment is unresolvable by
-construction, which is exactly what the source says about it.
+**A consumer reading a fixed position meets the sentinel where it expected a name.** It names
+none, and a consumer that treats it as one is reading evidence out of a segment that carries
+none — `queues[id].upsert(job)` has a delegate call's three segments and is a queue. The rule is
+the plugin's own: `effects-prisma` requires the receiver to name a client binding before it
+credits a computed model, and `effects-trpc` caps a `dynamicReceiver` call at `medium`.
+
+`<computed>` is unresolvable by construction: the segment grammar of
+[`ir-schema.md`](./ir-schema.md) §3.1 admits no `<`, so every candidate id built through such a
+target is refused by `trySymbolId`, and no Symbol `name`
+a component-scope or workspace-scope lookup compares against can hold one
+([`call-resolution.md`](./call-resolution.md) §4.5, §4.6). (`<default>` is reserved *ahead of*
+that pattern rather than by it, so the safety is this segment's spelling, not the angle
+brackets.) An **effect** plugin claiming the call is the one path that leaves that bucket with
+nothing to say: a classified call never reaches `calls[]` ([`ir-schema.md`](./ir-schema.md) §9.3) and is
+counted by no bucket, so what records the computed segment there is `effects[].target` and the
+tier the plugin chose.
+
+This is [`ir-schema.md`](./ir-schema.md) §3.2's computed-member row read from the other side, and
+the two do not disagree. A qualified name is a **resolution target** — inventing a segment there
+mints an id, and an id that names nothing is worse than no Symbol. A call target is a **reading
+of what the source calls**, which a missing segment falsifies, and which resolves against nothing
+either way.
 
 #### `dynamicReceiver`
 
-Set it to `true` when the callee's receiver was an **expression rather than a name** — `getRepo().save()`, `items[0].save()` (`items.<computed>.save`), `(a ?? b).save()`. Leave it absent otherwise; absent means `false`, so existing plugins stay valid without a change.
+Set it to `true` when the callee's receiver was an **expression rather than a name** — `getRepo().save()`, `items[0].save()` (`items.<computed>.save`), `(a ?? b).save()` — and when the callee **itself** is one, which brackets are the way to write (`handlers[name]()`, §4.4). Leave it absent otherwise; absent means `false`, so existing plugins stay valid without a change.
 
 Normalization is lossy here in a way only the plugin can repair: `getRepo().save()` collapses to the target `getRepo.save`, which is spelled exactly like a genuine `Class.method` qname. Without the flag, [`call-resolution.md`](./call-resolution.md) §8.1 would have to file every such call under `no-match` and send reviewers hunting for a typo that does not exist; with it, the call is correctly reported as `dynamic`.
 
@@ -610,8 +637,10 @@ Every language plugin must pass the following tests.
 | LP20g | a Symbol whose declaration is a **call** that registers a function — `app.post('/users', async (req, res) => { … })` | the registered function is the Symbol's body. The registration is the only Symbol the statement produces, so a handler written inline is otherwise in no Symbol at all; and it is what the registration runs, so it is the body by the same reading as LP20a. Every function written as a **direct** argument of a call on the statement's spine counts, in source order — a chained registration (`app.route(p).get(h1).post(h2)`) is one statement and one Symbol, and so is `app.use(h0).router.get(h1)`, where a property access stands between the two calls. "Function" is the plugin's own predicate (LP7a) and no wider: a generator argument (Koa's `app.use(function* (ctx, next) {…})`) registers no body. A body of no width is refused, so a half-written handler the parser recovered does not claim one. The Symbol's `signature` stays null: it is the registration, and reading the handler's would publish the framework's callback shape as the route's API |
 | LP20h | LP20g with more than one handler | the first in source order is `bodyNode` and the rest ride on `mergedDeclarations`, which is a **stretch of that field**: they are further bodies of one declaration, not further declarations of one entity (§4.3.1), and they carry no `declaration-merged`. The field is reused because every reader of it (`bodyNodesOf`, the empty-body hint) wants exactly "every body this Symbol has". A single-body reader gets the source-order-first function, which need not be the handler: `makeRouter(() => setup()).get(p, h)` leads with the factory's callback |
 | LP20i | LP20g's normalized string | the **whole call**, not the body. What the registration runs is the walk's question; what it *is* — its path, its method, the middleware between them and the handler — is the fingerprint's, and narrowing to the body makes `app.get(p, authenticate, h)` and `app.get(p, h)` serialize identically. This is LP8j's rule read from the other side: a describing node dropped from the string is a change the axis stops seeing |
-| LP20j | `prisma["user"].create(d)` | one call, target `prisma.user.create`, no `dynamicReceiver` — a string-literal index is the segment it spells (§4.4) |
-| LP20k | `prisma[model].create(d)`, `items[0].save()` | one call each, targets `prisma.<computed>.create` and `items.<computed>.save`, both `dynamicReceiver` — an index that names no segment is reported as one that names none, where dropping it would report a call the program does not contain |
+| LP20j | `prisma["user"].create(d)`, `prisma.user["create"](d)` | one call each, target `prisma.user.create`, no `dynamicReceiver` — a string-literal index is the segment it spells, in the receiver slot and in the terminal one (§4.4) |
+| LP20j1 | `prisma["user" "audit"].create(d)`, `obj["a\u12b"].m()` | `prisma.<computed>.create` / `obj.<computed>.m` — an index the parser recovered rather than read names no segment, whether the ERROR stands beside the literal or inside it |
+| LP20k | `prisma[model].create(d)`, `items[0].save()`, `obj["a-b"].m()` | one call each, targets `prisma.<computed>.create`, `items.<computed>.save`, `obj.<computed>.m`, all `dynamicReceiver` — an index that names no segment is reported as one that names none, where dropping it would report a call the program does not contain |
+| LP20k1 | `handlers[name]()`, `prisma.user[verb](d)` | `handlers.<computed>` / `prisma.user.<computed>`, both `dynamicReceiver` — the terminal slot answers the same way, so a call whose *name* is computed is reported as a call rather than as a call to its receiver |
 | LP20e | an owner-shaped node the walk *meets* rather than owns — `function f() { class Inner { m() { x() } } }` | walked whole. `Inner` is not extracted, so every call in it belongs to `f`; LP20a applies to the Symbol's own body nodes and to nothing else |
 
 ### 9.5 normalizeAst

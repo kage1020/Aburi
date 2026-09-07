@@ -94,7 +94,6 @@ export type {
   PluginManifest,
   Provides,
 } from "./generated/plugin"
-
 // ---------- Hand-written plugin contracts ----------
 export type {
   BodyExtraction,
@@ -131,3 +130,5 @@ export type {
   WalkContext,
   WrittenSourceRange,
 } from "./plugins"
+// ---------- Reserved IR strings (values, not types) ----------
+export { COMPUTED_TARGET_SEGMENT } from "./vocabulary"

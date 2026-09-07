@@ -184,12 +184,12 @@ export interface CallCandidate {
   /**
    * Callee as a normalized string (e.g. `prisma.invoice.create`).
    *
-   * One segment is reserved: `<computed>` stands where the source addressed a
-   * property through brackets with something that is not a name, so
+   * One segment is reserved: `COMPUTED_TARGET_SEGMENT` stands where the source
+   * addressed a property through brackets with something that is not a name, so
    * `prisma[model].create()` is `prisma.<computed>.create` rather than the
-   * `prisma.create` the program never calls (`lang-plugin.md` §4.4). A segment
-   * spelled with `<` is outside the qualified-name grammar, so a target
-   * carrying it resolves against nothing.
+   * `prisma.create` the program never calls (`lang-plugin.md` §4.4). Both sides
+   * read the exported constant rather than the literal, so a misspelling is a
+   * type error rather than a segment nothing matches.
    */
   target: string
   line: number

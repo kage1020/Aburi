@@ -254,7 +254,7 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 |---|---|---|
 | `local-scope` | resolved to a local variable / parameter | `callback(x)` inside `foo(callback: () => void)` |
 | `external` | resolved to a bare specifier import | `lodash.sortBy(...)` |
-| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)`, `prisma[model].create(...)` |
+| `dynamic` | receiver is an expression, not a name, or a `this` / `super` receiver with no usable LSP hint | `getRepo().save(...)`, `items[0].save(...)` |
 | `ambiguous` | multiple candidates | two `User.save` in different components with no explicit import |
 | `no-match` | no candidate found | typo, or callee not in workspace and not imported |
 
@@ -263,12 +263,19 @@ The core does not persist a "why null" reason field on `Call` in the IR. Adding 
 A single call can fit several descriptions at once — a parameter that happens to share a name with an imported package, an ambiguous qname reached through an expression receiver. The reviewer needs one stable answer per call site, so the resolver assigns the **most specific cause** in this fixed order:
 
 1. `local-scope` — the §4.2 shadow guard fired, so the resolver never looked outward at all.
-2. `dynamic` — the receiver is not a name: an expression receiver reported by the language plugin, or `this` / `super` with no *usable* LSP hint (§4.7) — no hint at all, or one the LSP tier declined (§5.2). `this.save()` is filed here because in the untyped tier the receiver's identity is a runtime property of the class hierarchy, exactly like `getRepo().save()`; there is no name for the resolver to look up. The bucket therefore does not separate a call site the type layer never spoke about from one whose hint was refused; `stats.lspEnrichment.hintsRejected` ([`lsp-enrichment.md`](./lsp-enrichment.md) §7.2) is where that distinction is recorded, per run rather than per call site.
+2. `dynamic` — the receiver is not a name: an expression receiver reported by the language plugin — which includes a property addressed through brackets with something that is not a name, `items[0].save()` ([`lang-plugin.md`](./lang-plugin.md) §4.4) — or `this` / `super` with no *usable* LSP hint (§4.7) — no hint at all, or one the LSP tier declined (§5.2). `this.save()` is filed here because in the untyped tier the receiver's identity is a runtime property of the class hierarchy, exactly like `getRepo().save()`; there is no name for the resolver to look up. The bucket therefore does not separate a call site the type layer never spoke about from one whose hint was refused; `stats.lspEnrichment.hintsRejected` ([`lsp-enrichment.md`](./lsp-enrichment.md) §7.2) is where that distinction is recorded, per run rather than per call site.
 3. `ambiguous` — some tier found the callee and refused to choose between candidates (§7.1). The competing Symbol ids are recorded, deduplicated and lex-sorted.
 4. `external` — the head of the target is bound in the caller's file by an import whose specifier is not relative. §4.4.1 resolves relative specifiers only, so such a callee is out of reach by construction rather than by accident.
 5. `no-match` — nothing matched anywhere.
 
 The order is part of the contract: changing it would move counts between buckets on an unchanged workspace.
+
+**A call an effect plugin claimed is in no bucket at all**, whichever description fits it. Such a
+call never reaches `calls[]` ([`ir-schema.md`](./ir-schema.md) §9.3), so the resolver never sees
+it and `stats.callResolution` never counts it — `prisma[model].create()` is recorded as a
+`db.write` whose `effects[].target` carries the computed segment, at the tier the plugin chose,
+and that pair is the whole record of what the source computed. The bucket is for the calls that
+stay calls.
 
 #### Where the counts and the detail live
 

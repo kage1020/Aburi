@@ -195,7 +195,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | default export (including anonymous functions/classes) | `<default>` |
 | function/class expression assigned to a variable | the variable name becomes the qname (e.g. `const handler = () => ...` → `handler`) |
 | destructuring declaration | one Symbol per **binding**, each named by the binding (e.g. `const { GET, POST } = handlers` → `GET` and `POST`). The pattern's text is not a name; `{ a: b }` binds `b`, and `{ a = fallback }` binds `a` and reads `fallback` |
-| class member with a computed name (`[Symbol.iterator]() {}`) | **no Symbol**, and no diagnostic. The brackets are not a name static analysis can record, and mangling them into a segment would invent one the source does not contain |
+| class member with a computed name (`[Symbol.iterator]() {}`) | **no Symbol**, and no diagnostic. The brackets are not a name static analysis can record, and mangling them into a segment would invent one the source does not contain. A **call target** answers the same shape differently and for the same reason ([`lang-plugin.md`](./lang-plugin.md) §4.4): a qualified name is a resolution target, so an invented segment mints an id that names nothing, while a call target is a reading of what the source calls, which a *dropped* segment falsifies — hence `<computed>` there and no Symbol here |
 | class member with a quoted name (`"createInvoice"() {}`) | the segment the literal *decodes* to, when that is an identifier — a property key is a string, so `"createInvoice"` and `createInvoice` are one member and fold onto one Symbol |
 | class member with a quoted name that is not an identifier (`"a-b"() {}`), or a numeric one (`1() {}`) | **no Symbol**, and no diagnostic, as for a computed name. `C["a-b"]` is how the source addresses it and `C.a-b` is not a qualified name; the body stays on the class |
 | class member whose name is written with a unicode escape (`\u006bay() {}`) | **no Symbol**. The grammar is IdentifierName *less the escape forms*, and a bare name arrives as its own source text with the backslash still on it. Quoted, the same key decodes and is a member — one property spelled two ways, answered two ways |
@@ -497,11 +497,17 @@ A call that does not qualify as an effect.
 `resolved` is filled in by the call-resolution feature (separate document). `null` while unresolved.
 
 `target` is the callee as the language plugin normalized it ([`lang-plugin.md`](./lang-plugin.md)
-§4.4), and one segment of it is reserved: **`<computed>`** stands where the source addressed a
-property through brackets with something that is not a name — `prisma[model].create()` is
-`prisma.<computed>.create`. It is a segment no `<qualified-name>` (§3.2) can contain, so a call
-carrying it resolves against nothing rather than against whatever the shortened name would have
-matched. `effects[].target` (§9) carries the same string under the same rule.
+§4.4), and one segment of it is reserved: **`<computed>`** — exported as
+`COMPUTED_TARGET_SEGMENT` — stands where the source addressed a property through brackets with
+something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. The
+segment pattern of §3.1 admits no `<`, so a call carrying it resolves against nothing rather than
+against whatever the shortened name would have matched. `effects[].target` (§9) carries the same
+string under the same rule, and is where a call an effect plugin claimed records it — such a call
+is not in `calls[]` (§9.3) and reaches no call-resolution bucket.
+
+A consumer reading a fixed position of a target — the model of a delegate call, the receiver
+before a verb — meets this segment where a name was expected, and it names none: absent evidence,
+never a name spelled oddly.
 
 ## 11. Dependency
 

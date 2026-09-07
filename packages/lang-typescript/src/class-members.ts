@@ -1,6 +1,6 @@
 import { isQnameSegment } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
-import { functionValueOf, hasChildOfType, nameFieldText } from "./ast-helpers"
+import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
 import { decodeStringLiteral } from "./string-escape"
 
 /**
@@ -58,13 +58,6 @@ export function memberNameSegment(member: Node): string | null {
 
 function admitSegment(candidate: string): string | null {
   return isQnameSegment(candidate) ? candidate : null
-}
-
-/** An ERROR or a MISSING token among a member's own children — its head, never its body. */
-function hasErrorChild(member: Node): boolean {
-  return member.children.some(
-    (child) => child !== null && (child.type === "ERROR" || child.isMissing),
-  )
 }
 
 /**

@@ -108,6 +108,25 @@ export function asFunctionValue(node: Node): Node | null {
 }
 
 /** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */
+/**
+ * An ERROR or a MISSING token among a node's **own** children — its head, never its body.
+ *
+ * What it answers is "did the parser guess at this node's own text?", and that is the question
+ * both readers of a written name ask: a class member's name (`memberNameSegment`) and a
+ * bracket access's index (`subscriptSegment`). Recovery re-emits the characters it could
+ * salvage as an ordinary node and drops an ERROR beside them, so a name that looks whole is
+ * not evidence that it was read — `class C { "\uZZZZ"() {} }` recovers as a member called
+ * `ZZZZ`, and `prisma["user" "audit"]` recovers with `"audit"` in the index field.
+ *
+ * Deliberately not `node.hasError`: a broken body or argument list nests its ERROR deeper and
+ * leaves the head alone, so a typo inside a member would otherwise cost the member its name.
+ */
+export function hasErrorChild(node: Node): boolean {
+  return node.children.some(
+    (child) => child !== null && (child.type === "ERROR" || child.isMissing),
+  )
+}
+
 export function hasChildOfType(node: Node, typeName: string): boolean {
   for (const child of node.children) {
     if (child !== null && child.type === typeName) return true

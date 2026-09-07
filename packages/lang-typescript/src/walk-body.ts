@@ -1,13 +1,14 @@
 import { isQnameSegment } from "@aburi/core"
-import type {
-  BodyExtraction,
-  CallCandidate,
-  Rule,
-  SymbolCandidate,
-  WalkContext,
+import {
+  type BodyExtraction,
+  type CallCandidate,
+  COMPUTED_TARGET_SEGMENT,
+  type Rule,
+  type SymbolCandidate,
+  type WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, findChild } from "./ast-helpers"
+import { bodyNodesOf, findChild, hasErrorChild } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 import { decodeStringLiteral } from "./string-escape"
 
@@ -315,28 +316,14 @@ function containsEarlyExit(node: Node): boolean {
 }
 
 /**
- * The segment that stands where the source addressed a property through brackets with
- * something that is not a name — `prisma[model].create()` is `prisma.<computed>.create`
- * (`lang-plugin.md` §4.4).
- *
- * The alternative was to drop the index, and dropping it does not shorten the call, it
- * renames it: `prisma["user"].create()` reported as `prisma.create` is a call the program
- * does not contain, spelled like an ordinary two-segment method call, and one segment short
- * of the delegate shape `effects-prisma` matches — so the `db.write` went missing with it.
- *
- * The spelling is what makes the segment safe to write. `<` is outside the qualified-name
- * grammar, so `trySymbolId` refuses every candidate id built through a target carrying it and
- * no Symbol `name` the component- or workspace-scope tiers compare against can hold it: the
- * segment is unresolvable by construction rather than by a check somebody has to remember.
- */
-const COMPUTED_SEGMENT = "<computed>"
-
-/**
  * What `describeCallee` learned about one callee expression.
  *
  * `target` is the normalized string that lands in `CallCandidate.target` and
- * eventually in `Symbol.calls[].target` — its computation is unchanged, so IR
- * bytes and fingerprints are untouched by the two flags beside it.
+ * eventually in `Symbol.calls[].target` and `Symbol.effects[].target`. The
+ * two flags beside it are passengers: neither is serialized, and neither
+ * changes what `target` says. What the *string* says is wire-visible — a
+ * bracket access contributes a segment (`lang-plugin.md` §4.4), and the logic
+ * fingerprint reads `effects[].target`, so a change here moves IR bytes.
  */
 interface CalleeShape {
   target: string
@@ -385,7 +372,11 @@ function describeCallee(node: Node): CalleeShape | null {
       if (inner === null) return null
       const segment = subscriptSegment(node)
       if (segment === null) {
-        return { target: `${inner.target}.${COMPUTED_SEGMENT}`, dynamic: true, opaque: false }
+        return {
+          target: `${inner.target}.${COMPUTED_TARGET_SEGMENT}`,
+          dynamic: true,
+          opaque: false,
+        }
       }
       return {
         target: `${inner.target}.${segment}`,
@@ -417,14 +408,24 @@ function describeCallee(node: Node): CalleeShape | null {
  *
  * `prisma["user"]` addresses the property `prisma.user` addresses, so it answers the same
  * segment — decoded rather than unquoted, so `prisma["us\u0065r"]` answers `user` too, and
- * refused when the read was partial, which is the rule a class member's written name already
- * follows (`memberNameSegment`).
+ * refused when the parser guessed at any of it, which is the rule a class member's written
+ * name already follows (`memberNameSegment`): both of its guards, not just the one on the
+ * literal's own children.
+ *
+ * Position is not part of the question. The index of `handlers["run"]()` names the property
+ * being called exactly as the one in `prisma["user"].create()` names the receiver, so the
+ * terminal slot folds by the same rule (`lang-plugin.md` §4.4).
  *
  * Everything else — an identifier, a number, a substituting template, a string the
  * qualified-name grammar has no segment for — is null, and the caller writes
- * `COMPUTED_SEGMENT` in its place.
+ * `COMPUTED_TARGET_SEGMENT` in its place.
  */
 function subscriptSegment(node: Node): string | null {
+  // Both halves of the refusal `memberNameSegment` makes, and neither covers the other: a
+  // literal that parsed in part answers `whole: false`, while `prisma["user" "audit"]` parses
+  // its second literal as the index and drops an ERROR *beside* it, so the index reads whole
+  // and spells a model the source does not name.
+  if (hasErrorChild(node)) return null
   const index = node.childForFieldName("index")
   if (index === null) return null
   if (index.type !== "string" && index.type !== "template_string") return null

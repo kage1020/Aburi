@@ -1,4 +1,4 @@
-import { describe, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import type {
   CallCandidate,
   CallResolutionStats,
@@ -40,6 +40,7 @@ import type {
   VocabRegistry,
   WrittenSourceRange,
 } from "../src/index"
+import { COMPUTED_TARGET_SEGMENT } from "../src/index"
 
 // Pure type-level tests. They compile-time-assert that the public surface stays
 // importable and shaped roughly as designed. No runtime cost beyond Vitest's
@@ -145,6 +146,13 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("dynamic")
     expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("ambiguous")
     expectTypeOf<UnresolvedCallBuckets>().toHaveProperty("noMatch")
+  })
+
+  it("exports the reserved target segment as a value both sides can spell from one place", () => {
+    // A language plugin writes it into `CallCandidate.target`; an effect plugin reads it at a
+    // fixed position. Two hand-written copies is one misspelling away from a segment that
+    // matches nothing, and neither the types nor the schema would say so.
+    expect(COMPUTED_TARGET_SEGMENT).toBe("<computed>")
   })
 
   it("marks CallCandidate.dynamicReceiver optional so existing plugins stay valid", () => {
