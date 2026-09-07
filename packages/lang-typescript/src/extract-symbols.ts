@@ -8,9 +8,12 @@ import type {
 } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import {
+  AMBIENT_DECLARATION_TYPE,
   findChild,
+  firstNonCommentChild,
   functionValueOf,
   hasChildOfType,
+  inAmbientContext,
   makeSourceRange,
   nameFieldText,
   unwrapValue,
@@ -187,10 +190,23 @@ function visitStatement(
     visitStatement(declared, ctx, namespacePath, out, callState)
     return
   }
+  if (node.type === AMBIENT_DECLARATION_TYPE) {
+    const declared = ambientDeclaration(node)
+    if (declared === null) return
+    visitStatement(declared, ctx, namespacePath, ambientSink(out), callState)
+    return
+  }
   switch (node.type) {
     case "function_declaration":
     case "generator_function_declaration":
       out.add(makeFunctionCandidate(node, ctx, namespacePath))
+      return
+    case "function_signature":
+      // A bodyless function is a Symbol only where nothing can be written beside it to carry
+      // the body. At module level it is an overload declaration and the implementation below it
+      // is the Symbol; under a `declare` there are no implementations, so the signature is the
+      // whole declaration and skipping it left `declare function f(): void` extracting nothing.
+      if (inAmbientContext(node)) out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
     case "arrow_function":
@@ -277,6 +293,59 @@ function wrappedDeclaration(statement: Node): Node | null {
   return only
 }
 
+/**
+ * The declaration a `declare` was written on, or null when the `declare` declares nothing *in
+ * this module*.
+ *
+ * `declare` is a modifier the grammar spells as a wrapper, and every form goes through it:
+ * `declare function f(): void`, `declare class C {}`, `declare const x: number`, `declare
+ * namespace N {}`, `declare enum E {}`, `declare interface I {}`, `declare type T = …`. So the
+ * wrapper is read through rather than matched on, and each of those reaches the arm of the
+ * statement switch it would have reached written without the keyword — which is what the
+ * `export declare class C {}` in every ordinary `.ts` file needs, `.d.ts` files being dropped
+ * before extraction (Category A) while these are not.
+ *
+ * `declare global { … }` is the one form holding a bare `statement_block` rather than a
+ * declaration, and it is refused. It augments the **global** scope: `interface Window { … }`
+ * inside it declares a member of that scope, not of this file, and the only qualified name this
+ * plugin could give it is a top-level one — where it would claim the name for this module and
+ * fold with the file's own declaration of it (§4.3.1). `declare module "express" { … }` is the
+ * same construct aimed at another module and is refused on the same ground, one step further in
+ * (see `moduleAugmentation`). Both are a known limit rather than an oversight: giving either its
+ * Symbols needs a qname convention for a scope that is not the file's, which `ir-schema.md` §3.2
+ * does not have.
+ */
+function ambientDeclaration(node: Node): Node | null {
+  const inner = firstNonCommentChild(node)
+  if (inner === null || inner.type === "statement_block") return null
+  return inner
+}
+
+/** What `derivedBy` says when a Symbol was declared under a `declare`. */
+const AMBIENT_DECLARATION = "ambient-declaration"
+
+/**
+ * `out`, with every candidate reaching it marked as written under a `declare`.
+ *
+ * The token is stamped on the sink rather than by each builder because `declare` wraps a
+ * *statement*, and everything that statement declares in turn is ambient too — a `declare
+ * namespace`'s functions and nested classes, a `declare class`'s methods. Wrapping the sink is
+ * what makes that one rule instead of an argument nine builders each have to remember to
+ * forward, and it cannot drift from the wrapper that established it.
+ *
+ * `list` is the wrapped sink's, so folding and ordering still happen once, over every
+ * declaration in the file (§4.3.1). An ambient declaration merged with a non-ambient one keeps
+ * the token, which is what the fold does with every other `derivedBy`.
+ */
+function ambientSink(out: CandidateSink): CandidateSink {
+  return {
+    add(candidate) {
+      out.add({ ...candidate, derivedBy: [...candidate.derivedBy, AMBIENT_DECLARATION] })
+    },
+    list: () => out.list(),
+  }
+}
+
 function addClassAndMembers(
   node: Node,
   ctx: ExtractionContext,
@@ -329,12 +398,14 @@ function addClassAndMembers(
 /**
  * One candidate per member, not per member declaration.
  *
- * `method_signature` is skipped outright: inside a class body it is an overload declaration,
+ * `method_signature` is skipped in an ordinary class body: there it is an overload declaration,
  * and the implementation beside it carries the body and the parameter types the member is
- * actually called with. Top-level overloads have always behaved this way — `function_signature`
- * is absent from the statement switch — and a class has to match, or the same source answers
- * differently depending on where it is written. A class body with signatures and no
- * implementation therefore declares no members, which is what `tsc` calls TS2391 anyway.
+ * actually called with. Top-level overloads behave the same way — a bare `function_signature`
+ * is not a Symbol either — and a class has to match, or the same source answers differently
+ * depending on where it is written. A class body with signatures and no implementation therefore
+ * declares no members, which is what `tsc` calls TS2391 anyway. Under a `declare` the reading
+ * inverts, because no implementation can be written beside them at all; `memberSymbolSegment`
+ * owns that split, along with the `abstract_method_signature` a class body admits outright.
  *
  * What is left can still name one member twice: `get v()` beside `set v(n)` is one property,
  * and two `method_definition` nodes. Those fold into one candidate, and the getter is the one
@@ -448,6 +519,10 @@ function makeMethodCandidate(
   const signature = buildSignature(node, jsDoc)
   const derivedBy: string[] = [isStatic ? "static-method" : "class-method"]
   if (kind === "constructor") derivedBy.push("constructor-declaration")
+  // The member is declared and not implemented here, by the `abstract` modifier rather than by
+  // being an empty stub. Nothing else on the Symbol says so: an abstract member and a `declare`d
+  // one both arrive with a null `bodyNode`, which is also what a half-written method has.
+  if (node.type === "abstract_method_signature") derivedBy.push(ABSTRACT_DECLARATION)
   // `get` and `set` are anonymous tokens on the same `method_definition` a plain method
   // uses, so nothing else on the Symbol says the member is a property rather than a call.
   if (hasChildOfType(node, "get") || hasChildOfType(node, "set")) {
@@ -467,6 +542,9 @@ function makeMethodCandidate(
     fullNode: node,
   }
 }
+
+/** What `derivedBy` says when a member is declared `abstract`. */
+const ABSTRACT_DECLARATION = "abstract-declaration"
 
 /**
  * A class field whose value is a function, which `memberSymbolSegment` has already admitted —
@@ -611,6 +689,25 @@ function makeEnumCandidate(
  * (`namespace A.B {}` beside `namespace A.C {}`) therefore reach the sink as two declarations
  * of `A`, which is what they are.
  */
+/**
+ * True for `declare module "express" { … }` — a `module` whose name is a **quoted specifier**
+ * rather than an identifier.
+ *
+ * It is an augmentation of another module, and the declarations inside it are members of that
+ * module. Neither half of it has a name this plugin can give a Symbol: a specifier is not a
+ * qualified-name segment — handing `"express"` to the id builder throws, and the throw is caught
+ * at the per-file boundary and costs the file every Symbol it had (§4.3) — and the declarations
+ * under it would have to take bare top-level qnames, claiming another module's names for this
+ * file and folding with its own declarations of them (§4.3.1). So neither is emitted, which is
+ * the answer `ir-schema.md` §3.2 gives every name the grammar has no segment for.
+ *
+ * Unreachable until `ambient_declaration` was read through: the quoted spelling is legal only
+ * under a `declare`, so this arm and the throw behind it arrived together.
+ */
+function isModuleAugmentation(node: Node): boolean {
+  return node.childForFieldName("name")?.type === "string"
+}
+
 function addNamespaceAndBody(
   node: Node,
   ctx: ExtractionContext,
@@ -618,6 +715,7 @@ function addNamespaceAndBody(
   out: CandidateSink,
   callState: CallExtractionState,
 ): void {
+  if (isModuleAugmentation(node)) return
   const segments = requireDeclarationName(node, "namespace", ctx.file.path).split(".")
   const path = [...namespacePath]
   for (const segment of segments) {
@@ -858,7 +956,7 @@ function readAccessibilityKeyword(node: Node): Visibility {
 }
 
 function isDefaultExport(node: Node): boolean {
-  const parent = node.parent
+  const parent = statementParent(node)
   if (parent === null || parent.type !== "export_statement") return false
   return hasDefaultKeyword(parent)
 }
@@ -957,7 +1055,7 @@ function promoteDefaultExports(
 }
 
 function hasExportKeywordAncestor(node: Node): boolean {
-  const parent = node.parent
+  const parent = statementParent(node)
   return parent !== null && parent.type === "export_statement"
 }
 
@@ -977,8 +1075,9 @@ function currentFile(ctx: ExtractionContext): string {
  * about the code, not a declaration of what the member throws.
  *
  * Wrapper handling: if the declaration is inside an `export_statement` (`export function
- * f() {}`), the JSDoc lives before the export wrapper, not before the declaration itself.
- * Walk up to the outermost wrapper before scanning siblings.
+ * f() {}`) or an `ambient_declaration` (`declare function f(): void`), or both (`export declare
+ * function f(): void`), the JSDoc lives before the outermost wrapper rather than before the
+ * declaration itself. Walk up to that wrapper before scanning siblings.
  *
  * The scan walks backwards from the anchor rather than reading the parent's child list and
  * searching it for the anchor's own position — see lang-plugin.md §8.2 for why a per-node
@@ -1010,7 +1109,24 @@ function readLeadingJsDoc(node: Node): string | null {
 }
 
 function outerStatementWrapper(node: Node): Node {
+  const ambient = node.parent
+  const anchor = ambient?.type === AMBIENT_DECLARATION_TYPE ? ambient : node
+  const exported = anchor.parent
+  return exported?.type === "export_statement" ? exported : anchor
+}
+
+/**
+ * The statement `node` was written as, seen from the declaration: its parent, with a `declare`
+ * wrapper stepped over.
+ *
+ * `export declare class C {}` parents the class in an `ambient_declaration` and *that* in the
+ * `export_statement`, so a reader that took the immediate parent found the wrapper and reported
+ * the class `internal`. Every question asked of a declaration's statement position goes through
+ * here — whether it is exported, whether it is the default export, and where its JSDoc is
+ * written — so `declare` cannot change the answer to one of them and not the others.
+ */
+function statementParent(node: Node): Node | null {
   const parent = node.parent
-  if (parent !== null && parent.type === "export_statement") return parent
-  return node
+  if (parent !== null && parent.type === AMBIENT_DECLARATION_TYPE) return parent.parent
+  return parent
 }

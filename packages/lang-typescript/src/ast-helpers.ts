@@ -184,6 +184,37 @@ export function* walkDescendants(root: Node): Iterable<Node> {
   }
 }
 
+/**
+ * The wrapper tree-sitter puts between a `declare` and the declaration it was written on.
+ * `declare function f(): void` is an `ambient_declaration` holding a `function_signature`, and
+ * `export declare class C {}` puts one between the `export_statement` and the class.
+ */
+export const AMBIENT_DECLARATION_TYPE = "ambient_declaration"
+
+/**
+ * True when the node is written under a `declare`, at any namespace depth inside it.
+ *
+ * What it decides is whether a **signature is the declaration or an overload of one**. A
+ * `function_signature` at module level is an overload: the implementation written beside it
+ * carries the body and the parameter types the function is actually called with, so the
+ * signature is not a Symbol of its own. An ambient context has no implementations at all —
+ * `declare function f(): void` is the whole declaration — so there is nothing beside it to
+ * defer to. The same split separates an ordinary class body's `method_signature` from a
+ * `declare class`'s, which is why one predicate answers for both.
+ *
+ * It reads the parent chain rather than a flag threaded through the statement walk, because the
+ * class-member question is asked by two readers that are handed the class node and nothing else
+ * (`memberSymbolSegment`) — and the moment those two disagree a body is recorded twice or not
+ * at all. The chain climbed is bounded by namespace nesting, and `program` ends it.
+ */
+export function inAmbientContext(node: Node): boolean {
+  for (let cursor = node.parent; cursor !== null; cursor = cursor.parent) {
+    if (cursor.type === AMBIENT_DECLARATION_TYPE) return true
+    if (cursor.type === "program") return false
+  }
+  return false
+}
+
 /** Return the identifier text of a node's `name` field, or null when absent. */
 export function nameFieldText(node: Node): string | null {
   const name = node.childForFieldName("name")
