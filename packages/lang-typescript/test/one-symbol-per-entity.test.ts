@@ -314,6 +314,17 @@ describe("merged declarations are one Symbol", () => {
     expect(symbol.derivedBy).toContain("declaration-merged")
   })
 
+  it("records the export keyword once when both declarations carry it", async () => {
+    // Legal source requires a merge's declarations to agree about being exported, so both
+    // contribute the same token — and a Symbol claiming the same evidence twice says something
+    // about the source that is not there. Every kind emits the token now (LP6b), which is what
+    // makes a reopened `interface` reach the fold with it on both declarations.
+    const source = "export interface I { a: 1 }\nexport interface I { b: 2 }"
+    const symbol = await symbolNamed(source, "ts:src/a.ts#I")
+
+    expect(symbol.derivedBy.filter((token) => token === "export-keyword")).toHaveLength(1)
+  })
+
   it("keeps the boundary evidence of a class an interface was declared before", async () => {
     // The one merge whose declarations can disagree about something that matters: an
     // interface may be written before the class it merges with, and a decorator kept only

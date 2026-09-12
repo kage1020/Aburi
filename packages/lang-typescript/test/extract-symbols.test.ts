@@ -77,6 +77,75 @@ describe("extractSymbols — structure (LP1-LP8)", () => {
   })
 })
 
+/**
+ * One question, one answer, whatever the declaration is written as (LP6b).
+ *
+ * `visibility` was already `public` for all seven kinds, because `computeTopLevelVisibility`
+ * reads the statement rather than the declaration. The `export-keyword` token was not: four
+ * builders — interface, type alias, enum, namespace — hardcoded a one-token `derivedBy`, so a
+ * consumer reading the evidence off a Symbol was told the declaration was exported for a
+ * `const` and told nothing at all for the `interface` beside it.
+ */
+describe("extractSymbols — the export keyword is evidence on every kind (LP6b)", () => {
+  it.each([
+    ["function", "export function f() {}", "#f"],
+    ["class", "export class C {}", "#C"],
+    ["const", "export const x = 1", "#x"],
+    ["arrow const", "export const g = () => 1", "#g"],
+    ["interface", "export interface I { a: number }", "#I"],
+    ["type alias", "export type T = number", "#T"],
+    ["enum", "export enum E { A }", "#E"],
+    ["namespace", "export namespace N { const a = 1 }", "#N"],
+  ])("%s: the exported spelling carries the token", async (_label, source, suffix) => {
+    const symbol = byId(await symbolsOf(source), suffix)
+    expect(symbol.visibility).toBe("public")
+    expect(symbol.derivedBy).toContain("export-keyword")
+  })
+
+  it.each([
+    ["function", "function f() {}", "#f"],
+    ["class", "class C {}", "#C"],
+    ["const", "const x = 1", "#x"],
+    ["arrow const", "const g = () => 1", "#g"],
+    ["interface", "interface I { a: number }", "#I"],
+    ["type alias", "type T = number", "#T"],
+    ["enum", "enum E { A }", "#E"],
+    ["namespace", "namespace N { const a = 1 }", "#N"],
+  ])("%s: the unexported spelling carries none", async (_label, source, suffix) => {
+    const symbol = byId(await symbolsOf(source), suffix)
+    expect(symbol.visibility).toBe("internal")
+    expect(symbol.derivedBy).not.toContain("export-keyword")
+  })
+
+  it("a dotted namespace carries the token on every segment it declares", async () => {
+    const symbols = await symbolsOf("export namespace A.B { const c = 1 }")
+    for (const suffix of ["#A", "#A.B"]) {
+      expect(byId(symbols, suffix).derivedBy).toContain("export-keyword")
+    }
+  })
+
+  it("a declaration inside an exported namespace is not exported by it", async () => {
+    // The keyword is read off the declaration's own statement, so the namespace being exported
+    // says nothing about the `const` written inside it — which is also what `visibility` says.
+    const symbol = byId(await symbolsOf("export namespace N { const a = 1 }"), "#N.a")
+    expect(symbol.visibility).toBe("internal")
+    expect(symbol.derivedBy).not.toContain("export-keyword")
+  })
+
+  it.each([
+    ["class", "export default class C {}", "#C"],
+    ["function", "export default function f() {}", "#f"],
+    ["interface", "export default interface I { a: number }", "#I"],
+  ])("%s: export default replaces the keyword rather than joining it", async (_l, source, id) => {
+    // One statement cannot be written with both, and the default export is the boundary a
+    // framework plugin reads (LP6a) — so the two tokens are alternatives, not a pair.
+    const symbol = byId(await symbolsOf(source), id)
+    expect(symbol.visibility).toBe("public")
+    expect(symbol.derivedBy).toContain("export-default")
+    expect(symbol.derivedBy).not.toContain("export-keyword")
+  })
+})
+
 describe("extractSymbols — Signature (LP9-LP13)", () => {
   it("LP9: async function sets signature.async = true", async () => {
     const symbols = await symbolsOf("export async function f() {}")

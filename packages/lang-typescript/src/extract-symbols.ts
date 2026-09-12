@@ -377,10 +377,7 @@ function addClassAndMembers(
   }
   const qname =
     className !== null ? nestedQname([...namespacePath, className]) : defaultExportQname()
-  const derivedBy = collectDerivedBy(node, {
-    exportKeyword: hasExportKeywordAncestor(node),
-    exportDefault: isDefault,
-  })
+  const derivedBy = exportEvidence(node)
   const candidate: SymbolCandidate<Node> = {
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind: "class",
@@ -487,10 +484,7 @@ function makeFunctionCandidate(
   const qname = funcName !== null ? nestedQname([...namespacePath, funcName]) : defaultExportQname()
   const jsDoc = readLeadingJsDoc(node)
   const signature = buildSignature(node, jsDoc)
-  const derivedBy = collectDerivedBy(node, {
-    exportKeyword: hasExportKeywordAncestor(node),
-    exportDefault: isDefault,
-  })
+  const derivedBy = exportEvidence(node)
   return {
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind: "function",
@@ -636,7 +630,7 @@ function makeInterfaceCandidate(
     decorators: [],
     signature: null,
     source: makeSourceRange(node, ctx),
-    derivedBy: ["interface-declaration"],
+    derivedBy: ["interface-declaration", ...exportEvidence(node)],
     bodyNode: findChild(node, "object_type") ?? findChild(node, "interface_body"),
     fullNode: node,
   }
@@ -658,7 +652,7 @@ function makeTypeAliasCandidate(
     decorators: [],
     signature: null,
     source: makeSourceRange(node, ctx),
-    derivedBy: ["type-alias"],
+    derivedBy: ["type-alias", ...exportEvidence(node)],
     bodyNode: null,
     fullNode: node,
   }
@@ -680,7 +674,7 @@ function makeEnumCandidate(
     decorators: [],
     signature: null,
     source: makeSourceRange(node, ctx),
-    derivedBy: ["enum-declaration"],
+    derivedBy: ["enum-declaration", ...exportEvidence(node)],
     bodyNode: null,
     fullNode: node,
   }
@@ -766,7 +760,7 @@ function addNamespaceAndBody(
       decorators: [],
       signature: null,
       source: makeSourceRange(node, ctx),
-      derivedBy: ["namespace-declaration"],
+      derivedBy: ["namespace-declaration", ...exportEvidence(node)],
       bodyNode: null,
       fullNode: node,
     })
@@ -815,8 +809,7 @@ function makeVariableCandidate(
   if (value !== null) {
     const jsDoc = readLeadingJsDoc(parent)
     const signature = buildSignature(value, jsDoc)
-    const derivedBy: string[] = ["variable-assigned-function"]
-    if (hasExportKeywordAncestor(parent)) derivedBy.push("export-keyword")
+    const derivedBy = ["variable-assigned-function", ...exportEvidence(parent)]
     return {
       id,
       kind: "function",
@@ -840,7 +833,7 @@ function makeVariableCandidate(
     decorators: [],
     signature: null,
     source: makeSourceRange(parent, ctx),
-    derivedBy: hasExportKeywordAncestor(parent) ? ["export-keyword"] : [],
+    derivedBy: exportEvidence(parent),
     bodyNode: null,
     fullNode: parent,
   }
@@ -945,8 +938,7 @@ function makeDestructuredCandidate(
   namespacePath: readonly string[],
 ): SymbolCandidate<Node> {
   const qname = nestedQname([...namespacePath, binding.text])
-  const derivedBy = ["destructured-binding"]
-  if (hasExportKeywordAncestor(parent)) derivedBy.push("export-keyword")
+  const derivedBy = ["destructured-binding", ...exportEvidence(parent)]
   return {
     id: makeTsSymbolId(currentFile(ctx), qname),
     kind: "const",
@@ -962,14 +954,33 @@ function makeDestructuredCandidate(
   }
 }
 
-function collectDerivedBy(
-  _node: Node,
-  flags: { exportKeyword: boolean; exportDefault: boolean },
-): string[] {
-  const out: string[] = []
-  if (flags.exportDefault) out.push(EXPORT_DEFAULT)
-  else if (flags.exportKeyword) out.push("export-keyword")
-  return out
+/**
+ * What `derivedBy` says about a top-level declaration's **export**, and the one reader that
+ * says it for every kind.
+ *
+ * Whether a declaration was exported is a question about the statement it was written as, not
+ * about which kind of declaration it is: `export interface I {}` and `export const x = 1`
+ * carry the same keyword and have to answer alike (LP6b). Four builders — interface, type
+ * alias, enum, namespace — hardcoded a one-token `derivedBy` instead, so the token was
+ * evidence on a Symbol for some kinds and silently absent for others, and a consumer reading
+ * it off a Symbol got an answer that depended on the kind the author reached for. `visibility`
+ * was right throughout; it is the evidence the vocabulary records that was not.
+ *
+ * `export default` **replaces** the keyword rather than joining it, the precedence the class
+ * and function paths have always had: the default export is the boundary a framework plugin
+ * reads (LP6a), and one statement cannot be written with both.
+ *
+ * The node handed in is the declaration whose statement position is being read, and that is a
+ * different node per kind — `addNamespaceAndBody` holds the `module` / `internal_module`, the
+ * variable builders hold the enclosing `lexical_declaration`, the rest hold the declaration
+ * itself. They are not interchangeable, which is the reason one reader answers for all of
+ * them rather than each builder asking for itself. Either question reaches the statement
+ * through `statementParent`, which steps over a `declare` wrapper, so `export declare
+ * interface I {}` answers as the spelling without the modifier does (LP36).
+ */
+function exportEvidence(node: Node): string[] {
+  if (isDefaultExport(node)) return [EXPORT_DEFAULT]
+  return hasExportKeywordAncestor(node) ? [EXPORT_KEYWORD] : []
 }
 
 function computeTopLevelVisibility(node: Node): Visibility {
@@ -1005,6 +1016,9 @@ function hasDefaultKeyword(statement: Node): boolean {
 
 /** What `derivedBy` says when a Symbol is the module's default export. */
 const EXPORT_DEFAULT = "export-default"
+
+/** What `derivedBy` says when a Symbol's declaration carries the `export` keyword. */
+const EXPORT_KEYWORD = "export-keyword"
 
 /**
  * Every name the module hands to `export default`, read through the wrappers that say
