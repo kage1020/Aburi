@@ -1,5 +1,121 @@
 # @aburi/effects-prisma
 
+## 0.4.0
+
+### Minor Changes
+
+- 1abc31a: Read a bracket access in a callee as the property it addresses
+
+  `prisma["user"].create({ data })` was reported as a call to `prisma.create`. The walk read the
+  object of a `subscript_expression` and dropped the index, so the target named a call that is
+  nowhere in the program — spelled exactly like an ordinary two-segment method call, and one
+  segment short of the `<client>.<model>.<verb>` shape `@aburi/effects-prisma` matches. The
+  `db.write` was lost with it, and nothing in the report said a write had gone missing.
+
+  **A string-literal index is the segment it spells.** `prisma["user"].create(…)` and
+  `prisma.user.create(…)` address one property and now produce one target, `prisma.user.create`,
+  with no `dynamicReceiver` — the receiver is a name, written with brackets. The literal is
+  decoded rather than unquoted, a template that substitutes nothing counts as one, and an index
+  the parser guessed at is refused whether the ERROR stands inside the literal (`obj["a\u12b"]`)
+  or beside it (`prisma["user" "audit"]`, a missing operator). Where the brackets sit does not
+  matter: `prisma.user["create"]()` folds the same way.
+
+  **An index that names no segment is reported as one that names none.** An identifier
+  (`prisma[model]`), a number (`items[0]`), a substituting template, a string the qualified-name
+  grammar has no segment for (`obj["a-b"]`, `obj["a.b"]`, `""`): the bracket contributes the
+  reserved segment `<computed>` — `prisma.<computed>.create` — and the call carries
+  `dynamicReceiver`. `<` is outside that grammar, so a target carrying the segment matches no
+  Symbol id and no Symbol name; it resolves against nothing rather than against whatever the
+  shortened name happened to find.
+
+  **The sentinel is a name to no consumer.** A plugin that reads a fixed position of a target now
+  meets a segment that names nothing where it expected a name, and segment _count_ is what several
+  of them match on:
+
+  - `@aburi/effects-prisma` credits a computed model only where the receiver names a client
+    binding. `prisma[model].create(…)` is a `db.write` at `medium`, as the issue asks; `queues[id].upsert(job)`
+    and `sets[key].delete(item)` stay unclassified, which is the answer `queue.upsert(job)` already got.
+  - `@aburi/effects-trpc` now reads `dynamicReceiver` at all, and records such a call at `medium`
+    rather than `high`. `handlers[key].query()` reaches a proxy call's segment count with none of
+    its evidence, and the plugin asserted certainty on every shape it matched.
+  - `@aburi/types` exports `COMPUTED_TARGET_SEGMENT`, so a producer and a consumer spell the
+    segment from one place rather than by hand. The IR schema records it in `Call.target` and
+    `Effect.target` descriptions.
+
+  **What a reader will meet after upgrading.**
+
+  - A call target may carry a segment the source writes in brackets, and `items[0].save()` reads
+    as `items.<computed>.save` where it read as `items.save`.
+  - The logic fingerprint reads `effects[].target`, so the first diff across the upgrade reports
+    logic changes on symbols whose source did not change.
+  - A call an effect plugin claims is in no call-resolution bucket — a classified call never
+    reaches `calls[]` — so for `prisma[model].create()` the record of the computed model is
+    `effects[].target` plus the `medium` tier, not `stats.callResolution.unresolved.dynamic`.
+  - `@aburi/effects-nest` matches an emitter name at a fixed position, so `this.emitter[i].emit(e)`
+    stops being an `event.publish` where it was one. The name is still spelled in the target, one
+    segment further back; reading through the sentinel is a change to that plugin's own rule and
+    is left to it.
+  - A configured `suppress` / `keep` prefix matches on exact-or-dot-prefix, so
+    `suppress: ["metrics.increment"]` stops matching `metrics["http"].increment(n)`, which is now
+    `metrics.http.increment`. Nothing warns about a prefix that matches nothing.
+  - `process["exit"]()` is recognized as an early exit, so an `if` that ends in one is a guard.
+
+- 9c17405: Weigh the receiver before attributing a database effect to a call
+
+  `delete`, `create`, `update` and `select` are shared vocabulary — `Map`, `Set`, the DOM,
+  RxJS stores and every HTTP router spell their verbs the same way an ORM does. Both
+  classifiers matched on that vocabulary plus a file-level import gate, and the gate answers
+  "does this file use the library", which a file is free to answer yes to while most of its
+  calls belong to something else. So a repository holding a `Map` cache beside its Prisma
+  client recorded `this.cache.items.delete(key)` as a `db.write` at `high` — the tier a
+  hand-annotated effect gets — and an Express router beside its Drizzle queries did the same
+  for `router.delete("/users/:id", handler)`.
+
+  Three checks now stand between the shape and the record. A first argument the library could
+  never take rules the call out entirely: no Prisma method and no Drizzle root takes a bare
+  literal, so a route registration is not classified at all. Then the receiver sets the tier
+  rather than being assumed — the segment holding the client is matched word-wise against
+  each plugin's vocabulary of client binding names, so `prismaClient`, `readReplicaDb` and
+  `_db` land at `high` while `cache`, `router`, `store` and `apiClient` do not. And the
+  argument count is weighed against what the method actually takes, which is one for most of
+  them and two for `$transaction`, Postgres' `selectDistinctOn(columns, projection)` and
+  Drizzle's `transaction(callback, config)`.
+
+  Anything short of all three downgrades to `medium`, it does not drop the effect. Effect
+  plugins never see the AST, so a client bound under a house naming convention and an
+  unrelated object of the same shape are not separable from the callee string — dropping the
+  first would be as wrong as claiming the second at `high`. The same reasoning governs the
+  argument count: it is a syntactic count, and a classifier is the first thing to read it as
+  a signature, so a miscount costs the tier rather than erasing a write and logging nothing.
+
+  `@aburi/lang-typescript` stops counting comments as arguments. They are grammar `extras`,
+  so tree-sitter hangs them inside the argument list: `db.delete(\n  users, // soft delete
+is not used\n)` reported two arguments, and a leading comment took `literalArgs[0]` from
+  the argument it belongs to. Both fields now match the source's arguments in count and in
+  order.
+
+  `@aburi/plugin-registry/plugin-input` gains the readers both plugins share:
+  `identifierWords` / `identifierMentions` (a word split, so `feedback` does not read as
+  `db`) and `hasLiteralFirstArgument`. `effect-plugin.md` §5.4 carries the rule for the next
+  effect plugin whose verbs are someone else's too.
+
+  **What the first scan after this shows.** `confidence` is part of effect identity in the
+  diff (`effectsEqual`) and propagates along call-graph edges as a floor, so every effect
+  that moves from `high` to `medium` reports as `modified` — plus the ancestors that inherit
+  it — against source that did not change. That is the reclassification landing, not a
+  regression.
+
+### Patch Changes
+
+- Updated dependencies [be8e2b9]
+- Updated dependencies [3774de6]
+- Updated dependencies [203ea78]
+- Updated dependencies [1abc31a]
+- Updated dependencies [9c17405]
+- Updated dependencies [ba9e505]
+  - @aburi/types@0.4.0
+  - @aburi/plugin-registry@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
