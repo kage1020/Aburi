@@ -215,10 +215,10 @@ describe("LP36: ambient declarations", () => {
   // it differs by kind — `addNamespaceAndBody` passes the `module`, `makeVariableCandidate` the
   // enclosing `lexical_declaration` — so one kind passing does not carry the others.
   //
-  // `visibility` is the whole assertion. Which builders also push `export-keyword` onto
-  // `derivedBy` is a separate and older asymmetry: the interface, type alias, enum and
-  // namespace builders have never emitted it, exported or not, and evening that out is not
-  // this change's business.
+  // Both answers are asserted, because a reader asking "was this exported?" has two places to
+  // ask it — `visibility` and the `export-keyword` token on `derivedBy` — and for **one**
+  // declaration they agree by construction (LP6b). A Symbol several declarations wrote is the
+  // fold's business, not this reader's: see `one-symbol-per-entity.test.ts`.
   it.each([
     ["export declare const x: number", "#x"],
     ["export declare enum E { A }", "#E"],
@@ -230,6 +230,7 @@ describe("LP36: ambient declarations", () => {
   ])("export declare reads as exported: %s", async (source, suffix) => {
     const symbol = byId(await symbolsOf(source), suffix)
     expect(symbol.visibility).toBe("public")
+    expect(symbol.derivedBy).toContain("export-keyword")
     expect(symbol.derivedBy).toContain("ambient-declaration")
   })
 
