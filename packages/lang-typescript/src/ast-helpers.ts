@@ -205,7 +205,9 @@ export const AMBIENT_DECLARATION_TYPE = "ambient_declaration"
  * It reads the parent chain rather than a flag threaded through the statement walk, because the
  * class-member question is asked by two readers that are handed the class node and nothing else
  * (`memberSymbolSegment`) — and the moment those two disagree a body is recorded twice or not
- * at all. The chain climbed is bounded by namespace nesting, and `program` ends it.
+ * at all. The chain climbed is bounded by declaration nesting depth — it runs through the
+ * `statement_block`, `export_statement`, `expression_statement` and `ambient_declaration`
+ * wrappers between a declaration and the module — and `program` ends it.
  */
 export function inAmbientContext(node: Node): boolean {
   for (let cursor = node.parent; cursor !== null; cursor = cursor.parent) {
