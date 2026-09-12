@@ -322,7 +322,26 @@ describe("merged declarations are one Symbol", () => {
     const source = "export interface I { a: 1 }\nexport interface I { b: 2 }"
     const symbol = await symbolNamed(source, "ts:src/a.ts#I")
 
+    expect(symbol.visibility).toBe("public")
     expect(symbol.derivedBy.filter((token) => token === "export-keyword")).toHaveLength(1)
+  })
+
+  it("keeps the leading declaration's visibility when a merge disagrees about the export", async () => {
+    // TS2395, and the grammar accepts it — so the two answers a reader has for "was this
+    // exported?" come apart here: `visibility` is the lead's scalar and `derivedBy` is the
+    // union, which is the fold's rule for every list it joins (§4.3.1). Legal source cannot
+    // reach this, which is why the rule stands rather than growing an exception for one scalar:
+    // deriving `visibility` from the union instead would change the answer for every merged
+    // Symbol, including the cross-kind merges that have carried a leading declaration's
+    // visibility since before this token existed.
+    //
+    // Reachable for an interface-interface merge only since LP6b: before it the four
+    // type-side kinds emitted no token for the union to carry.
+    const source = "interface I { a: 1 }\nexport interface I { b: 2 }"
+    const symbol = await symbolNamed(source, "ts:src/a.ts#I")
+
+    expect(symbol.visibility).toBe("internal")
+    expect(symbol.derivedBy).toContain("export-keyword")
   })
 
   it("keeps the boundary evidence of a class an interface was declared before", async () => {

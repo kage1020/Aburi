@@ -216,8 +216,9 @@ describe("LP36: ambient declarations", () => {
   // enclosing `lexical_declaration` — so one kind passing does not carry the others.
   //
   // Both answers are asserted, because a reader asking "was this exported?" has two places to
-  // ask it and they have to agree: `visibility` and the `export-keyword` token on `derivedBy`
-  // (LP6b).
+  // ask it — `visibility` and the `export-keyword` token on `derivedBy` — and for **one**
+  // declaration they agree by construction (LP6b). A Symbol several declarations wrote is the
+  // fold's business, not this reader's: see `one-symbol-per-entity.test.ts`.
   it.each([
     ["export declare const x: number", "#x"],
     ["export declare enum E { A }", "#E"],

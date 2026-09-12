@@ -241,7 +241,15 @@ export function statementParent(node: Node): Node | null {
   return parent
 }
 
-/** True when the given statement has an `export` keyword modifier at its root. */
+/**
+ * True when the declaration was written under an `export` keyword.
+ *
+ * This is the one implementation of that question. `extract-symbols` asks it under its own
+ * name, `hasExportKeywordAncestor`, which reads better beside the other questions that file
+ * asks of a declaration — but it delegates here rather than repeating these two lines. A second
+ * copy is how a reader that stops at `node.parent` gets written again, and that reader is the
+ * one `export declare class C {}` was invisible to: its export is a node further up.
+ */
 export function hasExportModifier(node: Node): boolean {
   const parent = statementParent(node)
   return parent !== null && parent.type === "export_statement"

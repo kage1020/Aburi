@@ -13,6 +13,7 @@ import {
   firstNonCommentChild,
   functionValueOf,
   hasChildOfType,
+  hasExportModifier,
   inAmbientContext,
   makeSourceRange,
   nameFieldText,
@@ -960,31 +961,46 @@ function makeDestructuredCandidate(
  *
  * Whether a declaration was exported is a question about the statement it was written as, not
  * about which kind of declaration it is: `export interface I {}` and `export const x = 1`
- * carry the same keyword and have to answer alike (LP6b). Four builders — interface, type
- * alias, enum, namespace — hardcoded a one-token `derivedBy` instead, so the token was
- * evidence on a Symbol for some kinds and silently absent for others, and a consumer reading
- * it off a Symbol got an answer that depended on the kind the author reached for. `visibility`
- * was right throughout; it is the evidence the vocabulary records that was not.
+ * carry the same keyword and have to answer alike (LP6b).
  *
- * `export default` **replaces** the keyword rather than joining it, the precedence the class
- * and function paths have always had: the default export is the boundary a framework plugin
- * reads (LP6a), and one statement cannot be written with both.
+ * **Neither question is exclusive, so the order of the two carries the rule rather than
+ * reporting it.** `hasExportKeywordAncestor` is true of `export default class C {}` as well —
+ * the statement is an `export_statement` in both spellings — and what separates them is that
+ * `isDefaultExport` is asked first. Within one statement the default export therefore
+ * *replaces* the keyword, which is the precedence the class and function paths have always
+ * had: the default export is the boundary a framework plugin reads (LP6a). Across two
+ * statements they **join**: `const Page = …` followed by `export default Page` reports both,
+ * `promoteDefaultExports` appending to whatever the declaration already carried, which is
+ * LP6a's requirement that the detached spelling report what the wrapped one does. So this is
+ * a rule about a statement, and nothing here makes the two tokens alternatives on a Symbol.
  *
  * The node handed in is the declaration whose statement position is being read, and that is a
  * different node per kind — `addNamespaceAndBody` holds the `module` / `internal_module`, the
- * variable builders hold the enclosing `lexical_declaration`, the rest hold the declaration
- * itself. They are not interchangeable, which is the reason one reader answers for all of
- * them rather than each builder asking for itself. Either question reaches the statement
- * through `statementParent`, which steps over a `declare` wrapper, so `export declare
- * interface I {}` answers as the spelling without the modifier does (LP36).
+ * variable builders hold the enclosing `lexical_declaration` or `variable_declaration` (`var`
+ * reaches the same builder), the rest hold the declaration itself. They are not
+ * interchangeable, which is the reason one reader answers for all of them rather than each
+ * builder asking for itself. Either question reaches the statement through `statementParent`,
+ * which steps over a `declare` wrapper, so `export declare interface I {}` answers as the
+ * spelling without the modifier does (LP36).
  */
 function exportEvidence(node: Node): string[] {
   if (isDefaultExport(node)) return [EXPORT_DEFAULT]
   return hasExportKeywordAncestor(node) ? [EXPORT_KEYWORD] : []
 }
 
+/**
+ * A top-level declaration's visibility, read from the evidence `derivedBy` records rather than
+ * from the two predicates a second time.
+ *
+ * For **one** declaration that makes the two answers agree by construction: every spelling
+ * that puts a token on the Symbol is a spelling this reports `public` for, so the LP6b table
+ * cannot drift into checking two readers that disagree. It says nothing about a Symbol several
+ * declarations wrote — `foldDeclarations` takes scalars from the leading declaration and
+ * unions the lists (§4.3.1) — and there the two agree because legal source requires a merge's
+ * declarations to agree about being exported (LP6b).
+ */
 function computeTopLevelVisibility(node: Node): Visibility {
-  return hasExportKeywordAncestor(node) || isDefaultExport(node) ? "public" : "internal"
+  return exportEvidence(node).length > 0 ? "public" : "internal"
 }
 
 function readAccessibilityKeyword(node: Node): Visibility {
@@ -1102,9 +1118,12 @@ function promoteDefaultExports(
   })
 }
 
+/**
+ * True when the declaration was written under an `export` keyword — the name this file reads
+ * the question by, delegating to the one implementation in `ast-helpers`.
+ */
 function hasExportKeywordAncestor(node: Node): boolean {
-  const parent = statementParent(node)
-  return parent !== null && parent.type === "export_statement"
+  return hasExportModifier(node)
 }
 
 function currentFile(ctx: ExtractionContext): string {

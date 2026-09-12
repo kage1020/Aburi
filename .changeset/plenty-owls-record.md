@@ -17,13 +17,17 @@ one, because the node each builder holds is different — the `module` for a nam
 enclosing `lexical_declaration` for a variable, the declaration itself for the rest — and two
 readers is where the kinds start to disagree again. The reader reaches the statement through the
 `declare` wrapper, so `export declare interface I {}` answers as `export interface I {}` does.
-`export default` still replaces the keyword rather than joining it: one statement cannot be
-written with both, and the default export is the token a framework plugin reads to find a page or
-a component. `export default interface I {}` therefore carries `export-default` now, where it
-used to carry no export evidence at all.
+Within one statement `export default` still replaces the keyword rather than joining it: the
+statement cannot be written with both, and the default export is the token a framework plugin
+reads to find a page or a component. Across two statements they join as they always have —
+`const Page = …` followed by `export default Page` reports both. `export default interface I {}`
+therefore carries `export-default` now, where it used to carry no export evidence at all.
 
-The change is additive — every Symbol that carried the token still carries it, and no Symbol
-disappears — but exported interfaces, type aliases, enums and namespaces gain a `derivedBy` entry
-they did not have, so IR output and any diff of it against an older document will show it.
+The change is additive for every spelling the language accepts: no Symbol disappears, and no
+legal declaration loses a token it carried. One illegal spelling the grammar accepts does change
+answer — `export default const x = 1` reported `export-keyword` and now reports `export-default`,
+which is what the same two keywords on a class have always reported — and the new answer is
+pinned. Exported interfaces, type aliases, enums and namespaces gain a `derivedBy` entry they did
+not have, so IR output and any diff of it against an older document will show it.
 `export-keyword` was already declared in the plugin manifest, so nothing downstream has to be
 registered. `lang-plugin.md` §9.1 records the rule as LP6b.
