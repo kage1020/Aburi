@@ -76,8 +76,9 @@ function readParameters(node: Node): Array<{ name: string; type: string }> {
  * hangs its single binding off a `parameter` field as a bare identifier, so the list
  * lookup above finds nothing and the function would report itself zero-arity. The api
  * fingerprint (fingerprint.md §3.1) compares `inputs` positionally, so that reading
- * hides the arity change between `x => …` and `(x, y) => …` behind an unchanged
- * signature.
+ * reports the wrong arity, and wrongly in both directions: `x => …` → `() => …` drops
+ * the parameter and is reported as no change at all, while `x => …` → `(x) => …` leaves
+ * the contract alone and is reported as an api change.
  *
  * The form admits no type annotation, so the input is untyped: the same empty `type` an
  * unannotated `(x) => …` produces, which keeps the two spellings of one parameter one
