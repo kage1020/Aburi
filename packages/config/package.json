@@ -1,6 +1,6 @@
 {
   "name": "@aburi/config",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Aburi project config loader: JSONC parser + ajv strict validation of aburi.json against aburi.config.v1.json, frameworkHints hint:-prefix normalization, and workspace-aware config file discovery",
   "license": "Apache-2.0",
   "author": "kage1020",
