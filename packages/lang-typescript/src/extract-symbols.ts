@@ -16,6 +16,7 @@ import {
   inAmbientContext,
   makeSourceRange,
   nameFieldText,
+  statementParent,
   unwrapValue,
 } from "./ast-helpers"
 import {
@@ -311,7 +312,7 @@ function wrappedDeclaration(statement: Node): Node | null {
  * plugin could give it is a top-level one — where it would claim the name for this module and
  * fold with the file's own declaration of it (§4.3.1). `declare module "express" { … }` is the
  * same construct aimed at another module and is refused on the same ground, one step further in
- * (see `moduleAugmentation`). Both are a known limit rather than an oversight: giving either its
+ * (see `declaredNamespaceName`). Both are a known limit rather than an oversight: giving either its
  * Symbols needs a qname convention for a scope that is not the file's, which `ir-schema.md` §3.2
  * does not have.
  */
@@ -330,8 +331,15 @@ const AMBIENT_DECLARATION = "ambient-declaration"
  * The token is stamped on the sink rather than by each builder because `declare` wraps a
  * *statement*, and everything that statement declares in turn is ambient too — a `declare
  * namespace`'s functions and nested classes, a `declare class`'s methods. Wrapping the sink is
- * what makes that one rule instead of an argument nine builders each have to remember to
+ * what makes that one rule instead of an argument every declaration builder has to remember to
  * forward, and it cannot drift from the wrapper that established it.
+ *
+ * The stamp is idempotent, because the wrapping is not. `declare namespace N { declare function
+ * g(): void }` is TS1038 and the grammar accepts it with no error at all, so the ambient arm is
+ * taken on the way in and again on the inner statement — and `g` came out carrying the token
+ * twice. Nothing downstream would have removed it: `foldDeclarations` dedupes only across an
+ * entity's several declarations, and the core pipeline's `mergeDerivedBy` only across what
+ * frameworks contribute.
  *
  * `list` is the wrapped sink's, so folding and ordering still happen once, over every
  * declaration in the file (§4.3.1). An ambient declaration merged with a non-ambient one keeps
@@ -340,6 +348,10 @@ const AMBIENT_DECLARATION = "ambient-declaration"
 function ambientSink(out: CandidateSink): CandidateSink {
   return {
     add(candidate) {
+      if (candidate.derivedBy.includes(AMBIENT_DECLARATION)) {
+        out.add(candidate)
+        return
+      }
       out.add({ ...candidate, derivedBy: [...candidate.derivedBy, AMBIENT_DECLARATION] })
     },
     list: () => out.list(),
@@ -675,6 +687,44 @@ function makeEnumCandidate(
 }
 
 /**
+ * The dotted name a namespace declaration gives its Symbols, or null when what it names is not
+ * a namespace of **this** module.
+ *
+ * Three shapes answer null, and each of them would otherwise put something in the IR that the
+ * source does not contain — or take the file down on the way.
+ *
+ * - **A name the parser invented.** `declare namespace` with nothing after it recovers as an
+ *   `internal_module` whose name is a MISSING `identifier` of no width. Read as an absent name
+ *   it reaches `requireDeclarationName`, which throws, and the throw reaches the per-file
+ *   boundary — withdrawing the whole file and with it the recoverable parse errors that were
+ *   the one diagnostic pointing at the missing token. `isMissing` is what says the parser
+ *   guessed, the same question `hasErrorChild` asks of a written member name.
+ * - **A quoted specifier** — `declare module "express" { … }`, `module "express" {}`. It
+ *   augments another module, so the declarations inside it are members of *that* module. A
+ *   specifier is not a qualified-name segment (handing `"express"` to the id builder throws,
+ *   §4.3), and the declarations under it would have to take bare top-level qnames, claiming
+ *   another module's names for this file and folding with its own declarations of them
+ *   (§4.3.1). The `declare` is the grammar's business and not `tsc`'s: this arm parses the
+ *   quoted spelling written without one, so the throw was live before the wrapper was read
+ *   through rather than arriving with it.
+ * - **No body.** `declare module` followed by `export function keep() {}` on the next line
+ *   parses with no error at all — `export` becomes the module's name. It satisfies the
+ *   qualified-name grammar, so a namespace called `export` entered the IR with no diagnostic
+ *   and the diff reported it as added. A namespace with no body declares nothing in any
+ *   spelling, so refusing it costs nothing.
+ *
+ * What is left is *read* rather than type-tested, because `namespace A.B {}` carries a
+ * `nested_identifier` where `namespace A {}` carries an `identifier` — admitting only the
+ * latter would refuse the dotted form LP8l exists for.
+ */
+function declaredNamespaceName(node: Node, body: Node | null): string | null {
+  if (body === null) return null
+  const name = node.childForFieldName("name")
+  if (name === null || name.isMissing || name.type === "string") return null
+  return name.text.length > 0 ? name.text : null
+}
+
+/**
  * A namespace declares one Symbol per segment of its name, and its body is visited under all
  * of them.
  *
@@ -688,26 +738,10 @@ function makeEnumCandidate(
  * because the source gives them nothing of their own. Two dotted declarations under one head
  * (`namespace A.B {}` beside `namespace A.C {}`) therefore reach the sink as two declarations
  * of `A`, which is what they are.
- */
-/**
- * True for `declare module "express" { … }` — a `module` whose name is a **quoted specifier**
- * rather than an identifier.
  *
- * It is an augmentation of another module, and the declarations inside it are members of that
- * module. Neither half of it has a name this plugin can give a Symbol: a specifier is not a
- * qualified-name segment — handing `"express"` to the id builder throws, and the throw is caught
- * at the per-file boundary and costs the file every Symbol it had (§4.3) — and the declarations
- * under it would have to take bare top-level qnames, claiming another module's names for this
- * file and folding with its own declarations of them (§4.3.1). So neither is emitted, which is
- * the answer `ir-schema.md` §3.2 gives every name the grammar has no segment for.
- *
- * Unreachable until `ambient_declaration` was read through: the quoted spelling is legal only
- * under a `declare`, so this arm and the throw behind it arrived together.
+ * A declaration `declaredNamespaceName` refuses declares nothing at all: no Symbol for the
+ * namespace, and no walk of a body it does not have.
  */
-function isModuleAugmentation(node: Node): boolean {
-  return node.childForFieldName("name")?.type === "string"
-}
-
 function addNamespaceAndBody(
   node: Node,
   ctx: ExtractionContext,
@@ -715,8 +749,10 @@ function addNamespaceAndBody(
   out: CandidateSink,
   callState: CallExtractionState,
 ): void {
-  if (isModuleAugmentation(node)) return
-  const segments = requireDeclarationName(node, "namespace", ctx.file.path).split(".")
+  const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
+  const declared = declaredNamespaceName(node, body)
+  if (declared === null || body === null) return
+  const segments = declared.split(".")
   const path = [...namespacePath]
   for (const segment of segments) {
     path.push(segment)
@@ -735,8 +771,6 @@ function addNamespaceAndBody(
       fullNode: node,
     })
   }
-  const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
-  if (body === null) return
   visitModuleLevel(body, ctx, path, out, callState)
 }
 
@@ -1108,25 +1142,18 @@ function readLeadingJsDoc(node: Node): string | null {
   return collected.reverse().join("\n")
 }
 
+/**
+ * The outermost wrapper a declaration's JSDoc is written above: the `export_statement` around
+ * an `ambient_declaration` around the declaration, or whichever of those two the source wrote.
+ *
+ * It reads the same wrappers `statementParent` does and cannot simply call it, because it needs
+ * a different answer — the wrapper *node*, to scan backwards from, rather than what is above it.
+ * The two agree about which wrappers exist, and nothing enforces that they keep agreeing: a
+ * third wrapper would have to be added to both.
+ */
 function outerStatementWrapper(node: Node): Node {
   const ambient = node.parent
   const anchor = ambient?.type === AMBIENT_DECLARATION_TYPE ? ambient : node
   const exported = anchor.parent
   return exported?.type === "export_statement" ? exported : anchor
-}
-
-/**
- * The statement `node` was written as, seen from the declaration: its parent, with a `declare`
- * wrapper stepped over.
- *
- * `export declare class C {}` parents the class in an `ambient_declaration` and *that* in the
- * `export_statement`, so a reader that took the immediate parent found the wrapper and reported
- * the class `internal`. Every question asked of a declaration's statement position goes through
- * here — whether it is exported, whether it is the default export, and where its JSDoc is
- * written — so `declare` cannot change the answer to one of them and not the others.
- */
-function statementParent(node: Node): Node | null {
-  const parent = node.parent
-  if (parent !== null && parent.type === AMBIENT_DECLARATION_TYPE) return parent.parent
-  return parent
 }

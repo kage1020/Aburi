@@ -18,8 +18,9 @@ An abstract member is now a `method` with a null `bodyNode` and `abstract-declar
 `derivedBy`; a declaration under a `declare` gets the SymbolCandidate it would get written
 without the keyword, plus `ambient-declaration`, and the members and nested declarations under
 it come with it. Reading the wrapper *through* rather than matching on it is what makes each
-form reach the arm it belongs in — and what fixes `export declare class C {}` reporting itself
-`internal`, its export having been one node further up than the reader looked.
+form reach the arm it belongs in. It also puts the export one node further up than a reader of
+`node.parent` looks, so `export declare class C {}` needs the wrapper stepped over before it
+reads as exported at all — which `statementParent` now does for every reader that asks.
 
 A signature with no body is a Symbol only under a `declare`. Written outside one it is an
 overload declaration and the implementation beside it is the entity, which is how a top-level

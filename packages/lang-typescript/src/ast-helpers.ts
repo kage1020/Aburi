@@ -223,11 +223,24 @@ export function nameFieldText(node: Node): string | null {
   return text.length > 0 ? text : null
 }
 
+/**
+ * The statement `node` was written as, seen from the declaration: its parent, with a `declare`
+ * wrapper stepped over.
+ *
+ * Tree-sitter-typescript wraps a declaration's modifiers at the statement level, and `export
+ * declare class C {}` uses both wrappers at once — the class is parented in an
+ * `ambient_declaration` and *that* in the `export_statement`. A reader taking the immediate
+ * parent finds the wrapper rather than the export, so every reader of a declaration's statement
+ * position comes through here instead of reading `node.parent` itself.
+ */
+export function statementParent(node: Node): Node | null {
+  const parent = node.parent
+  if (parent !== null && parent.type === AMBIENT_DECLARATION_TYPE) return parent.parent
+  return parent
+}
+
 /** True when the given statement has an `export` keyword modifier at its root. */
 export function hasExportModifier(node: Node): boolean {
-  // Tree-sitter-typescript wraps exports at the statement level: an exported function is
-  // an `export_statement` whose first named child is the declaration. When we look at the
-  // declaration itself, the export is the parent's concern.
-  const parent = node.parent
+  const parent = statementParent(node)
   return parent !== null && parent.type === "export_statement"
 }
