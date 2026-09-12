@@ -184,6 +184,39 @@ export function* walkDescendants(root: Node): Iterable<Node> {
   }
 }
 
+/**
+ * The wrapper tree-sitter puts between a `declare` and the declaration it was written on.
+ * `declare function f(): void` is an `ambient_declaration` holding a `function_signature`, and
+ * `export declare class C {}` puts one between the `export_statement` and the class.
+ */
+export const AMBIENT_DECLARATION_TYPE = "ambient_declaration"
+
+/**
+ * True when the node is written under a `declare`, at any namespace depth inside it.
+ *
+ * What it decides is whether a **signature is the declaration or an overload of one**. A
+ * `function_signature` at module level is an overload: the implementation written beside it
+ * carries the body and the parameter types the function is actually called with, so the
+ * signature is not a Symbol of its own. An ambient context has no implementations at all —
+ * `declare function f(): void` is the whole declaration — so there is nothing beside it to
+ * defer to. The same split separates an ordinary class body's `method_signature` from a
+ * `declare class`'s, which is why one predicate answers for both.
+ *
+ * It reads the parent chain rather than a flag threaded through the statement walk, because the
+ * class-member question is asked by two readers that are handed the class node and nothing else
+ * (`memberSymbolSegment`) — and the moment those two disagree a body is recorded twice or not
+ * at all. The chain climbed is bounded by declaration nesting depth — it runs through the
+ * `statement_block`, `export_statement`, `expression_statement` and `ambient_declaration`
+ * wrappers between a declaration and the module — and `program` ends it.
+ */
+export function inAmbientContext(node: Node): boolean {
+  for (let cursor = node.parent; cursor !== null; cursor = cursor.parent) {
+    if (cursor.type === AMBIENT_DECLARATION_TYPE) return true
+    if (cursor.type === "program") return false
+  }
+  return false
+}
+
 /** Return the identifier text of a node's `name` field, or null when absent. */
 export function nameFieldText(node: Node): string | null {
   const name = node.childForFieldName("name")
@@ -192,11 +225,24 @@ export function nameFieldText(node: Node): string | null {
   return text.length > 0 ? text : null
 }
 
+/**
+ * The statement `node` was written as, seen from the declaration: its parent, with a `declare`
+ * wrapper stepped over.
+ *
+ * Tree-sitter-typescript wraps a declaration's modifiers at the statement level, and `export
+ * declare class C {}` uses both wrappers at once — the class is parented in an
+ * `ambient_declaration` and *that* in the `export_statement`. A reader taking the immediate
+ * parent finds the wrapper rather than the export, so every reader of a declaration's statement
+ * position comes through here instead of reading `node.parent` itself.
+ */
+export function statementParent(node: Node): Node | null {
+  const parent = node.parent
+  if (parent !== null && parent.type === AMBIENT_DECLARATION_TYPE) return parent.parent
+  return parent
+}
+
 /** True when the given statement has an `export` keyword modifier at its root. */
 export function hasExportModifier(node: Node): boolean {
-  // Tree-sitter-typescript wraps exports at the statement level: an exported function is
-  // an `export_statement` whose first named child is the declaration. When we look at the
-  // declaration itself, the export is the parent's concern.
-  const parent = node.parent
+  const parent = statementParent(node)
   return parent !== null && parent.type === "export_statement"
 }

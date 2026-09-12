@@ -1,6 +1,12 @@
 import { isQnameSegment } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
-import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
+import {
+  functionValueOf,
+  hasChildOfType,
+  hasErrorChild,
+  inAmbientContext,
+  nameFieldText,
+} from "./ast-helpers"
 import { decodeStringLiteral } from "./string-escape"
 
 /**
@@ -82,18 +88,37 @@ function admitSegment(candidate: string): string | null {
  * `export default class C {}` is a `class_declaration` rather than an expression, so no named
  * class reaches either reader without member Symbols.
  *
- * Two member shapes qualify, and both need a name with a segment. A `method_definition` is a
- * member when `memberNameSegment` gives it one, which covers `ir-schema.md` §3.2's own row for
- * a computed name — no Symbol and no diagnostic — and every other name the grammar cannot
+ * Four member shapes qualify, and all of them need a name with a segment. A `method_definition`
+ * is a member when `memberNameSegment` gives it one, which covers `ir-schema.md` §3.2's own row
+ * for a computed name — no Symbol and no diagnostic — and every other name the grammar cannot
  * express. A field holding a function is a member because calling it is what runs the body;
- * see `functionValuedField`. Every other shape a class body can hold answers null for the
- * plain reason that it is neither.
+ * see `functionValuedField`. Every other shape a class body can hold answers null for the plain
+ * reason that it is neither.
+ *
+ * The other two are the shapes a member with **no body of its own** is written in, and what
+ * separates them from an overload is whether an implementation can be written beside them.
+ *
+ * - `abstract_method_signature` — `abstract doIt(): void` — is a member. The language forbids
+ *   an implementation beside it, so nothing else in the class declares `doIt`, and skipping it
+ *   left an abstract class reporting only the methods it happened to implement. The subclasses
+ *   overriding it each get their own Symbol, and the one the base declares is the API the class
+ *   promises: dropping or re-typing it is the change worth a heading.
+ * - `method_signature` is a member **only in an ambient class** (`declare class C { m(): void }`,
+ *   `export declare class C { … }`). Written in an ordinary class body it is an overload
+ *   declaration, and the implementation beside it carries the body and the parameter types the
+ *   member is actually called with — so it stays skipped, which is also how a top-level overload
+ *   behaves (`function_signature` is a Symbol only under a `declare`). An ambient class body has
+ *   no implementations to defer to, and reading its members as overloads left `export declare
+ *   class` with no methods at all. A class body of signatures and no implementation therefore
+ *   still declares no members outside a `declare`, which is what `tsc` calls TS2391 anyway.
  */
 export function memberSymbolSegment(classNode: Node, member: Node): string | null {
   if (nameFieldText(classNode) === null) return null
   const segment = memberNameSegment(member)
   if (segment === null) return null
   if (member.type === "method_definition") return segment
+  if (member.type === "abstract_method_signature") return segment
+  if (member.type === "method_signature") return inAmbientContext(classNode) ? segment : null
   return functionValuedField(member) === null ? null : segment
 }
 

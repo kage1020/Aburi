@@ -42,6 +42,8 @@ export const langTypescriptManifest: LangManifest = {
       "constructor-declaration",
       "destructured-binding",
       "accessor-declaration",
+      "abstract-declaration",
+      "ambient-declaration",
       "declaration-merged",
     ],
     frameworks: [],
