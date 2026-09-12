@@ -102,6 +102,44 @@ describe("extractSymbols — Signature (LP9-LP13)", () => {
     expect(sym.signature?.outputs).toEqual(["boolean"])
   })
 
+  it("LP11a: a parenthesis-free arrow reports its single parameter", async () => {
+    // The grammar gives this arrow no parameter list at all — the binding hangs off a
+    // `parameter` field as a bare identifier — so a reader that only knows the list form
+    // calls the function zero-arity and the api fingerprint reads the wrong arity.
+    const symbols = await symbolsOf("export const f = x => x + 1")
+    const sym = byId(symbols, "#f")
+    expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
+  })
+
+  it("LP11a: the parenthesised spelling of that parameter reads the same", async () => {
+    // `x => …` and `(x) => …` are one function written two ways; the signature must not
+    // tell them apart, or adding parentheses would register as an api change.
+    const bare = await symbolsOf("export const f = x => x + 1")
+    const parenthesised = await symbolsOf("export const f = (x) => x + 1")
+    expect(byId(bare, "#f").signature?.inputs).toEqual(byId(parenthesised, "#f").signature?.inputs)
+  })
+
+  it("LP11a: an async parenthesis-free arrow reports its parameter too", async () => {
+    const symbols = await symbolsOf("export const f = async x => x + 1")
+    const sym = byId(symbols, "#f")
+    expect(sym.signature?.async).toBe(true)
+    expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
+  })
+
+  it("LP11a: a zero-arity arrow still reports no inputs", async () => {
+    const symbols = await symbolsOf("export const f = () => 1")
+    const sym = byId(symbols, "#f")
+    expect(sym.signature?.inputs).toEqual([])
+  })
+
+  it("LP11a: a class field holding that arrow reports its parameter too", async () => {
+    // A third route into the fallback: the class-member reader, not the variable one. The
+    // field holds the same arrow, so the Symbol must report the same parameter.
+    const symbols = await symbolsOf("export class C { m = x => x }")
+    const sym = byId(symbols, "#C.m")
+    expect(sym.signature?.inputs).toEqual([{ name: "x", type: "" }])
+  })
+
   it("LP12: typeParameters carry raw text", async () => {
     const symbols = await symbolsOf("export function f<T>() {}")
     const sym = byId(symbols, "#f")
