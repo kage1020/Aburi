@@ -10,6 +10,10 @@ out/
 # time by packages/lang-typescript/scripts/copy-grammars.mjs
 packages/lang-typescript/wasm/
 
+# Sandbox that packages/e2e-integration/test/vendored-grammars.test.ts runs the
+# vendoring script in, so the real wasm/ stays untouched while tests run in parallel
+packages/lang-typescript/.grammar-sandbox-*/
+
 # Turborepo
 .turbo/
 

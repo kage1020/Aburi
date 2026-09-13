@@ -20,30 +20,41 @@
 
 Ship the packages, not the workshop
 
-Installing the toolchain pulled down 25 MB where under 4 MB does the same work. Nothing in it was
-deliberate — each piece was a default nobody had reason to look at until the sizes were measured
-side by side.
+Installing `@aburi/cli` and its dependency closure put 22.08 MB of prebuilt parser binaries
+on disk to read 2.86 MB of them. Nothing in that was deliberate — each piece was a default
+nobody had reason to look at until the sizes were measured side by side. Every number
+below is decimal MB, measured on this branch against its base.
 
-`@vscode/tree-sitter-wasm` was the bulk of it. It ships sixteen prebuilt grammars — bash, C#, C++,
-Ruby, Rust, PHP, PowerShell and the rest, 21.6 MB — and `@aburi/lang-typescript` loads exactly two
-of them. npm cannot install part of a tarball, so every consumer paid for the other fourteen to sit
-on disk unread. The two grammars we do parse with are now vendored into the package's own `wasm/`
-directory at build time and the dependency is a devDependency, which is the whole 18.9 MB. They are
-byte-identical copies of the same upstream files, `wasm/NOTICE` records where they came from and
-carries the upstream MIT licence, and bumping them is still a devDependency bump.
+`@vscode/tree-sitter-wasm` was the bulk of it. It ships sixteen prebuilt grammars totalling
+21.66 MB — bash, C#, C++, Ruby, Rust, PHP, PowerShell and the rest — and
+`@aburi/lang-typescript` loads exactly two of them, `tree-sitter-typescript` and
+`tree-sitter-tsx`, together 2.86 MB. npm cannot install part of a tarball, so every
+consumer paid for the other fourteen, 18.80 MB, to sit on disk unread.
 
-The rest was the published tarballs. `files` listed `src` alongside `dist`, so the TypeScript
-sources shipped a second time next to the bundle that was built from them — and the sourcemaps
-already embedded `sourcesContent`, so the copy was not even what a debugger reads. Sourcemaps and
-declaration maps are no longer emitted at all: 1.6 MB across the workspace, most of it that same
-source text a third time. `declarationMap` is what drove it, since tsdown forces JS sourcemaps on
-whenever it is set — which is why `sourcemap: false` in every `tsdown.config.ts` had been quietly
-doing nothing. Both map options are now off in `tsconfig.base.json` with a note saying why, because
-flipping either one back silently restores all of it.
+`scripts/copy-grammars.mjs` now vendors the two we parse with into the package's own
+`wasm/` at build time and the dependency drops to a devDependency, which takes that
+directory from 22.08 MB to 2.86 MB. The copies are byte-identical to the upstream files.
+`wasm/NOTICE` records their provenance and reproduces both the licence text upstream
+distributes and the component registration from its `cgmanifest.json`, and bumping the
+grammars stays an ordinary devDependency bump.
 
-With the sources gone there is no longer a reason to ship the bundle unminified, so `minify` is on:
-the runtime JS drops from 895 KB to 273 KB, 90 KB gzipped.
+The rest was the published tarballs. `files` listed `src` beside `dist`, so the TypeScript
+sources shipped a second time next to the bundle built from them — and the sourcemaps
+already embedded `sourcesContent`, so that copy was not even what a debugger reads.
 
-Published output is now `dist/*.mjs` and `dist/*.d.mts` — plus `wasm/` for the language plugin.
-The trade is that a stack trace from an installed copy no longer resolves to original source; the
-sources remain a `git clone` away, and no API, behaviour or output changed anywhere.
+Maps are no longer emitted at all: 1.67 MB across the workspace, most of it the same
+source text a third time. `declarationMap` alone drove it — `sourceMap` never had any
+effect on this build, because it is `rolldown-plugin-dts` that turns on rolldown's shared
+`output.sourcemap` whenever `declarationMap` is set, and that is what overrode
+`sourcemap: false` in all seventeen `tsdown.config.ts` files. `declarationMap` is now off
+in `tsconfig.base.json` with a note naming `dts: { sourcemap }` as the direct lever, since
+setting it back silently restores every byte.
+
+With the sources gone there is no longer a reason to ship the bundle unminified, so
+`minify` is on: summed across the seventeen published packages, every `.mjs` under `dist/`
+goes from 916,821 to 279,839 bytes.
+
+Published output is now `dist/*.mjs` and `dist/*.d.mts`, plus `wasm/` for the language
+plugin. The trade is that a stack trace from an installed copy no longer resolves to
+original source; the sources remain a `git clone` away, and no API, behaviour or emitted
+IR changed anywhere.

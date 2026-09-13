@@ -113,8 +113,11 @@ triggers a docs build. **Build → Build watch paths** can narrow that to
 - Never hardcode dependency versions in `package.json` — install via
   `pnpm add` so the latest compatible version is recorded.
 - No linter-suppression comments; fix the root cause instead.
-- Generated files (`packages/types/src/generated/`) are regenerated from
-  `schema/` — never edit them by hand.
+- Generated files are never edited by hand:
+  `packages/types/src/generated/` is regenerated from `schema/`, and
+  `packages/lang-typescript/wasm/` is vendored from the
+  `@vscode/tree-sitter-wasm` devDependency by that package's `build`. Both are
+  gitignored; `wasm/` is also published, so it must exist before `pnpm pack`.
 
 ## Releases
 
