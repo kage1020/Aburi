@@ -25,7 +25,7 @@
   },
   "files": [
     "dist",
-    "src",
+    "wasm",
     "README.md"
   ],
   "sideEffects": false,
@@ -33,18 +33,18 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "node scripts/copy-grammars.mjs && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "node scripts/copy-grammars.mjs && vitest run"
   },
   "dependencies": {
     "@aburi/core": "workspace:*",
     "@aburi/types": "workspace:*",
-    "@vscode/tree-sitter-wasm": "^0.3.1",
     "web-tree-sitter": "^0.26.10"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
+    "@vscode/tree-sitter-wasm": "^0.3.1",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

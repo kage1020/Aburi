@@ -489,9 +489,6 @@ importers:
       '@aburi/types':
         specifier: workspace:*
         version: link:../types
-      '@vscode/tree-sitter-wasm':
-        specifier: ^0.3.1
-        version: 0.3.1
       web-tree-sitter:
         specifier: ^0.26.10
         version: 0.26.10
@@ -499,6 +496,9 @@ importers:
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
+      '@vscode/tree-sitter-wasm':
+        specifier: ^0.3.1
+        version: 0.3.1
       tsdown:
         specifier: ^0.22.3
         version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)

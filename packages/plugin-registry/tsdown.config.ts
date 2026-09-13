@@ -11,5 +11,5 @@ export default defineConfig({
   dts: { isolatedDeclarations: false },
   clean: true,
   sourcemap: false,
-  minify: false,
+  minify: true,
 })

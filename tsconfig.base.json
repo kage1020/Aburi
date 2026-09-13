@@ -25,8 +25,12 @@
     "useUnknownInCatchVariables": true,
 
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    // Both map options stay off so the published packages carry only `.mjs` + `.d.mts`.
+    // tsdown forces JS sourcemaps on whenever `declarationMap` is enabled, so flipping
+    // either one back re-adds ~1.6 MB of `.map` files across the workspace's dist output.
+    // Nothing here emits via tsc (`typecheck` runs --noEmit), so these only steer tsdown.
+    "declarationMap": false,
+    "sourceMap": false,
     "removeComments": false,
     "newLine": "lf",
     "preserveConstEnums": true

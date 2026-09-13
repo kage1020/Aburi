@@ -26,7 +26,6 @@
   },
   "files": [
     "dist",
-    "src",
     "scripts",
     "action.yml",
     "README.md"

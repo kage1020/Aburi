@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
+import { fileURLToPath } from "node:url"
 import type { ParseError, ParseResult, SourceFile } from "@aburi/types"
 import { Language, Parser, type Tree } from "web-tree-sitter"
 import { extractImports } from "./imports"
@@ -7,15 +8,30 @@ import { extractImports } from "./imports"
 const nodeRequire = createRequire(import.meta.url)
 
 /**
- * Absolute filesystem paths of the WASM runtime and the two grammar wasms this plugin
- * needs. `createRequire.resolve` picks the right on-disk paths regardless of how the
- * dependency is hoisted (pnpm's per-package `node_modules`, npm's flat tree, etc.).
+ * Absolute filesystem path of the WASM runtime. `createRequire.resolve` picks the right
+ * on-disk path regardless of how the dependency is hoisted (pnpm's per-package
+ * `node_modules`, npm's flat tree, etc.).
  */
 const RUNTIME_WASM_PATH = nodeRequire.resolve("web-tree-sitter/web-tree-sitter.wasm")
-const TYPESCRIPT_WASM_PATH = nodeRequire.resolve(
-  "@vscode/tree-sitter-wasm/wasm/tree-sitter-typescript.wasm",
-)
-const TSX_WASM_PATH = nodeRequire.resolve("@vscode/tree-sitter-wasm/wasm/tree-sitter-tsx.wasm")
+
+/**
+ * Absolute filesystem paths of the two grammar wasms this plugin parses with.
+ *
+ * The grammars are vendored into the package's own `wasm/` directory by
+ * `scripts/copy-grammars.mjs` rather than resolved out of `@vscode/tree-sitter-wasm`:
+ * that package ships 16 grammars totalling ~21 MB and npm cannot install part of a
+ * tarball, so depending on it at runtime would bill every consumer ~19 MB for grammars
+ * nothing here ever loads.
+ *
+ * `../wasm/` resolves for both the published `dist/index.mjs` and this file under `src/`
+ * — both sit exactly one directory below the package root, which is why the script copies
+ * to the root rather than into `dist/`. Moving either one deeper breaks the path.
+ */
+const grammarPath = (name: string): string =>
+  fileURLToPath(new URL(`../wasm/${name}`, import.meta.url))
+
+const TYPESCRIPT_WASM_PATH = grammarPath("tree-sitter-typescript.wasm")
+const TSX_WASM_PATH = grammarPath("tree-sitter-tsx.wasm")
 
 /**
  * File-extension → grammar-wasm-path lookup used by parseFile to pick the right Language.
