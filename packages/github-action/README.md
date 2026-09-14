@@ -117,6 +117,87 @@ resolve is exit 2 with a message naming the directory it looked in —
   (input error) so a missing `diff.md` cannot bury the real failure inside a
   secondary `ENOENT` from the comment upsert.
 
+## Pull requests from a fork
+
+A `pull_request` run started by a fork — and by Dependabot, whose branch lives inside the
+repository — gets a read-only `GITHUB_TOKEN` whatever the workflow's `permissions` block says,
+so the comment cannot be posted from there. `pull_request_target` is not the answer: it would
+run with a writable token while `aburi diff` analyses code the contributor controls.
+
+Post it from a second workflow instead. The first uploads the report; the second runs on
+`workflow_run`, in the base repository's context, and comments.
+
+```yaml
+# .github/workflows/aburi.yml
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    env:
+      # Decided once. The comment step reads it, and so does the hand-off below.
+      CAN_COMMENT: >-
+        ${{ github.event.pull_request.head.repo.full_name == github.repository
+            && github.actor != 'dependabot[bot]' }}
+    steps:
+      # …checkout, install, build…
+      - uses: kage1020/Aburi/packages/github-action@main
+        with:
+          cli: workspace
+          # `false` on a fork's pull request and Dependabot's; the diff and the gate still run.
+          comment: ${{ env.CAN_COMMENT }}
+      # The companion posts when this file is in the artifact, and exits when it is not — so the
+      # fork test lives in one place instead of being written twice, in two event shapes.
+      - name: Hand the comment to the companion workflow
+        if: always() && env.CAN_COMMENT != 'true' && hashFiles('out/diff.md') != ''
+        run: echo "posted by the companion" > out/comment-pending
+      - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('out/diff.md') != ''
+        with:
+          name: aburi-diff
+          path: out/
+```
+
+```yaml
+# .github/workflows/aburi-comment.yml
+on:
+  workflow_run:
+    workflows: [Aburi]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+```
+
+That second workflow checks out this repository's `scripts/` directory, downloads the
+`aburi-diff` artifact from the run that triggered it, resolves the pull request **from the
+event** rather than from the artifact, and runs
+[`scripts/upsert-comment.mjs`](./scripts/upsert-comment.mjs) — the same upsert the action runs,
+so both paths write the same comment.
+
+[`.github/workflows/aburi-comment.yml`](../../.github/workflows/aburi-comment.yml) is the whole
+file, and [`docs/design/github-action.md`](../../docs/design/github-action.md) §5.1 explains what
+makes it safe to give that half a writable token. Two things to know: GitHub runs the copy of a
+`workflow_run` workflow that is on your **default branch**, so it does nothing until it is merged,
+and it posts no check on the pull request.
+
+### Posting the comment yourself
+
+`scripts/upsert-comment.mjs` is plain `.mjs` with no dependencies, so anything with Node can run
+it. Input is environment only:
+
+| Variable | |
+|---|---|
+| `GITHUB_TOKEN` | Token that may comment on the pull request. |
+| `GITHUB_REPOSITORY` | `owner/repo`, as the runner already sets it. |
+| `PR_NUMBER` | The pull request to comment on. |
+| `MARKDOWN_PATH` | The report to post. |
+| `GITHUB_API_URL` | Optional; the runner sets it, and Enterprise Server needs it. |
+| `GITHUB_OUTPUT` | Optional; `action` and `comment-id` are appended when set. |
+
+Exit `0` posted, `2` the invocation is wrong, `1` the API refused — each failure one
+`::error::` line.
+
 ## Programmatic API
 
 The same upsert primitive is exported as a library for callers who want to post

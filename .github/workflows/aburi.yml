@@ -69,9 +69,22 @@ jobs:
           # gate that fires on every pull request is a gate everyone learns to ignore.
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 
+      # The hand-off to `aburi-comment.yml`, which runs with this repository's own token and posts
+      # the comment this job could not. It travels in the artifact rather than being re-derived
+      # there because `CAN_COMMENT` above is the only place that decision is made: a second copy of
+      # the fork/Dependabot test, written against a `workflow_run` payload instead of a
+      # `pull_request` one, is a copy that can disagree — and the way it disagrees is that nobody
+      # posts at all. Its absence is just as meaningful: the companion exits on it.
+      - name: Hand the comment to the companion workflow
+        if: always() && env.CAN_COMMENT != 'true' && hashFiles('out/diff.md') != ''
+        run: |
+          echo "This pull request's own run had a read-only token (a fork, or Dependabot); aburi-comment.yml posts the comment." > out/comment-pending
+
       # The run that cannot comment is the run whose report is worth the most: a red check saying
-      # `--fail-on removed tripped` does not say *which* symbol went away, and on those pull
-      # requests nothing else will. `always()` because a tripped gate fails the step above.
+      # `--fail-on removed tripped` does not say *which* symbol went away. The companion workflow
+      # reads the report from here — it cannot check out a fork's head safely, and does not need to
+      # — so this upload is a dependency of the comment, not only a fallback for a human.
+      # `always()` because a tripped gate fails the step above.
       - name: Upload the report
         if: always() && hashFiles('out/diff.md') != ''
         uses: actions/upload-artifact@v4
@@ -82,7 +95,7 @@ jobs:
 
       # Otherwise the comment step simply renders as skipped, and a reader cannot tell "we chose
       # not to post" from "posting failed".
-      - name: Say why no comment was posted
+      - name: Say why no comment was posted here
         if: always() && env.CAN_COMMENT != 'true'
         run: |
-          echo "::notice::No comment was posted: this pull request's token is read-only (a fork, or Dependabot). The report is in the 'aburi-diff' artifact."
+          echo "::notice::This pull request's token is read-only (a fork, or Dependabot), so this run posted nothing. The 'Aburi report' workflow picks the report up from the 'aburi-diff' artifact and comments with the base repository's token."

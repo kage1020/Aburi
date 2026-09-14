@@ -80,6 +80,45 @@ Yarn PnP is the exception — it has no `node_modules`, and `.pnp.cjs` loads thr
 Aburi analyses its own pull requests this way, with the CLI each pull request builds:
 [`.github/workflows/aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml).
 
+### Pull requests from a fork
+
+A pull request opened from a fork runs with a read-only `GITHUB_TOKEN`, whatever your
+`permissions:` block says — and so does Dependabot's, whose branch is in your repository
+but whose token is not. The diff and the gate run normally there; the comment is the part
+that cannot be posted, because posting it needs write access the run does not have.
+
+Reaching for `pull_request_target` to get that access is the wrong trade: it would give a
+writable token to a job that analyses code the contributor wrote.
+
+Split the work in two instead. The pull request's own run uploads the report as an artifact;
+a second workflow, triggered on `workflow_run`, downloads it and posts the comment with your
+repository's token — without checking out, or running, anything from the fork.
+
+```yaml
+# .github/workflows/aburi-comment.yml
+on:
+  workflow_run:
+    workflows: [Aburi]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+```
+
+Aburi runs that pair on itself:
+[`aburi-comment.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi-comment.yml)
+is the companion, and
+[`docs/design/github-action.md`](../design/github-action.md) §5.1 walks through what makes it
+safe to give the second half a writable token.
+
+::: warning A `workflow_run` workflow runs from your default branch
+GitHub always uses the copy on the default branch, so the companion does nothing until it is
+merged — including on the pull request that adds it. It also posts no check on the pull
+request: the comment appearing is the signal, and failures show in the Actions tab.
+:::
+
 ## Any other CI
 
 The CLI has no opinion about your platform. Run it and read the exit code.

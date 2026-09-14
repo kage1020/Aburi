@@ -1,0 +1,144 @@
+name: Aburi report
+
+# The other half of `aburi.yml`. A pull request from a fork — and Dependabot's, whose branch lives
+# inside the repository — runs with a read-only `GITHUB_TOKEN` that no `permissions:` block can
+# widen, so the run that produces the report is structurally unable to post it. `workflow_run` runs
+# afterwards, in the context of the base repository, with a token that can.
+#
+# Nothing from the pull request's head is executed here: this job checks out `main`, downloads the
+# artifact the analysis already produced, and posts it. That is the whole reason the split exists —
+# a `pull_request_target` job would hand a writable token to code the fork controls.
+#
+# Two consequences of how `workflow_run` works, both worth knowing before editing this file:
+#   - GitHub always runs the copy of this file on the default branch, so changes to it take effect
+#     when they merge, not on the pull request that makes them.
+#   - It produces no check on the pull request. The comment appearing is the signal; failures here
+#     are visible in the Actions tab.
+on:
+  workflow_run:
+    workflows: [Aburi]
+    types: [completed]
+
+# One comment, one writer. Superseded analysis runs are cancelled upstream, but a pull request that
+# is pushed to twice in quick succession can still finish two of them, and two jobs upserting the
+# same comment would race between the "is it there?" read and the create. Keyed by the head branch
+# rather than by `github.ref`, which on this event is the default branch for every run alike.
+concurrency:
+  group: aburi-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Reading the artifact of another run.
+  actions: read
+  # The point of this workflow.
+  pull-requests: write
+
+jobs:
+  comment:
+    name: post the report
+    # `failure()` is not an error to skip here: a tripped `--fail-on` gate fails the analysis job,
+    # and that is exactly the run whose report a reviewer needs. `cancelled` and `skipped` runs
+    # produced no report at all, and a run from any other event has no pull request to post on.
+    if: >-
+      github.event.workflow_run.event == 'pull_request'
+      && (github.event.workflow_run.conclusion == 'success'
+          || github.event.workflow_run.conclusion == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      # Only the upsert script, and from this repository's default branch — never the head the
+      # analysis ran on. `sparse-checkout` keeps that explicit: whatever a pull request does to the
+      # rest of the tree, this job cannot reach it.
+      - name: Check out the upsert script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: packages/github-action/scripts
+          persist-credentials: false
+
+      - name: Find the report
+        id: artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner, repo: context.repo.repo, run_id: run.id, per_page: 100,
+            })
+            const report = artifacts.find((a) => a.name === 'aburi-diff' && !a.expired)
+            if (!report) {
+              core.info(`Run ${run.id} uploaded no 'aburi-diff' artifact; nothing to post.`)
+            }
+            core.setOutput('found', report ? 'true' : 'false')
+
+      # The pull request number comes from the event, never from the artifact. A fork's pull
+      # request can edit `.github/workflows/aburi.yml`, and therefore what that run uploads; it
+      # cannot edit the head repository and branch GitHub records for the run. Taking the number
+      # from the payload is what keeps a crafted artifact from addressing a comment to some other
+      # pull request in this repository.
+      - name: Resolve the pull request
+        id: pr
+        if: steps.artifact.outputs.found == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run
+            const head = `${run.head_repository.owner.login}:${run.head_branch}`
+            const open = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', head, per_page: 100,
+            })
+            // The same head branch can carry more than one open pull request (a stacked pair with
+            // different bases), so the head SHA decides. When it matches none of them the branch
+            // has moved on since the analysis ran: a single open pull request is still
+            // unambiguous, and the report it gets is one push stale — which the next run replaces
+            // in the same comment. Any other shape is a guess, and we do not guess.
+            const exact = open.find((pr) => pr.head.sha === run.head_sha)
+            const chosen = exact ?? (open.length === 1 ? open[0] : undefined)
+            if (!chosen) {
+              core.info(`No open pull request identified for ${head} at ${run.head_sha}; nothing to post.`)
+            }
+            core.setOutput('number', chosen ? String(chosen.number) : '')
+
+      - name: Download the report
+        if: steps.pr.outputs.number != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: aburi-diff
+          path: report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      # `comment-pending` is written by `aburi.yml` only when that run's own token could not post.
+      # Its absence means the comment is already on the pull request, posted by the analysis run
+      # itself, and re-posting it here would be at best a no-op round trip.
+      - name: Decide whether the comment is ours to post
+        id: pending
+        if: steps.pr.outputs.number != ''
+        run: |
+          set -euo pipefail
+          if [ ! -f report/comment-pending ]; then
+            echo "::notice::The analysis run posted its own comment; nothing to do here."
+            echo "post=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f report/diff.md ]; then
+            echo "::error::The 'aburi-diff' artifact has a comment-pending marker but no diff.md." >&2
+            exit 1
+          fi
+          echo "post=true" >> "$GITHUB_OUTPUT"
+
+      # The same script `packages/github-action` runs for a pull request that can comment for
+      # itself, so both paths produce the same comment, found by the same marker and rewritten in
+      # place across pushes. It is plain `.mjs` with no dependencies, which is why this job installs
+      # nothing.
+      #
+      # Everything the fork controls reaches it as a file it reads itself, never as an interpolated
+      # expression: `${{ }}` of artifact content would be pasted into this shell before bash ever
+      # sees it, which is the injection this whole split is supposed to avoid.
+      - name: Post the report
+        if: steps.pending.outputs.post == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          MARKDOWN_PATH: report/diff.md
+        run: node packages/github-action/scripts/upsert-comment.mjs

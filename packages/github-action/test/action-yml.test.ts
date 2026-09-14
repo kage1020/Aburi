@@ -17,6 +17,13 @@ const RESOLVER_PATH = resolve(
   "resolve-cli-bin.mjs",
 )
 
+const UPSERT_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "scripts",
+  "upsert-comment.mjs",
+)
+
 interface ActionShape {
   readonly name: string
   readonly description: string
@@ -31,6 +38,7 @@ interface ActionShape {
       readonly run?: string
       readonly shell?: string
       readonly if?: string
+      readonly env?: Record<string, string>
       readonly with?: Record<string, string>
     }[]
   }
@@ -200,13 +208,27 @@ describe("action.yml", () => {
 
     const commentStep = action.runs.steps.find((s) => s.id === "post-comment")
     expect(commentStep).toBeDefined()
-    expect(commentStep?.uses).toMatch(/^actions\/github-script@/)
+    expect(commentStep?.run).toContain('node "$GITHUB_ACTION_PATH/scripts/upsert-comment.mjs"')
     expect(commentStep?.if).toContain("inputs.comment == 'true'")
   })
 
-  it("embeds the same marker string as the programmatic upsert helper", async () => {
-    const raw = await readFile(ACTION_PATH, "utf8")
-    expect(raw).toContain(ABURI_COMMENT_MARKER)
+  it("upserts through the committed script, which `aburi-comment.yml` runs too", async () => {
+    // The marker lives in one file, not three. `.github/workflows/aburi-comment.yml` runs this
+    // same script for a pull request whose own token is read-only, and an inline heredoc here
+    // would be a second copy of the marker to keep in step with it — and with `src/comment.ts`.
+    // What the script answers is asserted by running it, in `upsert-comment.test.ts`.
+    await expect(stat(UPSERT_PATH)).resolves.toBeDefined()
+    expect(await readFile(UPSERT_PATH, "utf8")).toContain(ABURI_COMMENT_MARKER)
+  })
+
+  it("hands the comment step a pull request number the way github-script resolved one", async () => {
+    // The step used to read `context.issue.number`, which is the issue on an `issue_comment` event
+    // and the pull request on a `pull_request` one — the pair a slash-command workflow passing its
+    // own `refspec` relies on. A manifest has no such helper, so both halves are spelled out.
+    const action = await loadAction()
+    const env = action.runs.steps.find((s) => s.id === "post-comment")?.env ?? {}
+    expect(env.PR_NUMBER).toContain("github.event.pull_request.number")
+    expect(env.PR_NUMBER).toContain("github.event.issue.number")
   })
 
   it("reads the exact artefact filenames that @aburi/cli writes", async () => {
