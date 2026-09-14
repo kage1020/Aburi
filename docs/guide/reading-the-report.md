@@ -39,7 +39,7 @@ ones and folds the last three behind a `<details>`.
 | 🚫 Not compared | Neither revision analysed the file. | A standing blind spot. |
 | 🔀 Moved + Changed | Relocated and modified. | Read it like a Logic change. |
 | 🔀 Moved | Relocated, behaviour identical. | Skim and move on. |
-| 🧱 Component changes | A component appeared, vanished, or changed roots. | Architectural. Worth a look. |
+| 🧱 Component changes | A component appeared, vanished, or changed — roots, public API, frameworks, name, languages, or description. | Architectural. Worth a look. |
 | 🔗 Dependency changes | A new or dropped edge between components or symbols. | Watch for layering violations. |
 | 💧 Dropped changes | Boilerplate that came or went. | Usually nothing. |
 | 🎨 Syntax-only changes | Bodies reformatted, behaviour identical. | Nothing. |

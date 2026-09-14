@@ -50,6 +50,33 @@ export function codeFragment(source: string, options: { forceFence?: boolean } =
 }
 
 /**
+ * §3.4's sibling for a value that has to stay *inside* one list row: arbitrary user text — a
+ * Component's display name or description, which `aburi.config.v1` constrains to `minLength: 1`
+ * and to nothing at all respectively — rendered as a code span no value can break out of.
+ *
+ * `codeFragment` is the wrong tool one row down. It escapes to a fenced block, which ends the
+ * list item it sits in, and its fixed single backtick lets a value containing one close the span
+ * early and spill the rest of the row into prose. So: every newline run collapses to a single
+ * space, because the row is one line by construction, and the fence is one backtick longer than
+ * the longest run inside the value. The space padding is CommonMark's own rule — a span whose
+ * content opens or closes with a backtick or a space has one stripped from each end — so the
+ * value renders as written rather than a character short.
+ *
+ * The empty string gets no span: `` renders as two literal backticks, not as an empty one. A
+ * caller with a field that can be empty says so in words instead.
+ */
+export function inlineCodeValue(value: string): string {
+  const collapsed = value.replace(/\s*\r?\n\s*/g, " ")
+  if (collapsed.length === 0) return ""
+  let longestRun = 0
+  for (const run of collapsed.match(/`+/g) ?? []) longestRun = Math.max(longestRun, run.length)
+  const fence = "`".repeat(longestRun + 1)
+  const edge = `${collapsed.at(0)}${collapsed.at(-1)}`
+  const pad = edge.includes("`") || edge.includes(" ") ? " " : ""
+  return `${fence}${pad}${collapsed}${pad}${fence}`
+}
+
+/**
  * Read the `dropReason` off a dropped Symbol. The IR schema (aburi.ir.v1) enforces
  * `dropped=true → dropReason: string (minLength 1)`, so `null` here is an upstream
  * invariant violation the projection layer must surface loudly instead of quietly

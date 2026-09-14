@@ -457,25 +457,34 @@ The section is omitted when the array is empty, and equally when the key is abse
 
 ```md
 ### Added
+- `payments` — roots: `apps/payments`
 
-#### `payments`
-**Roots**: `apps/payments`
-**Languages**: ts
-**Frameworks**: nestjs
+### Removed
+- `legacy-auth`
 
 ### Changed
-
-#### `billing`
-- roots: `apps/billing` → `apps/billing, packages/billing-domain`
+- `billing`: name (`Billing` → `Billing & Invoicing`)
+- `payments`: description (none → `Settlement and payouts`)
+- `catalog`: roots, publicApi, frameworks
 ```
 
 The fields listed for a changed Component are read from the entry's `before` / `after`, not from
 its `delta`. The delta summarises three axes (roots, publicApi, frameworks); a rename, a new
-language, or an edited description moves none of them (diff-algorithm.md §6.1), and rendering
-the booleans alone printed an empty list for exactly those changes. Scalar fields — `name`,
-`description` — carry their before → after inline, because for them that is the whole change;
-the list-valued fields name themselves. An absent `description` renders as `none`, which is the
-same answer as `null` (ir-schema.md §1.1).
+language, or an edited description moves none of them (diff-algorithm.md §6.1). Entries with all
+three booleans `false` did not exist until §6.1 was fixed, and a renderer reading only the
+booleans would draw them as a row whose colon is followed by nothing — so both halves moved
+together.
+
+Scalar fields — `name`, `description` — carry their before → after inline, because for them that
+is the whole change; the list-valued fields name themselves and leave the values to the artifact.
+An absent `description` renders as `none`, which is the same answer as `null` (ir-schema.md
+§1.1); one that is present and empty renders as `(empty)`, which is a different answer.
+
+Both scalars are free-form text out of the config file, and this row reaches a pull request
+comment body, so they render through a code span the value cannot break out of: newlines collapse
+to a space, and the fence widens past the longest backtick run inside the value (§3.4). A
+component whose only difference is in a field this version of the projection has no rendering for
+— an IR written by a newer Aburi — is named alone, on the same row shape without the colon.
 
 #### 🔗 Dependency changes
 

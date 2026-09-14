@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" }
 import { buildDiff } from "../src/diff"
 import { sliceRecordViolation } from "../src/slice"
-import { fp, makeIR, makeSymbol } from "./fixtures"
+import { component, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
  * SV22 and SV24 (docs/design/slice-view.md §13.6, §13.7) + §11.3 — verify that
@@ -120,6 +120,31 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     })
     expect(diff.slices).toEqual([])
     expect(validate(diff)).toBe(true)
+  })
+
+  // The entry shape this schema had never seen: `changed[]` reports a component whose change is
+  // outside the three axes `delta` names, so all three booleans are `false` (diff-algorithm.md
+  // §6.1). Every IR in this file is component-free, so nothing pinned that it validates.
+  it("validates a changed component whose three delta booleans are all false", () => {
+    const before = component({ id: "billing", name: "Billing" })
+    const after = component({ id: "billing", name: "Billing & Invoicing" })
+    const diff = buildDiff({
+      baseIR: makeIR({ components: [before], symbols: [] }),
+      headIR: makeIR({ components: [after], symbols: [] }),
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+    })
+    expect(diff.summary.componentsChanged).toBe(1)
+    expect(diff.components.changed[0]?.delta).toEqual({
+      rootsChanged: false,
+      publicApiChanged: false,
+      frameworksChanged: false,
+    })
+    const ok = validate(diff)
+    if (!ok) {
+      throw new Error(`schema validation failed: ${JSON.stringify(validate.errors, null, 2)}`)
+    }
+    expect(ok).toBe(true)
   })
 
   it("rejects a slices[] entry that omits the required `slice:` prefix", () => {

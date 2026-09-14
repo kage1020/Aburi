@@ -12,6 +12,7 @@ import type {
   RelativePath,
   SkipReason,
 } from "@aburi/types"
+import { DiffError } from "./errors"
 
 /**
  * `docs/design/diff-algorithm.md` §6.1 — Component diff. Assumes `components[].id` is unique on each side (ir-schema.md §14
@@ -21,12 +22,12 @@ import type {
  *
  * Component identity is `id`; when a Component is present in both base and head with the same
  * id, *any* field that differs makes it `changed` — the whole object is compared, not the three
- * axes the delta names. Those two questions were conflated once and a display name, a language,
- * or a description could be rewritten with the diff reporting `componentsChanged: 0` and an
- * empty `changed[]`, which left the projection layer without even a before/after pair to render
- * (#100). The delta booleans stay exactly what they were — a summary of the three axes a
- * reviewer scans for architectural movement — and a `changed[]` entry with all three `false` is
- * a well-formed answer meaning "something else about this component moved", not a bug.
+ * axes the delta names. Those two questions were conflated once: a rename, an added language or
+ * an edited description left the diff reporting `componentsChanged: 0` and an empty `changed[]`,
+ * so the projection layer had no before/after pair to render. The delta booleans stay exactly
+ * what they were — a summary of the three axes a reviewer scans for architectural movement — and
+ * a `changed[]` entry with all three `false` is a well-formed answer meaning "something else
+ * about this component moved", not a bug.
  *
  * `modified` deltas are intentionally absent from this diff (diff-algorithm.md §5.2.3): fields
  * are reported as before/after pairs via the `changed[]` entries so consumers can render them
@@ -51,17 +52,20 @@ export function diffComponents(
       added.push(headComp)
       continue
     }
-    const rootsChanged = !stringArraysEqual(baseComp.roots, headComp.roots)
-    const publicApiChanged = !stringArraysEqual(baseComp.publicApi ?? [], headComp.publicApi ?? [])
-    const frameworksChanged = !stringArraysEqual(
-      baseComp.frameworks ?? [],
-      headComp.frameworks ?? [],
-    )
+    // Computed inside the branch, not before it: the three booleans summarise an entry, they
+    // are not the test for one.
     if (!componentsEqual(baseComp, headComp)) {
       changed.push({
         before: baseComp,
         after: headComp,
-        delta: { rootsChanged, publicApiChanged, frameworksChanged },
+        delta: {
+          rootsChanged: !stringArraysEqual(baseComp.roots, headComp.roots),
+          publicApiChanged: !stringArraysEqual(baseComp.publicApi ?? [], headComp.publicApi ?? []),
+          frameworksChanged: !stringArraysEqual(
+            baseComp.frameworks ?? [],
+            headComp.frameworks ?? [],
+          ),
+        },
       })
     }
   }
@@ -256,41 +260,70 @@ function compareDependencies(a: Dependency, b: Dependency): number {
 
 /**
  * Whether two Components are the same record, over every field the document carries rather
- * than an enumerated list. An enumerated list is what produced #100, and `v1` admits additive
- * fields (ir-schema.md §15), so a list written today would go stale the same way the next time
- * one is added.
+ * than an enumerated list. An enumerated list is what let a rename through, and `v1` admits
+ * additive fields (ir-schema.md §15), so a list written today would go stale the same way the
+ * next time one is added.
  *
  * Equality is `@aburi/core`'s canonical serialization — the codebase's one answer to "are these
- * two JSON values the same", the one fingerprints are built on — over a normalized form, so
- * key order and Unicode spelling cannot manufacture a change. It throws `non-plain-json` on a
- * value JSON cannot carry, which for a Component read out of a validated document cannot
- * happen; a library caller assembling one by hand gets the loud failure rather than a silent
- * comparison of `"{}"` against `"{}"`.
+ * two JSON values the same", the one fingerprints are built on — over the normalized form
+ * below, so key order and Unicode spelling cannot manufacture a change.
+ *
+ * It can refuse to answer, on a value `readonly Component[]` does not admit and only a
+ * hand-assembled document reaches: a nested value JSON cannot carry (`non-plain-json`), or two
+ * keys that render identically after NFC (`canonical-key-collision`). Note what is *not*
+ * covered — `normalizeComponent` hands over a fresh plain object, so the serializer's own
+ * top-level `assertPlainObject` guard never fires here; a non-plain top-level container would
+ * flatten to `"{}"` rather than throw. Both refusals become `DiffError` carrying the component
+ * id, because `errors.ts` is the whole of this package's failure surface and a bare `CoreError`
+ * leaves through `run.ts`'s generic arm on a different exit code than every sibling cause.
  */
 function componentsEqual(a: Component, b: Component): boolean {
-  return canonicalComponent(a) === canonicalComponent(b)
+  return canonicalComponent(a, "base") === canonicalComponent(b, "head")
+}
+
+function canonicalComponent(component: Component, side: "base" | "head"): string {
+  try {
+    return serializeCanonical(normalizeComponent(component), { format: "compact" })
+  } catch (error) {
+    throw new DiffError(
+      `${side} components[id=${component.id}] cannot be compared: ${error instanceof Error ? error.message : String(error)}`,
+      { code: "ir-shape-invalid", value: `components[id=${component.id}]` },
+      { cause: error },
+    )
+  }
 }
 
 /**
- * The spelling-independent form of a Component: keys whose value says "no value" are dropped,
- * so the two ways a document may say it compare equal.
+ * The spelling-independent form of a Component: the keys whose two spellings mean the same
+ * thing are reduced to one, so a document that writes the other does not read as a change.
  *
- * Both of ir-schema.md §1.1's classes land here. A Class A field (`description`) is `null`
- * exactly when an older document omits the key, and a reader MUST NOT tell those apart. A Class
- * B field on a Component (`publicApi`, `frameworks`) is omitted when empty, so `[]` is a
- * non-conforming spelling of absence that a reader still meets — which is what the `?? []`
- * normalizations the delta booleans above use have always assumed. Dropping both by shape
- * rather than by field name keeps that assumption true for fields added to `v1` later.
+ * Exactly two rules, and both are scoped to the fields that license them rather than to a
+ * class. `description` is Class A (ir-schema.md §1.1), where a reader MUST treat an absent key
+ * as `null`. `publicApi` and `frameworks` are Class B, whose *own* writer rule is "omitted when
+ * empty" — which is what makes `[]` a non-conforming spelling of absence, and what the `?? []`
+ * in the delta booleans has always assumed. Class B does not say that in general: §1.1 is
+ * explicit that "absent" and "empty" are different facts there, with
+ * `stats.lspEnrichment.hintsRejected` as its own counterexample. So a Class B field added to
+ * `v1` later whose presence is itself information must be added here deliberately — dropping it
+ * by shape would swallow a real difference — while every other new field compares as written,
+ * which is the case that needs no revisit.
  */
-function canonicalComponent(component: Component): string {
-  const normalized: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(component)) {
-    if (value === null || value === undefined) continue
-    if (Array.isArray(value) && value.length === 0) continue
-    normalized[key] = value
+function normalizeComponent(component: Component): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...component }
+  if (normalized.description === null || normalized.description === undefined) {
+    delete normalized.description
   }
-  return serializeCanonical(normalized, { format: "compact" })
+  for (const field of PRESENCE_EQUALS_EMPTY_FIELDS) {
+    const value = normalized[field]
+    if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+      delete normalized[field]
+    }
+  }
+  return normalized
 }
+
+/** The Component fields whose writer rule is "omitted when empty" (ir-schema.md §1.1). */
+const PRESENCE_EQUALS_EMPTY_FIELDS = ["publicApi", "frameworks"] as const
 
 function stringArraysEqual(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false

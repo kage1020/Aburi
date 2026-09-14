@@ -1,7 +1,7 @@
 import { makeLanguageId } from "@aburi/core"
 import type { Component } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { type DependencySideView, diffComponents, diffDependencies } from "../src"
+import { type DependencySideView, DiffError, diffComponents, diffDependencies } from "../src"
 import { component, componentId, dependency } from "./fixtures"
 
 /**
@@ -80,9 +80,9 @@ describe("diffComponents (I5)", () => {
     expect(result.changed).toEqual([])
   })
 
-  // #100 — change detection compares the whole Component; the three booleans summarise three
-  // axes and are not the definition of "changed" (diff-algorithm.md §6.1). A field outside
-  // them produced no entry at all, so the projection had no before/after pair to render.
+  // Change detection compares the whole Component; the three booleans summarise three axes and
+  // are not the definition of "changed" (diff-algorithm.md §6.1). A field outside them produced
+  // no entry at all, so the projection had no before/after pair to render.
   it("reports a display-name change with all three delta booleans false", () => {
     const before = component({ id: "billing", name: "Billing" })
     const after = component({ id: "billing", name: "Billing & Invoicing" })
@@ -156,6 +156,8 @@ describe("diffComponents (I5)", () => {
   })
 
   it("does not report a change when key insertion order differs", () => {
+    // Class B fields are spelled identically on both sides, so this pins key order alone and
+    // does not re-test the absence respellings above.
     const a = component({
       id: "billing",
       name: "billing",
@@ -165,13 +167,50 @@ describe("diffComponents (I5)", () => {
     const b: Component = {
       description: "Invoices",
       languages: [makeLanguageId("ts")],
-      frameworks: [],
-      publicApi: [],
+      frameworks: a.frameworks ?? [],
+      publicApi: a.publicApi ?? [],
       roots: ["apps/billing"],
       name: "billing",
       id: componentId("billing"),
     }
     expect(diffComponents([a], [b]).changed).toEqual([])
+  })
+
+  // The property that justifies reaching for `@aburi/core`'s canonical serializer rather than
+  // sorting keys by hand: ir-schema.md §1.2 puts every IR string in NFC, and a document that
+  // arrives in NFD would otherwise report an untouched component as changed on every pull
+  // request. Swap the serializer for `JSON.stringify` over sorted keys and only this fails.
+  it("does not report a change when a string arrives in a different Unicode form", () => {
+    const composed = "café"
+    const decomposed = "cafe\u0301"
+    expect(composed).not.toBe(decomposed)
+    expect(composed.normalize("NFC")).toBe(decomposed.normalize("NFC"))
+    const nfc = component({ id: "billing", name: composed, description: composed })
+    const nfd = component({ id: "billing", name: decomposed, description: decomposed })
+    expect(diffComponents([nfc], [nfd]).changed).toEqual([])
+  })
+
+  it("reports an empty description as a change, because it is not the same as none", () => {
+    const none = component({ id: "billing", name: "billing", description: null })
+    const empty = component({ id: "billing", name: "billing", description: "" })
+    expect(diffComponents([none], [empty]).changed).toHaveLength(1)
+  })
+
+  it("refuses a component it cannot compare, as a DiffError naming the component", () => {
+    const sound = component({ id: "billing", name: "billing" })
+    // A nested value JSON cannot carry. Only a hand-assembled document reaches this — which is
+    // the case the error exists for, and `errors.ts` is the whole of this package's failure
+    // surface, so it must not leave as a bare `CoreError` from `@aburi/core`.
+    const unsound = { ...sound, roots: [(() => "apps/billing") as unknown as string] }
+    let raised: unknown
+    try {
+      diffComponents([sound], [unsound])
+    } catch (error) {
+      raised = error
+    }
+    expect(raised).toBeInstanceOf(DiffError)
+    expect((raised as DiffError).code).toBe("ir-shape-invalid")
+    expect((raised as DiffError).value).toBe("components[id=billing]")
   })
 
   it("sorts changed[] by id", () => {

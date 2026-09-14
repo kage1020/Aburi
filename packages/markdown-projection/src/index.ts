@@ -31,6 +31,7 @@ export {
   fingerprintLine,
   INLINE_CODE_MAX_LENGTH,
   inlineCodePath,
+  inlineCodeValue,
   isSymbolIdEndpoint,
   orderFilesAscending,
   orderSymbolsWithinFile,
