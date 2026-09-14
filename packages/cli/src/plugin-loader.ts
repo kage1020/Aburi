@@ -1,4 +1,4 @@
-import { resolve } from "node:path"
+import { isAbsolute, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { VocabRegistry } from "@aburi/plugin-registry"
 import type {
@@ -57,6 +57,7 @@ export interface LoadPluginsOptions {
  * - npm package (`@aburi/lang-typescript`) — resolved verbatim.
  * - relative path (`./plugins/x.mjs`) — resolved from `pluginRefRoot`, which is the
  *   workspace root unless the caller says otherwise.
+ * - absolute path — converted to a file URL independently of `pluginRefRoot`.
  *
  * Once imported, the loader accepts the following export shapes, first hit wins:
  *   1. `default` export whose value has a `manifest` field
@@ -82,7 +83,7 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
 }
 
 function resolveSpecifier(ref: string, pluginRefRoot: string): string {
-  if (ref.startsWith("./") || ref.startsWith("../")) {
+  if (isAbsolute(ref) || ref.startsWith("./") || ref.startsWith("../")) {
     return pathToFileURL(resolve(pluginRefRoot, ref)).href
   }
   if (ref.startsWith("@") || ref.includes("/")) return ref

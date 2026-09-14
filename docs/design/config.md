@@ -130,7 +130,9 @@ Each array element is a **plugin manifest name** (the `name` field).
 
 For a string `<id>`, Aburi resolves to exactly one specifier — there is no fallback chain:
 
-1. `<id>` starts with `./` or `../` → resolved against the workspace root as a `file:` URL
+1. `<id>` is an absolute filesystem path, or starts with `./` or `../` → converted to a
+   `file:` URL. Relative paths resolve against the workspace root; absolute paths retain
+   their location. Windows absolute paths accept either forward or backslashes.
 2. `<id>` is scoped or contains `/` (`@myorg/pkg`, `some-pkg/subpath`) → used verbatim
 3. Otherwise → prefixed, becoming `@aburi/<id>`
 
@@ -138,6 +140,8 @@ Examples:
 - `"effects-prisma"` → `@aburi/effects-prisma`
 - `"@myorg/aburi-effects"` → `@myorg/aburi-effects`
 - `"./aburi-plugins/internal-framework.mjs"` → direct relative path
+- `"C:/aburi-plugins/internal-framework.mjs"` → absolute path on Windows
+- `"/opt/aburi-plugins/internal-framework.mjs"` → absolute path on POSIX
 
 A bare name is therefore *only* resolvable under the `@aburi` scope. Third-party plugins
 must be listed by their full package name.

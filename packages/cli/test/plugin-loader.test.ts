@@ -1,3 +1,9 @@
+import { execFile } from "node:child_process"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { resolve } from "node:path"
+import { pathToFileURL } from "node:url"
+import { promisify } from "node:util"
 import type {
   Config,
   EffectPlugin,
@@ -7,6 +13,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CliError, loadPlugins } from "../src"
+import { STUB_PLUGIN } from "./stub-language"
 
 const langManifest: LangManifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -172,5 +179,61 @@ describe("loadPlugins — module resolution and bucketing", () => {
       },
     })
     expect(seen).toMatch(/^file:.*plugins\/local\.mjs$/)
+  })
+
+  const absolutePath = resolve(tmpdir(), "aburi plugins", "local #100%.mjs")
+  it.each([
+    ...new Set([absolutePath, absolutePath.replaceAll("\\", "/")]),
+  ])("resolves the absolute ref %s as a file URL independently of the plugin root", async (ref) => {
+    let seen = ""
+    await loadPlugins({
+      config: { languages: [ref] },
+      workspaceRoot: resolve(tmpdir(), "workspace"),
+      pluginRefRoot: resolve(tmpdir(), "different-plugin-root"),
+      importModule: async (specifier) => {
+        seen = specifier
+        return { plugin: fakeLangPlugin }
+      },
+    })
+    expect(seen).toBe(pathToFileURL(absolutePath).href)
+  })
+
+  it("keeps explicit file URLs unchanged", async () => {
+    const ref = pathToFileURL(absolutePath).href
+    let seen = ""
+    await loadPlugins({
+      config: { languages: [ref] },
+      workspaceRoot: tmpdir(),
+      importModule: async (specifier) => {
+        seen = specifier
+        return { plugin: fakeLangPlugin }
+      },
+    })
+    expect(seen).toBe(ref)
+  })
+
+  it("imports an absolute plugin path containing spaces and URL-special characters", async () => {
+    const scratch = await mkdtemp(resolve(tmpdir(), "aburi-plugin-path-"))
+    try {
+      const pluginPath = resolve(scratch, "local #100%.mjs")
+      await writeFile(pluginPath, STUB_PLUGIN, "utf8")
+      // Use Node's ESM loader directly: Vitest's module runner treats URL fragments differently.
+      const loaderUrl = new URL("../src/plugin-loader.ts", import.meta.url).href
+      const { stdout } = await promisify(execFile)(process.execPath, [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "-e",
+        `import { loadPlugins } from ${JSON.stringify(loaderUrl)};
+        const loaded = await loadPlugins(${JSON.stringify({
+          config: { languages: [pluginPath] },
+          workspaceRoot: resolve(scratch, "workspace"),
+        })});
+        console.log(JSON.stringify(loaded.languages.map(plugin => plugin.manifest.name)));`,
+      ])
+      expect(JSON.parse(stdout)).toEqual(["lang-stub"])
+    } finally {
+      await rm(scratch, { recursive: true, force: true })
+    }
   })
 })
