@@ -28,8 +28,10 @@ and "empty" are different facts there — so a future Class B field whose presen
 information has to be added deliberately. Key order and Unicode form do not make a change either:
 the comparison is the canonical serializer the fingerprints are built on, not a second answer to
 the same question. A Component it cannot compare — only a hand-assembled one reaches that —
-raises `DiffError("ir-shape-invalid")` naming the component, rather than a `CoreError` leaving
-the package by a different door.
+raises `DiffError("ir-shape-invalid")` naming the component and the side, rather than a
+`CoreError` leaving the package by a different door on a different exit code. Two things widen
+with it: the serializer now sees every matched pair rather than only the components that reach
+`changed[]`, and a `--format md` run no longer skips it.
 
 The 🧱 Component changes section reads the fields it lists off `before` / `after` rather than off
 `delta`, which is the same conflation on the reviewer-facing side. Those all-`false` entries
