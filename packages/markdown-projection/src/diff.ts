@@ -74,11 +74,21 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
   // would report "nothing was missed" on every archived diff.
   appendSection(sections, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
   appendSection(sections, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
-  appendFolded(sections, "## 🔀 Moved", renderMoved(buckets.moved))
+  appendFolded(sections, "## 🔀 Moved", renderMoved(buckets.moved), buckets.moved.length)
   appendSection(sections, "## 🧱 Component changes", renderComponentChanges(diff))
   appendSection(sections, "## 🔗 Dependency changes", renderDependencyChanges(diff))
-  appendFolded(sections, "## 💧 Dropped changes", renderDroppedToggled(buckets.droppedToggled))
-  appendFolded(sections, "## 🎨 Syntax-only changes", renderSyntaxOnly(buckets.syntaxOnly))
+  appendFolded(
+    sections,
+    "## 💧 Dropped changes",
+    renderDroppedToggled(buckets.droppedToggled),
+    buckets.droppedToggled.length,
+  )
+  appendFolded(
+    sections,
+    "## 🎨 Syntax-only changes",
+    renderSyntaxOnly(buckets.syntaxOnly),
+    buckets.syntaxOnly.length,
+  )
 
   return assemble(heading, sections, options.maxBytes)
 }
@@ -303,9 +313,16 @@ function appendSection(sections: Section[], heading: string, body: string[]): vo
 /**
  * §6.1 — three sections (Moved / Dropped / Syntax-only) live inside a `<details>`
  * fold-out. Skipping the wrapper when body is empty keeps the file from carrying dangling
- * empty `<details>` blocks that GitHub still renders as a clickable arrow.
+ * empty `<details>` blocks that GitHub still renders as a clickable arrow. `entryCount` is
+ * passed separately because Dropped prefixes direction groups with headings and separators,
+ * so its rendered row count can exceed the number of entries.
  */
-function appendFolded(sections: Section[], heading: string, body: string[]): void {
+function appendFolded(
+  sections: Section[],
+  heading: string,
+  body: string[],
+  entryCount: number,
+): void {
   if (body.length === 0) return
   sections.push({
     title: titleOf(heading),
@@ -313,7 +330,7 @@ function appendFolded(sections: Section[], heading: string, body: string[]): voi
       heading,
       "",
       "<details>",
-      `<summary>${body.length} entries</summary>`,
+      `<summary>${entryCount} entries</summary>`,
       "",
       ...body,
       "",
