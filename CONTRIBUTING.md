@@ -1,7 +1,6 @@
 # Contributing to Aburi
 
-Thanks for your interest in contributing! This document explains how to set up
-a development environment and what we expect from contributions.
+Thanks for your interest in contributing! This document explains how to set up a development environment and what we expect from contributions.
 
 ## Prerequisites
 
@@ -25,119 +24,46 @@ pnpm test        # Vitest across packages
 pnpm build       # tsdown across packages
 ```
 
-All four must pass before a pull request can merge — CI runs them on Ubuntu,
-macOS, and Windows.
+All four must pass before a pull request can merge — CI runs them on Ubuntu, macOS, and Windows.
 
 ## Workflow
 
 1. Branch from `main` (`main` is protected; changes always land via PR).
-2. Follow a test-first flow: define acceptance criteria from the relevant
-   design doc under [`docs/design/`](docs/design/), write the tests, then the
-   implementation.
-3. If the change affects a published package, add a changeset:
-   `pnpm changeset`.
+2. Follow a test-first flow: define acceptance criteria from the relevant design doc under [`docs/design/`](docs/design/), write the tests, then the implementation.
+3. If the change affects a published package, add a changeset: `pnpm changeset`.
 4. Open a pull request against `main`.
 
-Two workflows then run. CI runs the four commands above on Ubuntu, macOS and Windows,
-and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml)
-builds your branch, diffs it against the pull request's base with the CLI your branch
-contains, and posts the report as a comment it rewrites on every push. (From a fork, the
-token is read-only: there is no comment, and the report is the `aburi-diff` artifact on
-the run.) Its gate (`removed,dropped-toggled:to-dropped:>10`) turns the check red when a
-symbol disappears or bodies are emptied in bulk.
+Two workflows then run. CI runs the four commands above on Ubuntu, macOS and Windows, and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml) builds your branch, diffs it against the pull request's base with the CLI your branch contains, and posts the report as a comment it rewrites on every push. (From a fork, the token is read-only: there is no comment, and the report is the `aburi-diff` artifact on the run.) Its gate (`removed,dropped-toggled:to-dropped:>10`) turns the check red when a symbol disappears or bodies are emptied in bulk.
 
-The job has no bypass switch: a tripped gate stays red for that commit. Say in the pull
-request why the removal is deliberate — merging past a red Aburi check is then a
-maintainer's call, and the design docs are what the argument is made against.
+The job has no bypass switch: a tripped gate stays red for that commit. Say in the pull request why the removal is deliberate — merging past a red Aburi check is then a maintainer's call, and the design docs are what the argument is made against.
 
-Two things about this repository's own dogfooding are worth knowing before they surprise
-you:
+Two things about this repository's own dogfooding are worth knowing before they surprise you:
 
-- A fresh `pnpm install` warns `Failed to create bin at …/node_modules/.bin/aburi`. That
-  is expected. The root `package.json` depends on `@aburi/cli`, whose bin is build output
-  and does not exist yet at install time; nothing needs the link, because the action
-  resolves the package rather than the link
-  ([`docs/design/github-action.md`](docs/design/github-action.md) §3).
-- There is an `aburi.json` at the repository root, and config discovery walks parent
-  directories to the filesystem root. A test fixture built inside the repository would
-  pick it up; build fixtures under `os.tmpdir()`, as the existing ones do.
+- A fresh `pnpm install` warns `Failed to create bin at …/node_modules/.bin/aburi`. That is expected. The root `package.json` depends on `@aburi/cli`, whose bin is build output and does not exist yet at install time; nothing needs the link, because the action resolves the package rather than the link ([`docs/design/github-action.md`](docs/design/github-action.md) §3).
+- There is an `aburi.json` at the repository root, and config discovery walks parent directories to the filesystem root. A test fixture built inside the repository would pick it up; build fixtures under `os.tmpdir()`, as the existing ones do.
 
 ## Design docs
 
-Behaviour is specified before it is implemented. Every package's contract
-lives under [`docs/design/`](docs/design/), and the JSON Schemas under
-[`schema/`](schema/) are the source of truth for the IR, diff, config, and
-plugin manifest shapes. If your change alters a contract, update the design
-doc and schema in the same PR.
+Behaviour is specified before it is implemented. Every package's contract lives under [`docs/design/`](docs/design/), and the JSON Schemas under [`schema/`](schema/) are the source of truth for the IR, diff, config, and plugin manifest shapes. If your change alters a contract, update the design doc and schema in the same PR.
 
-The `v1` schemas are frozen: additive changes only. Anything that would break
-an existing consumer of `aburi.ir.v1.json` / `aburi.diff.v1.json` needs a new
-schema version.
+The `v1` schemas are frozen: additive changes only. Anything that would break an existing consumer of `aburi.ir.v1.json` / `aburi.diff.v1.json` needs a new schema version.
 
 ## Writing plugins
 
-New language / framework / effects plugins are the most welcome kind of
-contribution. See [`docs/extend/plugin-development.md`](docs/extend/plugin-development.md)
-for the plugin contracts and a walkthrough.
+New language / framework / effects plugins are the most welcome kind of contribution. See [`docs/extend/plugin-development.md`](docs/extend/plugin-development.md) for the plugin contracts and a walkthrough.
 
 ## Docs site
 
-[aburi.kage1020.com](https://aburi.kage1020.com) is the VitePress site under
-[`docs/`](docs/), served by a Cloudflare Worker configured in
-[`docs/wrangler.jsonc`](docs/wrangler.jsonc). Production is deployed from
-[`.github/workflows/docs.yml`](.github/workflows/docs.yml); previews still come
-from Cloudflare's git integration, which watches the repository directly.
-
-**Production ships with the release, not with the merge.**
-[`release.yml`](.github/workflows/release.yml) calls the docs workflow only on
-the run where changesets actually published to npm, so the site never documents
-a version that cannot be installed yet. A documentation fix that should not
-wait for the next release can be shipped on its own by running the **Docs**
-workflow from the Actions tab.
-
-Pushing to a branch other than `main` uploads a *version*: the site is built
-and reachable at a preview URL, but no traffic moves off the deployed version.
-Cloudflare comments that URL on the pull request and rewrites the comment on
-every push, so the link in a review always points at the commit being reviewed.
-
-Two things make the previews work, one in this repository and one outside it:
-
-- `preview_urls` in [`docs/wrangler.jsonc`](docs/wrangler.jsonc). It is set
-  explicitly because the default follows `workers_dev`, and because Wrangler
-  overwrites the dashboard toggle on every deploy.
-- **Workers & Pages → aburi → Settings → Build → Branch control**: *Builds for
-  non-production branches* must be enabled, or pull requests get no preview at
-  all.
-
-And two make the release-time deploy work, neither of which lives in the
-repository:
-
-- On that same **Branch control** screen, builds for the **production branch**
-  must be *disabled*. Left on, every push to `main` deploys the site the moment
-  it merges, and the release-time deploy is only a second deploy of something
-  already live — which is the coupling this arrangement exists to break.
-- Two repository secrets, because Cloudflare has no equivalent of the OIDC
-  trusted publishing the npm release leans on: `CLOUDFLARE_API_TOKEN` (a token
-  with *Workers Scripts: Edit* on this account) and `CLOUDFLARE_ACCOUNT_ID`.
-
-Because this is a monorepo, a pull request that touches no documentation still
-triggers a preview build. **Build → Build watch paths** can narrow that to
-`docs/*` if the noise becomes a problem.
+[aburi.kage1020.com](https://aburi.kage1020.com) is the VitePress site under [`docs/`](docs/), served by a Cloudflare Worker configured in [`docs/wrangler.jsonc`](docs/wrangler.jsonc). Production is deployed from [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
 
 ## Conventions
 
 - ESM only, TypeScript strict mode, no `any` escapes.
-- Never hardcode dependency versions in `package.json` — install via
-  `pnpm add` so the latest compatible version is recorded.
+- Never hardcode dependency versions in `package.json` — install via `pnpm add` so the latest compatible version is recorded.
 - No linter-suppression comments; fix the root cause instead.
 - Generated files are never edited by hand:
-  `packages/types/src/generated/` is regenerated from `schema/`, and
-  `packages/lang-typescript/wasm/` is vendored from the
-  `@vscode/tree-sitter-wasm` devDependency by that package's `build`. Both are
-  gitignored; `wasm/` is also published, so it must exist before `pnpm pack`.
+  `packages/types/src/generated/` is regenerated from `schema/`, and `packages/lang-typescript/wasm/` is vendored from the `@vscode/tree-sitter-wasm` devDependency by that package's `build`. Both are gitignored; `wasm/` is also published, so it must exist before `pnpm pack`.
 
 ## Releases
 
-Releases are cut from `main` via [changesets](https://github.com/changesets/changesets):
-merging the release PR created by the release workflow publishes the packages
-to npm, and that same run deploys the docs site (see above).
+Releases are cut from `main` via [changesets](https://github.com/changesets/changesets): merging the release PR created by the release workflow publishes the packages to npm, and that same run deploys the docs site (see above).

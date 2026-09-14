@@ -1,13 +1,10 @@
-<img src="docs/public/brand/mark.svg" alt="" width="72" height="72">
+<img src="docs/public/brand/mark.svg" alt="" width="128" height="128" align="center">
 
 # Aburi
 
-Aburi reads a pull request and tells you what the change did: which endpoints
-are new, which methods now write to the database, which validation guard
-disappeared.
+Aburi reads a pull request and tells you what the change did: which endpoints are new, which methods now write to the database, which validation guard disappeared.
 
-It parses both revisions with tree-sitter, matches functions and methods across
-them, and writes the answer as Markdown. Your CI can fail the build on any of it.
+It parses both revisions with tree-sitter, matches functions and methods across them, and writes the answer as Markdown. Your CI can fail the build on any of it.
 
 Documentation: **[aburi.kage1020.com](https://aburi.kage1020.com)**
 
@@ -37,20 +34,13 @@ Documentation: **[aburi.kage1020.com](https://aburi.kage1020.com)**
   - db.write: `prisma.auditLog.create` (L31)
 ```
 
-That deleted guard is a single red line somewhere in a 2,000-line `git diff`.
-Aburi gives it a heading.
+That deleted guard is a single red line somewhere in a 2,000-line `git diff`. Aburi gives it a heading.
 
 ## Why not `git diff`
 
-Rename a file without touching its logic and Aburi reports `moved`, where
-`git diff` reports a delete plus an add. Reformat a body and Aburi files it
-under syntax-only changes, folded out of your way. Interfaces, DTOs,
-re-exports, and empty bodies drop out before the comparison, so they stay out
-of the summary.
+Rename a file without touching its logic and Aburi reports `moved`, where `git diff` reports a delete plus an add. Reformat a body and Aburi files it under syntax-only changes, folded out of your way. Interfaces, DTOs, re-exports, and empty bodies drop out before the comparison, so they stay out of the summary.
 
-Aburi runs static analysis. No model, no sampling, so the same commit produces
-the same report, and you can gate CI on any category it counts:
-`--fail-on 'removed,changed:>20'`.
+Aburi runs static analysis. No model, no sampling, so the same commit produces the same report, and you can gate CI on any category it counts: `--fail-on 'removed,changed:>20'`.
 
 ## Quick start
 
@@ -62,12 +52,9 @@ pnpm exec aburi scan                # analyse the workspace → out/
 pnpm exec aburi diff main..HEAD --fail-on 'removed,changed:>20'
 ```
 
-With another package manager, install with `npm install -D …`, `yarn add -D …`,
-or `bun add -D …`, and run the CLI as `npx aburi …`, `yarn aburi …`, or
-`bunx aburi …`.
+With another package manager, install with `npm install -D …`, `yarn add -D …`, or `bun add -D …`, and run the CLI as `npx aburi …`, `yarn aburi …`, or `bunx aburi …`.
 
-Exit code `3` means a gate tripped. The full walkthrough is in
-[Getting started](https://aburi.kage1020.com/guide/getting-started).
+Exit code `3` means a gate tripped. The full walkthrough is in [Getting started](https://aburi.kage1020.com/guide/getting-started).
 
 ### In GitHub Actions
 
@@ -85,14 +72,9 @@ Exit code `3` means a gate tripped. The full walkthrough is in
     fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
-The action posts the report as a pull request comment, and rewrites that same
-comment on every push.
+The action posts the report as a pull request comment, and rewrites that same comment on every push.
 
-`cli: workspace` runs the `@aburi/cli` those install steps put in your `node_modules`, which
-is also what lets it load the plugins your `aburi.json` names. Set `cli: dlx` instead and the
-action fetches the CLI itself, with no install step — and no plugin named by package, since it
-resolves those from the pnpm store rather than from your project. Aburi runs itself the first
-way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
+`cli: workspace` runs the `@aburi/cli` those install steps put in your `node_modules`, which is also what lets it load the plugins your `aburi.json` names. Set `cli: dlx` instead and the action fetches the CLI itself, with no install step — and no plugin named by package, since it resolves those from the pnpm store rather than from your project. Aburi runs itself the first way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
 
 ## Documentation
 
@@ -109,10 +91,7 @@ way: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml).
 | [Plugin development](https://aburi.kage1020.com/extend/plugin-development) | Add a language, framework, or library. |
 | [Roadmap](https://aburi.kage1020.com/roadmap) | What works today, what is next. |
 
-Design documents live in [`docs/design/`](docs/design/), the JSON Schemas in
-[`schema/`](schema/). The site serves each schema at the `$id` it carries, so
-`https://aburi.kage1020.com/schema/aburi.config.v1.json` is the same file your
-editor resolves from the `$schema` line of an `aburi.json`.
+Design documents live in [`docs/design/`](docs/design/), the JSON Schemas in [`schema/`](schema/). The site serves each schema at the `$id` it carries, so `https://aburi.kage1020.com/schema/aburi.config.v1.json` is the same file your editor resolves from the `$schema` line of an `aburi.json`.
 
 ## Contributing
 
@@ -126,8 +105,7 @@ pnpm test
 pnpm build
 ```
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before you open a pull request. We
-would love new language, framework, and effects plugins.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before you open a pull request. We would love new language, framework, and effects plugins.
 
 ## License
 
