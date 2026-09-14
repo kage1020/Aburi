@@ -1,3 +1,4 @@
+import type { SymbolDroppedToggled } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   projectComponent,
@@ -244,6 +245,46 @@ describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () =
     const md = projectDiff(diff)
     expect(md).toContain("## 🎨 Syntax-only changes")
     expect(md).not.toContain("## ⚠ API changes")
+  })
+})
+
+// -----------------------------------------------------------------------------
+// MP10b: folded summary counts source entries, not rendered Markdown rows
+// -----------------------------------------------------------------------------
+
+describe("folded diff summaries", () => {
+  it("counts dropped toggles rather than headings and bullets", () => {
+    const makeToggle = (
+      id: string,
+      direction: SymbolDroppedToggled["direction"],
+    ): SymbolDroppedToggled => {
+      const before = makeSymbol({
+        id,
+        name: id.split("#")[1] ?? id,
+        dropped: direction !== "to-dropped",
+      })
+      const after = makeSymbol({
+        id,
+        name: before.name,
+        dropped: direction === "to-dropped",
+        dropReason: direction === "to-dropped" ? "generated DTO" : null,
+      })
+      return { status: "dropped-toggled", before, after, direction }
+    }
+
+    const diff = makeDiff({
+      symbols: [
+        makeToggle("ts:src/a.ts#A", "to-dropped"),
+        makeToggle("ts:src/a.ts#B", "to-dropped"),
+        makeToggle("ts:src/a.ts#C", "to-kept"),
+      ],
+      summary: { ...emptySummary(), droppedToggled: 3 },
+    })
+
+    const md = projectDiff(diff)
+    expect(md).toContain("## 💧 Dropped changes")
+    expect(md).toContain("<summary>3 entries</summary>")
+    expect(md).not.toContain("<summary>6 entries</summary>")
   })
 })
 
