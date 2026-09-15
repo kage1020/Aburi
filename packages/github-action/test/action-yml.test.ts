@@ -17,6 +17,13 @@ const RESOLVER_PATH = resolve(
   "resolve-cli-bin.mjs",
 )
 
+const UPSERT_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "scripts",
+  "upsert-comment.mjs",
+)
+
 interface ActionShape {
   readonly name: string
   readonly description: string
@@ -31,6 +38,7 @@ interface ActionShape {
       readonly run?: string
       readonly shell?: string
       readonly if?: string
+      readonly env?: Record<string, string>
       readonly with?: Record<string, string>
     }[]
   }
@@ -200,21 +208,36 @@ describe("action.yml", () => {
 
     const commentStep = action.runs.steps.find((s) => s.id === "post-comment")
     expect(commentStep).toBeDefined()
-    expect(commentStep?.uses).toMatch(/^actions\/github-script@/)
+    expect(commentStep?.run).toContain('node "$GITHUB_ACTION_PATH/scripts/upsert-comment.mjs"')
     expect(commentStep?.if).toContain("inputs.comment == 'true'")
   })
 
-  it("embeds the same marker string as the programmatic upsert helper", async () => {
-    const raw = await readFile(ACTION_PATH, "utf8")
-    expect(raw).toContain(ABURI_COMMENT_MARKER)
+  it("upserts through the committed script, which `aburi-comment.yml` runs too", async () => {
+    // The marker lives in one file, not three. `.github/workflows/aburi-comment.yml` runs this
+    // same script for a pull request whose own token is read-only, and an inline heredoc here
+    // would be a second copy of the marker to keep in step with it — and with `src/comment.ts`.
+    // What the script answers is asserted by running it, in `upsert-comment.test.ts`.
+    await expect(stat(UPSERT_PATH)).resolves.toBeDefined()
+    expect(await readFile(UPSERT_PATH, "utf8")).toContain(ABURI_COMMENT_MARKER)
+  })
+
+  it("resolves the comment step's pull request number from both halves of the event", async () => {
+    // `actions/github-script` used to supply this as `context.issue.number`: the issue on an
+    // `issue_comment` event and the pull request on a `pull_request` one — the pair a
+    // slash-command workflow passing its own `refspec` relies on. A manifest has no such helper,
+    // so both halves are spelled out, and dropping either one silently loses that workflow.
+    const action = await loadAction()
+    const env = action.runs.steps.find((s) => s.id === "post-comment")?.env ?? {}
+    expect(env.PR_NUMBER).toContain("github.event.pull_request.number")
+    expect(env.PR_NUMBER).toContain("github.event.issue.number")
   })
 
   it("reads the exact artefact filenames that @aburi/cli writes", async () => {
     // Parity check between action.yml (which resolves diff-json-path /
     // diff-md-path via string concatenation in bash) and the CLI's actual
     // artifact-paths module. Without this, a rename of `diff.json` / `diff.md`
-    // on the CLI side would surface only at runtime as an ENOENT inside the
-    // github-script comment step — long after CI green.
+    // on the CLI side would surface only at runtime, as the upsert script
+    // exiting 2 on a path that is not there — long after CI green.
     const raw = await readFile(ACTION_PATH, "utf8")
     expect(raw).toContain(`$OUTPUT_DIR/${DIFF_JSON_FILENAME}`)
     expect(raw).toContain(`$OUTPUT_DIR/${DIFF_MD_FILENAME}`)
@@ -235,9 +258,10 @@ describe("action.yml", () => {
 
   it("skips the comment step when the CLI failed with runtime or input error", async () => {
     // Guarding on cli-exit-code == '0' || '3' means exit=1 (runtime) and
-    // exit=2 (input) suppress the comment. Without that guard, github-script
-    // would attempt to read a missing / partial diff.md and its ENOENT would
-    // bury the CLI's real failure in the workflow log.
+    // exit=2 (input) suppress the comment. Without that guard the upsert would
+    // run against a missing or partial diff.md and exit 2 on it, burying the
+    // CLI's real failure under a second one. `aburi.yml`'s hand-off to the
+    // companion workflow carries the same guard, for the same reason.
     const action = await loadAction()
     const commentStep = action.runs.steps.find((s) => s.id === "post-comment")
     expect(commentStep?.if).toContain("cli-exit-code")

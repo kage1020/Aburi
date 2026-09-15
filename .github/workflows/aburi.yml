@@ -14,8 +14,8 @@ concurrency:
 
 permissions:
   contents: read
-  # The action upserts one marker comment per pull request; without this the
-  # github-script step gets a 403 on the first create.
+  # The action upserts one marker comment per pull request; without this the upsert gets a 403
+  # on the first create.
   pull-requests: write
 
 jobs:
@@ -25,8 +25,8 @@ jobs:
     env:
       # A read-only token cannot post a comment, and the `permissions:` block above does not change
       # that for either case: a fork's pull request, or Dependabot's, whose branch lives inside the
-      # repository and so passes the fork check on its own. Decided once, because two steps below
-      # both need the answer.
+      # repository and so passes the fork check on its own. It tells the action not to try; what
+      # the companion workflow keys on is the outcome below, not this.
       CAN_COMMENT: >-
         ${{ github.event.pull_request.head.repo.full_name == github.repository
             && github.actor != 'dependabot[bot]' }}
@@ -69,9 +69,35 @@ jobs:
           # gate that fires on every pull request is a gate everyone learns to ignore.
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 
+      # The hand-off to `aburi-comment.yml`, which runs with this repository's own token and posts
+      # the comment this job could not. It travels in the artifact rather than being re-derived
+      # there, because a second copy of the decision — written against a `workflow_run` payload
+      # instead of a `pull_request` one — is a copy that can disagree, and the way it disagrees is
+      # that nobody posts at all. Its absence is just as meaningful: the companion exits on it.
+      #
+      # The test is the outcome, not the permission. `comment-id` is empty both when the action was
+      # told not to comment and when it tried and could not — a 403, a rate limit, a `fetch failed`.
+      # Keying on `CAN_COMMENT` would leave that second case with no marker, and the companion would
+      # read the absence as "a comment is already there" and say so, in green.
+      #
+      # The exit-code arm mirrors the action's own comment gate: 1 and 2 mean a report that is
+      # missing or partial, and handing one of those over would post it.
+      - name: Hand the comment to the companion workflow
+        id: handoff
+        if: >-
+          always() && hashFiles('out/diff.md') != ''
+          && steps.aburi.outputs.comment-id == ''
+          && (steps.aburi.outputs.cli-exit-code == '0' || steps.aburi.outputs.cli-exit-code == '3')
+        run: |
+          set -euo pipefail
+          echo "This pull request's own run posted no comment; aburi-comment.yml posts it." > out/comment-pending
+          echo "written=true" >> "$GITHUB_OUTPUT"
+
       # The run that cannot comment is the run whose report is worth the most: a red check saying
-      # `--fail-on removed tripped` does not say *which* symbol went away, and on those pull
-      # requests nothing else will. `always()` because a tripped gate fails the step above.
+      # `--fail-on removed tripped` does not say *which* symbol went away. The companion workflow
+      # reads the report from here — it cannot check out a fork's head safely, and does not need to
+      # — so this upload is a dependency of the comment, not only a fallback for a human.
+      # `always()` because a tripped gate fails the step above.
       - name: Upload the report
         if: always() && hashFiles('out/diff.md') != ''
         uses: actions/upload-artifact@v4
@@ -81,8 +107,16 @@ jobs:
           retention-days: 14
 
       # Otherwise the comment step simply renders as skipped, and a reader cannot tell "we chose
-      # not to post" from "posting failed".
-      - name: Say why no comment was posted
-        if: always() && env.CAN_COMMENT != 'true'
+      # not to post" from "posting failed" — nor, now, "someone else will post it" from "nobody
+      # will". The same outcome test as the hand-off, so the two can never describe different runs.
+      - name: Say what becomes of the comment
+        if: always() && steps.aburi.outputs.comment-id == ''
+        env:
+          HANDED_OFF: ${{ steps.handoff.outputs.written }}
         run: |
-          echo "::notice::No comment was posted: this pull request's token is read-only (a fork, or Dependabot). The report is in the 'aburi-diff' artifact."
+          set -euo pipefail
+          if [ "${HANDED_OFF:-}" = "true" ]; then
+            echo "::notice::This run posted no comment of its own — a read-only token (a fork, or Dependabot), or an upsert that failed. The 'Aburi report' workflow picks the report up from the 'aburi-diff' artifact and comments with the base repository's token."
+          else
+            echo "::notice::No comment was posted, and none was handed to the 'Aburi report' workflow: this run produced no report to hand over."
+          fi

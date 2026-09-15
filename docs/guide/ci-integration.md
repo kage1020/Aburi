@@ -92,6 +92,71 @@ Yarn PnP is the exception — it has no `node_modules`, and `.pnp.cjs` loads thr
 Aburi analyses its own pull requests this way, with the CLI each pull request builds:
 [`.github/workflows/aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml).
 
+### Pull requests from a fork
+
+A pull request opened from a fork runs with a read-only `GITHUB_TOKEN`, whatever your
+`permissions:` block says — and so does Dependabot's, whose branch is in your repository
+but whose token is not. The diff and the gate run normally there; the comment is the part
+that cannot be posted, because posting it needs write access the run does not have.
+
+The first thing to do is stop the action trying. Left at its default of `comment: true`, the
+upsert gets a 403 and the check goes **red** on a pull request whose only fault is coming
+from a fork:
+
+```yaml
+jobs:
+  aburi:
+    runs-on: ubuntu-latest
+    env:
+      CAN_COMMENT: >-
+        ${{ github.event.pull_request.head.repo.full_name == github.repository
+            && github.actor != 'dependabot[bot]' }}
+    steps:
+      # …checkout with fetch-depth: 0…
+      - uses: kage1020/Aburi/packages/github-action@main
+        with:
+          comment: ${{ env.CAN_COMMENT }}
+          fail-on: "removed"
+```
+
+That is enough on its own: the report is then the `aburi-diff` artifact on the run, for
+anyone who goes looking. To get the comment as well, split the work in two. The pull
+request's own run uploads the report as an artifact and leaves a marker saying it posted
+nothing; a second workflow, triggered on `workflow_run`, downloads both and posts the comment
+with your repository's token — without checking out, or running, anything from the fork.
+
+Reaching for `pull_request_target` instead is the wrong trade: it would give a writable token
+to a job that analyses code the contributor wrote.
+
+```yaml
+# .github/workflows/aburi-comment.yml
+on:
+  workflow_run:
+    # Matches the analysis workflow's `name:`, not its filename.
+    workflows: [Aburi]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+```
+
+Both halves in full — the upload, the marker that hands the comment over, and the companion's
+own steps — are in
+[the action's README](https://github.com/kage1020/Aburi/tree/main/packages/github-action#pull-requests-from-a-fork).
+Aburi runs that pair on itself
+([`aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml) and
+[`aburi-comment.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi-comment.yml)),
+and [`docs/design/github-action.md`](../design/github-action.md) §5.1 walks through what makes
+it safe to give the second half a writable token.
+
+::: warning A `workflow_run` workflow runs from your default branch
+GitHub always uses the copy on the default branch, so the companion does nothing until it is
+merged — including on the pull request that adds it. It also posts no check on the pull
+request: the comment appearing is the signal, and failures show in the Actions tab.
+:::
+
 ## Any other CI
 
 The CLI has no opinion about your platform. Run it and read the exit code.

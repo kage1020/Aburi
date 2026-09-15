@@ -4,7 +4,7 @@ The contract of `@aburi/github-action`: a composite action that runs `aburi diff
 request, posts the report as one comment it keeps rewriting, and fails the check when a
 `--fail-on` gate trips.
 
-See: [`cli-spec.md`](./cli-spec.md) §6.4 (`aburi diff`), §9 (exit codes), §8 (`--fail-on` grammar)
+See: [`cli-spec.md`](./cli-spec.md) §6.4 (`aburi diff`), §9 (exit codes), §6.7 (`--fail-on` grammar)
 Implementation: [`packages/github-action/action.yml`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/action.yml)
 
 ---
@@ -153,7 +153,76 @@ One comment per pull request, found by the marker `<!-- aburi:diff-comment -->` 
 place, so a pushed branch does not accumulate a column of reports. A body identical to what is
 already there is left alone (`unchanged`), which keeps a re-run from notifying everyone again.
 
+The upsert itself is [`scripts/upsert-comment.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/upsert-comment.mjs),
+a committed dependency-free script rather than an inline `actions/github-script` block, for the
+reason the CLI resolver is a script too — it can be run in a test — and for one the resolver does
+not have: a second caller runs it (§5.1), and an inline block cannot be called from a workflow.
+Its input is environment only — `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `PR_NUMBER`, `MARKDOWN_PATH`,
+and `GITHUB_API_URL` for Enterprise Server — because on a fork's pull request the Markdown names
+symbols that pull request declares, and a body on a command line is one quoting mistake from being
+run. `src/comment.ts` is the same flow as a library, for importers; `test/upsert-comment.test.ts`
+pins the two to the same marker.
+
+### 5.1 A pull request that cannot comment for itself
+
 A fork's pull request carries a read-only `GITHUB_TOKEN` regardless of the workflow's `permissions`
 block, and so does Dependabot's — whose branch lives inside the repository and therefore passes any
-`head.repo` check. Both need `comment: false`; the diff and the gate still run, and the report is
-worth uploading as an artifact there, since that run is the one where nobody can read the comment.
+`head.repo` check. No input to this action changes that: `pull_request` decides the token's scope
+before any step runs.
+
+Widening it is the wrong fix. `pull_request_target` would run with a writable token in the base
+repository's context, and `aburi diff` has to analyse the head — which on a fork is code the
+contributor controls. The report is not worth handing out write access to produce.
+
+So the work splits across two workflows, which is what this repository does:
+
+| | Runs as | Does |
+|---|---|---|
+| [`aburi.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi.yml) | `pull_request`, read-only on a fork | Analyses the head, gates the check, uploads `out/` as the `aburi-diff` artifact |
+| [`aburi-comment.yml`](https://github.com/kage1020/Aburi/blob/main/.github/workflows/aburi-comment.yml) | `workflow_run`, base repository | Downloads that artifact and upserts the comment |
+
+Three things make the second half safe to give a writable token:
+
+1. **It executes nothing from the head.** It checks out the default branch, sparsely, for the
+   upsert script alone, and reads the report as data.
+2. **The pull request number comes from the event.** A fork's pull request can edit `aburi.yml`,
+   and so decide what its run uploads; it cannot edit the head repository and branch GitHub
+   records for that run. The number is resolved by listing open pull requests for
+   `<head owner>:<head branch>` and matching `head.sha` — never read out of the artifact, which
+   would let a crafted upload address a comment to a different pull request. When no open pull
+   request is at that SHA the branch has moved on since the analysis ran, and a single open pull
+   request on it is still unambiguous: it gets the report, one push stale, with a `::warning::` and
+   a line at the top of the comment naming the commit it actually describes. Several, and none of
+   them at that SHA, is a guess: the job fails rather than picking one.
+3. **Nothing from the artifact is interpolated.** `${{ }}` of artifact content is pasted into the
+   shell before bash sees it; the report reaches the script as a path in the environment.
+
+The report body is still written by a run the contributor's branch configured, exactly as their
+pull request description is. What the split buys is that this is the whole of their reach.
+
+Which half comments is decided once, in `aburi.yml`, and travels in the artifact as a
+`comment-pending` file. The companion posts when that file is there and exits when it is not. The
+alternative — re-deriving the decision against a `workflow_run` payload — is a second copy that can
+disagree with the first, and the way it disagrees is that nobody comments at all.
+
+The decision is the **outcome**, not the permission: the marker is written when the analysis run
+finished with no comment of its own, which is `comment-id` empty — the action was told not to post
+(`CAN_COMMENT` false), or it tried and was refused. Keying on `CAN_COMMENT` alone would leave a
+403, a rate limit or a `fetch failed` with no marker, and the companion would read that absence as
+"a comment is already there" and say so in green, on a pull request that has none. The same test
+gates the notice that run writes, so the two can never describe different runs, and the same
+`cli-exit-code` arm as the action's own comment step keeps a partial report from being handed on.
+
+Two properties of `workflow_run` are worth knowing before editing that file. GitHub runs the copy
+on the **default branch**, so a change to it takes effect when it merges, not on the pull request
+that makes it — and it produces **no check on the pull request**: the comment appearing is the
+signal, and a failure shows up in the Actions tab.
+
+`aburi-comment.yml` is this repository's own configuration rather than a template: its checkout
+takes the upsert script from the repository the workflow lives in. A consumer's copy needs
+`repository: kage1020/Aburi` and a pinned `ref:` on that step — which adds a line to the argument
+above, since it runs third-party code in the privileged half — and
+[`packages/github-action/README.md`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/README.md)
+carries that recipe. A consumer who does not want the second workflow at all can keep
+`comment: false` on fork pull requests and read the report from the artifact; the diff and the gate
+run either way.
