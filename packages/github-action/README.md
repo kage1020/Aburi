@@ -163,7 +163,7 @@ jobs:
             && github.actor != 'dependabot[bot]' }}
     steps:
       # …checkout, install, build…
-      - uses: kage1020/Aburi/packages/github-action@main
+      - uses: kage1020/Aburi/packages/github-action@action-v0
         id: aburi
         with:
           cli: workspace

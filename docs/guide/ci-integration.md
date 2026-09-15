@@ -113,7 +113,7 @@ jobs:
             && github.actor != 'dependabot[bot]' }}
     steps:
       # …checkout with fetch-depth: 0…
-      - uses: kage1020/Aburi/packages/github-action@main
+      - uses: kage1020/Aburi/packages/github-action@action-v0
         with:
           comment: ${{ env.CAN_COMMENT }}
           fail-on: "removed"
