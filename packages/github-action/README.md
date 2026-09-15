@@ -54,6 +54,12 @@ published before it, `main` and a SHA are the only refs that resolve.
 While the major is `0`, `action-v0` crosses breaking input changes, because a `0.x` minor
 bump is where they land. Pin the full `action-v<x.y.z>` if that matters.
 
+The same tags work as an `actions/checkout` `ref:`, which is how the companion workflow under
+[Pull requests from a fork](#pull-requests-from-a-fork) pins the scripts it runs. A `ref:` is
+a plain git ref, so `@aburi/github-action@<x.y.z>` is legal *there* — it is only a `uses:`
+value that cannot hold it — but it names one release and nothing updates it, so the example
+uses the alias.
+
 ## Inputs
 
 | Input | Default | Purpose |
@@ -213,12 +219,14 @@ jobs:
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      # Third-party code in the half that holds a writable token, so pin the ref: a tag or a
-      # commit SHA, never a moving branch.
+      # Third-party code in the half that holds a writable token, so pin the ref rather than
+      # tracking a branch. `action-v0` follows the newest `0.x` release of the action, which is
+      # what keeps this example from naming a version that goes stale; `action-v<x.y.z>` or a
+      # commit SHA holds exact bytes instead — see Pinning above, the same trade as `uses:`.
       - uses: actions/checkout@v4
         with:
           repository: kage1020/Aburi
-          ref: "@aburi/github-action@0.2.0"
+          ref: action-v0
           sparse-checkout: packages/github-action/scripts
           persist-credentials: false
       # …download the aburi-diff artifact from github.event.workflow_run.id, resolve the pull

@@ -41,6 +41,11 @@ the unusable tag. Their examples move off `@main` onto `@action-v0`, which this 
 the first to create; the section says plainly that it crosses breaking input changes while
 the major is `0`, and points anyone who minds at the full `action-v<x.y.z>`.
 
+The companion workflow's checkout in the fork hand-off example pins `ref: action-v0` rather
+than a hard-coded `@aburi/github-action@<x.y.z>`. `changeset version` rewrites `package.json`
+and `CHANGELOG.md` and nothing else, so a version written into README prose goes stale on the
+next release with nothing to catch it; the alias has no version to keep in step.
+
 `test/uses-refs.test.ts` replays the runner's own parse over every `uses:` in the READMEs,
 the docs and the workflows — both quoting styles and a trailing comment included — so a
 snippet that would fail to load fails CI instead of a consumer's first run. It also pins
