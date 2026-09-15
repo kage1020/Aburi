@@ -1,5 +1,102 @@
 # @aburi/markdown-projection
 
+## 0.3.1
+
+### Patch Changes
+
+- 1364ca1: A component that is renamed, given a language, or given a description is a component that changed
+
+  `diffComponents` decided a Component had changed by asking the three questions its `delta`
+  answers — roots, publicApi, frameworks. A Component carries three more fields. Rename one, add a
+  language to it, write it a description, and the diff said `componentsChanged: 0` with an empty
+  `changed[]`: not a quiet entry a reader could miss, but no entry at all, so the Markdown layer
+  did not even have the before/after pair it would have rendered from.
+
+  Two questions had been answered with one list. Whether a Component is `changed` is now decided
+  over the whole record — every field the document carries, compared canonically, so a field added
+  to `v1` later counts without this decision being revisited. Which fields the `delta` summarises
+  is unchanged: the same three booleans, naming the axes a reviewer scans for architectural
+  movement. A `changed[]` entry whose three booleans are all `false` is the well-formed shape of
+  "something else about this component moved", and it needs no schema change, because `before` and
+  `after` were always there.
+
+  Two spellings of "no value" are reduced to one before the comparison, scoped to the fields that
+  license it rather than to a class: a `description` that is `null` compares equal to an absent key
+  (Class A, where `ir-schema.md` §1.1 requires a reader to treat the two alike), and a `publicApi`
+  or `frameworks` that is `[]` compares equal to an absent key (those two fields' own writer rule
+  is "omitted when empty"). Class B does not say that in general — §1.1 is explicit that "absent"
+  and "empty" are different facts there — so a future Class B field whose presence is itself
+  information has to be added deliberately. Key order and Unicode form do not make a change either:
+  the comparison is the canonical serializer the fingerprints are built on, not a second answer to
+  the same question. A Component it cannot compare — only a hand-assembled one reaches that —
+  raises `DiffError("ir-shape-invalid")` naming the component and the side, rather than a
+  `CoreError` leaving the package by a different door on a different exit code. Two things widen
+  with it: the serializer now sees every matched pair rather than only the components that reach
+  `changed[]`, and a `--format md` run no longer skips it.
+
+  The 🧱 Component changes section reads the fields it lists off `before` / `after` rather than off
+  `delta`, which is the same conflation on the reviewer-facing side. Those all-`false` entries
+  exist for the first time with this fix, and a renderer reading only the booleans would draw one
+  as a row whose colon is followed by nothing — so both halves had to move together. A rename and a
+  description carry their before → after inline, since for a scalar that is the whole change; the
+  list-valued fields name themselves as they always have.
+
+  Both scalars are free-form text out of the config file and the row reaches a pull request comment
+  body, so they now render through a code span no value can break out of: newlines collapse to a
+  space, and the fence widens past the longest backtick run inside the value. An absent description
+  reads `none` and a present but empty one reads `(empty)`, which are different answers from the
+  config author. A component whose only difference is in a field this version of the projection has
+  no rendering for is named on its own rather than dropped.
+
+- 155bed3: Ship the packages, not the workshop
+
+  Installing `@aburi/cli` and its dependency closure put 22.08 MB of prebuilt parser binaries
+  on disk to read 2.86 MB of them. Nothing in that was deliberate — each piece was a default
+  nobody had reason to look at until the sizes were measured side by side. Every number
+  below is decimal MB, measured on this branch against its base.
+
+  `@vscode/tree-sitter-wasm` was the bulk of it. It ships sixteen prebuilt grammars totalling
+  21.66 MB — bash, C#, C++, Ruby, Rust, PHP, PowerShell and the rest — and
+  `@aburi/lang-typescript` loads exactly two of them, `tree-sitter-typescript` and
+  `tree-sitter-tsx`, together 2.86 MB. npm cannot install part of a tarball, so every
+  consumer paid for the other fourteen, 18.80 MB, to sit on disk unread.
+
+  `scripts/copy-grammars.mjs` now vendors the two we parse with into the package's own
+  `wasm/` at build time and the dependency drops to a devDependency, which takes that
+  directory from 22.08 MB to 2.86 MB. The copies are byte-identical to the upstream files.
+  `wasm/NOTICE` records their provenance and reproduces both the licence text upstream
+  distributes and the component registration from its `cgmanifest.json`, and bumping the
+  grammars stays an ordinary devDependency bump.
+
+  The rest was the published tarballs. `files` listed `src` beside `dist`, so the TypeScript
+  sources shipped a second time next to the bundle built from them — and the sourcemaps
+  already embedded `sourcesContent`, so that copy was not even what a debugger reads.
+
+  Maps are no longer emitted at all: 1.67 MB across the workspace, most of it the same
+  source text a third time. `declarationMap` alone drove it — `sourceMap` never had any
+  effect on this build, because it is `rolldown-plugin-dts` that turns on rolldown's shared
+  `output.sourcemap` whenever `declarationMap` is set, and that is what overrode
+  `sourcemap: false` in all seventeen `tsdown.config.ts` files. `declarationMap` is now off
+  in `tsconfig.base.json` with a note naming `dts: { sourcemap }` as the direct lever, since
+  setting it back silently restores every byte.
+
+  With the sources gone there is no longer a reason to ship the bundle unminified, so
+  `minify` is on: summed across the seventeen published packages, every `.mjs` under `dist/`
+  goes from 916,821 to 279,839 bytes.
+
+  Published output is now `dist/*.mjs` and `dist/*.d.mts`, plus `wasm/` for the language
+  plugin. The trade is that a stack trace from an installed copy no longer resolves to
+  original source; the sources remain a `git clone` away, and no API, behaviour or emitted
+  IR changed anywhere.
+
+- Updated dependencies [be8e2b9]
+- Updated dependencies [3774de6]
+- Updated dependencies [203ea78]
+- Updated dependencies [1abc31a]
+- Updated dependencies [155bed3]
+- Updated dependencies [ba9e505]
+  - @aburi/types@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
