@@ -47,11 +47,21 @@ export function projectDiff(diff: DiffResult): string {
   // would report "nothing was missed" on every archived diff.
   appendSection(lines, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
   appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
-  appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
+  appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved), buckets.moved.length)
   appendSection(lines, "## 🧱 Component changes", renderComponentChanges(diff))
   appendSection(lines, "## 🔗 Dependency changes", renderDependencyChanges(diff))
-  appendFolded(lines, "## 💧 Dropped changes", renderDroppedToggled(buckets.droppedToggled))
-  appendFolded(lines, "## 🎨 Syntax-only changes", renderSyntaxOnly(buckets.syntaxOnly))
+  appendFolded(
+    lines,
+    "## 💧 Dropped changes",
+    renderDroppedToggled(buckets.droppedToggled),
+    buckets.droppedToggled.length,
+  )
+  appendFolded(
+    lines,
+    "## 🎨 Syntax-only changes",
+    renderSyntaxOnly(buckets.syntaxOnly),
+    buckets.syntaxOnly.length,
+  )
 
   return `${lines
     .join("\n")
@@ -186,12 +196,12 @@ function appendSection(lines: string[], heading: string, body: string[]): void {
  * fold-out. Skipping the wrapper when body is empty keeps the file from carrying dangling
  * empty `<details>` blocks that GitHub still renders as a clickable arrow.
  */
-function appendFolded(lines: string[], heading: string, body: string[]): void {
+function appendFolded(lines: string[], heading: string, body: string[], entryCount: number): void {
   if (body.length === 0) return
   lines.push(heading)
   lines.push("")
   lines.push("<details>")
-  lines.push(`<summary>${body.length} entries</summary>`)
+  lines.push(`<summary>${entryCount} entries</summary>`)
   lines.push("")
   lines.push(...body)
   lines.push("")
