@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: kage1020/Aburi/packages/github-action@main
+      - uses: kage1020/Aburi/packages/github-action@action-v0
         with:
           version: latest
           fail-on: "removed,dropped-toggled:to-dropped:>10"
@@ -43,9 +43,9 @@ you a wrong diff.
 
 ### Pinning the action
 
-`@main` runs whatever is on the default branch, which is convenient and not
-reproducible: the code your workflow executes changes when ours does. Every release
-also pushes two refs you can name instead.
+`@action-v0` above moves to the newest `0.x` release, so a breaking input change arrives
+without you asking — and `@main` changes on every merge. Every release also creates a ref
+that never moves.
 
 | Ref | Moves? |
 |---|---|
@@ -84,7 +84,7 @@ lockfile already pinned it.
     node-version: 24
     cache: pnpm
 - run: pnpm install --frozen-lockfile
-- uses: kage1020/Aburi/packages/github-action@main
+- uses: kage1020/Aburi/packages/github-action@action-v0
   with:
     cli: workspace
     fail-on: "removed"

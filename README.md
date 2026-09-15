@@ -79,7 +79,7 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 - uses: actions/setup-node@v4
   with: { node-version: 24, cache: pnpm }
 - run: pnpm install --frozen-lockfile
-- uses: kage1020/Aburi/packages/github-action@main
+- uses: kage1020/Aburi/packages/github-action@action-v0
   with:
     cli: workspace
     fail-on: "removed,dropped-toggled:to-dropped:>10"
@@ -88,8 +88,8 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 The action posts the report as a pull request comment, and rewrites that same
 comment on every push.
 
-`@main` tracks development. Pin `@action-v<x.y.z>` — created by the release, never moved —
-for a ref that cannot change under you;
+`@action-v0` moves to the newest `0.x` release, breaking input changes included. Pin the
+full `@action-v<x.y.z>` — created by the release, never moved — to hold one;
 [Pinning](packages/github-action/README.md#pinning) has the rest of the options, and why
 the `@aburi/github-action@<x.y.z>` tag npm publishes is not one of them.
 

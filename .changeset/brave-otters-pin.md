@@ -26,6 +26,10 @@ the commit whose `action.yml` consumers are still running.
 
 The READMEs and the CI integration guide gain a Pinning section covering all four refs
 (`action-v<x.y.z>`, `action-v<major>`, `main`, a full SHA) and drop the advice that named
-the unusable tag. `test/uses-refs.test.ts` replays the runner's own parse over every
-`uses:` in the READMEs, the docs and the workflows, so a snippet that would fail to load
-fails CI instead of a consumer's first run.
+the unusable tag. Their examples move off `@main` onto `@action-v0`, which this release is
+the first to create; the section says plainly that it crosses breaking input changes while
+the major is `0`, and points anyone who minds at the full `action-v<x.y.z>`.
+
+`test/uses-refs.test.ts` replays the runner's own parse over every `uses:` in the READMEs,
+the docs and the workflows, so a snippet that would fail to load fails CI instead of a
+consumer's first run.

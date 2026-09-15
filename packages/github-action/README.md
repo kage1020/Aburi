@@ -23,8 +23,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # `main` tracks development; the "Pinning" section below has the immutable refs.
-      - uses: kage1020/Aburi/packages/github-action@main
+      # Moves with every 0.x release, breaking input changes included. Pin the full
+      # `action-v<x.y.z>` instead to hold one — see Pinning below.
+      - uses: kage1020/Aburi/packages/github-action@action-v0
         with:
           version: latest
           fail-on: "removed,dropped-toggled:to-dropped:>10"
@@ -36,7 +37,7 @@ jobs:
 
 `uses:` takes `{owner}/{repo}[/path]@{ref}`. The runner splits that value on `@` and
 rejects anything that is not exactly two segments, so the per-package tags `changeset
-publish` writes — `@aburi/github-action@0.2.0` — cannot be used as a ref: a workflow
+publish` writes — `@aburi/github-action@0.3.0` — cannot be used as a ref: a workflow
 naming one fails to load with `Expected format {org}/{repo}[/path]@ref`, before any step
 runs. Release runs push two aliases that do parse, pointing at the same commit.
 
@@ -47,8 +48,8 @@ runs. Release runs push two aliases that do parse, pointing at the same commit.
 | `@main` | On every merge | You are tracking development, or you need something not released yet. |
 | `@<full 40-char SHA>` | Never | Same guarantee as `action-v<x.y.z>`, without trusting that the tag was never moved. |
 
-The `action-v*` tags begin with the first release after this scheme landed; `main` and a
-SHA are the only refs that reach anything published before it.
+The `action-v*` tags begin at `0.3.0`, the first release carrying this scheme. For anything
+published before it, `main` and a SHA are the only refs that resolve.
 
 While the major is `0`, `action-v0` crosses breaking input changes, because a `0.x` minor
 bump is where they land. Pin the full `action-v<x.y.z>` if that matters.
@@ -106,7 +107,7 @@ installed the workspace is the one that should run it.
     node-version: 24
     cache: pnpm
 - run: pnpm install --frozen-lockfile
-- uses: kage1020/Aburi/packages/github-action@main
+- uses: kage1020/Aburi/packages/github-action@action-v0
   with:
     cli: workspace
     fail-on: "removed"
