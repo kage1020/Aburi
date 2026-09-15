@@ -100,6 +100,58 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # `changeset publish` names every monorepo tag after its package, so the only ref this
+      # release leaves behind for the action is `@aburi/github-action@0.2.0` — a name a `uses:`
+      # cannot hold. The runner splits a `uses:` value on `@` and rejects anything that is not
+      # exactly two segments (`Expected format {org}/{repo}[/path]@ref`), so
+      # `kage1020/Aburi/packages/github-action@@aburi/github-action@0.2.0` fails to parse before
+      # the job starts. These aliases point at the same commit under a name that parses.
+      #
+      # `action-vX.Y.Z` is immutable: created once here, never moved, so a workflow pinned to it
+      # keeps running the bytes it was reviewed against. `action-vX` moves to the newest release
+      # in that major — the convenience alias, documented as mutable in
+      # `packages/github-action/README.md`.
+      - name: Tag the action release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          set -euo pipefail
+          # Checked before jq reads it: `set -e` would otherwise turn an empty payload into a
+          # failed release job, and this job is what the docs deploy hangs off.
+          if [ -z "${PUBLISHED:-}" ]; then
+            echo "::notice::No publishedPackages payload from changesets; action tags unchanged."
+            exit 0
+          fi
+          version="$(jq -r '.[] | select(.name == "@aburi/github-action") | .version' <<<"$PUBLISHED")"
+          if [ -z "$version" ]; then
+            # A release that bumped only the CLI or a plugin leaves the action tags where they
+            # are: they name the commit whose `action.yml` consumers are still running.
+            echo "::notice::@aburi/github-action was not part of this release; action tags unchanged."
+            exit 0
+          fi
+          # Belt to the braces of the plain push below, which git rejects on an existing tag
+          # anyway — this one says why.
+          if git ls-remote --exit-code --tags origin "refs/tags/action-v$version" >/dev/null 2>&1; then
+            echo "::error::action-v$version already exists. An immutable tag is never moved — investigate before re-running." >&2
+            exit 1
+          fi
+          git tag "action-v$version"
+          git push origin "refs/tags/action-v$version"
+          echo "::notice::Tagged action-v$version (immutable)."
+          # A prerelease gets its own immutable tag and nothing else: moving `action-v0` onto
+          # `0.3.0-beta.1` would hand every consumer tracking the major an unreleased action.
+          case "$version" in
+            *-*)
+              echo "::notice::$version is a prerelease; the action-v<major> alias stays put."
+              exit 0
+              ;;
+          esac
+          major="${version%%.*}"
+          git tag -f "action-v$major"
+          git push origin --force "refs/tags/action-v$major"
+          echo "::notice::Moved action-v$major to $version."
+
   # The documentation describes the packages, so it goes live when the packages
   # do — not when the merge that will eventually become a release lands. Gating
   # on `published` also means the run that only opens the Version Packages PR

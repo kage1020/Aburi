@@ -41,6 +41,24 @@ give it one. Without the full history the run stops early rather than handing
 you a wrong diff.
 :::
 
+### Pinning the action
+
+`@main` runs whatever is on the default branch, which is convenient and not
+reproducible: the code your workflow executes changes when ours does. Every release
+also pushes two refs you can name instead.
+
+| Ref | Moves? |
+|---|---|
+| `@action-v<x.y.z>` | Never. The release that creates the tag never re-points it. |
+| `@action-v<major>` | On every release in that major — fixes arrive without a bump, and so does everything else. |
+| `@main` | On every merge. |
+| `@<full 40-char SHA>` | Never, and without trusting that a tag was not moved. |
+
+The per-package tags `changeset publish` writes — `@aburi/github-action@0.3.0` — look
+like they would work here and cannot: the runner splits a `uses:` value on `@` and
+rejects anything that is not exactly two segments, so a workflow naming one fails to
+load before any step runs. That is what the `action-v*` aliases exist for.
+
 ### Running the CLI your project installed
 
 By default the action fetches the CLI with `pnpm dlx`, which needs no install step and puts

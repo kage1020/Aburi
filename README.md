@@ -88,6 +88,11 @@ Exit code `3` means a gate tripped. The full walkthrough is in
 The action posts the report as a pull request comment, and rewrites that same
 comment on every push.
 
+`@main` tracks development. Pin `@action-v<x.y.z>` — created by the release, never moved —
+for a ref that cannot change under you;
+[Pinning](packages/github-action/README.md#pinning) has the rest of the options, and why
+the `@aburi/github-action@<x.y.z>` tag npm publishes is not one of them.
+
 `cli: workspace` runs the `@aburi/cli` those install steps put in your `node_modules`, which
 is also what lets it load the plugins your `aburi.json` names. Set `cli: dlx` instead and the
 action fetches the CLI itself, with no install step — and no plugin named by package, since it

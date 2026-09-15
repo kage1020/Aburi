@@ -23,10 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Pin by branch (main) or by the per-package tag `changesets/action`
-      # creates on release (e.g. `@aburi/github-action@0.1.0`). An unscoped
-      # `vX.Y.Z` tag is intentionally not published because `changeset publish`
-      # names monorepo tags per package.
+      # `main` tracks development; the "Pinning" section below has the immutable refs.
       - uses: kage1020/Aburi/packages/github-action@main
         with:
           version: latest
@@ -34,6 +31,27 @@ jobs:
 ```
 
 `fetch-depth: 0` is required so `aburi diff` can resolve the base ref locally.
+
+## Pinning
+
+`uses:` takes `{owner}/{repo}[/path]@{ref}`. The runner splits that value on `@` and
+rejects anything that is not exactly two segments, so the per-package tags `changeset
+publish` writes — `@aburi/github-action@0.2.0` — cannot be used as a ref: a workflow
+naming one fails to load with `Expected format {org}/{repo}[/path]@ref`, before any step
+runs. Release runs push two aliases that do parse, pointing at the same commit.
+
+| Ref | Moves? | Pick it when |
+|---|---|---|
+| `@action-v<x.y.z>` | Never | You want to keep running the bytes you reviewed. The release that creates the tag never re-points it. |
+| `@action-v<major>` | On every release in that major | You want fixes without a bump. Mutable, so what you run can change under you. |
+| `@main` | On every merge | You are tracking development, or you need something not released yet. |
+| `@<full 40-char SHA>` | Never | Same guarantee as `action-v<x.y.z>`, without trusting that the tag was never moved. |
+
+The `action-v*` tags begin with the first release after this scheme landed; `main` and a
+SHA are the only refs that reach anything published before it.
+
+While the major is `0`, `action-v0` crosses breaking input changes, because a `0.x` minor
+bump is where they land. Pin the full `action-v<x.y.z>` if that matters.
 
 ## Inputs
 
