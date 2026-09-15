@@ -3,6 +3,18 @@ name: Release
 on:
   push:
     branches: [main]
+  # Recovery path for the tagging job below, which is the one part of a release
+  # a re-run cannot redo on its own: `changeset publish` skips packages that are
+  # already on npm, so `published` comes back "false" and the job is skipped
+  # forever. Dispatching with the version that shipped tags that release's own
+  # commit, found through the `@aburi/github-action@<version>` tag `changeset
+  # publish` left behind, so the answer does not depend on where `main` is now.
+  workflow_dispatch:
+    inputs:
+      actionVersion:
+        description: "Published @aburi/github-action version to (re)tag, e.g. 0.3.0"
+        required: true
+        type: string
 
 # Serialise release runs — two overlapping merges would race the version bump
 # PR / the npm publish. Do NOT cancel in progress; a half-completed publish is
@@ -29,8 +41,9 @@ jobs:
     # Fork guard: never run the publish workflow from a fork. A fork cannot
     # obtain an OIDC token that matches this repository's trusted publisher
     # config, so it would fail loudly — the guard just avoids emitting
-    # confusing telemetry.
-    if: github.repository == 'kage1020/Aburi'
+    # confusing telemetry. The event check keeps a `workflow_dispatch` — which
+    # exists only to re-run the tagging job — from starting a publish.
+    if: github.event_name == 'push' && github.repository == 'kage1020/Aburi'
     runs-on: ubuntu-latest
     outputs:
       # "true" only on the run that actually published — a run that merely
@@ -38,6 +51,9 @@ jobs:
       # what the docs deploy below waits on, so the site ships with the
       # release rather than with every merge into `main`.
       published: ${{ steps.changesets.outputs.published }}
+      # `[{"name": "@aburi/…", "version": "…"}, …]` for the packages this run put on npm.
+      # The tagging job reads the action's version out of it.
+      publishedPackages: ${{ steps.changesets.outputs.publishedPackages }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,57 +116,131 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # `changeset publish` names every monorepo tag after its package, so the only ref this
-      # release leaves behind for the action is `@aburi/github-action@0.2.0` — a name a `uses:`
-      # cannot hold. The runner splits a `uses:` value on `@` and rejects anything that is not
-      # exactly two segments (`Expected format {org}/{repo}[/path]@ref`), so
-      # `kage1020/Aburi/packages/github-action@@aburi/github-action@0.2.0` fails to parse before
-      # the job starts. These aliases point at the same commit under a name that parses.
-      #
-      # `action-vX.Y.Z` is immutable: created once here, never moved, so a workflow pinned to it
-      # keeps running the bytes it was reviewed against. `action-vX` moves to the newest release
-      # in that major — the convenience alias, documented as mutable in
-      # `packages/github-action/README.md`.
-      - name: Tag the action release
-        if: steps.changesets.outputs.published == 'true'
+  # Its own job, not a step on `release`: a tag ruleset, a rejected push or a bad
+  # answer here would otherwise red a run in which npm already has the packages,
+  # and take the `needs: release` docs deploy down with it for a failure that has
+  # nothing to do with the docs. Split, the two fail independently and the tags
+  # can be retried through `workflow_dispatch` without republishing anything.
+  #
+  # Why the tags exist at all: `changeset publish` names every monorepo tag after
+  # its package, so the only ref a release leaves behind for the action is
+  # `@aburi/github-action@<version>` — a name a `uses:` cannot hold, because the
+  # runner splits a `uses:` value on `@` and rejects anything that is not exactly
+  # two segments. `packages/github-action/README.md` has the long version, and is
+  # where the mutability of each ref below is documented for consumers.
+  tag-action:
+    name: tag the action release
+    needs: release
+    # `always()` so a dispatch, which skips `release` entirely, still reaches this.
+    if: |
+      always() && github.repository == 'kage1020/Aburi' && (
+        github.event_name == 'workflow_dispatch' || (
+          needs.release.result == 'success' && needs.release.outputs.published == 'true'
+        )
+      )
+    runs-on: ubuntu-latest
+    # Narrower than the workflow-level block: this job pushes tags and nothing else.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Brings the tags with it, which is how a dispatch resolves the commit a
+          # past release shipped from.
+          fetch-depth: 0
+
+      - name: Resolve the version and commit to tag
+        id: target
         env:
-          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+          EVENT: ${{ github.event_name }}
+          DISPATCH_VERSION: ${{ github.event.inputs.actionVersion }}
+          PUBLISHED: ${{ needs.release.outputs.publishedPackages }}
         run: |
           set -euo pipefail
-          # Checked before jq reads it: `set -e` would otherwise turn an empty payload into a
-          # failed release job, and this job is what the docs deploy hangs off.
-          if [ -z "${PUBLISHED:-}" ]; then
-            echo "::notice::No publishedPackages payload from changesets; action tags unchanged."
-            exit 0
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            version="$DISPATCH_VERSION"
+            # The tag `changeset publish` wrote for that version names the commit it
+            # published from, so a dispatch does not depend on where `main` has moved.
+            package_tag="refs/tags/@aburi/github-action@$version"
+            if ! target="$(git rev-list -n 1 "$package_tag" 2>/dev/null)"; then
+              echo "::error::No $package_tag in this repository, so $version was never published from it. Check the version." >&2
+              exit 1
+            fi
+          else
+            # An empty payload on a run that reported published=true is changesets/action
+            # breaking its own contract. Caught here because the `-z "$version"` branch
+            # below would otherwise report it as the CLI-only release it is not — jq reads
+            # empty input as no matches and exits 0, so nothing else would notice.
+            if [ -z "${PUBLISHED:-}" ]; then
+              echo "::warning::published=true but publishedPackages is empty; no action tag can be derived. Dispatch this workflow with the version if the action did ship."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            version="$(jq -r '.[] | select(.name == "@aburi/github-action") | .version' <<<"$PUBLISHED")"
+            if [ -z "$version" ]; then
+              # Says where the answer came from rather than what happened on npm: a run
+              # that republished after a partial failure reports only what *it* pushed,
+              # and the action can be absent from that list while being live.
+              echo "::notice::@aburi/github-action is not in this run's publishedPackages; action tags unchanged."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            target="$(git rev-parse HEAD)"
           fi
-          version="$(jq -r '.[] | select(.name == "@aburi/github-action") | .version' <<<"$PUBLISHED")"
-          if [ -z "$version" ]; then
-            # A release that bumped only the CLI or a plugin leaves the action tags where they
-            # are: they name the commit whose `action.yml` consumers are still running.
-            echo "::notice::@aburi/github-action was not part of this release; action tags unchanged."
-            exit 0
-          fi
-          # Belt to the braces of the plain push below, which git rejects on an existing tag
-          # anyway — this one says why.
-          if git ls-remote --exit-code --tags origin "refs/tags/action-v$version" >/dev/null 2>&1; then
-            echo "::error::action-v$version already exists. An immutable tag is never moved — investigate before re-running." >&2
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "::notice::Tagging @aburi/github-action@$version at $target."
+
+      - name: Create the immutable tag and move the major alias
+        if: steps.target.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
+          TARGET: ${{ steps.target.outputs.target }}
+        run: |
+          set -euo pipefail
+          immutable="action-v$VERSION"
+
+          # `--exit-code` is avoided on purpose: it answers 2 for no-match and 128 for a
+          # network or auth failure, and an `if` reads both as "the tag is not there".
+          # Without it, a non-zero exit means only that the query failed.
+          if ! remote_ls="$(git ls-remote --tags origin "refs/tags/$immutable" 2>&1)"; then
+            echo "::error::Could not read refs/tags/$immutable from origin, so whether it exists is unknown: $remote_ls" >&2
             exit 1
           fi
-          git tag "action-v$version"
-          git push origin "refs/tags/action-v$version"
-          echo "::notice::Tagged action-v$version (immutable)."
-          # A prerelease gets its own immutable tag and nothing else: moving `action-v0` onto
-          # `0.3.0-beta.1` would hand every consumer tracking the major an unreleased action.
-          case "$version" in
+          remote_sha="$(printf '%s\n' "$remote_ls" | awk '$2 !~ /\^\{\}$/ {print $1; exit}')"
+
+          # The push below is not the safety net it looks like: git rejects an existing tag
+          # only when it points somewhere else. On the same commit — which is exactly the
+          # shape of a retried run — it answers `Everything up-to-date` and exits 0, so
+          # this comparison is the only thing that can tell the two apart.
+          if [ -n "$remote_sha" ]; then
+            if [ "$remote_sha" = "$TARGET" ]; then
+              echo "::notice::$immutable already points at $TARGET; a previous run got this far. Leaving it and moving on to the alias."
+            else
+              echo "::error::$immutable points at $remote_sha, not at $TARGET. An immutable tag is never re-pointed: if $remote_sha is wrong, delete it deliberately (git push origin :refs/tags/$immutable) and dispatch this workflow again." >&2
+              exit 1
+            fi
+          else
+            git tag -f "$immutable" "$TARGET"
+            git push origin "refs/tags/$immutable"
+            echo "::notice::Created $immutable at $TARGET."
+          fi
+
+          # A prerelease keeps its immutable tag and nothing else: moving the alias onto
+          # `0.3.0-beta.1` would hand an unreleased action to every consumer tracking the
+          # major. The pattern is what decides that, so `test/uses-refs.test.ts` asserts it.
+          case "$VERSION" in
             *-*)
-              echo "::notice::$version is a prerelease; the action-v<major> alias stays put."
+              echo "::notice::$VERSION is a prerelease; the action-v<major> alias stays where it is."
               exit 0
               ;;
           esac
-          major="${version%%.*}"
-          git tag -f "action-v$major"
-          git push origin --force "refs/tags/action-v$major"
-          echo "::notice::Moved action-v$major to $version."
+
+          alias="action-v${VERSION%%.*}"
+          git tag -f "$alias" "$TARGET"
+          git push origin --force "refs/tags/$alias"
+          echo "::notice::Moved $alias to $TARGET ($VERSION)."
 
   # The documentation describes the packages, so it goes live when the packages
   # do — not when the merge that will eventually become a release lands. Gating

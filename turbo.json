@@ -17,6 +17,21 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],
       "outputs": []
     },
+    "@aburi/github-action#test": {
+      "dependsOn": ["^build"],
+      // `test/uses-refs.test.ts` reads every documented `uses:` in the repository, so the
+      // files it asserts about have to be part of this task's hash. Without them a local run
+      // after editing the root README or the CI guide serves a cached pass and the guard
+      // never executes. CI is cold every time, so this only ever bit locally.
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/schema/**",
+        "$TURBO_ROOT$/README.md",
+        "$TURBO_ROOT$/docs/**/*.md",
+        "$TURBO_ROOT$/.github/workflows/*.yml"
+      ],
+      "outputs": []
+    },
     "@aburi/lang-typescript#test": {
       "dependsOn": ["^build", "@aburi/lang-typescript#build"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/schema/**"],

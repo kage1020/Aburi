@@ -43,21 +43,15 @@ you a wrong diff.
 
 ### Pinning the action
 
-`@action-v0` above moves to the newest `0.x` release, so a breaking input change arrives
-without you asking — and `@main` changes on every merge. Every release also creates a ref
-that never moves.
+`@action-v0` above moves to the newest `0.x` release of the action, so a breaking input
+change arrives without you asking for it; `@main` changes on every merge. Pin the full
+`@action-v<x.y.z>` — created once by the release, never re-pointed — when you want to keep
+running the bytes you reviewed, or a full commit SHA when you would rather not trust that a
+tag was never moved.
 
-| Ref | Moves? |
-|---|---|
-| `@action-v<x.y.z>` | Never. The release that creates the tag never re-points it. |
-| `@action-v<major>` | On every release in that major — fixes arrive without a bump, and so does everything else. |
-| `@main` | On every merge. |
-| `@<full 40-char SHA>` | Never, and without trusting that a tag was not moved. |
-
-The per-package tags `changeset publish` writes — `@aburi/github-action@0.3.0` — look
-like they would work here and cannot: the runner splits a `uses:` value on `@` and
-rejects anything that is not exactly two segments, so a workflow naming one fails to
-load before any step runs. That is what the `action-v*` aliases exist for.
+Which refs exist, what each one costs you, and why the `@aburi/github-action@<x.y.z>` tag in
+this repository is not one of them, are in
+[the action's Pinning section](https://github.com/kage1020/Aburi/blob/main/packages/github-action/README.md#pinning).
 
 ### Running the CLI your project installed
 

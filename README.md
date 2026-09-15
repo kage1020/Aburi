@@ -91,7 +91,7 @@ comment on every push.
 `@action-v0` moves to the newest `0.x` release, breaking input changes included. Pin the
 full `@action-v<x.y.z>` — created by the release, never moved — to hold one;
 [Pinning](packages/github-action/README.md#pinning) has the rest of the options, and why
-the `@aburi/github-action@<x.y.z>` tag npm publishes is not one of them.
+the tag `changeset publish` writes is not one of them.
 
 `cli: workspace` runs the `@aburi/cli` those install steps put in your `node_modules`, which
 is also what lets it load the plugins your `aburi.json` names. Set `cli: dlx` instead and the

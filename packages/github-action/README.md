@@ -37,14 +37,14 @@ jobs:
 
 `uses:` takes `{owner}/{repo}[/path]@{ref}`. The runner splits that value on `@` and
 rejects anything that is not exactly two segments, so the per-package tags `changeset
-publish` writes — `@aburi/github-action@0.3.0` — cannot be used as a ref: a workflow
+publish` writes — `@aburi/github-action@<x.y.z>` — cannot be used as a ref: a workflow
 naming one fails to load with `Expected format {org}/{repo}[/path]@ref`, before any step
 runs. Release runs push two aliases that do parse, pointing at the same commit.
 
 | Ref | Moves? | Pick it when |
 |---|---|---|
 | `@action-v<x.y.z>` | Never | You want to keep running the bytes you reviewed. The release that creates the tag never re-points it. |
-| `@action-v<major>` | On every release in that major | You want fixes without a bump. Mutable, so what you run can change under you. |
+| `@action-v<major>` | On every release of this action, prereleases excepted | You want fixes without a bump. Mutable, so what you run can change under you. |
 | `@main` | On every merge | You are tracking development, or you need something not released yet. |
 | `@<full 40-char SHA>` | Never | Same guarantee as `action-v<x.y.z>`, without trusting that the tag was never moved. |
 
