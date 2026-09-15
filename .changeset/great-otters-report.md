@@ -22,9 +22,16 @@ privileged half safe: it executes nothing from the head (a sparse checkout of th
 for one script), the pull request number is resolved from the event rather than read out of the
 artifact (a fork can edit the analysis workflow, and so what it uploads; it cannot edit the head
 repository and branch GitHub recorded for the run), and no artifact content is interpolated into a
-shell. Which half comments is decided once, in the analysis job, and travels in the artifact as a
-`comment-pending` file — a second copy of the fork test, written against a different event payload,
-is a copy that can disagree, and the way it disagrees is that nobody comments at all.
+shell.
+
+Which half comments is decided once, in the analysis job, and travels in the artifact as a
+`comment-pending` file — a second copy of that decision, written against a different event payload,
+is a copy that can disagree, and the way it disagrees is that nobody comments at all. The decision
+is the outcome rather than the permission: the marker is written when the run finished with no
+comment of its own, which covers the upsert that was refused as well as the one that was never
+allowed. The companion says out loud when it stands down, and fails rather than exiting green when
+it has a report and cannot place it — a `workflow_run` workflow posts no check, so a line in a
+collapsed step log is the same as saying nothing.
 
 The upsert the action runs is now `scripts/upsert-comment.mjs` rather than an inline
 `actions/github-script` block, because the companion workflow runs the same one: one marker string,

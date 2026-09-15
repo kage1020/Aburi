@@ -129,25 +129,40 @@ Post it from a second workflow instead. The first uploads the report; the second
 
 ```yaml
 # .github/workflows/aburi.yml
+name: Aburi
+on: pull_request
+
 jobs:
   diff:
     runs-on: ubuntu-latest
     env:
-      # Decided once. The comment step reads it, and so does the hand-off below.
+      # Tells the action not to try on a fork's pull request or Dependabot's, where the token is
+      # read-only whatever `permissions:` says. The hand-off below keys on the *outcome*, not on
+      # this — see the comment there.
       CAN_COMMENT: >-
         ${{ github.event.pull_request.head.repo.full_name == github.repository
             && github.actor != 'dependabot[bot]' }}
     steps:
       # …checkout, install, build…
       - uses: kage1020/Aburi/packages/github-action@main
+        id: aburi
         with:
           cli: workspace
           # `false` on a fork's pull request and Dependabot's; the diff and the gate still run.
           comment: ${{ env.CAN_COMMENT }}
-      # The companion posts when this file is in the artifact, and exits when it is not — so the
-      # fork test lives in one place instead of being written twice, in two event shapes.
+      # The companion posts when this file is in the artifact and exits when it is not, so the
+      # decision lives in one place instead of being written twice, in two event shapes.
+      #
+      # `comment-id` is empty both when the action was told not to comment and when it tried and
+      # was refused — a 403, a rate limit, a `fetch failed`. Keying on `CAN_COMMENT` instead would
+      # leave that second case with no marker, and the companion would read the absence as "a
+      # comment is already there". The exit-code arm is the action's own comment gate: 1 and 2 mean
+      # a report that is missing or partial.
       - name: Hand the comment to the companion workflow
-        if: always() && env.CAN_COMMENT != 'true' && hashFiles('out/diff.md') != ''
+        if: >-
+          always() && hashFiles('out/diff.md') != ''
+          && steps.aburi.outputs.comment-id == ''
+          && (steps.aburi.outputs.cli-exit-code == '0' || steps.aburi.outputs.cli-exit-code == '3')
         run: echo "posted by the companion" > out/comment-pending
       - uses: actions/upload-artifact@v4
         if: always() && hashFiles('out/diff.md') != ''
@@ -156,10 +171,16 @@ jobs:
           path: out/
 ```
 
+The companion runs on `workflow_run`, checks out **this repository** for the upsert script — not
+yours; a plain `actions/checkout@v4` would give you your own tree and the last step would fail on
+a module that is not there — downloads the artifact from the run that triggered it, resolves the
+pull request **from the event** rather than from the artifact, and posts:
+
 ```yaml
 # .github/workflows/aburi-comment.yml
 on:
   workflow_run:
+    # Matches the analysis workflow's `name:`, not its filename.
     workflows: [Aburi]
     types: [completed]
 
@@ -167,24 +188,44 @@ permissions:
   contents: read
   actions: read
   pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      # Third-party code in the half that holds a writable token, so pin the ref: a tag or a
+      # commit SHA, never a moving branch.
+      - uses: actions/checkout@v4
+        with:
+          repository: kage1020/Aburi
+          ref: "@aburi/github-action@0.2.0"
+          sparse-checkout: packages/github-action/scripts
+          persist-credentials: false
+      # …download the aburi-diff artifact from github.event.workflow_run.id, resolve the pull
+      # request from the event, then…
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          MARKDOWN_PATH: report/diff.md
+        run: node packages/github-action/scripts/upsert-comment.mjs
 ```
 
-That second workflow checks out this repository's `scripts/` directory, downloads the
-`aburi-diff` artifact from the run that triggered it, resolves the pull request **from the
-event** rather than from the artifact, and runs
-[`scripts/upsert-comment.mjs`](./scripts/upsert-comment.mjs) — the same upsert the action runs,
-so both paths write the same comment.
-
-[`.github/workflows/aburi-comment.yml`](../../.github/workflows/aburi-comment.yml) is the whole
-file, and [`docs/design/github-action.md`](../../docs/design/github-action.md) §5.1 explains what
-makes it safe to give that half a writable token. Two things to know: GitHub runs the copy of a
+[`.github/workflows/aburi-comment.yml`](../../.github/workflows/aburi-comment.yml) is Aburi's own
+working copy, with the artifact lookup and the pull-request resolution written out — read it as a
+reference rather than copying it, since its checkout takes the script from the repository the
+workflow lives in, which for you is not this one.
+[`docs/design/github-action.md`](../../docs/design/github-action.md) §5.1 explains what makes it
+safe to give that half a writable token. Two things to know: GitHub runs the copy of a
 `workflow_run` workflow that is on your **default branch**, so it does nothing until it is merged,
 and it posts no check on the pull request.
 
 ### Posting the comment yourself
 
 `scripts/upsert-comment.mjs` is plain `.mjs` with no dependencies, so anything with Node can run
-it. Input is environment only:
+it — including a job that installs nothing, which is how the companion above uses it: the script
+is checked out from this repository, not resolved from `node_modules`. (It also ships in the npm
+tarball, for a job that does have the package installed.) Input is environment only:
 
 | Variable | |
 |---|---|

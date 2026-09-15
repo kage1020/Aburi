@@ -38,13 +38,18 @@ macOS, and Windows.
    `pnpm changeset`.
 4. Open a pull request against `main`.
 
-Two workflows then run. CI runs the four commands above on Ubuntu, macOS and Windows,
-and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml)
+Two workflows then run on your pull request. CI runs the four commands above on Ubuntu, macOS
+and Windows, and Aburi runs on itself: [`.github/workflows/aburi.yml`](.github/workflows/aburi.yml)
 builds your branch, diffs it against the pull request's base with the CLI your branch
-contains, and posts the report as a comment it rewrites on every push. (From a fork, the
-token is read-only: there is no comment, and the report is the `aburi-diff` artifact on
-the run.) Its gate (`removed,dropped-toggled:to-dropped:>10`) turns the check red when a
-symbol disappears or bodies are emptied in bulk.
+contains, and posts the report as a comment it rewrites on every push. Its gate
+(`removed,dropped-toggled:to-dropped:>10`) turns the check red when a symbol disappears or
+bodies are emptied in bulk.
+
+From a fork, that run's token is read-only and cannot post, so a third workflow does it:
+[`aburi-comment.yml`](.github/workflows/aburi-comment.yml) picks the report up from the
+`aburi-diff` artifact afterwards and comments with this repository's own token. It posts no
+check of its own — the comment appearing is the signal — so expect it a minute or so after the
+Aburi check finishes, and if it never arrives, the report is still that artifact on the run.
 
 The job has no bypass switch: a tripped gate stays red for that commit. Say in the pull
 request why the removal is deliberate — merging past a red Aburi check is then a

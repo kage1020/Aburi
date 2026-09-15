@@ -38,10 +38,20 @@ function fail(code, message) {
   process.exitCode = code
 }
 
-function reasonOf(error) {
+/**
+ * Node's `fetch` reports every network-layer failure as a bare `TypeError: fetch failed` and puts
+ * the reason — `ENOTFOUND`, `ECONNREFUSED`, a self-signed certificate on an Enterprise Server —
+ * one or two links down the `cause` chain. Without it the whole annotation is "fetch failed",
+ * which says only that something went wrong, on one line, to someone who cannot see the rest.
+ */
+function reasonOf(error, depth = 2) {
   if (!(error instanceof Error)) return String(error)
   const code = typeof error.code === "string" ? `${error.code}: ` : ""
-  return `${code}${error.message}`
+  const cause =
+    depth > 0 && error.cause !== undefined && error.cause !== null
+      ? ` (caused by ${reasonOf(error.cause, depth - 1)})`
+      : ""
+  return `${code}${error.message}${cause}`
 }
 
 function headers(token) {
@@ -80,7 +90,13 @@ function parseComment(row) {
   return { id: row.id, body: row.body, htmlUrl: row.html_url }
 }
 
+/**
+ * Returns the marker comment and how many rows were unreadable. The count is reported rather than
+ * swallowed: if the rejected row *was* Aburi's comment, this returns null and the caller creates a
+ * second one — the in-place update the whole design rests on, failing silently.
+ */
 async function findMarkerComment(context) {
+  let skipped = 0
   for (let page = 1; ; page++) {
     const url = apiUrl(
       context.apiBase,
@@ -98,9 +114,13 @@ async function findMarkerComment(context) {
     }
     for (const row of rows) {
       const parsed = parseComment(row)
-      if (parsed?.body.includes(MARKER)) return parsed
+      if (parsed === null) {
+        skipped += 1
+        continue
+      }
+      if (parsed.body.includes(MARKER)) return { comment: parsed, skipped }
     }
-    if (rows.length < PER_PAGE) return null
+    if (rows.length < PER_PAGE) return { comment: null, skipped }
   }
 }
 
@@ -119,11 +139,24 @@ async function writeComment(context, { method, path, body }) {
   return written
 }
 
-/** Step outputs, when a step is what we are running in. Absent outside Actions, which is fine. */
+/**
+ * Step outputs, when a step is what we are running in. Absent outside Actions, which is fine.
+ *
+ * A failure here is a warning and not a failure of the run: by this point the comment is posted,
+ * and exiting non-zero would leave the one state a reader cannot interpret — a red step next to
+ * the comment it says it could not write. Unwrapped, it would also escape `main` as an unhandled
+ * rejection, which is the one path out of this script with no `::error::` line on it.
+ */
 function setOutputs(outcome) {
   const target = process.env.GITHUB_OUTPUT
   if (!target) return
-  appendFileSync(target, `action=${outcome.action}\ncomment-id=${outcome.commentId}\n`)
+  try {
+    appendFileSync(target, `action=${outcome.action}\ncomment-id=${outcome.commentId}\n`)
+  } catch (error) {
+    process.stderr.write(
+      `::warning::Comment ${outcome.commentId} was ${outcome.action}, but $GITHUB_OUTPUT could not be written (${reasonOf(error).replace(/\s+/g, " ")}); a caller reading comment-id sees an empty value.\n`,
+    )
+  }
 }
 
 function readContext() {
@@ -179,7 +212,12 @@ async function main() {
 
   let outcome
   try {
-    const existing = await findMarkerComment(context)
+    const { comment: existing, skipped } = await findMarkerComment(context)
+    if (skipped > 0) {
+      process.stderr.write(
+        `::warning::${skipped} comment(s) came back without an id, body or html_url and were skipped. If one of them was Aburi's, this run posts a second marker comment instead of rewriting the first.\n`,
+      )
+    }
     if (existing !== null && existing.body === body) {
       // The same bytes as last time: a PATCH here would bump `updated_at` and notify every
       // subscriber to say nothing had changed.

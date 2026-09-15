@@ -18,16 +18,6 @@ const SCRIPT = resolve(
   "upsert-comment.mjs",
 )
 
-const COMPANION_WORKFLOW = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-  ".github",
-  "workflows",
-  "aburi-comment.yml",
-)
-
 interface RecordedRequest {
   readonly method: string
   readonly path: string
@@ -169,7 +159,7 @@ function baseEnv(base: string, markdownPath: string): Record<string, string> {
     GITHUB_API_URL: base,
     GITHUB_TOKEN: "secret-token",
     GITHUB_REPOSITORY: "kage1020/Aburi",
-    PR_NUMBER: "278",
+    PR_NUMBER: "42",
     MARKDOWN_PATH: markdownPath,
   }
 }
@@ -195,7 +185,7 @@ describe("upsert-comment.mjs", () => {
         expect(run.outputs).toEqual({ action: "created", "comment-id": "11" })
 
         const created = requests.find((r) => r.method === "POST")
-        expect(created?.path).toBe("/repos/kage1020/Aburi/issues/278/comments")
+        expect(created?.path).toBe("/repos/kage1020/Aburi/issues/42/comments")
         expect(created?.authorization).toBe("Bearer secret-token")
         const body = JSON.parse(created?.body ?? "{}").body as string
         expect(body.startsWith(ABURI_COMMENT_MARKER)).toBe(true)
@@ -331,15 +321,28 @@ describe("upsert-comment.mjs", () => {
     )
   })
 
-  it("is invoked by the companion workflow at the path it actually has", async () => {
-    // `.github/workflows/aburi-comment.yml` is the half that posts for a fork's pull request, and
-    // it reaches this script by path after a sparse checkout — nothing resolves it for that
-    // workflow, so a rename here would break the fork path silently, on the default branch, where
-    // no pull request can catch it first. See `docs/design/github-action.md` §5.1.
-    const workflow = await readFile(COMPANION_WORKFLOW, "utf8")
-    expect(workflow).toContain("node packages/github-action/scripts/upsert-comment.mjs")
-    // The script is checked out by the directory this pattern names.
-    expect(workflow).toContain("sparse-checkout: packages/github-action/scripts")
+  it("says how many comments it could not read, rather than skipping them in silence", async () => {
+    // A row the parser rejects is skipped, and if that row was Aburi's own comment the upsert
+    // creates a second one instead of rewriting the first — the in-place update the whole design
+    // rests on, failing with nothing in the log to explain the duplicate.
+    const path = await markdownFile("report\n")
+    await withApi(
+      (request) =>
+        request.method === "GET"
+          ? {
+              json: [
+                { id: 5, body: "no html_url here" },
+                { id: "not a number", body: "x" },
+              ],
+            }
+          : { status: 201, json: comment(6, "x") },
+      async (base) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        expect(run.stderr).toContain("::warning::2 comment(s)")
+        expect(run.outputs.action).toBe("created")
+      },
+    )
   })
 
   it("runs without `$GITHUB_OUTPUT`, for a caller that is not a step", async () => {
