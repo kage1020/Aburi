@@ -199,7 +199,7 @@ jobs:
           TARGET: ${{ steps.target.outputs.target }}
         run: |
           set -euo pipefail
-          immutable="action-v$VERSION"
+          immutable="v$VERSION"
 
           # `--exit-code` is avoided on purpose: it answers 2 for no-match and 128 for a
           # network or auth failure, and an `if` reads both as "the tag is not there".
@@ -232,12 +232,12 @@ jobs:
           # major. The pattern is what decides that, so `test/uses-refs.test.ts` asserts it.
           case "$VERSION" in
             *-*)
-              echo "::notice::$VERSION is a prerelease; the action-v<major> alias stays where it is."
+              echo "::notice::$VERSION is a prerelease; the v<major> alias stays where it is."
               exit 0
               ;;
           esac
 
-          alias="action-v${VERSION%%.*}"
+          alias="v${VERSION%%.*}"
           git tag -f "$alias" "$TARGET"
           git push origin --force "refs/tags/$alias"
           echo "::notice::Moved $alias to $TARGET ($VERSION)."

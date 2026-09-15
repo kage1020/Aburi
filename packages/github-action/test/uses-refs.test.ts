@@ -31,17 +31,21 @@ const PINNED_EXAMPLE_FILES = [
 
 /**
  * What a documented ref to this action may be: the immutable tag a release creates (a
- * prerelease suffix included — `release.yml` tags `action-v0.4.0-beta.1` before it decides
- * not to move the alias), the major alias, or a full SHA.
+ * prerelease suffix included — `release.yml` tags `v0.4.0-beta.1` before it decides not to
+ * move the alias), the major alias, or a full SHA.
+ *
+ * The tags are unprefixed because the path in front of them already says which action they
+ * belong to, and `changeset publish` only ever writes scoped `@aburi/<pkg>@<ver>` tags, so
+ * the `v*` namespace is this action's alone.
  *
  * `main` is deliberately absent. It resolves, so it is a legitimate thing for a consumer to
  * write, but leaving it legal here would let every example drift back onto a branch without
  * a test noticing — and moving them off it is the whole point of this package's Pinning
  * section. Someone documenting `@main` on purpose is expected to change this line and say why.
  */
-const ALLOWED_ABURI_REF = /^(?:action-v\d+(?:\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)?|[0-9a-f]{40})$/
+const ALLOWED_ABURI_REF = /^(?:v\d+(?:\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)?|[0-9a-f]{40})$/
 /** The major-only alias, captured so it can be checked against the package's real major. */
-const ALIAS_REF = /^action-v(\d+)$/
+const ALIAS_REF = /^v(\d+)$/
 
 /**
  * Both quoting styles and a trailing comment, because a value this misses is a value that
@@ -174,9 +178,9 @@ describe("parseUses", () => {
   it.each([
     ["actions/checkout@v4", ["actions", "checkout"], "v4"],
     [
-      "kage1020/Aburi/packages/github-action@action-v0",
+      "kage1020/Aburi/packages/github-action@v0",
       ["kage1020", "Aburi", "packages", "github-action"],
-      "action-v0",
+      "v0",
     ],
     // `RemoveEmptyEntries` in the runner's split, which `.filter(…)` reproduces.
     ["foo//bar@v1", ["foo", "bar"], "v1"],
@@ -187,12 +191,12 @@ describe("parseUses", () => {
 
 describe("ALLOWED_ABURI_REF", () => {
   it.each([
-    "action-v0",
-    "action-v1",
-    "action-v0.3.0",
+    "v0",
+    "v1",
+    "v0.3.0",
     // `release.yml` creates this before the prerelease guard decides not to move the alias,
     // so it is a real ref and documenting it is legal.
-    "action-v0.4.0-beta.1",
+    "v0.4.0-beta.1",
     "d7af4711659564b6a95d074130b24481bdff81ca",
   ])("accepts %s", (ref) => {
     expect(ALLOWED_ABURI_REF.test(ref)).toBe(true)
@@ -200,10 +204,11 @@ describe("ALLOWED_ABURI_REF", () => {
 
   it.each([
     ["main", "moving a branch back into the examples is the regression this locks"],
-    ["v0.2.0", "no release creates an unprefixed tag"],
     ["@aburi/github-action@0.2.0", "the tag a `uses:` cannot hold"],
-    ["action-v0.2", "not a version"],
-    ["action-v", "no number"],
+    ["action-v0", "the prefixed spelling this scheme dropped; no release creates it"],
+    ["0.3.0", "no `v`"],
+    ["v0.2", "not a version"],
+    ["v", "no number"],
     ["d7af471", "an abbreviated SHA, which is not what a pin means"],
   ])("rejects %s (%s)", (ref) => {
     expect(ALLOWED_ABURI_REF.test(ref)).toBe(false)
@@ -274,7 +279,7 @@ describe("documented `uses:` references", () => {
       expect(parsed?.path.slice(0, 2).join("/"), where).toBe("kage1020/Aburi")
       expect(parsed?.ref ?? "", where).toMatch(ALLOWED_ABURI_REF)
       // A `major` changeset would take the package to 1.0.0 and leave every documented
-      // `@action-v0` naming a tag no release will ever create. The alias is only correct
+      // `@v0` naming a tag no release will ever create. The alias is only correct
       // for the major this package is actually on.
       const alias = ALIAS_REF.exec(parsed?.ref ?? "")
       if (alias) {
@@ -298,7 +303,7 @@ describe("release workflow: tag-action job", () => {
     expect(workflow.jobs.docs?.needs).toBe("release")
     // And nothing may push tags from the publish job any more.
     const releaseRuns = (workflow.jobs.release?.steps ?? []).map((s) => s.run ?? "").join("\n")
-    expect(releaseRuns).not.toContain("action-v")
+    expect(releaseRuns).not.toContain("refs/tags/")
   })
 
   it("runs on a publish, and on a dispatch that skips the publish job", async () => {
@@ -344,7 +349,7 @@ describe("release workflow: tag-action job", () => {
 
   it("keeps the major alias off a prerelease, by the pattern that decides it", async () => {
     // Asserting the pattern, not just the shape around it: mistyping `*-*)` as `*_*)` is the
-    // one typo that force-pushes `action-v0` onto a prerelease for every consumer tracking
+    // one typo that force-pushes `v0` onto a prerelease for every consumer tracking
     // the major, and an order-of-substrings check waves it through.
     const run = await tagStepRun("Create the immutable tag and move the major alias")
     const guard = run.indexOf('case "$VERSION" in')
