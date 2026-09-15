@@ -1,5 +1,5 @@
 import { glob, readFile } from "node:fs/promises"
-import { dirname, relative, resolve } from "node:path"
+import { dirname, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { parse } from "yaml"
@@ -75,6 +75,15 @@ function extractUses(raw: string): { readonly value: string; readonly line: numb
   return out
 }
 
+/**
+ * `relative` answers `docs\guide\ci-integration.md` on Windows, which matches nothing in
+ * `SOURCES` or `PINNED_EXAMPLE_FILES` and turned every path comparison here into a silent
+ * miss on that runner alone. Paths are recorded in one spelling, the one the globs use.
+ */
+function repoPath(absolute: string): string {
+  return relative(REPO_ROOT, absolute).split(sep).join("/")
+}
+
 async function scanSources(): Promise<Scan> {
   const refs: UsesRef[] = []
   const filesPerPattern: Record<string, number> = {}
@@ -85,7 +94,7 @@ async function scanSources(): Promise<Scan> {
       const absolute = resolve(REPO_ROOT, entry)
       const raw = await readFile(absolute, "utf8")
       for (const { value, line } of extractUses(raw)) {
-        refs.push({ file: relative(REPO_ROOT, absolute), line, value })
+        refs.push({ file: repoPath(absolute), line, value })
       }
     }
   }
@@ -234,6 +243,11 @@ describe("documented `uses:` references", () => {
 
   it("keeps a pinned example in each file the pinning story is told in", async () => {
     const { refs } = await scanSources()
+    // The comparison below is `===` against a `/`-spelled literal, and only Windows ever
+    // disagreed about that — so the invariant is asserted rather than assumed.
+    for (const ref of refs) {
+      expect(ref.file, `${ref.file} is not spelled the way SOURCES is`).not.toContain("\\")
+    }
     for (const file of PINNED_EXAMPLE_FILES) {
       const ours = refs.filter((r) => r.file === file && r.value.startsWith("kage1020/Aburi"))
       expect(ours.length, `${file} documents no kage1020/Aburi ref`).toBeGreaterThan(0)
