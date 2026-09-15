@@ -1,6 +1,6 @@
 {
   "name": "@aburi/framework-react",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Aburi React framework plugin: recognizes React function components, custom hooks, contexts, forwardRef / memo wrappers, context providers, and higher-order components across .tsx / .jsx sources — emitting framework:react:* extKinds",
   "license": "Apache-2.0",
   "author": "kage1020",
