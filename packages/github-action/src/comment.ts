@@ -10,6 +10,21 @@
  */
 export const ABURI_COMMENT_MARKER = "<!-- aburi:diff-comment -->"
 
+/**
+ * GitHub's ceiling on an issue-comment body. A create or update carrying more is rejected with
+ * a 422 and nothing is posted — there is no partial write to fall back on.
+ */
+export const GITHUB_COMMENT_MAX_BYTES = 65536
+
+/**
+ * What the report itself may weigh, which is the ceiling less the marker and the blank line
+ * {@link ensureMarker} puts in front of it. This is the number to render with: `aburi diff
+ * --max-bytes <n>` (`markdown-projection.md` §6.4) drops whole sections to meet it, and
+ * `action.yml` passes exactly this value whenever it is going to post the result.
+ */
+export const ABURI_COMMENT_BODY_MAX_BYTES =
+  GITHUB_COMMENT_MAX_BYTES - Buffer.byteLength(`${ABURI_COMMENT_MARKER}\n\n`, "utf8")
+
 export interface PullRequestRef {
   readonly owner: string
   readonly repo: string
@@ -48,6 +63,17 @@ export type UpsertOutcome =
 export async function upsertPullRequestComment(options: UpsertOptions): Promise<UpsertOutcome> {
   const marker = options.marker ?? ABURI_COMMENT_MARKER
   const bodyWithMarker = ensureMarker(options.body, marker)
+  // Measured before the round trip rather than left to the API. GitHub answers an oversized body
+  // with a bare 422 whose message says nothing about size, after the list call has already paged
+  // through every comment on the pull request; this says what is wrong and what renders smaller.
+  const size = Buffer.byteLength(bodyWithMarker, "utf8")
+  if (size > GITHUB_COMMENT_MAX_BYTES) {
+    throw new Error(
+      `Comment body is ${size} bytes, over GitHub's ${GITHUB_COMMENT_MAX_BYTES}-byte limit; ` +
+        `GitHub would reject it with a 422. Render the report with a size cap — ` +
+        `aburi diff --max-bytes ${ABURI_COMMENT_BODY_MAX_BYTES} — and post that.`,
+    )
+  }
   const apiBase = options.apiBase ?? "https://api.github.com"
   const fetchImpl = options.fetch ?? globalThis.fetch
 

@@ -85,6 +85,12 @@ export interface DiffOptions {
   failOn?: string
   configPath?: string
   compact?: boolean
+  /**
+   * Size cap for `diff.md`, in UTF-8 bytes (`markdown-projection.md` §6.4). Absent writes the
+   * whole document, which is what a file on disk is for; a caller that posts the file as a
+   * GitHub comment has to pass one, because the API rejects a body over 65536 bytes outright.
+   */
+  maxBytes?: number
   /** Injected git runner for tests. Defaults to a real `git` child process. */
   git?: GitRunner
   /** Non-fatal warning sink (defaults to `process.stderr.write`). */
@@ -161,6 +167,18 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()
   const warn = options.warn ?? ((m: string) => process.stderr.write(`${m}\n`))
   const failOn = options.failOn === undefined ? [] : parseFailOn(options.failOn)
+  // Checked here rather than left to `projectDiff`, which raises a `RangeError`: a bad flag is
+  // an input error (exit 2) in this command's table, and it is checked before the scans so a
+  // typo costs a message instead of two full extractions.
+  if (
+    options.maxBytes !== undefined &&
+    (!Number.isInteger(options.maxBytes) || options.maxBytes <= 0)
+  ) {
+    throw new CliError(
+      `--max-bytes must be a positive integer (got ${String(options.maxBytes)}).`,
+      "input-error",
+    )
+  }
   // One pin for the whole command, and not one taken before something needs it.
   //
   // Eager would be simpler to read and wrong twice over: a `--base` / `--head` run that named
@@ -228,7 +246,11 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   }
   if (format !== "json") {
     diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
-    await writeFile(diffMdPath, projectDiff(diff), "utf8")
+    const markdown = projectDiff(
+      diff,
+      options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes },
+    )
+    await writeFile(diffMdPath, markdown, "utf8")
   }
 
   // §6.6, from `@aburi/markdown-projection` rather than from a local copy: the two were

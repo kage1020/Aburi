@@ -28,6 +28,15 @@ import { appendFileSync, readFileSync } from "node:fs"
  */
 const MARKER = "<!-- aburi:diff-comment -->"
 
+/**
+ * GitHub's ceiling on a comment body; anything larger comes back as a 422 with nothing posted.
+ * Must equal `GITHUB_COMMENT_MAX_BYTES` in `src/comment.ts`, which `test/upsert-comment.test.ts`
+ * asserts. The report is rendered to fit by `aburi diff --max-bytes` (`action.yml` passes it) —
+ * this end only measures, because a script holding a finished document cannot re-render it and
+ * cutting the string would post half a `<details>` block.
+ */
+const MAX_BYTES = 65536
+
 const INPUT_ERROR = 2
 const RUNTIME_ERROR = 1
 const PER_PAGE = 100
@@ -209,6 +218,14 @@ async function main() {
     return
   }
   const body = raw.includes(MARKER) ? raw : `${MARKER}\n\n${raw}`
+  const size = Buffer.byteLength(body, "utf8")
+  if (size > MAX_BYTES) {
+    fail(
+      INPUT_ERROR,
+      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes (markdown-projection.md §6.4) and post that.`,
+    )
+    return
+  }
 
   let outcome
   try {

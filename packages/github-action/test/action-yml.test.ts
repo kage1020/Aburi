@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { DEFAULT_OUTPUT_DIRNAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
 import { describe, expect, it } from "vitest"
 import { parse } from "yaml"
-import { ABURI_COMMENT_MARKER } from "../src/comment"
+import { ABURI_COMMENT_BODY_MAX_BYTES, ABURI_COMMENT_MARKER } from "../src/comment"
 
 const ACTION_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "action.yml")
 /** The opening of a GitHub expression, escaped so this file does not hold one it forbids. */
@@ -68,6 +68,7 @@ describe("action.yml", () => {
       "working-directory",
       "cli",
       "comment",
+      "max-bytes",
       "token",
       "node-version",
       "pnpm-version",
@@ -181,6 +182,58 @@ describe("action.yml", () => {
     )
     expect(validateStep?.run).toMatch(/case "\$COMMENT" in\s+true\|false\) : ;;/)
     expect(validateStep?.run).toContain("comment must be true or false")
+  })
+
+  it("caps the report at what a comment body can hold", async () => {
+    // The number in the manifest is GitHub's 65536-byte comment limit less the marker line the
+    // upsert prepends. Asserted against `src/comment.ts` rather than spelled twice: a change to
+    // the marker moves the budget, and a manifest still passing the old one renders a report that
+    // fits by 29 bytes too few — or, the other way, one the API rejects with a 422.
+    const action = await loadAction()
+    const run = action.runs.steps.find((s) => s.id === "diff")?.run ?? ""
+    expect(run).toContain(`budget="\${MAX_BYTES:-${ABURI_COMMENT_BODY_MAX_BYTES}}"`)
+    expect(action.inputs["max-bytes"]?.default).toBe("")
+  })
+
+  it("caps under `comment: false` too, because that is the mode a fork's pull request runs in", async () => {
+    // There, the Markdown goes up as an artefact and `aburi-comment.yml` posts it with the
+    // repository's own token. A cap that keyed on `comment` would leave that file oversized and
+    // move the 422 to the one pull request whose author cannot see the companion's log.
+    const action = await loadAction()
+    const diffStep = action.runs.steps.find((s) => s.id === "diff")
+    expect(diffStep?.env?.COMMENT).toBeUndefined()
+    expect(diffStep?.run).not.toContain('"$COMMENT"')
+  })
+
+  it("asks the CLI for `--max-bytes` before passing it", async () => {
+    // `version` pins the CLI while this action is referenced by ref, so a CLI older than the flag
+    // is the documented arrangement rather than an accident — and an unknown option would fail
+    // every one of those runs at argv parsing, before a single file was read.
+    const action = await loadAction()
+    const run = action.runs.steps.find((s) => s.id === "diff")?.run ?? ""
+    expect(run).toMatch(/"\$\{runner\[@\]}" diff --help/)
+    expect(run).toContain('grep -q -- "--max-bytes"')
+    expect(run).toContain("::warning::This @aburi/cli has no --max-bytes")
+    // After the runner is resolved, or the probe would run a command that does not exist yet.
+    expect(run.indexOf("--max-bytes")).toBeGreaterThan(run.indexOf("runner=(pnpm dlx"))
+  })
+
+  it("takes `max-bytes: 0` as no cap at all", async () => {
+    const action = await loadAction()
+    const run = action.runs.steps.find((s) => s.id === "diff")?.run ?? ""
+    expect(run).toContain('if [ "$MAX_BYTES" != "0" ]; then')
+    expect(run).toContain('args+=(--max-bytes "$budget")')
+  })
+
+  it("rejects a `max-bytes` that is not a number", async () => {
+    // Left to the CLI, `--max-bytes 64kb` is still exit 2 — but only after both revisions have
+    // been scanned, which on a large workspace is minutes spent to reject a typo.
+    const action = await loadAction()
+    const validateStep = action.runs.steps.find(
+      (s) => typeof s.run === "string" && s.run.includes("max-bytes must be"),
+    )
+    expect(validateStep?.run).toContain("max-bytes must be a non-negative integer")
+    expect(validateStep?.env?.MAX_BYTES).toContain("inputs.max-bytes")
   })
 
   it("installs Node and pnpm only for the dlx path", async () => {

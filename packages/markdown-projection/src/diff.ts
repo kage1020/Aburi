@@ -20,39 +20,133 @@ import { renderSymbolBlock } from "./component"
 import { compareStrings, inlineCodeValue, isSymbolIdEndpoint, requireDropReason } from "./format"
 
 /**
+ * Options for {@link projectDiff}.
+ */
+export interface ProjectDiffOptions {
+  /**
+   * §6.4 — hard cap on the produced document, in UTF-8 bytes. Absent means no cap, which is
+   * the right answer for a file on disk and the wrong one for a PR comment: GitHub rejects a
+   * comment body over 65536 bytes with a 422, and a pull request adding roughly 310 symbols
+   * is already past it.
+   *
+   * Honoured by dropping whole sections, least important first, never by cutting the string —
+   * a cut lands inside a `<details>` block or a code fence about as often as not, and what it
+   * produces is a document GitHub renders as one open fence swallowing the rest. The title and
+   * the Summary line are never dropped, so a budget smaller than those is not achievable and
+   * the document comes back over it.
+   */
+  readonly maxBytes?: number
+}
+
+/**
  * §6 — `out/diff.md`. Sections are emitted in the fixed importance order
  * (API changes → Syntax-only). Three sections — Moved (semantic no-op), Dropped changes
  * (drop rule flips), Syntax-only changes (implementation refactors) — are collapsed inside
  * `<details>` so PR comments stay reviewer-friendly. Moved + Changed is intentionally
  * NOT folded because the delta carries semantic impact worth reading. Empty sections
  * are dropped entirely (§5.3 rule).
+ *
+ * `options.maxBytes` caps the result (§6.4); without it the document is whatever the diff
+ * is worth, which is what a reader opening the file wants and what a PR comment cannot take.
  */
-export function projectDiff(diff: DiffResult): string {
-  const lines: string[] = []
-  lines.push(`# Aburi diff: ${diff.base.ref}..${diff.head.ref}`)
-  lines.push("")
-  lines.push(`**Summary**: ${summaryLine(diff)}`)
-  lines.push("")
+export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}): string {
+  const heading: string[] = []
+  heading.push(`# Aburi diff: ${diff.base.ref}..${diff.head.ref}`)
+  heading.push("")
+  heading.push(`**Summary**: ${summaryLine(diff)}`)
+  heading.push("")
 
   const buckets = partition(diff.symbols)
+  const sections: Section[] = []
 
-  appendSection(lines, "## ⚠ API changes", renderChangedList(buckets.apiChanged))
-  appendSection(lines, "## 🔧 Logic changes", renderChangedList(buckets.logicOnly))
-  appendSection(lines, "## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols))
-  appendSection(lines, "## ➕ Added", renderAddedRemoved(buckets.added))
-  appendSection(lines, "## ➖ Removed", renderAddedRemoved(buckets.removed))
-  appendSection(lines, "## ❔ Unknown", renderUnknown(buckets.unknown))
+  appendSection(sections, "## ⚠ API changes", renderChangedList(buckets.apiChanged))
+  appendSection(sections, "## 🔧 Logic changes", renderChangedList(buckets.logicOnly))
+  appendSection(sections, "## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols))
+  appendSection(sections, "## ➕ Added", renderAddedRemoved(buckets.added))
+  appendSection(sections, "## ➖ Removed", renderAddedRemoved(buckets.removed))
+  appendSection(sections, "## ❔ Unknown", renderUnknown(buckets.unknown))
   // `?? []` renders nothing for a diff that predates the field, which is the right answer:
   // such a document cannot say what it missed, and a section built from an assumed empty list
   // would report "nothing was missed" on every archived diff.
-  appendSection(lines, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
-  appendSection(lines, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
-  appendFolded(lines, "## 🔀 Moved", renderMoved(buckets.moved))
-  appendSection(lines, "## 🧱 Component changes", renderComponentChanges(diff))
-  appendSection(lines, "## 🔗 Dependency changes", renderDependencyChanges(diff))
-  appendFolded(lines, "## 💧 Dropped changes", renderDroppedToggled(buckets.droppedToggled))
-  appendFolded(lines, "## 🎨 Syntax-only changes", renderSyntaxOnly(buckets.syntaxOnly))
+  appendSection(sections, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
+  appendSection(sections, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
+  appendFolded(sections, "## 🔀 Moved", renderMoved(buckets.moved))
+  appendSection(sections, "## 🧱 Component changes", renderComponentChanges(diff))
+  appendSection(sections, "## 🔗 Dependency changes", renderDependencyChanges(diff))
+  appendFolded(sections, "## 💧 Dropped changes", renderDroppedToggled(buckets.droppedToggled))
+  appendFolded(sections, "## 🎨 Syntax-only changes", renderSyntaxOnly(buckets.syntaxOnly))
 
+  return assemble(heading, sections, options.maxBytes)
+}
+
+/**
+ * One rendered `##` block, kept whole so the size cap has something it can drop without
+ * leaving half a document behind. `title` is the heading without its `## `, for the note
+ * that names what went.
+ */
+interface Section {
+  readonly title: string
+  readonly lines: readonly string[]
+}
+
+/**
+ * §6.4 — join the document, dropping sections from the bottom until it fits.
+ *
+ * The section order is the importance order (§12.4), so the bottom is the least important
+ * thing in the document and the drop order falls straight out of it: Syntax-only first, API
+ * changes last. The note is rebuilt and the whole document re-measured on every drop, because
+ * naming one more section makes the note longer — measuring once against a note that does not
+ * yet say what it will say is how a budget gets missed by exactly the length of the last name.
+ *
+ * `kept.length === 0` returns a document that may still be over budget: the title and the
+ * Summary line are the one thing this cannot drop, and returning them over budget beats
+ * returning a document with no idea what it is.
+ */
+function assemble(
+  heading: readonly string[],
+  sections: readonly Section[],
+  maxBytes: number | undefined,
+): string {
+  if (maxBytes === undefined) return finalise([...heading, ...flatten(sections)])
+  if (!Number.isInteger(maxBytes) || maxBytes <= 0) {
+    throw new RangeError(
+      `projectDiff: maxBytes must be a positive integer (got ${String(maxBytes)}).`,
+    )
+  }
+
+  let kept = sections
+  const dropped: Section[] = []
+  for (;;) {
+    const document = finalise([...heading, ...omissionNote(dropped, maxBytes), ...flatten(kept)])
+    if (kept.length === 0) return document
+    if (Buffer.byteLength(document, "utf8") <= maxBytes) return document
+    const last = kept[kept.length - 1]
+    if (last !== undefined) dropped.unshift(last)
+    kept = kept.slice(0, -1)
+  }
+}
+
+/**
+ * The line that stands in for what was dropped. Sections are named in document order rather
+ * than in drop order: the reader is looking for the heading that is not there, and the order
+ * they looked in is the one the document is written in.
+ */
+function omissionNote(dropped: readonly Section[], maxBytes: number): string[] {
+  if (dropped.length === 0) return []
+  const subject = dropped.length === 1 ? "1 section was" : `${dropped.length} sections were`
+  const names = dropped.map((section) => section.title).join(", ")
+  return [
+    `> ⚠ **${subject} omitted** to keep this report within ${maxBytes} bytes: ${names}. ` +
+      `The full report is the same diff rendered without a size cap.`,
+    "",
+  ]
+}
+
+function flatten(sections: readonly Section[]): string[] {
+  return sections.flatMap((section) => [...section.lines])
+}
+
+function finalise(lines: readonly string[]): string {
   return `${lines
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -173,12 +267,9 @@ function routeChanged(
   else if (delta.syntaxChanged) out.syntaxOnly.push(change)
 }
 
-function appendSection(lines: string[], heading: string, body: string[]): void {
+function appendSection(sections: Section[], heading: string, body: string[]): void {
   if (body.length === 0) return
-  lines.push(heading)
-  lines.push("")
-  lines.push(...body)
-  lines.push("")
+  sections.push({ title: titleOf(heading), lines: [heading, "", ...body, ""] })
 }
 
 /**
@@ -186,17 +277,27 @@ function appendSection(lines: string[], heading: string, body: string[]): void {
  * fold-out. Skipping the wrapper when body is empty keeps the file from carrying dangling
  * empty `<details>` blocks that GitHub still renders as a clickable arrow.
  */
-function appendFolded(lines: string[], heading: string, body: string[]): void {
+function appendFolded(sections: Section[], heading: string, body: string[]): void {
   if (body.length === 0) return
-  lines.push(heading)
-  lines.push("")
-  lines.push("<details>")
-  lines.push(`<summary>${body.length} entries</summary>`)
-  lines.push("")
-  lines.push(...body)
-  lines.push("")
-  lines.push("</details>")
-  lines.push("")
+  sections.push({
+    title: titleOf(heading),
+    lines: [
+      heading,
+      "",
+      "<details>",
+      `<summary>${body.length} entries</summary>`,
+      "",
+      ...body,
+      "",
+      "</details>",
+      "",
+    ],
+  })
+}
+
+/** The heading as the reader sees it in the document, minus the `## ` the note has no use for. */
+function titleOf(heading: string): string {
+  return heading.replace(/^#+ */, "")
 }
 
 function renderChangedList(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {

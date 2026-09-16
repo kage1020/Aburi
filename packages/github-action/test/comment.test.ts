@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { ABURI_COMMENT_MARKER, ensureMarker, upsertPullRequestComment } from "../src/comment"
+import {
+  ABURI_COMMENT_BODY_MAX_BYTES,
+  ABURI_COMMENT_MARKER,
+  ensureMarker,
+  GITHUB_COMMENT_MAX_BYTES,
+  upsertPullRequestComment,
+} from "../src/comment"
 
 interface RecordedCall {
   readonly method: string
@@ -276,5 +282,47 @@ describe("upsertPullRequestComment", () => {
     await expect(
       upsertPullRequestComment({ ref: REF, body: "x", token: "t", fetch }),
     ).rejects.toThrow(/non-array response/)
+  })
+})
+
+describe("the comment-body size limit", () => {
+  it("leaves the report exactly the room the marker does not take", () => {
+    const withMarker = ensureMarker("x".repeat(ABURI_COMMENT_BODY_MAX_BYTES), ABURI_COMMENT_MARKER)
+    expect(Buffer.byteLength(withMarker, "utf8")).toBe(GITHUB_COMMENT_MAX_BYTES)
+  })
+
+  it("refuses an oversized body before touching the API", async () => {
+    // GitHub answers this with a bare 422 that never says "too large", and only after the list
+    // call has paged through every comment on the pull request. The message here names the size
+    // and the flag that renders a smaller one.
+    const { fetch, calls } = makeFakeFetch({ listPages: [[]] })
+    await expect(
+      upsertPullRequestComment({
+        ref: REF,
+        body: "x".repeat(GITHUB_COMMENT_MAX_BYTES + 1),
+        token: "test-token",
+        fetch,
+      }),
+    ).rejects.toThrow(/over GitHub's 65536-byte limit/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it("posts a body that lands exactly on the limit", async () => {
+    const { fetch, calls } = makeFakeFetch({
+      listPages: [[]],
+      createResponse: {
+        id: 333,
+        body: "at the limit",
+        html_url: "https://github.com/kage1020/Aburi/pull/42#issuecomment-333",
+      },
+    })
+    const outcome = await upsertPullRequestComment({
+      ref: REF,
+      body: "x".repeat(ABURI_COMMENT_BODY_MAX_BYTES),
+      token: "test-token",
+      fetch,
+    })
+    expect(outcome.action).toBe("created")
+    expect(calls.some((c) => c.method === "POST")).toBe(true)
   })
 })

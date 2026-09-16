@@ -11,7 +11,7 @@ snapshot-test outputs without stubbing side effects.
 |---|---|---|
 | `projectWorkspace(ir, options?)` | L0 workspace overview (component list + dependency edges); `options.suppressTimestamp` mirrors the CLI's `--no-timestamp` for reproducible snapshots. | `out/workspace.md` |
 | `projectComponent({ component, symbols, dependencies })` | L1 + L2 component detail (public API surface + module logic). The single-argument form makes it explicit that the caller must have pre-filtered `symbols` / `dependencies` to the ones belonging to `component`. | `out/components/<id>.md` |
-| `projectDiff(diff)` | Review-facing PR summary (added / removed / changed / moved with confidence badges) | `out/diff.md`, PR comment |
+| `projectDiff(diff, { maxBytes? })` | Review-facing PR summary (added / removed / changed / moved with confidence badges), optionally capped to a byte budget | `out/diff.md`, PR comment |
 | `projectSymbolExplain(symbol)` | Per-Symbol detail (rules / effects / calls / dropped fold-out) | `aburi explain` stdout |
 
 Also exports the `formatFailOnClause` / `formatFailOnTriggered` helpers that
@@ -39,6 +39,13 @@ import {
 const markdown = projectDiff(diffResult)
 // review-ready Markdown with confidence badges + dropped Symbols folded under
 // <details>. Boundary sections group by symbol status per §7 of the design.
+
+const forAComment = projectDiff(diffResult, { maxBytes: 65507 })
+// the same document, guaranteed to fit: whole sections are dropped least-important-first
+// (Syntax-only before Dropped changes, API changes last) and a note under the Summary names
+// the ones that went. Never cut mid-string — that would halve a <details> block or a code
+// fence. GitHub rejects a comment body over 65536 bytes outright, so the destination decides
+// the budget; see §6.4 of the design.
 ```
 
 ## See also

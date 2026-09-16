@@ -79,6 +79,7 @@ uses the alias.
 | `working-directory` | `.` | Directory to run the CLI from. |
 | `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). See [Choosing `cli`](#choosing-cli). |
 | `comment` | `true` | Upsert the produced Markdown as a PR comment. |
+| `max-bytes` | *(empty)* | Cap for `diff.md`, in UTF-8 bytes, forwarded to `--max-bytes`. Empty means `65507` — GitHub's 65536-byte comment limit less the hidden marker. `0` means no cap. See [Report size](#report-size). |
 | `token` | `${{ github.token }}` | Token used for the comment API. |
 | `node-version` | `24` | Node.js version installed via `actions/setup-node`. `cli: dlx` only. |
 | `pnpm-version` | `10` | pnpm version installed via `pnpm/action-setup`. `cli: dlx` only. |
@@ -147,6 +148,29 @@ resolve is exit 2 with a message naming the directory it looked in —
 - The comment step is skipped when the CLI exits with `1` (runtime error) or `2`
   (input error) so a missing `diff.md` cannot bury the real failure inside a
   secondary `ENOENT` from the comment upsert.
+
+## Report size
+
+GitHub rejects a comment body over 65536 bytes with a 422 and posts nothing. The report runs
+about 210 bytes per symbol, so a branch adding a few hundred of them would hit that — and the
+review that loses its comment would be the large one.
+
+The action renders the report to fit instead: it passes `--max-bytes 65507` (the limit, less the
+29-byte marker it prepends). The projection meets the budget by dropping whole sections, least
+important first — Syntax-only before Dropped changes, API changes last — and the report says at
+the top which ones went:
+
+> ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
+
+`diff.json` is never capped, so the artefact keeps everything the comment could not.
+
+The cap applies under `comment: false` too — that is the mode a fork's pull request runs in, where
+the Markdown is posted later by the companion workflow below. Set `max-bytes: 0` if you want the
+whole document written regardless; the comment step then refuses an oversized body with exit 2,
+rather than letting the API reject it with a 422 that never mentions size.
+
+A CLI older than `--max-bytes` is fine: the action asks `aburi diff --help` for the flag, and
+warns and renders uncapped if it is not there.
 
 ## Pull requests from a fork
 
@@ -285,4 +309,14 @@ await upsertPullRequestComment({
   body: "…markdown produced by aburi diff…",
   token: process.env.GITHUB_TOKEN!,
 })
+```
+
+It measures the body — marker included — before it calls GitHub, and throws rather than sending
+one over the 65536-byte limit. Render with a cap to stay under it:
+
+```ts
+import { ABURI_COMMENT_BODY_MAX_BYTES } from "@aburi/github-action"
+import { projectDiff } from "@aburi/markdown-projection"
+
+const body = projectDiff(diff, { maxBytes: ABURI_COMMENT_BODY_MAX_BYTES })
 ```

@@ -82,6 +82,23 @@ function makeIRWithAdded(): IR {
   }
 }
 
+/** The same symbol `count` times over, which is all the size cap cares about. */
+function makeIRWithManyAdded(count: number): IR {
+  const one = makeIRWithAdded()
+  const template = one.symbols[0]
+  if (template === undefined) throw new Error("expected a template symbol")
+  const symbols = Array.from({ length: count }, (_, i) => {
+    const name = `Added${String(i).padStart(4, "0")}`
+    return {
+      ...template,
+      id: symbolId(`ts:src/${name}.ts#${name}`),
+      name,
+      source: { ...template.source, file: `src/${name}.ts` },
+    }
+  })
+  return { ...one, symbols, stats: { ...one.stats, keptSymbols: count } }
+}
+
 beforeEach(async () => {
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-"))
 })
@@ -110,6 +127,47 @@ describe("runDiff — --base/--head (file mode)", () => {
     if (report.diffMdPath === null) throw new Error("expected diffMdPath")
     const diffMd = await readFile(report.diffMdPath, "utf8")
     expect(diffMd).toContain("Added")
+  })
+
+  it("caps diff.md at --max-bytes, leaving diff.json whole", async () => {
+    // What GitHub rejects at 65536 bytes is the comment body, not the JSON: the cap belongs to
+    // the document that gets posted, and the artefact beside it still holds every symbol.
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithManyAdded(400)), "utf8")
+
+    const uncapped = await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
+    if (uncapped.diffMdPath === null) throw new Error("expected diffMdPath")
+    const full = await readFile(uncapped.diffMdPath, "utf8")
+    expect(Buffer.byteLength(full, "utf8")).toBeGreaterThan(20_000)
+
+    const capped = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      maxBytes: 4_000,
+    })
+    if (capped.diffMdPath === null) throw new Error("expected diffMdPath")
+    const markdown = await readFile(capped.diffMdPath, "utf8")
+    expect(Buffer.byteLength(markdown, "utf8")).toBeLessThanOrEqual(4_000)
+    expect(markdown).toContain("omitted")
+    expect(markdown).toContain("**Summary**: +400 added")
+
+    if (capped.diffJsonPath === null) throw new Error("expected diffJsonPath")
+    const diffJson = await readFile(capped.diffJsonPath, "utf8")
+    expect(diffJson).toContain("Added0399")
+  })
+
+  it("rejects a --max-bytes that is not a positive integer, before scanning anything", async () => {
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
+    await expect(
+      runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null, maxBytes: 0 }),
+    ).rejects.toMatchObject({ code: "input-error" })
   })
 
   it("fires --fail-on and returns EXIT.GATE", async () => {

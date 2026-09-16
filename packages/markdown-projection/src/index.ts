@@ -5,6 +5,7 @@ export {
   renderSymbolBlock,
 } from "./component"
 export {
+  type ProjectDiffOptions,
   projectDiff,
   projectDiffSummaryLine,
 } from "./diff"

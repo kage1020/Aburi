@@ -67,3 +67,27 @@ describe("CL10 — diff arguments missing", () => {
     expect(stderr.text()).toContain("--head")
   })
 })
+
+/** §6.4 — `--max-bytes` is read at argv parsing, so a typo never reaches a scan. */
+describe("diff --max-bytes", () => {
+  it("rejects a value that is not a plain byte count", async () => {
+    for (const value of ["64kb", "0", "-1", "1.5", ""]) {
+      const { stdout, stderr } = makeStreams()
+      const code = await runCli({
+        argv: ["diff", "--base", "./b.json", "--head", "./h.json", "--max-bytes", value],
+        stdout,
+        stderr,
+        env: {},
+      })
+      expect(code, `accepted --max-bytes ${JSON.stringify(value)}`).toBe(EXIT.INPUT_ERROR)
+      expect(stderr.text()).toContain("--max-bytes")
+    }
+  })
+
+  it("advertises the flag in `diff --help`, which the action probes for", async () => {
+    const { stdout, stderr } = makeStreams()
+    const code = await runCli({ argv: ["diff", "--help"], stdout, stderr, env: {} })
+    expect(code).toBe(EXIT.SUCCESS)
+    expect(stdout.text()).toContain("--max-bytes")
+  })
+})

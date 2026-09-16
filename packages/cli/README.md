@@ -33,6 +33,14 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
   substring on `Symbol.name`. Ambiguous substring hits exit 2 with the candidate
   list.
 
+## `--max-bytes`
+
+`aburi diff --max-bytes <n>` caps `diff.md` at n UTF-8 bytes by dropping whole sections,
+least-important-first, and naming them in a note under the Summary — a byte cut would leave a
+`<details>` block or a code fence open. It exists because a GitHub comment body cannot exceed
+65536 bytes and the report is written to be pasted into one: at roughly 210 bytes per symbol, a
+few hundred added symbols is enough to be refused. `diff.json` is never capped.
+
 ## `--fail-on` grammar
 
 Comma-separated clauses. Every clause supports an optional `:>N` count

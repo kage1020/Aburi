@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { afterAll, describe, expect, it } from "vitest"
-import { ABURI_COMMENT_MARKER } from "../src/comment"
+import { ABURI_COMMENT_MARKER, GITHUB_COMMENT_MAX_BYTES } from "../src/comment"
 
 const execFileAsync = promisify(execFile)
 
@@ -172,6 +172,30 @@ describe("upsert-comment.mjs", () => {
     // comment instead.
     const source = await readFile(SCRIPT, "utf8")
     expect(source).toContain(`const MARKER = "${ABURI_COMMENT_MARKER}"`)
+  })
+
+  it("measures against the same limit the library holds", async () => {
+    const source = await readFile(SCRIPT, "utf8")
+    expect(source).toContain(`const MAX_BYTES = ${GITHUB_COMMENT_MAX_BYTES}`)
+  })
+
+  it("is exit 2 on a report GitHub would reject, without posting it", async () => {
+    // The 422 this replaces says nothing about size and arrives after the list call has paged
+    // through the whole pull request. Nothing here can re-render the document — that is what
+    // `aburi diff --max-bytes` is for — so it says which file, how big, and what to do.
+    const path = await markdownFile("x".repeat(GITHUB_COMMENT_MAX_BYTES))
+    await withApi(
+      () => ({ json: [] }),
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(2)
+        expect(run.stderr).toContain("::error::")
+        expect(run.stderr).toContain("65536-byte comment limit")
+        expect(run.stderr).toContain("--max-bytes")
+        expect(run.stderr.trimEnd().split("\n")).toHaveLength(1)
+        expect(requests).toHaveLength(0)
+      },
+    )
   })
 
   it("creates the comment when no marker comment is there, prefixing the marker", async () => {

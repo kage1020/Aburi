@@ -34,6 +34,14 @@ in place instead of piling up a new one.
 | `version` | Which `@aburi/cli` version to run (`latest`, `0.1.0`, and so on). Applies to `cli: dlx`. |
 | `fail-on` | Passed to `aburi diff --fail-on`. Leave it empty to report without ever failing. |
 | `cli` | How the binary is resolved: `dlx` (default) or `workspace`. See below. |
+| `max-bytes` | Size cap for the report, in bytes. Defaults to what a GitHub comment holds; see below. |
+
+::: tip A large pull request still gets a comment
+GitHub refuses a comment body over 65536 bytes, which is about 310 added symbols' worth of
+report. The action renders to fit rather than being refused: whole sections are dropped from the
+least important end — Syntax-only first, API changes last — and a note at the top names them.
+`diff.json` keeps everything. Pass `max-bytes: 0` to turn the cap off.
+:::
 
 ::: warning `fetch-depth: 0` is required
 Aburi checks out the base revision to analyse it, and a shallow clone cannot

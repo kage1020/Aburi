@@ -208,6 +208,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--format <format>", "json | md | both", parseFormat, "both")
     .option("--fail-on <spec>", "comma-separated CI gate spec (e.g. changed,removed:>10)")
     .option("--compact", "compact JSON output")
+    .option(
+      "--max-bytes <n>",
+      "cap diff.md at n UTF-8 bytes, dropping whole sections least-important-first (GitHub rejects a comment body over 65536)",
+      parseMaxBytes,
+    )
     .option("--config <path>", "config file path")
     .action(
       (
@@ -219,6 +224,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           format?: "json" | "md" | "both"
           failOn?: string
           compact?: boolean
+          maxBytes?: number
           config?: string
         },
       ) =>
@@ -232,6 +238,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             ...(cmdOptions.format === undefined ? {} : { format: cmdOptions.format }),
             ...(cmdOptions.failOn === undefined ? {} : { failOn: cmdOptions.failOn }),
             ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
+            ...(cmdOptions.maxBytes === undefined ? {} : { maxBytes: cmdOptions.maxBytes }),
             ...withConfigPath(cmdOptions.config, env),
             warn: (message: string) => {
               stderr.write(`${message}\n`)
@@ -430,6 +437,22 @@ function withConfigPath(
 function parseFormat(value: string): "json" | "md" | "both" {
   if (value === "json" || value === "md" || value === "both") return value
   throw new InvalidArgumentError(`--format must be one of: json | md | both`)
+}
+
+/**
+ * `--max-bytes`. Parsed strictly rather than with `Number()`: `64kb` reads as `NaN` there and
+ * would reach the projection as "no cap", which is the one answer a caller passing this flag
+ * has ruled out — their comment would be posted oversized and rejected by GitHub instead.
+ */
+function parseMaxBytes(value: string): number {
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new InvalidArgumentError(`--max-bytes must be a positive integer (got "${value}")`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new InvalidArgumentError(`--max-bytes is too large to be a byte count (got "${value}")`)
+  }
+  return parsed
 }
 
 function collect(value: string, accumulator: string[]): string[] {

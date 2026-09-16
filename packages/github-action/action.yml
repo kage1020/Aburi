@@ -64,6 +64,17 @@ inputs:
     description: "Upsert the produced Markdown as a PR comment. Set to `false` to run diff only."
     required: false
     default: "true"
+  max-bytes:
+    description: >-
+      Size cap for `diff.md`, in UTF-8 bytes, forwarded as `--max-bytes`. The report drops whole
+      sections least-important-first to meet it (`docs/design/markdown-projection.md` §6.4) rather
+      than being cut mid-block, and says at the top which sections went. Left empty it is 65507:
+      GitHub rejects a comment body over 65536 bytes with a 422, and the hidden marker takes the
+      other 29. It applies whether or not this run posts the comment itself, because the artefact
+      is what a `workflow_run` companion posts for a fork's pull request. Set to `0` for no cap;
+      `diff.json` is unabridged either way.
+    required: false
+    default: ""
   token:
     description: "GitHub token used to read PR comments and create/update the marker comment."
     required: false
@@ -107,6 +118,7 @@ runs:
         FORMAT: ${{ inputs.format }}
         COMMENT: ${{ inputs.comment }}
         CLI: ${{ inputs.cli }}
+        MAX_BYTES: ${{ inputs.max-bytes }}
       run: |
         set -euo pipefail
         if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
@@ -128,6 +140,12 @@ runs:
           true|false) : ;;
           *) echo "::error::comment must be true or false (got '$COMMENT')." >&2; exit 2 ;;
         esac
+        # A non-numeric value would reach the CLI as an argument it rejects with exit 2 anyway,
+        # but only after both scans have run. `0` is the documented "no cap" spelling.
+        if [ -n "$MAX_BYTES" ] && ! printf '%s' "$MAX_BYTES" | grep -Eq '^(0|[1-9][0-9]*)$'; then
+          echo "::error::max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')." >&2
+          exit 2
+        fi
 
     - name: "Aburi: resolve refspec"
       id: refspec
@@ -181,6 +199,7 @@ runs:
         FAIL_ON: ${{ inputs.fail-on }}
         CONFIG: ${{ inputs.config }}
         CLI: ${{ inputs.cli }}
+        MAX_BYTES: ${{ inputs.max-bytes }}
       run: |
         set -euo pipefail
         args=(diff "$REFSPEC" --format "$FORMAT" --output-dir "$OUTPUT_DIR")
@@ -213,6 +232,28 @@ runs:
           runner=(node "$cli_bin")
         else
           runner=(pnpm dlx "@aburi/cli@$VERSION")
+        fi
+
+        # 65536 is GitHub's comment-body limit and the upsert prepends a 29-byte marker line,
+        # which leaves 65507 for the report (`ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`,
+        # kept in step by `test/action-yml.test.ts`). Applied even under `comment: false`, and
+        # deliberately: that is the mode a fork's pull request runs in, where the Markdown goes up
+        # as an artefact for the `workflow_run` companion to post (§5.1) — a file capped only when
+        # this job was the one posting would be rejected there instead, which is the same 422 on
+        # the one pull request whose author cannot see the companion's log. `diff.json` is
+        # uncapped, and so is `diff.md` for a caller that says `max-bytes: 0`.
+        #
+        # Asked of the CLI rather than assumed of it: `version` pins the CLI while this action is
+        # referenced by ref, so an older CLI with a newer action is the documented arrangement,
+        # and passing an option that CLI has never heard of would fail every run outright. The
+        # probe costs one `--help`; the diff beside it scans two revisions.
+        if [ "$MAX_BYTES" != "0" ]; then
+          budget="${MAX_BYTES:-65507}"
+          if "${runner[@]}" diff --help 2>/dev/null | grep -q -- "--max-bytes"; then
+            args+=(--max-bytes "$budget")
+          else
+            echo "::warning::This @aburi/cli has no --max-bytes, so diff.md is written in full. A report over 65536 bytes is rejected by GitHub when it is posted; upgrade the CLI (the 'version' input) to cap it." >&2
+          fi
         fi
 
         set +e
