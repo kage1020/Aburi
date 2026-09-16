@@ -12,6 +12,14 @@ export type CoreErrorCode =
   | "invalid-language-id"
   /** A Component id failed the ASCII kebab-case pattern required by the IR schema. */
   | "invalid-component-id"
+  /**
+   * Component autodetect finished with two components still claiming one id. Every path-based
+   * suffix was exhausted and the root digests that separate the remainder collided, so the
+   * derivation has nothing left to try; `components[]` in `aburi.json` is the way out. Raised
+   * rather than returned because `aburi init` writes its result without building an IR, so the
+   * ir-schema.md §14 #2 uniqueness invariant never gets to see it.
+   */
+  | "component-id-collision-unresolved"
   /** serializeCanonical encountered a value JSON cannot represent (function, symbol, bigint, …). */
   | "non-plain-json"
   /**

@@ -1,9 +1,9 @@
+import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "./errors"
-import { hashRawString } from "./fingerprint/hash"
 import { makeComponentId, makeLanguageId } from "./id"
 import { CORE_IGNORE_PATTERNS } from "./scan/discover"
 import { describeThrown } from "./scan/faults"
@@ -365,31 +365,33 @@ function directoryLeaf(entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRo
 
 /**
  * The id a published npm name yields, with the scope folded in rather than discarded:
- * `@alpha/utils` is `alpha-utils`, not `utils`.
+ * `@alpha/utils` is `alpha-utils`, not `utils` (component-detect.md §4.1).
  *
- * Discarding it made every `utils` in the workspace the same id and left the collision passes
- * to tell them apart, which the most common layout cannot do: with every package directly
- * under `packages/`, the parent suffix is `-packages` for all of them and the tie-break fell
- * to a positional counter. Adding `@alpha/utils` then renumbered `@beta/utils` and
- * `@gamma/utils` behind it, and since the id keys `Symbol.component`, both `Dependency`
- * endpoints and cross-revision comparison, one new package read as "every component was
- * replaced". The scope is the part of the name that already distinguishes them, so it belongs
- * in the id.
+ * Three answers, and the difference between the last two is what §4.1 means by a priority over
+ * *sources*:
  *
- * An unscoped name is unchanged, and `@scope/` — a name §4.2 can use and §4.1 cannot — is
- * still `null` so the next manifest is asked. A name that kebab-cases to nothing is *not*
- * null: it is an answer that cannot be an id, and `componentIdOrThrow` says so rather than
- * silently taking the directory name.
+ * - `null` — this name says nothing §4.1 can use, so the next manifest is asked. `@scope/`
+ *   and a bare `@scope` are that: §4.2 has a name, §4.1 has none.
+ * - `""` — this name is the answer, and it cannot be an id. `componentIdOrThrow` says so and
+ *   names the package, rather than falling through to the directory.
+ * - anything else — the id.
+ *
+ * The bare part is kebab-cased on its own before the scope is prepended, so a name the
+ * grammar cannot express stays the second case. Folded in one pass it would not: `toKebabCase`
+ * drops the trailing hyphen, so `@acme/---` and a scope-plus-non-ASCII name would both come
+ * back as `acme` — the scope alone, silently, and identical for every unusable name in that
+ * scope.
  */
 function toIdFromNpmName(npmName: string): string | null {
   if (npmName.length === 0) return null
   if (!npmName.startsWith("@")) return toKebabCase(npmName)
   const slash = npmName.indexOf("/")
   if (slash < 0) return null
-  const scope = npmName.slice(1, slash)
   const bare = npmName.slice(slash + 1)
   if (bare.length === 0) return null
-  return toKebabCase(`${scope}-${bare}`)
+  const kebabBare = toKebabCase(bare)
+  if (kebabBare.length === 0) return ""
+  return toKebabCase(`${npmName.slice(1, slash)}-${kebabBare}`)
 }
 
 function toKebabCase(input: string): string {
@@ -645,44 +647,47 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
 }
 
 /**
- * Guarantee Component.id uniqueness with suffixes that depend only on the component itself.
+ * Guarantee Component.id uniqueness, order-independently (component-detect.md §4.1).
  *
  * 1. Walk up `roots[0]`, one ancestor directory at a time, suffixing every id that is still
- *    shared (`shared` at `apps/shared` and `libs/shared` becomes `shared-apps` /
- *    `shared-libs`; `pkg` at `team1/shared/pkg` and `team2/shared/pkg` needs the second step
- *    up and becomes `pkg-shared-team1` / `pkg-shared-team2`). A suffix that lands on another
- *    already-unique id puts that one in the next round's group, so it moves too.
- * 2. Whatever the path cannot separate — two roots whose ancestors all kebab-case to nothing,
- *    or the workspace root, which has no ancestors at all — takes a short hash of `roots[0]`.
+ *    shared, until each is unique or its root has no ancestors left.
+ * 2. Whatever the path could not separate takes a hash of `roots[0]` on top of the id it
+ *    reached.
+ * 3. Refuse to hand back a duplicate. Only a hash collision reaches this, and the caller it
+ *    protects is `aburi init`, which writes `components[]` without ever building an IR — so
+ *    the §14 #2 integrity check downstream never sees it.
  *
- * Every suffix is a function of that component's own base id and root, never of its position
- * in the list. The `-2`, `-3`, … counter this replaces was the opposite: it handed the tail
- * out in root order, so inserting `@alpha/utils` ahead of `@beta/utils` and `@gamma/utils`
- * demoted both of them by one. Component id keys `Symbol.component`, both `Dependency`
- * endpoints and cross-revision comparison, so that renumbering read downstream as every
- * component having been replaced.
+ * What the passes never read is a component's position in the list. `taken` does depend on
+ * the set of ids a component contends with — a package that arrives claiming an id in use
+ * moves someone — but that is a contended id rather than, as before, any package under the
+ * same parent renumbering its neighbours.
  */
 function resolveIdCollisions(components: Component[]): Component[] {
   applyAncestorSuffixPass(components)
   applyRootHashPass(components)
+  assertIdsUnique(components)
   return components
 }
 
 /**
- * How many hex characters of the root hash the last-resort suffix carries. Short enough to
- * stay readable in an id, and the space it has to separate is the handful of components in
- * one workspace whose whole path chain kebab-cases to the same thing.
+ * How many hex characters of the root digest the last-resort suffix carries. Short enough to
+ * stay readable in an id, against a space that is the handful of components in one workspace
+ * whose whole path chain kebab-cases to the same thing. `assertIdsUnique` covers the rest.
  */
 const ROOT_HASH_LENGTH = 8
 
 /** A component's id while the ancestor pass is deciding how much of its path it needs. */
 interface IdCandidate {
-  component: Component
+  readonly component: Component
   /** The id §4.1 derived, before any suffix. */
-  base: ComponentId
+  readonly base: ComponentId
   /** Ancestor directory segments of `roots[0]`, nearest first. */
-  ancestors: string[]
-  /** How many of them the current id carries. */
+  readonly ancestors: readonly string[]
+  /**
+   * How many of them this round has consumed — not how many the id carries. A segment that
+   * kebab-cases to nothing is consumed and contributes no suffix, which is exactly how a
+   * round can advance without changing an id.
+   */
   taken: number
 }
 
@@ -724,8 +729,29 @@ function applyRootHashPass(components: Component[]): void {
   for (const group of groupBy(components, (component) => component.id).values()) {
     if (group.length <= 1) continue
     for (const component of group) {
-      component.id = makeComponentId(`${component.id}-${rootHash(component.roots[0] ?? "")}`)
+      component.id = hashedId(component.id, component.roots[0] ?? "")
     }
+  }
+}
+
+/**
+ * The exit check the passes above cannot make for themselves.
+ *
+ * `applyRootHashPass` separates a group by digest rather than by construction, so uniqueness
+ * is overwhelmingly likely rather than certain. Where the result becomes an IR, invariant
+ * §14 #2 catches a duplicate; `aburi init` writes `components[]` straight to `aburi.json` and
+ * builds no IR, so without this it would persist the duplicate and report success.
+ */
+function assertIdsUnique(components: readonly Component[]): void {
+  for (const [id, group] of groupBy(components, (component) => component.id)) {
+    if (group.length <= 1) continue
+    const roots = group.map((component) => component.roots[0] ?? "?").join(", ")
+    throw new CoreError(
+      `Component id "${id}" is claimed by more than one component (${roots}) and collision ` +
+        `resolution could not separate them. Declare these components explicitly under ` +
+        `components[] in aburi.json.`,
+      { code: "component-id-collision-unresolved", value: id },
+    )
   }
 }
 
@@ -752,11 +778,16 @@ function suffixedId(base: ComponentId, ancestors: readonly string[], taken: numb
 }
 
 /**
- * A short digest of a component root, NFC-normalized first so the same directory hashes the
- * same way whatever spelling the filesystem handed back (ir-schema.md §1.2).
+ * `id` with a digest of `root` appended. Its own SHA-256 rather than `hashRawString`: that
+ * one is the fingerprint path, whose width is chosen for a different question, and an id
+ * respelled by a fingerprint constant moving would be a change nobody was making.
+ *
+ * `root` is already NFC — `toRelativePosix` normalizes it, which is what lets `withinRoot`
+ * compare roots against walk output raw — so the digest is of the same bytes on every machine.
  */
-function rootHash(root: string): string {
-  return hashRawString(root.normalize("NFC")).slice(0, ROOT_HASH_LENGTH)
+function hashedId(id: ComponentId, root: string): ComponentId {
+  const digest = createHash("sha256").update(root, "utf8").digest("hex")
+  return makeComponentId(`${id}-${digest.slice(0, ROOT_HASH_LENGTH)}`)
 }
 
 function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
@@ -774,10 +805,18 @@ function compareString(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Internal: surfaced for tests that want to verify the kebab transformer. */
+/**
+ * Internal: surfaced for tests that want a derivation on its own.
+ *
+ * `resolveIdCollisions` is here because the alternative is reaching it through a tmpdir of
+ * seeded files: it is the one pass whose interesting cases are about *which* components exist
+ * together, and a table of them should cost a line each. It mutates the components handed to
+ * it and returns the same array.
+ */
 export const __testing = {
   toIdFromNpmName,
   toKebabCase,
   collectFrameworks,
   collectPublicApi,
+  resolveIdCollisions,
 }
