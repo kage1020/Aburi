@@ -17,7 +17,7 @@ import type {
   SymbolUnknown,
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
-import { compareStrings, inlineCodeValue, isSymbolIdEndpoint, requireDropReason } from "./format"
+import { compareStrings, inlineCode, isSymbolIdEndpoint, requireDropReason } from "./format"
 
 /**
  * §6 — `out/diff.md`. Sections are emitted in the fixed importance order
@@ -204,8 +204,8 @@ function renderChangedList(items: readonly (SymbolChanged | SymbolMovedChanged)[
   const rows: string[] = []
   for (const item of sortByAfterId(items)) {
     const sym = item.after
-    rows.push(`### \`${sym.name}\` *(${sym.kind})*`)
-    rows.push(`**File**: \`${sym.source.file}:${sym.source.startLine}\``)
+    rows.push(`### ${inlineCode(sym.name)} *(${sym.kind})*`)
+    rows.push(`**File**: ${inlineCode(`${sym.source.file}:${sym.source.startLine}`)}`)
     rows.push("")
     rows.push(...renderDeltaBody(item.delta))
     rows.push("")
@@ -263,7 +263,7 @@ function appendSignatureDelta(
   if (sig.outputs.added.length > 0 || sig.outputs.removed.length > 0) {
     const before = renderStringList(sig.outputs.removed)
     const after = renderStringList(sig.outputs.added)
-    rows.push(`- signature.outputs: \`${before}\` → \`${after}\``)
+    rows.push(`- signature.outputs: ${inlineCode(before)} → ${inlineCode(after)}`)
   }
   appendInlineRow(rows, "signature.outputs modified", sig.outputs.modified)
   appendInlineRow(rows, "signature.throws added", sig.throws.added)
@@ -299,17 +299,17 @@ function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]):
   for (const raw of delta.added) {
     const d = asDecoratorLike(raw)
     if (d === null) continue
-    rows.push(`- decorator added: \`@${d.raw ?? d.name}\``)
+    rows.push(`- decorator added: ${inlineCode(`@${d.raw ?? d.name}`)}`)
   }
   for (const raw of delta.removed) {
     const d = asDecoratorLike(raw)
     if (d === null) continue
-    rows.push(`- decorator removed: \`@${d.raw ?? d.name}\``)
+    rows.push(`- decorator removed: ${inlineCode(`@${d.raw ?? d.name}`)}`)
   }
   for (const raw of delta.modified) {
     const d = asDecoratorLike(raw)
     if (d === null) continue
-    rows.push(`- decorator modified: \`@${d.name}\``)
+    rows.push(`- decorator modified: ${inlineCode(`@${d.name}`)}`)
   }
 }
 
@@ -427,24 +427,34 @@ function asCallLike(value: unknown): CallLike | null {
   return { target, line }
 }
 
+/**
+ * The delta's own rule row, which is not `ruleRow`: it renders a bucket entry nested under
+ * `- rules added:`, one list level below the per-Symbol view.
+ *
+ * It stays inline however long the condition is. `ruleRow` breaks out to a fenced block above
+ * `INLINE_CODE_MAX_LENGTH`, and a fence can live in a list item, but this row is already the
+ * child of one — the block would have to be indented to the grandchild's column to stay put,
+ * and a delta bucket lists the rules that moved rather than showing each in full. A widened
+ * code span holds any condition on one line, which is what this row wants anyway.
+ */
 function describeRuleLike(value: unknown): string | null {
   const rule = asRuleLike(value)
   if (rule === null) return null
   const detail = rule.condition ?? rule.what ?? rule.expr
-  const detailPart = detail === undefined ? "" : `: \`${detail}\``
+  const detailPart = detail === undefined ? "" : `: ${inlineCode(detail)}`
   return `${rule.type}${detailPart} (L${rule.line})`
 }
 
 function describeEffectLike(value: unknown): string | null {
   const eff = asEffectLike(value)
   if (eff === null) return null
-  return `${eff.id}: \`${eff.target}\` (L${eff.line})`
+  return `${eff.id}: ${inlineCode(eff.target)} (L${eff.line})`
 }
 
 function describeCallLike(value: unknown): string | null {
   const c = asCallLike(value)
   if (c === null) return null
-  return `\`${c.target}\` (L${c.line})`
+  return `${inlineCode(c.target)} (L${c.line})`
 }
 
 /**
@@ -462,7 +472,7 @@ function describeInputs(items: readonly unknown[]): string {
       if (!isRecord(value)) return null
       const { name, type } = value
       if (typeof name !== "string" || typeof type !== "string") return null
-      return `\`${name}: ${type}\``
+      return inlineCode(`${name}: ${type}`)
     })
     .filter((line): line is string => line !== null)
   return rendered.length > 0 ? rendered.join(", ") : `${items.length} item(s)`
@@ -476,7 +486,7 @@ function renderStringList(values: readonly unknown[]): string {
 function renderInlineList(values: readonly unknown[]): string {
   return values
     .filter((v): v is string => typeof v === "string")
-    .map((s) => `\`${s}\``)
+    .map((s) => inlineCode(s))
     .join(", ")
 }
 
@@ -497,8 +507,8 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
   if (symbols.length === 0) return []
   const rows: string[] = []
   for (const s of [...symbols].sort((a, b) => compareStrings(a.id, b.id))) {
-    rows.push(`### \`${s.name}\` *(${s.kind})*`)
-    rows.push(`**File**: \`${s.source.file}:${s.source.startLine}\``)
+    rows.push(`### ${inlineCode(s.name)} *(${s.kind})*`)
+    rows.push(`**File**: ${inlineCode(`${s.source.file}:${s.source.startLine}`)}`)
     rows.push(...renderSymbolBlock(s).slice(1))
     rows.push("")
   }
@@ -522,8 +532,8 @@ function renderUnknown(items: readonly SymbolUnknown[]): string[] {
   const rows: string[] = []
   for (const item of [...items].sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))) {
     const s = item.symbol
-    rows.push(`### \`${s.name}\` *(${s.kind})*`)
-    rows.push(`**File**: \`${s.source.file}:${s.source.startLine}\``)
+    rows.push(`### ${inlineCode(s.name)} *(${s.kind})*`)
+    rows.push(`**File**: ${inlineCode(`${s.source.file}:${s.source.startLine}`)}`)
     rows.push(`**Why**: ${unknownExplanation(item)}`)
     rows.push(...renderSymbolBlock(s).slice(1))
     rows.push("")
@@ -534,7 +544,7 @@ function renderUnknown(items: readonly SymbolUnknown[]): string[] {
 function unknownExplanation(item: SymbolUnknown): string {
   const side = item.absentFrom
   const fate = side === "head" ? "may still exist" : "may not be new"
-  return `the ${side} scan skipped \`${item.symbol.source.file}\` (${item.reason}), so this Symbol ${fate}`
+  return `the ${side} scan skipped ${inlineCode(item.symbol.source.file)} (${item.reason}), so this Symbol ${fate}`
 }
 
 /**
@@ -559,7 +569,7 @@ function renderNotCompared(files: readonly NotComparedFile[]): string[] {
       file.baseReason === file.headReason
         ? `${file.baseReason} on both`
         : `${file.baseReason} at base, ${file.headReason} at head`
-    rows.push(`- \`${file.path}\` — ${reasons}`)
+    rows.push(`- ${inlineCode(file.path)} — ${reasons}`)
   }
   rows.push("")
   return rows
@@ -569,9 +579,9 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   if (items.length === 0) return []
   const rows: string[] = []
   for (const item of sortByAfterId(items)) {
-    rows.push(`### \`${item.after.name}\` *(${item.after.kind})*`)
+    rows.push(`### ${inlineCode(item.after.name)} *(${item.after.kind})*`)
     rows.push(
-      `**Moved**: \`${item.before.source.file}\` → \`${item.after.source.file}\` (\`${item.rationale}\`)`,
+      `**Moved**: ${inlineCode(item.before.source.file)} → ${inlineCode(item.after.source.file)} (${inlineCode(item.rationale)})`,
     )
     rows.push("**Delta**:")
     rows.push(...renderDeltaBody(item.delta))
@@ -586,7 +596,7 @@ function renderMoved(items: readonly SymbolMoved[]): string[] {
     .sort((a, b) => compareStrings(a.after.id, b.after.id))
     .map(
       (m) =>
-        `- \`${m.after.name}\`: \`${m.before.source.file}\` → \`${m.after.source.file}\` (\`${m.rationale}\`)`,
+        `- ${inlineCode(m.after.name)}: ${inlineCode(m.before.source.file)} → ${inlineCode(m.after.source.file)} (${inlineCode(m.rationale)})`,
     )
 }
 
@@ -598,14 +608,14 @@ function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] 
   if (toDropped.length > 0) {
     rows.push(`**${toDropped.length} to-dropped**`)
     for (const i of toDropped.sort((a, b) => compareStrings(a.after.id, b.after.id))) {
-      rows.push(`- \`${i.after.id}\` — ${requireDropReason(i.after)}`)
+      rows.push(`- ${inlineCode(i.after.id)} — ${requireDropReason(i.after)}`)
     }
   }
   if (toKept.length > 0) {
     if (rows.length > 0) rows.push("")
     rows.push(`**${toKept.length} to-kept**`)
     for (const i of toKept.sort((a, b) => compareStrings(a.after.id, b.after.id))) {
-      rows.push(`- \`${i.after.id}\``)
+      rows.push(`- ${inlineCode(i.after.id)}`)
     }
   }
   return rows
@@ -614,7 +624,8 @@ function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] 
 function renderSyntaxOnly(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
   if (items.length === 0) return []
   return sortByAfterId(items).map(
-    (i) => `- \`${i.after.name}\` (\`${i.after.source.file}:${i.after.source.startLine}\`)`,
+    (i) =>
+      `- ${inlineCode(i.after.name)} (${inlineCode(`${i.after.source.file}:${i.after.source.startLine}`)})`,
   )
 }
 
@@ -673,7 +684,7 @@ function renderSliceView(
         )
       }
       const label = renderSingletonLabel(memberId, slice.id, changeById)
-      rows.push(`- \`${slice.id}\` — ${label}`)
+      rows.push(`- ${inlineCode(slice.id)} — ${label}`)
     }
     rows.push("")
     rows.push("</details>")
@@ -694,13 +705,13 @@ function renderSliceSection(
   changeById: ReadonlyMap<SymbolId, SymbolChange>,
 ): string[] {
   const rows: string[] = []
-  rows.push(`### \`${slice.id}\` (${slice.members.length} members)`)
+  rows.push(`### ${inlineCode(slice.id)} (${slice.members.length} members)`)
   rows.push("")
   for (const memberId of slice.members) {
     const change = requireChangeForMember(memberId, slice.id, changeById)
     const symbol = symbolForMember(change)
-    rows.push(`- \`${symbol.name}\` — *(${change.status})*`)
-    rows.push(`  **File**: \`${symbol.source.file}:${symbol.source.startLine}\``)
+    rows.push(`- ${inlineCode(symbol.name)} — *(${change.status})*`)
+    rows.push(`  **File**: ${inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)}`)
     rows.push(`  ↳ ${renderMemberFollowup(change)}${unresolvedCallMarker(symbol)}`)
   }
   rows.push("")
@@ -767,7 +778,7 @@ function renderSingletonLabel(
 ): string {
   const change = requireChangeForMember(memberId, sliceId, changeById)
   const symbol = symbolForMember(change)
-  return `\`${symbol.name}\` *(${change.status})*${unresolvedCallMarker(symbol)}`
+  return `${inlineCode(symbol.name)} *(${change.status})*${unresolvedCallMarker(symbol)}`
 }
 
 /**
@@ -823,7 +834,7 @@ function renderMemberFollowup(change: SymbolChange): string {
     case "removed":
       return "removed symbol"
     case "moved":
-      return `moved: \`${change.before.source.file}\` → \`${change.after.source.file}\``
+      return `moved: ${inlineCode(change.before.source.file)} → ${inlineCode(change.after.source.file)}`
     case "changed":
     case "moved+changed":
       return deltaAxisSummary(change.delta)
@@ -871,14 +882,14 @@ function renderComponentChanges(diff: DiffResult): string[] {
   if (diff.components.added.length > 0) {
     rows.push("### Added")
     for (const c of [...diff.components.added].sort((a, b) => compareStrings(a.id, b.id))) {
-      rows.push(`- \`${c.id}\` — roots: ${c.roots.map((r) => `\`${r}\``).join(", ")}`)
+      rows.push(`- ${inlineCode(c.id)} — roots: ${c.roots.map((r) => inlineCode(r)).join(", ")}`)
     }
     rows.push("")
   }
   if (diff.components.removed.length > 0) {
     rows.push("### Removed")
     for (const c of [...diff.components.removed].sort((a, b) => compareStrings(a.id, b.id))) {
-      rows.push(`- \`${c.id}\``)
+      rows.push(`- ${inlineCode(c.id)}`)
     }
     rows.push("")
   }
@@ -891,7 +902,9 @@ function renderComponentChanges(diff: DiffResult): string[] {
       // the sweep's normalization recognises. Naming the component alone is the honest row —
       // the artifact counted a change this renderer cannot describe.
       rows.push(
-        fields.length === 0 ? `- \`${ch.after.id}\`` : `- \`${ch.after.id}\`: ${fields.join(", ")}`,
+        fields.length === 0
+          ? `- ${inlineCode(ch.after.id)}`
+          : `- ${inlineCode(ch.after.id)}: ${fields.join(", ")}`,
       )
     }
     rows.push("")
@@ -910,7 +923,7 @@ function renderComponentChanges(diff: DiffResult): string[] {
  * as a row whose colon is followed by nothing. Both halves moved together for that reason.
  *
  * Scalars carry their before → after inline, because that *is* the change, through a code span
- * no value can break out of (`inlineCodeValue`): both are free-form user text out of the config
+ * no value can break out of (`inlineCode`): both are free-form user text out of the config
  * file, and this row reaches a PR comment body through `@aburi/github-action`. The list-valued
  * fields name themselves and leave the values to the artifact, which is what the surrounding
  * section has always done. A comma inside a scalar is why the values are spanned rather than
@@ -994,7 +1007,7 @@ function renderDescription(description: string | null): string {
 
 /** A free-form scalar as a row cell. Empty is spelled, because an empty code span is not one. */
 function renderValue(value: string): string {
-  return value === "" ? "(empty)" : inlineCodeValue(value)
+  return value === "" ? "(empty)" : inlineCode(value)
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
@@ -1038,7 +1051,7 @@ function appendDependencyGroup(rows: string[], heading: string, deps: readonly D
   if (deps.length === 0) return
   rows.push(`### ${heading}`)
   for (const d of deps) {
-    rows.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
+    rows.push(`- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})`)
   }
   rows.push("")
 }
@@ -1056,9 +1069,9 @@ function appendUnknownDependencies(rows: string[], unknown: readonly DependencyU
   rows.push("### Unknown — the other revision never read one end")
   for (const entry of unknown) {
     const d = entry.dependency
-    const lost = entry.lostFiles.map((f) => `\`${f.path}\` (${f.reason})`).join(", ")
+    const lost = entry.lostFiles.map((f) => `${inlineCode(f.path)} (${f.reason})`).join(", ")
     rows.push(
-      `- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`) — the ${entry.absentFrom} scan skipped ${lost}`,
+      `- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)}) — the ${entry.absentFrom} scan skipped ${lost}`,
     )
   }
   rows.push("")

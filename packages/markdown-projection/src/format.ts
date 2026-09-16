@@ -32,49 +32,111 @@ export function confidenceBadge(value: Confidence): string {
  * pure formatting.
  */
 export function inlineCodePath(path: string): string {
-  return `\`${path}\``
+  return inlineCode(path)
 }
 
 /**
  * §3.4 — inline vs. fenced choice. Anything ≤ `INLINE_CODE_MAX_LENGTH` and single-line
  * uses backticks; multiline strings ALWAYS render as fenced blocks so the newline
  * survives GitHub's Markdown pass without being folded into a single line.
+ *
+ * Both branches size their fence to the value: the inline one through `inlineCode`, the
+ * block one through `fencedBlock`. A fixed three-backtick opener closes early on source
+ * that itself contains a fence — a code sample inside a doc comment is enough — and the
+ * remainder of the fragment lands in the document as Markdown.
  */
 export function codeFragment(source: string, options: { forceFence?: boolean } = {}): string {
   const multiline = source.includes("\n")
   const forceFence = options.forceFence ?? false
   if (!forceFence && !multiline && source.length <= INLINE_CODE_MAX_LENGTH) {
-    return `\`${source}\``
+    return inlineCode(source)
   }
-  return `\n\`\`\`\n${source}\n\`\`\`\n`
+  return `\n${fencedBlock(source)}\n`
 }
 
 /**
- * §3.4's sibling for a value that has to stay *inside* one list row: arbitrary user text — a
- * Component's display name or description, which `aburi.config.v1` constrains to `minLength: 1`
- * and to nothing at all respectively — rendered as a code span no value can break out of.
+ * A fenced block whose opener clears the longest backtick run inside the source, and
+ * whose every line — fences included — carries `indent`.
  *
- * `codeFragment` is the wrong tool one row down. It escapes to a fenced block, which ends the
- * list item it sits in, and its fixed single backtick lets a value containing one close the span
- * early and spill the rest of the row into prose. So: every newline run collapses to a single
- * space, because the row is one line by construction, and the fence is one backtick longer than
- * the longest run inside the value. The space padding is CommonMark's own rule — a span whose
- * content opens or closes with a backtick or a space has one stripped from each end — so the
- * value renders as written rather than a character short.
+ * The indent is what keeps a fence inside the list item that introduced it: CommonMark
+ * ends a list item at the first non-blank line indented less than the item's content, so
+ * a column-0 fence under `- guard:` closes the list rather than nesting in it. The same
+ * prefix on the content lines is stripped back off at render time, because a fenced
+ * block drops up to as much leading whitespace as its opening fence carried.
+ */
+export function fencedBlock(source: string, indent = ""): string {
+  const fence = "`".repeat(Math.max(MIN_BLOCK_FENCE, longestBacktickRun(source) + 1))
+  const body = source
+    .split(/\r?\n/)
+    .map((line) => `${indent}${line}`)
+    .join("\n")
+  return `${indent}${fence}\n${body}\n${indent}${fence}`
+}
+
+/** CommonMark's own minimum; `fencedBlock` only ever goes above it. */
+const MIN_BLOCK_FENCE = 3
+
+/** Two spaces: the content column of a `- ` list item. */
+const LIST_ITEM_INDENT = "  "
+
+/**
+ * GFM resolves table cells before it parses inlines, so an unescaped `|` opens a column
+ * the header row never declared and every cell after it shifts left — including inside a
+ * code span, where a reader would expect the pipe to be literal. `\|` is the one escape
+ * the table parser honours there, and it survives into the span as a bare pipe.
+ *
+ * A newline would end the row outright; `<br>` is GFM's in-cell line break, and matches
+ * what the call-resolution table already uses to stack candidates.
+ *
+ * Takes rendered cell content, not a raw value — wrap in `inlineCode` first, then escape,
+ * so the pipe inside the span is escaped too.
+ */
+export function tableCell(text: string): string {
+  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>")
+}
+
+function longestBacktickRun(text: string): number {
+  let longest = 0
+  for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length)
+  return longest
+}
+
+/**
+ * The one way this package embeds a value in a code span. Every row that shows a fragment of
+ * somebody's source — a condition, an effect target, a call target, a path, a display name —
+ * goes through here, because every one of those values can contain a backtick and a hand-written
+ * `` `${value}` `` has no answer for it.
+ *
+ * A one-backtick span closes at the next one-backtick run, so a template literal —
+ * `` key === `x-${plugin}:write` `` — splits the span and spills its interior into the
+ * surrounding prose as Markdown. The fence is therefore one backtick longer than the longest run
+ * inside the value, which is the CommonMark rule for embedding backticks rather than a trick.
+ * The space padding is the same section's other half: a span whose content opens or closes with a
+ * backtick or a space has one space stripped from each end, so the padding is what makes the
+ * value render as written rather than a character short.
+ *
+ * Every newline run collapses to a single space, because a code span is one row by construction.
+ * A value that deserves its own block is `codeFragment`'s, not this function's — a fenced block
+ * cannot sit mid-row, and one that tries ends the list item it was written into.
  *
  * The empty string gets no span: `` renders as two literal backticks, not as an empty one. A
  * caller with a field that can be empty says so in words instead.
  */
-export function inlineCodeValue(value: string): string {
+export function inlineCode(value: string): string {
   const collapsed = value.replace(/\s*\r?\n\s*/g, " ")
   if (collapsed.length === 0) return ""
-  let longestRun = 0
-  for (const run of collapsed.match(/`+/g) ?? []) longestRun = Math.max(longestRun, run.length)
-  const fence = "`".repeat(longestRun + 1)
+  const fence = "`".repeat(longestBacktickRun(collapsed) + 1)
   const edge = `${collapsed.at(0)}${collapsed.at(-1)}`
   const pad = edge.includes("`") || edge.includes(" ") ? " " : ""
   return `${fence}${pad}${collapsed}${pad}${fence}`
 }
+
+/**
+ * The name this helper carried while the diff's component rows were its only caller.
+ *
+ * @deprecated Use `inlineCode`; this alias stays for consumers pinned to the old name.
+ */
+export const inlineCodeValue = inlineCode
 
 /**
  * Read the `dropReason` off a dropped Symbol. The IR schema (aburi.ir.v1) enforces
@@ -152,7 +214,7 @@ export function splitDecorators(decorators: readonly Decorator[]): DecoratorList
 }
 
 export function renderDecoratorList(decorators: readonly Decorator[]): string {
-  return decorators.map((d) => `\`@${d.raw}\``).join(" ")
+  return decorators.map((d) => inlineCode(`@${d.raw}`)).join(" ")
 }
 
 /**
@@ -172,7 +234,7 @@ export function signatureLine(signature: Signature | null | undefined): string |
   const genBadge = signature.generator ? " *generator*" : ""
   const typeParams =
     signature.typeParameters.length > 0 ? `<${signature.typeParameters.join(",")}>` : ""
-  return `\`${typeParams}(${inputs}) → ${outputs}\`${throwsPart}${asyncBadge}${genBadge}`
+  return `${inlineCode(`${typeParams}(${inputs}) → ${outputs}`)}${throwsPart}${asyncBadge}${genBadge}`
 }
 
 /**
@@ -185,27 +247,62 @@ export function signatureLine(signature: Signature | null | undefined): string |
  * `switch` exhaustiveness is enforced by the trailing `never` branch — adding a new
  * `RuleType` to the schema will produce a compile error here instead of a silent
  * "plain `<type>` (L<line>)" fallback.
+ *
+ * A value long enough to fence returns a multi-line row: `payloadRow` moves the line tag up
+ * and indents the block under the item. See there for why the compact row cannot hold one.
  */
 export function ruleRow(rule: Rule): string {
   const lineTag = `(L${rule.line})`
   switch (rule.type) {
     case "guard":
-      return `- guard: ${inlineOrFence(requireField(rule, "condition"))} ${lineTag}`
+      return payloadRow("guard", requireField(rule, "condition"), rule.line)
     case "throw":
-      return `- throw: ${inlineOrFence(requireField(rule, "what"))} ${lineTag}`
+      return payloadRow("throw", requireField(rule, "what"), rule.line)
     case "return":
-      return `- return: ${inlineOrFence(requireField(rule, "expr"))} ${lineTag}`
+      return payloadRow("return", requireField(rule, "expr"), rule.line)
     case "loop":
-      return `- loop (\`${requireField(rule, "loopKind")}\`) ${lineTag}`
+      return `- loop (${inlineCode(requireField(rule, "loopKind"))}) ${lineTag}`
     case "try":
       return `- try ${lineTag}`
     case "switch":
-      return `- switch: ${inlineOrFence(requireField(rule, "condition"))} ${lineTag}`
+      return payloadRow("switch", requireField(rule, "condition"), rule.line)
     case "match":
-      return `- match: ${inlineOrFence(requireField(rule, "condition"))} ${lineTag}`
+      return payloadRow("match", requireField(rule, "condition"), rule.line)
     default:
       return assertNeverRule(rule)
   }
+}
+
+/**
+ * One rule row, in whichever of its two shapes the payload fits.
+ *
+ * `- guard: <code> (L5)` is the row §5.6 documents and the one nearly every rule takes.
+ * It cannot hold a fenced block: the fence would open at column 0 in the middle of the
+ * item, which CommonMark reads as the end of the list — the `(L5)` after it becomes a
+ * paragraph of its own and the rules below it restart as a second list. And a fence is
+ * exactly what a condition over `INLINE_CODE_MAX_LENGTH` asks for; a boolean guard that
+ * long is routine, the IR truncates only past 120 characters.
+ *
+ * So a payload that fences takes the second shape, with the line tag moved ahead of the
+ * colon — the block has to be last — and the fence indented into the item:
+ *
+ * ```md
+ * - guard (L3):
+ *   ```
+ *   user.role === 'admin' && flags.enabled && !session.expired
+ *   ```
+ * ```
+ *
+ * The empty payload keeps the literal `` `` `` the row has always shown for it. It is not a
+ * value the schema admits, and a row that renders nothing after its colon would say less
+ * about the upstream bug than two backticks do.
+ */
+function payloadRow(label: string, value: string, line: number): string {
+  if (value === "") return `- ${label}: \`\` (L${line})`
+  if (!value.includes("\n") && value.length <= INLINE_CODE_MAX_LENGTH) {
+    return `- ${label}: ${inlineCode(value)} (L${line})`
+  }
+  return `- ${label} (L${line}):\n${fencedBlock(value, LIST_ITEM_INDENT)}`
 }
 
 /**
@@ -241,11 +338,6 @@ function assertNeverRule(rule: Rule): never {
   throw new ProjectionInvariantError("type", `Rule(type=${JSON.stringify(exhaustive)})`)
 }
 
-function inlineOrFence(text: string): string {
-  if (text.length === 0) return "``"
-  return codeFragment(text)
-}
-
 /**
  * §5.7 — Effect row. Format: `- <id>: \`<target>\` (L<line>) [<plugin>]<confidence-badge>`.
  * Extension effects (`x-<plugin>:<name>`) use the same shape — no special-casing needed
@@ -258,9 +350,9 @@ function inlineOrFence(text: string): string {
 export function effectRow(eff: Effect): string {
   if (eff.propagated === true) {
     const derivedFrom = (eff.derivedFrom ?? []).join(", ")
-    return `- ${eff.id}: \`${eff.target}\` [propagated from ${derivedFrom}] [${eff.plugin}]${confidenceBadge(eff.confidence)}`
+    return `- ${eff.id}: ${inlineCode(eff.target)} [propagated from ${derivedFrom}] [${eff.plugin}]${confidenceBadge(eff.confidence)}`
   }
-  return `- ${eff.id}: \`${eff.target}\` (L${eff.line}) [${eff.plugin}]${confidenceBadge(eff.confidence)}`
+  return `- ${eff.id}: ${inlineCode(eff.target)} (L${eff.line}) [${eff.plugin}]${confidenceBadge(eff.confidence)}`
 }
 
 /**
@@ -270,7 +362,7 @@ export function effectRow(eff: Effect): string {
  * resolved id here now would create PR churn when that scheme lands.
  */
 export function callRow(callObj: Call): string {
-  return `- \`${callObj.target}\` (L${callObj.line})`
+  return `- ${inlineCode(callObj.target)} (L${callObj.line})`
 }
 
 /**
@@ -280,7 +372,7 @@ export function callRow(callObj: Call): string {
  */
 export function fingerprintLine(fp: Fingerprint): string | null {
   if (isZeroFingerprint(fp)) return null
-  return `<sub>api=\`${fp.api}\` logic=\`${fp.logic}\` syntax=\`${fp.syntax}\`</sub>`
+  return `<sub>api=${inlineCode(fp.api)} logic=${inlineCode(fp.logic)} syntax=${inlineCode(fp.syntax)}</sub>`
 }
 
 function isZeroFingerprint(fp: Fingerprint): boolean {
@@ -294,7 +386,7 @@ const ZERO = "000000000000"
  * kind combo is enough for readers scanning the file.
  */
 export function symbolHeading(symbol: IRSymbol): string {
-  return `#### \`${symbol.name}\` *(${symbol.kind})*`
+  return `#### ${inlineCode(symbol.name)} *(${symbol.kind})*`
 }
 
 /**

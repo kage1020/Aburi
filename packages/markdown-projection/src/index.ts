@@ -28,8 +28,10 @@ export {
   decoratorRows,
   droppedFoldout,
   effectRow,
+  fencedBlock,
   fingerprintLine,
   INLINE_CODE_MAX_LENGTH,
+  inlineCode,
   inlineCodePath,
   inlineCodeValue,
   isSymbolIdEndpoint,
@@ -42,6 +44,7 @@ export {
   signatureLine,
   splitDecorators,
   symbolHeading,
+  tableCell,
 } from "./format"
 export {
   assignSymbolFilenames,

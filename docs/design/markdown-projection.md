@@ -78,6 +78,29 @@ The ordering conventions match the JSON side (ir-schema §1). If the projection 
 | > 80 chars or multiline | fenced code block (no language hint) |
 | Original canonical string exceeds 120 chars | already truncated with a trailing `...` at the IR stage ([`fingerprint.md`](./fingerprint.md) §2.2), so used as-is |
 
+Both forms size their fence to the value rather than assuming one. A code span opens and
+closes with one more backtick than the longest run inside it, and pads with a space at each
+end when the value itself starts or ends with a backtick or a space — CommonMark strips one
+space from each end of such a span, so the padding is what makes the value render as written.
+A fenced block opens with three backticks, or one more than the longest run in the source
+where that is longer. Everything a projection puts in a code span goes through this rule:
+`` key === `x-${plugin}:write` `` is ordinary TypeScript, and under a fixed single backtick it
+would close the span at its own first backtick and spill the rest of the row into the document
+as Markdown.
+
+Newlines collapse to a single space inside a code span, because a span belongs to one row. A
+value that needs its lines is a fenced block instead — and a fenced block cannot sit mid-row:
+it ends the list item it was written into unless it is indented to the item's content column
+(§5.6).
+
+### 3.4.1 Table cells
+
+GFM resolves table cells before it parses inlines, so a `|` in a value opens a column the
+header row never declared and every cell after it shifts left — inside a code span too, where
+a reader would expect the pipe to be literal. Every cell this projection emits therefore
+escapes `|` as `\|`, the one escape the table parser honours there, and maps newlines to
+`<br>`. Component ids, paths, effect ids and call targets all admit `|`.
+
 ### 3.5 Confidence badges
 
 | Value | Display |
@@ -292,6 +315,24 @@ Example:
 | try | `- try (L<line>)` |
 | switch | ``- switch: `<condition>` (L<line>)`` |
 | match | ``- match: `<condition>` (L<line>)`` |
+
+A payload that §3.4 sends to a fenced block — over 80 characters, or multiline — takes a
+second row shape, because the compact one cannot hold a block. The line tag moves ahead of the
+colon so the fence is last, and the fence is indented two spaces into the list item:
+
+````md
+**Rules**:
+- guard (L3):
+  ```
+  user.role === 'admin' && flags.enabled && !session.expired && ctx.tenant === wantedTenant
+  ```
+- loop (`for`) (L9)
+````
+
+At column 0 the fence would end the list instead: `(L3)` would become a paragraph of its own
+and the rules below it would restart as a second list. Boolean conditions above the threshold
+are routine — the IR truncates a canonical string only past 120 characters — so this is the
+shape a reviewer sees whenever a guard is long, not an edge case.
 
 ### 5.7 Effect display
 

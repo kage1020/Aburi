@@ -6,6 +6,7 @@ import {
   droppedFoldout,
   effectRow,
   fingerprintLine,
+  inlineCode,
   isSymbolIdEndpoint,
   orderFilesAscending,
   orderSymbolsWithinFile,
@@ -51,7 +52,7 @@ export function projectComponent(input: ProjectComponentInput): string {
   if ((component.publicApi ?? []).length > 0) {
     lines.push("## Public API")
     lines.push("")
-    for (const entry of component.publicApi ?? []) lines.push(`- \`${entry}\``)
+    for (const entry of component.publicApi ?? []) lines.push(`- ${inlineCode(entry)}`)
     lines.push("")
   }
 
@@ -74,13 +75,13 @@ export function projectComponent(input: ProjectComponentInput): string {
     lines.push("")
     for (const d of sortDeps(componentLevelDeps)) {
       const effectTag = d.effect === null ? "" : ` [${d.effect}]`
-      lines.push(`- ${d.from} → ${d.to} (via \`${d.via}\`)${effectTag}`)
+      lines.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})${effectTag}`)
     }
     if (symbolLevelDeps.length > 0) {
       if (componentLevelDeps.length > 0) lines.push("")
       lines.push("### Symbol edges")
       for (const d of sortDeps(symbolLevelDeps)) {
-        lines.push(`- \`${d.from}\` → \`${d.to}\` (via \`${d.via}\`)`)
+        lines.push(`- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})`)
       }
     }
     lines.push("")
@@ -100,7 +101,7 @@ export function projectComponent(input: ProjectComponentInput): string {
         droppedSymbols
           .slice()
           .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-          .map((s) => `\`${s.id}\` — ${requireDropReason(s)}`),
+          .map((s) => `${inlineCode(s.id)} — ${requireDropReason(s)}`),
       ),
     )
   }
@@ -111,7 +112,7 @@ export function projectComponent(input: ProjectComponentInput): string {
 }
 
 function joinCode(items: readonly string[]): string {
-  return items.map((i) => `\`${i}\``).join(", ")
+  return items.map((i) => inlineCode(i)).join(", ")
 }
 
 function sortDeps(deps: readonly Dependency[]): Dependency[] {
@@ -152,14 +153,14 @@ function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
         a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
       )
       .map((e) => {
-        const base = `${e.id}(\`${e.target}\`)`
+        const base = `${e.id}(${inlineCode(e.target)})`
         if (e.propagated === true) {
           const derivedFrom = (e.derivedFrom ?? []).join(", ")
           return `${base} [propagated from ${derivedFrom}]`
         }
         return base
       })
-    lines.push(`- \`${s.name}\` — ${cells.join(", ")}`)
+    lines.push(`- ${inlineCode(s.name)} — ${cells.join(", ")}`)
   }
   lines.push("")
   return lines
@@ -174,7 +175,7 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
   }
   const lines: string[] = []
   for (const file of orderFilesAscending([...byFile.keys()])) {
-    lines.push(`### \`${file}\``)
+    lines.push(`### ${inlineCode(file)}`)
     lines.push("")
     const inFile = orderSymbolsWithinFile(byFile.get(file) ?? [])
     for (const s of inFile) {
