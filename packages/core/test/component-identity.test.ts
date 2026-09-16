@@ -55,7 +55,7 @@ describe("a directory two detectors claim", () => {
 
     const component = await billing()
 
-    expect(component.id).toBe("billing-api")
+    expect(component.id).toBe("acme-billing-api")
     expect(component.name).toBe("@acme/billing-api")
   })
 
@@ -158,7 +158,7 @@ describe("a directory only nx claims", () => {
 
     const component = await billing()
 
-    expect(component.id).toBe("billing-api")
+    expect(component.id).toBe("acme-billing-api")
     expect(component.name).toBe("@acme/billing-api")
     expect(component.frameworks).toEqual(["nestjs"])
     expect(component.publicApi).toEqual(["src/index.ts"])

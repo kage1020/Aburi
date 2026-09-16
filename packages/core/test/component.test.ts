@@ -87,8 +87,57 @@ describe("detectComponents", () => {
     }
   })
 
-  it("CD7: scoped npm names strip the scope and become the id", async () => {
-    expect(__testing_component.toIdFromNpmName("@scope/billing")).toBe("billing")
+  it("CD7: scoped npm names fold the scope into the id", async () => {
+    // The scope is the part of a published name that already tells two same-named packages
+    // apart. Discarding it made `@alpha/utils` and `@beta/utils` one id and left the
+    // collision passes — which, under the usual flat `packages/*`, can only count — to
+    // separate them.
+    expect(__testing_component.toIdFromNpmName("@scope/billing")).toBe("scope-billing")
+    expect(__testing_component.toIdFromNpmName("billing")).toBe("billing")
+    // `@scope/` is a name §4.2 can use and §4.1 cannot: no id, so the next manifest is asked.
+    expect(__testing_component.toIdFromNpmName("@scope/")).toBeNull()
+    expect(__testing_component.toIdFromNpmName("@scope")).toBeNull()
+    expect(__testing_component.toIdFromNpmName("")).toBeNull()
+  })
+
+  it("keeps sibling ids where they were when an unrelated package is added", async () => {
+    // The bug this replaces: with every package directly under `packages/`, the parent
+    // suffix was `-packages` for all of them and the tie-break fell to a positional counter,
+    // so `utils-packages-2` / `utils-packages-3` moved down one the moment a package sorting
+    // ahead of them appeared. Component id keys `Symbol.component`, both `Dependency`
+    // endpoints and cross-revision comparison, so that read as every component replaced.
+    async function idsOf(scopes: ReadonlyArray<[string, string]>): Promise<string[]> {
+      const root = await setupTmp()
+      try {
+        await writeFile(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8")
+        for (const [scope, dir] of scopes) {
+          const pkg = await makeDir(root, "packages", dir)
+          await writeJson(join(pkg, "package.json"), { name: `@${scope}/utils` })
+          await seedTypescriptFiles(pkg, 12)
+        }
+        const components = await detectComponents({ workspaceRoot: root })
+        return components.map((c) => `${c.roots[0]}=${c.id}`)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+
+    const before = await idsOf([
+      ["beta", "b-utils"],
+      ["gamma", "c-utils"],
+    ])
+    expect(before).toEqual(["packages/b-utils=beta-utils", "packages/c-utils=gamma-utils"])
+
+    const after = await idsOf([
+      ["alpha", "a-utils"],
+      ["beta", "b-utils"],
+      ["gamma", "c-utils"],
+    ])
+    expect(after).toEqual([
+      "packages/a-utils=alpha-utils",
+      "packages/b-utils=beta-utils",
+      "packages/c-utils=gamma-utils",
+    ])
   })
 
   it("accepts a digit-leading package name, which npm allows and detection must not reject", async () => {
@@ -117,9 +166,10 @@ describe("detectComponents", () => {
     )
   })
 
-  it("resolves a collision numerically when the parent segment cannot form a suffix", async () => {
-    // The parent-suffix pass would otherwise build "app-", which is not a valid id — the
-    // collision is resolvable without failing detection for components whose own ids are fine.
+  it("falls back to a root hash when no ancestor segment can form a suffix", async () => {
+    // The ancestor pass would otherwise build "app-", which is not a valid id. Both roots
+    // take the hash rather than one of them keeping the bare id: "which one came first" is
+    // the input the whole pass exists to keep out of a Component id.
     await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - '**/app'\n", "utf8")
     for (const parent of ["--", "---"]) {
       const pkg = await makeDir(tmp, parent, "app")
@@ -127,7 +177,10 @@ describe("detectComponents", () => {
       await seedTypescriptFiles(pkg, 12)
     }
     const components = await detectComponents({ workspaceRoot: tmp })
-    expect(components.map((c) => c.id)).toEqual(["app", "app-2"])
+    const ids = components.map((c) => c.id)
+    expect(ids).toHaveLength(2)
+    for (const id of ids) expect(id).toMatch(/^app-[0-9a-f]{8}$/)
+    expect(new Set(ids).size).toBe(2)
   })
 
   it("CD9: dependency-driven framework detection (nestjs)", async () => {
@@ -219,9 +272,9 @@ describe("detectComponents", () => {
     expect(ids).toEqual(["shared-apps", "shared-libs"])
   })
 
-  it("collision resolution: same parent segment falls through to numeric suffix", async () => {
-    // team1/shared/pkg and team2/shared/pkg both suffix to "pkg-shared", so the numeric
-    // fallback must disambiguate them into pkg-shared and pkg-shared-2.
+  it("collision resolution: a shared parent segment takes one more step up the path", async () => {
+    // team1/shared/pkg and team2/shared/pkg both suffix to "pkg-shared", so the pass walks
+    // one directory further up and each id names the team it belongs to.
     await writeFile(
       join(tmp, "pnpm-workspace.yaml"),
       "packages:\n  - team1/*/*\n  - team2/*/*\n",
@@ -234,11 +287,11 @@ describe("detectComponents", () => {
     }
     const components = await detectComponents({ workspaceRoot: tmp })
     const ids = components.map((c) => c.id).sort()
-    expect(ids).toEqual(["pkg-shared", "pkg-shared-2"])
+    expect(ids).toEqual(["pkg-shared-team1", "pkg-shared-team2"])
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it("collision resolution: three-way collision produces -2 and -3 tails", async () => {
+  it("collision resolution: a three-way collision separates on the path, not a counter", async () => {
     await writeFile(
       join(tmp, "pnpm-workspace.yaml"),
       "packages:\n  - a/*/*\n  - b/*/*\n  - c/*/*\n",
@@ -251,6 +304,6 @@ describe("detectComponents", () => {
     }
     const components = await detectComponents({ workspaceRoot: tmp })
     const ids = components.map((c) => c.id).sort()
-    expect(ids).toEqual(["pkg-shared", "pkg-shared-2", "pkg-shared-3"])
+    expect(ids).toEqual(["pkg-shared-a", "pkg-shared-b", "pkg-shared-c"])
   })
 })

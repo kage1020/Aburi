@@ -3,6 +3,7 @@ import { basename, join } from "node:path"
 import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { CoreError } from "./errors"
+import { hashRawString } from "./fingerprint/hash"
 import { makeComponentId, makeLanguageId } from "./id"
 import { CORE_IGNORE_PATTERNS } from "./scan/discover"
 import { describeThrown } from "./scan/faults"
@@ -362,11 +363,33 @@ function directoryLeaf(entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRo
   return segments[segments.length - 1] ?? basename(entry.absoluteRoot)
 }
 
+/**
+ * The id a published npm name yields, with the scope folded in rather than discarded:
+ * `@alpha/utils` is `alpha-utils`, not `utils`.
+ *
+ * Discarding it made every `utils` in the workspace the same id and left the collision passes
+ * to tell them apart, which the most common layout cannot do: with every package directly
+ * under `packages/`, the parent suffix is `-packages` for all of them and the tie-break fell
+ * to a positional counter. Adding `@alpha/utils` then renumbered `@beta/utils` and
+ * `@gamma/utils` behind it, and since the id keys `Symbol.component`, both `Dependency`
+ * endpoints and cross-revision comparison, one new package read as "every component was
+ * replaced". The scope is the part of the name that already distinguishes them, so it belongs
+ * in the id.
+ *
+ * An unscoped name is unchanged, and `@scope/` — a name §4.2 can use and §4.1 cannot — is
+ * still `null` so the next manifest is asked. A name that kebab-cases to nothing is *not*
+ * null: it is an answer that cannot be an id, and `componentIdOrThrow` says so rather than
+ * silently taking the directory name.
+ */
 function toIdFromNpmName(npmName: string): string | null {
   if (npmName.length === 0) return null
-  const stripped = npmName.startsWith("@") ? (npmName.split("/")[1] ?? "") : npmName
-  if (stripped.length === 0) return null
-  return toKebabCase(stripped)
+  if (!npmName.startsWith("@")) return toKebabCase(npmName)
+  const slash = npmName.indexOf("/")
+  if (slash < 0) return null
+  const scope = npmName.slice(1, slash)
+  const bare = npmName.slice(slash + 1)
+  if (bare.length === 0) return null
+  return toKebabCase(`${scope}-${bare}`)
 }
 
 function toKebabCase(input: string): string {
@@ -622,66 +645,129 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
 }
 
 /**
- * Guarantee Component.id uniqueness in three passes:
+ * Guarantee Component.id uniqueness with suffixes that depend only on the component itself.
  *
- * 1. Try the parent-directory suffix (`shared` at `apps/shared` and `libs/shared` becomes
- *    `shared-apps` / `shared-libs`) — the human-readable case.
- * 2. If two collided components share the same parent segment (`team1/shared/pkg` and
- *    `team2/shared/pkg` both suffix to `pkg-shared`) or a suffix lands on another
- *    already-unique id, disambiguate with a stable `-2`, `-3`, … numeric tail.
- * 3. Validate that no id is duplicated on exit; anything left is a checker bug and must
- *    surface as an integrity failure downstream, not a silent duplicate here.
+ * 1. Walk up `roots[0]`, one ancestor directory at a time, suffixing every id that is still
+ *    shared (`shared` at `apps/shared` and `libs/shared` becomes `shared-apps` /
+ *    `shared-libs`; `pkg` at `team1/shared/pkg` and `team2/shared/pkg` needs the second step
+ *    up and becomes `pkg-shared-team1` / `pkg-shared-team2`). A suffix that lands on another
+ *    already-unique id puts that one in the next round's group, so it moves too.
+ * 2. Whatever the path cannot separate — two roots whose ancestors all kebab-case to nothing,
+ *    or the workspace root, which has no ancestors at all — takes a short hash of `roots[0]`.
+ *
+ * Every suffix is a function of that component's own base id and root, never of its position
+ * in the list. The `-2`, `-3`, … counter this replaces was the opposite: it handed the tail
+ * out in root order, so inserting `@alpha/utils` ahead of `@beta/utils` and `@gamma/utils`
+ * demoted both of them by one. Component id keys `Symbol.component`, both `Dependency`
+ * endpoints and cross-revision comparison, so that renumbering read downstream as every
+ * component having been replaced.
  */
 function resolveIdCollisions(components: Component[]): Component[] {
-  applyParentSuffixPass(components)
-  applyNumericSuffixPass(components)
+  applyAncestorSuffixPass(components)
+  applyRootHashPass(components)
   return components
 }
 
-function applyParentSuffixPass(components: Component[]): void {
-  const byId = new Map<ComponentId, Component[]>()
-  for (const c of components) {
-    const list = byId.get(c.id)
-    if (list === undefined) byId.set(c.id, [c])
-    else list.push(c)
-  }
-  for (const [id, group] of byId) {
-    if (group.length <= 1) continue
-    for (const c of group) {
-      const segments = c.roots[0]?.split("/").filter((s) => s.length > 0 && s !== ".") ?? []
-      const parent = segments.length > 1 ? segments[segments.length - 2] : null
-      // A parent that kebab-cases to nothing would produce a trailing-hyphen id. Leave the
-      // component unsuffixed instead and let the numeric pass separate it — the collision
-      // still gets resolved, and a component whose id was fine does not fail detection
-      // because of the segment above it.
-      const suffix = parent === undefined || parent === null ? "" : toKebabCase(parent)
-      c.id = suffix.length === 0 ? id : makeComponentId(`${id}-${suffix}`)
+/**
+ * How many hex characters of the root hash the last-resort suffix carries. Short enough to
+ * stay readable in an id, and the space it has to separate is the handful of components in
+ * one workspace whose whole path chain kebab-cases to the same thing.
+ */
+const ROOT_HASH_LENGTH = 8
+
+/** A component's id while the ancestor pass is deciding how much of its path it needs. */
+interface IdCandidate {
+  component: Component
+  /** The id §4.1 derived, before any suffix. */
+  base: ComponentId
+  /** Ancestor directory segments of `roots[0]`, nearest first. */
+  ancestors: string[]
+  /** How many of them the current id carries. */
+  taken: number
+}
+
+function applyAncestorSuffixPass(components: Component[]): void {
+  const candidates: IdCandidate[] = components.map((component) => ({
+    component,
+    base: component.id,
+    ancestors: ancestorSegments(component.roots[0] ?? ""),
+    taken: 0,
+  }))
+  for (;;) {
+    let extended = false
+    for (const group of groupBy(candidates, (candidate) => candidate.component.id).values()) {
+      if (group.length <= 1) continue
+      for (const candidate of group) {
+        // A candidate that has run out of path is left where it is rather than blocking the
+        // rest of its group: the ones that can still move may well separate from it, and the
+        // hash pass takes whatever is left.
+        if (candidate.taken >= candidate.ancestors.length) continue
+        candidate.taken++
+        extended = true
+      }
+    }
+    // Every round either lengthens at least one suffix — bounded by that root's depth — or
+    // ends the pass, so the loop terminates.
+    if (!extended) return
+    for (const candidate of candidates) {
+      candidate.component.id = suffixedId(candidate.base, candidate.ancestors, candidate.taken)
     }
   }
 }
 
-function applyNumericSuffixPass(components: Component[]): void {
-  // Keyed by `string` so the probe below can test a candidate suffix without minting an id
-  // for it. Appending `-2` to an id that is already valid cannot produce an invalid one, so
-  // the constructor runs once, on the value actually assigned.
-  const taken = new Set<string>()
-  // Two collided components can survive the parent-suffix pass either because their parent
-  // segments matched or because a rename collided with a third component. Walk in a stable
-  // order (roots[0]) so the tail assignment is deterministic; the first occurrence keeps
-  // its id and every subsequent duplicate takes -2, -3, …
-  const ordered = [...components].sort((a, b) =>
-    (a.roots[0] ?? "") < (b.roots[0] ?? "") ? -1 : (a.roots[0] ?? "") > (b.roots[0] ?? "") ? 1 : 0,
-  )
-  for (const c of ordered) {
-    if (!taken.has(c.id)) {
-      taken.add(c.id)
-      continue
+/**
+ * The last resort, for ids the path could not separate. Every member of a surviving group
+ * takes the hash — including the one that would have kept the bare id under a positional
+ * scheme, because "which one was first" is exactly the input this pass exists to avoid.
+ */
+function applyRootHashPass(components: Component[]): void {
+  for (const group of groupBy(components, (component) => component.id).values()) {
+    if (group.length <= 1) continue
+    for (const component of group) {
+      component.id = makeComponentId(`${component.id}-${rootHash(component.roots[0] ?? "")}`)
     }
-    let n = 2
-    while (taken.has(`${c.id}-${n}`)) n++
-    c.id = makeComponentId(`${c.id}-${n}`)
-    taken.add(c.id)
   }
+}
+
+/** The directories above `root`, nearest first. `packages/a` has one; `.` has none. */
+function ancestorSegments(root: string): string[] {
+  const segments = root.split("/").filter((s) => s.length > 0 && s !== ".")
+  return segments.slice(0, -1).reverse()
+}
+
+/**
+ * `base` carrying its first `taken` ancestors as a suffix.
+ *
+ * A segment that kebab-cases to nothing contributes nothing rather than a doubled or trailing
+ * hyphen — the id stays valid, the collision stays unresolved, and the next round (or the
+ * hash pass) deals with it. A component whose own id was fine does not fail detection because
+ * of the segment above it.
+ */
+function suffixedId(base: ComponentId, ancestors: readonly string[], taken: number): ComponentId {
+  const suffix = ancestors
+    .slice(0, taken)
+    .map(toKebabCase)
+    .filter((segment) => segment.length > 0)
+  return suffix.length === 0 ? base : makeComponentId(`${base}-${suffix.join("-")}`)
+}
+
+/**
+ * A short digest of a component root, NFC-normalized first so the same directory hashes the
+ * same way whatever spelling the filesystem handed back (ir-schema.md §1.2).
+ */
+function rootHash(root: string): string {
+  return hashRawString(root.normalize("NFC")).slice(0, ROOT_HASH_LENGTH)
+}
+
+function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const k = key(item)
+    const existing = groups.get(k)
+    if (existing === undefined) groups.set(k, [item])
+    else existing.push(item)
+  }
+  return groups
 }
 
 function compareString(a: string, b: string): number {
