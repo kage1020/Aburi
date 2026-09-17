@@ -21,12 +21,16 @@ import type {
   VocabRegistry,
   WorkspaceManager,
 } from "@aburi/types"
+import { dependencyKey } from "../call-site"
 import { type CallEdge, resolveCallGraph } from "../callgraph"
 import { serializeCanonical } from "../canonical"
+import { countBy } from "../collections"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
+import { silentLogger } from "../logger"
 import { enrichWithLsp, type ReadFile, type ServerFactory, withHintUsage } from "../lsp"
+import { compareBy, compareCodeUnit } from "../order"
 import { type PropagationStats, propagateEffects } from "../propagate"
 import { buildComponentAttribution } from "./attribute"
 import {
@@ -403,14 +407,14 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   // The count the per-file warning above deliberately does not repeat. One line per plugin,
   // and only when it went wrong more than once, so the run says how far the leak got without
-  // saying it once per file.
-  for (const [plugin, count] of countByPlugin(treeReleaseFailures)) {
+  // saying it once per file. Insertion order, so these read as the tail of those lines.
+  for (const [plugin, count] of countBy(treeReleaseFailures, (failure) => failure.plugin)) {
     if (count > 1) {
       logger.warn(`Plugin ${plugin} failed to release ${count} parse trees over this run.`)
     }
   }
 
-  symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  symbols.sort(compareBy((symbol) => symbol.id))
 
   // Optional LSP enrichment pass (lsp-enrichment.md §2). Runs BEFORE call
   // resolution so the LSP tier's receiver / implementer hints can feed the
@@ -428,7 +432,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory
   const enrichment = await enrichWithLsp(enrichmentInput)
   const enrichedSymbols = enrichment.symbols
-  enrichedSymbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  enrichedSymbols.sort(compareBy((symbol) => symbol.id))
 
   // Call-resolution + symbol → symbol edge projection (call-resolution.md §7,
   // ir-schema.md §11). The resolver rewrites `Symbol.calls[].resolved` in
@@ -461,45 +465,18 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
           fingerprint: { ...s.fingerprint, logic: logicFingerprint(s) },
         },
   )
-  const resolvedSymbols = propagatedSymbols
 
-  // `parsedFiles` counts the files that reached the end of the pipeline with a usable tree.
-  // Stated as an invariant rather than as a list of reasons, because the list has grown
-  // three times and the arithmetic is the same each time: every entry `additionalSkipped`
-  // holds is a file this loop stopped working on, whatever stopped it, and nothing else is.
-  // A recoverable parse error stops nothing — the tree survived — so such a file still
-  // counts as parsed.
-  //
-  // One subtraction, therefore, and no counter beside it. A withdrawn file that were both
-  // listed and counted would be netted out twice, reporting two files lost for one.
-  //
-  // What the length has to mean is *at most one entry per file*, and what holds it is that
-  // every branch pushing to `additionalSkipped` ends its iteration: the three that run before
-  // the outcome switch `continue`, and the two arms inside it end their case. A push left to
-  // fall through would subtract a file the loop went on to extract, and integrity #21 could
-  // not see it — it compares the same two lengths against the same sum.
-  //
-  // Inside the switch that is checked rather than merely intended: a missing `break` is
-  // `TS7029` from `tsc` and `lint/suspicious/noFallthroughSwitchClause` from Biome, and the
-  // next arm's narrowing then fails on the payload the previous variant does not have. All
-  // three run in CI on every change.
-  //
-  // `discovered.skipped` is not netted out here: those files were never candidates, and they
-  // are added to `totalFiles` instead.
-  //
-  // Merged and sorted here rather than at the return, because `buildStats` projects it into
-  // `stats.skippedFiles`. Integrity invariant #21 compares its length against
-  // `totalFiles - parsedFiles`, which for anything this function writes is the same sum of
-  // the same two array lengths — that check is for documents arriving through `readIR`, not
-  // for this one.
-  const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-  )
+  // `parsedFiles` is one subtraction: every `additionalSkipped` entry is a file this loop
+  // stopped working on and nothing else is, which holds because every branch that pushes one
+  // ends its iteration (at most one entry per file). `discovered.skipped` is not netted out —
+  // those files were never candidates and are added to `totalFiles` instead. Integrity #21
+  // re-checks the same arithmetic only for documents arriving through `readIR`.
+  const skipped = [...discovered.skipped, ...additionalSkipped].sort(compareBy((file) => file.path))
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
     parsedFiles: discovered.files.length - additionalSkipped.length,
     skipped,
-    symbols: resolvedSymbols,
+    symbols: propagatedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
     // Where the two halves of `stats.lspEnrichment` meet — see `LspHintUsage` for why the
@@ -529,7 +506,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     },
     workspace,
     components: sortComponents(input.components ?? []),
-    symbols: resolvedSymbols,
+    symbols: propagatedSymbols,
     dependencies: symbolEdges,
     stats,
   }
@@ -747,9 +724,9 @@ function buildStats(input: BuildStatsInput): Stats {
  * closes on the plugin boundary, on the one other Class A field that crosses a public API.
  */
 function sortComponents(components: readonly Component[]): Component[] {
-  return [...components]
+  return components
     .map((c) => ({ ...c, description: c.description ?? null }))
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .sort(compareBy((component) => component.id))
 }
 
 /**
@@ -765,7 +742,7 @@ function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
   const seen = new Set<string>()
   const out: Dependency[] = []
   for (const edge of edges) {
-    const key = `${edge.from}\t${edge.to}\t${edge.via}`
+    const key = dependencyKey(edge.from, edge.to, edge.via)
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
@@ -776,11 +753,12 @@ function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
       effect: null,
     })
   }
-  out.sort((a, b) => {
-    if (a.from !== b.from) return a.from < b.from ? -1 : 1
-    if (a.to !== b.to) return a.to < b.to ? -1 : 1
-    return a.via < b.via ? -1 : a.via > b.via ? 1 : 0
-  })
+  out.sort(
+    (a, b) =>
+      compareCodeUnit(a.from, b.from) ||
+      compareCodeUnit(a.to, b.to) ||
+      compareCodeUnit(a.via, b.via),
+  )
   return out
 }
 
@@ -796,7 +774,7 @@ function buildPluginRefs(input: ScanInput): PluginRef[] {
     refs.push(buildPluginRef(plugin.manifest.name, "framework", plugin.manifest.version))
   for (const plugin of input.effects)
     refs.push(buildPluginRef(plugin.manifest.name, "effects", plugin.manifest.version))
-  refs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  refs.sort(compareBy((ref) => ref.name))
   return refs
 }
 
@@ -817,26 +795,6 @@ function buildPluginRef(name: string, type: PluginRef["type"], version: string):
     version,
     grammarRevision: type === "lang" ? PENDING_GRAMMAR_REVISION : null,
   }
-}
-
-const silentLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-}
-
-/**
- * How many trees each plugin failed to release, in the order the plugins first went wrong.
- * Insertion order rather than sorted: the run has already named the first occurrence per
- * plugin on its own line, and these counts read as the tail of those lines.
- */
-function countByPlugin(failures: readonly TreeReleaseFailure[]): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const failure of failures) {
-    counts.set(failure.plugin, (counts.get(failure.plugin) ?? 0) + 1)
-  }
-  return counts
 }
 
 /**

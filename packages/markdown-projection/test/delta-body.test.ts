@@ -1,7 +1,8 @@
+import { fp, makeSymbol } from "@aburi/test-support"
 import type { SymbolChanged, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { emptySummary, fp, makeDiff, makeSymbol } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
  * C6 — renderDeltaBody branch coverage. Each test drives a single delta field so we can

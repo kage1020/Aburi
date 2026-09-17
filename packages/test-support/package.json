@@ -1,0 +1,20 @@
+{
+  "name": "@aburi/test-support",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test fixtures shared across the workspace's Vitest suites: a no-op vocab registry, a silent logger, and builders for IR records, classify contexts and symbol candidates. Not published; consumed from source.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aburi/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3"
+  }
+}

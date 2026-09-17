@@ -1,17 +1,8 @@
-// Plugin identity, kept in a leaf module so `classify.ts`, `imports.ts`, and `manifest.ts`
-// can all reach it without importing each other. Putting these next to the classifier
-// instead would make `imports.ts → classify.ts → imports.ts` a cycle.
+// Plugin identity, in a leaf module so `classify.ts`, `imports.ts` and `manifest.ts` can all
+// reach it without importing each other.
 
-/**
- * Package-relative plugin name. Doubles as the prefix of every thrown message, so a caught
- * exception names the plugin that rejected the input. `manifest.ts` declares the same
- * string as `name`.
- */
+/** Plugin name: the manifest's `name` and the prefix of every thrown message. */
 export const EFFECTS_DRIZZLE_PLUGIN_NAME = "effects-drizzle" as const
 
-/**
- * Shared derivedBy namespace. `manifest.ts` imports this same const for its
- * `derivedByPrefixes` entry, so the classifier's tag builder and the registry
- * declaration cannot drift.
- */
+/** derivedBy namespace shared by the classifier's tag builder and the manifest. */
 export const EFFECTS_DRIZZLE_DERIVED_BY_PREFIX = "effects-plugin:drizzle" as const

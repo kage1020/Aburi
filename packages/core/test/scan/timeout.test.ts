@@ -1,43 +1,13 @@
-import type {
-  CallCandidate,
-  ClassifyContext,
-  EffectPlugin,
-  EffectsManifest,
-  VocabRegistry,
-} from "@aburi/types"
+import { noopRegistry } from "@aburi/test-support"
+import type { CallCandidate, ClassifyContext, EffectPlugin, EffectsManifest } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { type ClassifyTimeoutEvent, classifyWithTimeout } from "../../src"
 import { symbolId } from "../fixtures/ir"
-
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
+import { effectsManifest } from "../fixtures/plugins"
 
 const stubManifest: EffectsManifest = {
-  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-  name: "effects-stub",
-  version: "0.0.0",
-  type: "effects",
-  engines: { aburi: "*" },
-  provides: {
-    effects: [],
-    effectPrefixes: [],
-    extKinds: [],
-    extKindPrefixes: [],
-    derivedByPrefixes: ["effects-plugin:stub"],
-    frameworks: [],
-  },
+  ...effectsManifest(),
+  provides: { ...effectsManifest().provides, derivedByPrefixes: ["effects-plugin:stub"] },
 }
 
 function makeCall(target: string): CallCandidate {

@@ -6,6 +6,7 @@ import type { Summary } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, type GitRunner, runDiff, runScan } from "../src"
 import { DIFF_JSON_FILENAME } from "../src/artifact-paths"
+import { fakeGit } from "./fixtures"
 
 /**
  * `cli-spec.md` §6.4 step 3: the base scan reads the **head**'s `aburi.json`.
@@ -99,19 +100,8 @@ export const plugin = {
  * layer — the defect lives in which file the scan opens, so the test has to let it open one.
  */
 function makeGit(): GitRunner {
-  return {
-    async run(args) {
-      const key = args.slice(0, 2).join(" ")
-      if (key === "rev-parse --verify") return { stdout: "abc123\n", stderr: "" }
-      if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
-      if (key === "worktree add") {
-        const destination = args[3]
-        if (destination === undefined) throw new Error("worktree add without a destination")
-        await cp(baseTree, destination, { recursive: true })
-      }
-      return { stdout: "", stderr: "" }
-    },
-  }
+  return fakeGit({ onWorktreeAdd: (destination) => cp(baseTree, destination, { recursive: true }) })
+    .runner
 }
 
 async function readSummary(outputDir: string): Promise<Summary> {

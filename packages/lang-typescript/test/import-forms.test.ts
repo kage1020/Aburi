@@ -1,6 +1,5 @@
-import type { ParseError } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { parseTypescriptFile } from "../src/index"
+import { importsOf } from "./fixtures/ctx"
 
 /**
  * Three legal import forms used to produce no edge and no diagnostic, which reads exactly
@@ -14,18 +13,9 @@ import { parseTypescriptFile } from "../src/index"
  * never named.
  */
 
-async function parse(source: string) {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return { errors: result.errors, imports: result.imports }
-}
-
-function emptySpecifierErrors(errors: readonly ParseError[]): ParseError[] {
-  return errors.filter((e) => e.message.includes("empty module specifier"))
-}
-
 describe("LP26f: import-equals-require binds the module object", () => {
   it("produces a namespace edge carrying the local binding", async () => {
-    const { imports, errors } = await parse("import x = require('./mod')")
+    const { imports, errors } = await importsOf("import x = require('./mod')")
 
     // The whole edge, not its presence. The shape is the point: `symbols: "*"` with a
     // `namespaceBinding` is what sends `x.foo()` to `foo` in the target file, where a
@@ -38,7 +28,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
   })
 
   it("is a static edge, which is what makes it reachable by call resolution", async () => {
-    const { imports } = await parse("import x = require('./mod')")
+    const { imports } = await importsOf("import x = require('./mod')")
 
     // `dynamic` means the import was written as `import()`, and this one was not. What the
     // value buys is separate from what decides it: both loops in `callgraph.ts` that read a
@@ -49,7 +39,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
   })
 
   it("LP26g: reads a type-only require-equals on the same terms", async () => {
-    const { imports } = await parse("import type x = require('./mod')")
+    const { imports } = await importsOf("import type x = require('./mod')")
 
     expect(imports).toEqual([
       { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },
@@ -57,38 +47,20 @@ describe("LP26f: import-equals-require binds the module object", () => {
   })
 
   it("reads it under the CommonJS extension it is the ordinary form for", async () => {
-    const result = await parseTypescriptFile({
-      path: "src/a.cts",
-      content: "import x = require('./mod')",
-    })
+    const { imports } = await importsOf("import x = require('./mod')", "src/a.cts")
 
-    expect(result.imports).toEqual([
+    expect(imports).toEqual([
       { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },
     ])
   })
 
   it("LP26h: says nothing about an alias that renames a local namespace", async () => {
-    const { imports, errors } = await parse("import x = A.B.C")
+    const { imports, errors } = await importsOf("import x = A.B.C")
 
     // `import_alias`, not `import_require_clause` — no module is named, so there is no
     // dependency to record and nothing the author did wrong.
     expect(imports).toEqual([])
     expect(errors).toEqual([])
-  })
-
-  it("LP26a: reports an empty require specifier as the empty specifier it is", async () => {
-    const { imports, errors } = await parse("import x = require('')")
-
-    expect(imports).toEqual([])
-    expect(emptySpecifierErrors(errors)).toEqual([
-      {
-        message:
-          "empty module specifier: this import names no module — write one, or remove the import",
-        line: 1,
-        column: 20,
-        recoverable: true,
-      },
-    ])
   })
 
   it.each([
@@ -97,7 +69,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
     ["a second argument", "import x = require('./m', 'y')"],
     ["a nested call", "import x = require(f('./m'))"],
   ])("refuses a clause that did not parse — %s", async (_label, source) => {
-    const { imports, errors } = await parse(source)
+    const { imports, errors } = await importsOf(source)
 
     // The grammar admits nothing but a string literal here, so each of these is a syntax
     // error — but tree-sitter's recovery leaves the operand it could read as a direct child
@@ -111,7 +83,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
   })
 
   it("keeps a require-equals beside an ordinary import, in source order", async () => {
-    const { imports } = await parse("import { A } from './a'\nimport b = require('./b')")
+    const { imports } = await importsOf("import { A } from './a'\nimport b = require('./b')")
 
     expect(imports).toEqual([
       { source: "./a", symbols: ["A"], line: 1, dynamic: false },
@@ -122,20 +94,22 @@ describe("LP26f: import-equals-require binds the module object", () => {
 
 describe("LP26i: a comment among the arguments of import()", () => {
   it("reads the specifier past a webpack magic comment", async () => {
-    const { imports, errors } = await parse('const m = import(/* webpackChunkName: "x" */ "./mod")')
+    const { imports, errors } = await importsOf(
+      'const m = import(/* webpackChunkName: "x" */ "./mod")',
+    )
 
     expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
     expect(errors).toEqual([])
   })
 
   it("reads past two of them", async () => {
-    const { imports } = await parse("const m = import(/* a */ /* b */ './mod')")
+    const { imports } = await importsOf("const m = import(/* a */ /* b */ './mod')")
 
     expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
   })
 
   it("says nothing when the comment is all there is", async () => {
-    const { imports, errors } = await parse("const m = import(/* nothing here */)")
+    const { imports, errors } = await importsOf("const m = import(/* nothing here */)")
 
     // No specifier was written, so there is no edge — and no complaint either. The empty
     // specifier is the case where someone typed a module name that names nothing, and
@@ -147,25 +121,10 @@ describe("LP26i: a comment among the arguments of import()", () => {
 
 describe("LP26j: a template specifier with nothing substituted into it", () => {
   it("is read as the static specifier it is", async () => {
-    const { imports, errors } = await parse("const m = import(`./mod`)")
+    const { imports, errors } = await importsOf("const m = import(`./mod`)")
 
     expect(imports).toEqual([{ source: "./mod", symbols: "*", line: 1, dynamic: true }])
     expect(errors).toEqual([])
-  })
-
-  it("LP26a: reports an empty one, the way an empty quoted specifier is reported", async () => {
-    const { imports, errors } = await parse("const m = import(``)")
-
-    expect(imports).toEqual([])
-    expect(emptySpecifierErrors(errors)).toEqual([
-      {
-        message:
-          "empty module specifier: this dynamic import names no module — write one, or remove the dynamic import",
-        line: 1,
-        column: 18,
-        recoverable: true,
-      },
-    ])
   })
 })
 
@@ -176,7 +135,7 @@ describe("LP26e: a template the author computes stays computed", () => {
     ["a leading substitution", `const m = import(\`\${dir}/b\`)`],
     ["nothing but a substitution", `const m = import(\`\${p}\`)`],
   ])("gives no edge and no diagnostic for %s", async (_label, source) => {
-    const { imports, errors } = await parse(source)
+    const { imports, errors } = await importsOf(source)
 
     // The failure this pins is not the missing edge — it is the plausible one. Joining the
     // fragments answers "./", "./a/b" and "/b" for the first three, each a module the author

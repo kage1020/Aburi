@@ -1,7 +1,7 @@
+import { makeIR, makeSymbol, zeroFp } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff } from "../src"
-import { makeIR, makeSymbol, zeroFp } from "./fixtures"
 
 /**
  * §3.4.5 pairs dropped Symbols on two coarse signals — the trailing segment of the qualified

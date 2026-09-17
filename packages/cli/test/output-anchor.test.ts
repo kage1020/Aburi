@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 import { detectWorkspaceRoot } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runExplain, runScan } from "../src"
-import { IR_JSON_FILENAME, resolveOutputDir } from "../src/artifact-paths"
+import { IR_JSON_FILENAME } from "../src/artifact-paths"
 
 /**
  * `aburi scan` writes its artefacts under the working directory; `aburi explain` looked for
@@ -236,19 +236,5 @@ describe("the directory scan writes to is the directory explain reads from", () 
 
     expect(stale.exitCode).toBe(0)
     expect(absent.exitCode).not.toBe(0)
-  })
-})
-
-describe("resolveOutputDir", () => {
-  it("anchors the default and an explicit relative path to the working directory", () => {
-    expect(resolveOutputDir("/work/pkgs/app", undefined)).toBe(resolve("/work/pkgs/app", "out"))
-    expect(resolveOutputDir("/work/pkgs/app", "artifacts")).toBe(
-      resolve("/work/pkgs/app", "artifacts"),
-    )
-  })
-
-  it("leaves an absolute path alone", () => {
-    const absolute = resolve("/elsewhere/artifacts")
-    expect(resolveOutputDir("/work/pkgs/app", absolute)).toBe(absolute)
   })
 })

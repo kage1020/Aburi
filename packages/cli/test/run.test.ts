@@ -1,17 +1,6 @@
-import { Writable } from "node:stream"
 import { describe, expect, it } from "vitest"
 import { EXIT, runCli } from "../src"
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
+import { MemStream } from "./fixtures"
 
 function makeStreams(): { stdout: MemStream; stderr: MemStream } {
   return { stdout: new MemStream(), stderr: new MemStream() }

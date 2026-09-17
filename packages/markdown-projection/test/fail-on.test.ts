@@ -3,6 +3,7 @@ import {
   evaluateFailOn,
   FAIL_ON_STATUSES,
   type FailOnClause,
+  type FailOnComparator,
   type FailOnStatus,
   formatFailOnClause,
   formatFailOnTriggered,
@@ -13,6 +14,9 @@ describe("formatFailOnClause", () => {
   it("emits bare status for clauses with no threshold", () => {
     expect(formatFailOnClause({ kind: "bare", status: "changed" })).toBe("changed")
     expect(formatFailOnClause({ kind: "bare", status: "dropped-toggled" })).toBe("dropped-toggled")
+    expect(formatFailOnClause({ kind: "bare", status: "dropped-toggled:to-kept" })).toBe(
+      "dropped-toggled:to-kept",
+    )
   })
 
   it("emits `status:>N` when a threshold is attached", () => {
@@ -24,12 +28,6 @@ describe("formatFailOnClause", () => {
         count: 10,
       }),
     ).toBe("changed:>10")
-  })
-
-  it("supports dropped-toggled sub-directions", () => {
-    expect(formatFailOnClause({ kind: "bare", status: "dropped-toggled:to-kept" })).toBe(
-      "dropped-toggled:to-kept",
-    )
   })
 })
 
@@ -70,71 +68,24 @@ describe("evaluateFailOn — bare-status branch", () => {
 
 describe("evaluateFailOn — comparator matrix", () => {
   const observedAt = (value: number) => ({ ...emptySummary(), changed: value })
+  const triggered = (comparator: FailOnComparator, count: number, observed: number) =>
+    evaluateFailOn(
+      { kind: "threshold", status: "changed", comparator, count },
+      observedAt(observed),
+    ).triggered
 
-  it("applies > strictly (10 vs threshold 10 = false)", () => {
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: ">", count: 10 },
-        observedAt(10),
-      ).triggered,
-    ).toBe(false)
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: ">", count: 10 },
-        observedAt(11),
-      ).triggered,
-    ).toBe(true)
-  })
-
-  it("applies >= inclusively (10 vs threshold 10 = true)", () => {
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: ">=", count: 10 },
-        observedAt(10),
-      ).triggered,
-    ).toBe(true)
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: ">=", count: 10 },
-        observedAt(9),
-      ).triggered,
-    ).toBe(false)
-  })
-
-  it("applies == on exact match", () => {
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: "==", count: 5 },
-        observedAt(5),
-      ).triggered,
-    ).toBe(true)
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: "==", count: 5 },
-        observedAt(4),
-      ).triggered,
-    ).toBe(false)
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: "==", count: 5 },
-        observedAt(6),
-      ).triggered,
-    ).toBe(false)
-  })
-
-  it("applies <= inclusively", () => {
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: "<=", count: 5 },
-        observedAt(5),
-      ).triggered,
-    ).toBe(true)
-    expect(
-      evaluateFailOn(
-        { kind: "threshold", status: "changed", comparator: "<=", count: 5 },
-        observedAt(6),
-      ).triggered,
-    ).toBe(false)
+  it.each<[FailOnComparator, number, number, boolean]>([
+    [">", 10, 10, false],
+    [">", 10, 11, true],
+    [">=", 10, 10, true],
+    [">=", 10, 9, false],
+    ["==", 5, 5, true],
+    ["==", 5, 4, false],
+    ["==", 5, 6, false],
+    ["<=", 5, 5, true],
+    ["<=", 5, 6, false],
+  ])("`changed:%s%i` with %i observed → %s", (comparator, count, observed, expected) => {
+    expect(triggered(comparator, count, observed)).toBe(expected)
   })
 })
 

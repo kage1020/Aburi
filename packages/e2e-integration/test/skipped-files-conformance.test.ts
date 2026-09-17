@@ -1,6 +1,6 @@
 import type { ScanResult } from "@aburi/core"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { checkoutFixture } from "../src/fixture"
+import { beforeAll, describe, expect, it } from "vitest"
+import { useFixtureCheckout } from "../src/fixture"
 import { irValidator } from "../src/ir-schema"
 import { scanFixture } from "../src/scan-helper"
 
@@ -10,26 +10,21 @@ import { scanFixture } from "../src/scan-helper"
  * `codegen-drift` proves the generated types match the schema and TypeScript accepts excess
  * properties structurally, so a document that violates `additionalProperties: false` or omits
  * a `required` key type-checks, passes every unit test, and is refused by the first
- * third-party validator that reads it. The conformance suite next door is guaranteed by its
- * own fixture to skip nothing, so until now no validated document carried this array.
+ * third-party validator that reads it. The conformance suite next door skips nothing, so
+ * until now no validated document carried this array.
  *
  * The cap is set below the size of the fixture's own sources, which is the one way to make a
  * real scan drop real files without breaking any of them.
  */
 
+const fixture = useFixtureCheckout("nestjs-billing", "all")
+
 let result: ScanResult
 let violations: (doc: unknown) => string[]
-let cleanup: () => Promise<void>
 
 beforeAll(async () => {
-  const fixture = await checkoutFixture()
-  cleanup = fixture.cleanup
   violations = await irValidator()
   result = await scanFixture(fixture.root, { maxFileSizeBytes: 1024 })
-})
-
-afterAll(async () => {
-  await cleanup()
 })
 
 describe("e2e: a document that lost files still validates", () => {

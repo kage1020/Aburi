@@ -1,6 +1,6 @@
+import { component, decorator, effect, makeSymbol, symbolId } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { projectComponent } from "../src"
-import { component, decorator, effect, makeSymbol, symbolId } from "./fixtures"
 
 /**
  * The `## Boundary effect surface` section renders on the per-component page for

@@ -1,49 +1,10 @@
-import type { LangManifest, LanguagePlugin } from "@aburi/types"
+import type { LanguagePlugin } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildLanguageRouter } from "../../src"
-
-function stubLangManifest(name: string): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name,
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
+import { langManifest, stubLanguagePlugin } from "../fixtures/plugins"
 
 function stubPlugin(name: string, extensions: string[]): LanguagePlugin {
-  const plugin = {
-    manifest: stubLangManifest(name),
-    fileExtensions: extensions,
-    capabilities: {
-      hasDecorators: false,
-      hasGenerics: false,
-      hasAsync: false,
-      hasMacros: false,
-      hasPatternMatching: false,
-      hasAbstractTypes: false,
-      hasModules: false,
-      hasNamespaces: false,
-      hasTypeParameters: false,
-      hasExplicitVisibility: false,
-      hasJsDoc: false,
-    },
-    init: async () => {},
-    parseFile: async () => ({ tree: null, errors: [], imports: [] }),
-    extractSymbols: () => [],
-    walkBody: () => ({ rules: [], calls: [] }),
-    normalizeAst: () => "",
-  }
-  return plugin as unknown as LanguagePlugin
+  return stubLanguagePlugin({ manifest: langManifest(name), fileExtensions: extensions })
 }
 
 describe("buildLanguageRouter", () => {

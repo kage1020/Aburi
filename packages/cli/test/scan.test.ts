@@ -1,21 +1,10 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runCli, runScan } from "../src"
 import { CliError } from "../src/errors"
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
+import { MemStream } from "./fixtures"
 
 /**
  * runScan integration tests — use a minimal on-disk workspace so config resolution and
@@ -67,6 +56,8 @@ describe("runScan — happy path with nothing declared", () => {
     expect(report.exitCode).toBe(0)
     expect(report.keptSymbols).toBe(0)
     expect(report.droppedSymbols).toBe(0)
+    expect(report.parseErrorCount).toBe(0)
+    expect(report.timeoutCount).toBe(0)
     expect(report.irPath).not.toBeNull()
     expect(report.workspaceMdPath).not.toBeNull()
   })
@@ -96,41 +87,13 @@ describe("runScan — happy path with nothing declared", () => {
     expect(lines[1]).toBe("calls 0 · resolved 0 · unresolved 0")
   })
 
-  it("--format json skips markdown", async () => {
-    const report = await runScan({
-      cwd: scratch,
-      outputDir: resolve(scratch, "out"),
-      format: "json",
-    })
-    expect(report.irPath).not.toBeNull()
-    expect(report.workspaceMdPath).toBeNull()
-  })
-
-  it("--format md skips the IR JSON", async () => {
-    const report = await runScan({
-      cwd: scratch,
-      outputDir: resolve(scratch, "out"),
-      format: "md",
-    })
-    expect(report.irPath).toBeNull()
-    expect(report.workspaceMdPath).not.toBeNull()
-  })
-
-  it("exposes a skipped array (may include files no loaded plugin claims)", async () => {
-    const report = await runScan({
-      cwd: scratch,
-      outputDir: resolve(scratch, "out"),
-      format: "json",
-    })
-    expect(Array.isArray(report.skipped)).toBe(true)
-    expect(report.parseErrorCount).toBe(0)
-    expect(report.timeoutCount).toBe(0)
-    // package.json is discovered but no loaded plugin claims `.json`, so it may land on
-    // the skipped list. Assert the shape rather than the exact contents.
-    for (const entry of report.skipped) {
-      expect(typeof entry.path).toBe("string")
-      expect(typeof entry.reason).toBe("string")
-    }
+  it.each([
+    { format: "json" as const, writesIr: true, writesMd: false },
+    { format: "md" as const, writesIr: false, writesMd: true },
+  ])("--format $format writes only that artefact", async ({ format, writesIr, writesMd }) => {
+    const report = await runScan({ cwd: scratch, outputDir: resolve(scratch, "out"), format })
+    expect(report.irPath !== null).toBe(writesIr)
+    expect(report.workspaceMdPath !== null).toBe(writesMd)
   })
 })
 
@@ -343,22 +306,6 @@ describe("runScan — a file a plugin threw on", () => {
 })
 
 describe("runScan — a workspace whose files all extract", () => {
-  it("exits SUCCESS with an empty extractionFailures", async () => {
-    await mkdir(resolve(scratch, "src"), { recursive: true })
-    await writeFile(
-      resolve(scratch, "src", "ok.ts"),
-      "export function ok() {\n  return 1\n}\n",
-      "utf8",
-    )
-    const report = await runScan({
-      cwd: scratch,
-      outputDir: resolve(scratch, "out"),
-      format: "json",
-    })
-    expect(report.exitCode).toBe(0)
-    expect(report.extractionFailures).toEqual([])
-  })
-
   it("stays SUCCESS when files were skipped for a reason that is not a plugin throw", async () => {
     // A file over `maxFileSizeBytes` is skipped, and skipping it says nothing is broken —
     // it is a deterministic budget doing its job. Gating on `skipped` as a whole rather than

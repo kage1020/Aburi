@@ -1,17 +1,15 @@
+import { noopRegistry, silentLogger } from "@aburi/test-support"
 import type {
   BodyExtraction,
   ExtractionContext,
   ImportEdge,
-  LangManifest,
   LanguagePlugin,
-  Logger,
   OpaqueAstNode,
   ParsedTree,
   ParseError,
   ParseResult,
   SourceFile,
   SymbolCandidate,
-  VocabRegistry,
   WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
@@ -23,7 +21,7 @@ import {
   type TreeReleaseFailure,
 } from "../../src"
 import { spend } from "../fixtures/clock"
-import { symbolId } from "../fixtures/ir"
+import { langManifest, NO_CAPABILITIES, stubCandidate, stubFile } from "../fixtures/plugins"
 
 /**
  * The parse tree is the plugin's to build and the core's to free: `parseFile` hands the
@@ -33,65 +31,7 @@ import { symbolId } from "../fixtures/ir"
  * recorded rather than becoming the file's story.
  */
 
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
-
-const silentLog: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-}
-
-const stubFile: SourceFile = { path: "test.stub", content: "" }
-
 const PLUGIN_NAME = "lang-stub"
-
-function langManifest(): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: PLUGIN_NAME,
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
-
-function candidate(name: string): SymbolCandidate<OpaqueAstNode> {
-  return {
-    id: symbolId(`stub:test.stub#${name}`),
-    kind: "function",
-    extKind: null,
-    name,
-    visibility: "public",
-    decorators: [],
-    signature: null,
-    source: { file: "test.stub", startLine: 1, endLine: 2, startColumn: null, endColumn: null },
-    derivedBy: [],
-    bodyNode: {} as OpaqueAstNode,
-    fullNode: {} as OpaqueAstNode,
-  }
-}
 
 type Stage = "extractSymbols" | "walkBody" | "normalizeAst"
 
@@ -122,22 +62,10 @@ interface StubOptions {
  * about the recorded trees is also an assertion that the receiver survived the call.
  */
 class StubLanguagePlugin {
-  readonly manifest = langManifest()
+  readonly manifest = langManifest(PLUGIN_NAME)
   readonly languageId = "stub"
   readonly fileExtensions = [".stub"]
-  readonly capabilities = {
-    hasDecorators: false,
-    hasGenerics: false,
-    hasAsync: false,
-    hasMacros: false,
-    hasPatternMatching: false,
-    hasAbstractTypes: false,
-    hasModules: false,
-    hasNamespaces: false,
-    hasTypeParameters: false,
-    hasExplicitVisibility: false,
-    hasJsDoc: false,
-  }
+  readonly capabilities = NO_CAPABILITIES
   readonly released: ParsedTree[] = []
   readonly order: string[] = []
   /** The handle `parseFile` last handed out, so a test can compare identity. */
@@ -170,7 +98,7 @@ class StubLanguagePlugin {
     this.order.push("extractSymbols")
     spend(this.options.extractMs ?? 0)
     this.failIfAsked("extractSymbols")
-    return (this.options.candidates ?? ["one"]).map(candidate)
+    return (this.options.candidates ?? ["one"]).map((name) => stubCandidate(name))
   }
 
   walkBody(
@@ -234,7 +162,7 @@ function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
     config: extras.parseTimeoutMs === undefined ? {} : { parseTimeoutMs: extras.parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
     component: null,
-    log: silentLog,
+    log: silentLogger,
     treeReleaseFailures: failures,
   }
   return runFilePipeline(input)

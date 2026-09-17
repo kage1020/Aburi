@@ -1,8 +1,8 @@
 import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { classifySymbolDropHint, extractSymbols, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { classifySymbolDropHint } from "../src/index"
+import { byId, makeExtractionCtx, symbolsOf } from "./fixtures/ctx"
 
 /**
  * The two statement shapes a declaration with **no body** is written in: `abstract` inside a
@@ -12,23 +12,8 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * in the ordinary `.ts` files that are not dropped as `.d.ts` (LP35, LP36).
  */
 
-async function symbolsOf(source: string): Promise<SymbolCandidate<Node>[]> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source))
-}
-
 function names(symbols: SymbolCandidate<Node>[]): string[] {
   return symbols.map((s) => s.name)
-}
-
-function byId(symbols: SymbolCandidate<Node>[], suffix: string): SymbolCandidate<Node> {
-  const match = symbols.find((s) => s.id.endsWith(suffix))
-  if (match === undefined) {
-    throw new Error(
-      `no symbol with id ending in "${suffix}" (have: ${symbols.map((s) => s.id).join(", ")})`,
-    )
-  }
-  return match
 }
 
 describe("LP35: abstract members", () => {

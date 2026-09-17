@@ -1,3 +1,4 @@
+import { fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -8,7 +9,6 @@ import {
   matchStageNameSignature,
   writeCanonicalDiff,
 } from "../src"
-import { fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
 
 /**
  * Two properties the matcher owes its callers, neither of which it held.

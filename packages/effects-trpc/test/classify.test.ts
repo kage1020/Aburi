@@ -1,6 +1,7 @@
+import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyTrpcCall, EFFECTS_TRPC_DERIVED_BY_PREFIX } from "../src/index"
-import { makeCall, makeCtx, makeTrpcClientImport, makeTrpcServerImport } from "./fixtures/context"
+import { makeTrpcClientImport, makeTrpcServerImport } from "./fixtures/context"
 
 const clientCtx = () => makeCtx({ imports: [makeTrpcClientImport()] })
 const reactCtx = () => makeCtx({ imports: [makeTrpcClientImport("@trpc/react-query")] })
@@ -221,7 +222,7 @@ describe("classifyTrpcCall — shapes outside the vocabulary", () => {
   })
 
   it("returns null for a lone `this` — the strip leaves nothing to address", () => {
-    // Degenerate edge of the strip: `segments` becomes empty while `terminal` still holds
+    // Degenerate edge of the strip: `clientPath` becomes empty while `terminal` still holds
     // the pre-strip last segment. The length gate is what keeps the two from disagreeing,
     // so pin the shortest input that exercises it. It must return null, not throw.
     expect(classifyTrpcCall(makeCall({ target: "this" }), clientCtx())).toBeNull()
@@ -317,13 +318,6 @@ describe("classifyTrpcCall — upstream contract violations", () => {
 })
 
 describe("classifyTrpcCall — purity", () => {
-  it("returns an identical result across repeated invocations (effect-plugin.md EP2)", () => {
-    const ctx = clientCtx()
-    const call = makeCall({ target: "client.user.byId.query" })
-    const runs = Array.from({ length: 5 }, () => classifyTrpcCall(call, ctx))
-    for (const run of runs) expect(run).toEqual(runs[0])
-  })
-
   it("does not mutate the CallCandidate or the ClassifyContext", () => {
     const ctx = clientCtx()
     const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })

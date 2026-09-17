@@ -1,6 +1,7 @@
 import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
 import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
+import { representativeSymbol } from "./status"
 
 /** The three inputs of the Slice View pass — docs/design/slice-view.md §3. */
 export interface SliceInput {
@@ -251,49 +252,16 @@ export function assertSliceRecordInvariant(record: SliceRecord): void {
 }
 
 /**
- * §4.1 Node selection: keep every SymbolChange whose status is
- * added / removed / changed / moved+changed / dropped-toggled. The identity
- * is the head-side Symbol id where present (added / changed / moved+changed /
- * dropped-toggled), the base-side id for removed. Pure moved and unchanged
- * (already stripped upstream) are excluded — §4.1 / §4.3.
- *
- * The returned array is deliberately not deduplicated: a well-formed
- * SymbolChange list from `buildDiff` never mentions the same Symbol id
- * twice, and Union-Find would coalesce any accidental duplicate anyway.
+ * §4.1 Node selection: every SymbolChange except pure `moved` (§4.3), identified by its
+ * representative Symbol — the head side where present, the base side for `removed`.
+ * `unknown` is a thing a reviewer has to look at, so it belongs in the cluster its
+ * neighbours are in. Not deduplicated: `buildDiff` never mentions one id twice, and the
+ * WCC primitive coalesces an accidental duplicate anyway.
  */
 function collectNodeIds(changes: readonly SymbolChange[]): SymbolId[] {
-  const ids: SymbolId[] = []
-  for (const change of changes) {
-    const id = nodeIdOf(change)
-    if (id === null) continue
-    ids.push(id)
-  }
-  return ids
-}
-
-function nodeIdOf(change: SymbolChange): SymbolId | null {
-  switch (change.status) {
-    case "added":
-      return change.symbol.id
-    case "removed":
-      // §4.1 — removed uses base-side id because there is no head symbol.
-      return change.symbol.id
-    case "unknown":
-      // The one side that exists carries the id, as for added / removed. An unknown entry
-      // is a thing a reviewer has to look at, so it belongs in the cluster its neighbours
-      // are in — a Symbol whose file went missing is most useful read beside the callers
-      // that still reference it.
-      return change.symbol.id
-    case "changed":
-    case "moved+changed":
-    case "dropped-toggled":
-      return change.after.id
-    case "moved":
-      // §4.3 — pure moved is not a Node and is not used for bridging either.
-      return null
-  }
-  // Exhaustive: if SymbolChange grows a new status the compile error above
-  // fires before this fallback is reachable.
+  return changes
+    .filter((change) => change.status !== "moved")
+    .map((change) => representativeSymbol(change).id)
 }
 
 /**

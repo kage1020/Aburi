@@ -33,24 +33,6 @@ function base(): IRSymbol {
   })
 }
 
-describe("apiFingerprint — 12-hex determinism", () => {
-  it("returns exactly 12 lowercase hex characters", () => {
-    const fp = apiFingerprint(base())
-    expect(fp).toMatch(/^[0-9a-f]{12}$/)
-  })
-
-  it("T1: two calls on the same Symbol produce the same hash", () => {
-    const sym = base()
-    expect(apiFingerprint(sym)).toBe(apiFingerprint(sym))
-  })
-
-  it("T1b: 100 identical inputs never diverge", () => {
-    const sym = base()
-    const first = apiFingerprint(sym)
-    for (let i = 0; i < 100; i++) expect(apiFingerprint(sym)).toBe(first)
-  })
-})
-
 describe("apiFingerprint — invariance", () => {
   it("A1: renaming signature.inputs[].name does not change the hash", () => {
     const sym = base()

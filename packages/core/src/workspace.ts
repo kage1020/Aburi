@@ -3,9 +3,11 @@ import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:p
 import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
 import { parse as parseYaml } from "yaml"
+import { toNfc } from "./codepoints"
 import { CoreError } from "./errors"
 import { posixWorkspaceRelativeViolation } from "./id"
-import { describeJsonType } from "./scan/faults"
+import { compareBy, compareCodeUnit } from "./order"
+import { describeJsonType, isVanishedFile } from "./scan/faults"
 
 /**
  * Filenames whose presence at any directory ancestor identifies a workspace root. The
@@ -201,21 +203,22 @@ export async function detectManagers(workspaceRoot: string): Promise<DetectManag
 
   await Promise.all([
     detectPnpm(workspaceRoot).then(merge),
-    detectPackageJsonWorkspaces(workspaceRoot).then((rs) => {
-      for (const r of rs) merge(r)
+    detectPackageJsonWorkspaces(workspaceRoot).then((managerScans) => {
+      for (const managerScan of managerScans) merge(managerScan)
     }),
     detectTurbo(workspaceRoot).then(merge),
     detectNx(workspaceRoot).then(merge),
   ])
 
-  managers.sort((a, b) => compareString(a.tool, b.tool))
-  for (const m of managers) m.roots.sort(compareString)
+  managers.sort(compareBy((manager) => manager.tool))
+  for (const manager of managers) manager.roots.sort(compareCodeUnit)
   workspaces.sort(
     (a, b) =>
-      compareString(a.relativeRoot, b.relativeRoot) || compareString(a.managerTool, b.managerTool),
+      compareCodeUnit(a.relativeRoot, b.relativeRoot) ||
+      compareCodeUnit(a.managerTool, b.managerTool),
   )
   unresolved.sort(
-    (a, b) => compareString(a.tool, b.tool) || compareString(a.manifestPath, b.manifestPath),
+    (a, b) => compareCodeUnit(a.tool, b.tool) || compareCodeUnit(a.manifestPath, b.manifestPath),
   )
   return { managers, workspaces, unresolved }
 }
@@ -462,21 +465,14 @@ function malformedPatternList(manifestPath: string, key: string, fault: string):
   )
 }
 
-/** How a value is named in a message about the JSON or YAML shape it came from. */
 async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path)
     return true
   } catch (err: unknown) {
-    if (isBenignFsError(err)) return false
+    if (isVanishedFile(err)) return false
     throw err
   }
-}
-
-function isBenignFsError(err: unknown): boolean {
-  if (err === null || typeof err !== "object") return false
-  const code = (err as { code?: unknown }).code
-  return code === "ENOENT" || code === "ENOTDIR"
 }
 
 async function readText(path: string): Promise<string> {
@@ -519,11 +515,7 @@ function toRelativePosix(root: string, target: string): string {
   const rel = relative(root, target)
   if (rel.length === 0) return "."
   const posixRel = sep === "/" ? rel : rel.split(sep).join(posix.sep)
-  return posixRel.normalize("NFC")
-}
-
-function compareString(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
+  return toNfc(posixRel)
 }
 
 /** Re-export so callers (component.ts) can list the directories without redoing detection. */
@@ -535,7 +527,7 @@ export async function isDirectory(path: string): Promise<boolean> {
     const stats = await stat(path)
     return stats.isDirectory()
   } catch (err: unknown) {
-    if (isBenignFsError(err)) return false
+    if (isVanishedFile(err)) return false
     throw err
   }
 }
@@ -545,7 +537,7 @@ export async function safeReaddir(path: string): Promise<string[]> {
   try {
     return await readdir(path)
   } catch (err: unknown) {
-    if (isBenignFsError(err)) return []
+    if (isVanishedFile(err)) return []
     throw err
   }
 }

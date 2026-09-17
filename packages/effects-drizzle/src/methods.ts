@@ -1,36 +1,23 @@
 /**
- * Drizzle ORM method vocabulary.
+ * Drizzle ORM method vocabulary. Each `_LIST` is the single source of truth for its union
+ * type and runtime `Set`.
  *
- * Each `_LIST` is the single source of truth — the union type and the runtime `Set` are
- * both derived from it, so extending the vocabulary is a table edit in exactly one
- * place. Extending as Drizzle ships new terminal methods keeps the classifier honest
- * without a code rewrite.
- *
- * Only methods that map cleanly onto core `db.read` / `db.write` / `db.transaction`
- * vocabulary are listed. Chained builder steps (`.from`, `.where`, `.set`, `.values`,
- * `.returning`, `.orderBy`, `.limit`, `.leftJoin`, ...) are deliberately NOT in the
- * vocab — they surface as internal segments in the classifier's fluent-chain reject
- * pass so exactly one classification is emitted per query. Raw SQL (`.execute()`) is
- * also excluded because a raw statement can be either a read or a write and static
- * disambiguation would require SQL parsing.
+ * Chained builder steps (`.from`, `.where`, `.set`, `.values`, `.returning`, ...) are
+ * deliberately absent: they surface as internal segments in the classifier's chain-collapse
+ * pass so exactly one classification is emitted per query. Raw SQL (`.execute()`) is absent
+ * because a raw statement can be a read or a write, and telling them apart needs SQL parsing.
  */
 const DRIZZLE_READ_METHODS_LIST = ["select", "selectDistinct", "selectDistinctOn"] as const
 
 const DRIZZLE_WRITE_METHODS_LIST = ["insert", "update", "delete"] as const
 
 /**
- * `transaction` is the standard interactive-transaction API across every driver.
- * `batch` is the multi-statement batch API on Neon (`drizzle-orm/neon-http` /
- * `drizzle-orm/neon-serverless`) and Cloudflare D1 (`drizzle-orm/d1`); it maps to
- * `db.transaction` because it executes multiple statements atomically. `batch` is a
- * method on the driver-specific database instance, not a separate subpath import.
+ * `transaction` is the interactive-transaction API on every driver; `batch` is the atomic
+ * multi-statement API on Neon and Cloudflare D1, so it maps to `db.transaction` too.
  */
 const DRIZZLE_TRANSACTION_METHODS_LIST = ["transaction", "batch"] as const
 
-/**
- * Relational query API terminals: `db.query.<table>.findMany` / `findFirst`.
- * Drizzle does NOT expose `findUnique` (that is Prisma vocabulary) — omit it.
- */
+/** Relational query API terminals (`db.query.<table>.findMany`). No `findUnique` — that is Prisma. */
 const DRIZZLE_QUERY_METHODS_LIST = ["findMany", "findFirst"] as const
 
 export type DrizzleReadMethod = (typeof DRIZZLE_READ_METHODS_LIST)[number]
@@ -68,18 +55,9 @@ export function isDrizzleQueryMethod(name: string): name is DrizzleQueryMethod {
 }
 
 /**
- * The most arguments each recognized terminal takes, for the terminals that take more than
- * one. Everything else takes at most one — an optional projection for `select`, a table
- * reference for `insert` / `update` / `delete`, an optional options object for the
- * relational query terminals, a statement array for `batch`.
- *
- * Two exceptions, both from the library's own signatures: Postgres'
- * `selectDistinctOn(columns, projection)` and `transaction(callback, config)`. A flat "one
- * argument" rule would read both as some other API, so the exceptions live next to the
- * vocabulary that defines them rather than as magic numbers at the call site.
- *
- * Keys are typed against the vocabulary unions, so renaming or dropping a terminal breaks
- * the build instead of leaving an arity exception that silently matches nothing.
+ * Terminals that take more than one argument: Postgres' `selectDistinctOn(columns,
+ * projection)` and `transaction(callback, config)`. Everything else takes at most one.
+ * Keyed on the vocabulary unions so dropping a terminal breaks the build here too.
  */
 const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
   DrizzleReadMethod | DrizzleTransactionMethod,
@@ -89,6 +67,8 @@ const DRIZZLE_MULTI_ARGUMENT_TERMINALS: ReadonlyMap<
   ["transaction", 2],
 ])
 
+const DEFAULT_MAX_ARGUMENTS = 1
+
 /** The most arguments `method` takes before the call stops looking like Drizzle's own API. */
 export function maxArgumentsFor(method: string): number {
   return (
@@ -97,18 +77,10 @@ export function maxArgumentsFor(method: string): number {
   )
 }
 
-const DEFAULT_MAX_ARGUMENTS = 1
-
 /**
- * The set of verbs that anchor a fluent chain at its root. A CallCandidate whose target
- * has any of these as an INTERNAL segment (i.e. neither first nor last) is a downstream
- * link of an already-classified chain and must be rejected to preserve the
- * one-classification-per-chain invariant.
- *
- * Internal helper — consumed only by `classifyDrizzleCall` — so it is deliberately kept
- * out of the public barrel export. Widened to `ReadonlySet<string>` at the callsite via
- * a cast because `Set.prototype.has` requires the element type and the callsite passes a
- * generic `string` segment.
+ * Verbs that anchor a fluent chain at its root. A target carrying one of these in an
+ * internal segment is a downstream link (`db.select.from`) whose root already classified.
+ * Internal to `classifyDrizzleCall`; not in the public barrel.
  */
 export const DRIZZLE_FLUENT_ROOT_METHODS: ReadonlySet<DrizzleReadMethod | DrizzleWriteMethod> =
   new Set<DrizzleReadMethod | DrizzleWriteMethod>([

@@ -1,6 +1,7 @@
+import { compareCodeUnit } from "@aburi/core"
 import type { Signature } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { findChild, isPresent, walkDescendants } from "./ast-helpers"
+import { findChild, thrownValue, walkDescendants } from "./ast-helpers"
 
 /**
  * Build a Signature for a function-like declaration node (function_declaration,
@@ -29,8 +30,6 @@ function detectAsync(node: Node): boolean {
   for (const child of node.children) {
     if (child !== null && child.type === "async") return true
   }
-  // arrow_function's `async` keyword may live as a sibling token; the grammar tags the
-  // node itself with an `async` child when present, so a single pass is enough.
   return false
 }
 
@@ -52,10 +51,10 @@ function readTypeParameters(node: Node): string[] {
   return out
 }
 
-function readParameters(node: Node): Array<{ name: string; type: string }> {
+function readParameters(node: Node): Signature["inputs"] {
   const params = node.childForFieldName("parameters") ?? findChild(node, "formal_parameters")
   if (params === null) return readBareParameter(node)
-  const out: Array<{ name: string; type: string }> = []
+  const out: Signature["inputs"] = []
   for (const child of params.namedChildren) {
     if (child === null) continue
     if (
@@ -84,7 +83,7 @@ function readParameters(node: Node): Array<{ name: string; type: string }> {
  * unannotated `(x) => …` produces, which keeps the two spellings of one parameter one
  * signature.
  */
-function readBareParameter(node: Node): Array<{ name: string; type: string }> {
+function readBareParameter(node: Node): Signature["inputs"] {
   const parameter = node.childForFieldName("parameter")
   if (parameter === null) return []
   const name = parameter.text.trim()
@@ -131,26 +130,23 @@ function readThrows(node: Node, jsDocText: string | null): string[] {
   if (jsDocText !== null) {
     for (const tag of extractJsDocThrows(jsDocText)) seen.add(tag)
   }
-  return [...seen].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return [...seen].sort(compareCodeUnit)
 }
 
+/**
+ * The type a `throw` names, as far as the tree says: the constructor of `throw new Foo()`;
+ * the identifier of `throw err`, which is likely a caught variable and is kept verbatim so at
+ * least the local name shows up; the callee of `throw makeError()` / `throw errors.notFound()`
+ * so factory-style construction is not silently dropped. Anything else is null — consumers
+ * wanting stronger typing rely on JSDoc `@throws`.
+ */
 function extractThrownType(throwNode: Node): string | null {
-  const argument = throwNode.namedChild(0)
-  if (argument === null) return null
-  // `throw new Foo(...)` — the constructor identifier IS the thrown type.
-  if (argument.type === "new_expression") {
-    const ctor = argument.childForFieldName("constructor")
-    if (isPresent(ctor)) return ctor.text
-  }
-  // `throw err` — the identifier is likely a caught variable; keep it verbatim so at
-  // least the local name shows up in the signature. Consumers that want stronger typing
-  // can rely on JSDoc @throws.
-  if (argument.type === "identifier") return argument.text
-  // `throw makeError()` / `throw errors.notFound()` — surface the callee identifier so
-  // factory-style error construction is not silently dropped.
-  if (argument.type === "call_expression") {
-    const callee = argument.childForFieldName("function")
-    if (isPresent(callee)) return callee.text
+  const thrown = thrownValue(throwNode)
+  if (thrown === null) return null
+  if (thrown.viaNew) return thrown.node.text
+  if (thrown.node.type === "identifier") return thrown.node.text
+  if (thrown.node.type === "call_expression") {
+    return thrown.node.childForFieldName("function")?.text ?? null
   }
   return null
 }

@@ -1,18 +1,6 @@
-import type { BodyExtraction, Rule, WalkContext } from "@aburi/types"
+import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { extractSymbols, parseTypescriptFile, walkBody } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
-
-async function walkFirstSymbol(source: string): Promise<BodyExtraction> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const symbols = extractSymbols(requireTree(result.tree), ctx)
-  const target = symbols[0]
-  if (target === undefined) throw new Error("no symbols in fixture")
-  const walkCtx: WalkContext<Node> = { ...ctx, symbol: target }
-  return walkBody(target, walkCtx)
-}
+import { walkFirstSymbol } from "./fixtures/ctx"
 
 function typesOf(rules: Rule[]): string[] {
   return rules.map((r) => r.type)

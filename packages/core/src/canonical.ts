@@ -1,5 +1,6 @@
-import { describeCodePoints } from "./codepoints"
+import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError } from "./errors"
+import { compareCodeUnit } from "./order"
 
 export interface SerializeOptions {
   /**
@@ -54,7 +55,7 @@ function write(
     case "number":
       return writeNumber(value, path)
     case "string":
-      return JSON.stringify(value.normalize("NFC"))
+      return JSON.stringify(toNfc(value))
     case "undefined":
     case "function":
     case "symbol":
@@ -72,7 +73,7 @@ function write(
     assertPlainObject(value, path)
     const entries = normalizedEntries(value as Record<string, unknown>, path)
     if (entries.length === 0) return "{}"
-    entries.sort(([a], [b]) => compareByCodeUnit(a, b))
+    entries.sort(([a], [b]) => compareCodeUnit(a, b))
     const childIndent = indent.repeat(depth + 1)
     const closeIndent = indent.repeat(depth)
     const rendered = entries.map(([k, v]) => {
@@ -112,11 +113,6 @@ function rejectNonJson(type: string, path: string): CoreError {
   )
 }
 
-/** Lexicographic compare by UTF-16 code unit (matches Array.prototype.sort default for strings). */
-function compareByCodeUnit(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
 /**
  * Own enumerable entries with `undefined` values dropped and every key normalized to NFC.
  *
@@ -133,7 +129,7 @@ function normalizedEntries(value: Record<string, unknown>, path: string): [strin
     // Skipped before the collision check on purpose: `{ [NFD]: 1, [NFC]: undefined }` writes
     // one key and loses nothing, so it is not a collision. A key with no value is not a key.
     if (entry === undefined) continue
-    const key = rawKey.normalize("NFC")
+    const key = toNfc(rawKey)
     const prior = seen.get(key)
     if (prior !== undefined) {
       throw new CoreError(

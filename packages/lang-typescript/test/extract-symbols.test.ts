@@ -1,40 +1,11 @@
 import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { extractSymbols, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
-
-async function symbolsOf(source: string): Promise<SymbolCandidate<Node>[]> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source))
-}
-
-function byId(symbols: SymbolCandidate<Node>[], suffix: string): SymbolCandidate<Node> {
-  const match = symbols.find((s) => s.id.endsWith(suffix))
-  if (match === undefined) {
-    throw new Error(
-      `no symbol with id ending in "${suffix}" (have: ${symbols.map((s) => s.id).join(", ")})`,
-    )
-  }
-  return match
-}
+import { byId, symbolsOf } from "./fixtures/ctx"
 
 describe("extractSymbols — structure (LP1-LP8)", () => {
-  it("LP1: top-level function", async () => {
-    const symbols = await symbolsOf("export function createInvoice() {}")
-    const sym = byId(symbols, "#createInvoice")
-    expect(sym.kind).toBe("function")
-    expect(sym.name).toBe("createInvoice")
-    expect(sym.derivedBy).toContain("export-keyword")
-  })
-
-  it("LP2: class declaration", async () => {
-    const symbols = await symbolsOf("export class InvoiceService {}")
-    const sym = byId(symbols, "#InvoiceService")
-    expect(sym.kind).toBe("class")
-    expect(sym.name).toBe("InvoiceService")
-  })
-
+  // LP1 (top-level function), LP2 (class) and LP5 (interface) are rows of the LP6b table
+  // below, which pins each kind's `kind` beside its export evidence.
   it("LP3: class method uses '.' separator", async () => {
     const symbols = await symbolsOf("export class InvoiceService { createInvoice() {} }")
     const sym = byId(symbols, "#InvoiceService.createInvoice")
@@ -46,12 +17,6 @@ describe("extractSymbols — structure (LP1-LP8)", () => {
     const sym = byId(symbols, "#InvoiceService::fromJson")
     expect(sym.kind).toBe("method")
     expect(sym.derivedBy).toContain("static-method")
-  })
-
-  it("LP5: interface declaration", async () => {
-    const symbols = await symbolsOf("export interface Invoice { total: number }")
-    const sym = byId(symbols, "#Invoice")
-    expect(sym.kind).toBe("interface")
   })
 
   it("LP6: default export of an anonymous function has qname <default>", async () => {
@@ -88,17 +53,18 @@ describe("extractSymbols — structure (LP1-LP8)", () => {
  */
 describe("extractSymbols — the export keyword is evidence on every kind (LP6b)", () => {
   it.each([
-    ["function", "export function f() {}", "#f"],
-    ["class", "export class C {}", "#C"],
-    ["const", "export const x = 1", "#x"],
-    ["arrow const", "export const g = () => 1", "#g"],
-    ["var", "export var v = 1", "#v"],
-    ["interface", "export interface I { a: number }", "#I"],
-    ["type alias", "export type T = number", "#T"],
-    ["enum", "export enum E { A }", "#E"],
-    ["namespace", "export namespace N { const a = 1 }", "#N"],
-  ])("%s: the exported spelling carries the token", async (_label, source, suffix) => {
+    ["function", "export function f() {}", "#f", "function"],
+    ["class", "export class C {}", "#C", "class"],
+    ["const", "export const x = 1", "#x", "const"],
+    ["arrow const", "export const g = () => 1", "#g", "function"],
+    ["var", "export var v = 1", "#v", "const"],
+    ["interface", "export interface I { a: number }", "#I", "interface"],
+    ["type alias", "export type T = number", "#T", "type"],
+    ["enum", "export enum E { A }", "#E", "enum"],
+    ["namespace", "export namespace N { const a = 1 }", "#N", "namespace"],
+  ])("%s: the exported spelling carries the token", async (_label, source, suffix, kind) => {
     const symbol = byId(await symbolsOf(source), suffix)
+    expect(symbol.kind).toBe(kind)
     expect(symbol.visibility).toBe("public")
     expect(symbol.derivedBy).toContain("export-keyword")
   })

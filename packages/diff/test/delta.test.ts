@@ -1,6 +1,6 @@
+import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { buildDiff, classifyStatus, computeSymbolDelta, dropDirection } from "../src"
-import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 

@@ -1,7 +1,7 @@
+import { makeCall } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classificationConfidence, DRIZZLE_CLIENT_WORDS, namesDrizzleClient } from "../src/index"
 import { maxArgumentsFor } from "../src/methods"
-import { makeCall } from "./fixtures/context"
 
 describe("namesDrizzleClient", () => {
   it.each([

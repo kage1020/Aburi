@@ -214,6 +214,8 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md §11)", () => {
     expect(bySymbolId(out, "ts:a.ts#A").effects.some((e) => e.propagated === true)).toBe(true)
   })
 
+  // A second pass over the first pass's output, so unlike PR14 it also covers the
+  // `propagated: true` entries being skipped as locals on re-entry.
   it("PR13: idempotence — running propagation twice reproduces the same effects[] byte-for-byte", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),

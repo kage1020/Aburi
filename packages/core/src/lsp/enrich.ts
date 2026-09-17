@@ -34,9 +34,13 @@ import type {
 } from "@aburi/types"
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
 import { makeCallSiteKey, receiverHead } from "../call-site"
+import { groupBy } from "../collections"
 import { trySymbolId } from "../id"
+import { silentLogger } from "../logger"
+import { compareBy, compareCodeUnit } from "../order"
 import {
   createLspClient,
+  errorMessage,
   isLspFailure,
   type LspClient,
   type LspFailure,
@@ -153,11 +157,11 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   const servers = input.lspConfig.servers
   if (servers === undefined) return emptyResult
 
-  const logger: Logger = input.logger ?? SILENT_LOGGER
+  const logger: Logger = input.logger ?? silentLogger
   const stats = createStatsBuilder(true)
   const fallback = createFallbackState()
 
-  const symbolsByLanguage = groupSymbolsByLanguage(input.symbols)
+  const symbolsByLanguage = groupBy(input.symbols, (symbol) => symbol.language)
   const workingSymbols: IRSymbol[] = input.symbols.map((s) => cloneSymbol(s))
   const workingById = new Map<SymbolId, IRSymbol>()
   for (const s of workingSymbols) workingById.set(s.id, s)
@@ -166,7 +170,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
 
   const factory = input.serverFactory ?? defaultServerFactory
 
-  for (const [language, langSymbols] of [...symbolsByLanguage.entries()].sort(byLanguage)) {
+  for (const [language, langSymbols] of [...symbolsByLanguage].sort(compareBy(([id]) => id))) {
     const serverConfig = servers[language]
     if (serverConfig === undefined) continue
 
@@ -277,7 +281,7 @@ interface ProcessLanguageInput {
 }
 
 async function processLanguage(input: ProcessLanguageInput): Promise<void> {
-  const symbolsByFile = groupSymbolsByFile(input.symbols)
+  const symbolsByFile = groupBy(input.symbols, (symbol) => symbol.source.file)
   const filesSorted = [...symbolsByFile.keys()].sort()
 
   const requestTimeout = input.serverConfig.requestTimeoutMs ?? 500
@@ -323,7 +327,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       input.stats.requestsIssued += 1
       const docSymbols = await requestDocumentSymbols(input.client, uri, requestTimeout)
       const requestOk = !isLspFailure(docSymbols)
-      if (!requestOk) accountForFailure(input.stats, docSymbols)
+      if (isLspFailure(docSymbols)) accountForFailure(input.stats, docSymbols)
       const requestOutcome = input.fallback.onRequest(file, requestOk)
       if (requestOutcome.escalate) fileFellBack = true
       if (requestOk) {
@@ -339,18 +343,10 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
-      // Responses are held, not applied, while workers are running: §10.3 wants
-      // the cache consumed in job order, and a write issued from inside a
-      // worker takes its order from the server's pace instead.
-      //
-      // With the target in the key no *live* collision remains for this to
-      // settle — distinct call sites key apart, identical ones hover the same
-      // position and answer the same thing, and `appendInferredThrows` merges
-      // through a sorted set — so nothing here is load-bearing today, and no
-      // test would fail if the apply moved back inside the worker. It is the
-      // structural half of the guarantee: what the file produces is decided by
-      // the sort, and a future writer of `applyJobResult` cannot reintroduce an
-      // arrival-order dependency by adding a field that does not merge.
+      // Responses are held, not applied, while workers are running: §10.3 wants the cache
+      // consumed in job order, and a write issued from inside a worker would take its order
+      // from the server's pace instead (no live collision depends on this today; it keeps a
+      // future non-merging field in `applyJobResult` from reintroducing arrival order).
       const responses: unknown[] = new Array(jobs.length)
       const answered: boolean[] = new Array(jobs.length).fill(false)
       try {
@@ -363,7 +359,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
           input.stats.requestsIssued += 1
           const result = await executeJob(job, input.client, uri, requestTimeout)
           const jobOk = !isLspFailure(result)
-          if (!jobOk) accountForFailure(input.stats, result)
+          if (isLspFailure(result)) accountForFailure(input.stats, result)
           const outcome = input.fallback.onRequest(file, jobOk)
           if (outcome.escalate) fileFellBack = true
           if (jobOk) {
@@ -372,18 +368,10 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
           }
         })
       } finally {
-        // Also on the way out of a throw: §6.2 keeps what a fallback had
-        // already earned, and every worker has stopped by the time
-        // `runJobsWithConcurrency` settles either way, so nothing is still
-        // writing here.
-        //
-        // Each apply carries its own `catch` for two reasons. A `finally` that
-        // throws *replaces* the exception unwinding through it, so a throw here
-        // would erase the server-side failure that caused the unwind and leave
-        // a stack pointing at the wrong cause; and inside the worker, where
-        // these applies used to run, a throwing one cost only its own result.
-        // Both properties are worth keeping even though `applyJobResult`'s
-        // lookups all return `null` rather than throw today.
+        // Also on the way out of a throw (§6.2 keeps what a fallback already earned; every
+        // worker has stopped by now). Each apply catches for itself so a throw here can
+        // neither replace the exception unwinding through this `finally` nor cost more than
+        // its own result.
         for (let index = 0; index < jobs.length; index += 1) {
           const job = jobs[index]
           if (job === undefined || !answered[index]) continue
@@ -513,9 +501,11 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
  * one — not because the pipeline's order is wrong.
  */
 function compareRequestJob(a: RequestJob, b: RequestJob): number {
-  if (a.symbolId !== b.symbolId) return a.symbolId < b.symbolId ? -1 : 1
-  if (a.callLine !== b.callLine) return a.callLine - b.callLine
-  return a.target < b.target ? -1 : a.target > b.target ? 1 : 0
+  return (
+    compareCodeUnit(a.symbolId, b.symbolId) ||
+    a.callLine - b.callLine ||
+    compareCodeUnit(a.target, b.target)
+  )
 }
 
 async function executeJob(
@@ -718,30 +708,6 @@ async function runJobsWithConcurrency<T>(
   throw failures.get(first)
 }
 
-function groupSymbolsByLanguage(symbols: readonly IRSymbol[]): Map<LanguageId, IRSymbol[]> {
-  const out = new Map<LanguageId, IRSymbol[]>()
-  for (const symbol of symbols) {
-    const bucket = out.get(symbol.language) ?? []
-    bucket.push(symbol)
-    out.set(symbol.language, bucket)
-  }
-  return out
-}
-
-function groupSymbolsByFile(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
-  const out = new Map<string, IRSymbol[]>()
-  for (const symbol of symbols) {
-    const bucket = out.get(symbol.source.file) ?? []
-    bucket.push(symbol)
-    out.set(symbol.source.file, bucket)
-  }
-  return out
-}
-
-function byLanguage(a: [string, unknown], b: [string, unknown]): number {
-  return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
-}
-
 function cloneSymbol(symbol: IRSymbol): IRSymbol {
   // `signature` and `component` are Class A (ir-schema.md §1.1), so the clone writes both
   // keys unconditionally and normalizes a missing one to `null`. The clone used to preserve
@@ -779,7 +745,7 @@ function cloneSignature(
   return base
 }
 
-/** `relativePath` is a filesystem path, not a Document one — see `EnrichmentInput.fsPaths`. */
+/** `relativePath` is a filesystem path, not a Document one — see `EnrichmentInput.fileContents`. */
 function fileUriFor(workspaceRoot: string, relativePath: string): string {
   const absolute = normalizeAbsolute(workspaceRoot, relativePath)
   return pathToFileURL(absolute).toString()
@@ -816,28 +782,14 @@ function overBudget(now: () => number, startMs: number, budgetMs: number): boole
   return now() - startMs > budgetMs
 }
 
-function isTimeout(value: unknown): boolean {
-  return (
-    typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "timeout"
-  )
-}
-
-function accountForFailure(stats: LspStatsBuilder, failure: unknown): void {
-  if (isTimeout(failure)) {
-    stats.requestsTimedOut += 1
-    return
-  }
-  stats.requestsFailed += 1
+function accountForFailure(stats: LspStatsBuilder, failure: LspFailure): void {
+  if (failure.kind === "timeout") stats.requestsTimedOut += 1
+  else stats.requestsFailed += 1
 }
 
 function failureReason(failure: LspFailure): string {
   if (failure.kind === "timeout") return "timeout"
   return `${failure.reason}: ${failure.message}`
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 /**
@@ -926,8 +878,8 @@ function findMethodColumn(line: string, head: string, method: string): number | 
 function extractHoverPayload(result: unknown): string | null {
   if (result === null || result === undefined) return null
   if (typeof result === "object") {
-    const r = result as { text?: string }
-    if (typeof r.text === "string") return r.text
+    const hover = result as { text?: string }
+    if (typeof hover.text === "string") return hover.text
   }
   return null
 }
@@ -998,13 +950,6 @@ function findMemberSymbolId(
 function lastSegment(qualifiedName: string): string {
   const idx = qualifiedName.lastIndexOf(".")
   return idx < 0 ? qualifiedName : qualifiedName.slice(idx + 1)
-}
-
-const SILENT_LOGGER: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
 }
 
 async function defaultServerFactory(

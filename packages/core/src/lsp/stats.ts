@@ -1,19 +1,12 @@
 import type { LanguageId, LspEnrichmentStats, LspHintRejections } from "@aburi/types"
 
 /**
- * Mutable accumulator for `stats.lspEnrichment` (lsp-enrichment.md §7.2).
- * Frozen at the end of the pass with `finalize()`.
+ * Mutable accumulator for `stats.lspEnrichment` (lsp-enrichment.md §7.2): the producer's
+ * fields, with `languagesDisabled` held as a set until `finalizeStats` freezes it.
  */
-export interface LspStatsBuilder {
-  enabled: boolean
-  filesEnriched: number
-  filesFellBack: number
-  requestsIssued: number
-  requestsTimedOut: number
-  requestsFailed: number
+export interface LspStatsBuilder
+  extends Omit<LspProducerStats, "languagesDisabled" | "hintsConsumed"> {
   languagesDisabled: Set<LanguageId>
-  hintsProduced: number
-  hintsRejected: LspHintRejectionCounts
 }
 
 /** Every way a hint can be lost, as one name per §7.2 bucket. */
@@ -28,12 +21,8 @@ export type LspProducerRejection = Extract<
 /** The reasons the resolver can record — the consumer half of §7.2. */
 export type LspConsumerRejection = Extract<LspHintRejectionReason, "kindMismatch" | "targetDropped">
 
-/**
- * The rejection buckets as a `Record`, so a producer can increment the one it is holding
- * (`counts[reason] += 1`) rather than switching over five names. Structurally identical to
- * the generated `LspHintRejections`, which is the shape that reaches the IR.
- */
-export type LspHintRejectionCounts = Record<LspHintRejectionReason, number>
+/** The rejection buckets a producer increments in place (`counts[reason] += 1`). */
+export type LspHintRejectionCounts = LspHintRejections
 
 /**
  * What the enrichment pass alone can say about hints (lsp-enrichment.md §7.2).
@@ -111,20 +100,15 @@ export function emptyHintUsage(): LspHintUsage {
 }
 
 export function finalizeStats(builder: LspStatsBuilder): LspProducerStats {
+  const { languagesDisabled, hintsRejected, ...counters } = builder
   return {
-    enabled: builder.enabled,
-    filesEnriched: builder.filesEnriched,
-    filesFellBack: builder.filesFellBack,
-    requestsIssued: builder.requestsIssued,
-    requestsTimedOut: builder.requestsTimedOut,
-    requestsFailed: builder.requestsFailed,
-    languagesDisabled: [...builder.languagesDisabled].sort(),
-    hintsProduced: builder.hintsProduced,
+    ...counters,
+    languagesDisabled: [...languagesDisabled].sort(),
     // Zero until the resolver reports back. The pass that fills these two runs after this one
     // returns, so a caller that only enriches sees the producer half of §7.2 and an honest
     // "nothing has consumed these yet" for the rest — which is what `LspProducerStats` names.
     hintsConsumed: 0,
-    hintsRejected: { ...builder.hintsRejected },
+    hintsRejected: { ...hintsRejected },
   }
 }
 

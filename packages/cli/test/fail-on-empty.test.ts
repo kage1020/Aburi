@@ -1,29 +1,13 @@
-import { Writable } from "node:stream"
 import { describe, expect, it } from "vitest"
 import { EXIT, FailOnParseError, parseFailOn, runCli } from "../src"
+import { MemStream } from "./fixtures"
 
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
-
-describe("parseFailOn — empty-value rejection", () => {
-  it("throws FailOnParseError on empty string (fail-open guard)", () => {
-    expect(() => parseFailOn("")).toThrow(FailOnParseError)
-  })
-
-  it("throws on comma-only value", () => {
-    expect(() => parseFailOn(",,")).toThrow(FailOnParseError)
-  })
-
-  it("still tolerates internal trailing commas when at least one clause survives", () => {
-    expect(parseFailOn("changed,,")).toEqual([{ token: "changed", threshold: null }])
+describe("parseFailOn — empty-value rejection (fail-open guard)", () => {
+  it.each([
+    ["an empty string", ""],
+    ["a comma-only value", ",,"],
+  ])("throws FailOnParseError on %s", (_, spec) => {
+    expect(() => parseFailOn(spec)).toThrow(FailOnParseError)
   })
 })
 

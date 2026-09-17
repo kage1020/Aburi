@@ -1,8 +1,7 @@
 import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { extractSymbols, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { symbolsOf } from "./fixtures/ctx"
 
 /**
  * LP6a — `export default Page` written beside the declaration instead of in front of it.
@@ -18,13 +17,10 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * a negative that never runs the code it names proves nothing about it.
  */
 
-async function symbolsOf(source: string, path = "src/a.tsx"): Promise<SymbolCandidate<Node>[]> {
-  const result = await parseTypescriptFile({ path, content: source })
-  return extractSymbols(requireTree(result.tree), makeExtractionCtx(path, source))
-}
+const TSX = "src/a.tsx"
 
 async function symbolNamed(source: string, name: string): Promise<SymbolCandidate<Node>> {
-  const symbols = await symbolsOf(source)
+  const symbols = await symbolsOf(source, TSX)
   const found = symbols.find((s) => s.name === name)
   if (found === undefined) {
     throw new Error(`no Symbol named ${name}; have ${symbols.map((s) => s.name).join(", ")}`)
@@ -98,6 +94,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
   it("leaves the other declarations in the file internal", async () => {
     const symbols = await symbolsOf(
       "const helper = () => null\nconst Page = () => helper()\nexport default Page\n",
+      TSX,
     )
     const helper = symbols.find((s) => s.name === "helper")
     expect(helper?.visibility).toBe("internal")
@@ -128,6 +125,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
     // reading the value's text rather than requiring an identifier would promote it.
     const symbols = await symbolsOf(
       "namespace Routes { export const Page = () => null }\nexport default Routes.Page\n",
+      TSX,
     )
     const nested = symbols.find((s) => s.name === "Routes.Page")
     expect(nested).toBeDefined()
@@ -135,7 +133,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
   })
 
   it("does not reach a class member through a member expression", async () => {
-    const symbols = await symbolsOf("class Shell { Page() {} }\nexport default Shell.Page\n")
+    const symbols = await symbolsOf("class Shell { Page() {} }\nexport default Shell.Page\n", TSX)
     const member = symbols.find((s) => s.name === "Shell.Page")
     expect(member).toBeDefined()
     expect(member?.derivedBy).not.toContain("export-default")
@@ -143,7 +141,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
 
   it("does not reach a class member that shares a bare identifier's spelling", async () => {
     // The separator is what keeps `Shell.Page` out of reach of the name `Page`.
-    const symbols = await symbolsOf("class Shell { Page() {} }\nexport default Page\n")
+    const symbols = await symbolsOf("class Shell { Page() {} }\nexport default Page\n", TSX)
     const member = symbols.find((s) => s.name === "Shell.Page")
     expect(member).toBeDefined()
     expect(member?.derivedBy).not.toContain("export-default")
@@ -153,10 +151,10 @@ describe("LP6a: a default export written apart from its declaration", () => {
     // LP20g qnames are a single identifier-legal segment, so the separator argument does not
     // cover them. A registration statement is not a declaration an export can be naming.
     const registration = "const app = 1\napp.get('/x', () => {})\n"
-    const symbols = await symbolsOf(registration)
+    const symbols = await symbolsOf(registration, TSX)
     const call = symbols.find((s) => s.kind === "call")
     if (call === undefined) throw new Error("fixture declares no call Symbol")
-    const promoted = await symbolsOf(`${registration}export default ${call.name}\n`)
+    const promoted = await symbolsOf(`${registration}export default ${call.name}\n`, TSX)
     const same = promoted.find((s) => s.name === call.name)
     expect(same?.derivedBy).not.toContain("export-default")
     expect(same?.visibility).toBe(call.visibility)
@@ -165,7 +163,7 @@ describe("LP6a: a default export written apart from its declaration", () => {
   it("declares nothing for an identifier that names an import", async () => {
     // A pin on `visitStatement`, not on the matching pass: the pass is a map and can never
     // create a candidate. If imports ever become candidates, this is what says so.
-    const symbols = await symbolsOf("import Page from './page'\nexport default Page\n")
+    const symbols = await symbolsOf("import Page from './page'\nexport default Page\n", TSX)
     expect(symbols.map((s) => s.name)).not.toContain("Page")
   })
 })

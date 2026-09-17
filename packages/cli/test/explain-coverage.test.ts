@@ -1,12 +1,11 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import { makeLanguageId } from "@aburi/core"
 import type { IR, Symbol as IRSymbol, SkippedFile } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runCli, runExplain } from "../src"
-import { symbolId } from "./fixtures"
+import { MemStream, symbolId } from "./fixtures"
 
 /**
  * `aburi explain` answering out of an IR that records what its scan never read.
@@ -17,17 +16,6 @@ import { symbolId } from "./fixtures"
  * question — the file arm and the id arm name a file, and the skip list either holds it or
  * does not — and a doubt it can only state about the run, which is every other case.
  */
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
 
 function makeSymbol(id: string, file: string): IRSymbol {
   return {

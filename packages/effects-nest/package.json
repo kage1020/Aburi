@@ -42,6 +42,7 @@
   },
   "devDependencies": {
     "@aburi/lang-typescript": "workspace:*",
+    "@aburi/test-support": "workspace:*",
     "@types/node": "^26.0.1",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3",

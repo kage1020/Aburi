@@ -98,47 +98,27 @@ describe("classifyNestjsSymbol — class decorators", () => {
 })
 
 describe("classifyNestjsSymbol — method decorators", () => {
-  it("NF5: @Post('/invoices') → framework:nestjs:route + boundary on the method", () => {
+  it.each([
+    "Get",
+    "Post",
+    "Put",
+    "Delete",
+    "Patch",
+    "Options",
+    "Head",
+    "All",
+  ])("NF5/NF6: @%s → framework:nestjs:route + boundary on the method", (name) => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",
-        name: "InvoiceController.create",
-        decorators: [makeDecorator("Post", ["'/invoices'"])],
+        name: `C.method_${name}`,
+        decorators: [makeDecorator(name, ["'/x'"])],
       }),
       makeCtx(),
     )
     expect(result?.extKind).toBe("framework:nestjs:route")
-    expect(result?.decoratorBoundaries).toEqual({ Post: true })
-    expect(result?.derivedBy).toBe("framework:nestjs:route:Post")
-  })
-
-  it("NF6: all eight HTTP method decorators map to route + boundary", () => {
-    for (const name of ["Get", "Post", "Put", "Delete", "Patch", "Options", "Head", "All"]) {
-      const result = classifyNestjsSymbol(
-        makeCandidate({
-          kind: "method",
-          name: `C.method_${name}`,
-          decorators: [makeDecorator(name)],
-        }),
-        makeCtx(),
-      )
-      expect(result?.extKind).toBe("framework:nestjs:route")
-      expect(result?.decoratorBoundaries?.[name]).toBe(true)
-    }
-  })
-
-  it("NF7: handler-only decorators mark boundary but do NOT claim the route extKind", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: "S.wrapped",
-        decorators: [makeDecorator("UseGuards", ["AuthGuard"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.decoratorBoundaries).toEqual({ UseGuards: true })
-    expect(result?.extKind).toBeUndefined()
-    expect(result?.derivedBy).toBe("framework:nestjs:handler:UseGuards")
+    expect(result?.decoratorBoundaries).toEqual({ [name]: true })
+    expect(result?.derivedBy).toBe(`framework:nestjs:route:${name}`)
   })
 
   it.each([
@@ -146,7 +126,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
     "UseInterceptors",
     "UsePipes",
     "UseFilters",
-  ])("NF7 variant: %s produces a handler-only classification with no extKind", (name) => {
+  ])("NF7: @%s marks a boundary but does NOT claim the route extKind", (name) => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",
@@ -156,7 +136,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
       makeCtx(),
     )
     expect(result?.extKind).toBeUndefined()
-    expect(result?.decoratorBoundaries?.[name]).toBe(true)
+    expect(result?.decoratorBoundaries).toEqual({ [name]: true })
     expect(result?.derivedBy).toBe(`framework:nestjs:handler:${name}`)
   })
 
@@ -179,25 +159,11 @@ describe("classifyNestjsSymbol — method decorators", () => {
     expect(result?.derivedBy).toBe("framework:nestjs:route:Post")
   })
 
-  it("NF9: microservice pattern decorators are route-equivalent boundaries", () => {
-    const result = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: "H.handle",
-        decorators: [makeDecorator("MessagePattern", ["'user.created'"])],
-      }),
-      makeCtx(),
-    )
-    expect(result?.extKind).toBe("framework:nestjs:route")
-    expect(result?.decoratorBoundaries?.MessagePattern).toBe(true)
-    expect(result?.derivedBy).toBe("framework:nestjs:route:MessagePattern")
-  })
-
   it.each([
     "MessagePattern",
     "EventPattern",
     "SubscribeMessage",
-  ])("NF9 variant: %s claims route extKind and boundary", (name) => {
+  ])("NF9: pattern decorator @%s is a route-equivalent boundary", (name) => {
     const result = classifyNestjsSymbol(
       makeCandidate({
         kind: "method",
@@ -207,7 +173,7 @@ describe("classifyNestjsSymbol — method decorators", () => {
       makeCtx(),
     )
     expect(result?.extKind).toBe("framework:nestjs:route")
-    expect(result?.decoratorBoundaries?.[name]).toBe(true)
+    expect(result?.decoratorBoundaries).toEqual({ [name]: true })
     expect(result?.derivedBy).toBe(`framework:nestjs:route:${name}`)
   })
 
@@ -221,31 +187,6 @@ describe("classifyNestjsSymbol — method decorators", () => {
       makeCtx(),
     )
     expect(result).toBeNull()
-  })
-})
-
-describe("classifyNestjsSymbol — derivedBy identifier policy", () => {
-  it("preserves the source decorator identifier verbatim across both route and handler branches", () => {
-    // Verbatim policy: no case transform on either side, so a grep for the decorator
-    // name lands on both the source `.ts` and the emitted derivedBy string.
-    const route = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: "C.post",
-        decorators: [makeDecorator("Post", ["'/x'"])],
-      }),
-      makeCtx(),
-    )
-    const handler = classifyNestjsSymbol(
-      makeCandidate({
-        kind: "method",
-        name: "C.protected",
-        decorators: [makeDecorator("UseGuards", ["AuthGuard"])],
-      }),
-      makeCtx(),
-    )
-    expect(route?.derivedBy).toBe("framework:nestjs:route:Post")
-    expect(handler?.derivedBy).toBe("framework:nestjs:handler:UseGuards")
   })
 })
 

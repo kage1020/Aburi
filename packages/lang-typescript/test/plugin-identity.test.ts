@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { langTypescriptPlugin, parseTypescriptFile } from "../src/index"
+import { langTypescriptPlugin } from "../src/index"
 import { TYPESCRIPT_LANGUAGE_ID } from "../src/qname"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { makeExtractionCtx, parseSource, requireTree } from "./fixtures/ctx"
 
 /**
  * `LanguagePlugin.languageId` is the `LanguageId` this plugin stamps on every Symbol id
@@ -13,22 +13,16 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * actually writes.
  */
 describe("langTypescriptPlugin.languageId", () => {
-  it("is the LanguageId, not the manifest name", () => {
+  it("is the LanguageId the qname builder stamps, not the manifest name", () => {
     expect(langTypescriptPlugin.languageId).toBe("ts")
-    expect(langTypescriptPlugin.languageId).not.toBe(langTypescriptPlugin.manifest.name)
-  })
-
-  it("satisfies the LanguageId grammar from aburi.ir.v1", () => {
-    expect(langTypescriptPlugin.languageId).toMatch(/^[a-z][a-z0-9]*$/)
-  })
-
-  it("is single-sourced with the qname builder's language constant", () => {
     expect(langTypescriptPlugin.languageId).toBe(TYPESCRIPT_LANGUAGE_ID)
+    expect(langTypescriptPlugin.languageId).not.toBe(langTypescriptPlugin.manifest.name)
+    expect(langTypescriptPlugin.languageId).toMatch(/^[a-z][a-z0-9]*$/)
   })
 
   it("matches the prefix the plugin actually writes onto Symbol ids", async () => {
     const source = "export function alpha() {}\n"
-    const parsed = await parseTypescriptFile({ path: "src/a.ts", content: source })
+    const parsed = await parseSource(source)
     const symbols = langTypescriptPlugin.extractSymbols(
       requireTree(parsed.tree),
       makeExtractionCtx("src/a.ts", source),

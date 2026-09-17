@@ -1,23 +1,21 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { noopRegistry } from "@aburi/test-support"
 import type {
-  BodyExtraction,
   ExtractionContext,
   IR,
-  LangManifest,
   LanguagePlugin,
   OpaqueAstNode,
   ParseError,
   ParseResult,
   SourceFile,
   SymbolCandidate,
-  VocabRegistry,
-  WalkContext,
 } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { checkIRIntegrity, makeLanguageId, scan } from "../../src"
-import { symbolId } from "../fixtures/ir"
+import { spend } from "../fixtures/clock"
+import { stubCandidate, stubLanguagePlugin } from "../fixtures/plugins"
 
 /**
  * The Document records what the scan gave up on.
@@ -28,86 +26,17 @@ import { symbolId } from "../fixtures/ir"
  * API, with a confident count and no way for the reader to tell.
  */
 
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
-
-function langManifest(): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "lang-stub",
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
-
 function candidate(file: string): SymbolCandidate<OpaqueAstNode> {
-  const base = file.replace(/[^A-Za-z0-9]/g, "_")
-  return {
-    id: symbolId(`stub:${file}#${base}`),
-    kind: "function",
-    extKind: null,
-    name: base,
-    visibility: "public",
-    decorators: [],
-    signature: null,
-    source: { file, startLine: 1, endLine: 2, startColumn: null, endColumn: null },
-    derivedBy: [],
-    bodyNode: {} as OpaqueAstNode,
-    fullNode: {} as OpaqueAstNode,
-  }
+  return stubCandidate(file.replace(/[^A-Za-z0-9]/g, "_"), { file })
 }
 
 /** Refuses `refused.stub`, throws on `boom.stub`, parses everything else. */
 function stubLanguage(): LanguagePlugin {
-  const plugin = {
-    manifest: langManifest(),
-    languageId: "stub",
-    fileExtensions: [".stub"],
-    capabilities: {
-      hasDecorators: false,
-      hasGenerics: false,
-      hasAsync: false,
-      hasMacros: false,
-      hasPatternMatching: false,
-      hasAbstractTypes: false,
-      hasModules: false,
-      hasNamespaces: false,
-      hasTypeParameters: false,
-      hasExplicitVisibility: false,
-      hasJsDoc: false,
-    },
-    init: async () => {},
+  return stubLanguagePlugin({
     parseFile: async (file: SourceFile): Promise<ParseResult> => {
       if (file.path === "boom.stub") throw new Error("stub parseFile exploded")
-      if (file.path === "slow.stub") {
-        // Spent, not mocked: the budget can only be blown harder on a slower machine, so
-        // there is no direction in which this flakes.
-        const until = performance.now() + 250
-        let spins = 0
-        while (performance.now() < until) spins++
-        if (spins < 0) throw new Error("unreachable")
-      }
+      // Spent, not mocked — see `spend`.
+      if (file.path === "slow.stub") spend(250)
       const errors: ParseError[] =
         file.path === "refused.stub"
           ? [{ message: "wrong dialect", line: 1, column: 1, recoverable: false }]
@@ -115,13 +44,7 @@ function stubLanguage(): LanguagePlugin {
       return { tree: { path: file.path } as unknown as OpaqueAstNode, errors, imports: [] }
     },
     extractSymbols: (_tree: OpaqueAstNode, ctx: ExtractionContext) => [candidate(ctx.file.path)],
-    walkBody: (
-      _symbol: SymbolCandidate<OpaqueAstNode>,
-      _ctx: WalkContext<OpaqueAstNode>,
-    ): BodyExtraction => ({ rules: [], calls: [] }),
-    normalizeAst: () => "stub-ast",
-  }
-  return plugin as unknown as LanguagePlugin
+  })
 }
 
 let workRoot: string

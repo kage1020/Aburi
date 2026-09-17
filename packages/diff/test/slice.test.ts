@@ -1,4 +1,5 @@
 import type { CallEdge } from "@aburi/core"
+import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "@aburi/test-support"
 import type { Confidence, Effect, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { DiffError } from "../src/errors"
@@ -9,13 +10,13 @@ import {
   sliceAnchor,
   sliceRecordViolation,
 } from "../src/slice"
-import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "./fixtures"
 
 /**
  * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
  * docs/design/slice-view.md §13; SV22 and SV24 (schema validation) live in
  * schema.test.ts, and the cross-package SV21 shape is additionally exercised
- * end-to-end in @aburi/e2e-integration.
+ * end-to-end in @aburi/e2e-integration. The SliceRecord rejections below overlap
+ * schema.test.ts on purpose: this layer checks the pass's own guard, that one the schema.
  *
  * Helpers below build the three pass inputs — a `SymbolChange[]`, plus base
  * and head `CallEdge[]` — as compactly as possible so each test spells out

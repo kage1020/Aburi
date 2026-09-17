@@ -3,6 +3,7 @@ import {
   parseTypescriptFile,
   walkBody as walkTypescriptBody,
 } from "@aburi/lang-typescript"
+import { makeOwner, noopRegistry } from "@aburi/test-support"
 import type {
   ExtractionContext,
   ImportEdge,
@@ -13,7 +14,6 @@ import type {
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { classifyDrizzleCall } from "../src/index"
-import { makeOwner, noopRegistry } from "./fixtures/context"
 
 /**
  * End-to-end: parse a TypeScript source through `@aburi/lang-typescript`, walk each
@@ -23,11 +23,7 @@ import { makeOwner, noopRegistry } from "./fixtures/context"
  * one-classification-per-fluent-chain invariant that is central to this package.
  */
 
-async function classifyCalls(
-  path: string,
-  source: string,
-  imports: ImportEdge[] = [{ source: "drizzle-orm", symbols: ["sql"], line: 1, dynamic: false }],
-) {
+async function classifyCalls(path: string, source: string, imports: ImportEdge[]) {
   const parseResult = await parseTypescriptFile({ path, content: source })
   const tree = parseResult.tree
   if (tree === null) throw new Error("parse returned null")
@@ -299,8 +295,8 @@ export async function work(db: ReturnType<typeof drizzle>) {
 }`,
       [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
     )
-    for (const r of results.filter((r) => r.derivedBy !== null)) {
-      expect(r.derivedBy?.startsWith("effects-plugin:drizzle:")).toBe(true)
+    for (const row of results.filter((r) => r.derivedBy !== null)) {
+      expect(row.derivedBy?.startsWith("effects-plugin:drizzle:")).toBe(true)
     }
   })
 })

@@ -1,7 +1,7 @@
+import { fp, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { matchStageNameSignature } from "../src"
-import { fp, makeSymbol, sig } from "./fixtures"
 
 /**
  * §3.4.0's bucket key is `(kind, signatureNullness)`, which a bulk rename leaves in one piece:

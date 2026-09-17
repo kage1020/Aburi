@@ -1,21 +1,10 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import { detectWorkspaceRoot } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, runCli, runScan } from "../src"
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
+import { MemStream } from "./fixtures"
 
 /**
  * Two anchors that are deliberately different, and the consequences of that.

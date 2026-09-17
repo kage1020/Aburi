@@ -9,12 +9,11 @@ import type {
 import { classifyExpressSymbol } from "./classify"
 import { frameworkExpressManifest } from "./manifest"
 
+/** Pure classifier over module-level Router consts and chained-call registrations; no lazy resources. */
 class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkExpressManifest
 
-  async init(_ctx: PluginContext): Promise<void> {
-    // Intentional no-op — pure classifier, no lazy resources.
-  }
+  async init(_ctx: PluginContext): Promise<void> {}
 
   classifySymbol(
     symbol: SymbolCandidate<OpaqueAstNode>,
@@ -24,5 +23,6 @@ class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   }
 }
 
+/** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
 export const expressFrameworkPlugin = new ExpressFrameworkPlugin()
 export { ExpressFrameworkPlugin }

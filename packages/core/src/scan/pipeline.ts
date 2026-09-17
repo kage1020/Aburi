@@ -27,6 +27,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { makeCallSiteKey } from "../call-site"
+import { toNfc } from "../codepoints"
 import { CoreError } from "../errors"
 import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
@@ -224,7 +225,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
   // gives. `parseErrors` is in scope at every call — the parse has always returned — which is
   // a temporal-dead-zone constraint rather than a visible one, so reordering the two lines
   // below the closure would break it silently.
-  const abandon = (): ParseTimeoutFile => ({
+  const abandonedFile = (): ParseTimeoutFile => ({
     kind: "parse-timeout",
     path: file.path,
     parseErrors,
@@ -261,11 +262,11 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
       return { kind: "parse-failed", path: file.path, parseErrors, imports }
     }
 
-    if (deadline.expired()) return abandon()
+    if (deadline.expired()) return abandonedFile()
 
     const extractCtx: ExtractionContext = { file, registry, config }
     const candidates = language.extractSymbols(parseResult.tree, extractCtx)
-    if (deadline.expired()) return abandon()
+    if (deadline.expired()) return abandonedFile()
 
     const symbols: IRSymbol[] = []
     const dynamicCallSites: string[] = []
@@ -276,7 +277,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     const frameworkCtx: FrameworkClassifyContext = { ...extractCtx, imports }
 
     for (const raw of candidates) {
-      if (deadline.expired()) return abandon()
+      if (deadline.expired()) return abandonedFile()
 
       const { candidate, confidence } = mergeFrameworkClassification(
         normalizeCandidateStrings(raw),
@@ -511,7 +512,7 @@ interface ClassifyCallsInput {
 function normalizeCandidateStrings(
   candidate: SymbolCandidate<OpaqueAstNode>,
 ): SymbolCandidate<OpaqueAstNode> {
-  const file = candidate.source.file.normalize("NFC")
+  const file = toNfc(candidate.source.file)
   const signature = normalizeSignatureStrings(candidate.signature)
   const decorators = normalizeDecoratorNames(candidate.decorators)
   if (
@@ -524,18 +525,25 @@ function normalizeCandidateStrings(
   return { ...candidate, source: { ...candidate.source, file }, signature, decorators }
 }
 
+/** `items.map(transform)`, except that `items` itself comes back when no element changed. */
+function mapPreservingIdentity<T>(items: T[], transform: (item: T) => T): T[] {
+  let changed = false
+  const next = items.map((item) => {
+    const out = transform(item)
+    if (out !== item) changed = true
+    return out
+  })
+  return changed ? next : items
+}
+
 /** Only `name` is normalized; `raw` and `arguments` are quotations of source text (§1.2). */
 function normalizeDecoratorNames(
   decorators: SymbolCandidate<OpaqueAstNode>["decorators"],
 ): SymbolCandidate<OpaqueAstNode>["decorators"] {
-  let changed = false
-  const next = decorators.map((decorator) => {
-    const name = decorator.name.normalize("NFC")
-    if (name === decorator.name) return decorator
-    changed = true
-    return { ...decorator, name }
+  return mapPreservingIdentity(decorators, (decorator) => {
+    const name = toNfc(decorator.name)
+    return name === decorator.name ? decorator : { ...decorator, name }
   })
-  return changed ? next : decorators
 }
 
 /**
@@ -547,14 +555,11 @@ function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["sig
   signature: T,
 ): T {
   if (signature === null || signature === undefined) return signature
-  let changed = false
-  const inputs = signature.inputs.map((input) => {
-    const name = input.name.normalize("NFC")
-    if (name === input.name) return input
-    changed = true
-    return { ...input, name }
+  const inputs = mapPreservingIdentity(signature.inputs, (input) => {
+    const name = toNfc(input.name)
+    return name === input.name ? input : { ...input, name }
   })
-  return changed ? ({ ...signature, inputs } as T) : signature
+  return inputs === signature.inputs ? signature : ({ ...signature, inputs } as T)
 }
 
 /**
@@ -569,11 +574,10 @@ function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["sig
  * sends a reviewer looking for a typo that does not exist.
  */
 function normalizeImportEdge(edge: ImportEdge): ImportEdge {
-  const source = edge.source.normalize("NFC")
+  const source = toNfc(edge.source)
   const binding = edge.namespaceBinding
-  const namespaceBinding = typeof binding === "string" ? binding.normalize("NFC") : binding
-  const symbols =
-    edge.symbols === "*" ? edge.symbols : edge.symbols.map((entry) => entry.normalize("NFC"))
+  const namespaceBinding = typeof binding === "string" ? toNfc(binding) : binding
+  const symbols = edge.symbols === "*" ? edge.symbols : mapPreservingIdentity(edge.symbols, toNfc)
   if (
     source === edge.source &&
     namespaceBinding === edge.namespaceBinding &&
@@ -600,7 +604,7 @@ function normalizeImportEdge(edge: ImportEdge): ImportEdge {
  * be handed a spelling that differs from the one recorded against its own answer.
  */
 function normalizeCallStrings(call: CallCandidate): CallCandidate {
-  const target = call.target.normalize("NFC")
+  const target = toNfc(call.target)
   return target === call.target ? call : { ...call, target }
 }
 
@@ -773,9 +777,9 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     //     branch bodies, `else` before `try/finally`), so an integrity-safe
     //     ordering has to be applied here.
     //   - `effects` and `calls` were both re-sorted by `byTargetThenLine` in
-    //     `classifyCalls` by `byTargetThenLine`. That satisfies human
-    //     readability but violates monotonic `.line` the moment a Symbol has two
-    //     entries whose target-alpha order is inverted from their source line.
+    //     `classifyCalls`. That satisfies human readability but violates monotonic
+    //     `.line` the moment a Symbol has two entries whose target-alpha order is
+    //     inverted from their source line.
     // A stable line sort here restores invariant #11 without disturbing the
     // relative order of same-line entries — same-line entries keep whatever
     // order the producer gave them (ir-schema.md §1: "ascending by `line`

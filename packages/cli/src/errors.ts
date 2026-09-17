@@ -23,31 +23,67 @@ export class CliError extends Error {
   }
 }
 
-/**
- * The human-readable half of a thrown value, for a message that wraps it.
- *
- * Beside `CliError` because every caller is building one: six modules held a byte-identical
- * copy of these two lines, which is one definition of "what a caught value looks like in a
- * CLI message" written six times.
- */
+/** The human-readable half of a thrown value, for a message that wraps it. */
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
 }
 
 /**
- * The `code` a thrown value carries, or `null` when it carries none.
- *
- * Beside `errorMessage` for the same reason, and against the same duplication: four modules
- * held their own copy of these two lines. What differs between the callers is which codes they
- * act on — an errno set for a filesystem probe, a `commander.` prefix for an argv fault — not
- * how a code is read off a value whose type says nothing about it.
- *
- * `CliError` carries a `code` of its own, so this answers for one too; every caller is asking
- * about a value it has already decided is not one.
+ * The `code` a thrown value carries, or `null` when it carries none. Callers differ only in
+ * which codes they act on — an errno set, a `commander.` prefix — not in how one is read.
  */
 export function errorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) return null
   const code = (error as { code?: unknown }).code
   return typeof code === "string" ? code : null
+}
+
+/**
+ * The report for a failure that is Aburi's own rather than the reader's.
+ *
+ * `phase` names what was under way (`"while loading the Aburi config"`), or is empty for a
+ * bare `Internal error:`. The instruction sits on its own line because nothing that reaches
+ * here ends in punctuation: a thrown message run together with the next sentence is what a
+ * reader has to unpick.
+ */
+export function internalFault(phase: string, detail: string, cause: unknown): CliError {
+  return new CliError(
+    `Internal error${phase}: ${detail}\n` +
+      "This is a bug in Aburi, not in your configuration — please report it at " +
+      "https://github.com/kage1020/Aburi/issues.",
+    "runtime-error",
+    { cause },
+  )
+}
+
+/**
+ * The `default:` arm of an exhaustive switch over an upstream error code.
+ *
+ * A new code is a type error here rather than one that silently takes an arm — and at
+ * runtime it degrades to an internal fault instead of throwing, because the compile-time
+ * check protects this repo's build and not an installed tree: `@aburi/config` and
+ * `@aburi/diff` version independently of this package, so a compiled switch can meet a code
+ * it never saw. Throwing there would discard the one thing the reader needs, which is what
+ * the upstream error said.
+ */
+export function unplacedErrorCode(
+  phase: string,
+  kind: string,
+  error: { message: string },
+  code: never,
+): CliError {
+  return internalFault(
+    phase,
+    `${error.message} (${kind} error code ${JSON.stringify(code)} has no exit code)`,
+    error,
+  )
+}
+
+/**
+ * Compile-time exhaustiveness guard: a new union member is a type error at the call site
+ * rather than a branch that silently does nothing. Exit 1 at runtime, like any other bug.
+ */
+export function assertNever(value: never, subject: string): never {
+  throw new CliError(`Unhandled ${subject}: ${JSON.stringify(value)}`, "runtime-error")
 }

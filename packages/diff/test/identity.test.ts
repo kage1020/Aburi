@@ -1,8 +1,8 @@
 import { checkIRIntegrity } from "@aburi/core"
+import { component, dependency, fp, makeIR, makeSymbol } from "@aburi/test-support"
 import type { Component, Dependency, IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, DiffError } from "../src"
-import { component, dependency, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
  * `buildDiff` keys three collections by identity, all three of them Document invariants

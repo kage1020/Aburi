@@ -1,15 +1,8 @@
 /**
- * Prisma model delegate method vocabulary.
- *
- * Each `_LIST` is the single source of truth — the union type and the runtime `Set` are
- * both derived from it, so extending the vocabulary is a table edit in exactly one
- * place. Extending as Prisma ships new delegate methods keeps the classifier honest
- * without a code rewrite.
- *
- * Only methods that map cleanly onto core `db.read` / `db.write` vocabulary are listed.
- * Delegate helpers whose semantics do not match (metadata accessors, raw SQL escapes,
- * connection lifecycle) stay out — the plugin returns `null` for them so downstream
- * effect plugins get a chance.
+ * Prisma model delegate method vocabulary. Each `_LIST` is the single source of truth for
+ * its union type and runtime `Set`. Only methods that map onto core `db.read` / `db.write`
+ * are listed; metadata accessors, raw SQL escapes and connection lifecycle stay out, so the
+ * plugin returns `null` for them and downstream effect plugins get a chance.
  */
 const PRISMA_READ_METHODS_LIST = [
   "findUnique",

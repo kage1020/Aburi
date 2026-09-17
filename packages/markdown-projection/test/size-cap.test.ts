@@ -1,3 +1,4 @@
+import { call, fp, makeSymbol, rule } from "@aburi/test-support"
 import type {
   Symbol as IRSymbol,
   SymbolChange,
@@ -8,7 +9,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { call, emptySummary, fp, makeDiff, makeSymbol, rule } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
  * §6.4 — `maxBytes`. The document GitHub takes as a PR comment body has a 65536-byte

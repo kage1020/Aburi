@@ -1,10 +1,10 @@
+import { component, fp, makeIR, makeSymbol } from "@aburi/test-support"
 import type { DiffResult, IR } from "@aburi/types"
 import Ajv2020, { type ErrorObject, type SchemaObject } from "ajv/dist/2020.js"
 import { describe, expect, it } from "vitest"
 import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" }
 import { buildDiff } from "../src/diff"
 import { sliceRecordViolation } from "../src/slice"
-import { component, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
  * SV22 and SV24 (docs/design/slice-view.md §13.6, §13.7) + §11.3 — verify that
@@ -95,6 +95,8 @@ function headIR(): IR {
   })
 }
 
+// The SliceRecord rejections here overlap slice.test.ts on purpose: this layer checks the
+// published schema, that one the pass's own guard (`sliceRecordViolation`).
 describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
   it("validates a `buildDiff` output containing a non-empty slices[]", () => {
     const diff = buildDiff({

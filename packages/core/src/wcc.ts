@@ -1,3 +1,5 @@
+import { compareCodeUnit } from "./order"
+
 /**
  * Weakly-connected components (WCC) via Union-Find with union-by-rank and
  * path compression. Language-independent primitive used by Slice View
@@ -89,7 +91,7 @@ export function computeWeaklyConnectedComponents<TNode>(
   // is a defence-in-depth choice: the internal parent-tree shape becomes a
   // function of the sorted stream, which keeps traces reproducible and
   // simplifies debugging without changing the visible output. Output
-  // ordering is enforced separately by the `compareKey` sorts below.
+  // ordering is enforced separately by the `compareCodeUnit` sorts below.
   interface CanonEdge {
     lo: number
     hi: number
@@ -123,16 +125,12 @@ export function computeWeaklyConnectedComponents<TNode>(
   for (const bucket of bucketsByRoot.values()) {
     const sortedIndices = bucket
       .slice()
-      .sort((a, b) => compareKey(keyOf(nodesByIndex[a] as TNode), keyOf(nodesByIndex[b] as TNode)))
+      .sort((a, b) =>
+        compareCodeUnit(keyOf(nodesByIndex[a] as TNode), keyOf(nodesByIndex[b] as TNode)),
+      )
     components.push(sortedIndices.map((idx) => nodesByIndex[idx] as TNode))
   }
 
-  components.sort((a, b) => compareKey(keyOf(a[0] as TNode), keyOf(b[0] as TNode)))
+  components.sort((a, b) => compareCodeUnit(keyOf(a[0] as TNode), keyOf(b[0] as TNode)))
   return components
-}
-
-function compareKey(a: string, b: string): number {
-  if (a < b) return -1
-  if (a > b) return 1
-  return 0
 }

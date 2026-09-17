@@ -1,4 +1,5 @@
 import type { CallCandidate } from "@aburi/types"
+import { toNfc } from "../codepoints"
 
 /**
  * Core standard callee prefixes that are dropped from Category C per drop-list.md
@@ -48,10 +49,6 @@ export function buildDropCFilter(input: DropCFilterInput = {}): DropCFilter {
   )
 }
 
-function toNfc(value: string): string {
-  return value.normalize("NFC")
-}
-
 export class DropCFilter {
   readonly #dropPrefixes: readonly string[]
   readonly #keepPrefixes: readonly string[]
@@ -90,12 +87,9 @@ export class DropCFilter {
 }
 
 /**
- * A prefix matches when the target either equals the prefix, ends at a member break
- * (`prefix + "."`), or the prefix itself ended at a break. Bare `console` matches
- * `console.log` but not `consoleWrap.method` — the identifier boundary is honored.
+ * A prefix matches when the target equals it or continues past it at a member break
+ * (`prefix + "."`): bare `console` matches `console.log` but not `consoleWrap.method`.
  */
 function isPrefixMatch(target: string, prefix: string): boolean {
-  if (target === prefix) return true
-  if (target.startsWith(`${prefix}.`)) return true
-  return false
+  return target === prefix || target.startsWith(`${prefix}.`)
 }

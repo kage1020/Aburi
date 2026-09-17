@@ -1,38 +1,26 @@
 import { describe, expect, it } from "vitest"
+import type { LogLevel } from "../src/env"
 import { createLogger } from "../src/logger"
 
 /**
- * `ABURI_LOG_LEVEL` is parsed by `readEnv` and handed to `runScan`, which builds
- * the run's logger from it. Before that path existed the level was read and then
- * dropped, and `debug` / `info` were hard-coded no-ops — so a pass that logged a
- * degraded operation at debug level could not be heard from at any setting.
+ * `ABURI_LOG_LEVEL` is parsed by `readEnv` and handed to `runScan`, which builds the run's
+ * logger from it; every level below the minimum is dropped rather than a hard-coded no-op.
  */
 describe("createLogger", () => {
-  it("prints warn and above by default", () => {
+  it.each<{ minimum: LogLevel | undefined; expected: string[] }>([
+    { minimum: undefined, expected: ["warn: w\n", "error: e\n"] },
+    { minimum: "debug", expected: ["debug: d\n", "info: i\n", "warn: w\n", "error: e\n"] },
+    { minimum: "error", expected: ["error: e\n"] },
+  ])("prints $minimum and above (default: warn)", ({ minimum, expected }) => {
     const lines: string[] = []
-    const logger = createLogger({ write: (line) => lines.push(line) })
-    emitAll(logger)
-    expect(lines).toEqual(["warn: w\n", "error: e\n"])
-  })
-
-  it("prints every level once the minimum is debug", () => {
-    const lines: string[] = []
-    const logger = createLogger({ minimum: "debug", write: (line) => lines.push(line) })
-    emitAll(logger)
-    expect(lines).toEqual(["debug: d\n", "info: i\n", "warn: w\n", "error: e\n"])
-  })
-
-  it("prints only errors once the minimum is error", () => {
-    const lines: string[] = []
-    const logger = createLogger({ minimum: "error", write: (line) => lines.push(line) })
-    emitAll(logger)
-    expect(lines).toEqual(["error: e\n"])
+    const logger = createLogger({
+      ...(minimum === undefined ? {} : { minimum }),
+      write: (line) => lines.push(line),
+    })
+    logger.debug?.("d")
+    logger.info?.("i")
+    logger.warn?.("w")
+    logger.error?.("e")
+    expect(lines).toEqual(expected)
   })
 })
-
-function emitAll(logger: ReturnType<typeof createLogger>): void {
-  logger.debug?.("d")
-  logger.info?.("i")
-  logger.warn?.("w")
-  logger.error?.("e")
-}

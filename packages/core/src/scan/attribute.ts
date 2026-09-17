@@ -1,4 +1,5 @@
 import type { Component, ComponentId } from "@aburi/types"
+import { toNfc } from "../codepoints"
 
 /**
  * Which Component a file belongs to, answered from `Component.roots[]` alone: the id of the
@@ -80,8 +81,7 @@ const WORKSPACE_ROOT_KEY = ""
  * the other way and the component would lose its own files (ir-schema.md §14 #19, §1.2).
  */
 function pathSegments(path: string): string[] {
-  return path
-    .normalize("NFC")
+  return toNfc(path)
     .split("/")
     .filter((segment) => segment.length > 0 && segment !== ".")
 }
@@ -105,7 +105,7 @@ function rootKey(root: string): string | null {
   const segments = pathSegments(root)
   if (segments.some((segment) => segment === "..")) return null
   if (segments.length > 0) return segments.join("/")
-  return root.normalize("NFC").split("/").includes(".") ? WORKSPACE_ROOT_KEY : null
+  return toNfc(root).split("/").includes(".") ? WORKSPACE_ROOT_KEY : null
 }
 
 /**

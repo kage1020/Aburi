@@ -1,5 +1,6 @@
 import type { DependencyEndpoint, IR, Symbol as IRSymbol } from "@aburi/types"
-import { describeCodePoints } from "./codepoints"
+import { CALL_SITE_KEY_SEPARATOR, callEdgeKey, dependencyKey } from "./call-site"
+import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type IntegrityViolation } from "./errors"
 import {
   isComponentId,
@@ -10,6 +11,7 @@ import {
   RESERVED_LANGUAGE_IDS,
 } from "./id"
 import { checkDocumentShape } from "./integrity-shape"
+import { compareCodeUnit } from "./order"
 
 /**
  * Core effect vocabulary frozen by aburi.ir.v1. The set is append-only across patch
@@ -71,32 +73,9 @@ const EXT_KIND_PATTERN = /^[a-z][a-z0-9-]*(:[a-z][a-z0-9.-]*)+$/
 const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
 
 /**
- * Run every invariant ir-schema.md §14 enumerates. Returns the violations array (possibly
- * empty); callers that want the throwing form use `assertIRIntegrity`.
- *
- * The invariants checked here, in §14 numbering, are:
- *   1. Symbol id uniqueness
- *   2. Component id uniqueness
- *   3. Symbol.component → Components[].id existence
- *   4. Dependency endpoints that look like Symbol ids exist in Symbols[]
- *   5. dropped=true ⇒ dropReason non-null
- *   6. Symbol.confidence ∈ enum
- *   7. Effect.id ∈ core vocab OR x-<plugin>: prefix
- *   8. Symbol.kind ∈ enum
- *   9. Symbol.extKind null or matches namespace:segment+ pattern
- *  10. All file paths are workspace-relative POSIX (non-empty, no backslash, no absolute
- *      prefix, no `..` ascent)
- *  11. Arrays are sorted per the IR schema's ordering rules
- *  12. via:"call" edges: both endpoints are Symbol ids present in Symbols[]
- *  13. dependencies[]: no duplicate (from, to, via) triples
- *  14. Symbol.calls[].resolved and via:"call" edges agree (call-graph projection is total)
- *  15. stats.callResolution (when present) is a faithful census of Symbol.calls[]
- *  16. No Symbol id or Dependency endpoint uses a reserved language token (today: `slice`)
- *  17. Symbol and Component ids satisfy their own grammars, and Symbol.name satisfies the
- *      qualified-name grammar
- *  18. workspace.languages is non-empty, well-formed, and covers every Symbol.language
- *  19. Every string the Document orders or identifies by is in Unicode NFC
- *  20. The Document has the shape `aburi.ir.v1` requires
+ * Run every invariant ir-schema.md §14 enumerates, in its numbering (each `check*` below
+ * names its number). Returns the violations array (possibly empty); callers that want the
+ * throwing form use `assertIRIntegrity`.
  *
  * The parameter is `unknown` rather than `IR` on purpose. Every other caller in this
  * workspace holds a typed `IR`, but the one this function exists for does not: `readIR`
@@ -107,7 +86,7 @@ const SYMBOL_ID_PATTERN = /^[a-z][a-z0-9]*:[^#]+#.+$/
  * #20 runs first and, when it finds anything, is returned alone. The rest are statements
  * about a Document; a value that fails #20 is not one, so their answers would be about
  * something else — and where the missing field is one they read, they would crash rather
- * than answer at all. Stated without a count, because the count has now been wrong once.
+ * than answer at all.
  */
 export function checkIRIntegrity(document: unknown): IntegrityViolation[] {
   const shape = checkDocumentShape(document)
@@ -362,14 +341,14 @@ function reportUnnormalized(
   field: string,
   out: IntegrityViolation[],
 ): void {
-  if (value === value.normalize("NFC")) return
+  if (value === toNfc(value)) return
   out.push({
     invariant: 19,
     subject,
     // Both spellings are quoted with their code points. They render identically — that is
     // what makes the defect invisible — so a message naming only the offending value would
     // show a string that looks correct beside the claim that it is not.
-    message: `${field} ${describeCodePoints(value)} is not in Unicode NFC; write it as ${describeCodePoints(value.normalize("NFC"))}`,
+    message: `${field} ${describeCodePoints(value)} is not in Unicode NFC; write it as ${describeCodePoints(toNfc(value))}`,
   })
 }
 
@@ -537,19 +516,19 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   assertSorted(
     ir.components.map((c) => c.id),
     "components[]",
-    (a, b) => compareCodeUnit(a, b),
+    compareCodeUnit,
     out,
   )
   assertSorted(
     ir.symbols.map((s) => s.id),
     "symbols[]",
-    (a, b) => compareCodeUnit(a, b),
+    compareCodeUnit,
     out,
   )
   assertSorted(
     (ir.stats.skippedFiles ?? []).map((f) => f.path),
     "stats.skippedFiles[]",
-    (a, b) => compareCodeUnit(a, b),
+    compareCodeUnit,
     out,
   )
   // The IR schema pins the dependency sort key to (from, to, via) lex order and does not
@@ -558,9 +537,9 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   // each other. Reproduce that shape here so the integrity check does not reject
   // schema-valid IRs.
   assertSorted(
-    ir.dependencies.map((d) => `${d.from}\t${d.to}\t${d.via}`),
+    ir.dependencies.map((d) => dependencyKey(d.from, d.to, d.via)),
     "dependencies[]",
-    (a, b) => compareCodeUnit(a, b),
+    compareCodeUnit,
     out,
   )
   for (const symbol of ir.symbols) {
@@ -583,11 +562,14 @@ function checkArraySortOrder(ir: IR, out: IntegrityViolation[]): void {
   }
 }
 
+/** Report the first adjacent pair of `values` that `compare` puts out of order, as #11. */
 function assertSorted<T>(
   values: readonly T[],
   collection: string,
   compare: (a: T, b: T) => number,
   out: IntegrityViolation[],
+  describePair: (prev: T, curr: T) => string = (prev, curr) =>
+    `"${String(prev)}" precedes "${String(curr)}"`,
 ): void {
   for (let i = 1; i < values.length; i++) {
     const prev = values[i - 1]
@@ -597,7 +579,7 @@ function assertSorted<T>(
       out.push({
         invariant: 11,
         subject: collection,
-        message: `${collection} not sorted: "${String(prev)}" precedes "${String(curr)}"`,
+        message: `${collection} not sorted: ${describePair(prev, curr)}`,
       })
       return
     }
@@ -609,24 +591,13 @@ function assertNumericSorted(
   collection: string,
   out: IntegrityViolation[],
 ): void {
-  for (let i = 1; i < values.length; i++) {
-    const prev = values[i - 1]
-    const curr = values[i]
-    if (prev === undefined || curr === undefined) continue
-    if (prev > curr) {
-      out.push({
-        invariant: 11,
-        subject: collection,
-        message: `${collection} not sorted: line ${prev} precedes ${curr}`,
-      })
-      return
-    }
-  }
-}
-
-/** The ordering ir-schema.md §1 fixes: UTF-16 code unit, matching `<` and the default sort. */
-function compareCodeUnit(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
+  assertSorted(
+    values,
+    collection,
+    (a, b) => a - b,
+    out,
+    (prev, curr) => `line ${prev} precedes ${curr}`,
+  )
 }
 
 /**
@@ -783,7 +754,7 @@ function checkCallEdgeEndpoints(ir: IR, out: IntegrityViolation[]): void {
 function checkDependencyTupleUniqueness(ir: IR, out: IntegrityViolation[]): void {
   const seen = new Set<string>()
   for (const dep of ir.dependencies) {
-    const key = `${dep.from}\t${dep.to}\t${dep.via}`
+    const key = dependencyKey(dep.from, dep.to, dep.via)
     if (seen.has(key)) {
       out.push({
         invariant: 13,
@@ -810,19 +781,19 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
   for (const symbol of ir.symbols) {
     for (const call of symbol.calls) {
       if (call.resolved === null) continue
-      expectedFromCalls.add(dependencyKey(symbol.id, call.resolved))
+      expectedFromCalls.add(callEdgeKey(symbol.id, call.resolved))
     }
   }
 
   const foundInDeps = new Set<string>()
   for (const dep of ir.dependencies) {
     if (dep.via !== "call") continue
-    foundInDeps.add(dependencyKey(dep.from, dep.to))
+    foundInDeps.add(callEdgeKey(dep.from, dep.to))
   }
 
   for (const key of expectedFromCalls) {
     if (!foundInDeps.has(key)) {
-      const [from, to] = key.split("\t")
+      const [from, to] = key.split(CALL_SITE_KEY_SEPARATOR)
       out.push({
         invariant: 14,
         subject: `dependencies[from=${from},to=${to},via=call]`,
@@ -832,7 +803,7 @@ function checkCallGraphProjectionAgrees(ir: IR, out: IntegrityViolation[]): void
   }
   for (const key of foundInDeps) {
     if (!expectedFromCalls.has(key)) {
-      const [from, to] = key.split("\t")
+      const [from, to] = key.split(CALL_SITE_KEY_SEPARATOR)
       out.push({
         invariant: 14,
         subject: `symbols[id=${from}].calls[resolved=${to}]`,
@@ -905,10 +876,6 @@ function checkSkippedFilesCensus(ir: IR, out: IntegrityViolation[]): void {
     }
     seen.add(file.path)
   }
-}
-
-function dependencyKey(from: string, to: string): string {
-  return `${from}\t${to}`
 }
 
 /**

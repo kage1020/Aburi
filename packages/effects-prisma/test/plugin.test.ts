@@ -1,34 +1,31 @@
-import type { PluginContext, VocabRegistry } from "@aburi/types"
+import { makeCall, makeCtx, noopRegistry, silentLogger } from "@aburi/test-support"
+import type { PluginContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { PrismaEffectsPlugin, prismaEffectsPlugin } from "../src/index"
-import { makeCall, makeCtx, makePrismaImport, noopRegistry } from "./fixtures/context"
+import { effectsPrismaManifest, PrismaEffectsPlugin, prismaEffectsPlugin } from "../src/index"
+import { makePrismaImport } from "./fixtures/context"
 
 const testPluginContext: PluginContext = {
-  registry: noopRegistry as VocabRegistry,
+  registry: noopRegistry,
   config: {},
   workspaceRoot: "/tmp",
-  log: {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-  },
+  log: silentLogger,
 }
 
 describe("PrismaEffectsPlugin", () => {
   it("exposes the effects-prisma manifest", () => {
-    expect(prismaEffectsPlugin.manifest.name).toBe("effects-prisma")
-    expect(prismaEffectsPlugin.manifest.type).toBe("effects")
+    expect(prismaEffectsPlugin.manifest).toBe(effectsPrismaManifest)
   })
 
   it("init resolves without touching plugin state", async () => {
     await expect(prismaEffectsPlugin.init(testPluginContext)).resolves.toBeUndefined()
   })
 
-  it("dispatches classify() to the pure classifier", () => {
+  it("dispatches classify() to the pure classifier, from the class and the singleton alike", () => {
     const ctx = makeCtx({ imports: [makePrismaImport()] })
-    const result = prismaEffectsPlugin.classify(makeCall({ target: "prisma.user.findMany" }), ctx)
-    expect(result?.effectId).toBe("db.read")
+    const call = makeCall({ target: "prisma.invoice.upsert" })
+    const result = prismaEffectsPlugin.classify(call, ctx)
+    expect(result?.effectId).toBe("db.write")
+    expect(new PrismaEffectsPlugin().classify(call, ctx)).toEqual(result)
   })
 
   it("returns null when the file is not a Prisma consumer", () => {
@@ -38,17 +35,10 @@ describe("PrismaEffectsPlugin", () => {
     ).toBeNull()
   })
 
-  it("class and singleton share behavior — the singleton is just a preconstructed instance", () => {
-    const constructed = new PrismaEffectsPlugin()
-    const ctx = makeCtx({ imports: [makePrismaImport()] })
-    const call = makeCall({ target: "prisma.invoice.upsert" })
-    expect(constructed.classify(call, ctx)).toEqual(prismaEffectsPlugin.classify(call, ctx))
-  })
-
   it("classify is idempotent across repeated invocations (no per-call state)", () => {
     const ctx = makeCtx({ imports: [makePrismaImport()] })
     const call = makeCall({ target: "prisma.$transaction" })
     const runs = Array.from({ length: 5 }, () => prismaEffectsPlugin.classify(call, ctx))
-    for (const r of runs) expect(r).toEqual(runs[0])
+    for (const run of runs) expect(run).toEqual(runs[0])
   })
 })

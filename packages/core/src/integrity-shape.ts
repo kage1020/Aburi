@@ -35,100 +35,104 @@ interface RecordSpec {
   readonly [field: string]: FieldSpec
 }
 
-const str: FieldSpec = { kind: "string" }
-const num: FieldSpec = { kind: "number" }
-const bool: FieldSpec = { kind: "boolean" }
-const strs: FieldSpec = { kind: "stringArray" }
+const stringField: FieldSpec = { kind: "string" }
+const numberField: FieldSpec = { kind: "number" }
+const booleanField: FieldSpec = { kind: "boolean" }
+const stringArrayField: FieldSpec = { kind: "stringArray" }
 const nullable = (inner: FieldSpec): FieldSpec => ({ kind: "nullable", inner })
 const optional = (inner: FieldSpec): FieldSpec => ({ kind: "optional", inner })
 const record = (spec: RecordSpec): FieldSpec => ({ kind: "record", spec })
 const recordArray = (spec: RecordSpec): FieldSpec => ({ kind: "recordArray", spec })
 
 const PLUGIN_REF: RecordSpec = {
-  name: str,
-  type: str,
-  version: str,
-  grammarRevision: nullable(str),
+  name: stringField,
+  type: stringField,
+  version: stringField,
+  grammarRevision: nullable(stringField),
 }
 
-const GENERATOR: RecordSpec = { name: str, version: str, plugins: recordArray(PLUGIN_REF) }
+const GENERATOR: RecordSpec = {
+  name: stringField,
+  version: stringField,
+  plugins: recordArray(PLUGIN_REF),
+}
 
-const WORKSPACE_MANAGER: RecordSpec = { tool: str, roots: strs }
+const WORKSPACE_MANAGER: RecordSpec = { tool: stringField, roots: stringArrayField }
 
 const WORKSPACE: RecordSpec = {
-  root: str,
+  root: stringField,
   managers: recordArray(WORKSPACE_MANAGER),
-  languages: strs,
+  languages: stringArrayField,
 }
 
 const COMPONENT: RecordSpec = {
-  id: str,
-  name: str,
-  roots: strs,
-  languages: strs,
-  publicApi: optional(strs),
-  frameworks: optional(strs),
-  description: optional(nullable(str)),
+  id: stringField,
+  name: stringField,
+  roots: stringArrayField,
+  languages: stringArrayField,
+  publicApi: optional(stringArrayField),
+  frameworks: optional(stringArrayField),
+  description: optional(nullable(stringField)),
 }
 
 const DECORATOR: RecordSpec = {
-  name: str,
-  raw: str,
-  arguments: strs,
-  boundary: bool,
-  line: num,
+  name: stringField,
+  raw: stringField,
+  arguments: stringArrayField,
+  boundary: booleanField,
+  line: numberField,
 }
 
 const RULE: RecordSpec = {
-  type: str,
-  line: num,
-  condition: nullable(str),
-  what: nullable(str),
-  expr: nullable(str),
-  loopKind: nullable(str),
+  type: stringField,
+  line: numberField,
+  condition: nullable(stringField),
+  what: nullable(stringField),
+  expr: nullable(stringField),
+  loopKind: nullable(stringField),
 }
 
 const EFFECT: RecordSpec = {
-  id: str,
-  target: str,
-  plugin: str,
-  confidence: str,
-  derivedBy: str,
-  line: optional(num),
-  propagated: optional(bool),
-  derivedFrom: optional(strs),
+  id: stringField,
+  target: stringField,
+  plugin: stringField,
+  confidence: stringField,
+  derivedBy: stringField,
+  line: optional(numberField),
+  propagated: optional(booleanField),
+  derivedFrom: optional(stringArrayField),
 }
 
-const CALL: RecordSpec = { target: str, line: num, resolved: nullable(str) }
+const CALL: RecordSpec = { target: stringField, line: numberField, resolved: nullable(stringField) }
 
 const SOURCE_RANGE: RecordSpec = {
-  file: str,
-  startLine: num,
-  endLine: num,
-  startColumn: optional(nullable(num)),
-  endColumn: optional(nullable(num)),
+  file: stringField,
+  startLine: numberField,
+  endLine: numberField,
+  startColumn: optional(nullable(numberField)),
+  endColumn: optional(nullable(numberField)),
 }
 
-const FINGERPRINT: RecordSpec = { api: str, logic: str, syntax: str }
+const FINGERPRINT: RecordSpec = { api: stringField, logic: stringField, syntax: stringField }
 
 const SIGNATURE: RecordSpec = {
-  inputs: recordArray({ name: str, type: str }),
-  outputs: strs,
-  throws: strs,
-  inferredThrows: optional(strs),
-  async: bool,
-  generator: bool,
-  typeParameters: strs,
+  inputs: recordArray({ name: stringField, type: stringField }),
+  outputs: stringArrayField,
+  throws: stringArrayField,
+  inferredThrows: optional(stringArrayField),
+  async: booleanField,
+  generator: booleanField,
+  typeParameters: stringArrayField,
 }
 
 const SYMBOL: RecordSpec = {
-  id: str,
-  kind: str,
-  extKind: nullable(str),
-  name: str,
-  language: str,
-  component: optional(nullable(str)),
-  visibility: str,
+  id: stringField,
+  kind: stringField,
+  extKind: nullable(stringField),
+  name: stringField,
+  language: stringField,
+  component: optional(nullable(stringField)),
+  visibility: stringField,
   decorators: recordArray(DECORATOR),
   signature: optional(nullable(record(SIGNATURE))),
   rules: recordArray(RULE),
@@ -136,74 +140,78 @@ const SYMBOL: RecordSpec = {
   calls: recordArray(CALL),
   source: record(SOURCE_RANGE),
   fingerprint: record(FINGERPRINT),
-  confidence: str,
-  derivedBy: strs,
-  dropped: bool,
-  dropReason: nullable(str),
+  confidence: stringField,
+  derivedBy: stringArrayField,
+  dropped: booleanField,
+  dropReason: nullable(stringField),
 }
 
 const DEPENDENCY: RecordSpec = {
-  from: str,
-  to: str,
-  via: str,
-  direction: str,
-  effect: nullable(str),
+  from: stringField,
+  to: stringField,
+  via: stringField,
+  direction: stringField,
+  effect: nullable(stringField),
 }
 
 const EFFECT_PROPAGATION_STATS: RecordSpec = {
-  sccCount: num,
-  maxSccSize: num,
-  propagatedEffectCount: num,
-  symbolsWithPropagatedEffects: num,
+  sccCount: numberField,
+  maxSccSize: numberField,
+  propagatedEffectCount: numberField,
+  symbolsWithPropagatedEffects: numberField,
 }
 
-const EFFECT_CLASSIFY_TIMEOUT: RecordSpec = { plugin: str, symbolId: str, timeoutMs: num }
+const EFFECT_CLASSIFY_TIMEOUT: RecordSpec = {
+  plugin: stringField,
+  symbolId: stringField,
+  timeoutMs: numberField,
+}
 
 const LSP_HINT_REJECTIONS: RecordSpec = {
-  unparseableHover: num,
-  ownerClassNotFound: num,
-  memberNotFound: num,
-  kindMismatch: num,
-  targetDropped: num,
+  unparseableHover: numberField,
+  ownerClassNotFound: numberField,
+  memberNotFound: numberField,
+  kindMismatch: numberField,
+  targetDropped: numberField,
 }
 
 const LSP_ENRICHMENT_STATS: RecordSpec = {
-  enabled: bool,
-  filesEnriched: num,
-  filesFellBack: num,
-  requestsIssued: num,
-  requestsTimedOut: num,
-  requestsFailed: num,
-  languagesDisabled: strs,
-  hintsProduced: optional(num),
-  hintsConsumed: optional(num),
+  enabled: booleanField,
+  filesEnriched: numberField,
+  filesFellBack: numberField,
+  requestsIssued: numberField,
+  requestsTimedOut: numberField,
+  requestsFailed: numberField,
+  languagesDisabled: stringArrayField,
+  hintsProduced: optional(numberField),
+  hintsConsumed: optional(numberField),
   hintsRejected: optional(record(LSP_HINT_REJECTIONS)),
 }
 
 const UNRESOLVED_CALL_BUCKETS: RecordSpec = {
-  localScope: num,
-  external: num,
-  dynamic: num,
-  ambiguous: num,
-  noMatch: num,
+  localScope: numberField,
+  external: numberField,
+  dynamic: numberField,
+  ambiguous: numberField,
+  noMatch: numberField,
 }
 
 const CALL_RESOLUTION_STATS: RecordSpec = {
-  totalCalls: num,
-  resolvedCalls: num,
+  totalCalls: numberField,
+  resolvedCalls: numberField,
   unresolved: record(UNRESOLVED_CALL_BUCKETS),
 }
 
 const SKIPPED_FILE: RecordSpec = {
-  path: str,
-  reason: str,
+  path: stringField,
+  reason: stringField,
 }
 
 const STATS: RecordSpec = {
-  totalFiles: num,
-  parsedFiles: num,
-  keptSymbols: num,
-  droppedSymbols: num,
+  totalFiles: numberField,
+  parsedFiles: numberField,
+  keptSymbols: numberField,
+  droppedSymbols: numberField,
   effectPropagation: record(EFFECT_PROPAGATION_STATS),
   effectClassifyTimeouts: optional(recordArray(EFFECT_CLASSIFY_TIMEOUT)),
   lspEnrichment: optional(record(LSP_ENRICHMENT_STATS)),
@@ -212,8 +220,8 @@ const STATS: RecordSpec = {
 }
 
 const DOCUMENT: RecordSpec = {
-  $schema: str,
-  generatedAt: optional(str),
+  $schema: stringField,
+  generatedAt: optional(stringField),
   generator: record(GENERATOR),
   workspace: record(WORKSPACE),
   components: recordArray(COMPONENT),
@@ -341,7 +349,6 @@ function checkField(
   }
 }
 
-/** Subject for a breach at the top level, where there is no enclosing record to name. */
 /**
  * The subject a breach at the top level of the Document is attributed to. Exported because
  * `@aburi/diff` prefixes every subject with the side it came from and has to recognise the

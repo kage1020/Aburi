@@ -10,11 +10,13 @@ import type {
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
 import { CALL_SITE_KEY_SEPARATOR, makeCallSiteKey, receiverHead } from "./call-site"
+import { groupBy } from "./collections"
 import { CoreError } from "./errors"
 import { trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
 import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
+import { compareCodeUnit } from "./order"
 
 /**
  * Internal edge shape emitted by `resolveCallGraph`. Mirrors call-resolution.md §7.1;
@@ -297,7 +299,7 @@ function classifyUnresolved(input: ClassifyUnresolvedInput): UnresolvedCallDiagn
     return {
       ...base,
       bucket: "ambiguous",
-      candidates: [...input.trace.ambiguousCandidates].sort(compareSymbolId),
+      candidates: [...input.trace.ambiguousCandidates].sort(compareCodeUnit),
     }
   }
   if (bindsToExternalImport(input.target, input.imports)) {
@@ -361,19 +363,12 @@ const BUCKET_TO_STATS_KEY: Record<UnresolvedCallBucket, keyof UnresolvedCallBuck
   "no-match": "noMatch",
 }
 
-function compareSymbolId(a: SymbolId, b: SymbolId): number {
-  if (a < b) return -1
-  if (a > b) return 1
-  return 0
-}
-
 function compareDiagnostic(a: UnresolvedCallDiagnostic, b: UnresolvedCallDiagnostic): number {
-  if (a.symbolId < b.symbolId) return -1
-  if (a.symbolId > b.symbolId) return 1
-  if (a.line !== b.line) return a.line - b.line
-  if (a.target < b.target) return -1
-  if (a.target > b.target) return 1
-  return 0
+  return (
+    compareCodeUnit(a.symbolId, b.symbolId) ||
+    a.line - b.line ||
+    compareCodeUnit(a.target, b.target)
+  )
 }
 
 /**
@@ -405,78 +400,30 @@ const EMPTY_RECEIVER_HINTS: ReadonlyMap<string, ReceiverHint> = new Map()
 const EMPTY_IMPLEMENTER_HINTS: ReadonlyMap<SymbolId, readonly SymbolId[]> = new Map()
 
 /**
- * Resolve a call left null by the untyped tier using LSP-derived hints.
- * `this.*` / `super.*` with a hint present resolve at `high` confidence.
+ * Resolve a call left null by the untyped tier using LSP-derived hints (call-resolution.md
+ * §5.2). `this.*` / `super.*` with a hint present resolve at `high` confidence — a known
+ * simplification of §7.2, which rates an inherited hit `medium`: `ReceiverHint` does not carry
+ * how far the lookup travelled, so the two cases are indistinguishable here.
  *
- * That flat `high` is a known simplification of §7.2, which rates direct
- * dispatch on the receiver's own class `high` but a hit found by walking up the
- * class hierarchy `medium`. `ReceiverHint` carries only the callee id and
- * `"this" | "super"`, not how far the lookup travelled, so the two cases are
- * indistinguishable here — and the hint producer reads the *declaring* class out
- * of the hover text, which for an inherited method is an ancestor. Inherited
- * dispatch therefore lands at `high` today. Splitting it needs a walk-depth
- * field on the hint, not a change in this function.
+ * A hint is looked up by the full call-site key and then checked against the call it would
+ * resolve: `ReceiverHint.kind` must match `receiverHead(target)`, the producer's own
+ * derivation. Neither check is redundant — the key stops a producer keyed to the line rather
+ * than the call site (see `makeCallSiteKey` for the edge that fabricates), the `kind` check
+ * stops a hand-built hint aimed at a target it does not describe. Neither can vouch for a hint
+ * whose position was wrong, which is why `buildRequestJobs` declines that shape up front.
  *
- * A hint is looked up by the full call-site key — file, line, **and** target —
- * and is then checked against the call it would resolve: `ReceiverHint.kind`
- * (via `receiverHead`, the same derivation the producer files the hint under)
- * must match the receiver the target leads with. Keying by line alone made a
- * hint for `this.foo()` apply to every other call on that line, so an unrelated
- * callee resolved to a class method, dropped out of the `unresolved`
- * diagnostics, and reached `propagateEffects` as an edge no source line
- * justifies. Both checks are cheap and neither is redundant: the key stops a
- * producer keyed to the line rather than the call site, the `kind` check stops
- * a hand-built hint map aimed at a target it does not describe.
+ * Both refusals are reported rather than merely taken, so `resolveCallGraph` can count them
+ * into `stats.lspEnrichment.hintsRejected` (lsp-enrichment.md §7.2); a hint the key never
+ * reaches is the ordinary case, not a refusal. The order of the two checks is part of §7.2's
+ * contract: a hint that fails both is counted as `kindMismatch` alone, so the same input
+ * cannot be bucketed two ways (LE15).
  *
- * Neither check can vouch for a hint whose *target* is right and whose
- * *position* was wrong — `findMethodColumn` hovering the wrong token would file
- * a well-formed hint for a callee the call site never names. That is why
- * `buildRequestJobs` declines the shape where it can happen (a `this.*` target
- * of more than two segments) rather than leaving it to be caught here: by the
- * time a hint exists, this function has nothing left to compare it against.
- *
- * Two further invariants of the LSP tier are load-bearing, and both hold by the
- * shape of the surrounding pass rather than by a check inside this function:
- *
- * - **An already-resolved call is never overwritten (§5.4).** Two guards in
- *   `resolveCallGraph` stand between a resolved call and this function, and both
- *   are needed: the loop returns early on any call that arrived with `resolved`
- *   already non-null, and a call the untyped tiers resolve during this pass
- *   returns with its edge before the LSP tier is consulted. The untyped answer
- *   stays authoritative for the cases the type layer cannot see — a barrel
- *   re-export pointing at a different declaration file, say. Note that §5.4's
- *   defensive exception — the LSP tier *may* replace a resolution whose target
- *   is no longer in the Symbol table — is not implemented: an incoming
- *   `resolved` is kept verbatim even when it names an id no Symbol carries, so
- *   the preservation rule is currently unconditional.
- * - **Confidence only ever rises (lsp-enrichment.md LE16).** Because the LSP
- *   tier fires solely where the untyped tier produced no edge at all, there is
- *   no untyped confidence available for it to lower: an LSP hit contributes an
- *   edge the LSP-off run did not have, never a re-rated one. Turning LSP on can
- *   add edges to the graph but cannot downgrade any edge already in it.
- *
- * A hint whose `targetSymbolId` is not in `keptSymbolIds` produces no edge. A
- * dropped Symbol carries an empty body and zeroed fingerprints, so an edge into
- * it would be a silent lie about what the caller actually reaches; the call
- * falls through to `classifyUnresolved` and is reported like any other miss.
- *
- * Both refusals — the `kind` disagreement and the dropped target — are reported
- * rather than merely taken: the reason rides back to `resolveCallGraph`, which
- * counts it into `stats.lspEnrichment.hintsRejected` (lsp-enrichment.md §7.2).
- * A hint declined here and not counted is indistinguishable, in the finished IR,
- * from one the language server never had — the enrichment pass has returned by
- * now and cannot see either outcome. A hint the key never reaches is not a
- * refusal and is not counted: the untyped tier resolving a call first is the
- * ordinary case, not a fault.
- *
- * The order of the two checks is part of §7.2's contract rather than an accident
- * of writing: a hint that fails both is counted as `kindMismatch` alone. Without
- * a fixed order the same input could be bucketed two ways, which is the kind of
- * drift LE15's byte-identical guarantee exists to forbid.
- *
- * Interface-tier resolution (§5.3) is out of scope until the IR carries
- * `implements` edges — until then any `implementerHints` entries pass through
- * untouched.
+ * Two further invariants hold by the shape of the surrounding pass: an already-resolved call
+ * is never overwritten (§5.4 — `resolveCallGraph` returns before reaching here, unconditionally,
+ * even when the incoming `resolved` names no Symbol), and confidence only ever rises (LE16 —
+ * the LSP tier fires solely where the untyped tier produced no edge). A hint whose target is
+ * not in `keptSymbolIds` produces no edge, for the reason `keptSymbolIds` exists. Interface-tier
+ * resolution (§5.3) is out of scope until the IR carries `implements` edges.
  */
 function resolveViaLspHint(input: {
   caller: IRSymbol
@@ -902,27 +849,18 @@ type TopLevelIndex = Map<string, Map<string, IRSymbol[]>>
  * body would be misleading downstream.
  */
 function indexTopLevelByFile(symbols: readonly IRSymbol[]): TopLevelIndex {
-  const out: TopLevelIndex = new Map()
-  for (const symbol of symbols) {
-    if (symbol.dropped) continue
-    if (symbol.name.includes(".")) continue
-    const perFile = out.get(symbol.source.file) ?? new Map<string, IRSymbol[]>()
-    const bucket = perFile.get(symbol.name) ?? []
-    bucket.push(symbol)
-    perFile.set(symbol.name, bucket)
-    out.set(symbol.source.file, perFile)
-  }
-  return out
+  const topLevel = symbols.filter((symbol) => !symbol.dropped && !symbol.name.includes("."))
+  return mapValues(
+    groupBy(topLevel, (symbol) => symbol.source.file),
+    (perFile) => groupBy(perFile, (symbol) => symbol.name),
+  )
 }
 
 function indexFilesByLanguage(symbols: readonly IRSymbol[]): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>()
-  for (const symbol of symbols) {
-    const bucket = out.get(symbol.language) ?? new Set<string>()
-    bucket.add(symbol.source.file)
-    out.set(symbol.language, bucket)
-  }
-  return out
+  return mapValues(
+    groupBy(symbols, (symbol) => symbol.language),
+    (perLang) => new Set(perLang.map((symbol) => symbol.source.file)),
+  )
 }
 
 /**
@@ -938,19 +876,15 @@ function indexFilesByLanguage(symbols: readonly IRSymbol[]): Map<string, Set<str
 type ComponentIndex = Map<string, Map<string, Map<string, IRSymbol[]>>>
 
 function indexByComponent(symbols: readonly IRSymbol[]): ComponentIndex {
-  const out: ComponentIndex = new Map()
-  for (const symbol of symbols) {
-    if (symbol.dropped) continue
-    const perLang = out.get(symbol.language) ?? new Map<string, Map<string, IRSymbol[]>>()
-    const componentKey = componentKeyOf(symbol.component ?? null)
-    const perComponent = perLang.get(componentKey) ?? new Map<string, IRSymbol[]>()
-    const bucket = perComponent.get(symbol.name) ?? []
-    bucket.push(symbol)
-    perComponent.set(symbol.name, bucket)
-    perLang.set(componentKey, perComponent)
-    out.set(symbol.language, perLang)
-  }
-  return out
+  const kept = symbols.filter((symbol) => !symbol.dropped)
+  return mapValues(
+    groupBy(kept, (symbol) => symbol.language),
+    (perLang) =>
+      mapValues(
+        groupBy(perLang, (symbol) => componentKeyOf(symbol.component ?? null)),
+        (perComponent) => groupBy(perComponent, (symbol) => symbol.name),
+      ),
+  )
 }
 
 /**
@@ -963,16 +897,16 @@ function indexByComponent(symbols: readonly IRSymbol[]): ComponentIndex {
 type WorkspaceIndex = Map<string, Map<string, IRSymbol[]>>
 
 function indexByWorkspace(symbols: readonly IRSymbol[]): WorkspaceIndex {
-  const out: WorkspaceIndex = new Map()
-  for (const symbol of symbols) {
-    if (symbol.dropped) continue
-    const perLang = out.get(symbol.language) ?? new Map<string, IRSymbol[]>()
-    const bucket = perLang.get(symbol.name) ?? []
-    bucket.push(symbol)
-    perLang.set(symbol.name, bucket)
-    out.set(symbol.language, perLang)
-  }
-  return out
+  const kept = symbols.filter((symbol) => !symbol.dropped)
+  return mapValues(
+    groupBy(kept, (symbol) => symbol.language),
+    (perLang) => groupBy(perLang, (symbol) => symbol.name),
+  )
+}
+
+/** `map` with every value replaced by `transform(value)`, keys and order kept. */
+function mapValues<K, V, W>(map: ReadonlyMap<K, V>, transform: (value: V) => W): Map<K, W> {
+  return new Map([...map].map(([key, value]) => [key, transform(value)]))
 }
 
 /**
@@ -986,9 +920,5 @@ function componentKeyOf(component: string | null): string {
 }
 
 function compareCallEdge(a: CallEdge, b: CallEdge): number {
-  if (a.from < b.from) return -1
-  if (a.from > b.from) return 1
-  if (a.to < b.to) return -1
-  if (a.to > b.to) return 1
-  return a.line - b.line
+  return compareCodeUnit(a.from, b.from) || compareCodeUnit(a.to, b.to) || a.line - b.line
 }

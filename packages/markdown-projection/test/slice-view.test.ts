@@ -1,7 +1,8 @@
+import { fp, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
 import type { SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
-import { fp, makeDiff, makeSymbol, sliceId, symbolId } from "./fixtures"
+import { makeDiff } from "./fixtures"
 
 /**
  * Slice View rendering acceptance tests. Backs docs/design/slice-view.md §12

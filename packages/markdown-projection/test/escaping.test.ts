@@ -1,3 +1,4 @@
+import { component, effect, makeIR, makeSymbol, rule, symbolId } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   callRow,
@@ -11,7 +12,6 @@ import {
   ruleRow,
   tableCell,
 } from "../src"
-import { component, effect, makeIR, makeSymbol, rule, symbolId } from "./fixtures"
 
 /**
  * §3.4 / §5.6 — the three ways a value out of the IR used to escape the construct that
@@ -115,12 +115,6 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
       "  ```",
       `  ${longCondition()}`,
       "  ```",
-    ])
-  })
-
-  it("keeps the compact row for a condition that fits inline", () => {
-    expect(ruleRow(rule({ type: "guard", line: 5, condition: "x > 0" }))).toEqual([
-      "- guard: `x > 0` (L5)",
     ])
   })
 

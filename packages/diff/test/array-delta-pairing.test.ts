@@ -1,7 +1,7 @@
+import { call, decorator, effect, fp, makeSymbol, rule } from "@aburi/test-support"
 import type { Effect, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSymbolDelta } from "../src"
-import { call, decorator, effect, fp, makeSymbol, rule } from "./fixtures"
 
 /**
  * §5.2 pairs the elements of `rules`, `calls` and `decorators` by an identity key with a

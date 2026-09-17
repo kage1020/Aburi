@@ -108,13 +108,12 @@ describe("runDiff ref spec — two-dot form is unaffected", () => {
 })
 
 describe("runDiff ref spec — other malformed specs", () => {
-  it("rejects a spec with no separator", async () => {
-    const error = await parseFailure("main")
-    expect(error.message).toContain("is not a valid ref spec")
-  })
-
-  it("rejects a spec with more than one separator", async () => {
-    const error = await parseFailure("a..b..c")
+  it.each([
+    ["no separator", "main"],
+    ["more than one separator", "a..b..c"],
+    ["a dot run longer than three", "main....HEAD"],
+  ])("rejects a spec with %s", async (_, spec) => {
+    const error = await parseFailure(spec)
     expect(error.message).toContain("is not a valid ref spec")
   })
 
@@ -124,11 +123,6 @@ describe("runDiff ref spec — other malformed specs", () => {
     const error = await parseFailure("a...b..c")
     expect(error.message).toContain("is not a valid ref spec")
     expect(error.message).not.toContain("three-dot")
-  })
-
-  it("rejects a dot run longer than three", async () => {
-    const error = await parseFailure("main....HEAD")
-    expect(error.message).toContain("is not a valid ref spec")
   })
 
   it("rejects an empty side rather than reading it as a three-dot spec", async () => {

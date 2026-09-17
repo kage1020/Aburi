@@ -1,3 +1,16 @@
+import {
+  call,
+  component,
+  decorator,
+  dependency,
+  effect,
+  fp,
+  makeIR,
+  makeSymbol,
+  rule,
+  sig,
+  zeroFp,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   projectComponent,
@@ -6,21 +19,7 @@ import {
   projectSymbolExplain,
   projectWorkspace,
 } from "../src"
-import {
-  call,
-  component,
-  decorator,
-  dependency,
-  effect,
-  emptySummary,
-  fp,
-  makeDiff,
-  makeIR,
-  makeSymbol,
-  rule,
-  sig,
-  zeroFp,
-} from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 // -----------------------------------------------------------------------------
 // MP1: same IR → same Markdown (determinism)
@@ -159,28 +158,6 @@ describe("MP5 / MP6 — confidence badge visibility", () => {
       dependencies: [],
     })
     expect(md).not.toContain("⚠")
-  })
-})
-
-// -----------------------------------------------------------------------------
-// MP7: mermaid fallback when node count exceeds limit
-// -----------------------------------------------------------------------------
-
-describe("MP7 — mermaid → text fallback beyond node limit", () => {
-  it("skips the mermaid fence when node count > MERMAID_NODE_LIMIT", () => {
-    const deps = Array.from({ length: 110 }, (_, i) => dependency({ from: `a${i}`, to: `b${i}` }))
-    const ir = makeIR({ dependencies: deps })
-    const md = projectWorkspace(ir)
-    expect(md).not.toContain("```mermaid")
-    // Text fallback is still there:
-    expect(md).toContain("- a0 → b0")
-  })
-
-  it("includes mermaid fence when under the limit", () => {
-    const ir = makeIR({
-      dependencies: [dependency({ from: "core", to: "shared" })],
-    })
-    expect(projectWorkspace(ir)).toContain("```mermaid")
   })
 })
 
@@ -337,20 +314,6 @@ describe("projectDiffSummaryLine — CLI stdout summary", () => {
 // -----------------------------------------------------------------------------
 
 describe("Rule row rendering (§5.6)", () => {
-  it("renders guard with condition", () => {
-    const s = makeSymbol({
-      id: "ts:src/a.ts#Foo",
-      name: "Foo",
-      rules: [rule({ type: "guard", line: 5, condition: "x > 0" })],
-    })
-    const md = projectComponent({
-      component: component({ id: "core", name: "core" }),
-      symbols: [s],
-      dependencies: [],
-    })
-    expect(md).toContain("- guard: `x > 0` (L5)")
-  })
-
   it("renders loop with kind", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Foo",

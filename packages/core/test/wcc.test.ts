@@ -128,18 +128,7 @@ describe("computeWeaklyConnectedComponents", () => {
     expect(result.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["m", "x"], ["z"]])
   })
 
-  it("idempotence — same input twice yields structurally equal output (SV17 backing)", () => {
-    const nodes = [n("c"), n("a"), n("b"), n("d")]
-    const edges: [Node, Node][] = [
-      [n("a"), n("b")],
-      [n("c"), n("d")],
-    ]
-    const one = computeWeaklyConnectedComponents(nodes, edges, keyOf)
-    const two = computeWeaklyConnectedComponents(nodes, edges, keyOf)
-    expect(two.map((c) => c.map(keyOf))).toEqual(one.map((c) => c.map(keyOf)))
-  })
-
-  it("input-order insensitive — shuffled nodes and shuffled edges → same output (SV18 backing)", () => {
+  it("input-order insensitive — shuffled nodes and shuffled edges → same output (SV17 / SV18 backing)", () => {
     const canonical = computeWeaklyConnectedComponents(
       [n("a"), n("b"), n("c"), n("d")],
       [

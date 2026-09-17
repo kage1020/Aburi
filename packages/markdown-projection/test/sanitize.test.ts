@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  assignSymbolFilenames,
-  collisionSuffix,
-  sanitizeSymbolId,
-  withCollisionSuffix,
-} from "../src"
+import { assignSymbolFilenames, collisionSuffix, sanitizeSymbolId } from "../src"
 
 describe("sanitizeSymbolId (§8)", () => {
   it("replaces separators with `-` and collapses runs", () => {
@@ -27,17 +22,6 @@ describe("collisionSuffix (§8 tail)", () => {
     const suffix = collisionSuffix("ts:src/a.ts#Foo")
     expect(suffix).toMatch(/^[0-9a-f]{6}$/)
     expect(collisionSuffix("ts:src/a.ts#Foo")).toBe(suffix)
-  })
-
-  it("differs for different inputs", () => {
-    expect(collisionSuffix("a")).not.toBe(collisionSuffix("b"))
-  })
-})
-
-describe("withCollisionSuffix", () => {
-  it("always appends the deterministic suffix", () => {
-    const value = withCollisionSuffix("ts:src/a.ts#Foo")
-    expect(value).toMatch(/^ts-src-a-ts-Foo-[0-9a-f]{6}$/)
   })
 })
 

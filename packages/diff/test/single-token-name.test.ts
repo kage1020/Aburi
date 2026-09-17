@@ -1,7 +1,7 @@
+import { fp, makeIR, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageNameSignature } from "../src"
-import { fp, makeIR, makeSymbol, sig } from "./fixtures"
 
 /**
  * §3.4.3's threshold table demands a higher score the less the name has to say, and the row

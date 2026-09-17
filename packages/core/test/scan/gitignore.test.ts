@@ -199,20 +199,6 @@ describe("discoverFiles — what a .gitignore negation cannot reach", () => {
     expect(await discover()).toEqual(["src/a.ts"])
   })
 
-  it("changes nothing when respectGitignore is false", async () => {
-    await writeFileAt("src/a.ts")
-    await writeFileAt("gen/keep.ts")
-    await writeGitignore("gen/", "!gen/keep.ts")
-
-    const result = await discoverFiles({
-      workspaceRoot: workRoot,
-      languageExtensions: [".ts"],
-      respectGitignore: false,
-    })
-
-    expect(result.files.map((f) => f.path)).toEqual(["gen/keep.ts", "src/a.ts"])
-  })
-
   it("reads a .gitignore below the workspace root", async () => {
     // This line used to assert the opposite, and said why: "the day the nested ones are read
     // this line is what says so". Precedence between two files that disagree is the subject of

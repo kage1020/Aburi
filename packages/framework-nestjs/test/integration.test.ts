@@ -2,45 +2,19 @@ import {
   extractSymbols as extractTypescriptSymbols,
   parseTypescriptFile,
 } from "@aburi/lang-typescript"
-import type { FrameworkClassifyContext, SourceFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { classifyNestjsSymbol } from "../src/index"
+import { makeCtx } from "./fixtures/symbol"
 
-/**
- * End-to-end: parse a TypeScript source with `@aburi/lang-typescript`, run
- * `classifyNestjsSymbol` on every SymbolCandidate the language plugin emits, and confirm
- * that the framework plugin correctly assigns extKinds and boundary flags. Locks the wire
- * between decorator extraction in the language plugin and framework classification here.
- *
- * The import edges come from the same parse as the Symbols, so a case that writes an
- * `import` statement is exercising the real `ImportEdge.symbols` encoding rather than a
- * fixture's idea of it.
- */
+// End-to-end: real TypeScript through `@aburi/lang-typescript`, then `classifyNestjsSymbol`.
+// The import edges come from the same parse, so aliased cases exercise the real
+// `ImportEdge.symbols` encoding rather than a fixture's idea of it.
 
 async function classifyEach(source: string) {
   const parseResult = await parseTypescriptFile({ path: "src/x.ts", content: source })
   const tree = parseResult.tree
   if (tree === null) throw new Error("parse returned null")
-  const file: SourceFile = { path: "src/x.ts", content: source }
-  const ctx: FrameworkClassifyContext = {
-    file,
-    imports: parseResult.imports,
-    registry: {
-      findEffect: () => null,
-      findExtKind: () => null,
-      findFramework: () => null,
-      findDerivedByOwner: () => null,
-      isEffectOwnedBy: () => false,
-      isExtKindOwnedBy: () => false,
-      listEffects: () => [],
-      listExtKinds: () => [],
-      listFrameworks: () => [],
-      listPlugins: () => [],
-      assertEffectDeclared: () => {},
-      assertExtKindDeclared: () => {},
-    },
-    config: {},
-  }
+  const ctx = makeCtx({ path: "src/x.ts", content: source, imports: parseResult.imports })
   const candidates = extractTypescriptSymbols(tree, ctx)
   return candidates.map((candidate) => ({
     id: candidate.id,

@@ -1,12 +1,6 @@
 import { parseTypescriptFile } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
-import { isPascalCase, matchesHocNaming, returnsContextProvider, returnsJsx } from "../src/index"
-
-async function parseRoot(source: string): Promise<unknown> {
-  const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
-  if (result.tree === null) throw new Error("parse returned null")
-  return result.tree.rootNode
-}
+import { isPascalCase, matchesHocNaming, returnsContextProvider } from "../src/index"
 
 /** Return the body node of the first function-like declaration — matches how the plugin
  * hands `symbol.bodyNode` to `returnsContextProvider` in production. */
@@ -64,18 +58,6 @@ describe("matchesHocNaming", () => {
     ["", false],
   ])("matchesHocNaming(%j) === %j", (leaf, expected) => {
     expect(matchesHocNaming(leaf)).toBe(expected)
-  })
-})
-
-describe("returnsJsx", () => {
-  it("is true when a function returns JSX", async () => {
-    const root = await parseRoot("function C() { return <div /> }")
-    expect(returnsJsx(root)).toBe(true)
-  })
-
-  it("is false when a function returns a plain value", async () => {
-    const root = await parseRoot("function C() { return 42 }")
-    expect(returnsJsx(root)).toBe(false)
   })
 })
 

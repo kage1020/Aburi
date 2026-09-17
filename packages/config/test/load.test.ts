@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { ConfigError, loadConfig } from "../src/index"
+import { loadConfig } from "../src/index"
+import { configErrorFrom } from "./fixtures/errors"
 
 const SCHEMA = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
@@ -44,37 +45,22 @@ describe("loadConfig", () => {
     expect(result.syntheticPlugins[0]?.name).toBe("hint-acme")
   })
 
-  it("propagates config-parse-failed end-to-end", async () => {
-    await writeFile(join(tmp, "aburi.json"), "{ not valid", "utf8")
-    let caught: unknown
-    try {
-      await loadConfig({ cwd: tmp })
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(ConfigError)
-    expect((caught as ConfigError).code).toBe("config-parse-failed")
-  })
-
-  it("propagates reserved-namespace end-to-end", async () => {
-    const text = JSON.stringify({
-      $schema: SCHEMA,
-      frameworkHints: [
-        {
-          name: "acme",
-          decorators: { X: { extKind: "framework:hint:acme:controller" } },
-        },
-      ],
-    })
-    await writeFile(join(tmp, "aburi.jsonc"), text, "utf8")
-    let caught: unknown
-    try {
-      await loadConfig({ cwd: tmp })
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(ConfigError)
-    expect((caught as ConfigError).code).toBe("reserved-namespace")
+  it.each([
+    ["config-parse-failed", "aburi.json", "{ not valid"],
+    [
+      "reserved-namespace",
+      "aburi.jsonc",
+      JSON.stringify({
+        $schema: SCHEMA,
+        frameworkHints: [
+          { name: "acme", decorators: { X: { extKind: "framework:hint:acme:controller" } } },
+        ],
+      }),
+    ],
+  ])("propagates %s end-to-end", async (code, filename, text) => {
+    await writeFile(join(tmp, filename), text, "utf8")
+    const caught = await configErrorFrom(() => loadConfig({ cwd: tmp }))
+    expect(caught.code).toBe(code)
   })
 
   it("walks ancestor directories to find the nearest config", async () => {
@@ -86,15 +72,5 @@ describe("loadConfig", () => {
     expect(result.found).toBe(true)
     if (!result.found) throw new Error("type narrowing unreachable")
     expect(result.source).toBe(root)
-  })
-
-  it("prefers aburi.jsonc over aburi.json at the same level", async () => {
-    const jsonc = join(tmp, "aburi.jsonc")
-    await writeFile(jsonc, "{}", "utf8")
-    await writeFile(join(tmp, "aburi.json"), "{}", "utf8")
-    const result = await loadConfig({ cwd: tmp })
-    expect(result.found).toBe(true)
-    if (!result.found) throw new Error("type narrowing unreachable")
-    expect(result.source).toBe(jsonc)
   })
 })

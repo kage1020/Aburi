@@ -1,5 +1,5 @@
 import type { FrameworkManifest, SymbolKind } from "@aburi/types"
-import type { ExpressExtKind } from "./ext-kinds"
+import { EXPRESS_DERIVED_BY_PREFIX, type ExpressExtKind } from "./ext-kinds"
 
 interface ExpressExtKindEntry {
   id: ExpressExtKind
@@ -51,7 +51,7 @@ export const frameworkExpressManifest: FrameworkManifest = {
     effectPrefixes: [],
     extKinds: EXT_KIND_ENTRIES,
     extKindPrefixes: ["framework:express"],
-    derivedByPrefixes: ["framework:express"],
+    derivedByPrefixes: [EXPRESS_DERIVED_BY_PREFIX],
     frameworks: ["express"],
   },
 }

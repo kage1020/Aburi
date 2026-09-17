@@ -1,168 +1,63 @@
+import { noopRegistry, silentLogger } from "@aburi/test-support"
 import type {
   BodyExtraction,
   CallCandidate,
   EffectClassification,
   EffectPlugin,
-  EffectsManifest,
-  ExtractionContext,
-  FrameworkManifest,
   FrameworkPlugin,
   ImportEdge,
-  LangManifest,
   LanguagePlugin,
-  Logger,
   OpaqueAstNode,
   ParseResult,
-  SourceFile,
   SymbolCandidate,
   SymbolClassification,
-  VocabRegistry,
-  WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDropCFilter, type ExtractedFile, runFilePipeline } from "../../src"
 import { symbolId } from "../fixtures/ir"
-
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
-
-const silentLog: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-}
-
-function langManifest(name: string): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name,
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
-
-function frameworkManifest(name: string): FrameworkManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name,
-    version: "0.0.0",
-    type: "framework",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
-
-function effectsManifest(name: string): EffectsManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name,
-    version: "0.0.0",
-    type: "effects",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
+import {
+  effectsManifest,
+  frameworkManifest,
+  stubCandidate,
+  stubFile,
+  stubLanguagePlugin,
+} from "../fixtures/plugins"
 
 /**
  * Build a single-Symbol language plugin fixture that returns whatever candidate + body
  * the caller wired in. Everything else is a no-op so tests can focus on the pipeline
  * dispatch semantics.
  */
-function stubLanguagePlugin(options: {
+function singleSymbolPlugin(options: {
   candidate: SymbolCandidate<OpaqueAstNode>
   body: BodyExtraction
   normalized?: string
   imports?: readonly ImportEdge[]
 }): LanguagePlugin {
-  const plugin = {
-    manifest: langManifest("lang-stub"),
-    fileExtensions: [".stub"],
-    capabilities: {
-      hasDecorators: false,
-      hasGenerics: false,
-      hasAsync: false,
-      hasMacros: false,
-      hasPatternMatching: false,
-      hasAbstractTypes: false,
-      hasModules: false,
-      hasNamespaces: false,
-      hasTypeParameters: false,
-      hasExplicitVisibility: false,
-      hasJsDoc: false,
-    },
-    init: async () => {},
-    parseFile: async (_file: SourceFile): Promise<ParseResult> => ({
+  return stubLanguagePlugin({
+    parseFile: async (): Promise<ParseResult> => ({
       tree: {} as OpaqueAstNode,
       errors: [],
       imports: [...(options.imports ?? [])],
     }),
-    extractSymbols: (_tree: OpaqueAstNode, _ctx: ExtractionContext) => [options.candidate],
-    walkBody: (_symbol: SymbolCandidate<OpaqueAstNode>, _ctx: WalkContext<OpaqueAstNode>) =>
-      options.body,
-    normalizeAst: (_symbol: SymbolCandidate<OpaqueAstNode>) => options.normalized ?? "stub-ast",
-  }
-  return plugin as unknown as LanguagePlugin
+    extractSymbols: () => [options.candidate],
+    walkBody: () => options.body,
+    normalizeAst: () => options.normalized ?? "stub-ast",
+  })
 }
 
 function baseCandidate(): SymbolCandidate<OpaqueAstNode> {
-  return {
-    id: symbolId("stub:test.stub#Fn"),
-    kind: "function",
-    extKind: null,
-    name: "Fn",
-    visibility: "public",
+  return stubCandidate("Fn", {
     decorators: [
       { name: "Controller", raw: "@Controller()", arguments: [], boundary: false, line: 1 },
     ],
-    signature: null,
     source: { file: "test.stub", startLine: 1, endLine: 5, startColumn: null, endColumn: null },
-    derivedBy: [],
-    bodyNode: {} as OpaqueAstNode,
-    fullNode: {} as OpaqueAstNode,
-  }
+  })
 }
 
 function stubCall(target: string, line = 1): CallCandidate {
   return { target, line, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
 }
-
-const stubFile: SourceFile = { path: "test.stub", content: "" }
 
 /**
  * Narrowed to the file that reached the IR, because every case in this file is about the
@@ -178,7 +73,7 @@ async function runPipelineWithStubs(overrides: {
 }): Promise<ExtractedFile> {
   const candidate = overrides.candidate ?? baseCandidate()
   const body: BodyExtraction = overrides.body ?? { rules: [], calls: [] }
-  const language = stubLanguagePlugin({ candidate, body, imports: overrides.imports ?? [] })
+  const language = singleSymbolPlugin({ candidate, body, imports: overrides.imports ?? [] })
   const result = await runFilePipeline({
     file: stubFile,
     language,
@@ -189,7 +84,7 @@ async function runPipelineWithStubs(overrides: {
     dropCFilter: buildDropCFilter(),
     component: null,
     treeReleaseFailures: [],
-    log: silentLog,
+    log: silentLogger,
   })
   if (result.kind !== "extracted") {
     throw new Error(`stub fixture produced a ${result.kind} file, not an extracted one`)

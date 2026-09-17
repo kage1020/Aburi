@@ -1,3 +1,4 @@
+import { component, dependency, makeIR, makeSymbol } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   MERMAID_NODE_LIMIT,
@@ -6,7 +7,7 @@ import {
   projectSymbolExplain,
   projectWorkspace,
 } from "../src"
-import { component, dependency, makeDiff, makeIR, makeSymbol } from "./fixtures"
+import { makeDiff } from "./fixtures"
 
 describe("workspace mermaid dependencies (symbol-edge exclusion)", () => {
   it("emits component-level dependencies into the mermaid graph", () => {

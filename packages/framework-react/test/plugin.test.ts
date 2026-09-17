@@ -1,3 +1,4 @@
+import { noopRegistry, silentLogger } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { frameworkReactManifest, ReactFrameworkPlugin, reactFrameworkPlugin } from "../src/index"
 import { makeCandidate, makeCtx } from "./fixtures/symbol"
@@ -11,30 +12,7 @@ describe("ReactFrameworkPlugin — instance surface", () => {
   it("init resolves to undefined without touching global state", async () => {
     const plugin = new ReactFrameworkPlugin()
     await expect(
-      plugin.init({
-        registry: {
-          findEffect: () => null,
-          findExtKind: () => null,
-          findFramework: () => null,
-          findDerivedByOwner: () => null,
-          isEffectOwnedBy: () => false,
-          isExtKindOwnedBy: () => false,
-          listEffects: () => [],
-          listExtKinds: () => [],
-          listFrameworks: () => [],
-          listPlugins: () => [],
-          assertEffectDeclared: () => {},
-          assertExtKindDeclared: () => {},
-        },
-        config: {},
-        workspaceRoot: "/tmp",
-        log: {
-          debug: () => {},
-          info: () => {},
-          warn: () => {},
-          error: () => {},
-        },
-      }),
+      plugin.init({ registry: noopRegistry, config: {}, workspaceRoot: "/tmp", log: silentLogger }),
     ).resolves.toBeUndefined()
   })
 

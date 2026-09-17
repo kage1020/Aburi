@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   apiFingerprint,
-  FP_HEX_LENGTH,
   hashCanonicalObject,
   hashRawString,
   logicFingerprint,
@@ -17,14 +16,11 @@ import { makeSymbol } from "../fixtures/ir"
  */
 
 describe("reference implementation — pinned hex", () => {
-  it("FP_HEX_LENGTH is exposed and equals 12", () => {
-    expect(FP_HEX_LENGTH).toBe(12)
-  })
-
-  it("hashRawString of the empty JSON object matches the reference", () => {
+  it("hashRawString of the empty JSON object matches the reference, at 12 lowercase hex", () => {
     // Pinning hashRawString directly is the cheapest cross-impl assertion; a reader can
     // verify with `echo -n '{}' | openssl dgst -sha256 | cut -c1-12`.
     expect(hashRawString("{}")).toBe("44136fa355b3")
+    expect(hashRawString("anything else")).toMatch(/^[0-9a-f]{12}$/)
   })
 
   it("hashCanonicalObject of {} produces the same hash as hashRawString('{}')", () => {
@@ -49,10 +45,7 @@ describe("reference implementation — pinned hex", () => {
     })
     // Regression-guard the exact 12-hex value. A shift means the api canonical form
     // changed and every historical IR needs re-hashing before comparison.
-    expect(apiFingerprint(sym)).toMatch(/^[0-9a-f]{12}$/)
-    const pinned = apiFingerprint(sym)
-    // Re-computing yields the same value across runs (round-trip stability guard).
-    expect(apiFingerprint(sym)).toBe(pinned)
+    expect(apiFingerprint(sym)).toBe("abf3a0597098")
   })
 
   it("logicFingerprint of a Symbol with no rules and no effects is pinned", () => {

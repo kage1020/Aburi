@@ -8,6 +8,7 @@ export {
 } from "./callgraph"
 export { type SerializeOptions, serializeCanonical } from "./canonical"
 export { describeCodePoints } from "./codepoints"
+export { countBy, groupBy } from "./collections"
 export {
   __testing as __testing_component,
   type DetectComponentsOptions,
@@ -76,6 +77,7 @@ export {
   type ServerFactory,
   withHintUsage,
 } from "./lsp"
+export { compareBy, compareCodeUnit, stringArraysEqual } from "./order"
 export {
   type PropagateInput,
   type PropagateResult,
@@ -137,6 +139,15 @@ export {
   type ParseTimeoutEvent,
   startParseDeadline,
 } from "./scan/timeout"
+export {
+  anyCallCalleeMatches,
+  asSyntaxNode,
+  calleeLeaf,
+  calleeText,
+  findFirstDescendantOfType,
+  findNamedChildOfType,
+  type SyntaxNode,
+} from "./syntax-node"
 export { computeWeaklyConnectedComponents } from "./wcc"
 export {
   type DetectManagersResult,

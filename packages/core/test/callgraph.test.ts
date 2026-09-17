@@ -1,4 +1,4 @@
-import type { ImportEdge, Symbol as IRSymbol } from "@aburi/types"
+import type { Confidence, ImportEdge, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../src/call-site"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
@@ -949,58 +949,40 @@ describe("resolveCallGraph", () => {
 })
 
 describe("reconstructCallEdgesFromIR", () => {
-  it("returns [] for an IR with no symbols", () => {
-    expect(reconstructCallEdgesFromIR(minimalIR())).toEqual([])
-  })
-
-  it("returns [] for an IR whose symbols all have empty calls[]", () => {
+  it.each<[string, IRSymbol[]]>([
+    ["no symbols", []],
+    ["symbols with empty calls[]", [makeSymbol("ts:src/a.ts#a"), makeSymbol("ts:src/a.ts#b")]],
+    [
+      "only unresolved calls (resolved: null emits no edge)",
+      [
+        makeSymbol("ts:src/a.ts#caller", {
+          calls: [{ target: "unknown", line: 3, resolved: null }],
+        }),
+      ],
+    ],
+  ])("returns [] for an IR with %s", (_label, symbols) => {
     const ir = minimalIR()
-    ir.symbols = [makeSymbol("ts:src/a.ts#a"), makeSymbol("ts:src/a.ts#b")]
+    ir.symbols = symbols
     expect(reconstructCallEdgesFromIR(ir)).toEqual([])
   })
 
-  it("skips calls with resolved: null (unresolved calls emit no edge)", () => {
+  // ir-schema.md does not model per-call confidence; the reconstructed edge uses the
+  // containing Symbol's confidence as a defensible floor.
+  it.each<Confidence>([
+    "high",
+    "low",
+  ])("emits one edge per resolved call in the §7.1 CallEdge shape, at the caller's %s confidence", (confidence) => {
     const ir = minimalIR()
     ir.symbols = [
       makeSymbol("ts:src/a.ts#caller", {
-        calls: [{ target: "unknown", line: 3, resolved: null }],
-      }),
-    ]
-    expect(reconstructCallEdgesFromIR(ir)).toEqual([])
-  })
-
-  it("emits one edge per resolved call with the CallEdge shape from call-resolution.md §7.1", () => {
-    const ir = minimalIR()
-    ir.symbols = [
-      makeSymbol("ts:src/a.ts#caller", {
-        confidence: "high",
+        confidence,
         calls: [{ target: "helper", line: 5, resolved: "ts:src/a.ts#helper" }],
       }),
       makeSymbol("ts:src/a.ts#helper"),
     ]
     expect(reconstructCallEdgesFromIR(ir)).toEqual([
-      {
-        from: "ts:src/a.ts#caller",
-        to: "ts:src/a.ts#helper",
-        via: "call",
-        confidence: "high",
-        line: 5,
-      },
+      { from: "ts:src/a.ts#caller", to: "ts:src/a.ts#helper", via: "call", confidence, line: 5 },
     ])
-  })
-
-  it("inherits confidence from the caller Symbol's own confidence field", () => {
-    // ir-schema.md does not model per-call confidence; the reconstructed edge
-    // uses the containing Symbol's confidence as a defensible floor.
-    const ir = minimalIR()
-    ir.symbols = [
-      makeSymbol("ts:src/a.ts#weak", {
-        confidence: "low",
-        calls: [{ target: "helper", line: 1, resolved: "ts:src/a.ts#helper" }],
-      }),
-      makeSymbol("ts:src/a.ts#helper"),
-    ]
-    expect(reconstructCallEdgesFromIR(ir)[0]?.confidence).toBe("low")
   })
 
   it("emits one edge per call site when the same caller invokes the same callee on multiple lines", () => {
@@ -1040,18 +1022,5 @@ describe("reconstructCallEdgesFromIR", () => {
       "ts:src/a.ts#a->ts:src/c.ts#c@2",
       "ts:src/z.ts#z->ts:src/b.ts#b@4",
     ])
-  })
-
-  it("is deterministic — repeated invocations return byte-identical output", () => {
-    const ir = minimalIR()
-    ir.symbols = [
-      makeSymbol("ts:src/a.ts#a", {
-        calls: [{ target: "b", line: 1, resolved: "ts:src/a.ts#b" }],
-      }),
-      makeSymbol("ts:src/a.ts#b"),
-    ]
-    const one = reconstructCallEdgesFromIR(ir)
-    const two = reconstructCallEdgesFromIR(ir)
-    expect(JSON.stringify(two)).toBe(JSON.stringify(one))
   })
 })

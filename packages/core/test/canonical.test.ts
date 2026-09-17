@@ -37,20 +37,12 @@ describe("serializeCanonical", () => {
     )
   })
 
-  it("rejects bigint values", () => {
-    expect(() => serializeCanonical({ x: 1n }, { format: "compact" })).toThrowError(
-      expect.objectContaining({ code: "non-plain-json" }),
-    )
-  })
-
-  it("rejects function values", () => {
-    expect(() => serializeCanonical({ x: () => 0 }, { format: "compact" })).toThrowError(
-      expect.objectContaining({ code: "non-plain-json" }),
-    )
-  })
-
-  it("rejects symbol values", () => {
-    expect(() => serializeCanonical({ x: Symbol("x") }, { format: "compact" })).toThrowError(
+  it.each<[string, unknown]>([
+    ["bigint", 1n],
+    ["function", () => 0],
+    ["symbol", Symbol("x")],
+  ])("rejects %s values", (_type, value) => {
+    expect(() => serializeCanonical({ x: value }, { format: "compact" })).toThrowError(
       expect.objectContaining({ code: "non-plain-json" }),
     )
   })

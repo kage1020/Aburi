@@ -21,13 +21,10 @@ describe("frameworkExpressManifest", () => {
     expect(frameworkExpressManifest.provides.derivedByPrefixes).toContain("framework:express")
   })
 
-  it("registers the express framework name and declares no effects", () => {
+  it("is a framework manifest registering express and declaring no effects", () => {
+    expect(frameworkExpressManifest.type).toBe("framework")
     expect(frameworkExpressManifest.provides.frameworks).toEqual(["express"])
     expect(frameworkExpressManifest.provides.effects).toHaveLength(0)
     expect(frameworkExpressManifest.provides.effectPrefixes).toHaveLength(0)
-  })
-
-  it("is typed as a framework plugin manifest", () => {
-    expect(frameworkExpressManifest.type).toBe("framework")
   })
 })

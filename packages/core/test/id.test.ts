@@ -60,30 +60,6 @@ describe("makeSymbolId", () => {
     ).toThrowError(expect.objectContaining({ code: "anonymous-symbol-id-attempted" }))
   })
 
-  it("rejects backslash paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "src\\a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
-  it("rejects absolute POSIX paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "/abs/a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
-  it("rejects Windows drive-letter paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "C:/abs/a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
-  it("rejects parent-ascending paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "../escape/a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
   it("answers the shared path table on the `symbolPath` side, with the stated reason", () => {
     for (const { path, symbolPath, why } of WORKSPACE_PATH_CASES) {
       const label = `${JSON.stringify(path)} (${why})`

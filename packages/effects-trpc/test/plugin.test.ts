@@ -1,34 +1,31 @@
-import type { EffectPlugin, PluginContext, VocabRegistry } from "@aburi/types"
+import { makeCall, makeCtx, noopRegistry, silentLogger } from "@aburi/test-support"
+import type { EffectPlugin, PluginContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { TrpcEffectsPlugin, trpcEffectsPlugin } from "../src/index"
-import { makeCall, makeCtx, makeTrpcClientImport, noopRegistry } from "./fixtures/context"
+import { effectsTrpcManifest, TrpcEffectsPlugin, trpcEffectsPlugin } from "../src/index"
+import { makeTrpcClientImport } from "./fixtures/context"
 
 const testPluginContext: PluginContext = {
-  registry: noopRegistry as VocabRegistry,
+  registry: noopRegistry,
   config: {},
   workspaceRoot: "/tmp",
-  log: {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-  },
+  log: silentLogger,
 }
 
 describe("TrpcEffectsPlugin", () => {
   it("exposes the effects-trpc manifest", () => {
-    expect(trpcEffectsPlugin.manifest.name).toBe("effects-trpc")
-    expect(trpcEffectsPlugin.manifest.type).toBe("effects")
+    expect(trpcEffectsPlugin.manifest).toBe(effectsTrpcManifest)
   })
 
   it("init resolves without touching plugin state", async () => {
     await expect(trpcEffectsPlugin.init(testPluginContext)).resolves.toBeUndefined()
   })
 
-  it("dispatches classify() to the pure classifier", () => {
+  it("dispatches classify() to the pure classifier, from the class and the singleton alike", () => {
     const ctx = makeCtx({ imports: [makeTrpcClientImport()] })
-    const result = trpcEffectsPlugin.classify(makeCall({ target: "client.user.byId.query" }), ctx)
+    const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })
+    const result = trpcEffectsPlugin.classify(call, ctx)
     expect(result?.effectId).toBe("network.rpc")
+    expect(new TrpcEffectsPlugin().classify(call, ctx)).toEqual(result)
   })
 
   it("returns null when the file is not a tRPC client consumer", () => {
@@ -36,13 +33,6 @@ describe("TrpcEffectsPlugin", () => {
     expect(
       trpcEffectsPlugin.classify(makeCall({ target: "client.user.byId.query" }), ctx),
     ).toBeNull()
-  })
-
-  it("class and singleton share behavior — the singleton is just a preconstructed instance", () => {
-    const constructed = new TrpcEffectsPlugin()
-    const ctx = makeCtx({ imports: [makeTrpcClientImport()] })
-    const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })
-    expect(constructed.classify(call, ctx)).toEqual(trpcEffectsPlugin.classify(call, ctx))
   })
 
   it("classify is idempotent across repeated invocations (no per-call state)", () => {
@@ -53,9 +43,7 @@ describe("TrpcEffectsPlugin", () => {
   })
 
   it("satisfies the EffectPlugin contract and declares no dropCallees", () => {
-    // Widening to the interface both pins structural conformance and reaches the optional
-    // `dropCallees` member, which the narrow class type does not carry. tRPC has no logger
-    // surface that belongs in drop-list category C.
+    // Widened to the interface because the narrow class type omits the optional field.
     const asEffectPlugin: EffectPlugin = trpcEffectsPlugin
     expect(asEffectPlugin.dropCallees).toBeUndefined()
   })

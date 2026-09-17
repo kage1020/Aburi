@@ -1,32 +1,13 @@
-import type { PluginContext, VocabRegistry } from "@aburi/types"
+import { noopRegistry, silentLogger } from "@aburi/test-support"
+import type { PluginContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { expressFrameworkPlugin, frameworkExpressManifest } from "../src/index"
-
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
 
 const pluginContext: PluginContext = {
   registry: noopRegistry,
   config: {},
   workspaceRoot: "/tmp",
-  log: {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-  },
+  log: silentLogger,
 }
 
 describe("expressFrameworkPlugin", () => {

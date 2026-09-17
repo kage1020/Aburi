@@ -1,3 +1,4 @@
+import { makeCall } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   classificationConfidence,
@@ -6,7 +7,6 @@ import {
   PRISMA_DELEGATE_MAX_ARGUMENTS,
   PRISMA_TRANSACTION_MAX_ARGUMENTS,
 } from "../src/index"
-import { makeCall } from "./fixtures/context"
 
 describe("namesPrismaClient", () => {
   it.each([

@@ -4,6 +4,8 @@ import {
   compareStrings,
   effectRow,
   inlineCode,
+  orderEffects,
+  renderDocument,
   requireDropReason,
   ruleRow,
   signatureLine,
@@ -14,35 +16,23 @@ import {
 
 export interface ProjectSymbolExplainContext {
   /**
-   * Every Dependency in the current IR. When provided, `projectSymbolExplain`
-   * renders a `## Called by` section listing the callers of this Symbol —
-   * discovered by scanning `via: "call"` edges whose `to` equals this Symbol's
-   * id. Absent → the section is silently omitted.
+   * Every Dependency in the current IR. When provided, a `## Called by` section lists the
+   * `via: "call"` edges whose `to` is this Symbol. Absent → the section is omitted.
    */
   dependencies?: readonly Dependency[]
   /**
-   * Per-call resolution diagnostics for THIS Symbol (call-resolution.md §8.1),
-   * as produced by the scan that is running right now. Supplying them adds a
-   * `## Call resolution` section; omitting them leaves the output byte-identical
-   * to what it was before the section existed. The IR cannot carry these — §8.1
-   * keeps the reason out of the document — so only a caller holding a live
-   * `ScanResult` can pass them.
+   * Per-call resolution diagnostics for THIS Symbol (call-resolution.md §8.1), from the scan
+   * running right now — the IR cannot carry them, since §8.1 keeps the reason out of the
+   * document. Supplying them adds a `## Call resolution` section; omitting them leaves the
+   * output as it was before the section existed.
    */
   unresolvedCalls?: readonly UnresolvedCallDiagnostic[]
 }
 
 /**
- * §7 — `aburi explain <id>`. A stand-alone Symbol view, richer than the per-Component
- * L2 blocks because it splits every axis into its own section (§7 mock) instead of
- * inlining them under a compact `**Signature**` row. Also carries `derivedBy` and the
- * full fingerprint list (as dedicated `## Fingerprint` block, not the compact `<sub>` line).
- *
- * When the Symbol is `dropped: true`, the design falls back to a short summary —
- * dropped Symbols have no rules/effects/calls/fingerprint by construction (ir-schema §5.6).
- *
- * `context.dependencies` is optional so a caller with no reachable call graph
- * can still explain a single Symbol; supplying it enables the `## Called by`
- * section derived from the resolved edges.
+ * §7 — `aburi explain <id>`. A stand-alone Symbol view that gives every axis its own section
+ * (§7 mock) and carries `derivedBy` and the full fingerprint. A `dropped: true` Symbol falls
+ * back to a short summary, since it has no rules/effects/calls/fingerprint (ir-schema §5.6).
  */
 export function projectSymbolExplain(
   symbol: IRSymbol,
@@ -98,20 +88,7 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   if (symbol.effects.length > 0) {
     lines.push("## Effects")
     lines.push("")
-    // Two-segment emission — local (line-monotonic) first, propagated
-    // ((id, target)-monotonic) after — matches effect-propagation.md §8 and the
-    // integrity segmentation check. A single-key sort by `line ?? 0` would put
-    // every propagated entry before local (they compare as 0), inverting the
-    // documented output shape.
-    const locals = symbol.effects
-      .filter((e) => e.propagated !== true)
-      .sort((a, b) => (a.line ?? 0) - (b.line ?? 0))
-    const propagated = symbol.effects
-      .filter((e) => e.propagated === true)
-      .sort((a, b) =>
-        a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
-      )
-    for (const e of [...locals, ...propagated]) lines.push(effectRow(e))
+    for (const e of orderEffects(symbol.effects)) lines.push(effectRow(e))
     lines.push("")
   }
 
@@ -146,21 +123,14 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   lines.push(`- syntax: ${inlineCode(symbol.fingerprint.syntax)}`)
   lines.push("")
 
-  return `${lines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd()}\n`
+  return renderDocument(lines)
 }
 
 /**
- * `aburi explain --debug-resolution` — the per-Symbol view `call-resolution.md`
- * §8.1 promises. One row per call site: the resolved callee, or the bucket that
- * explains the `null`. Rows are ordered by line so they read alongside the
- * source; `Calls` above shows the same sites without the verdict.
- *
- * Passing an empty array is meaningful — it says "the resolver ran and left
- * nothing unresolved here" — so the section renders with an explicit note
- * rather than disappearing. Passing `undefined` (the default) omits it.
+ * `aburi explain --debug-resolution` — the per-Symbol view call-resolution.md §8.1 promises:
+ * one row per call site, ordered by line, with the resolved callee or the bucket that
+ * explains the `null`. An empty array is meaningful ("the resolver left nothing unresolved
+ * here") and renders the section with a note; `undefined` omits it.
  */
 function renderCallResolution(
   symbol: IRSymbol,
@@ -173,10 +143,9 @@ function renderCallResolution(
     lines.push("_(no call sites)_", "")
     return lines
   }
-  // `(line, target)` is not a unique key — `a(); a()` on one source line yields
-  // two Call entries — but classification is a pure function of the caller, the
-  // target, and the call site, so colliding entries carry the identical verdict
-  // and last-write-wins is indistinguishable from first.
+  // `(line, target)` is not unique — `a(); a()` on one line yields two Call entries — but
+  // classification is a pure function of caller, target and site, so colliding entries carry
+  // the identical verdict.
   const bucketByKey = new Map<string, UnresolvedCallDiagnostic>()
   for (const d of mine) bucketByKey.set(`${d.line}\t${d.target}`, d)
 
@@ -195,12 +164,7 @@ function renderCallResolution(
   return lines
 }
 
-/**
- * Reverse the `via: "call"` edges to find every Symbol id whose `resolved`
- * points at `symbol`. The list is deduplicated (the same caller can call the
- * same callee on multiple lines, but `Called by` is caller-granular, not
- * per-line) and lex-sorted so the section is byte-stable across runs.
- */
+/** Every Symbol id with a `via: "call"` edge into `symbol`, deduplicated and lex-sorted. */
 function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): string[] {
   const callers = new Set<string>()
   for (const d of dependencies) {
@@ -225,5 +189,5 @@ function renderDroppedExplain(symbol: IRSymbol): string {
   lines.push("")
   lines.push("_(dropped symbols carry no rules / effects / calls / fingerprint by IR contract.)_")
   lines.push("")
-  return `${lines.join("\n").trimEnd()}\n`
+  return renderDocument(lines)
 }

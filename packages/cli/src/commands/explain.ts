@@ -1,12 +1,12 @@
-import { access } from "node:fs/promises"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { backslashSite, symbolIdFile } from "@aburi/core"
 import { type ProjectSymbolExplainContext, projectSymbolExplain } from "@aburi/markdown-projection"
 import type { IR, Symbol as IRSymbol, SkippedFile, UnresolvedCallDiagnostic } from "@aburi/types"
 import { IR_JSON_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { configuredOutputDir, pinConfig } from "../config-load"
-import { CliError, errorCode, errorMessage } from "../errors"
+import { CliError } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
+import { pathExists } from "../fs-probe"
 import { readIR } from "../ir-io"
 import { writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
@@ -116,18 +116,16 @@ export type CoverageDoubt =
  * When the substring match hits more than one Symbol the caller receives an
  * `ambiguous` outcome (exit 2) so they can add more of the qualified name. Zero hits
  * become `not-found` (exit 1), or `unknown` (exit 3) when the question named a file the
- * document says it never analysed — §7.6. Both codes are overridden by `withScanFault` when
- * the scan this command ran did not exit clean, because the answer is then unsafe whichever
- * of the three it was. Every "single" / "file" outcome carries the resolved
- * `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
- * stdout mirror (avoiding the "output to file *and* stdout" behaviour the design
- * intentionally rules out).
+ * document says it never analysed — §7.6. Every code is overridden by `withScanFault` when
+ * the scan this command ran did not exit clean. A "single" / "file" outcome carries the
+ * resolved `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
+ * stdout mirror.
  */
 export async function runExplain(options: ExplainOptions): Promise<ExplainOutcome> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
   assertDebugResolutionCombination(options)
-  const resolved = await resolveIR(cwd, workspaceRoot, options)
+  const resolved = await readOrScanIR(cwd, workspaceRoot, options)
   return withScanFault(await locate(resolved, cwd, workspaceRoot, options), resolved.scanFaulted)
 }
 
@@ -163,8 +161,8 @@ async function locate(
 
   const arg = options.argument
   const outputPath = options.outputPath === undefined ? null : resolve(cwd, options.outputPath)
-  const lost = new Map<string, SkippedFile>()
-  for (const file of ir.stats.skippedFiles ?? []) lost.set(file.path, file)
+  const skippedByPath = new Map<string, SkippedFile>()
+  for (const file of ir.stats.skippedFiles ?? []) skippedByPath.set(file.path, file)
   const coverage = coverageDoubt(ir)
 
   if (arg.includes("#")) {
@@ -187,7 +185,7 @@ async function locate(
     // Returning here for a string that is provably not an id would make the path arm below
     // unreachable for exactly the files that most need it.
     const claimed = symbolIdFile(arg)
-    if (claimed !== null) return missed(lost.get(claimed), "id", coverage)
+    if (claimed !== null) return missed(skippedByPath.get(claimed), "id", coverage)
   }
 
   if (arg.includes("/")) {
@@ -202,8 +200,10 @@ async function locate(
     // `relative` returns a native path, and only where the platform separator is a backslash
     // is a backslash in it a separator — POSIX allows one in a filename, and rewriting it
     // there turns the argument into a path naming a directory nobody has.
-    const native = relative(workspaceRoot, resolve(cwd, arg))
-    const relPath = (sep === "/" ? native : native.split(sep).join("/")).normalize("NFC")
+    const nativeRelative = relative(workspaceRoot, resolve(cwd, arg))
+    const documentPath = (
+      sep === "/" ? nativeRelative : nativeRelative.split(sep).join("/")
+    ).normalize("NFC")
     // Before the skip list and before the disk, because neither can answer. A name holding a
     // backslash has no spelling in a Document path, so it is in no `stats.skippedFiles[]` and
     // never will be, and the file existing says nothing about whether the IR could describe it.
@@ -212,11 +212,11 @@ async function locate(
     //
     // Unreachable on Windows, and correctly so: the conversion above spends every backslash as
     // a separator there, which is what one is, and no Windows filename can hold the character.
-    const unnameable = backslashSite(relPath)
+    const unnameable = backslashSite(documentPath)
     if (unnameable !== null) {
       return {
         kind: "unnameable",
-        path: relPath,
+        path: documentPath,
         unnameablePrefix: unnameable.prefix,
         exitCode: EXIT.GATE,
       }
@@ -224,9 +224,9 @@ async function locate(
     // The skip list is consulted before the disk probe, not after: a file the document
     // already describes needs no filesystem to answer for it, and `unreadable` is a reason
     // whose file may well refuse the probe too.
-    const skipped = lost.get(relPath)
-    if (skipped !== undefined || (await pathExistsStrict(resolve(cwd, arg)))) {
-      const inFile = ir.symbols.filter((s) => s.source.file === relPath)
+    const skipped = skippedByPath.get(documentPath)
+    if (skipped !== undefined || (await pathExists(resolve(cwd, arg)))) {
+      const inFile = ir.symbols.filter((s) => s.source.file === documentPath)
       if (inFile.length === 0) return missed(skipped, "path", coverage)
       const markdown = inFile.map((s) => projectSymbolExplain(s, explainContext)).join("\n---\n\n")
       if (outputPath !== null) await writeOutputFile(outputPath, markdown)
@@ -345,7 +345,7 @@ interface ResolvedIR {
   scanFaulted: boolean
 }
 
-async function resolveIR(
+async function readOrScanIR(
   cwd: string,
   workspaceRoot: string,
   options: ExplainOptions,
@@ -365,7 +365,7 @@ async function resolveIR(
     const candidates = irSearchPath(cwd, workspaceRoot, outputDir)
     const [nearest] = candidates
     for (const candidate of candidates) {
-      if (await pathExistsStrict(candidate)) {
+      if (await pathExists(candidate)) {
         // Which document answered, when it is not the one under the caller's feet. The lookup
         // can now reach any ancestor up to the workspace root, and the answer carries no trace
         // of where it came from — `ir.workspace.root` is `"."` in every document by schema, so
@@ -405,29 +405,13 @@ async function resolveIR(
 }
 
 /**
- * Where a written IR might be, nearest first.
+ * Where a written IR might be, nearest first: `aburi scan` writes under the directory it was
+ * run from, which may be this one or any ancestor, and either document describes the whole
+ * workspace.
  *
- * `aburi scan` writes under the directory it was run from, and that is not necessarily this
- * one: a caller standing in `pkgs/app` may have scanned there, or at the repository root, and
- * either document describes the same workspace — the scan covers the whole of it wherever it
- * was started. So the lookup walks up from `cwd` rather than guessing one of the two anchors.
- * Reading only the workspace root missed a scan run inside a package; reading only `cwd`
- * misses the far more common one run at the root.
- *
- * Upward and nearest-first is what config discovery does too, but it **stops at the workspace
- * root** and config discovery deliberately does not — `findConfig`'s own docblock says a config
- * above the root is still honoured, because a user may share one across repositories. An output
- * directory above the root is not shareable in that way: it holds a document about a different
- * tree, and
- * answering from it would describe a workspace the caller is not in.
- *
- * Nearest wins, for the same reason the nearest config does: it is the one the caller most
- * recently had a reason to write.
- *
- * `outputDir` is `config.output.dir`, so the walk looks for the directory this workspace
- * actually writes to. An absolute one names a single place from every rung, and the repeats
- * are dropped: a candidate list holding the same path five times would make the miss message
- * offer a range of directories it never searched.
+ * Unlike `findConfig`, the walk **stops at the workspace root**: an output directory above it
+ * holds a document about a different tree. An absolute `outputDir` names one place from every
+ * rung, so repeats are dropped and the miss message does not offer directories never searched.
  */
 function irSearchPath(
   cwd: string,
@@ -450,30 +434,4 @@ function irSearchPath(
     if (!paths.includes(candidate)) paths.push(candidate)
   }
   return paths
-}
-
-/**
- * `access` treats every errno as "not usable", but "does not exist" and "permission
- * denied" mean very different things to the caller: the first is a fall-through, the
- * second is a configuration mistake we must surface. This wrapper only treats
- * ENOENT / ENOTDIR as absence; anything else is re-thrown as a `CliError` so an EACCES
- * cannot silently bypass the "config exists" check upstream in `init`.
- */
-async function pathExistsStrict(path: string): Promise<boolean> {
-  try {
-    await access(path)
-    return true
-  } catch (error) {
-    if (isBenignErrno(error)) return false
-    throw new CliError(`Failed to probe ${path}: ${errorMessage(error)}`, "runtime-error", {
-      cause: error,
-    })
-  }
-}
-
-const BENIGN_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
-
-function isBenignErrno(error: unknown): boolean {
-  const code = errorCode(error)
-  return code !== null && BENIGN_ERRNOS.has(code)
 }

@@ -14,5 +14,9 @@ export {
   readImportedNames,
   resolveDecoratorName,
 } from "./imports"
-export { FRAMEWORK_NESTJS_PLUGIN_NAME, frameworkNestjsManifest } from "./manifest"
+export {
+  FRAMEWORK_NESTJS_PLUGIN_NAME,
+  frameworkNestjsManifest,
+  NESTJS_DERIVED_BY_PREFIX,
+} from "./manifest"
 export { NestjsFrameworkPlugin, nestjsFrameworkPlugin } from "./plugin"

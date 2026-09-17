@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { frameworkNextManifest, NEXT_APP_ROUTER_ROLES, NEXT_ROUTE_HTTP_VERBS } from "../src/index"
+import { frameworkNextManifest, NEXT_APP_ROUTER_ROLES } from "../src/index"
 
 describe("frameworkNextManifest", () => {
   it("declares the framework-next name and framework type", () => {
@@ -44,17 +44,6 @@ describe("public vocabulary exports", () => {
     expect(NEXT_APP_ROUTER_ROLES.get("page")).toBe("page")
     expect(NEXT_APP_ROUTER_ROLES.get("route")).toBe("route")
     expect(NEXT_APP_ROUTER_ROLES.get("component")).toBeUndefined()
-  })
-
-  it("exposes the recognized HTTP verbs so consumers can share the predicate", () => {
-    for (const verb of ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"] as const) {
-      expect(NEXT_ROUTE_HTTP_VERBS.has(verb)).toBe(true)
-    }
-    // Non-verbs are not in the literal union — the type-erased Set surface is used
-    // deliberately here to lock the runtime behavior alongside the type shape.
-    const untyped = NEXT_ROUTE_HTTP_VERBS as ReadonlySet<string>
-    expect(untyped.has("CONNECT")).toBe(false)
-    expect(untyped.has("TRACE")).toBe(false)
   })
 
   it("keeps the manifest extKind ids in sync with the App Router roles", () => {

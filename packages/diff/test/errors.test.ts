@@ -1,6 +1,6 @@
+import { makeIR, makeSymbol } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { buildDiff, computeSymbolDelta, DiffError, MAX_LINE_FUZZ, MIN_LINE_FUZZ } from "../src"
-import { makeIR, makeSymbol } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 

@@ -1,10 +1,11 @@
-import type { Symbol as IRSymbol, LanguageId, Logger } from "@aburi/types"
+import type { Symbol as IRSymbol, LanguageId } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { DocumentSymbol, SymbolInformation } from "vscode-languageserver-protocol"
 import { makeCallSiteKey } from "../../src/call-site"
 import { makeLanguageId } from "../../src/id"
 import { enrichWithLsp } from "../../src/lsp"
 import { makeSymbol } from "../fixtures/ir"
+import { capturingLogger } from "../fixtures/plugins"
 import {
   makeClassSymbol,
   makeEnrichmentInput,
@@ -22,30 +23,6 @@ import { type MockLspClient, mockServerFactory } from "./fixtures/mock-server"
  */
 
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
-
-interface CapturedDebug {
-  message: string
-  meta: Record<string, unknown> | undefined
-}
-
-function capturingLogger(): {
-  logger: Logger
-  warnings: string[]
-  debugs: CapturedDebug[]
-} {
-  const warnings: string[] = []
-  const debugs: CapturedDebug[] = []
-  return {
-    warnings,
-    debugs,
-    logger: {
-      debug: (message: string, meta?: Record<string, unknown>) => debugs.push({ message, meta }),
-      info: () => {},
-      warn: (m: string) => warnings.push(m),
-      error: () => {},
-    },
-  }
-}
 
 /**
  * The lines §6.3 rule 3 counts: one per language the pass gave up on, whichever of §6.1's

@@ -81,6 +81,11 @@ export function isLspFailure(value: unknown): value is LspFailure {
   )
 }
 
+/** The message an `LspError` or a log line carries for a thrown value. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /**
  * Every operation addressed to a server that has already exited fails this way
  * — request and notification alike. A notification is the case worth stating:
@@ -127,7 +132,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
         return {
           kind: "error",
           reason: "server-error",
-          message: error instanceof Error ? error.message : String(error),
+          message: errorMessage(error),
         }
       }
       if (isLspFailure(result)) return result
@@ -179,7 +184,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
         return {
           kind: "error",
           reason: "server-error",
-          message: error instanceof Error ? error.message : String(error),
+          message: errorMessage(error),
         }
       }
     },
@@ -246,7 +251,7 @@ async function sendNotificationBounded(
     return {
       kind: "error",
       reason: "server-error",
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     }
   }
 }

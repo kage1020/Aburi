@@ -1,13 +1,10 @@
 import type { PluginManifest } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { ConfigError, normalizeFrameworkHints } from "../src/index"
+import { normalizeFrameworkHints } from "../src/index"
 import { hint, withHints } from "./fixtures/configs"
+import { configErrorFrom } from "./fixtures/errors"
 
-/**
- * normalizeFrameworkHints always returns one entry per `frameworkHints[]`. Tests assert that
- * shape up front, then use `single` to extract and narrow the manifest without relying on
- * non-null assertions (the codebase forbids `!` and `@biome-ignore`-style escape hatches).
- */
+/** The one manifest `normalizeFrameworkHints` returns for a single hint, narrowed for the assertions. */
 function single(plugins: PluginManifest[]): PluginManifest {
   expect(plugins).toHaveLength(1)
   const [plugin] = plugins
@@ -41,7 +38,7 @@ describe("normalizeFrameworkHints", () => {
     expect(plugin.provides.effectPrefixes).toEqual([])
   })
 
-  it("rejects extKind written under the reserved framework:hint:* namespace", () => {
+  it("rejects extKind written under the reserved framework:hint:* namespace", async () => {
     const config = withHints(
       hint("acme", {
         decorators: {
@@ -49,15 +46,9 @@ describe("normalizeFrameworkHints", () => {
         },
       }),
     )
-    let caught: unknown
-    try {
-      normalizeFrameworkHints(config)
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(ConfigError)
-    expect((caught as ConfigError).code).toBe("reserved-namespace")
-    expect((caught as ConfigError).value).toBe("framework:hint:acme:controller")
+    const caught = await configErrorFrom(() => normalizeFrameworkHints(config))
+    expect(caught.code).toBe("reserved-namespace")
+    expect(caught.value).toBe("framework:hint:acme:controller")
   })
 
   it("derives derivedByPrefixes from user-written framework-hint:* values without transforming them", () => {

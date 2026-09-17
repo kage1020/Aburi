@@ -11,11 +11,12 @@ import {
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
 import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
 import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
-import { CliError, errorCode, errorMessage } from "../errors"
+import { CliError, errorCode, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from "../fail-on"
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
+import { joinCapped } from "../listing"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
@@ -25,15 +26,11 @@ export type { WarnFn }
 /**
  * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md §9).
  *
- * Most codes describe something the reader can fix — IR schemas that disagree,
- * an out-of-range `lineFuzz`, a malformed IR, a repeated Symbol / Component id
- * or Dependency triple — so they surface as `config-error` (exit 2).
- * `slice-invariant-violated` is the one code that
- * cannot: it fires only when Aburi produced a Slice breaking its own
- * derivation rule (slice-view.md §7.4). Reporting that as a config error would
- * send a reader looking through `aburi.json` for a bug that is not there, the
- * same misdirection `assertRefResolvable` avoids by separating "git is
- * missing" from "that ref does not resolve".
+ * Most codes describe something the reader can fix — IR schemas that disagree, an
+ * out-of-range `lineFuzz`, a malformed IR, a repeated id — so they surface as `config-error`
+ * (exit 2). `slice-invariant-violated` cannot: it fires only when Aburi produced a Slice
+ * breaking its own derivation rule (slice-view.md §7.4), and reporting that as a config error
+ * would send a reader through `aburi.json` for a bug that is not there.
  */
 export function classifyDiffError(error: DiffError): CliError {
   switch (error.code) {
@@ -43,36 +40,10 @@ export function classifyDiffError(error: DiffError): CliError {
     case "ir-identity-collision":
       return new CliError(error.message, "config-error", { cause: error })
     case "slice-invariant-violated":
-      return internalDiffFault(error.message, error)
-    default: {
-      // A new `DiffErrorCode` is a type error here rather than a code that silently takes an
-      // arm — and at runtime it degrades instead of throwing, because the compile-time check
-      // protects this repo's build and not an installed tree: `@aburi/diff` and `@aburi/cli`
-      // version independently, so a compiled switch can meet a code it never saw. Throwing
-      // there would discard the one thing the reader needs, which is what the diff said.
-      const unplaced: never = error.code
-      return internalDiffFault(
-        `${error.message} (diff error code ${JSON.stringify(unplaced)} has no exit code)`,
-        error,
-      )
-    }
+      return internalFault("", error.message, error)
+    default:
+      return unplacedErrorCode("", "diff", error, error.code)
   }
-}
-
-/**
- * The report for a diff failure that is Aburi's own rather than the reader's.
- *
- * The instruction sits on its own line because nothing that reaches here ends in punctuation:
- * a thrown message run together with the next sentence is what a reader has to unpick.
- */
-function internalDiffFault(detail: string, cause: unknown): CliError {
-  return new CliError(
-    `Internal error: ${detail}\n` +
-      "This is a bug in Aburi, not in your configuration — please report it at " +
-      "https://github.com/kage1020/Aburi/issues.",
-    "runtime-error",
-    { cause },
-  )
 }
 
 export interface DiffOptions {
@@ -150,11 +121,8 @@ export type DiffSide = "base" | "head"
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
  *   The worktree's own directory is named after the head workspace's (§6.4 step 2),
- *   since Component detection reads that name — see `baseWorktreeLeaf`.
- *   NOTE: the head is always the working tree — a mismatched `<head>` label in the
- *   ref spec (e.g. `main..v1.1.0` when the checkout is `v1.0.0`) does NOT rescope the
- *   head scan; it only labels the report. This mirrors the design's "head is always
- *   the current checkout" contract but is easy to miss so we spell it out here.
+ *   since Component detection reads that name — see `baseWorktreeLeaf`. The head is
+ *   always the working tree: the `<head>` label in the ref spec only labels the report.
  * - `--base <ir.json> --head <ir.json>` — parses both files and jumps directly to
  *   `buildDiff`. No git required.
  *
@@ -179,14 +147,9 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       "input-error",
     )
   }
-  // One pin for the whole command, and not one taken before something needs it.
-  //
-  // Eager would be simpler to read and wrong twice over: a `--base` / `--head` run that named
-  // its own `--output-dir` consults no config at all today, and pinning walks the filesystem
-  // and can raise `config-read-failed` on an EACCES that run would never have met. Lazy but
-  // unmemoised is the state this replaces, where the destination and the scans each ran the
-  // resolution list — same answer, since both anchor to `cwd`, but "decided once" was a
-  // description of the intent rather than of the code.
+  // One pin for the whole command, taken only once something needs it: a `--base` / `--head`
+  // run that named its own `--output-dir` consults no config at all, and pinning walks the
+  // filesystem and can raise `config-read-failed` on an EACCES that run would never have met.
   let pinned: PinnedConfig | null = null
   const pinConfigOnce = async (): Promise<PinnedConfig> => {
     pinned ??= await pinConfig(cwd, options.configPath)
@@ -273,8 +236,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     await writeFile(diffMdPath, markdown, "utf8")
   }
 
-  // §6.6, from `@aburi/markdown-projection` rather than from a local copy: the two were
-  // byte-identical, and a change to the format reached only one of them.
+  // §6.6
   const summaryLine = projectDiffSummaryLine(diff)
   const { firstTriggered } = evaluateFailOn(failOn, diff)
   const faultedScans =
@@ -341,32 +303,13 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
 }
 
 /**
- * A scan that broke makes the diff evidence of nothing, whichever side broke.
+ * A scan that broke makes the diff evidence of nothing, whichever side broke: an incident that
+ * `scan` refuses to exit `0` on (§5.6) must not turn green by being asked for a diff instead.
+ * That covers the base side too — a fault at the base ref reddens every diff taken against it.
  *
- * The counts are mostly not the problem: a withdrawn file is in `stats.skippedFiles`, which
- * `dependencySideView` reads into `lostFiles`, so its Symbols already classify as `unknown`
- * rather than as deletions. One gate reason escapes that — a file whose name the Document
- * cannot spell is in no list at all, so a file renamed into such a name between the two
- * revisions has its base Symbols read as deletions somebody made. Nothing here can repair it;
- * the document it would have to read is the one that cannot describe the file. The problem the
- * rest of this function is about is greenness: an
- * incident that `scan` refuses to exit `0` on (§5.6) should not turn green by being asked for
- * a diff instead of a scan. That covers the base side too, deliberately — a fault at the base
- * ref reddens every diff taken against it, which is the intended reading of "this comparison
- * has a broken half".
- *
- * The wording comes from what the scan reported rather than from the gate condition, which is
- * only `exitCode !== EXIT.SUCCESS`. A plugin exception was the sole reason that gated when this
- * was written and `runScan` said outright that others might follow; two more have, so the clause
- * reads all three. Naming any of them unconditionally would leave the exit code right and the
- * diagnosis wrong.
- *
- * One clause per faulted side, joined, rather than one sentence about a joined list of sides.
- * While a plugin exception was the only reason, every faulted side had thrown at least once and
- * a sentence about "the base and head scan" was true of both. It stopped being true the moment
- * two sides could fault for different reasons: a cross-side count, or the first side's fault,
- * stated about both is a false sentence — and this is the line a reader greps out of a CI log to
- * account for the exit code.
+ * One clause per faulted side, each in the words of what that scan reported: two sides can
+ * fault for different reasons, and this is the line a reader greps out of a CI log to account
+ * for the exit code.
  */
 function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], warn: WarnFn): void {
   if (faultedScans.length === 0) return
@@ -399,16 +342,16 @@ function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], war
  * fills the `fault === null` gap ahead of it — and saying nothing more than the exit code already
  * said is the honest answer to a cause we cannot name.
  */
-function describeScanFault(scan: ScanReport): string {
-  const thrown = scan.extractionFailures.length
+function describeScanFault(report: ScanReport): string {
+  const thrown = report.extractionFailures.length
   if (thrown > 0) return `a plugin exception withdrew ${thrown} file(s)`
-  const fault = scan.coverageFault
+  const fault = report.coverageFault
   // Before "discovered no file to read" and after the other two faults, because the direction
   // of cause runs one way: an unnameable file leaves `totalFiles`, so a workspace whose whole
   // candidate set is unnameable discovers nothing and that fault is this one's consequence.
   // Leaving the denominator can only raise the parsed ratio, so it cannot produce either of
   // the other two — where those hold they are their own cause, and they are named instead.
-  const unnameable = scan.unrepresentableFiles.length
+  const unnameable = report.unrepresentableFiles.length
   if (unnameable > 0 && (fault === null || fault.kind === "nothing-discovered")) {
     return `${unnameable} file(s) have names no Document path can spell`
   }
@@ -446,20 +389,12 @@ function warnOnRecordedFaults(irs: Record<DiffSide, IR>, warn: WarnFn): void {
       (file) => file.reason === "extraction-failed",
     )
     if (thrown.length === 0) continue
-    const listed = thrown
-      .slice(0, MAX_LISTED_RECORDED_FAULTS)
-      .map((file) => file.path)
-      .join(", ")
-    const rest = thrown.length - MAX_LISTED_RECORDED_FAULTS
     warn(
-      `⚠ ${side} IR records ${thrown.length} file(s) a plugin threw on: ${listed}${rest > 0 ? `, and ${rest} more` : ""}. ` +
+      `⚠ ${side} IR records ${thrown.length} file(s) a plugin threw on: ${joinCapped(thrown.map((file) => file.path))}. ` +
         `The scan that wrote it exited 3; this diff does not, because the fault was reported where it happened.`,
     )
   }
 }
-
-/** Same reasoning as the scan's own listing cap: one broken plugin usually means every file. */
-const MAX_LISTED_RECORDED_FAULTS = 10
 
 /**
  * An IR that dropped files but predates `stats.skippedFiles` cannot say which ones.
@@ -474,7 +409,7 @@ const MAX_LISTED_RECORDED_FAULTS = 10
  * examined, because a base written by an older scan makes phantom `added` entries the same
  * way a head makes phantom `removed` ones.
  */
-function warnOnUnenumerableLosses(ir: IR, side: "base" | "head", warn: (m: string) => void): void {
+function warnOnUnenumerableLosses(ir: IR, side: DiffSide, warn: WarnFn): void {
   if (ir.stats.skippedFiles !== undefined) return
   const unparsed = ir.stats.totalFiles - ir.stats.parsedFiles
   if (unparsed <= 0) return
@@ -505,26 +440,14 @@ function warnOnUnenumerableLosses(ir: IR, side: "base" | "head", warn: (m: strin
  */
 function warnOnSymmetricLosses(notCompared: readonly NotComparedFile[], warn: WarnFn): void {
   if (notCompared.length === 0) return
-  const listed = notCompared
-    .slice(0, MAX_LISTED_SYMMETRIC_LOSSES)
-    .map((f) => f.path)
-    .join(", ")
-  const rest = notCompared.length - MAX_LISTED_SYMMETRIC_LOSSES
   warn(
-    `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${listed}${rest > 0 ? `, and ${rest} more` : ""}.`,
+    `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${joinCapped(notCompared.map((file) => file.path))}.`,
   )
 }
 
-/**
- * How many symmetrically-lost paths are named before the list is summarised. A workspace
- * whose config drops a whole generated directory hits this on every diff, and the list is
- * then the directory rather than a signal.
- */
-const MAX_LISTED_SYMMETRIC_LOSSES = 10
-
 /** Trigger phrasing so the CLI wrapper can pipe it to stderr. */
-export function formatFailOnMessage(trig: NonNullable<DiffReport["triggered"]>): string {
-  return formatTriggered(trig.clause, trig.observed)
+export function formatFailOnMessage(triggered: NonNullable<DiffReport["triggered"]>): string {
+  return formatTriggered(triggered.clause, triggered.observed)
 }
 
 interface RefSpec {
@@ -533,26 +456,13 @@ interface RefSpec {
 }
 
 /**
- * `<base>..<head>`, split at the first separator rather than at every `..`
- * (`cli-spec.md` §6.3).
+ * `<base>..<head>`, split at the first separator rather than at every `..` (`cli-spec.md`
+ * §6.3), so the three-dot form is named for what it is (exit 2, §6.5) instead of running with
+ * `.HEAD` as the head ref. The merge-base advice uses placeholders rather than the caller's
+ * refs: a ref name is not shell-safe, so a copy-pasteable command built from one hands the
+ * reader a substitution to run.
  *
- * `"main...HEAD".split("..")` is `["main", ".HEAD"]` — two parts, both non-empty, so the
- * three-dot form passed the syntax check and the run continued with `.HEAD` as the head ref.
- * What the reader then saw was a git failure naming a ref they never typed (`Head ref '.HEAD'
- * could not be resolved…`, exit 1), for an input `cli-spec.md` §6.5 classifies as a syntax
- * violation (exit 2). Three-dot is a realistic input: it is the form in a GitHub compare URL
- * and in `git diff a...b`.
- *
- * So the separator is located once and the dot run measured, which lets the three-dot case be
- * named for what it is instead of falling into the generic message. `aburi diff` compares the
- * two revisions directly and has no merge-base form, so the message says that and names the
- * `git merge-base` that resolves one — as a two-placeholder form rather than a command with
- * the caller's own refs pasted in, both because resolving it here would silently answer a
- * different question than the one asked, and because a ref name is not shell-safe: `$ ( ) " ;
- * & |` and backticks all pass `git check-ref-format`, so a copy-pasteable command built from
- * one hands the reader a substitution to run.
- *
- * The three checks below are ordered by what each can still say truthfully:
+ * The three checks are ordered by what each can still say truthfully:
  *
  * - **Emptiness first**, so `main...` reads as a missing head ref rather than as a three-dot
  *   spec whose suggested rewrite would be `main..`.
@@ -681,11 +591,8 @@ async function resolveViaGit(
   let baseIR: IR
   let headIR: IR
   let scans: ScanPair
-  // Whether there is a worktree to clean up. `finally` ran `worktree remove` unconditionally,
-  // so anything that threw before the checkout existed — a failing `worktree add`, and now the
-  // `mkdir` above it — was reported first as a cleanup failure advising `git worktree prune`.
-  // The reader followed that, watched it succeed against bookkeeping that was never written,
-  // and only then reached the exception that actually ended the run.
+  // Whether there is a worktree to clean up: a `worktree remove` after a failed `add` reports
+  // a cleanup failure advising `git worktree prune` ahead of the exception that ended the run.
   let worktreeAdded = false
   const renames = await collectRenames(git, cwd, spec, warn)
   try {
@@ -756,26 +663,11 @@ async function resolveViaGit(
 }
 
 /**
- * The directory name to materialise the base revision under: the head workspace's own leaf.
- *
- * Why it is not a fixed word is `cli-spec.md` §6.4 step 2 — one statement of the rule, where
- * the rest of the ref-diff contract is. In short: detection reads the directory name for a
- * Component rooted at the workspace root, so a constant here made the base side a different
- * Component from the head side. This function is only the two names that rule cannot use.
- *
- * The two are an empty leaf — `basename` of an absolute path, only at the filesystem root —
- * and `@`. `git worktree add` writes its bookkeeping under `.git/worktrees/<leaf>` and cannot
- * spell that one: it fails with `fatal: not a git repository: <repo>/.git/worktrees/@`, which
- * reads as the reader's own repository being broken. `@x`, `HEAD`, `a^b`, `~x` and `x.lock`
- * are all fine, so `@` alone is the exception.
- *
- * Substituting is safe rather than lucky, and for one reason covering both: a substitution can
- * only reinstate the defect by supplying a Component id that differs from the head's, and
- * neither of these leaves can supply an id at all. `toKebabCase` maps both to the empty string,
- * which `makeComponentId` rejects as `invalid-component-id` (`packages/core/src/component.ts`),
- * so where detection decides ids the head scan refuses the workspace and names the directory
- * that did it; where `components[]` declares them, no directory name is read on either side.
- * What is left for this default to be is a name git can create.
+ * The directory name to materialise the base revision under: the head workspace's own leaf
+ * (`cli-spec.md` §6.4 step 2 — Component detection reads that name). The two substitutions
+ * are an empty leaf (only at the filesystem root) and `@`, which `git worktree add` cannot
+ * spell under `.git/worktrees/`; both kebab-case to nothing, so neither could supply a
+ * Component id that differs from the head's.
  */
 function baseWorktreeLeaf(headWorkspaceRoot: string): string {
   const leaf = basename(headWorkspaceRoot)
@@ -796,13 +688,9 @@ function labelFor(target: ScanTarget): string {
 }
 
 /**
- * One scan of one side, reading the config both sides share.
- *
- * `pinnedConfig` replaces `options.configPath` rather than accompanying it. The two would
- * otherwise disagree for the base: the flag's value is relative to the caller's directory
- * and this scan runs in the worktree. `pluginRefRoot` is passed to both sides for the same
- * reason — it is a no-op for the head, whose workspace root it already is, and stating it
- * once keeps the two scans provably identical in everything but their sources.
+ * One scan of one side, reading the config both sides share. `pinnedConfig` replaces
+ * `options.configPath`: the flag is relative to the caller's directory and the base scan runs
+ * in the worktree. `pluginRefRoot` is passed to both sides so they differ only in their sources.
  */
 async function runScanInDir(
   cwd: string,

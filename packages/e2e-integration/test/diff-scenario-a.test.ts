@@ -1,47 +1,29 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { evaluateFailOn, parseFailOn } from "@aburi/cli"
-import { buildDiff } from "@aburi/diff"
-import { afterEach, describe, expect, it } from "vitest"
-import { checkoutFixture } from "../src/fixture"
-import { scanFixture } from "../src/scan-helper"
-
-let cleanup: (() => Promise<void>) | null = null
-
-afterEach(async () => {
-  if (cleanup !== null) {
-    await cleanup()
-    cleanup = null
-  }
-})
+import { describe, expect, it } from "vitest"
+import { useFixtureCheckout } from "../src/fixture"
+import { diffIRs, scanFixture } from "../src/scan-helper"
 
 /**
  * Scenario A — a PR that adds a validation Rule to an existing service method.
  *
  * The mutation edits `BillingService.applyRefund` so that it rejects a negative
- * `amountCents` before touching the invoice. From the diff's point of view this
- * adds one `throw` Rule to the Symbol's body, so:
- *   - status: "changed" (fingerprint diverges)
- *   - delta.rules.added: 1
- *   - delta.logicChanged: true
- * No other Symbol is touched, so `changed = 1` on the summary and every other
- * count is 0. The `--fail-on changed` gate would trip; we assert that here so the
- * downstream gate contract stays covered end-to-end.
+ * `amountCents` before touching the invoice: one `throw` Rule added to the Symbol's body, so
+ * `status: "changed"`, `delta.rules.added: 1`, `delta.logicChanged: true`, and the
+ * `--fail-on changed` gate trips.
  */
+
+const fixture = useFixtureCheckout()
+
 describe("e2e diff — scenario A: single rule added to BillingService.applyRefund", () => {
   it("reports changed:1 with logicChanged=true and trips `--fail-on changed`", async () => {
-    const fixture = await checkoutFixture()
-    cleanup = fixture.cleanup
-
     const baseIR = (await scanFixture(fixture.root)).ir
 
-    // Head mutation: guard `applyRefund` against negative amounts.
     const target = resolve(fixture.root, "src/billing/billing.service.ts")
     const original = await readFile(target, "utf8")
-    // Insertion embeds `${amountCents}` as literal source that lands in the
-    // fixture on disk (it becomes a real TS template-literal there). We build
-    // the string via concatenation instead of a plain-string literal so biome's
-    // `noTemplateCurlyInString` lint does not misread the intent.
+    // The inserted line embeds `${amountCents}` as literal source; built by concatenation so
+    // biome's `noTemplateCurlyInString` does not misread the intent.
     const dollar = "$"
     const guardLine = `    if (amountCents < 0) throw new Error(\`refund amount must be non-negative: ${dollar}{amountCents}\`)`
     const searchAnchor =
@@ -52,22 +34,11 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
     await writeFile(target, patched, "utf8")
 
     const headIR = (await scanFixture(fixture.root)).ir
+    const diff = diffIRs(baseIR, headIR)
 
-    const irSchema = "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
-    const diff = buildDiff({
-      baseIR,
-      headIR,
-      base: { ref: "base", irSchema },
-      head: { ref: "head", irSchema },
-    })
-
-    // Two changes propagate from the mutation:
-    //   1. The applyRefund method itself (added rule, logicChanged).
-    //   2. The enclosing BillingService class Symbol, whose fingerprint mixes the
-    //      member Symbols — a rule added inside applyRefund's body reshapes the
-    //      class-level normalised AST too.
-    // Everything else (add / remove / move / dropped-toggled) must be zero — the
-    // mutation is intentionally scoped to one method body.
+    // Two changes propagate from the mutation: the applyRefund method itself, and the
+    // enclosing BillingService class Symbol, whose fingerprint mixes the member Symbols.
+    // Everything else must be zero — the mutation is scoped to one method body.
     expect(diff.summary.changed).toBe(2)
     expect(diff.summary.added).toBe(0)
     expect(diff.summary.removed).toBe(0)
@@ -78,7 +49,7 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
     expect(changed).toHaveLength(2)
     const changedNames = changed
       .map((c) => (c.status === "changed" ? c.after.name : ""))
-      .filter((n) => n.length > 0)
+      .filter((name) => name.length > 0)
       .sort()
     expect(changedNames).toEqual(["BillingService", "BillingService.applyRefund"])
 
@@ -89,10 +60,8 @@ describe("e2e diff — scenario A: single rule added to BillingService.applyRefu
     expect(method.delta.logicChanged).toBe(true)
     expect(method.delta.rules?.added.length ?? 0).toBeGreaterThanOrEqual(1)
 
-    // The `changed` clause must trip, and it must trip on the very first (and only)
-    // changed symbol. `>0` semantics: a bare token means "any occurrence".
-    const clauses = parseFailOn("changed")
-    const triggered = evaluateFailOn(clauses, diff)
+    // A bare token means "any occurrence", so `changed` trips on the first changed symbol.
+    const triggered = evaluateFailOn(parseFailOn("changed"), diff)
     expect(triggered.firstTriggered).not.toBeNull()
     expect(triggered.firstTriggered?.clause.token).toBe("changed")
   })

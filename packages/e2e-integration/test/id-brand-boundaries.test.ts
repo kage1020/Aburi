@@ -15,8 +15,10 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
  * - `diff/src/slice.ts` holds the only `SliceId` constructor, plus the one predicate that
  *   takes `unknown` by contract and so has nothing better than an assertion to work with.
  *
- * Test fixtures are the fourth documented boundary and are excluded below: a case that feeds
- * a malformed id to the code that rejects it has to be able to write one. `cli/src/ir-io.ts`
+ * Test fixtures are the fourth documented boundary and are excluded below (each package's
+ * `test/` tree, and the private `@aburi/test-support` package that holds the shared ones): a
+ * case that feeds a malformed id to the code that rejects it has to be able to write one.
+ * `cli/src/ir-io.ts`
  * is the fifth, but it asserts a whole document (`as unknown as IR`) rather than an id, so it
  * does not match this pattern — invariant #17 is what checks the ids inside it.
  */
@@ -31,7 +33,7 @@ describe("id brand boundaries", () => {
   it("no production file mints a branded id outside the documented boundaries", async () => {
     const files = await glob(["packages/*/src/**/*.ts"], {
       cwd: REPO_ROOT,
-      ignore: ["**/node_modules/**", "**/dist/**"],
+      ignore: ["**/node_modules/**", "**/dist/**", "packages/test-support/**"],
       onlyFiles: true,
     })
     expect(files.length).toBeGreaterThan(50)

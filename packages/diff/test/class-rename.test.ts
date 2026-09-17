@@ -1,8 +1,8 @@
+import { fp, makeIR, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageLogicFingerprint } from "../src"
 import { nameSimilarity, ownersAreCompatible } from "../src/similarity"
-import { fp, makeIR, makeSymbol, sig } from "./fixtures"
 
 /**
  * §3.4.6 (R-8) exists to keep `UserRepo.getUser` from pairing with `AdminRepo.getUser` while
@@ -269,6 +269,31 @@ describe("ownersAreCompatible", () => {
   it("pairs one empty owner with none", () => {
     expect(ownersAreCompatible("findById", "UserRepo.findById")).toBe(false)
     expect(ownersAreCompatible("UserRepo.findById", "findById")).toBe(false)
+  })
+
+  it("finds a matching a greedy pass would strand", () => {
+    // `{users, user}` against `{users, userses}`. `users` takes its equal first, leaving `user`
+    // facing only a claimed token — a greedy pass stops there. Backtracking moves `users` on to
+    // `userses`, its own inflection, and `user` takes the `users` it vacated.
+    expect(ownersAreCompatible("UsersUser.x", "UsersUserses.x")).toBe(true)
+  })
+
+  it("does not call two owners compatible by displacing without checking", () => {
+    // The soundness half. `{user, users}` against `{users, admin}`: `user` claims `users`, then
+    // `users` wants the same token. A displaced holder has to find its own partner, and here it
+    // cannot — displacing unconditionally would report these two classes as one.
+    expect(ownersAreCompatible("UserUsers.x", "UsersAdmin.x")).toBe(false)
+  })
+
+  it("refuses an owner segment with more tokens than the search will take", () => {
+    // Kuhn's is cubic and recursive in the token count, and `buildDiff` takes IR JSON from a
+    // caller. Equal owners short-circuit; anything else past the ceiling is refused, which
+    // leaves the pair as added + removed rather than hanging. Same token count on both sides,
+    // so the size check passes them through and the ceiling is what refuses.
+    const wide = (last: string) =>
+      `${Array.from({ length: 40 }, (_, i) => `Seg${i}`).join("")}${last}.x`
+    expect(ownersAreCompatible(wide("Tail"), wide("Tail"))).toBe(true) // equal, short-circuits
+    expect(ownersAreCompatible(wide("Tail"), wide("Tails"))).toBe(false)
   })
 })
 

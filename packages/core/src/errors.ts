@@ -68,10 +68,9 @@ export type CoreErrorCode =
   | "scan-outcome-unhandled"
   /**
    * `ResolveCallGraphInput.receiverHints` was non-empty and keyed by something other than
-   * `makeCallSiteKey`. Raised rather than ignored because the failure is otherwise invisible:
-   * every lookup misses, so the LSP tier contributes nothing and the run looks exactly like
-   * one where the language server had nothing to say. The keys carried `${file}:${line}` up
-   * to @aburi/core 0.3.0; they carry `makeCallSiteKey(file, line, target)` from 0.4.0.
+   * `makeCallSiteKey` (the keys were `${file}:${line}` up to @aburi/core 0.3.0). Raised rather
+   * than ignored because every lookup would otherwise miss in silence — see
+   * `assertReceiverHintKeys`.
    */
   | "receiver-hint-key-malformed"
 

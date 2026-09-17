@@ -1,13 +1,17 @@
-import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import type { Component, ComponentId, LanguageId } from "@aburi/types"
 import { glob } from "tinyglobby"
+import { toNfc } from "./codepoints"
+import { groupBy } from "./collections"
 import { CoreError } from "./errors"
+import { sha256Hex } from "./fingerprint/hash"
 import { makeComponentId, makeLanguageId } from "./id"
+import { compareBy, compareCodeUnit } from "./order"
 import { CORE_IGNORE_PATTERNS } from "./scan/discover"
-import { describeThrown } from "./scan/faults"
+import { describeThrown, isVanishedFile } from "./scan/faults"
 import { openGitignoreTree } from "./scan/gitignore"
+import { fileExtension } from "./scan/route"
 import { detectManagers, type WorkspaceCandidate, type WorkspaceManager } from "./workspace"
 
 /**
@@ -109,21 +113,22 @@ export interface DetectComponentsOptions {
  */
 export async function detectComponents(options: DetectComponentsOptions): Promise<Component[]> {
   const { workspaces } = await detectManagers(options.workspaceRoot)
-  const merged = workspaces.length === 0 ? null : mergeCandidatesByPath(workspaces)
+  // The single-project fallback (component-detect.md §5): the workspace root as the one
+  // candidate, described by whatever `package.json` it holds.
+  const mergedCandidates =
+    workspaces.length === 0
+      ? [rootCandidate(options.workspaceRoot)]
+      : mergeCandidatesByPath(workspaces)
   // One walk for every root, before any component is built — see `countLanguagesPerRoot`.
   const languages = await countLanguagesPerRoot(
     options.workspaceRoot,
-    merged === null ? ["."] : merged.map((entry) => entry.relativeRoot),
+    mergedCandidates.map((entry) => entry.relativeRoot),
     options,
   )
-  if (merged === null) {
-    return [await buildSingleProjectComponent(options.workspaceRoot, languages.get(".") ?? [])]
-  }
-
   const components = await Promise.all(
-    merged.map((entry) => buildComponent(entry, languages.get(entry.relativeRoot) ?? [])),
+    mergedCandidates.map((entry) => buildComponent(entry, languages.get(entry.relativeRoot) ?? [])),
   )
-  return resolveIdCollisions(components).sort((a, b) => compareString(a.id, b.id))
+  return resolveIdCollisions(components).sort(compareBy((component) => component.id))
 }
 
 export type { WorkspaceManager }
@@ -167,21 +172,27 @@ interface MergedCandidate {
   manifests: Map<string, string>
 }
 
+function rootCandidate(workspaceRoot: string): MergedCandidate {
+  return { relativeRoot: ".", absoluteRoot: workspaceRoot, managerTools: [], manifests: new Map() }
+}
+
 function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): MergedCandidate[] {
   const byPath = new Map<string, MergedCandidate>()
-  for (const c of candidates) {
-    const existing = byPath.get(c.relativeRoot)
+  for (const candidate of candidates) {
+    const existing = byPath.get(candidate.relativeRoot)
     if (existing === undefined) {
-      byPath.set(c.relativeRoot, {
-        relativeRoot: c.relativeRoot,
-        absoluteRoot: c.absoluteRoot,
-        managerTools: [c.managerTool],
-        manifests: new Map([[basename(c.manifestPath), c.manifestPath]]),
+      byPath.set(candidate.relativeRoot, {
+        relativeRoot: candidate.relativeRoot,
+        absoluteRoot: candidate.absoluteRoot,
+        managerTools: [candidate.managerTool],
+        manifests: new Map([[basename(candidate.manifestPath), candidate.manifestPath]]),
       })
       continue
     }
-    if (!existing.managerTools.includes(c.managerTool)) existing.managerTools.push(c.managerTool)
-    existing.manifests.set(basename(c.manifestPath), c.manifestPath)
+    if (!existing.managerTools.includes(candidate.managerTool)) {
+      existing.managerTools.push(candidate.managerTool)
+    }
+    existing.manifests.set(basename(candidate.manifestPath), candidate.manifestPath)
   }
   return [...byPath.values()]
 }
@@ -195,7 +206,7 @@ function orderedManifests(manifests: ReadonlyMap<string, string>): [string, stri
   const ranked = [...manifests].filter(([kind]) => MANIFEST_PRIORITY.includes(kind))
   ranked.sort(([a], [b]) => MANIFEST_PRIORITY.indexOf(a) - MANIFEST_PRIORITY.indexOf(b))
   const unranked = [...manifests].filter(([kind]) => !MANIFEST_PRIORITY.includes(kind))
-  unranked.sort(([a], [b]) => compareString(a, b))
+  unranked.sort(([a], [b]) => compareCodeUnit(a, b))
   return [...ranked, ...unranked]
 }
 
@@ -232,8 +243,9 @@ async function buildComponent(
   languages: readonly LanguageId[],
 ): Promise<Component> {
   const manifests = await readCandidateManifests(entry)
-  const npm = manifests.find((read) => read.kind === NPM_MANIFEST)
-  const npmManifest = asNpmManifest(npm?.manifest ?? null)
+  // The one place a parse is read as an `NpmManifest`: it came from the `package.json` slot.
+  const npmManifest: NpmManifest | null =
+    manifests.find((read) => read.kind === NPM_MANIFEST)?.manifest ?? null
   const declared = declaredNames(manifests.map((read) => read.manifest))
   const id = decideId(entry, declared)
   const name = decideName(entry, declared)
@@ -247,33 +259,6 @@ async function buildComponent(
     // Class A per ir-schema.md §1.1: always written, `null` when unset. Detection has no
     // source for a description; the config path (`resolveComponents` in @aburi/cli) writes
     // the same key from `components[].description`, so both producers agree on the shape.
-    description: null,
-  }
-  if (publicApi.length > 0) component.publicApi = publicApi
-  if (frameworks.length > 0) component.frameworks = frameworks
-  return component
-}
-
-async function buildSingleProjectComponent(
-  workspaceRoot: string,
-  languages: readonly LanguageId[],
-): Promise<Component> {
-  const manifest = await readJsonManifest(join(workspaceRoot, NPM_MANIFEST))
-  const fakeEntry: Pick<MergedCandidate, "relativeRoot" | "absoluteRoot"> = {
-    relativeRoot: ".",
-    absoluteRoot: workspaceRoot,
-  }
-  const declared = declaredNames([manifest])
-  const id = decideId(fakeEntry, declared)
-  const name = decideName(fakeEntry, declared)
-  const frameworks = collectFrameworks(asNpmManifest(manifest))
-  const publicApi = collectPublicApi(asNpmManifest(manifest))
-  const component: Component = {
-    id,
-    name,
-    roots: ["."],
-    languages: languages.length > 0 ? [...languages] : [FALLBACK_LANGUAGE],
-    // Class A per ir-schema.md §1.1 -- see buildComponent.
     description: null,
   }
   if (publicApi.length > 0) component.publicApi = publicApi
@@ -440,7 +425,7 @@ async function countLanguagesPerRoot(
     // Asked with the filesystem's own spelling, which is what git matches and what keys the
     // matcher. The bucketing below needs the other one — see `withinRoot`.
     if (gitignore !== null && (await gitignore.ignores(file))) continue
-    const normalized = file.normalize("NFC")
+    const normalized = toNfc(file)
     for (const root of roots) {
       if (!withinRoot(root, normalized)) continue
       const perRoot = counts.get(root)
@@ -479,9 +464,8 @@ function directoryLevels(file: string): number {
 }
 
 function languageOfExtension(file: string): LanguageId | null {
-  const dot = file.lastIndexOf(".")
-  if (dot < 0) return null
-  const raw = EXTENSION_TO_LANGUAGE.get(file.slice(dot).toLowerCase())
+  const extension = fileExtension(file)
+  const raw = extension === null ? undefined : EXTENSION_TO_LANGUAGE.get(extension)
   if (raw === undefined) return null
   // The table is the boundary where a per-extension token becomes a LanguageId, so the
   // grammar check happens once here rather than at every consumer.
@@ -497,7 +481,7 @@ function frequentLanguages(counts: ReadonlyMap<LanguageId, number>): LanguageId[
     if (count / total < LANGUAGE_MIN_SHARE) continue
     out.push(lang)
   }
-  return out.sort(compareString)
+  return out.sort(compareCodeUnit)
 }
 
 /**
@@ -511,7 +495,7 @@ interface ManifestIdentity {
 
 /**
  * An npm manifest. `dependencies` and `exports` are npm's fields, so a value of this type is
- * one that came from a `package.json` — `asNpmManifest` is the only place that is decided,
+ * one that came from a `package.json` — `buildComponent` is the only place that is decided,
  * which is what stops `collectFrameworks` being handed an nx project file whose targets
  * happen to hold a key of that name.
  */
@@ -525,11 +509,6 @@ interface NpmManifest extends ManifestIdentity {
   module?: string
   types?: string
   typings?: string
-}
-
-/** A parse already known to have come from a `package.json`, read as the npm manifest it is. */
-function asNpmManifest(manifest: ManifestIdentity | null): NpmManifest | null {
-  return manifest
 }
 
 /**
@@ -551,7 +530,7 @@ async function readJsonManifest(path: string): Promise<ManifestIdentity | null> 
   try {
     raw = await readFile(path, "utf8")
   } catch (cause) {
-    if (isMissingFile(cause)) return null
+    if (isVanishedFile(cause)) return null
     throw new CoreError(
       `Manifest at ${path} could not be read: ${describeThrown(cause)}`,
       { code: "workspace-manifest-malformed", value: path },
@@ -572,13 +551,6 @@ async function readJsonManifest(path: string): Promise<ManifestIdentity | null> 
   return parsed as ManifestIdentity
 }
 
-/** Whether this is the filesystem saying there is nothing at that path. */
-function isMissingFile(error: unknown): boolean {
-  if (error === null || typeof error !== "object") return false
-  const code = (error as { code?: unknown }).code
-  return code === "ENOENT" || code === "ENOTDIR"
-}
-
 function collectFrameworks(manifest: NpmManifest | null): string[] {
   if (manifest === null) return []
   const depKeys = new Set<string>()
@@ -595,7 +567,7 @@ function collectFrameworks(manifest: NpmManifest | null): string[] {
   for (const [dep, framework] of NPM_DEP_TO_FRAMEWORK) {
     if (depKeys.has(dep)) out.add(framework)
   }
-  return [...out].sort(compareString)
+  return [...out].sort(compareCodeUnit)
 }
 
 /**
@@ -615,7 +587,7 @@ function collectPublicApi(manifest: NpmManifest | null): string[] {
     const path = normalizePackagePath(candidate)
     if (path !== null) found.add(path)
   }
-  return [...found].sort(compareString)
+  return [...found].sort(compareCodeUnit)
 }
 
 function collectFromExports(value: unknown, out: Set<string>): void {
@@ -643,7 +615,7 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
   if (raw === undefined || raw === null) return null
   if (typeof raw !== "string" || raw.length === 0) return null
   if (raw.includes("\\")) return null
-  return raw.replace(/^\.\//, "").normalize("NFC")
+  return toNfc(raw.replace(/^\.\//, ""))
 }
 
 /**
@@ -657,8 +629,8 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
  *    protects is `aburi init`, which writes `components[]` without ever building an IR — so
  *    the §14 #2 integrity check downstream never sees it.
  *
- * What the passes never read is a component's position in the list. `taken` does depend on
- * the set of ids a component contends with — a package that arrives claiming an id in use
+ * What the passes never read is a component's position in the list. `consumedAncestors` does
+ * depend on the set of ids a component contends with — a package that arrives claiming an id in use
  * moves someone — but that is a contended id rather than, as before, any package under the
  * same parent renumbering its neighbours.
  */
@@ -688,7 +660,7 @@ interface IdCandidate {
    * kebab-cases to nothing is consumed and contributes no suffix, which is exactly how a
    * round can advance without changing an id.
    */
-  taken: number
+  consumedAncestors: number
 }
 
 function applyAncestorSuffixPass(components: Component[]): void {
@@ -696,7 +668,7 @@ function applyAncestorSuffixPass(components: Component[]): void {
     component,
     base: component.id,
     ancestors: ancestorSegments(component.roots[0] ?? ""),
-    taken: 0,
+    consumedAncestors: 0,
   }))
   for (;;) {
     let extended = false
@@ -706,8 +678,8 @@ function applyAncestorSuffixPass(components: Component[]): void {
         // A candidate that has run out of path is left where it is rather than blocking the
         // rest of its group: the ones that can still move may well separate from it, and the
         // hash pass takes whatever is left.
-        if (candidate.taken >= candidate.ancestors.length) continue
-        candidate.taken++
+        if (candidate.consumedAncestors >= candidate.ancestors.length) continue
+        candidate.consumedAncestors++
         extended = true
       }
     }
@@ -715,7 +687,11 @@ function applyAncestorSuffixPass(components: Component[]): void {
     // ends the pass, so the loop terminates.
     if (!extended) return
     for (const candidate of candidates) {
-      candidate.component.id = suffixedId(candidate.base, candidate.ancestors, candidate.taken)
+      candidate.component.id = suffixedId(
+        candidate.base,
+        candidate.ancestors,
+        candidate.consumedAncestors,
+      )
     }
   }
 }
@@ -762,23 +738,27 @@ function ancestorSegments(root: string): string[] {
 }
 
 /**
- * `base` carrying its first `taken` ancestors as a suffix.
+ * `base` carrying its first `consumed` ancestors as a suffix.
  *
  * A segment that kebab-cases to nothing contributes nothing rather than a doubled or trailing
  * hyphen — the id stays valid, the collision stays unresolved, and the next round (or the
  * hash pass) deals with it. A component whose own id was fine does not fail detection because
  * of the segment above it.
  */
-function suffixedId(base: ComponentId, ancestors: readonly string[], taken: number): ComponentId {
+function suffixedId(
+  base: ComponentId,
+  ancestors: readonly string[],
+  consumed: number,
+): ComponentId {
   const suffix = ancestors
-    .slice(0, taken)
+    .slice(0, consumed)
     .map(toKebabCase)
     .filter((segment) => segment.length > 0)
   return suffix.length === 0 ? base : makeComponentId(`${base}-${suffix.join("-")}`)
 }
 
 /**
- * `id` with a digest of `root` appended. Its own SHA-256 rather than `hashRawString`: that
+ * `id` with a digest of `root` appended. Its own width rather than `hashRawString`'s: that
  * one is the fingerprint path, whose width is chosen for a different question, and an id
  * respelled by a fingerprint constant moving would be a change nobody was making.
  *
@@ -786,23 +766,7 @@ function suffixedId(base: ComponentId, ancestors: readonly string[], taken: numb
  * compare roots against walk output raw — so the digest is of the same bytes on every machine.
  */
 function hashedId(id: ComponentId, root: string): ComponentId {
-  const digest = createHash("sha256").update(root, "utf8").digest("hex")
-  return makeComponentId(`${id}-${digest.slice(0, ROOT_HASH_LENGTH)}`)
-}
-
-function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
-  const groups = new Map<string, T[]>()
-  for (const item of items) {
-    const k = key(item)
-    const existing = groups.get(k)
-    if (existing === undefined) groups.set(k, [item])
-    else existing.push(item)
-  }
-  return groups
-}
-
-function compareString(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
+  return makeComponentId(`${id}-${sha256Hex(root).slice(0, ROOT_HASH_LENGTH)}`)
 }
 
 /**

@@ -1,7 +1,8 @@
+import { endpoint, languageId, makeSymbol } from "@aburi/test-support"
 import type { Dependency, IR, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectWorkspace } from "../src"
-import { emptySummary, endpoint, languageId, makeDiff, makeSymbol } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
  * The two documents a human reads have to say what the scan lost, or the exit code is the

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { GitRunner } from "../src"
+import { fakeGit } from "./fixtures"
 
 /**
  * A workspace whose only language plugin is written by the test.
@@ -132,16 +133,5 @@ export async function populate(dir: string, files: readonly string[]): Promise<v
  * against a path that does not exist.
  */
 export function gitWith(baseFiles: readonly string[]): GitRunner {
-  return {
-    async run(args) {
-      const key = args.slice(0, 2).join(" ")
-      if (key === "worktree add") {
-        const dir = args[3]
-        if (dir === undefined) throw new Error("worktree add without a destination")
-        await populate(dir, baseFiles)
-      }
-      if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
-      return { stdout: "", stderr: "" }
-    },
-  }
+  return fakeGit({ onWorktreeAdd: (dir) => populate(dir, baseFiles) }).runner
 }

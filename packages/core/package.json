@@ -45,6 +45,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@aburi/test-support": "workspace:*",
     "@types/node": "^26.0.1",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3",

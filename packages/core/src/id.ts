@@ -6,9 +6,16 @@
  * constructors here or through the `isSymbolId` / `isComponentId` guards, so "is this string
  * a well-formed id?" has one implementation rather than one per call site — and an id that
  * reaches the IR has necessarily passed it.
+ *
+ * No path entry point here converts separators: a backslash is refused, never rewritten to
+ * `/`. Whether one is a separator is not decidable from the string, so the conversion belongs
+ * to the caller that knows it holds a native path — `toRelativePosix` in `workspace.ts` shows
+ * the shape, rewriting on the platform separator, which is a separator exactly where a
+ * filename cannot hold one. (This module once rewrote `\` first, which cost the shared rule
+ * its backslash clause and silently renamed any file whose name legitimately held one.)
  */
 import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
-import { describeCodePoints } from "./codepoints"
+import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type CoreErrorCode } from "./errors"
 
 /** Sentinel qualified name reserved for the lone default export of a module. */
@@ -278,12 +285,8 @@ export function isDefaultExportQname(qname: string): boolean {
 /**
  * Validate a path that is already POSIX-separated, and normalize it to NFC. This is the file
  * walk's entry point (ir-schema.md §1.2): what it returns becomes a `symbols[].source.file`, or
- * a `stats.skippedFiles[].path` for a file the walk gave up on.
- *
- * It does not convert separators, and a backslash reaching it is refused rather than rewritten.
- * Whether one is a separator is not decidable from the string, so the conversion belongs to the
- * caller that knows it holds a native path — see `normalizeToNfc` for what that cost while it
- * happened here.
+ * a `stats.skippedFiles[].path` for a file the walk gave up on. Converts no separators (see
+ * the module header).
  *
  * The shared path rule only. It does **not** answer whether a Symbol from that file could be
  * given an id: `:` and `#` are legal in a POSIX filename and legal in every path the Document
@@ -303,7 +306,7 @@ export function isDefaultExportQname(qname: string): boolean {
  * expected to copy.
  */
 export function toDocumentPath(rawPath: string): string {
-  const normalized = normalizeToNfc(rawPath)
+  const normalized = toNfc(rawPath)
   const violation = posixWorkspaceRelativeViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -391,28 +394,8 @@ export function symbolIdSeparatorSite(path: string): SymbolIdSeparatorSite | nul
 }
 
 /**
- * NFC, and nothing else: `toDocumentPath` above and `toPosixRelative` below share it, so the id
- * built from a path is spelled by the same string the Document records it as.
- *
- * It used to rewrite `\` into `/` first, on the theory that a caller might be holding a native
- * path. That cost the shared rule its backslash clause — the check ran on a string the character
- * had already been spent in — and silently renamed any file whose name legitimately held one.
- * Converting a native path is the caller's job because only the caller knows it has one;
- * `toRelativePosix` in `workspace.ts` shows the shape, rewriting on the platform separator,
- * which is a separator exactly where a filename cannot hold one.
- *
- * Shared by the two rather than one composed out of the other, so each applies its own rule and
- * reports it with its own subject. Layered, a path that breaks the shared rule
- * would be described by whichever function ran first, and a caller assembling a Symbol id would
- * be told about a "path".
- */
-function normalizeToNfc(rawPath: string): string {
-  return rawPath.normalize("NFC")
-}
-
-/**
  * Validate a path that is already POSIX-separated against the form `Symbol.id` requires, and
- * normalize it to NFC. Like `toDocumentPath`, it converts no separators.
+ * normalize it to NFC. Like `toDocumentPath`, it converts no separators (module header).
  *
  * The shared path rule plus the id rule, where `toDocumentPath` applies the shared rule alone:
  * what this returns can be the file segment of a Symbol id, where what that returns can only be
@@ -428,7 +411,7 @@ function normalizeToNfc(rawPath: string): string {
  * was building, and the more useful of the two subjects to be told about.
  */
 export function toPosixRelative(rawPath: string): string {
-  const normalized = normalizeToNfc(rawPath)
+  const normalized = toNfc(rawPath)
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -453,9 +436,9 @@ export function toPosixRelative(rawPath: string): string {
  */
 function normalizeParts(parts: SymbolIdParts): SymbolIdParts {
   return {
-    language: parts.language.normalize("NFC"),
-    file: parts.file.normalize("NFC"),
-    qualifiedName: parts.qualifiedName.normalize("NFC"),
+    language: toNfc(parts.language),
+    file: toNfc(parts.file),
+    qualifiedName: toNfc(parts.qualifiedName),
   }
 }
 
@@ -511,10 +494,10 @@ function unnormalizedViolation(parts: SymbolIdParts): GrammarViolation | null {
     ["file", parts.file],
     ["qualified name", parts.qualifiedName],
   ] as const) {
-    if (raw === raw.normalize("NFC")) continue
+    if (raw === toNfc(raw)) continue
     return {
       code: "invalid-symbol-id",
-      message: `Symbol id ${field} ${describeCodePoints(raw)} is not in Unicode NFC; write it as ${describeCodePoints(raw.normalize("NFC"))}`,
+      message: `Symbol id ${field} ${describeCodePoints(raw)} is not in Unicode NFC; write it as ${describeCodePoints(toNfc(raw))}`,
       value: raw,
     }
   }

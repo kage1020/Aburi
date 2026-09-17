@@ -1,7 +1,8 @@
+import { component, languageId } from "@aburi/test-support"
 import type { Component } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { component, emptySummary, languageId, makeDiff } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
  * §6.2 🧱 Component changes. The fields listed for a changed Component come from the entry's

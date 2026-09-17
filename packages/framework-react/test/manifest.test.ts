@@ -7,7 +7,7 @@ describe("frameworkReactManifest", () => {
     expect(frameworkReactManifest.type).toBe("framework")
   })
 
-  it("enumerates the seven React extKinds with baseKind fallback", () => {
+  it("enumerates the seven React extKinds, each described", () => {
     const ids = frameworkReactManifest.provides.extKinds.map((e) => e.id).sort()
     expect(ids).toEqual([
       "framework:react:component",
@@ -20,7 +20,6 @@ describe("frameworkReactManifest", () => {
     ])
     for (const entry of frameworkReactManifest.provides.extKinds) {
       expect(entry.description).not.toBe("")
-      expect(["function", "const"]).toContain(entry.baseKind)
     }
   })
 
