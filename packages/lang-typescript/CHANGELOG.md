@@ -1,5 +1,12 @@
 # @aburi/lang-typescript
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [1d09de8]
+  - @aburi/core@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes
