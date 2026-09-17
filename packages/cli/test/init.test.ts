@@ -184,7 +184,7 @@ describe("CL27 — an --output that cannot hold a file", () => {
     )
 
     expect(thrown).toBeInstanceOf(CliError)
-    // The caller's path rather than the machine's refusal — cli-spec.md §4.5 puts an
+    // The caller's path rather than the machine's refusal — cli-spec.md puts an
     // --output that cannot be written at exit 2.
     expect((thrown as CliError).code).toBe("input-error")
     expect((thrown as Error).message).toContain(resolve(scratch, "generated/aburi.json"))

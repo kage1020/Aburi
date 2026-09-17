@@ -48,7 +48,7 @@ import {
  * `parseErrors` is on all three because it is diagnostic rather than IR, and each outcome
  * needs it for a different reason: an extracted file carries its recoverable warnings, a
  * refused one has nothing else to explain why it fell, and an abandoned one is often slow
- * *because* it is broken — lang-plugin.md §7.1.2 keeps them there so a reader is not sent to
+ * *because* it is broken — lang-plugin.md keeps them there so a reader is not sent to
  * raise a budget that was never the problem.
  */
 interface FileOutcomeCommon {
@@ -72,7 +72,7 @@ export interface ExtractedFile extends FileOutcomeCommon {
    * `makeCallSiteKey` keys for the surviving calls whose receiver the language
    * plugin reported as an expression. `Call` is a schema type and cannot carry
    * the flag, so it rides beside the Symbols until `resolveCallGraph` consumes
-   * it for the `dynamic` diagnostic bucket (call-resolution.md §8.1).
+   * it for the `dynamic` diagnostic bucket (call-resolution.md).
    */
   dynamicCallSites: readonly string[]
 }
@@ -150,7 +150,7 @@ export interface FilePipelineInput {
    *
    * Required rather than optional even though `null` is a legal answer, because the two are
    * different facts — "this file is outside every Component" and "this caller never said" —
-   * and only the first is one a Symbol may carry (ir-schema.md §1.1, Class A). At this
+   * and only the first is one a Symbol may carry (ir-schema.md, Class A). At this
    * boundary the distinction is enforceable: the pipeline is handed one file at a time and
    * cannot re-derive the answer, so an optional key would spell the two the same way and
    * attribute a whole file to nothing on a caller that simply forgot it. `ScanInput.components`
@@ -188,7 +188,7 @@ export interface TreeReleaseFailure {
 
 /**
  * Run the extraction pipeline for a single file. The steps follow
- * docs/design/lang-plugin.md §5.3 (extraction order) and effect-plugin.md §5.1
+ * docs/design/lang-plugin.md (extraction order) and effect-plugin.md
  * (first-match-wins) in order:
  *
  *   1. parse the file — a null tree, or any error the plugin marked non-recoverable, makes
@@ -211,7 +211,7 @@ export interface TreeReleaseFailure {
  *   8. `releaseTree` — the tree goes back to the plugin, on every way out of the function.
  *      Steps 2-7 are the only readers it has, and the plugin gave up ownership at step 1.
  *
- * The file's `parseTimeoutMs` budget (lang-plugin.md §7.1.2) is read after step 1, after
+ * The file's `parseTimeoutMs` budget (lang-plugin.md) is read after step 1, after
  * step 2, and before each iteration of 3-7. A plugin call cannot be interrupted once it has
  * started, so a budget can only be enforced between them; these three are the readings that
  * bound the work still to come, and a file found over budget at one of them is abandoned.
@@ -363,7 +363,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
  * The core is the only side that can: `parseFile` gives the handle away and never sees it
  * again, and the tree stays live until `normalizeAst` has read the last node out of it. For
  * a WASM parser that handle is heap the process does not get back on its own
- * (docs/design/lang-plugin.md §8.1), so a scan that skipped this would grow by one tree per
+ * (docs/design/lang-plugin.md), so a scan that skipped this would grow by one tree per
  * file for the length of the run.
  *
  * A release that fails is recorded and dropped, never thrown. It runs in a `finally`, so a
@@ -478,7 +478,7 @@ interface ClassifyCallsInput {
 }
 
 /**
- * Put the strings a language plugin hands back into Unicode NFC, the form ir-schema.md §1.2
+ * Put the strings a language plugin hands back into Unicode NFC, the form ir-schema.md
  * defines every Document string to be in.
  *
  * A plugin reads identifiers and paths out of source bytes, so whichever spelling a file
@@ -487,11 +487,11 @@ interface ClassifyCallsInput {
  * against values that arrive from elsewhere, so leaving one side alone turns a match into a
  * miss. What is covered:
  *
- * - `source.file`, which §14 invariant #19 checks and which `resolveCallGraph` matches
+ * - `source.file`, which invariant #19 checks and which `resolveCallGraph` matches
  *   against call-site keys built from the already-normalized `SourceFile.path`.
  * - `signature.inputs[].name`, which the call resolver compares against a call's head
  *   segment to decide that a parameter shadows a Symbol of the same name
- *   (call-resolution.md §4.2). Missing that comparison emits an edge to an unrelated
+ *   (call-resolution.md). Missing that comparison emits an edge to an unrelated
  *   Symbol, which then carries effects through propagation.
  * - `decorators[].name`, which a framework plugin resolves against `ImportEdge.symbols` —
  *   already normalized by `normalizeImportEdge` below. Leaving this side alone makes a
@@ -499,7 +499,7 @@ interface ClassifyCallsInput {
  *   decomposed, which is the silent miss `readImportedNames` exists to prevent.
  *
  * `decorators[].raw` is left alone for the reason the signature's type strings are: it is a
- * quotation of source text (§1.2), not a value anything matches against.
+ * quotation of source text (ir-schema.md), not a value anything matches against.
  *
  * `id` is deliberately not touched: it is constructed rather than read, `makeSymbolId`
  * normalizes it there, and quietly repairing one asserted by hand would hide the plugin bug
@@ -536,7 +536,7 @@ function mapPreservingIdentity<T>(items: T[], transform: (item: T) => T): T[] {
   return changed ? next : items
 }
 
-/** Only `name` is normalized; `raw` and `arguments` are quotations of source text (§1.2). */
+/** Only `name` is normalized; `raw` and `arguments` are quotations of source text. */
 function normalizeDecoratorNames(
   decorators: SymbolCandidate<OpaqueAstNode>["decorators"],
 ): SymbolCandidate<OpaqueAstNode>["decorators"] {
@@ -548,7 +548,7 @@ function normalizeDecoratorNames(
 
 /**
  * Only `inputs[].name` is normalized. The type strings beside it are quotations of source
- * text (§1.2): their spelling decides nothing, and rewriting one would misquote the
+ * text (ir-schema.md): their spelling decides nothing, and rewriting one would misquote the
  * declaration the Document is reporting.
  */
 function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["signature"]>(
@@ -594,7 +594,7 @@ function normalizeImportEdge(edge: ImportEdge): ImportEdge {
  * The same treatment for a call, which carries the string the IR orders by.
  *
  * `target` reaches the Document through one of two fields — `calls[].target` when nothing
- * claims the call, `effects[].target` when an effect plugin does (§9.3; the two are
+ * claims the call, `effects[].target` when an effect plugin does (ir-schema.md; the two are
  * exclusive). The second is a sort key: `propagateEffects` orders propagated entries by
  * `(id, target)` and integrity invariant #11 verifies that order against the in-memory
  * string, while the serializer writes the normalized one. Two spellings there put a Document
@@ -684,7 +684,7 @@ function byTargetThenLine(
   if (a.target < b.target) return -1
   if (a.target > b.target) return 1
   // Effect.line became optional in the schema when the propagation pass landed
-  // (effect-propagation.md §5.1 — propagated entries omit line). At this call
+  // (effect-propagation.md — propagated entries omit line). At this call
   // site, both inputs are locally-detected effects seeded from `call.line`, so
   // `line` is present; the ?? 0 fallback is a type-level completeness hedge and
   // never runs.
@@ -693,7 +693,7 @@ function byTargetThenLine(
 
 /**
  * Recover the LanguageId from a Symbol id. The id contract is
- * `<language>:<posix-relative-path>#<qualified-name>` per ir-schema §3.1, so the
+ * `<language>:<posix-relative-path>#<qualified-name>` per ir-schema.md, so the
  * language sits before the first colon. An id without a colon means the language
  * plugin violated the id contract — throw so the scan surfaces the bug loudly rather
  * than emitting a Symbol with an empty language that silently passes the (currently
@@ -723,10 +723,10 @@ function buildDroppedSymbol(
     extKind: candidate.extKind,
     name: candidate.name,
     language,
-    // Class A per ir-schema.md §1.1, decided by `FilePipelineInput.component` -- which is
+    // Class A per ir-schema.md, decided by `FilePipelineInput.component` -- which is
     // where the whole rule is. A dropped Symbol is attributed exactly as a kept one is: a
     // drop is a statement about the Symbol's shape, not about where it lives, and the
-    // per-component Markdown lists both (markdown-projection.md §5).
+    // per-component Markdown lists both (markdown-projection.md).
     component,
     visibility: candidate.visibility,
     decorators: [...candidate.decorators],
@@ -762,7 +762,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     extKind: input.candidate.extKind,
     name: input.candidate.name,
     language: input.language,
-    // Class A per ir-schema.md §1.1 -- see `FilePipelineInput.component` for how the value
+    // Class A per ir-schema.md -- see `FilePipelineInput.component` for how the value
     // is decided and why the key is written even when it is `null`.
     component: input.component,
     visibility: input.candidate.visibility,
@@ -782,7 +782,7 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     //     inverted from their source line.
     // A stable line sort here restores invariant #11 without disturbing the
     // relative order of same-line entries — same-line entries keep whatever
-    // order the producer gave them (ir-schema.md §1: "ascending by `line`
+    // order the producer gave them (ir-schema.md: "ascending by `line`
     // (source order within the same line)").
     decorators: [...input.candidate.decorators].sort((a, b) => a.line - b.line),
     signature: input.candidate.signature,

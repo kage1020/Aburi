@@ -111,7 +111,7 @@ function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
  * a name the target does not have. A wrong edge is worse than the missing one this replaces.
  *
  * `dynamic` is false by definition rather than by consequence: the field means "written as
- * `import()`" (`lang-plugin.md` §4.2), and a require-equals is resolved when the module
+ * `import()`" (`lang-plugin.md`), and a require-equals is resolved when the module
  * loads. The two loops in `callgraph.ts` that read a file's edges both skip a dynamic one
  * today, so the value is also what keeps this edge visible to call resolution — but that is
  * what the value buys, not what decides it.
@@ -251,7 +251,7 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
  *   substitution in it), or a shape this reader does not model. There is nothing to report:
  *   the author wrote something valid that static analysis cannot follow.
  * - A literal that *is* there and is empty is something someone typed, and it names no
- *   module. `ImportEdge.source` is a non-empty specifier (`lang-plugin.md` §4.4) and the
+ *   module. `ImportEdge.source` is a non-empty specifier (`lang-plugin.md`) and the
  *   shared guards in `@aburi/plugin-registry/plugin-input` throw on one that is not, so no
  *   edge can carry it.
  *

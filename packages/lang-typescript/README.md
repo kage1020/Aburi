@@ -19,7 +19,7 @@ Responsibilities:
   `readonly` / `abstract` tracking.
 
 Emits `SymbolCandidate.id` under the `ts:` language prefix per the id contract in
-`docs/design/ir-schema.md §3.1`.
+`docs/design/ir-schema.md`.
 
 ## Install
 

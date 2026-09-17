@@ -8,7 +8,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 
 /**
  * Assertions in production code that mint a branded id out of a plain string. `ir-schema.md`
- * §3.5 says there are exactly these, and each carries a comment saying why:
+ * says there are exactly these, and each carries a comment saying why:
  *
  * - `core/src/id.ts` is the module the whole workspace goes through to obtain a `SymbolId`
  *   or `ComponentId`; both assertions there run behind a full grammar check.

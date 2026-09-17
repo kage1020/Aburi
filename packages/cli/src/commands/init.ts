@@ -57,10 +57,10 @@ export interface InitReport {
 }
 
 /**
- * §4 — `aburi init`. Runs the autodetect chain (workspace root → managers → components),
+ * `cli-spec.md` — `aburi init`. Runs the autodetect chain (workspace root → managers → components),
  * writes an `aburi.json` (or the caller's `--output` path), and returns a structured report.
  *
- * Refuses to overwrite an existing file unless `--force` is set (§4.4, exit 2). The
+ * Refuses to overwrite an existing file unless `--force` is set (exit 2). The
  * overwrite guard probes with `pathKind` so a permission-denied on `aburi.json` cannot
  * silently bypass it and let the write clobber a file the user cannot read.
  */
@@ -183,10 +183,10 @@ function pluginRefsFor(
 }
 
 /**
- * §4.6 tail — the `--with-suggestions` banner. Install instructions name the npm package,
+ * The `--with-suggestions` banner. Install instructions name the npm package,
  * so these carry the `@aburi/` scope that `PluginRef` leaves implicit.
  *
- * Languages come first and are included unconditionally, per `cli-spec.md` §4.6: the
+ * Languages come first and are included unconditionally, per `cli-spec.md`: the
  * language plugin `init` just wrote into `languages` is a hard requirement for the next
  * `aburi scan`, where a framework plugin only adds classification.
  */

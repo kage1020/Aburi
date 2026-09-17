@@ -6,9 +6,9 @@
 import type { IntegrityViolation } from "@aburi/core"
 
 export type DiffErrorCode =
-  /** `base.$schema` and `head.$schema` disagree (§9.1). */
+  /** `base.$schema` and `head.$schema` disagree (diff-algorithm.md). */
   | "schema-mismatch"
-  /** `config.diff.lineFuzz` was outside the documented [0, 10] range (diff-algorithm.md §5.2.1). */
+  /** `config.diff.lineFuzz` was outside the documented [0, 10] range (diff-algorithm.md). */
   | "invalid-line-fuzz"
   /**
    * `baseIR` or `headIR` is not a Document of the shape `aburi.ir.v1` requires (invariant #20,
@@ -20,11 +20,11 @@ export type DiffErrorCode =
    * `baseIR` or `headIR` repeats an identity the diff keys on: a `symbols[].id`, a
    * `components[].id`, or a `dependencies[]` `(from, to, via)` triple. Distinct from
    * `ir-shape-invalid` because the Document is well-formed — the collision changes the
-   * answer rather than preventing one (ir-schema.md §14 #1 / #2 / #13).
+   * answer rather than preventing one (ir-schema.md #1 / #2 / #13).
    */
   | "ir-identity-collision"
   /**
-   * A `SliceRecord` broke the derivation invariant of slice-view.md §7.1 / §8.2. Raised only by
+   * A `SliceRecord` broke the derivation invariant of slice-view.md. Raised only by
    * an Aburi bug, never by user input — see `SliceRecordViolation.kind` for which clause broke.
    */
   | "slice-invariant-violated"

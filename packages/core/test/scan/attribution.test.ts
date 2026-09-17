@@ -103,7 +103,7 @@ describe("buildComponentAttribution", () => {
 
   it("orders colliding ids as strings, not as numbers", () => {
     // "Lower id" is `<` over the id, which is the order `components[]` itself is sorted in
-    // (ir-schema.md §1) — so `svc-10` precedes `svc-9`, as it does in the document. Spelled
+    // (ir-schema.md) — so `svc-10` precedes `svc-9`, as it does in the document. Spelled
     // out because `api` / `web` above read the same under a numeric or a natural order.
     const shared = ["packages/shared"]
     const attribution = buildComponentAttribution([
@@ -304,7 +304,7 @@ describe("a scan of a two-component workspace", () => {
 
   it("writes the component key into the serialized bytes, `null` included", async () => {
     // `Object.hasOwn` on the in-memory Symbol cannot see this: `serializeCanonical` drops a
-    // property whose value is `undefined`, so an omitted Class A key (ir-schema.md §1.1) is
+    // property whose value is `undefined`, so an omitted Class A key (ir-schema.md) is
     // invisible in TypeScript and visible only in what lands on disk.
     const { ir } = await scanWorkspace()
     const written = JSON.parse(serializeCanonical(ir)) as {
@@ -336,7 +336,7 @@ describe("a scan of a two-component workspace", () => {
  * A stub whose every `pricing.stub` file declares one method `Pricing.calc`, and whose every
  * other file declares one function that calls it.
  *
- * The call resolver's component tier (call-resolution.md §4.5) keys on `Symbol.component`, so
+ * The call resolver's component tier (call-resolution.md) keys on `Symbol.component`, so
  * before attribution existed every Symbol sat in one "no component" bucket: two Symbols named
  * `Pricing.calc` anywhere in the workspace made the tier ambiguous, and the call resolved to
  * nothing. Populating the field is what separates them — and nothing else in this suite would

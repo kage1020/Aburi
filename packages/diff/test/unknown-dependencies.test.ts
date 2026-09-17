@@ -374,8 +374,8 @@ describe("buildDiff — an edge into a file the other side never analysed", () =
 
 describe("diffDependencies — a side view with nothing to say", () => {
   it("classifies every one-sided edge as before, and still writes the unknown array", () => {
-    // The honest spelling of "I have no skip list": an IR predating `stats.skippedFiles` is
-    // exactly this, and §3.5.1 already describes what a diff against one may and may not
+    // The honest spelling of "I have no skip list": an IR predating `stats.skippedFiles` is exactly
+    // this, and diff-algorithm.md already describes what a diff against one may and may not
     // conclude. It has to be written rather than defaulted into, because `unknown: []` in the
     // artifact means "nothing was unknown" and not "nobody looked".
     const blind: DependencySideView = { symbolFiles: new Map(), lostFiles: new Map() }

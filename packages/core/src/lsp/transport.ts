@@ -28,10 +28,10 @@ export interface SpawnedServer {
    */
   spawnError: Promise<Error | null>
   /**
-   * Force-kill after a graceful shutdown grace period (lsp-enrichment.md §4.1:
+   * Force-kill after a graceful shutdown grace period (lsp-enrichment.md:
    * 1 s → SIGKILL). Returns after at most two grace periods whether or not the
    * child is reaped: waiting on `exit` without a bound would reintroduce, one
-   * layer down, the same stall the §4.4 write bounds exist to prevent — a
+   * layer down, the same stall the write bounds exist to prevent — a
    * process wedged in uninterruptible I/O does not answer SIGKILL either.
    */
   killAfter(graceMs: number): Promise<void>

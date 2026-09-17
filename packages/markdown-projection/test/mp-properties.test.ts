@@ -294,7 +294,7 @@ describe("MP12 — empty IR still projects workspace.md", () => {
 // -----------------------------------------------------------------------------
 
 describe("projectDiffSummaryLine — CLI stdout summary", () => {
-  it("emits `+A -R ~C ↔M ⤴MC` shape (§6.3)", () => {
+  it("emits `+A -R ~C ↔M ⤴MC` shape", () => {
     const diff = makeDiff({
       summary: {
         ...emptySummary(),
@@ -313,7 +313,7 @@ describe("projectDiffSummaryLine — CLI stdout summary", () => {
 // Section-omit — rules row rendering
 // -----------------------------------------------------------------------------
 
-describe("Rule row rendering (§5.6)", () => {
+describe("Rule row rendering", () => {
   it("renders loop with kind", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Foo",
@@ -333,7 +333,7 @@ describe("Rule row rendering (§5.6)", () => {
 // Fingerprint <sub> row is omitted for dropped
 // -----------------------------------------------------------------------------
 
-describe("Fingerprint row (§5.9)", () => {
+describe("Fingerprint row", () => {
   it("emits <sub> row for kept Symbol", () => {
     const s = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", fingerprint: fp("v1") })
     const md = projectComponent({

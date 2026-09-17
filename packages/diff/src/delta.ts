@@ -18,7 +18,7 @@ export const MIN_LINE_FUZZ = 0
 
 export interface DeltaOptions {
   /**
-   * §5.2.1 line fuzz for rule/call identity. Must be an integer in
+   * Line fuzz for rule/call identity (diff-algorithm.md). Must be an integer in
    * `[MIN_LINE_FUZZ, MAX_LINE_FUZZ]` (`0..10`); anything outside — or a non-finite value —
    * throws `DiffError({ code: "invalid-line-fuzz" })`. Setting `0` disables fuzz; omitting
    * the field falls back to `DEFAULT_LINE_FUZZ` (2).
@@ -27,8 +27,9 @@ export interface DeltaOptions {
 }
 
 /**
- * §5 — the full per-Symbol delta between two paired Symbols. The axis booleans come from
- * fingerprint comparison; the array deltas from identity-preserving diff with line fuzz.
+ * The full per-Symbol delta between two paired Symbols (diff-algorithm.md). The axis booleans
+ * come from fingerprint comparison; the array deltas from identity-preserving diff with line
+ * fuzz.
  */
 export function computeSymbolDelta(
   base: IRSymbol,
@@ -51,8 +52,9 @@ export function computeSymbolDelta(
 }
 
 /**
- * §5.2.1 range check. Loud rather than clamping so a config typo (`lineFuzz: 999`) or an
- * upstream `NaN` surfaces at the diff boundary instead of rounding into the wrong deltas.
+ * Line-fuzz range check (diff-algorithm.md). Loud rather than clamping so a config typo
+ * (`lineFuzz: 999`) or an upstream `NaN` surfaces at the diff boundary instead of rounding
+ * into the wrong deltas.
  */
 function validateLineFuzz(value: number): number {
   if (!Number.isFinite(value) || !Number.isInteger(value)) {
@@ -77,12 +79,12 @@ interface Identified<T> {
 }
 
 /**
- * §5.2 — pair the two sides by identity key within ±`lineFuzz`, then classify each element
- * into `added` / `removed` / `modified`. `modified` fires only when a pairing holds and the
- * content differs, so a cosmetic line shift produces nothing.
+ * Array diff (diff-algorithm.md) — pair the two sides by identity key within ±`lineFuzz`,
+ * then classify each element into `added` / `removed` / `modified`. `modified` fires only
+ * when a pairing holds and the content differs, so a cosmetic line shift produces nothing.
  *
  * Several elements of one Symbol routinely share a key — two `guard` rules, two `@Get` — so
- * which base element a head element takes is a real choice (§5.2.0). Two passes make it:
+ * which base element a head element takes is a real choice. Two passes make it:
  * first the elements whose key **and content** agree, then whatever is left. An untouched
  * element is therefore claimed by its own counterpart before an edited or deleted neighbour
  * can take it, and the remainder pairs by proximity, where a genuine edit lands.
@@ -140,7 +142,7 @@ function outranks(a: AssignmentScore, b: AssignmentScore): boolean {
  * The best set of non-crossing pairings between the still-free elements of `base` and `head`,
  * as `[baseIndex, headIndex]` in ascending order.
  *
- * Non-crossing is the whole content of the rule, and ir-schema §14 #11 licenses it: these
+ * Non-crossing is the whole content of the rule, and ir-schema.md #11 licenses it: these
  * arrays are ordered by line, so two pairings that cross would have an element move above one
  * it was below, which is a different element rather than a line shift. It also makes the
  * optimum reachable by a suffix recurrence. Maximising the count before minimising distance
@@ -217,10 +219,10 @@ function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDel
   const mapper = (effect: Effect): Identified<Effect> => ({
     item: effect,
     key: `${effect.id}::${effect.target}`,
-    // Propagated entries (effect-propagation.md §5.1) omit `line`. The infinite fuzz admits
+    // Propagated entries (effect-propagation.md) omit `line`. The infinite fuzz admits
     // every same-key candidate, and `(id, target)` is the whole of an effect's identity
-    // (ir-schema §7), so `0` only ranks a propagated effect nearest the earliest local one
-    // carrying its key; §5.2.0's exact-content pass settles the rest.
+    // (ir-schema.md), so `0` only ranks a propagated effect nearest the earliest local one
+    // carrying its key; the exact-content pass settles the rest.
     line: effect.line ?? 0,
   })
   return classifyArrayDelta(
@@ -250,7 +252,7 @@ function callsEqual(a: Call, b: Call): boolean {
   return a.target === b.target && (a.resolved ?? null) === (b.resolved ?? null)
 }
 
-/** §5.2.2 — decorator identity is `name`; the argument list decides `modified`. */
+/** Decorator identity is `name`; the argument list decides `modified` (diff-algorithm.md). */
 function diffDecorators(
   base: readonly Decorator[],
   head: readonly Decorator[],
@@ -269,15 +271,16 @@ function decoratorsEqual(a: Decorator, b: Decorator): boolean {
 }
 
 /**
- * §5.3 — signature delta. Both `null` → `null`; one `null` → the present side emitted
- * verbatim as `added` or `removed`; both present → per-list sub-deltas: `inputs` positional
- * (index in the key, fuzz 0), `outputs` positional without `modified`, `throws` as a set.
+ * Signature delta (diff-algorithm.md). Both `null` → `null`; one `null` → the present side
+ * emitted verbatim as `added` or `removed`; both present → per-list sub-deltas: `inputs`
+ * positional (index in the key, fuzz 0), `outputs` positional without `modified`, `throws`
+ * as a set.
  */
 function diffSignature(base: Signature | null, head: Signature | null): SignatureDelta | null {
   if (base === null) return head === null ? null : oneSidedSignatureDelta(head, "added")
   if (head === null) return oneSidedSignatureDelta(base, "removed")
   // Parameters are positional, so the index is part of the identity and the fuzz is 0. Every
-  // key is then unique within its list, so §5.2.0 never has a choice to make here.
+  // key is then unique within its list, so the pairing never has a choice to make here.
   const inputMapper = (
     input: { name: string; type: string },
     index: number,

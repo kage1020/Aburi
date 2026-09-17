@@ -49,7 +49,7 @@ export function configSourceFrom(found: string | null): ConfigSource {
 /**
  * Read, validate, and normalize the config a `ConfigSource` names, without discovery.
  *
- * `aburi diff` needs this: `cli-spec.md` §6.4 step 3 requires the base scan to use the
+ * `aburi diff` needs this: the `cli-spec.md` diff behaviour requires the base scan to use the
  * head's `aburi.json`, and the base scan runs with its cwd inside the base worktree, where
  * discovery would find the base copy again.
  */

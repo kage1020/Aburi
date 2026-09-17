@@ -4,7 +4,7 @@ import { EFFECTS_DRIZZLE_DERIVED_BY_PREFIX, effectsDrizzleManifest } from "../sr
 describe("effectsDrizzleManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
     // Core `db.*` ids are returned from classify() and MUST NOT appear in provides.effects
-    // (extension-vocab.md §5.1); an effects plugin cannot own extKinds or frameworks either.
+    // (extension-vocab.md); an effects plugin cannot own extKinds or frameworks either.
     expect(effectsDrizzleManifest).toEqual({
       $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
       name: "effects-drizzle",

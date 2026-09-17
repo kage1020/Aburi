@@ -1,7 +1,7 @@
 import type { CallResolutionStats, UnresolvedCallBuckets } from "@aburi/types"
 
 /**
- * Bucket display labels, declared in the `call-resolution.md` §8.1 table order.
+ * Bucket display labels, declared in the `call-resolution.md` bucket table order.
  * The labels are the kebab-case bucket ids from the doc, not the camelCase JSON
  * keys, so a reviewer reading the line can grep the spec for the same word.
  *
@@ -22,8 +22,8 @@ const BUCKET_LABELS: Readonly<Record<keyof UnresolvedCallBuckets, string>> = {
 /**
  * One-line rendering of `IR.stats.callResolution` for `aburi scan` /
  * `aburi diff` stdout. Answers "did the resolver actually see this call graph,
- * or is the picture below missing edges?" — the question `slice-view.md` §5.4's
- * silent drop otherwise leaves a reviewer unable to ask.
+ * or is the picture below missing edges?" — the question `slice-view.md`'s
+ * silent unresolved-call drop otherwise leaves a reviewer unable to ask.
  *
  * Zero-valued buckets are omitted: on a healthy workspace most of the five are
  * zero, and printing them turns a scannable line into noise. When nothing is

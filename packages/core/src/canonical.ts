@@ -14,14 +14,14 @@ export interface SerializeOptions {
  * Serialize any plain-JSON value into a byte-deterministic UTF-8 string.
  *
  * Three rules together guarantee bit-identical output for equal inputs:
- * 1. Every string is normalized to Unicode NFC (ir-schema.md §1.2, which states why the
+ * 1. Every string is normalized to Unicode NFC (ir-schema.md, which states why the
  *    form matters and where the rest of the pipeline establishes it). Keys are normalized
  *    *before* rule 2 orders them: ordering the input spelling and writing the normalized
  *    one yields a document whose key order does not match the bytes it contains.
- * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md §1. Rule 1 is what lets
+ * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md Rule 1 is what lets
  *    that comparator agree with the rest of the codebase: this function orders normalized
  *    keys while every other ordering decision compares the string held in memory, so the
- *    two stay in step only because §1.2 puts both in the same form.
+ *    two stay in step only because Unicode normalization puts both in the same form.
  * 3. Array order is preserved; the caller is responsible for sorting arrays per the IR
  *    schema's per-collection ordering rules (this serializer is not in the business of
  *    interpreting which collection is which).

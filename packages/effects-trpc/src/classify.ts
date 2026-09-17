@@ -28,7 +28,7 @@ const MIN_CLIENT_SEGMENTS = 3
 /**
  * Classify a CallCandidate against tRPC client conventions.
  *
- * Every recognized shape maps onto the core `network.rpc` id (ir-schema.md §9.1),
+ * Every recognized shape maps onto the core `network.rpc` id (ir-schema.md),
  * subscriptions included: tRPC v11 runs them over `wsLink` or `httpSubscriptionLink`, and
  * the transport is not decidable from the call site, so `network.ws` would be a guess. The
  * query / mutation / subscription family and the router-relative procedure path go into
@@ -40,7 +40,7 @@ const MIN_CLIENT_SEGMENTS = 3
  *    count. The known cost is a false negative on the `src/utils/trpc.ts` wrapper layout,
  *    where consumers import the wrapper — resolving that needs the LSP enrichment tier.
  * 2. **Server-side shapes are never effects.** A router definition is a Boundary, and
- *    `type: "effects"` plugins may not declare extKinds (extension-vocab.md §6.1), so the
+ *    `type: "effects"` plugins may not declare extKinds (extension-vocab.md), so the
  *    `query` terminal is refused in any file that imports `@trpc/server`. Only `query`: the
  *    server spells its other verbs `mutation` / `subscription`, absent from the client
  *    vocabulary.
@@ -51,7 +51,7 @@ const MIN_CLIENT_SEGMENTS = 3
  *    of `await client.user.byId.query().then(cb)` falls out of the vocabulary naturally.
  *
  * Throws on a malformed target or import edge: upstream contract violations, not
- * classification decisions. Pure with respect to plugin state (effect-plugin.md §5.1.1).
+ * classification decisions. Pure with respect to plugin state (effect-plugin.md).
  */
 export function classifyTrpcCall(
   call: CallCandidate,

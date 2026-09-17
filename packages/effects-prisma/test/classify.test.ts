@@ -323,7 +323,7 @@ describe("classifyPrismaCall — purity", () => {
 })
 
 // A model addressed through brackets arrives as `<computed>` in the model slot
-// (`lang-plugin.md` §4.4). That restores the third segment the delegate shape needs, and
+// (`lang-plugin.md`). That restores the third segment the delegate shape needs, and
 // segment count is exactly what keeps `queue.upsert(job)` unclassified — so the receiver
 // has to carry the claim alone.
 describe("classifyPrismaCall — a model segment that names nothing", () => {

@@ -1,7 +1,7 @@
 import type { IntegrityViolation } from "./errors"
 
 /**
- * Invariant #20 (ir-schema.md §14): the Document has the shape `aburi.ir.v1` requires.
+ * Invariant #20 (ir-schema.md): the Document has the shape `aburi.ir.v1` requires.
  *
  * The other nineteen invariants, and every consumer that holds the branded `IR` type, are
  * written against a Document of that shape. Nothing in the pipeline establishes it: `readIR`

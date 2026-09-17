@@ -177,11 +177,11 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
             }),
             incidents: { warn },
           })
-          // `totalFiles` excludes the files no Document path can name, by design (§5.8), so on
-          // its own this line moves in the flattering direction: a workspace of 200 with 15
-          // unnameable ones reads `185 files` and looks whole. The other two gate reasons leave
-          // their mark in these numbers; this one has to be added back or the summary
-          // contradicts the exit code beside it.
+          // `totalFiles` excludes the files no Document path can name, by design
+          // (`cli-spec.md`), so on its own this line moves in the flattering direction: a
+          // workspace of 200 with 15 unnameable ones reads `185 files` and looks whole. The
+          // other two gate reasons leave their mark in these numbers; this one has to be added
+          // back or the summary contradicts the exit code beside it.
           const unnameable = report.unrepresentableFiles.length
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files` +
@@ -291,7 +291,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           switch (outcome.kind) {
             case "single":
             case "file":
-              // §7 — when --output is set the markdown lives in the file only.
+              // `cli-spec.md` — when --output is set the markdown lives in the file only.
               // Otherwise mirror to stdout so the user can `aburi explain foo | less`.
               if (outcome.writtenTo === null) {
                 stdout.write(outcome.markdown)
@@ -375,7 +375,7 @@ function isCommanderError(value: unknown): value is { code: string; message: str
 }
 
 /**
- * Error mapping (see docs/design/cli-spec.md §9 for the exit-code contract):
+ * Error mapping (see docs/design/cli-spec.md for the exit-code contract):
  *   - `input-error` / `config-error` → EXIT.INPUT_ERROR
  *   - `runtime-error`                → EXIT.RUNTIME
  *   - `plugin-error`                 → EXIT.GATE

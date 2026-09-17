@@ -4,7 +4,7 @@ Runs `aburi scan` and `aburi diff` against pinned commits of nine public
 repositories and records both what it cost and what it produced.
 
 The synthetic corpus in [`docs/design/performance.md`](../../docs/design/performance.md)
-§2 measures one shape deliberately: 1,200 similar small files, which is the shape
+measures one shape deliberately: 1,200 similar small files, which is the shape
 the planned worker pool exists for. Public repositories measure the shapes nobody
 designs for — a generated file thousands of lines long, a workspace Aburi splits
 into 113 components, a wall of `.tsx`, decorators on every class — and they are
@@ -84,14 +84,14 @@ everything around it — a clone that will not check out, an IR that will not pa
 
 A run counts as a measurement only if it produced a measurement line, exited 0 or
 3, and wrote an IR of its own. Exit 3 is a *completed* run whose workspace was not
-clean (`cli-spec.md` §9) and its numbers are real, so the report prints the exit
+clean (`cli-spec.md`) and its numbers are real, so the report prints the exit
 code rather than a verdict. Anything else has no number to record, and reporting
 it as one is the failure mode the removal of the IR before each run exists to
 prevent.
 
 `--no-timestamp` removes the only intentionally varying field in the IR, so the
 hashes of two runs over an unchanged tree must match. That is the single-threaded
-form of performance.md Rule PF-11 (§7.1); once the worker pool lands, the same
+form of performance.md Rule PF-11; once the worker pool lands, the same
 equality across `--concurrency` values is the check that matters. A single
 measured run compares nothing, and the report says `n/a` rather than a tick.
 

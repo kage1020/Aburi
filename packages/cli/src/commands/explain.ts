@@ -21,14 +21,14 @@ export interface ExplainOptions {
   outputPath?: string
   noRescan?: boolean
   /**
-   * Append the per-call `## Call resolution` table of `call-resolution.md`
-   * §8.1. The buckets are per-run diagnostics that the IR deliberately does not
+   * Append the per-call `## Call resolution` table of `call-resolution.md`.
+   * The buckets are per-run diagnostics that the IR deliberately does not
    * persist, so this always rescans the workspace — an on-disk IR simply cannot
    * answer the question.
    */
   debugResolution?: boolean
   /**
-   * Sink for the incidents of the scan this command runs when no IR is on disk (§5.6), and
+   * Sink for the incidents of the scan this command runs when no IR is on disk (`cli-spec.md`), and
    * for the one line reading an existing IR can produce: which document answered, when it was
    * not the one under the working directory. Otherwise reading an IR reports nothing — the
    * live signal fired when `aburi scan` wrote the file.
@@ -102,7 +102,7 @@ export type CoverageDoubt =
 
 /**
  * `aburi explain <id-or-pattern>` — three-arm dispatch mirrored from
- * `docs/design/cli-spec.md §7.2`:
+ * `docs/design/cli-spec.md`:
  *
  * - argument contains `#` → full Symbol id lookup.
  * - argument contains `/` but no `#` AND either resolves to an existing file or is named in
@@ -116,7 +116,7 @@ export type CoverageDoubt =
  * When the substring match hits more than one Symbol the caller receives an
  * `ambiguous` outcome (exit 2) so they can add more of the qualified name. Zero hits
  * become `not-found` (exit 1), or `unknown` (exit 3) when the question named a file the
- * document says it never analysed — §7.6. Every code is overridden by `withScanFault` when
+ * document says it never analysed (`cli-spec.md`). Every code is overridden by `withScanFault` when
  * the scan this command ran did not exit clean. A "single" / "file" outcome carries the
  * resolved `writtenTo` path when `--output` was supplied so the CLI wrapper can suppress the
  * stdout mirror.
@@ -136,8 +136,8 @@ export async function runExplain(options: ExplainOptions): Promise<ExplainOutcom
  * withdrew is absent from the IR, so a `single` answer may have had a competing candidate that
  * would have made it `ambiguous`, and a `not-found` may be describing the withdrawal rather
  * than the workspace. Reporting `0` for the first and `1` for the second would let a broken
- * toolchain look like a clean answer, which is the state §5.6 already refuses to call green for
- * `aburi scan`; the command asking the question does not change that.
+ * toolchain look like a clean answer, which is the state `cli-spec.md` already refuses to call
+ * green for `aburi scan`; the command asking the question does not change that.
  *
  * The condition is the scan's own exit code rather than a named incident, so a second reason to
  * gate — `runScan` says outright that there may be one — arrives here without an edit.
@@ -317,13 +317,13 @@ function assertDebugResolutionCombination(options: ExplainOptions): void {
   if (options.debugResolution !== true) return
   if (options.noRescan) {
     throw new CliError(
-      "--debug-resolution needs a fresh scan (call-resolution.md §8.1 keeps the per-call buckets out of the IR), so it cannot be combined with --no-rescan.",
+      "--debug-resolution needs a fresh scan (call-resolution.md keeps the per-call buckets out of the IR), so it cannot be combined with --no-rescan.",
       "input-error",
     )
   }
   if (options.irPath !== undefined) {
     throw new CliError(
-      "--debug-resolution needs a fresh scan (call-resolution.md §8.1 keeps the per-call buckets out of the IR), so it cannot read an existing --ir file.",
+      "--debug-resolution needs a fresh scan (call-resolution.md keeps the per-call buckets out of the IR), so it cannot read an existing --ir file.",
       "input-error",
     )
   }

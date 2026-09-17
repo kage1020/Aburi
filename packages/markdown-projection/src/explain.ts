@@ -21,18 +21,19 @@ export interface ProjectSymbolExplainContext {
    */
   dependencies?: readonly Dependency[]
   /**
-   * Per-call resolution diagnostics for THIS Symbol (call-resolution.md §8.1), from the scan
-   * running right now — the IR cannot carry them, since §8.1 keeps the reason out of the
-   * document. Supplying them adds a `## Call resolution` section; omitting them leaves the
+   * Per-call resolution diagnostics for THIS Symbol (call-resolution.md), from the scan
+   * running right now — the IR cannot carry them, since the resolver keeps the reason out of
+   * the document. Supplying them adds a `## Call resolution` section; omitting them leaves the
    * output as it was before the section existed.
    */
   unresolvedCalls?: readonly UnresolvedCallDiagnostic[]
 }
 
 /**
- * §7 — `aburi explain <id>`. A stand-alone Symbol view that gives every axis its own section
- * (§7 mock) and carries `derivedBy` and the full fingerprint. A `dropped: true` Symbol falls
- * back to a short summary, since it has no rules/effects/calls/fingerprint (ir-schema §5.6).
+ * markdown-projection.md — `aburi explain <id>`. A stand-alone Symbol view that gives every
+ * axis its own section (as in the doc's mock) and carries `derivedBy` and the full
+ * fingerprint. A `dropped: true` Symbol falls back to a short summary, since it has no
+ * rules/effects/calls/fingerprint (ir-schema.md).
  */
 export function projectSymbolExplain(
   symbol: IRSymbol,
@@ -127,7 +128,7 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
 }
 
 /**
- * `aburi explain --debug-resolution` — the per-Symbol view call-resolution.md §8.1 promises:
+ * `aburi explain --debug-resolution` — the per-Symbol view call-resolution.md promises:
  * one row per call site, ordered by line, with the resolved callee or the bucket that
  * explains the `null`. An empty array is meaningful ("the resolver left nothing unresolved
  * here") and renders the section with a note; `undefined` omits it.

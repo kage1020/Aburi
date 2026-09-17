@@ -13,7 +13,7 @@ import { detectComponents } from "../src/index"
  *
  * What is aligned is the *drop* decision, not the routing one. The census counts every
  * extension it knows whether or not a plugin claims it, because `Component.languages` answers
- * what a component is written in rather than what a run parsed (component-detect.md §4.4).
+ * what a component is written in rather than what a run parsed (component-detect.md).
  *
  * The threshold is ten files and a five-percent share, so every fixture here writes enough of
  * one language to clear it and enough of another to be the thing under test.

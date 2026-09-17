@@ -7,7 +7,7 @@ import { findChild, thrownValue, walkDescendants } from "./ast-helpers"
  * Build a Signature for a function-like declaration node (function_declaration,
  * method_definition, arrow_function, function_expression, etc.).
  *
- * Rules that mirror lang-plugin.md §4.3 / fingerprint.md §3.1:
+ * Rules that mirror lang-plugin.md / fingerprint.md:
  * - `inputs[].name` is the parameter binding name (destructured / rest / this variants
  *   collapse to a printable form).
  * - `inputs[].type` and `outputs[]` are the AST-visible type text; we do not resolve
@@ -74,7 +74,7 @@ function readParameters(node: Node): Signature["inputs"] {
  * A parenthesis-free arrow — `x => x + 1` — has no parameter list to read: the grammar
  * hangs its single binding off a `parameter` field as a bare identifier, so the list
  * lookup above finds nothing and the function would report itself zero-arity. The api
- * fingerprint (fingerprint.md §3.1) compares `inputs` positionally, so that reading
+ * fingerprint (fingerprint.md) compares `inputs` positionally, so that reading
  * reports the wrong arity, and wrongly in both directions: `x => …` → `() => …` drops
  * the parameter and is reported as no change at all, while `x => …` → `(x) => …` leaves
  * the contract alone and is reported as an api change.

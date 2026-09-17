@@ -504,7 +504,8 @@ async function readJson(path: string): Promise<unknown> {
  * `glob` — hands it to `toDocumentPath` unconverted, which is what lets the shared rule refuse
  * the character instead of spending it.
  *
- * The NFC step is the §1.2 entry point for roots (ir-schema.md): a root left in whatever
+ * The NFC step is the Unicode-normalization entry point for roots (ir-schema.md): a root
+ * left in whatever
  * spelling the filesystem returned would disagree with a `symbols[].source.file` naming
  * the same directory, which is normalized at its own entry point.
  *

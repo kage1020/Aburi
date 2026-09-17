@@ -109,7 +109,7 @@ export interface ParseResult<TTree = ParsedTree> {
 
 /**
  * A `SourceRange` as a writer must produce it: both column keys are always present,
- * carrying `null` when the position is unknown (`ir-schema.md` §1.1 Class A, §12).
+ * carrying `null` when the position is unknown (`ir-schema.md` Class A, SourceRange).
  *
  * The read-side `SourceRange` keeps them optional on purpose, and the asymmetry is the
  * point — writers are held to the convention, readers stay tolerant of documents that
@@ -187,7 +187,7 @@ export interface CallCandidate {
    * One segment is reserved: `COMPUTED_TARGET_SEGMENT` stands where the source
    * addressed a property through brackets with something that is not a name, so
    * `prisma[model].create()` is `prisma.<computed>.create` rather than the
-   * `prisma.create` the program never calls (`lang-plugin.md` §4.4). Both sides
+   * `prisma.create` the program never calls (`lang-plugin.md`). Both sides
    * read the exported constant rather than the literal, so a misspelling is a
    * type error rather than a segment nothing matches.
    */
@@ -206,14 +206,14 @@ export interface CallCandidate {
    * collapses such a receiver to whatever name it can find (`getRepo.save`),
    * which is indistinguishable from a genuine qualified name once the AST is
    * gone. The flag preserves the distinction so call resolution can report the
-   * `dynamic` diagnostic bucket of `call-resolution.md` §8.1 instead of
+   * `dynamic` diagnostic bucket of `call-resolution.md` instead of
    * misfiling the call under `no-match`. Absent means false.
    */
   dynamicReceiver?: boolean
 }
 
 export interface BodyExtraction {
-  /** Rules per ir-schema §8. */
+  /** Rules per ir-schema.md. */
   rules: import("./generated/ir").Rule[]
   /** Pre-classification call list. */
   calls: CallCandidate[]
@@ -224,7 +224,7 @@ export interface BodyExtraction {
 export interface DropHint {
   /** Goes into Symbol.dropReason verbatim. */
   reason: string
-  /** drop-list §2 category. */
+  /** drop-list.md category. */
   category: "B" | "C"
 }
 
@@ -288,7 +288,7 @@ export interface OwnerSummary {
   id: SymbolId
   kind: SymbolKind
   name: string
-  /** Already populated by framework plugin (lang-plugin.md §5.3). */
+  /** Already populated by framework plugin (lang-plugin.md). */
   extKind: ExtKind
   decorators: { name: string; boundary: boolean }[]
   component: ComponentId | null
@@ -410,7 +410,7 @@ export interface LanguagePlugin<TTree = ParsedTree, TNode = OpaqueAstNode> {
    * budget. A stage that threw is one of the paths, not an exception to them. A plugin whose
    * trees are ordinary garbage-collected objects omits the method.
    *
-   * This is where the WASM convention in docs/design/lang-plugin.md §8.1 is discharged for
+   * This is where the WASM convention in docs/design/lang-plugin.md is discharged for
    * the tree: the plugin can free its parser inside `parseFile`, but not the tree, which by
    * then belongs to the caller. Implementations need not be idempotent or defensive — one
    * call, on a live handle, is what they are given.
@@ -454,7 +454,7 @@ export interface EffectPlugin {
 /**
  * Framework plugin. Adjusts SymbolCandidate extKind / decorator boundaries based
  * on framework conventions. Runs between extractSymbols and walkBody.
- * See docs/design/lang-plugin.md §5.2 and extension-vocab.md §3.
+ * See docs/design/lang-plugin.md and extension-vocab.md
  *
  * `TNode` mirrors the lang plugin's AST node type so a framework plugin paired
  * with a specific lang plugin sees the right tree.

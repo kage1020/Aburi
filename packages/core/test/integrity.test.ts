@@ -444,7 +444,7 @@ describe("checkIRIntegrity", () => {
   })
 })
 
-describe("invariant #15 — callResolution stats census (call-resolution.md §8.1)", () => {
+describe("invariant #15 — callResolution stats census (call-resolution.md)", () => {
   function irWithOneUnresolvedCall(): ReturnType<typeof minimalIR> {
     const ir = minimalIR()
     ir.symbols = [
@@ -745,8 +745,8 @@ describe("checkIRIntegrity #19 — Unicode normalization", () => {
 
   it("refuses NFKC as a substitute: compatibility folding is not normalization here", () => {
     // NFKC maps `ﬁ` to `fi` and fullwidth `Ａ` to `A`. Under it two distinct
-    // Symbols collapse onto one id and quoted source is rewritten — the damage §1.2 scopes
-    // out. These values are already NFC, so a checker using NFKC would report them.
+    // Symbols collapse onto one id and quoted source is rewritten — the damage ir-schema.md
+    // scopes out. These values are already NFC, so a checker using NFKC would report them.
     const ir = minimalIR()
     ir.components = [makeComponent("a", { roots: ["apps/ﬁle", "apps/Ａpp"] })]
     expect(checkIRIntegrity(ir).filter((v) => v.invariant === 19)).toEqual([])

@@ -1,7 +1,7 @@
 /**
  * Coded error class for every registry failure. Consumers can branch on `code`
- * without parsing message text. See docs/design/extension-vocab.md §5
- * (namespaces) and §6 (conflicts) for the underlying rules; `manifest-*` codes are
+ * without parsing message text. See docs/design/extension-vocab.md
+ * (namespaces and conflict resolution) for the underlying rules; `manifest-*` codes are
  * I/O / parse / schema failures that surface before the registry sees the manifest.
  *
  * `plugins[]` carries 0, 1, or 2 names:

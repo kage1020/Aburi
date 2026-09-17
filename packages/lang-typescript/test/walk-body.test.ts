@@ -121,11 +121,11 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 })
 
-// The `dynamic` diagnostic bucket of call-resolution.md §8.1 cannot be recovered
+// The `dynamic` diagnostic bucket of call-resolution.md cannot be recovered
 // from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
 // spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
 // the distinction alive across the AST boundary.
-describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucket)", () => {
+describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", () => {
   it("flags a call-expression receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")
     const call = calls.find((c) => c.target === "getRepo.save")
@@ -156,7 +156,7 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
     expect(call?.dynamicReceiver).toBeUndefined()
   })
 
-  it("does not flag `this` / `super` receivers — those carry their own §4.7 rule", async () => {
+  it("does not flag `this` / `super` receivers — those carry their own rule", async () => {
     const { calls } = await walkFirstSymbol(
       "export function f(this: any) { this.save(); super.save() }",
     )
@@ -204,7 +204,7 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
   })
 })
 
-// A bracket access in a callee (`lang-plugin.md` §4.4, LP20j / LP20k). Reading only the
+// A bracket access in a callee (`lang-plugin.md`, LP20j / LP20k). Reading only the
 // object part answered `prisma.create` for `prisma["user"].create()` — a call that is
 // nowhere in the program, spelled like an ordinary two-segment method call, and one
 // segment short of the delegate shape `effects-prisma` needs, so the `db.write` went with

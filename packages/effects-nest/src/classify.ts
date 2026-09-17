@@ -11,8 +11,7 @@ import { hasNestEmitterImport, isNestEmitMethod, isNestEventEmitterIdentifier } 
  * in files that do.
  *
  * Throws on a malformed target (`assertNonEmptySegments`): an upstream contract violation,
- * not a classification decision. Pure with respect to plugin state (effect-plugin.md
- * §5.1.1).
+ * not a classification decision. Pure with respect to plugin state (effect-plugin.md).
  */
 export function classifyNestCall(
   call: CallCandidate,

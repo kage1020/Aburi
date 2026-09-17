@@ -3,8 +3,8 @@ import { EFFECTS_TRPC_DERIVED_BY_PREFIX, effectsTrpcManifest } from "../src/inde
 
 describe("effectsTrpcManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
-    // The core `network.rpc` id (ir-schema.md §9.1) is returned from classify() and MUST
-    // NOT appear in provides.effects (extension-vocab.md §5.1). The empty extKinds is also
+    // The core `network.rpc` id (ir-schema.md) is returned from classify() and MUST
+    // NOT appear in provides.effects (extension-vocab.md). The empty extKinds is also
     // why the server-side router surface is out of scope: it would need `framework:trpc:*`
     // extKinds, which a type=effects manifest cannot own.
     expect(effectsTrpcManifest).toEqual({

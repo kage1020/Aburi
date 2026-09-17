@@ -14,9 +14,10 @@ import {
 } from "../src"
 
 /**
- * §3.4 / §5.6 — the three ways a value out of the IR used to escape the construct that
- * was meant to contain it: a fence opened at column 0 inside a list item, a backtick
- * closing a code span early, and a `|` opening a table column the header never declared.
+ * Code fragment and Rule row display (markdown-projection.md) — the three ways a value out
+ * of the IR used to escape the construct that was meant to contain it: a fence opened at
+ * column 0 inside a list item, a backtick closing a code span early, and a `|` opening a
+ * table column the header never declared.
  *
  * Every value asserted here is ordinary source text — a boolean condition long enough to
  * fence, a template literal, a path with a pipe in it — not a crafted hostile string.
@@ -142,7 +143,7 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
   })
 
   it("fences a multiline condition under the item as well", () => {
-    // ir-schema.md §8.2 has the extractor strip newlines from this field; a writer that did
+    // ir-schema.md has the extractor strip newlines from this field; a writer that did
     // not is the reason the branch exists, so the row still has to hold together.
     expect(ruleRow(rule({ type: "switch", line: 9, condition: "a\nb" }))).toEqual([
       "- switch (L9):",

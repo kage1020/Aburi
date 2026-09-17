@@ -17,15 +17,15 @@ import { DiffError } from "./errors"
 const byId = compareBy((item: { id: string }) => item.id)
 
 /**
- * `docs/design/diff-algorithm.md` §6.1 — Component diff. Assumes `components[].id` is unique
- * on each side (ir-schema.md §14 #2) and does not check it: `buildDiff` establishes that, and
+ * `docs/design/diff-algorithm.md` — Component diff. Assumes `components[].id` is unique
+ * on each side (ir-schema.md #2) and does not check it: `buildDiff` establishes that, and
  * a caller reaching this export directly owns the obligation, because the lookup map here is
  * last-write-wins.
  *
  * Any field that differs makes a Component `changed` — the whole object is compared, not the
  * three axes the delta names, so a `changed[]` entry with all three booleans `false` is a
  * well-formed answer meaning "something else about this component moved". `modified` deltas
- * are intentionally absent (§5.2.3): fields are reported as before/after pairs.
+ * are intentionally absent: fields are reported as before/after pairs.
  */
 export function diffComponents(
   base: readonly Component[],
@@ -107,12 +107,12 @@ export function dependencySideView(ir: IR): DependencySideView {
 }
 
 /**
- * `docs/design/diff-algorithm.md` §6.2 — Dependency diff. Identity is the composite
+ * `docs/design/diff-algorithm.md` — Dependency diff. Identity is the composite
  * `(from, to, via)` triple; direction and effect changes surface as an added + removed pair so
- * `modified` is not part of the schema (§6.2 tail). Uniqueness of the triple is the caller's
+ * `modified` is not part of the schema. Uniqueness of the triple is the caller's
  * obligation on the same terms as `diffComponents`.
  *
- * `sides` separates a deletion from a loss (§6.2.1) and is required rather than optional:
+ * `sides` separates a deletion from a loss and is required rather than optional:
  * omitting it would silently classify every edge into a lost file as a deletion while still
  * writing `unknown: []`, which the schema defines as "nothing was unknown". A caller with no
  * skip list passes a side view whose `lostFiles` is empty.
@@ -176,7 +176,7 @@ function endpointsLostBy(
   for (const endpoint of [dep.from, dep.to]) {
     const file = holder.symbolFiles.get(endpoint)
     // Normally a Component endpoint, which has no file to lose. A symbol-shaped endpoint with
-    // no Symbol behind it (forbidden by ir-schema.md §14 #4, but `buildDiff` runs no integrity
+    // no Symbol behind it (forbidden by ir-schema.md #4, but `buildDiff` runs no integrity
     // check) lands here too and quietly reverts to the plain classification: there is no
     // diagnostics channel, and refusing would take down the legitimate case sharing the branch.
     if (file === undefined) continue
@@ -190,11 +190,11 @@ function endpointsLostBy(
 }
 
 /**
- * `docs/design/diff-algorithm.md` §6.2 — the fields Dependency identity is made of, in key
+ * `docs/design/diff-algorithm.md` — the fields Dependency identity is made of, in key
  * order, and the join that turns them into one. Both exported so the entry-point uniqueness
  * check keys on exactly what this file keys on. Core's invariant #13 joins the same triple
  * with a different separator; the two agree for every endpoint that satisfies the id grammars
- * of ir-schema.md §3.1 and §4.
+ * of ir-schema.md.
  */
 export const DEPENDENCY_IDENTITY_FIELDS = ["from", "to", "via"] as const
 
@@ -233,7 +233,7 @@ function canonicalComponent(component: Component, side: "base" | "head"): string
 }
 
 /**
- * The spelling-independent form of a Component (ir-schema.md §1.1): `description` is Class A,
+ * The spelling-independent form of a Component (ir-schema.md): `description` is Class A,
  * so absent and `null` are one spelling; `publicApi` and `frameworks` are Class B fields whose
  * own writer rule is "omitted when empty", so absent and `[]` are one spelling. Class B does
  * not say that in general — a field whose presence is itself information must not be added

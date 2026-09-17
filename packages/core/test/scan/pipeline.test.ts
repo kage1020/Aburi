@@ -352,7 +352,7 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
   })
 
   it("preserves the relative order of same-line entries (stable sort)", async () => {
-    // Schema §17 phrases the same-line contract as "appearance order". Node's
+    // The schema phrases the same-line contract as "appearance order". Node's
     // Array.prototype.sort has been stable since ES2019 — we depend on that here
     // so callers can trust the ordering of e.g. two calls on the same line.
     const result = await runPipelineWithStubs({
@@ -383,7 +383,7 @@ describe("runFilePipeline — Symbol id contract", () => {
 
 describe("runFilePipeline — Unicode normalization at the plugin boundary", () => {
   // A language plugin reads identifiers and paths out of source bytes, so whichever Unicode
-  // spelling the file carries is the spelling it hands back. ir-schema.md §1.2 states why
+  // spelling the file carries is the spelling it hands back. ir-schema.md states why
   // the Document cannot hold both, and this boundary is where the two collapse into one.
   const decomposed = "café".normalize("NFD")
   const composed = decomposed.normalize("NFC")
@@ -403,7 +403,7 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
   })
 
   it("normalizes signature.inputs[].name, which the local-shadow guard compares", async () => {
-    // call-resolution.md §4.2: a parameter of the same name as a Symbol shadows it, and the
+    // call-resolution.md: a parameter of the same name as a Symbol shadows it, and the
     // resolver decides that by comparing this string against the call's head segment. The
     // head is normalized; leaving the parameter alone turns the guard off and emits an edge
     // to an unrelated Symbol, which then carries effects through propagation.

@@ -155,7 +155,7 @@ describe("receiver hints survive the trip from enrichment to the resolver", () =
 })
 
 /**
- * lsp-enrichment.md §7.2 / §11.7, through the whole pipeline rather than the pass alone. The
+ * lsp-enrichment.md hint observability, through the whole pipeline rather than the pass alone. The
  * consumer half of the counters is written by the call resolver, which runs after enrichment
  * has returned and holds none of its state, so only a scan can show that both halves reach
  * `IR.stats`.

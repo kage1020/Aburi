@@ -169,7 +169,7 @@ describe("runExplain — not-found", () => {
   })
 })
 
-describe("runExplain — --debug-resolution (call-resolution.md §8.1)", () => {
+describe("runExplain — --debug-resolution (call-resolution.md)", () => {
   it("rejects --no-rescan because the buckets only exist in a live scan", async () => {
     await expect(
       runExplain({

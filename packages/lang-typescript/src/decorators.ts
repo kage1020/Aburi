@@ -64,7 +64,7 @@ function collectDecoratorNodes(declaration: Node): Node[] {
  * and searching it for the declaration's own position. Both find the same run, but the
  * parent of a top-level declaration is the whole program and `namedChildren` unmarshals
  * every child into a JS object, so reading it once per declaration costs a file of N
- * declarations O(N²) (lang-plugin.md §8.2). The walk pays for the run it collects plus
+ * declarations O(N²) (lang-plugin.md). The walk pays for the run it collects plus
  * tree-sitter's own cost to step back one sibling, and stops as soon as the run ends — for
  * most declarations, before the first step returns anything.
  *

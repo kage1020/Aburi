@@ -11,7 +11,7 @@ import { effectsPrismaManifest } from "./manifest"
 /**
  * Prisma effect plugin: maps `prisma.<model>.<verb>` and `prisma.$transaction` call
  * expressions onto the core `db.read` / `db.write` / `db.transaction` vocabulary. `classify`
- * is pure (effect-plugin.md §5.1.1, §11.1) and throws on a malformed CallCandidate — an
+ * is pure (effect-plugin.md) and throws on a malformed CallCandidate — an
  * upstream contract violation, surfaced rather than swallowed.
  */
 class PrismaEffectsPlugin implements EffectPlugin {

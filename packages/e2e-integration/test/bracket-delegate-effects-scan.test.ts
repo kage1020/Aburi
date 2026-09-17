@@ -62,7 +62,7 @@ describe("scan — a Prisma delegate addressed through brackets", () => {
     const result = await scanWorkspace()
     const create = symbolById(result, "ts:src/repo.ts#createAny")
 
-    // A classified call never reaches `calls[]` (`ir-schema.md` §9.3), so the segment in
+    // A classified call never reaches `calls[]` (`ir-schema.md`), so the segment in
     // `target` and the `medium` tier are the whole record of what the source computed.
     expect(create.calls.map((c) => c.target)).not.toContain("prisma.create")
     expect(create.calls.map((c) => c.target)).not.toContain("prisma.<computed>.create")

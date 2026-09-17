@@ -22,10 +22,10 @@ describe("e2e: scan on fixtures/nestjs-billing", () => {
   })
 
   it("emits well-shaped via:call edges when the resolver produces any (untyped tier ⇒ may be zero)", () => {
-    // The fixture is dominated by `this.<service>.<method>()` — §4.7 "runtime receivers" the
-    // untyped tier cannot resolve — so zero call edges is the expected outcome. What is
-    // asserted is the shape contract on any edge that is emitted; positive file-scope /
-    // import-scope resolution lives in core-scan.test.ts.
+    // The fixture is dominated by `this.<service>.<method>()` — the `call-resolution.md`
+    // "runtime receivers" the untyped tier cannot resolve — so zero call edges is the expected
+    // outcome. What is asserted is the shape contract on any edge that is emitted; positive
+    // file-scope / import-scope resolution lives in core-scan.test.ts.
     const callEdges = result.ir.dependencies.filter((d) => d.via === "call")
     for (const edge of callEdges) {
       expect(edge.from).toMatch(/^[a-z][a-z0-9]*:[^#]+#.+$/)

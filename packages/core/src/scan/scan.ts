@@ -58,14 +58,14 @@ export interface ScanInput {
   workspaceManagers?: readonly WorkspaceManager[]
   /**
    * The workspace's Components, which the scan both records on `IR.components` and reads
-   * back to attribute each file (component-detect.md §12).
+   * back to attribute each file (component-detect.md).
    *
    * Optional, and omitting it is a statement: a run with no Components attributes every
    * Symbol `null`, so the per-component views have nothing to group by. It stays optional
    * because a caller may legitimately have none to declare — the CLI always resolves them,
    * from the config or by detection, and a Document with an empty `components[]` is one
-   * detection was never run for rather than one that found nothing (§5 guarantees at least
-   * one Component).
+   * detection was never run for rather than one that found nothing (component-detect.md
+   * guarantees at least one Component).
    */
   components?: readonly Component[]
   /** Generator metadata for `IR.generator`. Callers (the CLI) fill in name + version. */
@@ -112,10 +112,10 @@ export interface ScanResult {
    */
   parseTimeouts: readonly ParseTimeoutEvent[]
   /**
-   * One record per call the resolver left `resolved: null`, with the §8.1
-   * bucket that explains why. Counts are aggregated into
+   * One record per call the resolver left `resolved: null`, with the
+   * call-resolution.md bucket that explains why. Counts are aggregated into
    * `ir.stats.callResolution`; the per-call detail deliberately stays out of
-   * the IR (call-resolution.md §8.1) and is surfaced by
+   * the IR (call-resolution.md) and is surfaced by
    * `aburi explain --debug-resolution`.
    */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
@@ -200,7 +200,7 @@ export interface ParseErrorRecord {
  *      Category B/C drop → fingerprint.
  *   4. Assemble the IR (Symbols + Components + Dependencies + Stats), sort every array
  *      per the schema's ordering rules.
- *   5. `assertIRIntegrity` — every ir-schema.md §14 invariant must pass before we hand the IR back.
+ *   5. `assertIRIntegrity` — every ir-schema.md invariant must pass before we hand the IR back.
  *
  * Serialization to disk is the caller's job (`writeCanonicalIR` handles the canonical
  * JSON write). Keeping serialization off the scan path lets tests assert on the IR
@@ -283,7 +283,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       continue
     }
 
-    // The per-file exception boundary (lang-plugin.md §7.2). Every plugin call for this file
+    // The per-file exception boundary (lang-plugin.md). Every plugin call for this file
     // happens inside `runFilePipeline`, which returns its whole result at once — so a throw
     // leaves no accumulator in this function half-written, and there is nothing to unwind.
     // (Not that nothing is lost: the file's classify-timeout events go with it, because they
@@ -416,11 +416,11 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   symbols.sort(compareBy((symbol) => symbol.id))
 
-  // Optional LSP enrichment pass (lsp-enrichment.md §2). Runs BEFORE call
+  // Optional LSP enrichment pass (lsp-enrichment.md). Runs BEFORE call
   // resolution so the LSP tier's receiver / implementer hints can feed the
   // resolver. When `config.lsp?.enabled !== true` the pass is a total no-op
-  // and returns the input unchanged; determinism (§10) is preserved because
-  // the pass writes only to the strictly bounded set of fields in §5 and only
+  // and returns the input unchanged; determinism is preserved because
+  // the pass writes only to the strictly bounded set of fields and only
   // when its cache is fully populated first.
   const enrichmentInput: Parameters<typeof enrichWithLsp>[0] = {
     symbols,
@@ -434,11 +434,11 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const enrichedSymbols = enrichment.symbols
   enrichedSymbols.sort(compareBy((symbol) => symbol.id))
 
-  // Call-resolution + symbol → symbol edge projection (call-resolution.md §7,
-  // ir-schema.md §11). The resolver rewrites `Symbol.calls[].resolved` in
+  // Call-resolution + symbol → symbol edge projection (call-resolution.md,
+  // ir-schema.md). The resolver rewrites `Symbol.calls[].resolved` in
   // place and returns per-call-site CallEdges; those are then collapsed into
   // `(from, to, via: "call")` Dependency triples with a stable `(from, to, via)`
-  // sort. LSP hints (when present) supply the §5.2 / §5.3 tier.
+  // sort. LSP hints (when present) supply the LSP tier.
   const callGraph = resolveCallGraph({
     symbols: enrichedSymbols,
     importsByFile,
@@ -449,10 +449,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const symbolEdges = projectSymbolEdges(callGraph.edges)
 
   // Transitive effect propagation over the resolved call graph
-  // (effect-propagation.md §2). Runs AFTER call resolution and BEFORE the
+  // (effect-propagation.md). Runs AFTER call resolution and BEFORE the
   // logic-fingerprint recompute below; `api` and `syntax` axes do not read
   // `effects[]`, so only `logic` needs to be refreshed on the augmented
-  // symbols (effect-propagation.md §8).
+  // symbols (effect-propagation.md).
   const propagation = propagateEffects({
     symbols: callGraph.symbols,
     edges: callGraph.edges,
@@ -481,7 +481,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     propagation: propagation.stats,
     // Where the two halves of `stats.lspEnrichment` meet — see `LspHintUsage` for why the
     // resolver reports rather than writes. This is the only call site that completes the
-    // §7.2 record.
+    // `stats.lspEnrichment` record.
     lspEnrichment:
       enrichment.stats === undefined
         ? undefined
@@ -714,7 +714,7 @@ function buildStats(input: BuildStatsInput): Stats {
 
 /**
  * Sort by id, and normalize the one Class A field on `Component` (`description`, per
- * `ir-schema.md` §1.1) to an explicit `null`.
+ * `ir-schema.md`) to an explicit `null`.
  *
  * `ScanInput.components` is a public boundary: the in-tree CLI writes the key, but any other
  * `@aburi/core` caller can hand over a `Component` built against the read-side type, where
@@ -734,7 +734,7 @@ function sortComponents(components: readonly Component[]): Component[] {
  * into deduplicated `Dependency` triples keyed on `(from, to, via)`. Multiple
  * calls from the same caller to the same callee become one Dependency — the
  * per-line detail lives on `Symbol.calls[]` and is deliberately not duplicated
- * onto Dependency (ir-schema.md §11). `direction` is fixed to `"outbound"`
+ * onto Dependency (ir-schema.md). `direction` is fixed to `"outbound"`
  * (call edges are inherently directional) and `effect` to `null` (effect
  * annotation is a separate propagation pass — effect-propagation.md).
  */
@@ -780,7 +780,7 @@ function buildPluginRefs(input: ScanInput): PluginRef[] {
 
 /**
  * Placeholder grammar revision emitted for lang plugins that do not yet expose their
- * tree-sitter revision through the plugin surface. The schema (ir-schema §3.4) requires
+ * tree-sitter revision through the plugin surface. The schema (ir-schema.md) requires
  * a non-null value for `type: "lang"`; using a stable sentinel keeps IRs schema-valid
  * without pretending we know what revision produced them. Consumers can detect this
  * value and treat it as "pending" for cross-run comparability. A future patch that

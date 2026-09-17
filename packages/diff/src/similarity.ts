@@ -1,6 +1,6 @@
 /**
  * String similarity utilities dedicated to the diff engine. Kept in one file so the
- * name/signature/owner formulas are auditable side by side against diff-algorithm.md §3.4.
+ * name/signature/owner formulas are auditable side by side against diff-algorithm.md
  */
 
 /**
@@ -10,8 +10,8 @@
  *
  * The camel boundary is ASCII, so a name in a script with no ASCII case boundary and no
  * separator is one token however long it is (`ユーザー情報を取得する`, `получитьПользователя`).
- * That makes the token count a poor measure of how much such a name says — see §3.4.3's
- * admissibility rule.
+ * That makes the token count a poor measure of how much such a name says — see the
+ * admissibility rule of diff-algorithm.md's threshold table.
  */
 export function tokenizeName(input: string): string[] {
   const seen = new Set<string>()
@@ -62,7 +62,7 @@ function isCamelBoundary(prev: string, curr: string): boolean {
 
 /**
  * Jaccard similarity |A ∩ B| / |A ∪ B| over two token lists. Empty on both sides is 1.0
- * (both are "no tokens", equivalent for §3.4.1); empty on one side only is 0.0.
+ * (both are "no tokens", equivalent for nameSimilarity); empty on one side only is 0.0.
  */
 export function jaccard(a: readonly string[], b: readonly string[]): number {
   return jaccardSets(new Set(a), new Set(b))
@@ -92,7 +92,7 @@ function splitQualifiedName(qname: string): { owner: string; member: string } {
   return { owner: "", member: qname }
 }
 
-/** §3.4.1 tail note — the member name; read by the weak matcher and the threshold lookup. */
+/** The member name; read by the weak matcher and the threshold lookup. */
 export function lastSegment(qname: string): string {
   return splitQualifiedName(qname).member
 }
@@ -102,26 +102,27 @@ type TokenSets = (value: string) => ReadonlySet<string>
 
 const uncachedTokenSets: TokenSets = (value) => new Set(tokenizeName(value))
 
-/** §3.4.1 — Jaccard over the tokens of the full qualified name, every segment weighted alike. */
+/** Jaccard over the tokens of the full qualified name, every segment weighted alike. */
 export function nameSimilarity(baseName: string, headName: string): number {
   return nameJaccard(uncachedTokenSets, baseName, headName)
 }
 
 /**
- * §3.4.1 — Jaccard over the tokens of the **last segment** only. What §3.4's composite reads,
- * because §3.4.6 decides the owner separately and reading it on both axes charges twice.
+ * Jaccard over the tokens of the **last segment** only. What stage 4's composite reads, because the
+ * owner gate decides the owner separately and reading it on both axes charges twice.
  */
 export function memberSimilarity(baseName: string, headName: string): number {
   return memberJaccard(uncachedTokenSets, baseName, headName)
 }
 
 /**
- * §3.4.6 (R-8) — whether two Symbols are close enough in *scope* to be the same Symbol: the
- * same owner, or one whose owner was renamed. A gate rather than a score, because a shared
- * owner token at any weight lets `UserRepo.findById` / `AdminRepo.findById` outscore the real
- * rename `UsersRepository.findById`. Two empty owners are compatible (top-level Symbols share
- * the outer scope); one empty and one not never are. Otherwise the owners must correspond
- * segment for segment, every token on each side finding a distinct partner under `sameWord`.
+ * The owner gate (diff-algorithm.md, R-8) — whether two Symbols are close enough in *scope* to be
+ * the same Symbol: the same owner, or one whose owner was renamed. A gate rather than a score,
+ * because a shared owner token at any weight lets `UserRepo.findById` / `AdminRepo.findById`
+ * outscore the real rename `UsersRepository.findById`. Two empty owners are compatible (top-level
+ * Symbols share the outer scope); one empty and one not never are. Otherwise the owners must
+ * correspond segment for segment, every token on each side finding a distinct partner under
+ * `sameWord`.
  */
 export function ownersAreCompatible(baseName: string, headName: string): boolean {
   return ownersCompatible(
@@ -132,10 +133,10 @@ export function ownersAreCompatible(baseName: string, headName: string): boolean
 }
 
 /**
- * §3.4.6 — the tokens `a` and `b` name the same thing: equal, or the same word inflected
+ * The tokens `a` and `b` name the same thing: equal, or the same word inflected
  * (`user`/`users`, `entity`/`entities`). Nothing else. A prefix or edit-distance rule admits
  * `repo`/`report` and `cache`/`cached` — the collisions R-8 exists to refuse — and no
- * threshold separates those from real renames; diff-algorithm.md §3.4.6 has the figures and
+ * threshold separates those from real renames; diff-algorithm.md has the figures and
  * records the abbreviation family (`Repo` → `Repository`) as the price.
  */
 function sameWord(a: string, b: string): boolean {
@@ -166,7 +167,7 @@ function memberJaccard(tokenSets: TokenSets, baseName: string, headName: string)
 }
 
 /**
- * §3.4.6's gate over two already-extracted owners. Identical owners answer on a string
+ * The owner gate over two already-extracted owners. Identical owners answer on a string
  * compare, which a bucket of methods on one class hits every time; then a first-segment
  * filter refuses most of the rest before the full matching runs.
  */
@@ -178,7 +179,7 @@ function ownersCompatible(baseOwner: string, headOwner: string, tokenSets: Token
 }
 
 /**
- * §3.4.6 — the two owners name the same scope: segment for segment, token for token.
+ * The two owners name the same scope: segment for segment, token for token.
  * Per segment rather than over the owner as a whole, because `tokenizeName` dedups and an
  * owner is a *path*: `Users.UserRepo` and `Users.UsersRepository` lose a token to the shared
  * namespace when tokenised whole. A differing segment count is a differing scope.
@@ -268,7 +269,7 @@ function dotOrEnd(owner: string): number {
   return dot < 0 ? owner.length : dot
 }
 
-/** The formulas §3.4 reads, over a token table shared for one matching pass. */
+/** The formulas stage 4 reads, over a token table shared for one matching pass. */
 export interface NameScorer {
   name(baseName: string, headName: string): number
   member(baseName: string, headName: string): number

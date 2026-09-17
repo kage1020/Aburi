@@ -1,5 +1,5 @@
 /**
- * CLI exit code table — matches the contract in `docs/design/cli-spec.md §9`.
+ * CLI exit code table — matches the contract in `docs/design/cli-spec.md`.
  * `as const` gives every value a literal type so `ExitCode` is a union of the four literals.
  * The mapping from `CliErrorCode` / `FailOnParseError` onto these lives in `run.ts`.
  */
@@ -11,8 +11,8 @@ export const EXIT = {
   /**
    * Input error: bad argv, a file named and missing or malformed, unresolvable IR shape,
    * ambiguous explain target, a config or `--fail-on` grammar mistake. The line against
-   * `RUNTIME` is who has to act (`cli-spec.md` §9): a mistyped path is the reader's, a
-   * permission is not.
+   * `RUNTIME` is who has to act (`cli-spec.md`, the exit-code table): a mistyped path is the
+   * reader's, a permission is not.
    */
   INPUT_ERROR: 2,
   /**

@@ -21,7 +21,7 @@ const CONSTRUCTION_SEGMENT = "constructor"
  * The qualified-name segment a class-body member's written name maps to, or null when the
  * member has no name the grammar can record.
  *
- * Null rather than a throw: `ir-schema.md` §3.2 answers a computed name with no Symbol and no
+ * Null rather than a throw: `ir-schema.md` answers a computed name with no Symbol and no
  * diagnostic, and handing the name's source text to the id builder instead would cost the
  * file every Symbol it had at the per-file boundary.
  *
@@ -67,7 +67,7 @@ function admitSegment(candidate: string): string | null {
  *
  * Only a **named** class has member Symbols: the only unnamed form the statement walk reaches
  * is an anonymous default export, where `<default>` is reserved for the class itself and
- * `<default>.m` is not a qualified name the id builder accepts (`ir-schema.md` §3.2).
+ * `<default>.m` is not a qualified name the id builder accepts (`ir-schema.md`).
  *
  * Four member shapes qualify. A `method_definition` is a member when `memberNameSegment` gives
  * it one. A field holding a function is a member because calling it is what runs the body

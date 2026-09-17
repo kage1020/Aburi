@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, type GitRunner, runDiff } from "../src"
 
 /**
- * Ref-spec parsing (`cli-spec.md` §6.3). Every case here is decided before git is touched,
+ * Ref-spec parsing (`cli-spec.md`). Every case here is decided before git is touched,
  * so the injected runner exists only to make a pass through it loud: any spec that reaches
  * `rev-parse` was accepted, and these specs must not be.
  *
@@ -55,7 +55,7 @@ describe("runDiff ref spec — three-dot form", () => {
     expect(error.message).toContain('write it as "main..HEAD"')
   })
 
-  it("classifies it as an input error (exit 2, §6.5), not a runtime git failure", async () => {
+  it("classifies it as an input error (exit 2), not a runtime git failure", async () => {
     // The code is what `parseFailure` guards; this case is where the rule is written down.
     const error = await parseFailure("main...HEAD")
     expect(error.code).toBe("input-error")

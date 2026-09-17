@@ -10,7 +10,7 @@ import { parse } from "yaml"
  *
  * `aburi.yml` analyses a pull request and uploads the report; `aburi-comment.yml` picks that up on
  * `workflow_run` and posts it for a pull request whose own token could not (see
- * `docs/design/github-action.md` §5.1). Every name they agree on — the artifact, the hand-off
+ * `docs/design/github-action.md`). Every name they agree on — the artifact, the hand-off
  * marker, the workflow name the trigger matches, the path the report lands at, the script that
  * posts it — is written in one file and read in the other, with nothing between them: no import,
  * no type, no resolver. And the companion runs from the **default branch**, so a rename that

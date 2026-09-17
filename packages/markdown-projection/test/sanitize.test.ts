@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { assignSymbolFilenames, collisionSuffix, sanitizeSymbolId } from "../src"
 
-describe("sanitizeSymbolId (§8)", () => {
+describe("sanitizeSymbolId", () => {
   it("replaces separators with `-` and collapses runs", () => {
     expect(
       sanitizeSymbolId("ts:apps/billing/src/InvoiceService.ts#InvoiceService.createInvoice"),
@@ -17,7 +17,7 @@ describe("sanitizeSymbolId (§8)", () => {
   })
 })
 
-describe("collisionSuffix (§8 tail)", () => {
+describe("collisionSuffix", () => {
   it("is deterministic and 6 hex chars", () => {
     const suffix = collisionSuffix("ts:src/a.ts#Foo")
     expect(suffix).toMatch(/^[0-9a-f]{6}$/)

@@ -7,7 +7,7 @@ import { parseRenameRecords } from "../src/commands/diff"
 import { fakeGit, gitOutput } from "./fixtures"
 
 /**
- * Refspec-mode diff drives the injected `GitRunner` so we can exercise §6.4 without a
+ * Refspec-mode diff drives the injected `GitRunner` so we can exercise the ref-spec form without a
  * real git repo: head validation, worktree cleanup, and rename-collection warnings.
  */
 

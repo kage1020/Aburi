@@ -62,7 +62,7 @@ you:
   is expected. The root `package.json` depends on `@aburi/cli`, whose bin is build output
   and does not exist yet at install time; nothing needs the link, because the action
   resolves the package rather than the link
-  ([`docs/design/github-action.md`](docs/design/github-action.md) §3).
+  ([`docs/design/github-action.md`](docs/design/github-action.md)).
 - There is an `aburi.json` at the repository root, and config discovery walks parent
   directories to the filesystem root. A test fixture built inside the repository would
   pick it up; build fixtures under `os.tmpdir()`, as the existing ones do.

@@ -10,7 +10,7 @@ import { openGitignoreTree } from "./gitignore"
 import { fileExtension } from "./route"
 
 /**
- * Category A drop patterns from drop-list.md §3.1. They are ignore globs, not IR-visible drops.
+ * Category A drop patterns from drop-list.md They are ignore globs, not IR-visible drops.
  *
  * Exported because file discovery is no longer the only place they apply: component detection
  * counts file extensions to decide `Component.languages`, and it kept a shorter copy of part of
@@ -58,7 +58,7 @@ export const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024
 export interface DiscoverOptions {
   /**
    * Workspace root absolute path. All returned file paths are POSIX-relative to this
-   * root — matches the `SourceRange.file` contract in ir-schema §12 (SourceRange).
+   * root — matches the `SourceRange.file` contract in ir-schema.md.
    */
   workspaceRoot: string
   /**
@@ -100,7 +100,7 @@ export interface DiscoverOptions {
 export interface DiscoveredFile {
   /**
    * POSIX path relative to `workspaceRoot`, in NFC: the spelling the Document holds
-   * (ir-schema.md §1.2), and the one a Symbol id is built from.
+   * (ir-schema.md), and the one a Symbol id is built from.
    */
   path: string
   /**
@@ -191,10 +191,10 @@ export interface UnnameableFile extends UnrepresentableBase {
 /**
  * A file whose name a Document path can spell, but not apart from another file's.
  *
- * Two names differing only in Unicode normalization are one path once normalized, and §1.2
- * requires the normalization: a Document that held both spellings would sort them on opposite
- * sides of the alphabet and give one construct two Symbol ids. So the Document has exactly one
- * name for two files, which is no name at all.
+ * Two names differing only in Unicode normalization are one path once normalized, and
+ * ir-schema.md requires the normalization: a Document that held both spellings would sort
+ * them on opposite sides of the alphabet and give one construct two Symbol ids. So the
+ * Document has exactly one name for two files, which is no name at all.
  *
  * Every claimant is withdrawn rather than one being kept. A rule granting the path to the
  * NFC-spelled claimant is partial — two different decomposed spellings can normalize to one

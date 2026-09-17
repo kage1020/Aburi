@@ -297,8 +297,9 @@ describe("merged declarations are one Symbol", () => {
   it("keeps the leading declaration's visibility when a merge disagrees about the export", async () => {
     // TS2395, and the grammar accepts it — so the two answers a reader has for "was this
     // exported?" come apart here: `visibility` is the lead's scalar and `derivedBy` is the
-    // union, which is the fold's rule for every list it joins (§4.3.1). Legal source cannot
-    // reach this, which is why the rule stands rather than growing an exception for one scalar:
+    // union, which is the fold's rule for every list it joins (`lang-plugin.md`). Legal source
+    // cannot reach this, which is why the rule stands rather than growing an exception for one
+    // scalar:
     // deriving `visibility` from the union instead would change the answer for every merged
     // Symbol, including the cross-kind merges that have carried a leading declaration's
     // visibility since before this token existed.

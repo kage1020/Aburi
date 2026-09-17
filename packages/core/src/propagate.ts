@@ -149,9 +149,9 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         existing.confidence = maxConfidence(existing.confidence, propagatedConfidence)
         // Keep `plugin` and `derivedBy` in lock-step. When a local classification is
         // already present anywhere in the SCC the local's (plugin, derivedBy) pair
-        // wins verbatim per effect-propagation.md §5.1 — downstream cannot rename
+        // wins verbatim per effect-propagation.md — downstream cannot rename
         // either field. When there is no local, the downstream contribution with
-        // the lexicographically smallest `derivedBy` wins (§5.2) and BOTH fields
+        // the lexicographically smallest `derivedBy` wins and BOTH fields
         // move together so a reader never sees "plugin says X, derivedBy says Y".
         if (!existing.hasLocal && downEntry.derivedBy < existing.derivedBy) {
           existing.derivedBy = downEntry.derivedBy
@@ -408,7 +408,7 @@ function condense(
 /**
  * Kahn's algorithm over the condensed DAG, run backwards so a callee is emitted before
  * every caller that reaches it. Among SCCs ready at the same moment the smallest index
- * wins — the tie-break effect-propagation.md §6 requires.
+ * wins — the tie-break effect-propagation.md requires.
  *
  * What that tie-break does and does not buy: determinism comes from the sorts around this
  * function — the id-sorted node list, the sorted `outSccs`, and the explicit sorts applied
@@ -421,7 +421,8 @@ function condense(
  * The ready set is a binary min-heap rather than a re-sorted array. Most symbols call
  * nothing, so nearly every SCC is ready at the start: the set grows to O(V), and
  * re-sorting it on each of the V dequeues made this `O(V² log V)`. A heap brings it to
- * `O((V + E) log V)`; the log factor is unavoidable while §6 mandates a min tie-break.
+ * `O((V + E) log V)`; the log factor is unavoidable while effect-propagation.md mandates a
+ * min tie-break for SCCs.
  */
 export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
   const remainingOut = condensed.map((scc) => scc.outSccs.length)

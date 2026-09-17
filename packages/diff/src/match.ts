@@ -17,7 +17,7 @@ export interface SymbolPair {
 /** Optional map returned by git for stage 2 (`old path` → `new path`). */
 export type GitRenameMap = ReadonlyMap<string, string>
 
-/** §3.3 — the similarity a multi-candidate logic-fingerprint group must reach to pair. */
+/** Stage 3 — the similarity a multi-candidate logic-fingerprint group must reach to pair. */
 const NAME_DISAMBIGUATION_THRESHOLD = 0.85
 
 /** One candidate pairing and the score that ranks it against the others. */
@@ -35,15 +35,15 @@ interface Assignment {
 }
 
 /**
- * §3.8 — accept candidate pairings highest score first, taking each base and each head at
- * most once. Deciding one head at a time let an earlier head consume a base that was a later
- * head's exact match. Not an optimal assignment — a greedy sweep can strand a pair whose
- * partners were both taken by higher-scoring ones — but it never passes over the best
- * available pairing. §8.2 carries the O(base × head) bound on `candidates`.
+ * Choosing among candidate pairings (diff-algorithm.md) — accept them highest score first, taking
+ * each base and each head at most once. Deciding one head at a time let an earlier head consume a
+ * base that was a later head's exact match. Not an optimal assignment — a greedy sweep can strand a
+ * pair whose partners were both taken by higher-scoring ones — but it never passes over the best
+ * available pairing. The same doc carries the O(base × head) bound on `candidates`.
  *
  * The consumed id sets come back with the pairings because every caller needs them, and
  * re-deriving them at the call site is a chance to read the wrong side. Stage 4.5 does not
- * call this: §3.4.5's candidates are all worth the same, see `bestPairing`.
+ * call this: stage 4.5's candidates are all worth the same, see `bestPairing`.
  */
 function acceptInScoreOrder(candidates: ScoredPair[]): Assignment {
   candidates.sort(compareCandidates)
@@ -61,7 +61,7 @@ function acceptInScoreOrder(candidates: ScoredPair[]): Assignment {
 
 /**
  * Highest score first, then `(base.id, head.id)` ascending. The id keys make the order total
- * because ids are unique within a Document (ir-schema.md §14 #1); without them equal scores
+ * because ids are unique within a Document (ir-schema.md #1); without them equal scores
  * would resolve to enumeration order and the diff would stop being a function of the inputs.
  */
 function compareCandidates(a: ScoredPair, b: ScoredPair): number {
@@ -78,10 +78,10 @@ function unclaimed(symbols: readonly IRSymbol[], claimed: ReadonlySet<SymbolId>)
 }
 
 /**
- * §3.1 — segments Symbols with identical `id` into paired matches. Runs first because it
- * is the highest-confidence signal (no heuristics, just hash lookup).
+ * Stage 1 (diff-algorithm.md) — segments Symbols with identical `id` into paired matches.
+ * Runs first because it is the highest-confidence signal (no heuristics, just hash lookup).
  *
- * Assumes `id` is unique on each side (ir-schema.md §14 #1) and does not check it:
+ * Assumes `id` is unique on each side (ir-schema.md #1) and does not check it:
  * `buildDiff` establishes that before calling, and a caller reaching this export directly
  * owns the obligation. A repeat on the head side loses all but the last entry to the lookup
  * map and then removes every one of them from `remainingHead`; a repeat on the base side
@@ -115,10 +115,10 @@ export function matchStageId(
 }
 
 /**
- * §3.2 — git rename detection. When a rename map is available (typical of ref-driven
- * scans), rewrite the base id with the head-side file path and look for a hit. Two base
- * files renamed onto one target predict the same head id, so the claimants are collected
- * before one is chosen.
+ * Stage 2 (diff-algorithm.md) — git rename detection. When a rename map is available
+ * (typical of ref-driven scans), rewrite the base id with the head-side file path and look
+ * for a hit. Two base files renamed onto one target predict the same head id, so the
+ * claimants are collected before one is chosen.
  *
  * The rewriter only touches the `file` portion of the id — the `<language>:` prefix and
  * the trailing `#<qualified-name>` segment stay unchanged so a moved file with the same
@@ -200,12 +200,13 @@ function rewriteIdFile(id: SymbolId, oldPath: string, newPath: string): SymbolId
 }
 
 /**
- * §3.3 — group both sides by `fingerprint.logic` and pair within each group. Two branches:
+ * Stage 3 (diff-algorithm.md) — group both sides by `fingerprint.logic` and pair within each
+ * group. Two branches:
  * - single base candidate → paired with `logic-fingerprint`, no similarity test
  * - several → `nameSimilarity` disambiguates at ≥ 0.85; a group that cannot reach it is left
  *   whole for stage 4 to re-evaluate
  *
- * Dropped symbols are excluded (§3.3 tail) — their logic fingerprint is the sentinel
+ * Dropped symbols are excluded — their logic fingerprint is the sentinel
  * `"000000000000"` and would collide with every other dropped Symbol in the workspace.
  * They flow to the stage-4.5 weak matcher instead.
  */
@@ -235,7 +236,7 @@ export function matchStageLogicFingerprint(
   }
 }
 
-/** Symbols by logic fingerprint, skipping the ones §3.3 excludes; each group is self-contained. */
+/** Symbols by logic fingerprint, skipping the ones stage 3 excludes; groups are self-contained. */
 function groupByLogic(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
   return groupBy(
     symbols.filter((symbol) => !symbol.dropped && symbol.fingerprint.logic !== ZERO_FINGERPRINT),
@@ -244,7 +245,7 @@ function groupByLogic(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
 }
 
 /**
- * §3.3’s two branches, over one logic-fingerprint group. A lone base candidate pairs with no
+ * Stage 3’s two branches, over one logic-fingerprint group. A lone base candidate pairs with no
  * similarity test; with more than one, names disambiguate. The loop keeps the second branch
  * feeding the first: a scored round that consumes all but one base leaves that one
  * unconditional.
@@ -306,9 +307,9 @@ function closestNameTo(
 }
 
 /**
- * §3.4 — name + signature similarity with a `(kind, signatureNullness)` bucket pre-filter, so
- * a class body is never paired against a function. §3.4.6's owner gate runs before the
- * score; over the pairs that clear it:
+ * Stage 4 (diff-algorithm.md) — name + signature similarity with a `(kind, signatureNullness)`
+ * bucket pre-filter, so a class body is never paired against a function. The owner gate runs
+ * before the score; over the pairs that clear it:
  *   0.5 * memberSimilarity + 0.3 * signatureSimilarity + 0.2 * OWNER_AXIS_SATISFIED
  * `memberSimilarity` reads the last segment only, since the gate has settled the owner and
  * reading it again would charge twice. Thresholds are per head, see `thresholdFor`; the two
@@ -327,7 +328,7 @@ export function matchStageNameSignature(
   const buckets = new Map<string, Bucket>()
   for (const baseSymbol of remainingBase) {
     if (baseSymbol.dropped) continue
-    // §3.4.3 — see `saysEnoughToPair`. Read on the base as well as the head, because the
+    // See `saysEnoughToPair`. Read on the base as well as the head, because the
     // property belongs to a pairing.
     if (!saysEnoughToPair(baseSymbol.name)) continue
     const key = bucketKey(baseSymbol)
@@ -348,7 +349,7 @@ export function matchStageNameSignature(
   let visitCount = 0
   for (const headSymbol of remainingHead) {
     if (headSymbol.dropped) continue
-    // §3.4.3 tail — `signatureSimilarity(null, null)` is 1.0, and the bucket key means a
+    // `signatureSimilarity(null, null)` is 1.0, and the bucket key means a
     // signature-less head only ever sees signature-less candidates: nothing it could
     // legitimately pair with.
     if (headSymbol.signature === null || headSymbol.signature === undefined) continue
@@ -397,7 +398,7 @@ export function matchStageNameSignature(
 }
 
 /**
- * §3.4 — score one candidate pairing and keep it if it clears the head's threshold. A plain
+ * Score one candidate pairing and keep it if it clears the head's threshold. A plain
  * function rather than a closure per head, which measured ~1.6x slower on a bucket the index
  * cannot narrow. The member floor is read before the owner gate because it is one Jaccard
  * over token sets the pass already holds, where the gate tokenises and matches every segment.
@@ -428,7 +429,7 @@ function bucketKey(symbol: IRSymbol): string {
 }
 
 /**
- * §3.4.0 — the least `memberSimilarity` that leaves `threshold` reachable: the other two axes
+ * The least `memberSimilarity` that leaves `threshold` reachable: the other two axes
  * are worth at most 0.3 + 0.2, so `member >= 2 * (threshold - 0.5)`. Exact, not approximate.
  */
 function lowestUsefulMember(threshold: number): number {
@@ -447,7 +448,7 @@ interface Bucket {
 }
 
 /**
- * §3.4.0 — the token that stands in for a member name carrying none. `Foo.Bar.` is admissible
+ * The token that stands in for a member name carrying none. `Foo.Bar.` is admissible
  * (two tokens in its qualified name) with an empty last segment; such Symbols can only pair
  * with each other, so they share a key of their own. `tokenizeName` never emits a space.
  */
@@ -459,18 +460,18 @@ function memberTokens(qname: string): readonly string[] {
 }
 
 /**
- * §3.4.3 — the composite score a pair must reach, by how many tokens the head's last name
- * segment has: 1 token → 1.0 (`0.5 + 0.3 + 0.2` is exactly 1 in IEEE 754, reached on an
- * identical member name and signature past a *compatible* owner), 2 tokens → 0.95 (refuses
- * `getUser` vs `getUsers`), otherwise 0.85.
+ * The threshold table (diff-algorithm.md) — the composite score a pair must reach, by how
+ * many tokens the head's last name segment has: 1 token → 1.0 (`0.5 + 0.3 + 0.2` is exactly
+ * 1 in IEEE 754, reached on an identical member name and signature past a *compatible*
+ * owner), 2 tokens → 0.95 (refuses `getUser` vs `getUsers`), otherwise 0.85.
  */
 const EXACT_MATCH_ONLY = 1
 const TWO_TOKEN_THRESHOLD = 0.95
 const DEFAULT_THRESHOLD = 0.85
 
 /**
- * §3.4.6 — what the owner axis is worth to a pair past its gate. A value rather than folded
- * into the weights so the composite keeps the 0.5/0.3/0.2 shape §3.4.3's rows are
+ * What the owner axis is worth to a pair past its gate. A value rather than folded
+ * into the weights so the composite keeps the 0.5/0.3/0.2 shape the threshold table's rows are
  * calibrated against.
  */
 const OWNER_AXIS_SATISFIED = 1
@@ -483,7 +484,7 @@ function thresholdFor(qname: string): number {
 }
 
 /**
- * §3.4.3 — whether a Symbol's qualified name says enough for stage 4 to read it at all.
+ * Whether a Symbol's qualified name says enough for stage 4 to read it at all.
  *
  * A name of one distinct token — `main`, or `Main.main` after dedup — scores the full 1.0
  * against any other with the same signature, and 1.0 is the top of the scale, so no threshold
@@ -496,16 +497,16 @@ function thresholdFor(qname: string): number {
  *
  * `tokenizeName` splits on ASCII case boundaries, so `ユーザー情報を取得する` is refused on
  * the same footing as `main`; the cost is a stage-4 move this stage will not find, and the
- * fix is §3.4.1's to make.
+ * fix is nameSimilarity's to make.
  */
 function saysEnoughToPair(qname: string): boolean {
   return tokenizeName(qname).length > 1
 }
 
 /**
- * §3.4.5 — dropped-only weak matcher. With the fingerprint zeroed, the only signals left are
- * the last segment of the qualified name and the file basename, and either alone pairs —
- * deliberately lax, since dropped Symbols sit outside the main review surface.
+ * Stage 4.5 (diff-algorithm.md) — dropped-only weak matcher. With the fingerprint zeroed, the only
+ * signals left are the last segment of the qualified name and the file basename, and either alone
+ * pairs — deliberately lax, since dropped Symbols sit outside the main review surface.
  *
  * What it does not accept is a signal that identifies nothing: a basename hit on `index.ts`
  * paired every dropped Symbol of one kind with every other and landed them in
@@ -513,7 +514,7 @@ function saysEnoughToPair(qname: string): boolean {
  * dropped base and one dropped head carry that key — counted over the Symbols this stage is
  * handed, since a key the earlier stages emptied out identifies again. The candidates are
  * then the identifying keys themselves, at most `2 × min(base, head)` of them, all worth the
- * same; §3.8's score-ordered sweep would settle a conflict on nothing but id order, so
+ * same; the score-ordered sweep would settle a conflict on nothing but id order, so
  * `bestPairing` takes a maximum matching instead.
  */
 export function matchStageDroppedWeak(
@@ -546,7 +547,7 @@ export function matchStageDroppedWeak(
   }
 }
 
-/** A pairing that one of §3.4.5's two keys identifies. */
+/** A pairing that one of stage 4.5's two keys identifies. */
 interface WeakEdge {
   base: IRSymbol
   head: IRSymbol
@@ -649,7 +650,7 @@ function soleCarriers(
 }
 
 /**
- * The two halves §3.4.5 scores. `kind` leads because it gates a pair before either half is
+ * The two halves stage 4.5 scores. `kind` leads because it gates a pair before either half is
  * read, and `/` separates because no kind, qualified-name segment or basename contains one.
  */
 function nameKey(symbol: IRSymbol): string {

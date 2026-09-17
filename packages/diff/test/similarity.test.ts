@@ -45,8 +45,8 @@ describe("nameSimilarity", () => {
 
 describe("memberSimilarity", () => {
   it("reads the last segment, leaving the owner to the gate", () => {
-    // The double count §3.4.6 used to carry: the whole-name Jaccard is depressed by a renamed
-    // owner, and the owner axis then charged for the same difference again.
+    // The double count the owner gate used to carry: the whole-name Jaccard is depressed by a
+    // renamed owner, and the owner axis then charged for the same difference again.
     expect(memberSimilarity("UserRepo.getUser", "UsersRepository.getUser")).toBe(1)
     expect(nameSimilarity("UserRepo.getUser", "UsersRepository.getUser")).toBeCloseTo(0.4, 5)
   })

@@ -3,7 +3,7 @@ import { langTypescriptPlugin } from "../src/plugin"
 
 /**
  * `parseFile` hands its tree to the core and stops owning it, so the plugin's side of the
- * WASM convention in lang-plugin.md §8.1 is `releaseTree`: the core calls it once the tree's
+ * WASM convention in lang-plugin.md is `releaseTree`: the core calls it once the tree's
  * last reader is done, and the WASM handle goes back to the heap there.
  */
 describe("langTypescriptPlugin.releaseTree", () => {

@@ -2,9 +2,9 @@ import type { Signature } from "@aburi/types"
 import { jaccard } from "./similarity"
 
 /**
- * §3.4.2 signatureSimilarity — mean of three subscores over `inputs` (ordered type equality
- * rate), `outputs` (same) and `throws` (Jaccard). Two null signatures score 1.0, one null
- * scores 0.0. Empty on both sides counts as 1.0, empty on one side as 0.0.
+ * signatureSimilarity (diff-algorithm.md) — mean of three subscores over `inputs` (ordered
+ * type equality rate), `outputs` (same) and `throws` (Jaccard). Two null signatures score
+ * 1.0, one null scores 0.0. Empty on both sides counts as 1.0, empty on one side as 0.0.
  */
 export function signatureSimilarity(
   base: Signature | null | undefined,

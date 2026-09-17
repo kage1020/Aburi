@@ -43,6 +43,6 @@ hand-editing is needed.
 
 ## See also
 
-- [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) §5.2 — the framework `classifySymbol` contract this plugin implements.
+- [`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) — the framework `classifySymbol` contract this plugin implements.
 - [`docs/design/extension-vocab.md`](../../docs/design/extension-vocab.md) — how framework `extKind` namespaces (`framework:nestjs:*`) plug into the shared vocab.
 - [`docs/design/drop-list.md`](../../docs/design/drop-list.md)

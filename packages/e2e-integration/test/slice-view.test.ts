@@ -46,7 +46,7 @@ async function writeHead(files: { repo: string; svc: string; ctl: string }): Pro
 /**
  * The `## 🧵 Slice View` section alone. Contain-checks must be scoped to it because the
  * flat `## ➕ Added` section lists the same symbols (Slice View is additive per
- * slice-view.md §14.10), so a naive `md.toContain("handleRequest")` would pass even if the
+ * slice-view.md), so a naive `md.toContain("handleRequest")` would pass even if the
  * Slice View rendering broke entirely.
  */
 function sliceViewSection(md: string): string {
@@ -87,8 +87,8 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     expect(section).toContain("writeRecord")
     expect(section).toContain("(3 members)")
 
-    // Every call in this chain resolves, so §12.6's marker must stay silent. A false-positive
-    // warning here would train reviewers to ignore it.
+    // Every call in this chain resolves, so `slice-view.md`'s unresolved-call marker must stay
+    // silent. A false-positive warning here would train reviewers to ignore it.
     expect(section).not.toContain("unresolved call")
     expect(headScan.ir.stats.callResolution?.unresolved).toEqual({
       localScope: 0,
@@ -122,7 +122,7 @@ describe("e2e slice-view — 3-layer feature addition clusters into 1 slice", ()
     const diff = diffIRs(baseScan.ir, headScan.ir)
 
     // The controller is now its own Slice: a singleton that looks architecturally
-    // disconnected but is not. slice-view.md §12.6 is the marker that tells the two apart.
+    // disconnected but is not. slice-view.md is the marker that tells the two apart.
     const ctlSlice = diff.slices.find(
       (s) => s.members.length === 1 && s.members[0]?.endsWith("ctl.ts#handleRequest") === true,
     )

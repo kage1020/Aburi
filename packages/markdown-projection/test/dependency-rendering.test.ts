@@ -107,7 +107,7 @@ describe("workspace mermaid graph — all-component enumeration", () => {
   })
 
   it("sanitizes distinct ComponentId inputs to distinct mermaid node ids (injectivity)", () => {
-    // If ir-schema §11 ever admits `_` in ComponentId, this test breaks first — the
+    // If ir-schema.md ever admits `_` in ComponentId, this test breaks first — the
     // sanitizer's `- → _` mapping would stop being injective and node lines would
     // collide silently in the rendered graph.
     const ids = ["billing", "billing-api", "billing-api-v2", "a", "ab-c", "abc"]

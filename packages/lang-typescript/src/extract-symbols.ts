@@ -338,11 +338,11 @@ function wrappedDeclaration(statement: Node): Node | null {
  * declaration, and it is refused. It augments the **global** scope: `interface Window { … }`
  * inside it declares a member of that scope, not of this file, and the only qualified name this
  * plugin could give it is a top-level one — where it would claim the name for this module and
- * fold with the file's own declaration of it (§4.3.1). `declare module "express" { … }` is the
- * same construct aimed at another module and is refused on the same ground, one step further in
- * (see `declaredNamespaceName`). Both are a known limit rather than an oversight: giving either its
- * Symbols needs a qname convention for a scope that is not the file's, which `ir-schema.md` §3.2
- * does not have.
+ * fold with the file's own declaration of it (`lang-plugin.md`). `declare module "express" { … }`
+ * is the same construct aimed at another module and is refused on the same ground, one step
+ * further in (see `declaredNamespaceName`). Both are a known limit rather than an oversight:
+ * giving either its Symbols needs a qname convention for a scope that is not the file's, which
+ * `ir-schema.md` does not have.
  */
 function ambientDeclaration(node: Node): Node | null {
   const inner = firstNonCommentChild(node)
@@ -395,7 +395,7 @@ function addClassAndMembers(
 
   // Members are only walked for named classes. Anonymous default classes
   // (`export default class { m() {} }`) do not have a documented member qname
-  // convention in ir-schema.md §3.2 — the `<default>` sentinel is reserved for the
+  // convention in ir-schema.md — the `<default>` sentinel is reserved for the
   // class itself, and `<default>.m` violates the identifier-segment pattern the core id
   // builder enforces. Refactor the class to a named form (or export it named separately)
   // to get member Symbols. Deferred alongside the anonymous-scope proposal.
@@ -673,7 +673,7 @@ function makeBodylessCandidate(
  *   withdraws the whole file along with the parse error that pointed at the missing token.
  * - **A quoted specifier** — `declare module "express" { … }`, `module "express" {}` — augments
  *   another module, so its declarations would claim that module's names for this file and fold
- *   with its own (§4.3, §4.3.1). Reachable without the `declare`, so the throw predated it.
+ *   with its own (`lang-plugin.md`). Reachable without the `declare`, so the throw predated it.
  * - **No body.** `declare module` followed by `export function keep() {}` parses with no error:
  *   `export` becomes the module's name, and a namespace called `export` entered the IR.
  *
@@ -943,8 +943,8 @@ function exportEvidence(node: Node): string[] {
  * that puts a token on the Symbol is a spelling this reports `public` for, so the LP6b table
  * cannot drift into checking two readers that disagree. It says nothing about a Symbol several
  * declarations wrote — `foldDeclarations` takes scalars from the leading declaration and
- * unions the lists (§4.3.1) — and there the two agree because legal source requires a merge's
- * declarations to agree about being exported (LP6b).
+ * unions the lists (`lang-plugin.md`) — and there the two agree because legal source requires a
+ * merge's declarations to agree about being exported (LP6b).
  */
 function computeTopLevelVisibility(node: Node): Visibility {
   return exportEvidence(node).length > 0 ? "public" : "internal"
@@ -985,7 +985,7 @@ const EXPORT_KEYWORD = "export-keyword"
  * `isDefaultExport` reads the parent, and the parent of `const Page = () => …` is the
  * module. The two are linked by name or not at all, which is why the names are collected up
  * front: one pass over the module's own statements, asked once, instead of a search of the
- * module per declaration (`lang-plugin.md` §8.2).
+ * module per declaration (`lang-plugin.md`).
  *
  * The wrappers are read by `unwrapValue`, the one reader that answers what a wrapper is for
  * every question this plugin asks about a node (LP7a). `export default Page satisfies NextPage`
@@ -1068,7 +1068,7 @@ function promoteDefaultExports(
  * The scan starts at the outermost wrapper (`export`, `declare`), since that is where the
  * JSDoc sits, and walks backwards from the anchor rather than searching the parent's child
  * list — at module level that list is every statement in the file, and materializing it once
- * per declaration made a large single file quadratic (`lang-plugin.md` §8.2). A decorator and
+ * per declaration made a large single file quadratic (`lang-plugin.md`). A decorator and
  * a non-doc comment are stepped over; anything else ends the run, including an anonymous
  * token such as a stray `;`, which separates a comment from the member below it.
  */

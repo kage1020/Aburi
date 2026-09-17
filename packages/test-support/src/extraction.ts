@@ -54,7 +54,7 @@ export function makeCandidate(
 
 /**
  * Fixtures are a documented boundary layer where an id is asserted rather than constructed
- * (ir-schema.md §3.5); production code reaches a `SymbolId` only through `makeSymbolId` /
+ * (ir-schema.md); production code reaches a `SymbolId` only through `makeSymbolId` /
  * `trySymbolId` in `@aburi/core`.
  */
 function symbolId(raw: string): SymbolId {

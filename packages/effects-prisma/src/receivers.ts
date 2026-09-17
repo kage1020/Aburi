@@ -3,7 +3,7 @@ import type { CallCandidate, Confidence } from "@aburi/types"
 
 /**
  * The words a Prisma Client binding is spelled with. The callee string is all a classifier
- * sees (effect-plugin.md §11.1), and matching is per word (`identifierWords`): `prisma`,
+ * sees (effect-plugin.md), and matching is per word (`identifierWords`): `prisma`,
  * `prismaClient`, `readReplicaDb` and `_prisma` count; `cache`, `router`, `items` and
  * `feedback` do not. `tx` / `trx` cover the interactive-transaction callback parameter.
  *

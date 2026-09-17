@@ -27,9 +27,10 @@ export interface ProjectComponentInput {
 }
 
 /**
- * §5 — `components/<id>.md` for one Component. `symbols[]` is expected to be the subset that
- * belongs to `component.id`; filtering belongs to the caller, which keeps the projection pure.
- * Newlines are always `\n` (§3.1); a caller that needs CRLF must post-process.
+ * markdown-projection.md — `components/<id>.md` for one Component. `symbols[]` is expected
+ * to be the subset that belongs to `component.id`; filtering belongs to the caller, which
+ * keeps the projection pure. Newlines are always `\n`; a caller that needs CRLF must
+ * post-process.
  */
 export function projectComponent(input: ProjectComponentInput): string {
   const { component, symbols, dependencies } = input
@@ -112,7 +113,7 @@ function joinCode(items: readonly string[]): string {
 
 /**
  * Effects of the Boundary Symbols (a `boundary: true` decorator or a `framework:` extKind).
- * effect-propagation.md §4.3 puts this rollup in the projection layer: propagation runs to
+ * effect-propagation.md puts this rollup in the projection layer: propagation runs to
  * full closure regardless of boundary status; the view chooses what to surface. Every effect
  * (local + propagated) per boundary Symbol, sorted by `(id, target)`; the section is omitted
  * when no boundary Symbol has an effect.
@@ -164,7 +165,7 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
 }
 
 /**
- * §5.2 — one Symbol block, with §5.3's omit rules: empty `decorators` → no row,
+ * markdown-projection.md — one Symbol block, with its omit rules: empty `decorators` → no row,
  * `signature: null` → no row, empty `rules` / `effects` / `calls` → no section, dropped
  * fingerprint → no `<sub>` line.
  */

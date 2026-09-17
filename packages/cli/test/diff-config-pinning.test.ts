@@ -9,7 +9,7 @@ import { DIFF_JSON_FILENAME } from "../src/artifact-paths"
 import { fakeGit } from "./fixtures"
 
 /**
- * `cli-spec.md` §6.4 step 3: the base scan reads the **head**'s `aburi.json`.
+ * `cli-spec.md`: the base scan reads the **head**'s `aburi.json`.
  *
  * The base is interpreted through the head's view on purpose. Under the base's own config a
  * commit that edits nothing but `ignore` moves every Symbol the setting covers, so `aburi
@@ -224,7 +224,7 @@ describe("a relative plugin ref in the head's config resolves in the head's tree
     await makeRevisions("aburi.json")
     // The head registers a plugin that lives beside its own config. The base revision predates
     // it, so the file is absent from the worktree — which is the ordinary shape of a commit
-    // that adds a plugin. `cli-spec.md` §6.4.1.5 pins the plugin set to the head environment
+    // that adds a plugin. `cli-spec.md` pins the plugin set to the head environment
     // for exactly this reason; resolved against the worktree instead, the base scan dies with
     // `plugin-error` on a config the head reads fine.
     await mkdir(resolve(head, "plugins"), { recursive: true })

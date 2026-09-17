@@ -8,7 +8,7 @@ import { loadPinnedConfig, resolveConfig } from "../src/config-load"
 
 /**
  * Every failure of the config load used to be reported as the config being malformed, which
- * `cli-spec.md` §9 spends exit 2 on. Two kinds of failure arrive there that are not: a file
+ * `cli-spec.md` spends exit 2 on. Two kinds of failure arrive there that are not: a file
  * that exists and cannot be read, which is IO, and Aburi's own invariants, which are bugs.
  * Sending a reader through `aburi.json` for either is the misdirection `classifyDiffError`
  * exists to avoid one file away.
@@ -36,7 +36,7 @@ function detailFor(code: ConfigErrorCode): ConstructorParameters<typeof ConfigEr
   }
 }
 
-describe("classifyConfigError — ConfigError to exit code (cli-spec.md §9)", () => {
+describe("classifyConfigError — ConfigError to exit code (cli-spec.md)", () => {
   for (const code of READER_FAULTS) {
     it(`reports ${code} as the reader's to fix`, () => {
       const cliError = classifyConfigError(new ConfigError(`boom: ${code}`, detailFor(code)))
@@ -48,8 +48,8 @@ describe("classifyConfigError — ConfigError to exit code (cli-spec.md §9)", (
   }
 
   it("reports a config that cannot be read as the machine's fault", () => {
-    // §9 keeps exit 1 for IO. A config that is there and unreadable is not a malformed one,
-    // and the remedy is a permission or a mount rather than an edit.
+    // `cli-spec.md` keeps exit 1 for IO. A config that is there and unreadable is not a
+    // malformed one, and the remedy is a permission or a mount rather than an edit.
     const cause = new ConfigError("Failed to read config at /w/aburi.json (EACCES)", {
       code: "config-read-failed",
     })
@@ -65,7 +65,7 @@ describe("classifyConfigError — ConfigError to exit code (cli-spec.md §9)", (
 
   it("keeps a path that names nothing on the reader's side", () => {
     // The one that decides whether `--config ./typo.json` is an argument mistake or an IO
-    // failure. §9 lists "missing" under exit 2, and no permission is involved.
+    // failure. `cli-spec.md` lists "missing" under exit 2, and no permission is involved.
     const cliError = classifyConfigError(
       new ConfigError("No config file at /w/typo.json", { code: "config-not-found" }),
     )

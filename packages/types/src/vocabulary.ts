@@ -7,14 +7,14 @@
 /**
  * The segment a call target carries where the source addressed a property through brackets
  * with something that is not a name — `prisma[model].create()` is `prisma.<computed>.create`
- * (`lang-plugin.md` §4.4).
+ * (`lang-plugin.md`).
  *
  * Dropping the index instead does not shorten the call, it renames it: `prisma.create` is a
  * call the program does not contain, spelled like an ordinary two-segment method call, and a
  * consumer that counts segments reads it as one.
  *
  * The spelling is what makes the segment safe to write: `<` is outside the qualified-name
- * segment grammar (`ir-schema.md` §3.1), so a target carrying it matches no Symbol id and no
+ * segment grammar (`ir-schema.md`), so a target carrying it matches no Symbol id and no
  * Symbol name, and resolves against nothing rather than against whatever the shortened name
  * would have found.
  *

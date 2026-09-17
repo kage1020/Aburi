@@ -32,7 +32,7 @@ import {
 /**
  * One file's plugin throw must cost that file and no other.
  *
- * `lang-plugin.md` §7.2 has said so since before there was a `try` anywhere in the scan:
+ * `lang-plugin.md` has said so since before there was a `try` anywhere in the scan:
  * an extraction exception skips the file and the pipeline as a whole does not stop. Until
  * the boundary existed, a single throw discarded every other file's Symbols — the run
  * produced no IR at all, so a workspace of healthy files yielded nothing because one file

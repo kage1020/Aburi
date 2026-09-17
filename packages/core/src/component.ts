@@ -16,7 +16,7 @@ import { detectManagers, type WorkspaceCandidate, type WorkspaceManager } from "
 
 /**
  * Language id assigned to each file extension when counting language frequency in a
- * candidate directory. The list mirrors docs/design/component-detect.md §4.4; the
+ * candidate directory. The list mirrors docs/design/component-detect.md; the
  * future lang-plugin path will register additions on top of this table.
  */
 const EXTENSION_TO_LANGUAGE: ReadonlyMap<string, string> = new Map([
@@ -64,7 +64,7 @@ const NPM_DEP_TO_FRAMEWORK: ReadonlyArray<readonly [string, string]> = [
   ["@trpc/server", "trpc"],
 ]
 
-/** How far below a component root the language census looks (component-detect.md §4.4). */
+/** How far below a component root the language census looks (component-detect.md). */
 const LANGUAGE_SCAN_DEPTH = 3
 
 /** Language-frequency filter: skip extensions with fewer than this many files. */
@@ -105,7 +105,7 @@ export interface DetectComponentsOptions {
 /**
  * Synthesize one `Component` per workspace candidate emitted by detectManagers. The result
  * always has at least one entry: when no managers fire, the workspace root itself becomes
- * a single-project Component (component-detect.md §5) so the rest of the pipeline never
+ * a single-project Component (component-detect.md) so the rest of the pipeline never
  * has to handle a zero-Component IR.
  *
  * The function is async-only because language frequency counting and dependency-driven
@@ -113,7 +113,7 @@ export interface DetectComponentsOptions {
  */
 export async function detectComponents(options: DetectComponentsOptions): Promise<Component[]> {
   const { workspaces } = await detectManagers(options.workspaceRoot)
-  // The single-project fallback (component-detect.md §5): the workspace root as the one
+  // The single-project fallback (component-detect.md): the workspace root as the one
   // candidate, described by whatever `package.json` it holds.
   const mergedCandidates =
     workspaces.length === 0
@@ -143,12 +143,13 @@ export { detectManagers }
 const NPM_MANIFEST = "package.json"
 
 /**
- * Manifest filenames in the order component-detect.md §4.1 reads them for a Component's
+ * Manifest filenames in the order component-detect.md reads them for a Component's
  * identity. A directory several detectors claim is described by all of their manifests, and
  * this is which one answers first — by filename rather than by which detector arrived first,
  * so the order `detectManagers` sorts its tools in cannot move a Component's id.
  *
- * The three §4.1 names no detector produces yet are listed anyway: a filename absent from
+ * The three id-inference names no detector produces yet are listed anyway: a filename absent
+ * from
  * this list is ordered after every name in it and against its peers alphabetically, which is
  * deterministic but says nothing about what the manifest means.
  */
@@ -198,7 +199,8 @@ function mergeCandidatesByPath(candidates: readonly WorkspaceCandidate[]): Merge
 }
 
 /**
- * This candidate's manifests as `[filename, path]`, in the order §4.1 reads them. A filename
+ * This candidate's manifests as `[filename, path]`, in the order id inference reads them. A
+ * filename
  * the order does not name comes after every one it does, and against its peers by name — a
  * decision that is at least the same on every machine.
  */
@@ -216,7 +218,7 @@ interface ReadManifest {
 }
 
 /**
- * Every manifest describing this directory, parsed, in §4.1's reading order.
+ * Every manifest describing this directory, parsed, in id inference's reading order.
  *
  * The `package.json` under the candidate root is read whether or not a detector reported it.
  * A directory holding one is an npm package however it was found, and letting the detector set
@@ -256,7 +258,7 @@ async function buildComponent(
     name,
     roots: [entry.relativeRoot],
     languages: languages.length > 0 ? [...languages] : [FALLBACK_LANGUAGE],
-    // Class A per ir-schema.md §1.1: always written, `null` when unset. Detection has no
+    // Class A per ir-schema.md: always written, `null` when unset. Detection has no
     // source for a description; the config path (`resolveComponents` in @aburi/cli) writes
     // the same key from `components[].description`, so both producers agree on the shape.
     description: null,
@@ -267,7 +269,7 @@ async function buildComponent(
 }
 
 /**
- * Pick the Component id, in the priority order of component-detect.md §4.1. Of the sources
+ * Pick the Component id, in the priority order of component-detect.md Of the sources
  * that list names, `package.json#name` and `project.json#name` have detectors today; the
  * Cargo, pyproject and go.mod branches arrive with theirs, and the directory name is the last
  * resort for every candidate.
@@ -306,7 +308,7 @@ function componentIdOrThrow(candidate: string, origin: string, root: string): Co
   } catch (cause) {
     throw new CoreError(
       `Cannot derive a Component id from ${origin} at "${root}": kebab-casing it yields ` +
-        `"${candidate}", which is not ASCII kebab-case (ir-schema.md §4). Rename it, or ` +
+        `"${candidate}", which is not ASCII kebab-case (ir-schema.md). Rename it, or ` +
         `declare the component explicitly under components[] in aburi.json.`,
       { code: "invalid-component-id", value: candidate },
       { cause },
@@ -324,7 +326,8 @@ function decideName(
 /**
  * Every name these manifests declare, in the order they were read.
  *
- * §4.1 and §4.2 are priority orders over *sources*, so a manifest that carries no name is not
+ * `id` and `name` inference are priority orders over *sources*, so a manifest that carries no
+ * name is not
  * an answer — the next one is asked before the directory name is. That matters where the two
  * disagree about what exists rather than about the value: an nx `project.json` names a project
  * even for a directory whose `package.json` is a private stub with no `name` at all.
@@ -350,13 +353,14 @@ function directoryLeaf(entry: Pick<MergedCandidate, "relativeRoot" | "absoluteRo
 
 /**
  * The id a published npm name yields, with the scope folded in rather than discarded:
- * `@alpha/utils` is `alpha-utils`, not `utils` (component-detect.md §4.1).
+ * `@alpha/utils` is `alpha-utils`, not `utils` (component-detect.md).
  *
- * Three answers, and the difference between the last two is what §4.1 means by a priority over
- * *sources*:
+ * Three answers, and the difference between the last two is what id inference means by a
+ * priority over *sources*:
  *
- * - `null` — this name says nothing §4.1 can use, so the next manifest is asked. `@scope/`
- *   and a bare `@scope` are that: §4.2 has a name, §4.1 has none.
+ * - `null` — this name says nothing id inference can use, so the next manifest is asked.
+ *   `@scope/` and a bare `@scope` are that: `name` inference has a name, `id` inference has
+ *   none.
  * - `""` — this name is the answer, and it cannot be an id. `componentIdOrThrow` says so and
  *   names the package, rather than falling through to the directory.
  * - anything else — the id.
@@ -485,7 +489,8 @@ function frequentLanguages(counts: ReadonlyMap<LanguageId, number>): LanguageId[
 }
 
 /**
- * What every manifest kind has in common — the `name` §4.1 and §4.2 read. It is all a
+ * What every manifest kind has in common — the `name` that id and name inference read. It is
+ * all a
  * `project.json` shares with a `package.json`, so it is what a parse is typed as until
  * something establishes which file it came from.
  */
@@ -573,7 +578,7 @@ function collectFrameworks(manifest: NpmManifest | null): string[] {
 /**
  * Gather the component's declared public surface from its manifest.
  *
- * Every value is put into Unicode NFC (ir-schema.md §1.2) because this function decides
+ * Every value is put into Unicode NFC (ir-schema.md) because this function decides
  * both an identity and an order with them: the `Set` collapses duplicates and the result is
  * sorted. `@aburi/diff` then compares the array against the previous revision's, which was
  * read off disk and is therefore normalized — so an un-normalized entry here reports a
@@ -608,7 +613,8 @@ function collectFromExports(value: unknown, out: Set<string>): void {
 
 /**
  * The single funnel every `publicApi` entry passes through, whether it came from `exports`
- * or from one of the scalar keys — so the NFC normalization §1.2 requires cannot be applied
+ * or from one of the scalar keys — so the NFC normalization ir-schema.md requires cannot be
+ * applied
  * to one source and forgotten on the other.
  */
 function normalizePackagePath(raw: string | undefined | null): string | null {
@@ -619,7 +625,7 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
 }
 
 /**
- * Guarantee Component.id uniqueness, order-independently (component-detect.md §4.1).
+ * Guarantee Component.id uniqueness, order-independently (component-detect.md).
  *
  * 1. Walk up `roots[0]`, one ancestor directory at a time, suffixing every id that is still
  *    shared, until each is unique or its root has no ancestors left.
@@ -627,7 +633,7 @@ function normalizePackagePath(raw: string | undefined | null): string | null {
  *    reached.
  * 3. Refuse to hand back a duplicate. Only a hash collision reaches this, and the caller it
  *    protects is `aburi init`, which writes `components[]` without ever building an IR — so
- *    the §14 #2 integrity check downstream never sees it.
+ *    the #2 integrity check downstream never sees it.
  *
  * What the passes never read is a component's position in the list. `consumedAncestors` does
  * depend on the set of ids a component contends with — a package that arrives claiming an id in use
@@ -651,7 +657,7 @@ const ROOT_HASH_LENGTH = 8
 /** A component's id while the ancestor pass is deciding how much of its path it needs. */
 interface IdCandidate {
   readonly component: Component
-  /** The id §4.1 derived, before any suffix. */
+  /** The id inference derived, before any suffix. */
   readonly base: ComponentId
   /** Ancestor directory segments of `roots[0]`, nearest first. */
   readonly ancestors: readonly string[]
@@ -715,7 +721,7 @@ function applyRootHashPass(components: Component[]): void {
  *
  * `applyRootHashPass` separates a group by digest rather than by construction, so uniqueness
  * is overwhelmingly likely rather than certain. Where the result becomes an IR, invariant
- * §14 #2 catches a duplicate; `aburi init` writes `components[]` straight to `aburi.json` and
+ * #2 catches a duplicate; `aburi init` writes `components[]` straight to `aburi.json` and
  * builds no IR, so without this it would persist the duplicate and report success.
  */
 function assertIdsUnique(components: readonly Component[]): void {

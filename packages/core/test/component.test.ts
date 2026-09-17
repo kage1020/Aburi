@@ -65,7 +65,7 @@ describe("detectComponents", () => {
     expect(components[0]?.roots).toEqual(["."])
   })
 
-  it("writes description as an explicit null on both detection paths (ir-schema.md §1.1)", async () => {
+  it("writes description as an explicit null on both detection paths (ir-schema.md)", async () => {
     // Class A: the key is present carrying `null`, never omitted. Detection has no source
     // for a description, but the config path in @aburi/cli writes the same key from
     // `components[].description`, and a Component must not change shape depending on which
@@ -100,12 +100,14 @@ describe("detectComponents", () => {
     // separate them.
     expect(__testing_component.toIdFromNpmName("@scope/billing")).toBe("scope-billing")
     expect(__testing_component.toIdFromNpmName("billing")).toBe("billing")
-    // `@scope/` is a name §4.2 can use and §4.1 cannot: no id, so the next manifest is asked.
+    // `@scope/` is a name `name` inference can use and `id` inference cannot: no id, so the
+    // next manifest is asked.
     expect(__testing_component.toIdFromNpmName("@scope/")).toBeNull()
     expect(__testing_component.toIdFromNpmName("@scope")).toBeNull()
     expect(__testing_component.toIdFromNpmName("")).toBeNull()
     // A bare part that kebab-cases to nothing is `""`, not the scope: `""` reaches the abort
-    // §4.1 promises, and the scope alone would be one silent id for every unusable name in it.
+    // id inference promises, and the scope alone would be one silent id for every unusable
+    // name in it.
     expect(__testing_component.toIdFromNpmName("@acme/---")).toBe("")
     expect(__testing_component.toIdFromNpmName("@acme/___")).toBe("")
     expect(__testing_component.toIdFromNpmName("@acme/日本語")).toBe("")
@@ -114,7 +116,8 @@ describe("detectComponents", () => {
   it("aborts on a scoped name whose bare part cannot be an id, rather than taking the scope", async () => {
     // Folding the scope in must not turn "this name has no id" into "the id is the scope":
     // two such packages in one scope would both become `acme`, collide, and come out of the
-    // hash pass with opaque ids and nothing said. §4.1 says detection aborts and names the
+    // hash pass with opaque ids and nothing said. component-detect.md says detection aborts and
+    // names the
     // package, which is what the unscoped `"---"` case below has always done.
     await writeFile(join(tmp, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8")
     const pkg = await makeDir(tmp, "packages", "widgets")
@@ -346,7 +349,7 @@ describe("detectComponents", () => {
 
   it("CD10: normalizes publicApi entries, which decide both an identity and an order", async () => {
     // The `Set` collapses duplicates and the result is sorted, so the spelling decides both
-    // (ir-schema.md §1.2). `@aburi/diff` then compares this array against the previous
+    // (ir-schema.md). `@aburi/diff` then compares this array against the previous
     // revision's, which was read off disk and is therefore normalized — so an un-normalized
     // entry here reports a `publicApiChanged` for a component nobody touched.
     const decomposed = "café".normalize("NFD")
@@ -414,7 +417,7 @@ describe("detectComponents", () => {
     // The hash pass separates a group by digest, not by construction, so uniqueness is a
     // check rather than a guarantee. Two components on one root is the only way to force it
     // from a test — a real digest collision is not reachable — and it is the same shape: the
-    // path separates nothing and the digests match. Where the result becomes an IR, §14 #2
+    // path separates nothing and the digests match. Where the result becomes an IR, invariant #2
     // would catch it; `aburi init` builds no IR, so this is the boundary that has to.
     const duplicate = (): Component[] => [
       {

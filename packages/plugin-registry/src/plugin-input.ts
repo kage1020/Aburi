@@ -57,9 +57,9 @@ export interface CallTargetSegments {
  * one bias that would actively mislead whoever debugs it.
  *
  * A thrown error is an upstream contract violation, not a classification decision, and
- * effect-plugin.md §10 EP3a exempts it from the "a throwing classifier is treated as
+ * effect-plugin.md EP3a exempts it from the "a throwing classifier is treated as
  * `null`" rule: it propagates rather than resolving to an unclassified call. The core's
- * per-file boundary (lang-plugin.md §7.2) is what decides the cost — the file is withdrawn,
+ * per-file boundary (lang-plugin.md) is what decides the cost — the file is withdrawn,
  * named, and quoted back with this message, and the scan exits non-zero. Degrading the
  * throw here instead would convert a language plugin bug into a quietly under-populated IR,
  * which is the outcome this guard exists to prevent.
@@ -303,11 +303,11 @@ export interface EffectsPluginManifest<Name extends string, DerivedByPrefix exte
  * Manifest for an effects plugin that classifies onto core-owned effect ids only.
  *
  * `provides.effects` is empty by design: core vocabulary (`db.*`, `event.*`, `network.*`)
- * lives in the reserved namespace and MUST NOT appear there (extension-vocab.md §5.1). The
+ * lives in the reserved namespace and MUST NOT appear there (extension-vocab.md). The
  * plugin's own `x-<name>:*` namespace is reserved via the `xPrefix` the registry derives
  * from `name` (`deriveXPrefix`) and currently claims no bindings. `extKinds` and
  * `frameworks` are empty by contract — an effects manifest declaring either is a schema
- * error (extension-vocab.md §6.1). `derivedByPrefixes` takes the same constant the
+ * error (extension-vocab.md). `derivedByPrefixes` takes the same constant the
  * classifier builds its tags from, so the two cannot drift.
  */
 export function defineEffectsManifest<Name extends string, DerivedByPrefix extends string>(

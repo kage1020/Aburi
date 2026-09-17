@@ -10,9 +10,9 @@ import { effectsDrizzleManifest } from "./manifest"
 
 /**
  * Drizzle effect plugin: maps Drizzle ORM call expressions onto the core `db.read` /
- * `db.write` / `db.transaction` vocabulary. `classify` is pure (effect-plugin.md §5.1.1,
- * §11.1) and throws on a malformed CallCandidate or a zero-argument `transaction` / `batch`
- * — upstream contract violations, surfaced rather than swallowed.
+ * `db.write` / `db.transaction` vocabulary. `classify` is pure (effect-plugin.md) and throws
+ * on a malformed CallCandidate or a zero-argument `transaction` / `batch` — upstream contract
+ * violations, surfaced rather than swallowed.
  */
 class DrizzleEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsDrizzleManifest

@@ -7,7 +7,7 @@ import type { CallEdge } from "../../src/callgraph"
  * read as though they were testing different things.
  */
 
-/** A locally-detected Effect: `line` present, `propagated` absent (ir-schema.md §9). */
+/** A locally-detected Effect: `line` present, `propagated` absent (ir-schema.md). */
 export function effect(id: string, target: string, overrides: Partial<Effect> = {}): Effect {
   return {
     id,

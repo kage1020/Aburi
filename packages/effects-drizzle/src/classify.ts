@@ -34,7 +34,7 @@ import { classificationConfidence } from "./receivers"
  *
  * Throws on a malformed target (`assertNonEmptySegments`) and on a zero-argument
  * `transaction` / `batch`: both are upstream contract violations, not classification
- * decisions. Pure with respect to plugin state (effect-plugin.md §5.1.1).
+ * decisions. Pure with respect to plugin state (effect-plugin.md).
  */
 export function classifyDrizzleCall(
   call: CallCandidate,

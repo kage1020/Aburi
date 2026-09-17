@@ -24,12 +24,12 @@ import { runScan, type ScanReport } from "./scan"
 export type { WarnFn }
 
 /**
- * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md §9).
+ * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md).
  *
  * Most codes describe something the reader can fix — IR schemas that disagree, an
  * out-of-range `lineFuzz`, a malformed IR, a repeated id — so they surface as `config-error`
  * (exit 2). `slice-invariant-violated` cannot: it fires only when Aburi produced a Slice
- * breaking its own derivation rule (slice-view.md §7.4), and reporting that as a config error
+ * breaking its own derivation rule (slice-view.md), and reporting that as a config error
  * would send a reader through `aburi.json` for a bug that is not there.
  */
 export function classifyDiffError(error: DiffError): CliError {
@@ -57,7 +57,7 @@ export interface DiffOptions {
   configPath?: string
   compact?: boolean
   /**
-   * Size cap for `diff.md`, in UTF-8 bytes (`markdown-projection.md` §6.4). Absent writes the
+   * Size cap for `diff.md`, in UTF-8 bytes (`markdown-projection.md`). Absent writes the
    * whole document, which is what a file on disk is for; a caller that posts the file as a
    * GitHub comment has to pass one, because the API rejects a body over 65536 bytes outright.
    */
@@ -80,7 +80,7 @@ export interface DiffReport {
   diffMdPath: string | null
   summaryLine: string
   /**
-   * Head-side call-resolution census (call-resolution.md §8.1), rendered for
+   * Head-side call-resolution census (call-resolution.md), rendered for
    * stdout. `null` when the head IR predates `stats.callResolution` — an older
    * artifact cannot be back-filled, and printing zeroes would claim a clean
    * graph the run never actually observed.
@@ -90,7 +90,7 @@ export interface DiffReport {
   /**
    * Sides whose own scan reported a fault — `ScanReport.exitCode` other than success, which
    * means a plugin threw while extracting a file, or the scan read too little of the workspace
-   * to be believed (`cli-spec.md` §5.7). The two can hold on different sides at once, which is
+   * to be believed (`cli-spec.md`). The two can hold on different sides at once, which is
    * why the warning built from this list says each side's cause rather than one about both.
    *
    * `null` in `--base` / `--head` mode, where this command ran no scan: that is not the same
@@ -108,26 +108,26 @@ export interface DiffReport {
 
 /**
  * Which revision a scan covered. The head is always the working tree, whatever the ref spec
- * calls it (§6.4), so the two are not interchangeable with the ref names.
+ * calls it (`cli-spec.md`), so the two are not interchangeable with the ref names.
  */
 export type DiffSide = "base" | "head"
 
 /**
- * `aburi diff` — two dispatch paths, both defined by `docs/design/cli-spec.md §6`:
+ * `aburi diff` — two dispatch paths, both defined by `docs/design/cli-spec.md`:
  *
- * - `<base>..<head>` ref spec (§6.4). Both refs are validated with `git rev-parse
+ * - `<base>..<head>` ref spec. Both refs are validated with `git rev-parse
  *   --verify` before we touch the working tree; the base ref materialises via a
  *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
- *   The worktree's own directory is named after the head workspace's (§6.4 step 2),
+ *   The worktree's own directory is named after the head workspace's,
  *   since Component detection reads that name — see `baseWorktreeLeaf`. The head is
  *   always the working tree: the `<head>` label in the ref spec only labels the report.
  * - `--base <ir.json> --head <ir.json>` — parses both files and jumps directly to
  *   `buildDiff`. No git required.
  *
  * `--fail-on` is parsed once and evaluated post-diff; the first triggered clause maps to
- * `EXIT.GATE` with a stable diagnostic phrasing (§6.7). An empty `--fail-on` value
+ * `EXIT.GATE` with a stable diagnostic phrasing. An empty `--fail-on` value
  * (from an unset shell variable, for example) is rejected by the parser rather than
  * silently disabling the CI gate.
  */
@@ -223,7 +223,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes },
     )
     // The one case the projection cannot meet is a budget smaller than the title, the Summary
-    // line and the omission note together (`markdown-projection.md` §6.4). It says so in the
+    // line and the omission note together (`markdown-projection.md`). It says so in the
     // document; this says so to the caller, who asked for a number and got a bigger one.
     if (options.maxBytes !== undefined) {
       const written = Buffer.byteLength(markdown, "utf8")
@@ -236,7 +236,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     await writeFile(diffMdPath, markdown, "utf8")
   }
 
-  // §6.6
+  // `cli-spec.md` stdout shape
   const summaryLine = projectDiffSummaryLine(diff)
   const { firstTriggered } = evaluateFailOn(failOn, diff)
   const faultedScans =
@@ -255,7 +255,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const callResolution = headIR.stats.callResolution
   if (callResolution === undefined) {
     warn(
-      `⚠ head IR has no stats.callResolution, so the call-resolution census is unavailable for this diff. Re-run \`aburi scan\` on the head revision to record it (call-resolution.md §8.1).`,
+      `⚠ head IR has no stats.callResolution, so the call-resolution census is unavailable for this diff. Re-run \`aburi scan\` on the head revision to record it (call-resolution.md).`,
     )
   }
   warnOnUnenumerableLosses(baseIR, "base", warn)
@@ -304,8 +304,9 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
 
 /**
  * A scan that broke makes the diff evidence of nothing, whichever side broke: an incident that
- * `scan` refuses to exit `0` on (§5.6) must not turn green by being asked for a diff instead.
- * That covers the base side too — a fault at the base ref reddens every diff taken against it.
+ * `scan` refuses to exit `0` on (`cli-spec.md`) must not turn green by being asked for a diff
+ * instead. That covers the base side too — a fault at the base ref reddens every diff taken
+ * against it.
  *
  * One clause per faulted side, each in the words of what that scan reported: two sides can
  * fault for different reasons, and this is the line a reader greps out of a CI log to account
@@ -324,8 +325,8 @@ function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], war
  * Why one scan did not exit clean, in the words of what it reported.
  *
  * Shorter than the lines `scan` prints for itself: those carry the consequence and where to
- * look, and both scans' reports are already on this stderr above this one (§5.6). This clause
- * exists to account for the exit code, so it names the cause and stops.
+ * look, and both scans' reports are already on this stderr above this one (`cli-spec.md`).
+ * This clause exists to account for the exit code, so it names the cause and stops.
  *
  * A plugin exception comes first when one scan has more than one. It is the reason that says
  * something in the run is broken, and a scan that threw on every file it found has the coverage
@@ -376,7 +377,7 @@ function describeScanFault(report: ScanReport): string {
  * `stats.skippedFiles[].reason` persists `extraction-failed`, so `--base` / `--head` can see
  * that a plugin threw when a document was written even though it never watched it happen. Left
  * silent, a workspace that makes `aburi scan` exit 3 produced two IRs that diff clean — and
- * scan-in-one-job, diff-in-another is the shape `cli-spec.md` §6.4 recommends when git is not
+ * scan-in-one-job, diff-in-another is the shape `cli-spec.md` recommends when git is not
  * available.
  *
  * It warns and does not gate. The fault already had its exit code, in the run that hit it;
@@ -426,7 +427,7 @@ function warnOnUnenumerableLosses(ir: IR, side: DiffSide, warn: WarnFn): void {
  * `unknown` is derived from the matcher's leftovers: a Symbol one document has and the other
  * lacks. When a file is skipped on both sides there are no Symbols from it anywhere and no
  * leftovers, so no status can carry the loss. The document says it one level up, in
- * `notCompared[]` (`diff-algorithm.md` §6.3), and this line is the cover note for the reader
+ * `notCompared[]` (`diff-algorithm.md`), and this line is the cover note for the reader
  * watching the command rather than reading the file it wrote.
  *
  * Deliberately shorter than the artifact: a count, a capped list of paths, and no reasons,
@@ -456,8 +457,8 @@ interface RefSpec {
 }
 
 /**
- * `<base>..<head>`, split at the first separator rather than at every `..` (`cli-spec.md`
- * §6.3), so the three-dot form is named for what it is (exit 2, §6.5) instead of running with
+ * `<base>..<head>`, split at the first separator rather than at every `..` (`cli-spec.md`),
+ * so the three-dot form is named for what it is (exit 2) instead of running with
  * `.HEAD` as the head ref. The merge-base advice uses placeholders rather than the caller's
  * refs: a ref name is not shell-safe, so a copy-pasteable command built from one hands the
  * reader a substitution to run.
@@ -569,14 +570,14 @@ async function resolveViaGit(
   await assertNotShallow(git, cwd)
 
   // Pinned before the worktree exists, and therefore against the caller's own directory.
-  // §6.4 step 3 gives the base scan the *head* `aburi.json`: a config as of the base ref
+  // `cli-spec.md` gives the base scan the *head* `aburi.json`: a config as of the base ref
   // would make any commit that edits one read as "the entire IR changed". Discovery from
   // inside the worktree returns the base copy, and so does a relative `--config`, so the
   // rule holds only if the answer is fixed here and handed to both scans.
   const pinnedConfig = await pinConfigOnce()
   // Two things read this, and both are "the base is interpreted through the head's view":
-  // the name to materialise the base under (§6.4 step 2), and where a relative
-  // `./plugins/*.mjs` ref in the head's config resolves from (§6.4.1.5, which pins the plugin
+  // the name to materialise the base under, and where a relative
+  // `./plugins/*.mjs` ref in the head's config resolves from (`cli-spec.md` pins the plugin
   // set to the head environment). The worktree materialises the base *sources*; it has no
   // claim on either.
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
@@ -664,7 +665,7 @@ async function resolveViaGit(
 
 /**
  * The directory name to materialise the base revision under: the head workspace's own leaf
- * (`cli-spec.md` §6.4 step 2 — Component detection reads that name). The two substitutions
+ * (`cli-spec.md` — Component detection reads that name). The two substitutions
  * are an empty leaf (only at the filesystem root) and `@`, which `git worktree add` cannot
  * spell under `.git/worktrees/`; both kebab-case to nothing, so neither could supply a
  * Component id that differs from the head's.
@@ -677,9 +678,9 @@ function baseWorktreeLeaf(headWorkspaceRoot: string): string {
 /**
  * What a scan covered, in the only two shapes there are.
  *
- * The head carries no ref because §6.4 scans the working tree whatever the ref spec calls it,
- * so `main..v1.1.0` from a `v1.0.0` checkout must not produce a `head ref "v1.1.0"` label. As
- * a union that mislabelling is unwritable rather than caught by a test.
+ * The head carries no ref because `cli-spec.md` scans the working tree whatever the ref spec
+ * calls it, so `main..v1.1.0` from a `v1.0.0` checkout must not produce a `head ref "v1.1.0"`
+ * label. As a union that mislabelling is unwritable rather than caught by a test.
  */
 type ScanTarget = { side: "base"; ref: string } | { side: "head" }
 
@@ -761,7 +762,7 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
 
 /**
  * `git diff --find-renames --name-status -z` powers the diff engine's stage-2 rename map
- * (`diff-algorithm.md` §3.2, which is where the `-z` contract is stated and why).
+ * (`diff-algorithm.md`, which is where the `-z` contract is stated and why).
  *
  * A failure here is non-fatal — the diff still runs, just without the rename hints — so it warns
  * on stderr instead of aborting, loudly enough that a reviewer noticing "moved -> removed +

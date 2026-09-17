@@ -348,7 +348,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
   })
 })
 
-describe("extractSymbols — SourceRange key presence (ir-schema.md §1.1 Class A)", () => {
+describe("extractSymbols — SourceRange key presence (ir-schema.md Class A)", () => {
   /**
    * Both column keys must be own properties carrying `null`, not absent. Asserting the
    * value alone would not catch the regression this locks: `expect(x).toBeNull()` fails on

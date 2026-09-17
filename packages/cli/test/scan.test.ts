@@ -62,7 +62,7 @@ describe("runScan — happy path with nothing declared", () => {
     expect(report.workspaceMdPath).not.toBeNull()
   })
 
-  it("reports the call-resolution census even with nothing to resolve (§8.1)", async () => {
+  it("reports the call-resolution census even with nothing to resolve", async () => {
     const report = await runScan({
       cwd: scratch,
       outputDir: resolve(scratch, "out"),
@@ -161,7 +161,7 @@ describe("runScan — config-supplied component roots", () => {
 
 describe("runScan — config-supplied publicApi", () => {
   it("normalizes the patterns, as component detection does for the detected path", async () => {
-    // ir-schema.md §1.2: `@aburi/diff` compares `publicApi` against the previous revision's,
+    // ir-schema.md: `@aburi/diff` compares `publicApi` against the previous revision's,
     // which was read off disk and is therefore NFC. An un-normalized entry written here
     // reports a `publicApiChanged` for a component nobody touched.
     const decomposed = "café".normalize("NFD")
@@ -196,7 +196,7 @@ describe("runScan — config-supplied publicApi", () => {
 })
 
 /**
- * A file a plugin throws on is withdrawn rather than fatal (`lang-plugin.md` §7.2), and the
+ * A file a plugin throws on is withdrawn rather than fatal (`lang-plugin.md`), and the
  * IR is still written — so the exit code is the only thing left to tell a CI job that
  * something in the run is broken rather than merely partial.
  *

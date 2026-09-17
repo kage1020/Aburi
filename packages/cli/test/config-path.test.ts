@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { readEnv, resolveConfigPath } from "../src"
 
-describe("resolveConfigPath — §11 precedence", () => {
+describe("resolveConfigPath — precedence", () => {
   it.each([
     ["the CLI flag when both are set (flag > env)", "./from-flag.jsonc", "./from-flag.jsonc"],
     ["the env when the CLI flag is undefined", undefined, "./from-env.jsonc"],

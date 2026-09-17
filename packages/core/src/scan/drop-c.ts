@@ -2,8 +2,8 @@ import type { CallCandidate } from "@aburi/types"
 import { toNfc } from "../codepoints"
 
 /**
- * Core standard callee prefixes that are dropped from Category C per drop-list.md
- * §5.1. Every entry is a dot-terminated identifier prefix — `console.log`,
+ * Core standard callee prefixes that are dropped from Category C per drop-list.md.
+ * Every entry is a dot-terminated identifier prefix — `console.log`,
  * `console.info`, etc. all match `console.` and never reach `Symbol.calls[]` or
  * `Symbol.effects[]`.
  */
@@ -37,7 +37,7 @@ export interface DropCFilterInput {
  * regex — because drop rules are all exact identifier chains and the identifier chain
  * has already been normalized by the language plugin.
  *
- * Precedence follows drop-list.md §6.2: `keep` wins over `suppress` and both wins
+ * Precedence follows drop-list.md: `keep` wins over `suppress` and both wins
  * over the core / plugin drop sets. Consumers only need one probe per call.
  */
 export function buildDropCFilter(input: DropCFilterInput = {}): DropCFilter {
@@ -60,12 +60,12 @@ export class DropCFilter {
     suppress: readonly string[],
     keep: readonly string[],
   ) {
-    // Decorator names in `keep[]` use `@Name` syntax per drop-list.md §6.2. Strip the
+    // Decorator names in `keep[]` use `@Name` syntax per drop-list.md Strip the
     // `@` for prefix comparison — a decorator can't reach here anyway (this is
     // call-level) so the strip is defensive against consumers mixing the two syntaxes.
     //
     // Both lists are put into Unicode NFC because the `target` they are matched against is
-    // (ir-schema.md §1.2). These arrive from a JSON config and a plugin manifest, neither of
+    // (ir-schema.md). These arrive from a JSON config and a plugin manifest, neither of
     // which normalizes, so without this a `suppress` entry could fail to match the call it
     // names — and a dropped call leaves nothing in the Document to trace the miss back from.
     this.#dropPrefixes = [...core, ...pluginDropCallees, ...suppress].map(toNfc)

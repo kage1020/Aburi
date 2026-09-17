@@ -5,7 +5,7 @@ import { projectDiff } from "../src"
 import { emptySummary, makeDiff } from "./fixtures"
 
 /**
- * §6.2 tail — `partition` routes overlapping delta flags by priority:
+ * markdown-projection.md — `partition` routes overlapping delta flags by priority:
  *   apiChanged > logicChanged > syntaxChanged
  * A single `changed` entry lands in exactly one of API changes / Logic changes / Syntax-only.
  */

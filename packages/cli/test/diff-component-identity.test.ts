@@ -9,10 +9,10 @@ import { fakeGit } from "./fixtures"
 /**
  * A ref diff scans two checkouts of one workspace, and the temporary directory the base one
  * lives in must not change what that workspace is called. Component detection reads the
- * directory name for a Component rooted at the workspace root (component-detect.md §4.1), so a
+ * directory name for a Component rooted at the workspace root (component-detect.md), so a
  * worktree at a fixed path named `base` gave the two sides different Component ids: a workspace
  * declaring neither a package name nor explicit `components[]` reported one Component added and
- * one removed on every run. The rule and its two exceptions are cli-spec.md §6.4 step 2.
+ * one removed on every run. The rule and its two exceptions are cli-spec.md step 2.
  */
 
 let scratch = ""

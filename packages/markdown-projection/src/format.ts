@@ -11,11 +11,12 @@ import type {
   Signature,
 } from "@aburi/types"
 
-/** §3.4 — a code fragment longer than this is a fenced block, so PR comments stay compact. */
+/** A code fragment longer than this is a fenced block, so PR comments stay compact. */
 export const INLINE_CODE_MAX_LENGTH = 80
 
 /**
- * §3.5 — confidence badge. `high` renders nothing so it does not compete with the warnings;
+ * markdown-projection.md — confidence badge. `high` renders nothing so it does not compete
+ * with the warnings;
  * `medium` and `low` share the `⚠` glyph but keep the severity word for screen readers.
  */
 export function confidenceBadge(value: Confidence): string {
@@ -24,7 +25,7 @@ export function confidenceBadge(value: Confidence): string {
 }
 
 /**
- * §3.3 — POSIX-relative path wrapped in backticks.
+ * markdown-projection.md — POSIX-relative path wrapped in backticks.
  *
  * @deprecated Use `inlineCode`, which this forwards to unchanged. Removed in 1.0.0.
  */
@@ -33,8 +34,9 @@ export function inlineCodePath(path: string): string {
 }
 
 /**
- * §3.4 — inline vs. fenced choice. Anything `fitsInline` accepts uses backticks; everything
- * else renders as a fenced block so the newline survives GitHub's Markdown pass. Both
+ * markdown-projection.md — inline vs. fenced choice. Anything `fitsInline` accepts uses
+ * backticks; everything else renders as a fenced block so the newline survives GitHub's
+ * Markdown pass. Both
  * branches size their fence to the value. `indent` is forwarded to `fencedBlock` and matters:
  * a column-0 fence inside a list item ends the item rather than nesting in it (`payloadRow`
  * is the worked example).
@@ -49,7 +51,7 @@ export function codeFragment(
   return `\n${fencedBlock(source, indent)}\n`
 }
 
-/** §3.4's threshold: single-line and no longer than `INLINE_CODE_MAX_LENGTH`. */
+/** The inline threshold: single-line and no longer than `INLINE_CODE_MAX_LENGTH`. */
 export function fitsInline(value: string): boolean {
   return !value.includes("\n") && value.length <= INLINE_CODE_MAX_LENGTH
 }
@@ -162,7 +164,7 @@ export function requireDropReason(symbol: {
   return symbol.dropReason
 }
 
-/** §3.6 — dropped fold-out over pre-sorted entry lines; empty input renders nothing. */
+/** Dropped fold-out over pre-sorted entry lines; empty input renders nothing. */
 export function droppedFoldout(entries: readonly string[]): string {
   if (entries.length === 0) return ""
   const body = entries.map((line) => `- ${line}`).join("\n")
@@ -180,8 +182,8 @@ export function droppedFoldout(entries: readonly string[]): string {
 }
 
 /**
- * §5.4 — decorator rows: `**Boundary**` for boundary decorators, `**Decorators**` for the
- * rest, each omitted when its bucket is empty (§5.3).
+ * markdown-projection.md — decorator rows: `**Boundary**` for boundary decorators,
+ * `**Decorators**` for the rest, each omitted when its bucket is empty.
  */
 export function decoratorRows(decorators: readonly Decorator[]): string[] {
   const parts = splitDecorators(decorators)
@@ -199,7 +201,7 @@ export interface DecoratorLists {
 
 /**
  * Structured variant of `decoratorRows`, for callers rendering into other section shapes
- * (§7 `aburi explain`, §6 diff rows) so they need not re-parse the compact row.
+ * (`aburi explain`, diff rows) so they need not re-parse the compact row.
  */
 export function splitDecorators(decorators: readonly Decorator[]): DecoratorLists {
   if (decorators.length === 0) return { boundary: null, regular: null }
@@ -216,9 +218,9 @@ export function renderDecoratorList(decorators: readonly Decorator[]): string {
 }
 
 /**
- * §5.5 — `(name: type) → output` + optional `throws A, B` + `⚡async` / `*generator*` /
- * `<T,U>` badges; multiple outputs are `|`-separated. `null` when there is no signature, so
- * §5.3's section-omit logic can branch on presence.
+ * markdown-projection.md — `(name: type) → output` + optional `throws A, B` + `⚡async` /
+ * `*generator*` / `<T,U>` badges; multiple outputs are `|`-separated. `null` when there is
+ * no signature, so the section-omit logic can branch on presence.
  */
 export function signatureLine(signature: Signature | null | undefined): string | null {
   if (signature === null || signature === undefined) return null
@@ -233,9 +235,10 @@ export function signatureLine(signature: Signature | null | undefined): string |
 }
 
 /**
- * §5.6 — Rule row, as the lines it occupies (a payload long enough to fence takes four, and
- * callers spread into a `string[]` joined by newline). A missing per-type payload violates
- * ir-schema §8.2 and throws `ProjectionInvariantError` rather than rendering `- guard:  (L5)`.
+ * markdown-projection.md — Rule row, as the lines it occupies (a payload long enough to
+ * fence takes four, and callers spread into a `string[]` joined by newline). A missing
+ * per-type payload violates ir-schema.md's extraction conventions and throws
+ * `ProjectionInvariantError` rather than rendering `- guard:  (L5)`.
  * The label is `rule.type` itself, and the `never` branch keeps the switch exhaustive.
  */
 export function ruleRow(rule: Rule): string[] {
@@ -299,9 +302,10 @@ function assertNeverRule(rule: Rule): never {
 }
 
 /**
- * §5.7 — Effect row: `- <id>: \`<target>\` (L<line>) [<plugin>]<badge>`. Propagated entries
- * (effect-propagation.md §5.1) omit `line`; the row substitutes `[propagated from …]` so a
- * reviewer can trace the effect to the direct callee that carried it in.
+ * markdown-projection.md — Effect row: `- <id>: \`<target>\` (L<line>) [<plugin>]<badge>`.
+ * Propagated entries (effect-propagation.md) omit `line`; the row substitutes
+ * `[propagated from …]` so a reviewer can trace the effect to the direct callee that carried
+ * it in.
  */
 export function effectRow(eff: Effect): string {
   if (eff.propagated === true) {
@@ -312,7 +316,7 @@ export function effectRow(eff: Effect): string {
 }
 
 /**
- * Emission order of a Symbol's effects (effect-propagation.md §8): local entries by line,
+ * Emission order of a Symbol's effects (effect-propagation.md): local entries by line,
  * then propagated ones — which omit `line` — by `(id, target)`. A single-key sort by
  * `line ?? 0` would put every propagated entry first.
  */
@@ -330,16 +334,17 @@ export function compareEffectIdentity(a: Effect, b: Effect): number {
 }
 
 /**
- * §5.8 — Call row. `resolved` is not rendered yet because the anchor scheme for cross-Symbol
- * links inside one Markdown file is not finalised; emitting it now would create PR churn.
+ * markdown-projection.md — Call row. `resolved` is not rendered yet because the anchor
+ * scheme for cross-Symbol links inside one Markdown file is not finalised; emitting it now
+ * would create PR churn.
  */
 export function callRow(call: Call): string {
   return `- ${inlineCode(call.target)} (L${call.line})`
 }
 
 /**
- * §5.9 — Fingerprint one-liner inside `<sub>`. `null` for a dropped Symbol (all-zero
- * fingerprint) so §5.3 can omit the row.
+ * markdown-projection.md — Fingerprint one-liner inside `<sub>`. `null` for a dropped Symbol
+ * (all-zero fingerprint) so the section-omit rules can omit the row.
  */
 export function fingerprintLine(fp: Fingerprint): string | null {
   if (isZeroFingerprint(fp)) return null
@@ -354,19 +359,19 @@ function isZeroFingerprint(fp: Fingerprint): boolean {
 
 const ZERO_FINGERPRINT = "000000000000"
 
-/** §5.2 heading: name + kind is enough for a reader scanning the file. */
+/** Symbol heading: name + kind is enough for a reader scanning the file. */
 export function symbolHeading(symbol: IRSymbol): string {
   return `#### ${inlineCode(symbol.name)} *(${symbol.kind})*`
 }
 
-/** §3.2 — canonical Symbol order within a file: `startLine`, then `id`. */
+/** markdown-projection.md — canonical Symbol order within a file: `startLine`, then `id`. */
 export function orderSymbolsWithinFile(symbols: readonly IRSymbol[]): IRSymbol[] {
   return [...symbols].sort(
     (a, b) => a.source.startLine - b.source.startLine || compareStrings(a.id, b.id),
   )
 }
 
-/** §3.2 — file grouping preserves POSIX ordering per §3.3. */
+/** markdown-projection.md — file grouping preserves the POSIX path ordering. */
 export function orderFilesAscending(files: readonly string[]): string[] {
   return [...files].sort(compareStrings)
 }
@@ -380,7 +385,7 @@ export function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Dependencies in `(from, to, via)` order — their identity (diff-algorithm.md §6.2). */
+/** Dependencies in `(from, to, via)` order — their identity (diff-algorithm.md). */
 export function sortDependencies(deps: readonly Dependency[]): Dependency[] {
   return [...deps].sort(
     (a, b) =>
@@ -388,7 +393,7 @@ export function sortDependencies(deps: readonly Dependency[]): Dependency[] {
   )
 }
 
-/** A document's final bytes: collapsed blank runs, one trailing newline, `\n` throughout (§3.1). */
+/** A document's final bytes: collapsed blank runs, one trailing newline, `\n` throughout. */
 export function renderDocument(lines: readonly string[]): string {
   return `${lines
     .join("\n")
@@ -397,7 +402,7 @@ export function renderDocument(lines: readonly string[]): string {
 }
 
 /**
- * ir-schema.md §3.1 Symbol id shape (`<language>:<file>#<qname>`). Deliberately looser than
+ * ir-schema.md Symbol id shape (`<language>:<file>#<qname>`). Deliberately looser than
  * `isSymbolId` in `@aburi/core` (no backslash exclusion), which is why `isSymbolIdEndpoint`
  * answers with a boolean rather than narrowing to `SymbolId`: holding the brand means having
  * gone through a constructor, and this only routes an endpoint into a section.

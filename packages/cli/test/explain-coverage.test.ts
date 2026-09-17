@@ -296,7 +296,7 @@ describe("runExplain — the file arm", () => {
 
   it("finds the Symbols of a decomposed argument the document composed", async () => {
     // The file on disk carries the decomposed name, which is what an archive leaves behind,
-    // while the scan recorded it composed as §1.2 requires. The disk probe finds it under
+    // while the scan recorded it composed as `ir-schema.md` requires. The disk probe finds it under
     // the name it was given; the comparison against `source.file` must not depend on that.
     const composed = "src/caf\u00e9.ts"
     const decomposed = "src/cafe\u0301.ts"

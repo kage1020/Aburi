@@ -33,7 +33,8 @@ export interface LoadPluginsOptions {
   /**
    * Where a relative `./plugins/*.mjs` ref resolves from. Defaults to `workspaceRoot`, and
    * differs from it only for `aburi diff`'s base scan, whose config comes from the head tree
-   * while its workspace root is the temporary worktree (`cli-spec.md` §6.4.1.5).
+   * while its workspace root is the temporary worktree (`cli-spec.md`, plugin resolution at the
+   * base ref).
    */
   pluginRefRoot?: string
   /** Dynamic import hook for testing (default: real ESM import). */

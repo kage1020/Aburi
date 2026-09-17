@@ -3,7 +3,7 @@ import { BACKSLASH, emptySpecifierErrors, importsOf, parseSource } from "./fixtu
 
 /**
  * An empty module specifier names no module, so it cannot become an `ImportEdge` — the
- * contract in `lang-plugin.md` §4.4 says `source` is non-empty, and the shared guards in
+ * contract in `lang-plugin.md` says `source` is non-empty, and the shared guards in
  * `@aburi/plugin-registry/plugin-input` throw when it is not.
  *
  * The grammar accepts every form below and `tsc` rejects them at resolution (TS2307, or

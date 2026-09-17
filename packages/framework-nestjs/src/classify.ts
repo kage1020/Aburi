@@ -43,7 +43,7 @@ export function classifyNestjsSymbol(
 /**
  * Per-file import index, memoized on the identity of the `imports` array the pipeline hands
  * every candidate of a file (`scan/pipeline.ts`). Rebuilding it per decorated Symbol would
- * charge a large single-shard file declarations × imports (`performance.md` §2). A fresh
+ * charge a large single-shard file declarations × imports (`performance.md`). A fresh
  * array per call simply takes the uncached path.
  */
 const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedNames>()

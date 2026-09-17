@@ -5,7 +5,7 @@
 // `node_modules/.bin/aburi` link because that link is not reliably there: a workspace that builds
 // its own CLI has no bin file when the install writes the links, so the link is skipped, and a
 // later install does not recreate it — the tree is up to date by then. See
-// `docs/design/github-action.md` §3 for the whole story; this file is its implementation.
+// `docs/design/github-action.md` for the whole story; this file is its implementation.
 //
 // Plain `.mjs`, committed rather than built, because a consumer references the action by path
 // (`uses: kage1020/Aburi/packages/github-action@main`) and nothing builds this repository for them.

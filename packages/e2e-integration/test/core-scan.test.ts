@@ -60,7 +60,7 @@ describe("scan — integration through real plugins", () => {
     expect(result.ir.stats.totalFiles).toBe(3)
     expect(result.ir.stats.parsedFiles).toBe(3)
 
-    // call-resolution.md §8.1 — the counters are emitted unconditionally, and integrity
+    // call-resolution.md — the counters are emitted unconditionally, and integrity
     // invariant #15 has already checked them against symbols[].
     const callResolution = result.ir.stats.callResolution
     expect(callResolution).toBeDefined()
@@ -182,7 +182,7 @@ describe("scan — integration through real plugins", () => {
     expect(callEdge?.direction).toBe("outbound")
     expect(callEdge?.effect).toBeNull()
     // The Call entry on the caller Symbol carries the resolved id too — the round-trip
-    // invariant #14 (`call-resolution.md` §7.1).
+    // invariant #14 (`call-resolution.md`).
     const caller = result.ir.symbols.find((symbol) => symbol.name === "caller")
     const resolvedCall = caller?.calls.find((c) => c.target === "helper")
     expect(resolvedCall?.resolved).toBe(callEdge?.to)
@@ -227,7 +227,7 @@ describe("scan — integration through real plugins", () => {
     expect(callEdge).toBeDefined()
   })
 
-  it("emits every Class A key in the serialized IR (ir-schema.md §1.1)", async () => {
+  it("emits every Class A key in the serialized IR (ir-schema.md)", async () => {
     // The assertion has to run on parsed JSON rather than on `result.ir`: serializeCanonical
     // drops properties whose value is `undefined`, so a writer that left a Class A key off
     // its object literal produces an in-memory tree that satisfies every value-based check
@@ -278,10 +278,10 @@ describe("scan — integration through real plugins", () => {
     expect(schemaViolations(parsed)).toEqual([])
   })
 
-  it("reads an IR whose Class A keys were never written (ir-schema.md §1.1 reader rule)", async () => {
-    // §1.1 calls the reader rule the load-bearing half: a committed IR cannot be rewritten,
-    // and `aburi diff` reads one as its base, so consumers must read an absent Class A key
-    // as `null`. That makes the `?? null` normalizations in fingerprint/api.ts and
+  it("reads an IR whose Class A keys were never written (ir-schema.md reader rule)", async () => {
+    // `ir-schema.md` calls the reader rule the load-bearing half: a committed IR cannot be
+    // rewritten, and `aburi diff` reads one as its base, so consumers must read an absent
+    // Class A key as `null`. That makes the `?? null` normalizations in fingerprint/api.ts and
     // diff/delta.ts part of the contract; this is what fails if someone "cleans them up".
     await workspace.writeSource(
       "src/InvoiceService.ts",
@@ -314,7 +314,8 @@ describe("scan — integration through real plugins", () => {
 
     // `apiFingerprint` folds a missing `signature` to null. Comparing recomputed against
     // recomputed rather than against the stored value keeps dropped Symbols in scope: those
-    // carry the all-zero fingerprint of §5.6, which no recomputation reproduces.
+    // carry the all-zero fingerprint of `ir-schema.md`'s `dropped` rule, which no recomputation
+    // reproduces.
     for (const [i, symbol] of legacy.symbols.entries()) {
       const emitted = result.ir.symbols[i] as IRSymbol
       expect(apiFingerprint(symbol), `api fingerprint drift on ${symbol.id}`).toBe(

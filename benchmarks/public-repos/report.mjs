@@ -12,7 +12,7 @@ import { posix, resolve, win32 } from "node:path"
 /**
  * The exit codes a *completed* scan can return. 0 is clean and 3 is a tripped gate — the run
  * finished, wrote its IR, and reported that something in the workspace was not clean
- * (`cli-spec.md` §9). `zod` exits 3 on every run here because one file's extraction throws,
+ * (`cli-spec.md`). `zod` exits 3 on every run here because one file's extraction throws,
  * and its numbers are real; flattening that to "failed" would discard the measurement.
  * 1 (runtime) and 2 (input) mean the opposite: there is no answer to record.
  */
@@ -65,7 +65,7 @@ export function summariseScans(runs, options = {}) {
     /**
      * `--no-timestamp` removes the only intentionally varying field, so two runs over an
      * unchanged tree must serialise to the same bytes — the single-threaded half of
-     * performance.md Rule PF-11 (§7.1). One run compares nothing, and `[x].every(...)` is
+     * performance.md Rule PF-11. One run compares nothing, and `[x].every(...)` is
      * true for the same reason `[].every(...)` is, so it reports unmeasured rather than a tick.
      */
     deterministic: hashes.length < 2 ? null : hashes.every((hash) => hash === hashes[0]),

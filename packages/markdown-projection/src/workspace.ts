@@ -9,20 +9,21 @@ import {
   tableRow,
 } from "./format"
 
-/** §4.2 — nodes above this render as text-only fallback so GitHub mermaid does not choke. */
+/** Nodes above this render as text-only fallback so GitHub mermaid does not choke. */
 export const MERMAID_NODE_LIMIT = 100
 
-/** §4.1 — top-N effect surface table. Kept at 10 to fit a PR-comment-safe height. */
+/** Top-N effect surface table. Kept at 10 to fit a PR-comment-safe height. */
 export const EFFECT_SURFACE_TOP_N = 10
 
 export interface ProjectWorkspaceOptions {
-  /** §4.3 — omit `generatedAt` even if the IR carries it (mirrors CLI `--no-timestamp`). */
+  /** Omit `generatedAt` even if the IR carries it (mirrors CLI `--no-timestamp`). */
   suppressTimestamp?: boolean
 }
 
 /**
- * §4 — `workspace.md`: monorepo shape (managers, languages, symbol counts), a Components
- * table, dependencies (mermaid + text fallback), and the top-10 effect surface.
+ * markdown-projection.md — `workspace.md`: monorepo shape (managers, languages, symbol
+ * counts), a Components table, dependencies (mermaid + text fallback), and the top-10 effect
+ * surface.
  */
 export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}): string {
   const lines: string[] = []
@@ -143,13 +144,13 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
 }
 
 /**
- * §4.2 — mermaid `graph LR` of the workspace: every declared component is a node (isolated
- * ones included, per `docs/design/overview.md` §3.1's full-monorepo contract), component →
+ * Mermaid `graph LR` of the workspace: every declared component is a node (isolated ones
+ * included, per `docs/design/overview.md`'s full-monorepo contract), component →
  * component dependencies are edges, and a text fallback list follows when any edge exists.
  * Above `MERMAID_NODE_LIMIT` the mermaid block is dropped and only the list survives.
  *
  * Symbol-to-symbol call edges are excluded: they would blow past the render limit and drown
- * the L0 overview in method-granularity detail. Assumes ir-schema §14 #2 (unique
+ * the L0 overview in method-granularity detail. Assumes ir-schema.md invariant #2 (unique
  * `Component.id`); the projection trusts `assertIRIntegrity` upstream and does not re-check.
  */
 function renderDependencies(ir: IR): string[] {
@@ -220,7 +221,7 @@ function escapeMermaidLabel(label: string): string {
 }
 
 /**
- * §4.1 — Effect surface top-N table, ties broken by effect id. The component column
+ * Effect surface top-N table, ties broken by effect id. The component column
  * deduplicates the origin list.
  */
 function renderEffectSurface(ir: IR): string[] {

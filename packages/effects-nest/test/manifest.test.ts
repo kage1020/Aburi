@@ -4,7 +4,7 @@ import { EFFECTS_NEST_DERIVED_BY_PREFIX, effectsNestManifest } from "../src/inde
 describe("effectsNestManifest", () => {
   it("declares the plugin identity and no vocabulary of its own", () => {
     // The core `event.publish` id is returned from classify() and MUST NOT appear in
-    // provides.effects (extension-vocab.md §5.1); an effects plugin cannot own extKinds or
+    // provides.effects (extension-vocab.md); an effects plugin cannot own extKinds or
     // frameworks either.
     expect(effectsNestManifest).toEqual({
       $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",

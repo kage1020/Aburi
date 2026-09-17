@@ -59,13 +59,13 @@ export interface ScanOptions {
   /**
    * A config already decided by the caller, which supersedes both `configPath` and discovery.
    * `aburi diff` sets it so its base scan, running inside a temporary worktree, reads the
-   * head's config (cli-spec.md §6.4 step 3). `{ kind: "autodetect" }` is meaningful rather
+   * head's config (cli-spec.md step 3). `{ kind: "autodetect" }` is meaningful rather
    * than equivalent to omitting the field: the caller looked and found nothing.
    */
   pinnedConfig?: PinnedConfig
   /**
    * Where a relative plugin ref (`./plugins/x.mjs`) in the config resolves from. Defaults to
-   * this scan's own workspace root; `aburi diff`'s base scan passes the head's, since §6.4.1.5
+   * this scan's own workspace root; `aburi diff`'s base scan passes the head's, since `cli-spec.md`
    * pins the plugin set to the head environment.
    */
   pluginRefRoot?: string
@@ -83,14 +83,17 @@ export interface ScanOptions {
   strict?: boolean
   /**
    * Override for `Config.lsp.enabled` (`--lsp` / `--no-lsp`); `undefined` falls through to
-   * the config, per `docs/design/config.md` §11.
+   * the config, per `docs/design/config.md`.
    */
   lsp?: boolean
-  /** Lowest level the run's `Logger` emits, from `ABURI_LOG_LEVEL` (§11). Defaults to `"warn"`. */
+  /**
+   * Lowest level the run's `Logger` emits, from `ABURI_LOG_LEVEL` (`cli-spec.md`). Defaults to
+   * `"warn"`.
+   */
   logLevel?: LogLevel
   /**
-   * Where this scan's incident report goes (§5.6). Omit it and the report goes nowhere — but
-   * not silent: the run's per-file `Logger` is a separate channel that still defaults to
+   * Where this scan's incident report goes (`cli-spec.md`). Omit it and the report goes nowhere
+   * — but not silent: the run's per-file `Logger` is a separate channel that still defaults to
    * `process.stderr`. One option rather than two because a label means nothing without a sink.
    */
   incidents?: {
@@ -134,7 +137,7 @@ export interface ScanReport {
   /**
    * Files carrying parse errors the plugin called recoverable — every file on
    * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error (`parseFailureCount`).
-   * A file abandoned on its `parseTimeoutMs` budget is counted here (`lang-plugin.md` §7.1.2).
+   * A file abandoned on its `parseTimeoutMs` budget is counted here (`lang-plugin.md`).
    */
   parseErrorCount: number
   /**
@@ -158,9 +161,9 @@ export interface ScanReport {
   treeReleaseFailures: readonly TreeReleaseFailure[]
   /** Present when the LSP enrichment pass ran; absent when LSP was skipped entirely. */
   lspEnrichment: LspEnrichmentStats | undefined
-  /** Head-side call-resolution census rendered for stdout (call-resolution.md §8.1). */
+  /** Head-side call-resolution census rendered for stdout (call-resolution.md). */
   callResolutionLine: string
-  /** Per-call diagnostics behind that census, kept out of the IR (§8.1). */
+  /** Per-call diagnostics behind that census, kept out of the IR (`call-resolution.md`). */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
   /** Absolute path of the config that was read, or `null` when the run fell through to autodetect. */
   configSource: string | null
@@ -174,7 +177,7 @@ export interface ScanReport {
   /** Why this scan's coverage is not worth believing, or `null`. `exitCode` is derived from it. */
   coverageFault: CoverageFault | null
   /**
-   * Candidate files the Document has no way to name (§5.8), in path order. Nothing in the
+   * Candidate files the Document has no way to name (`cli-spec.md`), in path order. Nothing in the
    * artifact mentions them, so this list is the run's only account and moves the exit code.
    */
   unrepresentableFiles: readonly UnrepresentableFile[]
@@ -186,7 +189,7 @@ export interface ScanReport {
 }
 
 /**
- * §5 — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
+ * `cli-spec.md` — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
  * writes IR JSON and per-Component Markdown into `--output-dir` (default `out/`).
  *
  * Writes nothing to the process streams of its own accord: summaries are the CLI wrapper's
@@ -302,10 +305,10 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unrepresentableFiles: scanResult.unrepresentableFiles.map((file) => ({ ...file })),
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
-    // Three gates (`cli-spec.md` §5.4, §5.7, §5.8), none of which withholds the artifact: a
-    // plugin exception says the run is broken, a coverage fault says it described nothing (or
-    // too little, under `minParsedFileRatio`), and an unnameable file is source the artifact
-    // holds no trace of.
+    // Three gates (`cli-spec.md`: exit codes, coverage, unnameable files), none of which
+    // withholds the artifact: a plugin exception says the run is broken, a coverage fault says
+    // it described nothing (or too little, under `minParsedFileRatio`), and an unnameable file
+    // is source the artifact holds no trace of.
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
@@ -368,8 +371,9 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
 type SayIncident = (line: string) => void
 
 /**
- * §5.6 — surface parse failures / soft timeouts / discovery-time skips so a scan that ate 50
- * broken files still produces a visible signal. Each clause fires only on a non-empty incident.
+ * `cli-spec.md` stderr warnings — surface parse failures / soft timeouts / discovery-time skips
+ * so a scan that ate 50 broken files still produces a visible signal. Each clause fires only on
+ * a non-empty incident.
  *
  * `label` goes inside the line, after the glyph, so `⚠` starts every line that stands on its
  * own; only the indented per-file listings and their `…and N more` tails go without it.
@@ -430,8 +434,8 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
 
 /**
  * What the typed tier actually bought. The request line cannot answer it: a hover that comes
- * back on time carrying nothing usable is a healthy row in every counter (lsp-enrichment.md
- * §7.2). Quiet only for a run that neither produced nor refused a hint. The rejection total
+ * back on time carrying nothing usable is a healthy row in every counter (lsp-enrichment.md).
+ * Quiet only for a run that neither produced nor refused a hint. The rejection total
  * rather than the five buckets: `stats.lspEnrichment.hintsRejected` in the IR is where to look.
  */
 function reportHints(lsp: LspEnrichmentStats, sayIncident: SayIncident): void {
@@ -710,7 +714,7 @@ function requireCallResolution(ir: IR): CallResolutionStats {
   const stats = ir.stats.callResolution
   if (stats === undefined) {
     throw new CliError(
-      "scan() returned an IR without stats.callResolution; @aburi/core stopped emitting the call-resolution census (call-resolution.md §8.1).",
+      "scan() returned an IR without stats.callResolution; @aburi/core stopped emitting the call-resolution census (call-resolution.md).",
       "runtime-error",
     )
   }
@@ -781,8 +785,8 @@ async function resolveComponents(
       // Ids and language tokens arrive as plain strings and go through the constructors, so a
       // config loaded by some other path cannot smuggle in a shape the IR grammar refuses.
       return declared.map((entry) => {
-        // `publicApi` / `frameworks` are Class B and `description` is Class A (`ir-schema.md`
-        // §1.1): the empty arrays disappear, the scalar stays as `null`, matching what
+        // `publicApi` / `frameworks` are Class B and `description` is Class A (`ir-schema.md`):
+        // the empty arrays disappear, the scalar stays as `null`, matching what
         // `detectComponents` emits. `languages` is optional in the config but `minItems: 1`
         // in the IR, so it falls back to the same `["ts"]` detection uses.
         const languages = (entry.languages ?? []).map(makeLanguageId)
@@ -794,7 +798,7 @@ async function resolveComponents(
           description: entry.description ?? null,
         }
         if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
-          // NFC, as `collectPublicApi` does for the detected path (ir-schema.md §1.2): the
+          // NFC, as `collectPublicApi` does for the detected path (ir-schema.md): the
           // previous revision's array was read off disk and is therefore normalized.
           component.publicApi = entry.publicApi.map((pattern) => pattern.normalize("NFC"))
         }
@@ -806,7 +810,7 @@ async function resolveComponents(
     }
     // The same *drop* decision the scan is about to make, so an ignored file cannot put a
     // language on a component. Not the same *routing* decision: `Component.languages` answers
-    // "what is this written in", not "what did this run parse" (component-detect.md §4.4).
+    // "what is this written in", not "what did this run parse" (component-detect.md).
     return await detectComponents({
       workspaceRoot,
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
@@ -820,7 +824,7 @@ async function resolveComponents(
 }
 
 /**
- * Which of the two exit codes a failed component resolution deserves (`cli-spec.md §9`).
+ * Which of the two exit codes a failed component resolution deserves (`cli-spec.md`).
  * Detection walks the workspace and opens every `.gitignore`, so an `EACCES` is possible here,
  * and reporting it as a config error would send the reader through `aburi.json` for a mistake
  * that is not there. A `CoreError` naming a config-shaped fault keeps exit 2; everything else

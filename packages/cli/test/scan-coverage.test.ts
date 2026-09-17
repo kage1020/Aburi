@@ -438,7 +438,7 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    // §6.5 says the wording is derived from what the scan actually reported "so a second
+    // `cli-spec.md` says the wording is derived from what the scan actually reported "so a second
     // reason arrives with the code right and the message still true". This is that reason.
     expect(warnings.join("\n")).toContain("base: none of the 1 file(s) it found parsed")
     expect(warnings.join("\n")).not.toContain("plugin exception")

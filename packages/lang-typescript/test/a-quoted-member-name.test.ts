@@ -11,7 +11,7 @@ import { BACKSLASH, callsOf, classOf, hintOf, idsOf, importsOf, symbolOf } from 
  * calls the pair TS2393, a duplicate *implementation* — so the quoted spelling maps onto the
  * `ok` segment and the two fold, the way a field and a method of the same name already do.
  * What is not an identifier once decoded has no segment, and so no Symbol: its body stays on
- * the class, which is the answer `ir-schema.md` §3.2 already gives a computed name.
+ * the class, which is the answer `ir-schema.md` already gives a computed name.
  */
 
 async function errorsOf(source: string): Promise<number> {

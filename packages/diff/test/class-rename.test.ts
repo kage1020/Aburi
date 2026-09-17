@@ -5,13 +5,13 @@ import { buildDiff, matchStageLogicFingerprint } from "../src"
 import { nameSimilarity, ownersAreCompatible } from "../src/similarity"
 
 /**
- * §3.4.6 (R-8) exists to keep `UserRepo.getUser` from pairing with `AdminRepo.getUser` while
- * letting it pair with `UsersRepository.getUser` — the same method after its class was
- * renamed. It could do neither, for two reasons that compounded.
+ * The owner gate (diff-algorithm.md, R-8) exists to keep `UserRepo.getUser` from pairing with
+ * `AdminRepo.getUser` while letting it pair with `UsersRepository.getUser` — the same method after
+ * its class was renamed. It could do neither, for two reasons that compounded.
  *
- * The owner was counted twice. §3.4.1's name axis is a Jaccard over the *whole* qualified
- * name, so a renamed owner depressed the name term, and §3.4.6 then charged for it again at
- * 0.2. `UserRepo.getUser` vs `UsersRepository.getUser` scored 0.5 where §3.4.6's arithmetic
+ * The owner was counted twice. The name axis is a Jaccard over the *whole* qualified
+ * name, so a renamed owner depressed the name term, and the gate then charged for it again at
+ * 0.2. `UserRepo.getUser` vs `UsersRepository.getUser` scored 0.5 where the gate's arithmetic
  * assumed 0.9, and the class rename came out as `added` + `removed`.
  *
  * And the owner was a weight, which cannot do the job R-8 describes. Grading owners means a
@@ -100,11 +100,11 @@ describe("a class renamed by inflection keeps its methods", () => {
 })
 
 describe("an abbreviation is not read as a rename", () => {
-  // §3.4.6's original headline example, and the price of refusing the collisions below. A
+  // The owner gate's original headline example, and the price of refusing the collisions below. A
   // prefix rule accepts `repo` -> `repository`, and with it `repo` -> `report`: two distinct
   // classes, which is the collision R-8 exists to refuse. Nothing over the two strings alone
-  // separates them — the renames score *lower* than the collisions on every measure tried —
-  // so the gate declines the whole family rather than guessing.
+  // separates them — the renames score *lower* than the collisions on every measure tried — so the
+  // gate declines the whole family rather than guessing.
 
   it("declines UserRepo -> UsersRepository", () => {
     expect(renamed("UserRepo", "UsersRepository", "findById")).toEqual([])
@@ -159,7 +159,7 @@ describe("an owner is a path, compared segment by segment", () => {
 describe("the end-to-end refactor the section is for", () => {
   it("reports a renamed class of three edited methods as moved+changed, not added and removed", () => {
     // `moved` because the qualified name is part of the id, so a rename relocates the Symbol
-    // whether or not its file did — §4's `pathChanged`, and DF9.
+    // whether or not its file did — status determination's `pathChanged`, and DF9.
     const members = ["getUser", "findById", "save"]
     const diff = buildDiff({
       baseIR: makeIR({

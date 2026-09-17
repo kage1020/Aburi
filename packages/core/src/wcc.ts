@@ -3,13 +3,13 @@ import { compareCodeUnit } from "./order"
 /**
  * Weakly-connected components (WCC) via Union-Find with union-by-rank and
  * path compression. Language-independent primitive used by Slice View
- * (docs/design/slice-view.md §6) to group changed Symbols by call-graph
+ * (docs/design/slice-view.md) to group changed Symbols by call-graph
  * connectivity, but the algorithm is agnostic to what a "node" is — the
  * `keyOf` callback provides a stable string identity per node.
  *
  * Complexity: `O((V + E)·α(V))`, effectively linear.
  *
- * Guarantees (see slice-view.md §10):
+ * Guarantees (see slice-view.md):
  * - Deterministic: same `(nodes, edges)` always yields the same output.
  * - Input-order insensitive: shuffling `nodes` or `edges` yields the same
  *   output.
@@ -21,13 +21,13 @@ import { compareCodeUnit } from "./order"
  *
  * The two ordering guarantees are part of the contract, not an accident of the
  * implementation: Slice View derives a cluster's identity from `component[0]`
- * (slice-view.md §7.1) and asserts that derivation on every record it emits,
+ * (slice-view.md) and asserts that derivation on every record it emits,
  * so weakening either sort turns into a loud failure there rather than a
  * silently mislabelled Slice.
  *
  * Edges are treated as undirected. Edges whose endpoints are not both in
  * `nodes` are silently dropped — the caller is responsible for building the
- * Node set (Slice View §5.2 forbids bridging via non-Node Symbols, which the
+ * Node set (slice-view.md forbids bridging via non-Node Symbols, which the
  * caller enforces by omitting non-Node endpoints from the input).
  */
 export function computeWeaklyConnectedComponents<TNode>(

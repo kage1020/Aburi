@@ -16,8 +16,8 @@ import { decodeStringLiteral } from "./string-escape"
  * Walk a Symbol's body and produce control-flow rules + call candidates.
  *
  * Which statements become rules, and which returns are too trivial to, is the drop-list
- * contract (`drop-list.md` §5.3–§5.5); `visitNode` is the switch that applies it. A `catch`
- * body's contents do not feed the same Symbol's rules (`ir-schema.md` §8.1).
+ * contract (`drop-list.md`); `visitNode` is the switch that applies it. A `catch`
+ * body's contents do not feed the same Symbol's rules (`ir-schema.md`).
  *
  * Calls are every call_expression whose callee we can normalize. `await` and `new`
  * modifiers surface as flags; each argument's literal value (if any) is captured on
@@ -89,7 +89,7 @@ function visitExcluding(node: Node, skipped: Node, rules: Rule[], calls: CallCan
     // By `id`, not by reference: a field read and a children read of the same node hand back
     // different JS wrappers, so `===` never matches. `Node.equals()` answers the same question
     // and would do; `id` is a field read rather than a call across the WASM boundary
-    // (`lang-plugin.md` §8.2). Not by type: a `method_definition` has exactly one
+    // (`lang-plugin.md`). Not by type: a `method_definition` has exactly one
     // `statement_block` today, but a member shape carrying a second would start dropping it
     // without a word.
     if (part === null || part.id === skipped.id) continue
@@ -143,7 +143,7 @@ function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
     case "try_statement":
       rules.push(makeRule("try", node))
       // Only the try block's statements contribute rules/calls; catch/finally are skipped
-      // per ir-schema §8.1 so a rewritten error handler does not perturb the logic axis.
+      // per ir-schema.md so a rewritten error handler does not perturb the logic axis.
       handleTryStatement(node, rules, calls)
       return
     case "switch_statement":
@@ -249,7 +249,7 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
 }
 
 /**
- * Trivial expression detector matching drop-list §5.5 exactly. Anything that reads like a
+ * Trivial expression detector matching drop-list.md exactly. Anything that reads like a
  * simple identifier / literal / member chain / unary wrap should NOT surface as a return
  * rule. Everything else does.
  */
@@ -310,7 +310,7 @@ function containsEarlyExit(node: Node): boolean {
  * eventually in `Symbol.calls[].target` and `Symbol.effects[].target`. The
  * two flags beside it are passengers: neither is serialized, and neither
  * changes what `target` says. What the *string* says is wire-visible — a
- * bracket access contributes a segment (`lang-plugin.md` §4.4), and the logic
+ * bracket access contributes a segment (`lang-plugin.md`), and the logic
  * fingerprint reads `effects[].target`, so a change here moves IR bytes.
  */
 interface CalleeShape {
@@ -318,7 +318,7 @@ interface CalleeShape {
   /**
    * The receiver was positively identified as an expression rather than a name
    * (`getRepo().save()`, `items[0].save()`, `(a ?? b).save()`). Such a call can
-   * never resolve in the untyped tier, and `call-resolution.md` §8.1 wants it
+   * never resolve in the untyped tier, and `call-resolution.md` wants it
    * reported as `dynamic` rather than lumped in with genuine typos.
    */
   dynamic: boolean
@@ -402,7 +402,7 @@ function describeCallee(node: Node): CalleeShape | null {
  *
  * Position is not part of the question. The index of `handlers["run"]()` names the property
  * being called exactly as the one in `prisma["user"].create()` names the receiver, so the
- * terminal slot folds by the same rule (`lang-plugin.md` §4.4).
+ * terminal slot folds by the same rule (`lang-plugin.md`).
  *
  * Everything else — an identifier, a number, a substituting template, a string the
  * qualified-name grammar has no segment for — is null, and the caller writes

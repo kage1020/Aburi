@@ -24,7 +24,7 @@ export type PinnedConfig = ConfigSource
  * Decide which config a run reads, without reading it.
  *
  * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the given `cwd`,
- * per `cli-spec.md §13 Config Resolution Order`. A config in that directory therefore wins
+ * per `cli-spec.md Config Resolution Order`. A config in that directory therefore wins
  * over one in an ancestor.
  *
  * The marker-detected workspace root plays no part here. It is the base for Symbol id
@@ -33,7 +33,7 @@ export type PinnedConfig = ConfigSource
  * package-local config can name paths that resolve against a directory above it.
  *
  * Separated from the read so that `aburi diff` can pin the head's answer before it moves the
- * working directory (cli-spec.md §6.4 step 3). Both halves of a diff then read one file, and
+ * working directory (cli-spec.md step 3). Both halves of a diff then read one file, and
  * a commit touching only `aburi.json` stops reading as a change to every Symbol in the
  * workspace.
  */
@@ -89,16 +89,17 @@ export async function resolveConfig(
 }
 
 /**
- * Map a failure of the config load onto the CLI exit-code table (cli-spec.md §9).
+ * Map a failure of the config load onto the CLI exit-code table (cli-spec.md).
  *
  * Three different people are at fault on this path and only one of them is the reader.
  *
  * A `ConfigError` naming the file's *content* is theirs, and exit 2 sends them to edit it. So
  * is `config-not-found` — a `--config` path that names nothing is a mistyped argument, which
- * §9 spends the same code on. `config-read-failed` is neither: the file is there and the
- * filesystem refused it, which §9 spends exit 1 on, and no edit to `aburi.json` changes a
- * permission or a mount. All three keep the `Failed to load Aburi config:` prefix, because it
- * names the phase that failed rather than who is answerable for it.
+ * the exit-code table spends the same code on. `config-read-failed` is neither: the file is
+ * there and the filesystem refused it, which the exit-code table spends exit 1 on, and no edit
+ * to `aburi.json` changes a permission or a mount. All three keep the
+ * `Failed to load Aburi config:` prefix, because it names the phase that failed rather than
+ * who is answerable for it.
  *
  * Anything that is not a `ConfigError` is Aburi's own, and the reader is told so: `formatAjvErrors`
  * throws a bare `Error` when ajv reports failure with an empty `errors[]`, and reporting that

@@ -2,7 +2,7 @@ import type { DiffResult, SymbolChange, SymbolChanged, SymbolMovedChanged } from
 import { assertNever } from "./errors"
 
 /**
- * §6.7 — `--fail-on` value grammar. Three families collapse into one union so the CLI
+ * `cli-spec.md` — `--fail-on` value grammar. Three families collapse into one union so the CLI
  * driver can accept a comma-separated list without branching per family.
  *
  * Status family (raw `SymbolChange["status"]` plus direction subtypes):

@@ -3,8 +3,8 @@ import { resolve } from "node:path"
 /**
  * Every name the CLI writes into the `--output-dir`, and the directory itself, so external
  * drivers (the GitHub Action, integration fixtures) import the literal rather than copy it.
- * `docs/design/cli-spec.md §6.4` and `diff-algorithm.md §2.3` pin the diff artefacts;
- * `cli-spec.md §5.3` pins the scan's three.
+ * `docs/design/cli-spec.md` and `diff-algorithm.md` pin the diff artefacts;
+ * `cli-spec.md` pins the scan's three.
  */
 
 export const DIFF_JSON_FILENAME = "diff.json"
@@ -19,8 +19,8 @@ export const DEFAULT_OUTPUT_DIRNAME = "out"
 /**
  * The directory a command writes its artefacts into, or reads them back from — against `cwd`,
  * not the workspace root, like every other path-bearing flag. `configured` is
- * `config.output.dir`, which stands exactly where the flag would (`cli-spec.md §5.2`,
- * `config.md §11`) and so resolves against the same directory.
+ * `config.output.dir`, which stands exactly where the flag would (`cli-spec.md`,
+ * `config.md`) and so resolves against the same directory.
  */
 export function resolveOutputDir(
   cwd: string,

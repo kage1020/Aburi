@@ -28,18 +28,19 @@ import {
 /** Options for {@link projectDiff}. */
 export interface ProjectDiffOptions {
   /**
-   * §6.4 — hard cap on the document in UTF-8 bytes (GitHub rejects a comment over 65536),
-   * honoured by dropping whole sections least important first, never by cutting the string.
-   * Must be a positive integer (`0` throws `RangeError`); absent means no cap.
+   * markdown-projection.md — hard cap on the document in UTF-8 bytes (GitHub rejects a
+   * comment over 65536), honoured by dropping whole sections least important first, never by
+   * cutting the string. Must be a positive integer (`0` throws `RangeError`); absent means no
+   * cap.
    */
   readonly maxBytes?: number
 }
 
 /**
- * §6 — `out/diff.md`. Sections are emitted in the fixed importance order (API changes →
- * Syntax-only). Moved, Dropped changes and Syntax-only changes are folded inside `<details>`;
- * Moved + Changed is not, because its delta carries semantic impact. Empty sections are
- * dropped (§5.3).
+ * markdown-projection.md — `out/diff.md`. Sections are emitted in the fixed importance order
+ * (API changes → Syntax-only). Moved, Dropped changes and Syntax-only changes are folded
+ * inside `<details>`; Moved + Changed is not, because its delta carries semantic impact.
+ * Empty sections are dropped.
  */
 export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}): string {
   const heading: string[] = []
@@ -82,8 +83,9 @@ interface Section {
 }
 
 /**
- * §6.4 — join the document, dropping sections from the bottom until it fits. The section
- * order is the §6.1 importance order (§12.4), so Syntax-only goes first and API changes last.
+ * Join the document, dropping sections from the bottom until it fits (markdown-projection.md,
+ * `maxBytes`). The section order is the importance order (which slice-view.md's cross-links
+ * rely on too), so Syntax-only goes first and API changes last.
  * The note is rebuilt and the document re-measured on every drop, because naming one more
  * section lengthens the note. The title and Summary line cannot be dropped, so the last
  * document may still be over budget; only that one takes the "could not be brought within"
@@ -142,7 +144,7 @@ function flatten(sections: readonly Section[]): string[] {
   return sections.flatMap((section) => [...section.lines])
 }
 
-/** §6.3 — one-line CLI stdout summary. */
+/** markdown-projection.md — one-line CLI stdout summary. */
 export function projectDiffSummaryLine(diff: DiffResult): string {
   const summary = diff.summary
   return withUnknown(
@@ -182,9 +184,9 @@ interface Buckets {
 }
 
 /**
- * §6.2 section routing. The delta flags overlap, so `routeChanged` applies a priority:
- * `apiChanged` → API changes, else `logicChanged` → Logic changes, else `syntaxChanged` →
- * Syntax-only. The other buckets are routed by the `status` tag alone.
+ * Section routing (markdown-projection.md). The delta flags overlap, so `routeChanged`
+ * applies a priority: `apiChanged` → API changes, else `logicChanged` → Logic changes, else
+ * `syntaxChanged` → Syntax-only. The other buckets are routed by the `status` tag alone.
  */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
@@ -250,7 +252,7 @@ function appendSection(sections: Section[], heading: string, body: string[]): vo
   sections.push({ title: titleOf(heading), lines: [heading, "", ...body, ""] })
 }
 
-/** §6.1 — a `<details>` fold-out; skipped when empty so GitHub renders no dangling arrow. */
+/** A `<details>` fold-out; skipped when empty so GitHub renders no dangling arrow. */
 function appendFolded(sections: Section[], heading: string, body: string[]): void {
   if (body.length === 0) return
   sections.push({
@@ -553,9 +555,10 @@ function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
 }
 
 /**
- * §6.2 — the Symbols one document has and the other never looked for. Apart from Added and
- * Removed because the reader's next action differs: an entry here is a gap to close, and the
- * reason says how — `parse-timeout` and `unreadable` usually clear on a re-run, while
+ * The Symbols one document has and the other never looked for (markdown-projection.md).
+ * Apart from Added and Removed because the reader's next action differs: an entry here is a
+ * gap to close, and the reason says how — `parse-timeout` and `unreadable` usually clear on
+ * a re-run, while
  * `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the file or the
  * plugin set.
  */
@@ -652,9 +655,9 @@ function renderSyntaxOnly(items: readonly (SymbolChanged | SymbolMovedChanged)[]
 }
 
 /**
- * §12 — the Slice View section: every non-singleton Slice as a `###` subsection with member
- * bullets, then the singletons folded into one "Standalone changes" `<details>`. Empty
- * input renders nothing (§12.5). `symbols[]` supplies each member's SymbolChange for the
+ * slice-view.md — the Slice View section: every non-singleton Slice as a `###` subsection
+ * with member bullets, then the singletons folded into one "Standalone changes" `<details>`.
+ * Empty input renders nothing. `symbols[]` supplies each member's SymbolChange for the
  * per-bullet detail.
  */
 function renderSliceView(
@@ -684,7 +687,7 @@ function renderSliceView(
     )
     rows.push("")
     for (const slice of singleton) {
-      // members[0] is the Slice anchor (slice-view.md §7.1). Read from members, never by
+      // members[0] is the Slice anchor (slice-view.md). Read from members, never by
       // stripping the `slice:` prefix off `id`: for a record that broke the derivation that
       // would name a Symbol outside the Slice. (`sliceAnchor` lives in @aburi/diff, which
       // this package does not depend on.)
@@ -692,7 +695,7 @@ function renderSliceView(
       if (memberId === undefined) {
         throw new Error(
           `projectDiff: slice ${slice.id} has an empty members[]; every Slice has at least one ` +
-            "member and members[0] is its anchor (slice-view.md §11.1).",
+            "member and members[0] is its anchor (slice-view.md).",
         )
       }
       const label = renderSingletonLabel(memberId, slice.id, changeById)
@@ -705,8 +708,9 @@ function renderSliceView(
 }
 
 /**
- * §12.2 — one non-singleton Slice: the full slice id in a code span (so viewers do not
- * auto-link the `:` / `/` / `#`) with the member count, then a three-line cluster per member.
+ * slice-view.md — one non-singleton Slice: the full slice id in a code span (so viewers do
+ * not auto-link the `:` / `/` / `#`) with the member count, then a three-line cluster per
+ * member.
  */
 function renderSliceSection(
   slice: SliceRecord,
@@ -727,10 +731,10 @@ function renderSliceSection(
 }
 
 /**
- * §12.6 — the note that turns slice-view.md §5.4's silent drop into something a reviewer can
- * act on: an unresolved call emits no `CallEdge`, so a Slice that should have bridged two
- * Symbols may show as two singletons. Counting the members' own `calls[].resolved` is
- * sufficient, since §5.1 draws an edge only when both endpoints are Nodes.
+ * The note that turns slice-view.md's silent drop into something a reviewer can act on: an
+ * unresolved call emits no `CallEdge`, so a Slice that should have bridged two Symbols may
+ * show as two singletons. Counting the members' own `calls[].resolved` is sufficient, since
+ * the Edge set draws an edge only when both endpoints are Nodes.
  */
 function renderUnresolvedCallNote(
   slices: readonly SliceRecord[],
@@ -752,7 +756,7 @@ function renderUnresolvedCallNote(
   const verb = affectedMembers === 1 ? "makes" : "make"
   const calls = unresolvedCalls === 1 ? "1 call" : `${unresolvedCalls} calls`
   return [
-    `> ⚠ ${affectedMembers} of the changed symbols below ${verb} ${calls} the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md §8.1).`,
+    `> ⚠ ${affectedMembers} of the changed symbols below ${verb} ${calls} the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md).`,
     "",
   ]
 }
@@ -785,9 +789,9 @@ function renderSingletonLabel(
 }
 
 /**
- * Every Slice member is a Node (slice-view.md §4.1) and every Node is a SymbolChange in
- * `diff.symbols[]` (§11.2), so a missing entry is a producer bug that surfaces here rather
- * than as an "unknown" label.
+ * Every Slice member is a Node (slice-view.md) and every Node is a SymbolChange in
+ * `diff.symbols[]` (its emission rules), so a missing entry is a producer bug that surfaces
+ * here rather than as an "unknown" label.
  */
 function requireChangeForMember(
   memberId: SymbolId,
@@ -798,15 +802,16 @@ function requireChangeForMember(
   if (change === undefined) {
     throw new Error(
       `projectDiff: slice ${sliceId} lists member ${memberId} that is not present in diff.symbols[]; ` +
-        `every Slice member must have a corresponding SymbolChange (slice-view.md §11.2).`,
+        `every Slice member must have a corresponding SymbolChange (slice-view.md).`,
     )
   }
   return change
 }
 
 /**
- * The Symbol a change is reported under (§4.1): `after` where both sides exist, otherwise
- * the one side the document holds. Pure `moved` is not a Node (§4.3) but is still indexed.
+ * The Symbol a change is reported under (slice-view.md's Node set): `after` where both
+ * sides exist, otherwise the one side the document holds. Pure `moved` is not a Node but is
+ * still indexed.
  */
 function symbolForMember(change: SymbolChange): IRSymbol {
   return change.status === "added" || change.status === "removed" || change.status === "unknown"
@@ -884,7 +889,7 @@ function renderComponentChanges(diff: DiffResult): string[] {
 /**
  * The fields that differ between the two revisions of one Component, read from `before` /
  * `after` rather than `delta`: the delta summarises three axes, and a change to name,
- * languages or description leaves all three `false` (diff-algorithm.md §6.1). Scalars carry
+ * languages or description leaves all three `false` (diff-algorithm.md). Scalars carry
  * their before → after inline through `inlineCode` (free-form config text that reaches a PR
  * comment body); list fields name themselves. The sweep after the six named fields covers a
  * `Component` key added to `aburi.ir.v1` later, which `diffComponents` will report and this
@@ -899,7 +904,7 @@ function changedComponentFields(before: Component, after: Component): string[] {
   if (!sameList(before.publicApi ?? [], after.publicApi ?? [])) fields.push("publicApi")
   if (!sameList(before.languages, after.languages)) fields.push("languages")
   if (!sameList(before.frameworks ?? [], after.frameworks ?? [])) fields.push("frameworks")
-  // Class A (ir-schema.md §1.1): an absent key and `null` are the same answer, so the `??`
+  // Class A (ir-schema.md): an absent key and `null` are the same answer, so the `??`
   // is what keeps an older document that omits the key from reading as a description removal.
   const beforeDescription = before.description ?? null
   const afterDescription = after.description ?? null
@@ -960,9 +965,10 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * §6 Dependency changes — split into component-level (architectural) and symbol-level
- * (implementation) groups under one heading; an empty group collapses. The Unknown group
- * appended last is not level-routed, because only a Symbol endpoint has a file to lose.
+ * Dependency changes (markdown-projection.md) — split into component-level (architectural)
+ * and symbol-level (implementation) groups under one heading; an empty group collapses. The
+ * Unknown group appended last is not level-routed, because only a Symbol endpoint has a file
+ * to lose.
  */
 function renderDependencyChanges(diff: DiffResult): string[] {
   const { added, removed } = diff.dependencies

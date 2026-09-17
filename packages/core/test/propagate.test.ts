@@ -20,7 +20,7 @@ function bySymbolId(symbols: IRSymbol[], id: string): IRSymbol {
   return sym
 }
 
-describe("propagateEffects — PR1..PR15 (effect-propagation.md §11)", () => {
+describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
   it("PR1: direct A→B propagation — B's db.write reaches A", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A", { effects: [] }),
@@ -263,7 +263,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md §11)", () => {
   })
 })
 
-describe("propagateEffects — additional invariants (§5, §8, §12.9)", () => {
+describe("propagateEffects — additional invariants", () => {
   it("derivedBy lex tie-break — two paths, smaller derivedBy wins", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),

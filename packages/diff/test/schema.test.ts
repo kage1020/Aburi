@@ -7,7 +7,7 @@ import { buildDiff } from "../src/diff"
 import { sliceRecordViolation } from "../src/slice"
 
 /**
- * SV22 and SV24 (docs/design/slice-view.md §13.6, §13.7) + §11.3 — verify that
+ * SV22 and SV24 (docs/design/slice-view.md) — verify that
  * the diff schema addition (`slices[]`) is fully honoured at runtime, both by
  * valid outputs and by rejecting malformed shapes. Type-level assertions in
  * `packages/types/test/exports.test.ts` prove the compile-time contract; this
@@ -23,9 +23,9 @@ const ajv = new Ajv2020({
 })
 
 /**
- * §7.4 layer 2 — the derivation check a JSON Schema cannot carry, registered by
+ * Enforcement layer 2 — the derivation check a JSON Schema cannot carry, registered by
  * the validating consumer rather than written into `schema/aburi.diff.v1.json`
- * (see `docs/design/slice-view.md` §7.4 for why the schema file stays standard).
+ * (see `docs/design/slice-view.md` for why the schema file stays standard).
  *
  * `errors` on the function is how Ajv keywords report a custom message, so the
  * reason from `sliceRecordViolation` reaches the caller instead of Ajv's
@@ -112,7 +112,7 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     expect(ok).toBe(true)
   })
 
-  it("validates a `buildDiff` output whose slices[] is empty (zero-Node case, §9.4)", () => {
+  it("validates a `buildDiff` output whose slices[] is empty (zero-Node case)", () => {
     const ir = makeIR({ symbols: [makeSymbol({ id: "ts:src/x.ts#X", name: "X" })] })
     const diff = buildDiff({
       baseIR: ir,
@@ -125,8 +125,8 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
   })
 
   // The entry shape this schema had never seen: `changed[]` reports a component whose change is
-  // outside the three axes `delta` names, so all three booleans are `false` (diff-algorithm.md
-  // §6.1). Every IR in this file is component-free, so nothing pinned that it validates.
+  // outside the three axes `delta` names, so all three booleans are `false` (diff-algorithm.md).
+  // Every IR in this file is component-free, so nothing pinned that it validates.
   it("validates a changed component whose three delta booleans are all false", () => {
     const before = component({ id: "billing", name: "Billing" })
     const after = component({ id: "billing", name: "Billing & Invoicing" })
@@ -196,7 +196,7 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
         {
           id: "slice:ts:src/a.ts#A",
           members: ["ts:src/a.ts#A"],
-          confidence: "high", // §14.12 explicitly forbids extra fields on SliceRecord
+          confidence: "high", // slice-view.md explicitly forbids extra fields on SliceRecord
         },
       ],
     }
@@ -288,7 +288,7 @@ describe("aburi.diff.v1.json — anchor derivation invariant (SV24)", () => {
 
     // The published schema alone cannot see this: the prefix matches, members
     // are unique, non-empty, and there is no extra property. Pinning that fact
-    // is the point — it is exactly why the keyword exists (§11.1).
+    // is the point — it is exactly why the keyword exists.
     expect(validate(malformed)).toBe(true)
 
     expect(validateWithAnchorInvariant(malformed)).toBe(false)

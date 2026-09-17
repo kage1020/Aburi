@@ -60,7 +60,7 @@ export interface DiffInput {
   generator?: { name: string; version: string }
   /** Optional stage-2 rename table. When null/undefined stage 2 is skipped. */
   gitRenames?: GitRenameMap | null
-  /** Passed through to computeSymbolDelta (§5.2.1 line fuzz). */
+  /** Passed through to computeSymbolDelta (line fuzz, diff-algorithm.md). */
   delta?: DeltaOptions
 }
 
@@ -220,9 +220,8 @@ export function buildDiff(
 
   symbols.sort(compareSymbolChange)
 
-  // Slice View clustering (docs/design/slice-view.md §2), over the resolved call edges only
-  // (§5.4). `slices[]` is emitted even when empty (§11.2); the Markdown side omits the
-  // section (§12.5).
+  // Slice View clustering (docs/design/slice-view.md), over the resolved call edges only
+  // `slices[]` is emitted even when empty; the Markdown side omits the section.
   const slices = computeSlices({
     changes: symbols,
     baseCallEdges: reconstructCallEdgesFromIR(input.baseIR),
@@ -249,7 +248,7 @@ export function buildDiff(
  * classify and the diff would otherwise fall silent about it — which is what a diff that
  * compared it and found it unchanged looks like. The intersection only: a one-sided loss is
  * already reported as `unknown` on the other side. Always an array, empty included
- * (docs/design/diff-algorithm.md §10.1).
+ * (docs/design/diff-algorithm.md).
  */
 function filesNeitherSideRead(
   lostByBase: ReadonlyMap<RelativePath, SkipReason>,
@@ -264,7 +263,7 @@ function filesNeitherSideRead(
   return both.sort(compareBy((file) => file.path))
 }
 
-/** §9.1 — refuse to diff across schema versions. */
+/** Refuse to diff across schema versions (diff-algorithm.md). */
 function ensureSchemasAgree(base: IR, head: IR): void {
   if (base.$schema !== head.$schema) {
     throw new DiffError(
@@ -309,7 +308,7 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
     consequence:
       "stage 1 pairs Symbols by id and every later stage tracks the base Symbols it has " +
       "consumed by id, so a repeat leaves one entry out of the diff entirely or classifies " +
-      "its counterpart twice (ir-schema.md §14 #1)",
+      "its counterpart twice (ir-schema.md #1)",
   },
   {
     field: "components",
@@ -319,7 +318,7 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
     show: soleField,
     consequence:
       "Component identity is the id, so a repeat hides one entry and can report a change " +
-      "the two revisions do not contain (ir-schema.md §14 #2)",
+      "the two revisions do not contain (ir-schema.md #2)",
   },
   {
     field: "dependencies",
@@ -331,9 +330,10 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
     noun: "(from, to, via) triple",
     show: (parts) => `(${parts.join(", ")})`,
     consequence:
-      "direction and effect are deliberately outside Dependency identity (§6.2), so a " +
+      "direction and effect are deliberately outside Dependency identity " +
+      "(diff-algorithm.md), so a " +
       "repeat surfaces as an added + removed pair no reader can tell from a real flip " +
-      "(ir-schema.md §14 #13)",
+      "(ir-schema.md #13)",
   },
 ]
 
@@ -342,7 +342,7 @@ const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
  * (`checkDocumentShape`, invariant #20 — `buildDiff` is public API, so an IR assembled in
  * memory arrives having passed nothing), a `$schema` that names something (two Documents
  * that both say `""` would agree with each other), and identities it can key on
- * (diff-algorithm.md §3.7). Deliberately not the semantic invariants: an unsorted
+ * (diff-algorithm.md). Deliberately not the semantic invariants: an unsorted
  * `symbols[]` diffs correctly, so refusing it would withhold an answer the matcher can give.
  */
 function assertDiffable(ir: IR, name: IRSide): void {

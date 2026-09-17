@@ -248,7 +248,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("says what the typed tier bought, on a run every other counter calls healthy", () => {
-    // The whole point of the hint counters (lsp-enrichment.md §7.2): 12 hovers came back on
+    // The whole point of the hint counters (lsp-enrichment.md): 12 hovers came back on
     // time with nothing usable, so the census line above cannot fire and every number it
     // would have printed reads clean. Without this line the CLI reports a perfect run.
     const lines = incidentLinesFrom(
@@ -373,8 +373,9 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
 
   it("gives each reason its own ten, so a flood cannot hide the one that gates", () => {
     // A single cap across the whole listing is the failure: eleven over-size files would
-    // spend it, and the one file that set the exit code would be inside `…and N more`. §5.6
-    // promises the opposite — a reader handed a non-zero status is told which files earned it.
+    // spend it, and the one file that set the exit code would be inside `…and N more`.
+    // `cli-spec.md` promises the opposite — a reader handed a non-zero status is told which
+    // files earned it.
     const flood = Array.from({ length: 11 }, (_, i) => ({
       path: `vendor/big${i}.js`,
       reason: "over-size" as const,
@@ -627,7 +628,7 @@ describe("aburi diff — both scans it ran for you", () => {
       '⚠ base ref "main": 1 file(s) could not be parsed and were left out of the IR.',
     )
     expect(warnings).toContain("⚠ head (working tree): 1 file(s) had recoverable parse errors.")
-    // §6.4 — the head is always the current checkout, whatever the ref spec calls it. A
+    // `cli-spec.md` — the head is always the current checkout, whatever the ref spec calls it. A
     // `head ref "v1.1.0"` label would name a revision this scan never read.
     expect(warnings.join("\n")).not.toContain("v1.1.0")
   })

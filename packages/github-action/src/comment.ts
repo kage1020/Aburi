@@ -17,12 +17,12 @@ export const GITHUB_COMMENT_MAX_BYTES = 65536
 /**
  * What a report rendered for the default marker may weigh: the ceiling less that marker and its
  * separator. This is the number to render with — `aburi diff --max-bytes <n>`
- * (`markdown-projection.md` §6.4) drops whole sections to meet it — and the default
+ * (`markdown-projection.md`) drops whole sections to meet it — and the default
  * `scripts/resolve-max-bytes.mjs` holds.
  *
  * The action passes it on every run that writes Markdown, `comment: false` included, because
  * that is the mode a fork's pull request uses and its artefact is posted by another workflow
- * (`docs/design/github-action.md` §5.2). A caller naming its own `max-bytes` gets that instead,
+ * (`docs/design/github-action.md`). A caller naming its own `max-bytes` gets that instead,
  * and `max-bytes: 0` gets no cap at all.
  *
  * A caller passing its own {@link UpsertOptions.marker} should derive its own budget: a longer

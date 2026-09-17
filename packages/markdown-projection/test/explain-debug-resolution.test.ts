@@ -3,7 +3,7 @@ import type { UnresolvedCallDiagnostic } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectSymbolExplain } from "../src/explain"
 
-// call-resolution.md §8.1 — `aburi explain --debug-resolution` renders the
+// call-resolution.md — `aburi explain --debug-resolution` renders the
 // per-Symbol dump the doc promises. The buckets never enter the IR, so they
 // arrive through the projection context instead.
 

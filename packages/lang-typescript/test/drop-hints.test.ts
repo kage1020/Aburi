@@ -78,7 +78,7 @@ describe("classifySymbolDropHint", () => {
   it("keeps a Symbol carrying a boundary decorator, whatever its kind", () => {
     // `decideDropReason` in core asks `decideSymbolDrop` first, which answers `null` on a
     // boundary decorator, and then asks this. So an arm here that never looks at decorators
-    // is the one that decides — `drop-list.md` §4.1 puts a boundary outside Category B, and
+    // is the one that decides — `drop-list.md` puts a boundary outside Category B, and
     // that has to hold for every kind, not only for the class arm that already checked.
     const boundary = [
       { name: "Controller", raw: "@Controller()", arguments: [], boundary: true, line: 1 },
