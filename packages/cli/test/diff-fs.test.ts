@@ -99,6 +99,44 @@ function makeIRWithManyAdded(count: number): IR {
   return { ...one, symbols, stats: { ...one.stats, keptSymbols: count } }
 }
 
+/**
+ * The base side of a two-section diff: one symbol the head keeps but changes. Without it every
+ * fixture here renders a single `Added` section, and a capped run drops that one section and
+ * returns the heading — which measures well under any budget worth testing and so never
+ * exercises the path where some sections survive and others go.
+ */
+function makeIRWithKept(apiFingerprint: string): IR {
+  const one = makeIRWithAdded()
+  const template = one.symbols[0]
+  if (template === undefined) throw new Error("expected a template symbol")
+  return {
+    ...one,
+    symbols: [
+      {
+        ...template,
+        id: symbolId("ts:src/kept.ts#Kept"),
+        name: "Kept",
+        source: { ...template.source, file: "src/kept.ts" },
+        fingerprint: { ...template.fingerprint, api: apiFingerprint },
+      },
+    ],
+    stats: { ...one.stats, keptSymbols: 1 },
+  }
+}
+
+/**
+ * That same symbol, changed, plus `count` added ones: `API changes` above `Added`. Sorted by id,
+ * which the IR's own integrity check requires of every document the reader accepts.
+ */
+function makeIRWithChangeAndManyAdded(count: number): IR {
+  const changed = makeIRWithKept("zzz000000000")
+  const added = makeIRWithManyAdded(count)
+  const symbols = [...changed.symbols, ...added.symbols].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  )
+  return { ...added, symbols, stats: { ...added.stats, keptSymbols: symbols.length } }
+}
+
 beforeEach(async () => {
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-"))
 })
@@ -134,30 +172,76 @@ describe("runDiff — --base/--head (file mode)", () => {
     // the document that gets posted, and the artefact beside it still holds every symbol.
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
-    await writeFile(headPath, JSON.stringify(makeIRWithManyAdded(400)), "utf8")
+    await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithChangeAndManyAdded(400)), "utf8")
 
     const uncapped = await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })
     if (uncapped.diffMdPath === null) throw new Error("expected diffMdPath")
     const full = await readFile(uncapped.diffMdPath, "utf8")
     expect(Buffer.byteLength(full, "utf8")).toBeGreaterThan(20_000)
+    expect(full).toContain("## ⚠ API changes")
+    expect(full).toContain("## ➕ Added")
 
     const capped = await runDiff({
       cwd: scratch,
       base: basePath,
       head: headPath,
       refSpec: null,
-      maxBytes: 4_000,
+      maxBytes: 2_000,
     })
     if (capped.diffMdPath === null) throw new Error("expected diffMdPath")
     const markdown = await readFile(capped.diffMdPath, "utf8")
-    expect(Buffer.byteLength(markdown, "utf8")).toBeLessThanOrEqual(4_000)
-    expect(markdown).toContain("omitted")
+    expect(Buffer.byteLength(markdown, "utf8")).toBeLessThanOrEqual(2_000)
+    // The budget was met by dropping the lower section and keeping the higher one, which is the
+    // path the flag exists for — not by dropping everything and returning the heading.
+    expect(markdown).toContain("## ⚠ API changes")
+    expect(markdown).not.toContain("## ➕ Added")
+    expect(markdown).toContain("➕ Added")
     expect(markdown).toContain("**Summary**: +400 added")
 
     if (capped.diffJsonPath === null) throw new Error("expected diffJsonPath")
     const diffJson = await readFile(capped.diffJsonPath, "utf8")
     expect(diffJson).toContain("Added0399")
+  })
+
+  it("warns, rather than fails, when a budget cannot be met", async () => {
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithManyAdded(20)), "utf8")
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      maxBytes: 10,
+      warn: (message) => warnings.push(message),
+    })
+    expect(report.exitCode).toBe(EXIT.SUCCESS)
+    if (report.diffMdPath === null) throw new Error("expected diffMdPath")
+    const written = Buffer.byteLength(await readFile(report.diffMdPath, "utf8"), "utf8")
+    expect(written).toBeGreaterThan(10)
+    expect(warnings.join("\n")).toContain(`diff.md is ${written} bytes, over the 10 requested`)
+  })
+
+  it("warns that --max-bytes has nothing to cap under --format json", async () => {
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      format: "json",
+      maxBytes: 4_000,
+      warn: (message) => warnings.push(message),
+    })
+    expect(report.diffMdPath).toBeNull()
+    expect(warnings.join("\n")).toContain("--max-bytes has no effect under --format json")
   })
 
   it("rejects a --max-bytes that is not a positive integer, before scanning anything", async () => {
@@ -309,6 +393,54 @@ describe("runDiff — call-resolution census on stdout (call-resolution.md §8.1
     const lines = stdout.text().trimEnd().split("\n")
     expect(lines[0]).toBe("+1 -0 ~0 ↔0 ⤴0")
     expect(lines[1]).toBe("calls 1 · resolved 0 · unresolved 1 (ambiguous 1)")
+  })
+})
+
+describe("argv routing for --max-bytes", () => {
+  it("caps the written diff.md from runCli end-to-end", async () => {
+    // The one hop the action depends on: `--max-bytes 65507` on the command line reaching
+    // `projectDiff`. Delete the forwarding line in `run.ts` and every other test in this repo
+    // still passes — the CLI exits 0, writes a full-size diff.md, and the comment silently
+    // stops being posted, which is the bug this flag exists to prevent.
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithChangeAndManyAdded(400)), "utf8")
+    const outputDir = resolve(scratch, "out")
+    const mdPath = resolve(outputDir, "diff.md")
+
+    const uncapped = await runCli({
+      argv: ["diff", "--base", basePath, "--head", headPath, "--output-dir", outputDir],
+      stdout: new MemStream(),
+      stderr: new MemStream(),
+      env: {},
+      cwd: scratch,
+    })
+    expect(uncapped).toBe(EXIT.SUCCESS)
+    expect(Buffer.byteLength(await readFile(mdPath, "utf8"), "utf8")).toBeGreaterThan(20_000)
+
+    const capped = await runCli({
+      argv: [
+        "diff",
+        "--base",
+        basePath,
+        "--head",
+        headPath,
+        "--output-dir",
+        outputDir,
+        "--max-bytes",
+        "2000",
+      ],
+      stdout: new MemStream(),
+      stderr: new MemStream(),
+      env: {},
+      cwd: scratch,
+    })
+    expect(capped).toBe(EXIT.SUCCESS)
+    const markdown = await readFile(mdPath, "utf8")
+    expect(Buffer.byteLength(markdown, "utf8")).toBeLessThanOrEqual(2000)
+    expect(markdown).toContain("## ⚠ API changes")
+    expect(markdown).not.toContain("## ➕ Added")
   })
 })
 

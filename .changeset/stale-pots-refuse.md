@@ -26,18 +26,29 @@ for them:
 > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
 ```
 
+One budget cannot be met — smaller than the title, the Summary line and that note together — and
+the document that comes back over it says so in as many words rather than claiming a size it does
+not have. `aburi diff` warns on stderr in the same case, and again when `--format json` leaves the
+flag nothing to cap.
+
 `aburi diff --max-bytes <n>` is the CLI spelling, and it caps `diff.md` alone — `diff.json` is
 unabridged, so nothing is lost from the artefact a tool reads.
 
 The action passes `--max-bytes 65507` by default: the 65536-byte ceiling less the 29-byte marker
 line the upsert prepends, kept in step with `ABURI_COMMENT_MARKER` by a test rather than spelled
-twice. Two details are deliberate. The cap applies under `comment: false` as well, because that is
-the mode a fork's pull request runs in, where the Markdown travels as an artefact for the
-`workflow_run` companion to post — a cap keyed on `comment` would simply move the 422 onto the one
-pull request whose author cannot see the companion's log. And the flag is probed for with
-`aburi diff --help` rather than assumed, because `version` pins the CLI while the action is
-referenced by ref: against an older CLI the action warns and renders uncapped, which is what that
-CLI did anyway, instead of failing every run at argv parsing.
+twice. The decision is `scripts/resolve-max-bytes.mjs`, a committed script beside the CLI resolver
+and for the same reason — a `run:` block is never executed by a test, so a guard dropped from one
+leaves CI green and breaks every run. Four things it settles. The cap applies under
+`comment: false` as well, because that is the mode a fork's pull request runs in, where the
+Markdown travels as an artefact for the `workflow_run` companion to post; a cap keyed on `comment`
+would simply move the 422 onto the one pull request whose author cannot see the companion's log.
+The flag is probed for with `aburi diff --help` rather than assumed, because `version` pins the CLI
+while the action is referenced by ref: against an older CLI it warns — naming both upgrade routes,
+since `version` means nothing under `cli: workspace` — and renders uncapped, which is what that CLI
+did anyway. A probe that could not run at all is reported as itself rather than as a missing flag,
+because a registry outage read as "this CLI has no `--max-bytes`" is a green job publishing an
+oversized artefact with a log that explains it wrongly. And `format: json` caps nothing, since that
+run writes no `diff.md`.
 
 Both ends of the upsert now measure before they write — `scripts/upsert-comment.mjs` exits 2 with a
 one-line annotation, `upsertPullRequestComment` throws — and say which file is how large and which

@@ -7,7 +7,11 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { afterAll, describe, expect, it } from "vitest"
-import { ABURI_COMMENT_MARKER, GITHUB_COMMENT_MAX_BYTES } from "../src/comment"
+import {
+  ABURI_COMMENT_BODY_MAX_BYTES,
+  ABURI_COMMENT_MARKER,
+  GITHUB_COMMENT_MAX_BYTES,
+} from "../src/comment"
 
 const execFileAsync = promisify(execFile)
 
@@ -183,7 +187,10 @@ describe("upsert-comment.mjs", () => {
     // The 422 this replaces says nothing about size and arrives after the list call has paged
     // through the whole pull request. Nothing here can re-render the document — that is what
     // `aburi diff --max-bytes` is for — so it says which file, how big, and what to do.
-    const path = await markdownFile("x".repeat(GITHUB_COMMENT_MAX_BYTES))
+    //
+    // One byte over, measured with the marker: `"x".repeat(GITHUB_COMMENT_MAX_BYTES)` would be
+    // the limit plus the marker's 29, and would pass just as well against a `>=` comparison.
+    const path = await markdownFile("x".repeat(ABURI_COMMENT_BODY_MAX_BYTES + 1))
     await withApi(
       () => ({ json: [] }),
       async (base, requests) => {
@@ -194,6 +201,45 @@ describe("upsert-comment.mjs", () => {
         expect(run.stderr).toContain("--max-bytes")
         expect(run.stderr.trimEnd().split("\n")).toHaveLength(1)
         expect(requests).toHaveLength(0)
+      },
+    )
+  })
+
+  it("posts a report that lands exactly on the limit", async () => {
+    // The other side of the boundary, so `>` cannot drift to `>=` unnoticed: one byte less than
+    // the case above is the largest report the default budget is calculated to allow.
+    const body = "x".repeat(ABURI_COMMENT_BODY_MAX_BYTES)
+    const path = await markdownFile(body)
+    await withApi(
+      (request) =>
+        request.method === "GET" ? { json: [] } : { status: 201, json: comment(44, "x") },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        const created = requests.find((r) => r.method === "POST")
+        const posted = JSON.parse(created?.body ?? "{}").body as string
+        expect(Buffer.byteLength(posted, "utf8")).toBe(GITHUB_COMMENT_MAX_BYTES)
+      },
+    )
+  })
+
+  it("measures a report that already carries the marker as it stands", async () => {
+    // The other branch of `raw.includes(MARKER)`: nothing is prepended, so the whole 65536 is
+    // the report's to use. Prepending a second marker would also be an in-place update that
+    // never finds its own comment again.
+    const body = `${ABURI_COMMENT_MARKER}\n\n${"x".repeat(GITHUB_COMMENT_MAX_BYTES - 29)}`
+    expect(Buffer.byteLength(body, "utf8")).toBe(GITHUB_COMMENT_MAX_BYTES)
+    const path = await markdownFile(body)
+    await withApi(
+      (request) =>
+        request.method === "GET" ? { json: [] } : { status: 201, json: comment(45, "x") },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        const created = requests.find((r) => r.method === "POST")
+        const posted = JSON.parse(created?.body ?? "{}").body as string
+        expect(posted).toBe(body)
+        expect(posted.split(ABURI_COMMENT_MARKER)).toHaveLength(2)
       },
     )
   })

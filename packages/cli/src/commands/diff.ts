@@ -244,12 +244,32 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     })
     await writeFile(diffJsonPath, serialized, "utf8")
   }
+  if (format === "json" && options.maxBytes !== undefined) {
+    // Not an input error: the action passes `--max-bytes` without consulting `--format`, so
+    // rejecting the pair would fail every `format: json` run of it. Said out loud all the same —
+    // a flag that is accepted, validated and then has nothing to act on is one a reader is
+    // entitled to hear about.
+    warn(
+      `⚠ --max-bytes has no effect under --format json: the cap applies to ${DIFF_MD_FILENAME}, which this run does not write.`,
+    )
+  }
   if (format !== "json") {
     diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
     const markdown = projectDiff(
       diff,
       options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes },
     )
+    // The one case the projection cannot meet is a budget smaller than the title, the Summary
+    // line and the omission note together (`markdown-projection.md` §6.4). It says so in the
+    // document; this says so to the caller, who asked for a number and got a bigger one.
+    if (options.maxBytes !== undefined) {
+      const written = Buffer.byteLength(markdown, "utf8")
+      if (written > options.maxBytes) {
+        warn(
+          `⚠ ${DIFF_MD_FILENAME} is ${written} bytes, over the ${options.maxBytes} requested: every section was dropped and the title and summary alone exceed it. Raise --max-bytes.`,
+        )
+      }
+    }
     await writeFile(diffMdPath, markdown, "utf8")
   }
 

@@ -170,7 +170,11 @@ whole document written regardless; the comment step then refuses an oversized bo
 rather than letting the API reject it with a 422 that never mentions size.
 
 A CLI older than `--max-bytes` is fine: the action asks `aburi diff --help` for the flag, and
-warns and renders uncapped if it is not there.
+warns and renders uncapped if it is not there. A probe that could not run at all — a registry
+failure, a bad `version` — gets a different warning, naming what it saw, rather than being
+reported as a missing flag.
+
+Under `format: json` nothing is capped, because nothing writes `diff.md`.
 
 ## Pull requests from a fork
 

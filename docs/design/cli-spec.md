@@ -444,7 +444,7 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
 | `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
-| `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, dropping whole sections least-important-first ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped. Absent: no cap |
+| `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, dropping whole sections least-important-first ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--quiet` | Limit stdout to a single final summary line |
 
 ### 6.3 Arguments

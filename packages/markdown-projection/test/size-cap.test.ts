@@ -137,13 +137,22 @@ describe("projectDiff — maxBytes (§6.4)", () => {
   it("drops sections from the least important end, at every budget", () => {
     // Whatever survives is a prefix of the document's own importance order: the cut only ever
     // moves up from the bottom, so the reader never loses an API change while a refactor stays.
+    // The byte assertion rides along, because "a prefix" alone is satisfied by dropping
+    // everything at every budget — and because an implementation that built the note once,
+    // while it was still empty, and measured before appending it would pass the rest of this.
     const diff = crowdedDiff(40)
     const order = headings(projectDiff(diff))
     const full = bytes(projectDiff(diff))
+    expect(order.length).toBeGreaterThan(1)
     for (let budget = full; budget > 0; budget -= 97) {
-      const kept = headings(projectDiff(diff, { maxBytes: budget }))
+      const md = projectDiff(diff, { maxBytes: budget })
+      const kept = headings(md)
       expect(kept).toEqual(order.slice(0, kept.length))
+      // Over budget is allowed only on the one path that cannot do better: nothing kept.
+      if (kept.length > 0) expect(bytes(md)).toBeLessThanOrEqual(budget)
     }
+    // The non-vacuous end: a budget the whole document already fits keeps every section.
+    expect(headings(projectDiff(diff, { maxBytes: full }))).toEqual(order)
   })
 
   it("drops only what the budget requires", () => {
@@ -182,8 +191,11 @@ describe("projectDiff — maxBytes (§6.4)", () => {
 
   it("never cuts a `<details>` block in half", () => {
     // Every budget from "everything fits" down to "nothing does" leaves the folds balanced.
+    // Counted against the folds the document actually has, so a run that dropped every folded
+    // section does not pass this by having none.
     const diff = crowdedDiff(40)
     const full = bytes(projectDiff(diff))
+    expect(projectDiff(diff).split("<details>").length - 1).toBeGreaterThan(0)
     for (let budget = full; budget > 0; budget -= 97) {
       const md = projectDiff(diff, { maxBytes: budget })
       expect(md.split("<details>").length).toBe(md.split("</details>").length)
@@ -196,6 +208,30 @@ describe("projectDiff — maxBytes (§6.4)", () => {
     expect(md).toContain("**Summary**: +400 added")
     expect(md).toContain("**6 sections were omitted**")
     expect(md).not.toContain("## ⚠ API changes")
+  })
+
+  it("says it could not fit, rather than claiming a budget it missed", () => {
+    // The one document that comes back over budget is the one that cannot do better. A note
+    // reading "to keep this report within 1 bytes" on a 300-byte document is the report
+    // contradicting itself at the one moment a reader needs it to be exact.
+    const md = projectDiff(crowdedDiff(400), { maxBytes: 1 })
+    expect(bytes(md)).toBeGreaterThan(1)
+    expect(md).toContain("could not be brought within 1 bytes")
+    expect(md).not.toContain("to keep this report within 1 bytes")
+  })
+
+  it("keeps the ordinary wording when nothing is left but the document still fits", () => {
+    // Every section dropped is not the same answer as "impossible": with room for the heading
+    // and the note, the budget was met, and the note should say so.
+    const diff = crowdedDiff(400)
+    // The floor: what the document weighs once every section is gone. Budgeting exactly that
+    // drops them all and still fits, because the note that says "could not" is the longer one.
+    const floor = bytes(projectDiff(diff, { maxBytes: 1 }))
+    const md = projectDiff(diff, { maxBytes: floor })
+    expect(headings(md)).toEqual([])
+    expect(bytes(md)).toBeLessThanOrEqual(floor)
+    expect(md).toContain(`to keep this report within ${floor} bytes`)
+    expect(md).not.toContain("could not be brought")
   })
 
   it("is deterministic under a budget (MP1)", () => {

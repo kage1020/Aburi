@@ -32,8 +32,12 @@ export interface ProjectDiffOptions {
    * Honoured by dropping whole sections, least important first, never by cutting the string —
    * a cut lands inside a `<details>` block or a code fence about as often as not, and what it
    * produces is a document GitHub renders as one open fence swallowing the rest. The title and
-   * the Summary line are never dropped, so a budget smaller than those is not achievable and
-   * the document comes back over it.
+   * the Summary line are never dropped, so a budget smaller than those is not achievable: the
+   * document comes back over it, with a note saying so in place of the usual one.
+   *
+   * Anything that is not a positive integer raises a `RangeError` — `0` included, which is the
+   * value a caller coming from the action's `max-bytes: 0` reaches for. No cap is spelled by
+   * leaving this out.
    */
   readonly maxBytes?: number
 }
@@ -92,15 +96,23 @@ interface Section {
 /**
  * §6.4 — join the document, dropping sections from the bottom until it fits.
  *
- * The section order is the importance order (§12.4), so the bottom is the least important
- * thing in the document and the drop order falls straight out of it: Syntax-only first, API
- * changes last. The note is rebuilt and the whole document re-measured on every drop, because
- * naming one more section makes the note longer — measuring once against a note that does not
- * yet say what it will say is how a budget gets missed by exactly the length of the last name.
+ * The section order is the §6.1 order (why that is the importance order: §12.4), so the bottom
+ * is the least important thing in the document and the drop order falls straight out of it:
+ * Syntax-only first, API changes last. The note is rebuilt and the whole document re-measured on
+ * every drop, because naming one more section makes the note longer — measuring once against a
+ * note that does not yet say what it will say is how a budget gets missed by exactly the length
+ * of the last name.
  *
- * `kept.length === 0` returns a document that may still be over budget: the title and the
- * Summary line are the one thing this cannot drop, and returning them over budget beats
- * returning a document with no idea what it is.
+ * Dropping every section is where the loop stops, and that last document may still be over
+ * budget: the title and the Summary line are the one thing this cannot drop, and returning them
+ * over budget beats returning a document with no idea what it is. Only *that* document — the one
+ * measured and still too large — takes the note's "could not be brought within" wording, because
+ * a line claiming a budget the document misses is worst exactly where it matters most, and
+ * because an empty-section document often does fit.
+ *
+ * The count is the loop variable rather than the two arrays it would slice: an array pair needs
+ * a `noUncheckedIndexedAccess` guard on an element that cannot be absent, which reads as "this
+ * might be empty" at the one place the line above has just proved it is not.
  */
 function assemble(
   heading: readonly string[],
@@ -114,15 +126,19 @@ function assemble(
     )
   }
 
-  let kept = sections
-  const dropped: Section[] = []
-  for (;;) {
-    const document = finalise([...heading, ...omissionNote(dropped, maxBytes), ...flatten(kept)])
-    if (kept.length === 0) return document
+  const render = (kept: number, unachievable: boolean): string =>
+    finalise([
+      ...heading,
+      ...omissionNote(sections.slice(kept), maxBytes, unachievable),
+      ...flatten(sections.slice(0, kept)),
+    ])
+
+  for (let kept = sections.length; ; kept--) {
+    const document = render(kept, false)
     if (Buffer.byteLength(document, "utf8") <= maxBytes) return document
-    const last = kept[kept.length - 1]
-    if (last !== undefined) dropped.unshift(last)
-    kept = kept.slice(0, -1)
+    // Nothing left to drop, and still too large. Say that, rather than repeat a promise the
+    // bytes below it contradict.
+    if (kept === 0) return render(0, true)
   }
 }
 
@@ -130,13 +146,25 @@ function assemble(
  * The line that stands in for what was dropped. Sections are named in document order rather
  * than in drop order: the reader is looking for the heading that is not there, and the order
  * they looked in is the one the document is written in.
+ *
+ * `unachievable` is the path where every section went and the document is still over budget —
+ * the title, the Summary line and this note alone weigh more than the caller allowed. It says
+ * that rather than "to keep this report within N bytes", which on that one path would be a
+ * document asserting the opposite of its own size.
  */
-function omissionNote(dropped: readonly Section[], maxBytes: number): string[] {
+function omissionNote(
+  dropped: readonly Section[],
+  maxBytes: number,
+  unachievable: boolean,
+): string[] {
   if (dropped.length === 0) return []
   const subject = dropped.length === 1 ? "1 section was" : `${dropped.length} sections were`
   const names = dropped.map((section) => section.title).join(", ")
+  const budget = unachievable
+    ? `and this report still could not be brought within ${maxBytes} bytes`
+    : `to keep this report within ${maxBytes} bytes`
   return [
-    `> ⚠ **${subject} omitted** to keep this report within ${maxBytes} bytes: ${names}. ` +
+    `> ⚠ **${subject} omitted** ${budget}: ${names}. ` +
       `The full report is the same diff rendered without a size cap.`,
     "",
   ]

@@ -140,8 +140,10 @@ runs:
           true|false) : ;;
           *) echo "::error::comment must be true or false (got '$COMMENT')." >&2; exit 2 ;;
         esac
-        # A non-numeric value would reach the CLI as an argument it rejects with exit 2 anyway,
-        # but only after both scans have run. `0` is the documented "no cap" spelling.
+        # `scripts/resolve-max-bytes.mjs` rejects the same values, and is where the rule is
+        # tested. Repeated here so a typo is caught before the toolchain is installed and, under
+        # `cli: dlx`, before a package is fetched — not because the later check might miss it.
+        # `0` is the documented "no cap" spelling, so it passes.
         if [ -n "$MAX_BYTES" ] && ! printf '%s' "$MAX_BYTES" | grep -Eq '^(0|[1-9][0-9]*)$'; then
           echo "::error::max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')." >&2
           exit 2
@@ -234,27 +236,34 @@ runs:
           runner=(pnpm dlx "@aburi/cli@$VERSION")
         fi
 
-        # 65536 is GitHub's comment-body limit and the upsert prepends a 29-byte marker line,
-        # which leaves 65507 for the report (`ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`,
-        # kept in step by `test/action-yml.test.ts`). Applied even under `comment: false`, and
-        # deliberately: that is the mode a fork's pull request runs in, where the Markdown goes up
-        # as an artefact for the `workflow_run` companion to post (§5.1) — a file capped only when
-        # this job was the one posting would be rejected there instead, which is the same 422 on
-        # the one pull request whose author cannot see the companion's log. `diff.json` is
-        # uncapped, and so is `diff.md` for a caller that says `max-bytes: 0`.
+        # The size cap. 65536 is GitHub's comment-body limit and the upsert prepends a 29-byte
+        # marker line, which leaves 65507 for the report — the default the script below holds,
+        # against `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`. Applied even under
+        # `comment: false`, and deliberately: that is the mode a fork's pull request runs in,
+        # where the Markdown goes up as an artefact for the `workflow_run` companion to post
+        # (§5.1) — a file capped only when this job was the one posting would be rejected there
+        # instead, which is the same 422 on the one pull request whose author cannot see the
+        # companion's log. `diff.json` is uncapped, and so is `diff.md` under `max-bytes: 0`.
         #
-        # Asked of the CLI rather than assumed of it: `version` pins the CLI while this action is
-        # referenced by ref, so an older CLI with a newer action is the documented arrangement,
-        # and passing an option that CLI has never heard of would fail every run outright. The
-        # probe costs one `--help`; the diff beside it scans two revisions.
-        if [ "$MAX_BYTES" != "0" ]; then
-          budget="${MAX_BYTES:-65507}"
-          if "${runner[@]}" diff --help 2>/dev/null | grep -q -- "--max-bytes"; then
-            args+=(--max-bytes "$budget")
-          else
-            echo "::warning::This @aburi/cli has no --max-bytes, so diff.md is written in full. A report over 65536 bytes is rejected by GitHub when it is posted; upgrade the CLI (the 'version' input) to cap it." >&2
-          fi
+        # A script rather than a branch here, for the reason the CLI resolver above is one: this
+        # decision has four outcomes and a subprocess in the middle of it, and a `run:` block
+        # cannot be tested. `test/resolve-max-bytes.test.ts` runs it.
+        #
+        # stderr is left alone so its `::warning::` annotations reach the log; only stdout, which
+        # carries the budget, is captured.
+        set +e
+        budget=$(node "$GITHUB_ACTION_PATH/scripts/resolve-max-bytes.mjs" "${runner[@]}")
+        budget_status=$?
+        set -e
+        if [ "$budget_status" != "0" ]; then
+          # Same shape as the resolver's failure above: the outputs are written before the exit,
+          # so a caller reading `cli-exit-code` gets the 2 this is rather than an empty string.
+          echo "diff-json-path=" >> "$GITHUB_OUTPUT"
+          echo "diff-md-path=" >> "$GITHUB_OUTPUT"
+          echo "cli-exit-code=2" >> "$GITHUB_OUTPUT"
+          exit 2
         fi
+        if [ -n "$budget" ]; then args+=(--max-bytes "$budget"); fi
 
         set +e
         "${runner[@]}" "${args[@]}"

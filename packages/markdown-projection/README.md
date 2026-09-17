@@ -41,11 +41,18 @@ const markdown = projectDiff(diffResult)
 // <details>. Boundary sections group by symbol status per §7 of the design.
 
 const forAComment = projectDiff(diffResult, { maxBytes: 65507 })
-// the same document, guaranteed to fit: whole sections are dropped least-important-first
-// (Syntax-only before Dropped changes, API changes last) and a note under the Summary names
-// the ones that went. Never cut mid-string — that would halve a <details> block or a code
-// fence. GitHub rejects a comment body over 65536 bytes outright, so the destination decides
-// the budget; see §6.4 of the design.
+// the same document, cut to fit: whole sections are dropped least-important-first (Syntax-only
+// before Dropped changes, API changes last) and a note under the Summary names the ones that
+// went. Never cut mid-string — that would halve a <details> block or a code fence. GitHub
+// rejects a comment body over 65536 bytes outright, so the destination decides the budget;
+// see §6.4 of the design.
+//
+// Two edges worth knowing:
+//   - The title and the Summary line are never dropped, so a budget smaller than those plus the
+//     note is not achievable: the document comes back over it, saying so in the note rather than
+//     claiming a size it does not have.
+//   - `maxBytes` must be a positive integer; anything else, `0` included, is a RangeError. No cap
+//     is spelled by leaving the option out. (`max-bytes: 0` is the *action* input for that.)
 ```
 
 ## See also

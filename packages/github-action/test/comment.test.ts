@@ -299,12 +299,30 @@ describe("the comment-body size limit", () => {
     await expect(
       upsertPullRequestComment({
         ref: REF,
-        body: "x".repeat(GITHUB_COMMENT_MAX_BYTES + 1),
+        // One byte over once the marker is on it, so `>` cannot drift to `>=` unnoticed.
+        body: "x".repeat(ABURI_COMMENT_BODY_MAX_BYTES + 1),
         token: "test-token",
         fetch,
       }),
     ).rejects.toThrow(/over GitHub's 65536-byte limit/)
     expect(calls).toHaveLength(0)
+  })
+
+  it("advises a budget derived from the marker actually in use", async () => {
+    // A caller with a longer marker that re-rendered at the default 65507 would overflow again,
+    // on the advice of this very message.
+    const marker = "<!-- a much longer marker than the default one -->"
+    const budget = 65536 - Buffer.byteLength(`${marker}\n\n`, "utf8")
+    const { fetch } = makeFakeFetch({ listPages: [[]] })
+    await expect(
+      upsertPullRequestComment({
+        ref: REF,
+        body: "x".repeat(budget + 1),
+        token: "test-token",
+        marker,
+        fetch,
+      }),
+    ).rejects.toThrow(`--max-bytes ${budget}`)
   })
 
   it("posts a body that lands exactly on the limit", async () => {

@@ -343,6 +343,7 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 
 ## ⚠ API changes
 ## 🔧 Logic changes
+## 🧵 Slice View
 ## ➕ Added
 ## ➖ Removed
 ## ❔ Unknown
@@ -355,7 +356,14 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ## 🎨 Syntax-only changes
 ```
 
-The section order is fixed, **highest importance → lowest**. The bottom 3 sections (**Moved / Dropped / Syntax-only**) are folded in `<details>`. Moved+Changed is not folded because it contains semantic changes.
+The section order is fixed, **highest importance → lowest**, and this list is the order: §6.4 drops
+sections from the bottom of it, and MP13 is stated against it, so a list that has drifted from the
+projection is a size cap that drops the wrong thing.
+
+Three sections — **Moved**, **Dropped changes** and **Syntax-only changes** — are folded in
+`<details>`. They are not contiguous: Component changes and Dependency changes sit between Moved
+and Dropped changes, unfolded. Moved + Changed is not folded either, because it carries semantic
+change worth reading.
 
 The `· ?N unknown` suffix on the Summary line appears only when `summary.unknown` is non-zero, so the line a reviewer skims on every PR does not carry a permanent `?0`. It qualifies the counts beside it: added and removed are both smaller than the truth by that much.
 
@@ -571,6 +579,17 @@ A capped document says so, directly under the Summary:
 > ⚠ **3 sections were omitted** to keep this report within 65507 bytes: 🔗 Dependency changes, 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
 ```
 
+On the one path that comes back over budget — every section dropped and the remainder still too
+large — the note says that instead, because a line promising a budget the bytes below it miss is
+worst exactly where it matters most:
+
+```md
+> ⚠ **4 sections were omitted** and this report still could not be brought within 300 bytes: …
+```
+
+`aburi diff` also warns on stderr when it writes such a file, so a caller who asked for a number
+and got a bigger one hears it from the tool as well as from the document.
+
 Sections are named in document order rather than in the order they were dropped: the reader is
 looking for a heading that is not there, and that is the order they looked in.
 
@@ -696,7 +715,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
-| MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes; the sections kept are a prefix of the §6.1 order, and a note names the ones that went |
+| MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. The sections kept are a prefix of the §6.1 order, and a note names the ones that went |
 
 ## 12. Design decisions
 

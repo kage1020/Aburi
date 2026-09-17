@@ -191,9 +191,14 @@ cutting the text mid-fence, and the report says at the top which sections went:
 The sections that survive are always the important ones: API changes go last, Syntax-only first.
 `diff.json` is never capped, so nothing is lost from the artefact you can query.
 
+The CLI has no cap unless you pass one: omitting `--max-bytes` writes the whole document.
+`--max-bytes 0` is not the way to say that — it exits `2`, along with every other value that is
+not a positive integer.
+
 The [GitHub Action](https://aburi.kage1020.com/guide/ci-integration) passes `65507` for you —
 65536 less the hidden marker it prepends — so you only reach for this flag to choose a smaller
-comment, or `max-bytes: 0` to turn the cap off.
+comment. There, `max-bytes: 0` *is* the spelling for no cap: the action input takes it and passes
+no flag at all.
 
 ```bash
 aburi diff main..HEAD --max-bytes 65507

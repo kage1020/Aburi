@@ -71,7 +71,10 @@ describe("CL10 — diff arguments missing", () => {
 /** §6.4 — `--max-bytes` is read at argv parsing, so a typo never reaches a scan. */
 describe("diff --max-bytes", () => {
   it("rejects a value that is not a plain byte count", async () => {
-    for (const value of ["64kb", "0", "-1", "1.5", ""]) {
+    // The last one reaches the `Number.isSafeInteger` check past the regex, which is the only
+    // thing keeping that branch — and its own message — from reading as redundant and being
+    // deleted. An overflowing count is not "not a positive integer"; it is too large to be one.
+    for (const value of ["64kb", "0", "-1", "1.5", "", "99999999999999999999"]) {
       const { stdout, stderr } = makeStreams()
       const code = await runCli({
         argv: ["diff", "--base", "./b.json", "--head", "./h.json", "--max-bytes", value],
@@ -81,6 +84,9 @@ describe("diff --max-bytes", () => {
       })
       expect(code, `accepted --max-bytes ${JSON.stringify(value)}`).toBe(EXIT.INPUT_ERROR)
       expect(stderr.text()).toContain("--max-bytes")
+      if (value === "99999999999999999999") {
+        expect(stderr.text()).toContain("too large to be a byte count")
+      }
     }
   })
 
