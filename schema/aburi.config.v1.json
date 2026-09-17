@@ -24,7 +24,7 @@
       "type": "array",
       "items": { "$ref": "#/$defs/PluginRef" },
       "uniqueItems": true,
-      "description": "Enabled language plugins (manifest names or relative paths)."
+      "description": "Enabled language plugins (manifest names, npm package ids, or relative/absolute paths)."
     },
     "frameworks": {
       "type": "array",
@@ -130,7 +130,7 @@
     "PluginRef": {
       "type": "string",
       "minLength": 1,
-      "description": "Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative path ('./aburi-plugins/x.mjs')."
+      "description": "Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative/absolute filesystem path ('./aburi-plugins/x.mjs', '/opt/aburi-plugins/x.mjs', 'C:/aburi-plugins/x.mjs')."
     },
 
     "PluginManifestName": {
