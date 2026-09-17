@@ -939,7 +939,7 @@ function renderComponentChanges(diff: DiffResult): string[] {
 function changedComponentFields(before: Component, after: Component): string[] {
   const fields: string[] = []
   if (before.name !== after.name) {
-    fields.push(`name (${renderValue(before.name)} → ${renderValue(after.name)})`)
+    fields.push(`name (${inlineCode(before.name)} → ${inlineCode(after.name)})`)
   }
   if (!sameList(before.roots, after.roots)) fields.push("roots")
   if (!sameList(before.publicApi ?? [], after.publicApi ?? [])) fields.push("publicApi")
@@ -1002,12 +1002,7 @@ const RENDERED_COMPONENT_FIELDS = new Set<string>([
  * "no description" against "a description that is empty" — so they read differently here.
  */
 function renderDescription(description: string | null): string {
-  return description === null ? "none" : renderValue(description)
-}
-
-/** A free-form scalar as a row cell. Empty is spelled, because an empty code span is not one. */
-function renderValue(value: string): string {
-  return value === "" ? "(empty)" : inlineCode(value)
+  return description === null ? "none" : inlineCode(description)
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {

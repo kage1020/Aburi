@@ -7,6 +7,8 @@ import { ProjectionInvariantError, ruleRow } from "../src"
  * (guard→condition, throw→what, return→expr, loop→loopKind, switch/match→condition) must
  * be present. When it is not, ruleRow throws ProjectionInvariantError so an upstream
  * extractor bug does not surface as `- guard:  (L5)` in a reviewer's PR.
+ *
+ * Every row comes back as the lines it occupies, because a fenced payload occupies four.
  */
 
 function base(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
@@ -22,35 +24,37 @@ function base(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
 
 describe("ruleRow — happy paths", () => {
   it("guard with condition", () => {
-    expect(ruleRow(base({ type: "guard", line: 5, condition: "x > 0" }))).toBe(
+    expect(ruleRow(base({ type: "guard", line: 5, condition: "x > 0" }))).toEqual([
       "- guard: `x > 0` (L5)",
-    )
+    ])
   })
   it("throw with what", () => {
-    expect(ruleRow(base({ type: "throw", line: 8, what: "new E()" }))).toBe(
+    expect(ruleRow(base({ type: "throw", line: 8, what: "new E()" }))).toEqual([
       "- throw: `new E()` (L8)",
-    )
+    ])
   })
   it("return with expr", () => {
-    expect(ruleRow(base({ type: "return", line: 20, expr: "value" }))).toBe(
+    expect(ruleRow(base({ type: "return", line: 20, expr: "value" }))).toEqual([
       "- return: `value` (L20)",
-    )
+    ])
   })
   it("loop with loopKind", () => {
-    expect(ruleRow(base({ type: "loop", line: 30, loopKind: "for" }))).toBe("- loop (`for`) (L30)")
+    expect(ruleRow(base({ type: "loop", line: 30, loopKind: "for" }))).toEqual([
+      "- loop (`for`) (L30)",
+    ])
   })
   it("try (no per-type payload required)", () => {
-    expect(ruleRow(base({ type: "try", line: 40 }))).toBe("- try (L40)")
+    expect(ruleRow(base({ type: "try", line: 40 }))).toEqual(["- try (L40)"])
   })
   it("switch with condition", () => {
-    expect(ruleRow(base({ type: "switch", line: 50, condition: "kind" }))).toBe(
+    expect(ruleRow(base({ type: "switch", line: 50, condition: "kind" }))).toEqual([
       "- switch: `kind` (L50)",
-    )
+    ])
   })
   it("match with condition", () => {
-    expect(ruleRow(base({ type: "match", line: 60, condition: "kind" }))).toBe(
+    expect(ruleRow(base({ type: "match", line: 60, condition: "kind" }))).toEqual([
       "- match: `kind` (L60)",
-    )
+    ])
   })
 })
 

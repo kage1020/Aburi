@@ -1,5 +1,5 @@
 import type { Dependency, IR } from "@aburi/types"
-import { compareStrings, inlineCode, isSymbolIdEndpoint, tableCell } from "./format"
+import { compareStrings, inlineCode, isSymbolIdEndpoint, tableHeader, tableRow } from "./format"
 
 /** §4.2 — nodes above this render as text-only fallback so GitHub mermaid does not choke. */
 export const MERMAID_NODE_LIMIT = 100
@@ -129,17 +129,14 @@ function renderComponentsTable(ir: IR): string[] {
   if (ir.components.length === 0) {
     return ["_No components defined._"]
   }
-  const rows: string[] = []
-  rows.push("| id | roots | languages | frameworks | symbols |")
-  rows.push("|---|---|---|---|---|")
+  const rows: string[] = [...tableHeader(["id", "roots", "languages", "frameworks", "symbols"])]
   const symbolCountsByComponent = countSymbolsPerComponent(ir)
   for (const c of [...ir.components].sort((a, b) => compareStrings(a.id, b.id))) {
     const roots = c.roots.map((r) => inlineCode(r)).join(", ")
     const languages = c.languages.join(", ")
     const frameworks = (c.frameworks ?? []).length > 0 ? (c.frameworks ?? []).join(", ") : "—"
     const symbolCount = symbolCountsByComponent.get(c.id) ?? 0
-    const cells = [c.id, roots, languages, frameworks, String(symbolCount)].map(tableCell)
-    rows.push(`| ${cells.join(" | ")} |`)
+    rows.push(tableRow([c.id, roots, languages, frameworks, String(symbolCount)]))
   }
   return rows
 }
@@ -293,11 +290,10 @@ function renderEffectSurface(ir: IR): string[] {
     return compareStrings(a.effect, b.effect)
   })
   const top = sorted.slice(0, EFFECT_SURFACE_TOP_N)
-  const out: string[] = ["| effect | count | components |", "|---|---|---|"]
+  const out: string[] = [...tableHeader(["effect", "count", "components"])]
   for (const r of top) {
     const comps = r.components.size === 0 ? "—" : [...r.components].sort().join(", ")
-    const cells = [r.effect, String(r.count), comps].map(tableCell)
-    out.push(`| ${cells.join(" | ")} |`)
+    out.push(tableRow([r.effect, String(r.count), comps]))
   }
   return out
 }

@@ -199,7 +199,7 @@ export function renderSymbolBlock(symbol: IRSymbol): string[] {
   if (sig !== null) rows.push(`**Signature**: ${sig}`)
   if (symbol.rules.length > 0) {
     rows.push("**Rules**:")
-    for (const r of [...symbol.rules].sort((a, b) => a.line - b.line)) rows.push(ruleRow(r))
+    for (const r of [...symbol.rules].sort((a, b) => a.line - b.line)) rows.push(...ruleRow(r))
   }
   if (symbol.effects.length > 0) {
     rows.push("**Effects**:")

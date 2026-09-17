@@ -3,6 +3,7 @@ import {
   callRow,
   codeFragment,
   effectRow,
+  INLINE_CODE_MAX_LENGTH,
   inlineCode,
   projectComponent,
   projectSymbolExplain,
@@ -50,8 +51,25 @@ describe("inlineCode", () => {
     expect(inlineCode("a\n  b")).toBe("`a b`")
   })
 
-  it("renders the empty string as nothing rather than as two literal backticks", () => {
-    expect(inlineCode("")).toBe("")
+  it("names the empty string, because an empty code span cannot be written", () => {
+    expect(inlineCode("")).toBe("(empty)")
+  })
+
+  it("pads an edge space too, so the value keeps the space it was given", () => {
+    expect(inlineCode(" x")).toBe("`  x `")
+    expect(inlineCode("x ")).toBe("` x  `")
+  })
+
+  it("treats a lone carriage return as the line break CommonMark reads it as", () => {
+    expect(inlineCode("a\rb")).toBe("`a b`")
+    expect(tableCell("a\rb")).toBe("a<br>b")
+  })
+
+  it("cannot round-trip a value that is only spaces", () => {
+    // CommonMark strips one space from each end only when the content is not entirely
+    // spaces, so the padding stays visible here. Recorded rather than fixed: no span can
+    // carry this value exactly, and no IR field this package renders holds one.
+    expect(inlineCode(" ")).toBe("`   `")
   })
 })
 
@@ -80,29 +98,65 @@ describe("tableCell", () => {
   it("maps a newline to a break, because a GFM row ends at one", () => {
     expect(tableCell("a\nb")).toBe("a<br>b")
   })
+
+  it("doubles the backslash run in front of the pipe, so the escape is not itself escaped", () => {
+    expect(tableCell("a\\|b")).toBe("a\\\\\\|b")
+  })
+
+  it("leaves a backslash that no pipe follows alone", () => {
+    expect(tableCell("C:\\src")).toBe("C:\\src")
+  })
 })
 
 describe("ruleRow — a value that has to fence stays inside its list item", () => {
   it("moves the line tag ahead of the fence and indents the block into the item", () => {
-    const row = ruleRow(rule({ type: "guard", line: 3, condition: longCondition() }))
-    expect(row.split("\n")).toEqual(["- guard (L3):", "  ```", `  ${longCondition()}`, "  ```"])
+    expect(ruleRow(rule({ type: "guard", line: 3, condition: longCondition() }))).toEqual([
+      "- guard (L3):",
+      "  ```",
+      `  ${longCondition()}`,
+      "  ```",
+    ])
   })
 
   it("keeps the compact row for a condition that fits inline", () => {
-    expect(ruleRow(rule({ type: "guard", line: 5, condition: "x > 0" }))).toBe(
+    expect(ruleRow(rule({ type: "guard", line: 5, condition: "x > 0" }))).toEqual([
       "- guard: `x > 0` (L5)",
-    )
+    ])
+  })
+
+  it("fences at one character past the threshold and not at the threshold", () => {
+    const at = "x".repeat(INLINE_CODE_MAX_LENGTH)
+    const past = "x".repeat(INLINE_CODE_MAX_LENGTH + 1)
+    expect(ruleRow(rule({ type: "guard", line: 1, condition: at }))).toEqual([
+      `- guard: \`${at}\` (L1)`,
+    ])
+    expect(ruleRow(rule({ type: "guard", line: 1, condition: past }))[0]).toBe("- guard (L1):")
+  })
+
+  it("names an empty payload instead of rendering a row that trails off", () => {
+    // `Rule.condition` carries a maxLength and no minLength in aburi.ir.v1, so this is a
+    // document to render, not an invariant to throw on.
+    expect(ruleRow(rule({ type: "guard", line: 5, condition: "" }))).toEqual([
+      "- guard: (empty) (L5)",
+    ])
   })
 
   it("does not let a template literal close the span early", () => {
-    expect(ruleRow(rule({ type: "throw", line: 3, what: THROWN_TEMPLATE }))).toBe(
+    expect(ruleRow(rule({ type: "throw", line: 3, what: THROWN_TEMPLATE }))).toEqual([
       `- throw: \`\`${THROWN_TEMPLATE}\`\` (L3)`,
-    )
+    ])
   })
 
   it("fences a multiline condition under the item as well", () => {
-    const row = ruleRow(rule({ type: "switch", line: 9, condition: "a\nb" }))
-    expect(row.split("\n")).toEqual(["- switch (L9):", "  ```", "  a", "  b", "  ```"])
+    // ir-schema.md §8.2 has the extractor strip newlines from this field; a writer that did
+    // not is the reason the branch exists, so the row still has to hold together.
+    expect(ruleRow(rule({ type: "switch", line: 9, condition: "a\nb" }))).toEqual([
+      "- switch (L9):",
+      "  ```",
+      "  a",
+      "  b",
+      "  ```",
+    ])
   })
 
   it("keeps the rules of one symbol in a single list", () => {
@@ -146,11 +200,27 @@ describe("inline code spans elsewhere in the row", () => {
 })
 
 describe("table cells keep their column count", () => {
+  /**
+   * How many cells GFM reads in this row, scanned the way cmark-gfm does rather than the way
+   * `tableCell` writes: a backslash and the character after it are one escape pair and neither
+   * can delimit, so `\\|` is an escaped backslash followed by a live delimiter. A lookbehind on
+   * the pipe would instead share `tableCell`'s own assumption and pass on output GFM splits.
+   */
   function cellCount(row: string): number {
-    return row.split(/(?<!\\)\|/g).length
+    let cells = 1
+    for (let i = 0; i < row.length; i++) {
+      if (row[i] === "\\") {
+        i++
+        continue
+      }
+      if (row[i] === "|") cells++
+    }
+    return cells
   }
 
   it("holds the Components table to five columns when a root carries a pipe", () => {
+    // `RelativePath` forbids a backslash and nothing else, so a root is the cell in this table
+    // that can carry a pipe. `ComponentId` is kebab-case and cannot.
     const md = projectWorkspace(
       makeIR({
         components: [component({ id: "web", name: "Web", roots: ["apps/a|b"] })],
@@ -160,26 +230,7 @@ describe("table cells keep their column count", () => {
     const row = md.split("\n").find((l) => l.startsWith("| web |")) ?? ""
     expect(row).not.toBe("")
     expect(cellCount(row)).toBe(cellCount(header))
-  })
-
-  it("holds the effect surface table when an effect target carries a pipe", () => {
-    const md = projectWorkspace(
-      makeIR({
-        components: [component({ id: "web", name: "Web" })],
-        symbols: [
-          makeSymbol({
-            id: "ts:src/a.ts#f",
-            name: "f",
-            component: "web",
-            effects: [effect({ id: "http.route", target: "GET /a|b", plugin: "framework-next" })],
-          }),
-        ],
-      }),
-    )
-    const header = md.split("\n").find((l) => l.startsWith("| effect |")) ?? ""
-    const row = md.split("\n").find((l) => l.startsWith("| http.route |")) ?? ""
-    expect(row).not.toBe("")
-    expect(cellCount(row)).toBe(cellCount(header))
+    expect(row).toContain("apps/a\\|b")
   })
 
   it("holds the call resolution table when a call target carries a pipe", () => {
@@ -205,11 +256,21 @@ describe("table cells keep their column count", () => {
     expect(cellCount(row)).toBe(cellCount(header))
     expect(row).toContain("pipe(a\\|b)")
   })
-})
 
-describe("the component id column stays a component id", () => {
-  it("escapes a pipe in a component id rather than shifting the row", () => {
-    const md = projectWorkspace(makeIR({ components: [component({ id: "a|b", name: "A" })] }))
-    expect(md).toContain("| a\\|b |")
+  it("holds it when the target carries a backslash in front of the pipe", () => {
+    // `Call.target` is `minLength: 1` and nothing else — the one cell in any of these tables
+    // that can hold both characters. A single backslash before the escape would pair with it
+    // and hand the pipe back to the row scanner.
+    const target = "pipe(a\\|b)"
+    const caller = makeSymbol({
+      id: "ts:src/ctl.ts#Ctl.route",
+      name: "Ctl.route",
+      calls: [{ target, line: 4, resolved: null }],
+    })
+    const md = projectSymbolExplain(caller, { unresolvedCalls: [] })
+    const header = md.split("\n").find((l) => l.startsWith("| line |")) ?? ""
+    const row = md.split("\n").find((l) => l.startsWith("| 4 |")) ?? ""
+    expect(row).not.toBe("")
+    expect(cellCount(row)).toBe(cellCount(header))
   })
 })

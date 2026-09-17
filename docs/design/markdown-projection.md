@@ -76,30 +76,56 @@ The ordering conventions match the JSON side (ir-schema §1). If the projection 
 |---|---|
 | ≤ 80 chars | inline backticks: `` `customer.creditLimit < invoice.total` `` |
 | > 80 chars or multiline | fenced code block (no language hint) |
-| Original canonical string exceeds 120 chars | already truncated with a trailing `...` at the IR stage ([`fingerprint.md`](./fingerprint.md) §2.2), so used as-is |
+| Original canonical string exceeds 120 chars | already truncated with a trailing `...` at the IR stage ([`ir-schema.md`](./ir-schema.md) §8.2), so used as-is |
 
-Both forms size their fence to the value rather than assuming one. A code span opens and
-closes with one more backtick than the longest run inside it, and pads with a space at each
-end when the value itself starts or ends with a backtick or a space — CommonMark strips one
-space from each end of such a span, so the padding is what makes the value render as written.
-A fenced block opens with three backticks, or one more than the longest run in the source
-where that is longer. Everything a projection puts in a code span goes through this rule:
-`` key === `x-${plugin}:write` `` is ordinary TypeScript, and under a fixed single backtick it
-would close the span at its own first backtick and spill the rest of the row into the document
-as Markdown.
+Both forms size their fence to the value rather than assuming one. A code span opens and closes
+with one more backtick than the longest run inside it. A fenced block opens with three backticks,
+or one more than the longest run in the source where that is longer. Everything a projection puts
+in a code span goes through this rule: `` key === `x-${plugin}:write` `` is ordinary TypeScript,
+and under a fixed single backtick it would close the span at its own first backtick and spill the
+rest of the row into the document as Markdown.
+
+A span whose value opens or closes with a backtick also carries a space of padding at each end,
+for two separate reasons worth keeping apart:
+
+- **It is needed.** CommonMark reads the delimiter as a run of backticks, so a value beginning
+  with one extends that run: two backticks of delimiter against a value starting with a backtick
+  is a three-run against a three-run, and the delimiters are consumed instead of delimiting. The
+  space is what separates the value from the run — the spec says as much.
+- **It is safe.** The parser removes one space from each end again, but only when the content
+  *both* begins and ends with a space and is not made entirely of spaces. Hence padding on both
+  ends or neither. The one value this cannot round-trip is an all-space one: a single space
+  renders as three, because the stripping rule declines to touch it.
 
 Newlines collapse to a single space inside a code span, because a span belongs to one row. A
 value that needs its lines is a fenced block instead — and a fenced block cannot sit mid-row:
 it ends the list item it was written into unless it is indented to the item's content column
 (§5.6).
 
-### 3.4.1 Table cells
+A value with nothing in it gets no span at all — `` is two literal backticks, not an empty code
+span — so it renders as `(empty)`. Emitting nothing is the failure this replaces: it is
+indistinguishable from an absent field, and one level up it deletes the row that was about to
+report the change.
 
-GFM resolves table cells before it parses inlines, so a `|` in a value opens a column the
-header row never declared and every cell after it shifts left — inside a code span too, where
-a reader would expect the pipe to be literal. Every cell this projection emits therefore
-escapes `|` as `\|`, the one escape the table parser honours there, and maps newlines to
-`<br>`. Component ids, paths, effect ids and call targets all admit `|`.
+#### 3.4.1 Table cells
+
+GFM resolves table cells before it parses inlines, so a `|` in a value opens a column the header
+row never declared and every cell after it shifts left — inside a code span too, where a reader
+would expect the pipe to be literal. Every cell this projection emits therefore escapes `|` as
+`\|`, which the row scanner reads as a literal pipe, and maps newlines to `<br>`.
+
+The scanner reads a backslash and the character after it as one escape pair, so a value that
+already contains `\|` needs its backslash doubled first: escaped naively it becomes `\\|`, where
+the first backslash consumes the second and the pipe delimits again. Only a backslash run
+directly in front of a pipe is doubled, so a path elsewhere in the cell keeps its backslashes.
+The cost is one visible backslash inside the code span, which is the price of a column that
+still lines up; GFM has no encoding that avoids both.
+
+Which cells can actually carry one is narrower than it looks: `ComponentId` is kebab-case,
+`EffectId` is a frozen enum or an `x-…` pattern, and `RelativePath` and `SymbolId` forbid
+backslash outright. `RelativePath` admits `|`, and `Call.target` (`minLength: 1`, nothing else)
+admits both. The escaping is applied to every cell regardless — a table whose correctness
+depends on which column the value landed in is one schema change away from being wrong.
 
 ### 3.5 Confidence badges
 
@@ -331,8 +357,17 @@ colon so the fence is last, and the fence is indented two spaces into the list i
 
 At column 0 the fence would end the list instead: `(L3)` would become a paragraph of its own
 and the rules below it would restart as a second list. Boolean conditions above the threshold
-are routine — the IR truncates a canonical string only past 120 characters — so this is the
+are routine — ir-schema.md §8.2 truncates a payload only past 120 characters — so this is the
 shape a reviewer sees whenever a guard is long, not an edge case.
+
+Length is what reaches this shape in practice. §8.2 also has the extractor remove newlines from
+`condition` / `what` / `expr`, so a multiline payload means a writer that did not; it renders as
+the same fenced block rather than breaking the row.
+
+A payload that is present but empty renders as `- guard: (empty) (L3)`. The schema puts a
+`maxLength` on these three fields and no `minLength`, so the empty string is a document to
+render rather than an invariant to refuse — unlike `dropReason`, whose `minLength: 1` is what
+lets the projection throw on it.
 
 ### 5.7 Effect display
 

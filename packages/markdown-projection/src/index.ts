@@ -27,9 +27,11 @@ export {
   type DecoratorLists,
   decoratorRows,
   droppedFoldout,
+  EMPTY_VALUE,
   effectRow,
   fencedBlock,
   fingerprintLine,
+  fitsInline,
   INLINE_CODE_MAX_LENGTH,
   inlineCode,
   inlineCodePath,
@@ -45,6 +47,8 @@ export {
   splitDecorators,
   symbolHeading,
   tableCell,
+  tableHeader,
+  tableRow,
 } from "./format"
 export {
   assignSymbolFilenames,

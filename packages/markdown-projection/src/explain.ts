@@ -8,7 +8,8 @@ import {
   ruleRow,
   signatureLine,
   splitDecorators,
-  tableCell,
+  tableHeader,
+  tableRow,
 } from "./format"
 
 export interface ProjectSymbolExplainContext {
@@ -90,7 +91,7 @@ function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContex
   if (symbol.rules.length > 0) {
     lines.push("## Rules")
     lines.push("")
-    for (const r of [...symbol.rules].sort((a, b) => a.line - b.line)) lines.push(ruleRow(r))
+    for (const r of [...symbol.rules].sort((a, b) => a.line - b.line)) lines.push(...ruleRow(r))
     lines.push("")
   }
 
@@ -179,8 +180,7 @@ function renderCallResolution(
   const bucketByKey = new Map<string, UnresolvedCallDiagnostic>()
   for (const d of mine) bucketByKey.set(`${d.line}\t${d.target}`, d)
 
-  lines.push("| line | target | resolved | bucket | candidates |")
-  lines.push("|---|---|---|---|---|")
+  lines.push(...tableHeader(["line", "target", "resolved", "bucket", "candidates"]))
   for (const call of [...symbol.calls].sort((a, b) => a.line - b.line)) {
     const diagnostic = bucketByKey.get(`${call.line}\t${call.target}`)
     const resolved = call.resolved === null ? "—" : inlineCode(call.resolved)
@@ -189,10 +189,7 @@ function renderCallResolution(
       diagnostic === undefined || diagnostic.candidates.length === 0
         ? "—"
         : diagnostic.candidates.map((c) => inlineCode(c)).join("<br>")
-    const cells = [String(call.line), inlineCode(call.target), resolved, bucket, candidates].map(
-      tableCell,
-    )
-    lines.push(`| ${cells.join(" | ")} |`)
+    lines.push(tableRow([String(call.line), inlineCode(call.target), resolved, bucket, candidates]))
   }
   lines.push("")
   return lines
