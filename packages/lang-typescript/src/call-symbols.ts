@@ -2,7 +2,7 @@ import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@abu
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, findChild, makeSourceRange, unwrapValue } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
-import { decodeStringLiteral } from "./string-escape"
+import { decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
  * Framework-level method vocabulary that promotes a module-level chained call
@@ -239,7 +239,7 @@ function firstStringLiteralArg(argsNode: Node): string | null {
   const first = argsNode.namedChildren[0]
   if (first === undefined || first === null) return null
   if (first.type !== "string") return null
-  return decodeStringLiteral(first).value
+  return decodeStringLiteralOrRaw(first)
 }
 
 /** The characters `QNAME_SEGMENT_PATTERN` admits at the head of a segment, and after it. */

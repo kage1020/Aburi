@@ -269,7 +269,7 @@ async function buildComponent(
 }
 
 /**
- * Pick the Component id, in the priority order of component-detect.md Of the sources
+ * Pick the Component id, in the priority order of component-detect.md. Of the sources
  * that list names, `package.json#name` and `project.json#name` have detectors today; the
  * Cargo, pyproject and go.mod branches arrive with theirs, and the directory name is the last
  * resort for every candidate.

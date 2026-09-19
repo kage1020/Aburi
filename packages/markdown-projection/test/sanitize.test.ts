@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { assignSymbolFilenames, collisionSuffix, sanitizeSymbolId } from "../src"
+import {
+  assignSymbolFilenames,
+  collisionSuffix,
+  sanitizeSymbolId,
+  withCollisionSuffix,
+} from "../src"
 
 describe("sanitizeSymbolId", () => {
   it("replaces separators with `-` and collapses runs", () => {
@@ -22,6 +27,19 @@ describe("collisionSuffix", () => {
     const suffix = collisionSuffix("ts:src/a.ts#Foo")
     expect(suffix).toMatch(/^[0-9a-f]{6}$/)
     expect(collisionSuffix("ts:src/a.ts#Foo")).toBe(suffix)
+  })
+})
+
+/**
+ * The always-append composition, which `assignSymbolFilenames` reaches for only on a
+ * collision. It is a public export for callers that want the suffix on every file rather
+ * than on the pairs that happen to clash, so the shape of what it appends is pinned here
+ * rather than left to the collision cases below.
+ */
+describe("withCollisionSuffix", () => {
+  it("always appends the deterministic suffix", () => {
+    const value = withCollisionSuffix("ts:src/a.ts#Foo")
+    expect(value).toMatch(/^ts-src-a-ts-Foo-[0-9a-f]{6}$/)
   })
 })
 

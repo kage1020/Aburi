@@ -1,11 +1,14 @@
 /**
  * How many items a warning names individually before the rest are counted.
  *
- * A fault broken enough to lose one file usually loses them all, so the untruncated list is
- * the whole workspace — which on CI scrolls every other warning out of the log it was meant to
- * appear in. Ten is enough to see the shape (one path, or many) and read the detail, and the
- * artifact the line points at still holds every entry. Listings whose entries exist nowhere
- * else (`reportUnrepresentable` in `commands/scan.ts`) deliberately do not use this.
+ * Every list this caps is recorded in full somewhere the reader can still reach: the manifest
+ * a dead pattern was declared in, `stats.skippedFiles[]` in the IR, `notCompared[]` in
+ * `diff.json`. So the line's job is to show the shape of the loss — one entry, or a flood —
+ * rather than to be the record of it, and ten is enough to tell those two apart and still read
+ * the detail beside them. Uncapped, such a list runs to the width of the workspace and scrolls
+ * every other warning out of the CI log it was meant to appear in. Listings whose entries
+ * exist nowhere else (`reportUnrepresentable` in `commands/scan.ts`) deliberately do not use
+ * this.
  */
 export const MAX_LISTED = 10
 

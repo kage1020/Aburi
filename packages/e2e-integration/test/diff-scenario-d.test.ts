@@ -9,8 +9,9 @@ import { scanFixture, symbolById } from "../src/scan-helper"
  * Scenario D — a controller inherits a `db.write` transitively.
  *
  * The scenario chains three top-level functions across three files so the untyped
- * call-graph resolver (call-resolution.md, workspace scope) can link them without needing
- * LSP-tier `this.<method>` support (which it deliberately leaves unresolved).
+ * call-graph resolver (call-resolution.md, the file, import, component and workspace scope
+ * steps) can link them without needing LSP-tier `this.<method>` support (which its
+ * normalized-target rules deliberately leave unresolved).
  *
  *   controller.persistedRoute → service.persistInvoiceService → repo.writeInvoice
  *                                                                    ↓

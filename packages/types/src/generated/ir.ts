@@ -292,7 +292,7 @@ filesFellBack: number
  */
 requestsIssued: number
 /**
- * Requests that hit requestTimeoutMs (lsp-enrichment.md per-request fallback).
+ * Requests that hit requestTimeoutMs (the per-request fallback in lsp-enrichment.md).
  */
 requestsTimedOut: number
 /**
@@ -353,7 +353,7 @@ resolvedCalls: number
 unresolved: UnresolvedCallBuckets
 }
 /**
- * Why the remaining call sites stayed null, bucketed per call-resolution.md The five counters sum to totalCalls - resolvedCalls.
+ * Why the remaining call sites stayed null, bucketed per call-resolution.md. The five counters sum to totalCalls - resolvedCalls.
  */
 export interface UnresolvedCallBuckets {
 /**

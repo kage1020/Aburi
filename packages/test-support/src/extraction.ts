@@ -1,10 +1,5 @@
-import type {
-  ExtractionContext,
-  SymbolCandidate,
-  SymbolId,
-  SymbolKind,
-  Visibility,
-} from "@aburi/types"
+import type { ExtractionContext, SymbolCandidate, SymbolKind, Visibility } from "@aburi/types"
+import { symbolId } from "./ir"
 import { noopRegistry } from "./registry"
 
 /** An `ExtractionContext` over one in-memory file, backed by `noopRegistry`. */
@@ -50,13 +45,4 @@ export function makeCandidate(
     bodyNode: overrides.bodyNode ?? null,
     fullNode: overrides.fullNode ?? { placeholder: true },
   }
-}
-
-/**
- * Fixtures are a documented boundary layer where an id is asserted rather than constructed
- * (ir-schema.md); production code reaches a `SymbolId` only through `makeSymbolId` /
- * `trySymbolId` in `@aburi/core`.
- */
-function symbolId(raw: string): SymbolId {
-  return raw as SymbolId
 }

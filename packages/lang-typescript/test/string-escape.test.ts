@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { decodeEscapeSequence, decodeStringLiteral } from "../src/string-escape"
+import {
+  decodeEscapeSequence,
+  decodeStringLiteral,
+  decodeStringLiteralOrRaw,
+} from "../src/string-escape"
 import { BACKSLASH, parseSource, requireTree } from "./fixtures/ctx"
 
 /**
@@ -121,6 +125,18 @@ describe("anything else keeps what the author typed", () => {
     // specifier if that ever stops being true.
     expect(decodeEscapeSequence("ab")).toBe("ab")
   })
+
+  it.each([
+    ["nothing", ""],
+    ["a lone backslash", BACKSLASH],
+  ])("returns %s unchanged, which is too short to carry an escape", (_label, raw) => {
+    // The `raw.length < 2` half of the guard, which the backslash half does not cover. An
+    // `escape_sequence` is a backslash and at least one character, so neither of these is
+    // one and nothing hands them over today; without the length test, though, a lone
+    // backslash falls through to `raw.slice(1)`, matches no arm, and comes back as the empty
+    // string — a character dropped from a specifier rather than one the author wrote.
+    expect(decodeEscapeSequence(raw)).toBe(raw)
+  })
 })
 
 /**
@@ -162,5 +178,48 @@ describe("what a literal decodes to, and whether that is all of it", () => {
 
     expect([continuation.value, unparsed.value]).toEqual(["", ""])
     expect([continuation.whole, unparsed.whole]).toEqual([true, false])
+  })
+})
+
+/**
+ * The judgement three readers share: a route path, a call's literal argument and a module
+ * specifier all keep whatever decoded, and all fall back to the source text when nothing did.
+ * Pinned on the helper because the alternative is pinning it three times through whichever
+ * shapes happen to survive recovery in each of those positions.
+ */
+describe("what a literal reads as when the fallback is allowed to stand in", () => {
+  async function readOf(written: string): Promise<string> {
+    // An import again, for the reason `literalOf` gives: a specifier position is where a
+    // literal the parser only half-read still leaves a `string` node behind.
+    const source = `import x from ${written}`
+    const result = await parseSource(source)
+    const value = requireTree(result.tree).rootNode.descendantsOfType("string")[0]
+    if (value === undefined || value === null) throw new Error(`no string node in ${source}`)
+    return decodeStringLiteralOrRaw(value)
+  }
+
+  it.each([
+    ["a plain literal as itself", '"./m"', "./m"],
+    ["an escape as the character it names", `"./a${BACKSLASH}tb"`, "./a\tb"],
+    ["an empty literal as empty, because it was read", '""', ""],
+    ["a lone line continuation as empty, for the same reason", `"${BACKSLASH}\n"`, ""],
+    ["a partial read as the part that parsed", `"a${BACKSLASH}uZZZZb"`, "a"],
+    [
+      "an unread literal as its source text, quotes off",
+      `"${BACKSLASH}uZZZZ"`,
+      `${BACKSLASH}uZZZZ`,
+    ],
+    ["a single-quoted unread literal the same way", `'${BACKSLASH}uZZZZ'`, `${BACKSLASH}uZZZZ`],
+  ])("reads %s", async (_label, written, expected) => {
+    expect(await readOf(written)).toBe(expected)
+  })
+
+  it("keeps two unread literals apart, which their decoded values cannot", async () => {
+    // Both decode to `""`, so a reader that took the value alone would see one literal where
+    // the author wrote two — and a Symbol id built from that is decided by source order.
+    const first = await readOf(`"${BACKSLASH}uZZZZ/a"`)
+    const second = await readOf(`"${BACKSLASH}uZZZZ/b"`)
+
+    expect(first).not.toBe(second)
   })
 })

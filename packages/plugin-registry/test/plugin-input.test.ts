@@ -320,6 +320,24 @@ describe("defineEffectsManifest", () => {
       "effects",
     ])
   })
+
+  it("keeps xPrefix and capabilities off the shape, so reading either is a compile error", () => {
+    // `PluginManifest` declares both optional, and `defineEffectsManifest`'s docblock leans
+    // on the first being absent: the registry derives `xPrefix` from `name`, so a manifest
+    // that carried one would be stating something nobody reads. While `EffectsPluginManifest`
+    // inherited the optionals, `manifest.xPrefix` was a well-typed read that answered
+    // `undefined` for every manifest in the repo — a mistake with nothing to catch it.
+    //
+    // Like the assignments above, this is enforced by `pnpm typecheck`, not by the runner,
+    // and it fails in both directions: should either read start compiling again, the
+    // directive goes unused and TypeScript reports it as TS2578.
+    const manifest = defineEffectsManifest("effects-foo", "effects-plugin:foo")
+    // @ts-expect-error `xPrefix` is the registry's to derive, not the manifest's to declare.
+    const xPrefix = manifest.xPrefix
+    // @ts-expect-error a first-party effects plugin claims no capabilities.
+    const capabilities = manifest.capabilities
+    expect([xPrefix, capabilities]).toEqual([undefined, undefined])
+  })
 })
 
 describe("plugin-input module", () => {

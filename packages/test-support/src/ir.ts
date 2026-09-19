@@ -19,8 +19,10 @@ import type {
 
 /**
  * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is
- * asserted rather than constructed: several suites feed *malformed* ids to the code that
- * exists to reject them, which routing through `makeSymbolId` would make unwritable.
+ * asserted rather than constructed (ir-schema.md): several suites feed *malformed* ids to the
+ * code that exists to reject them, which routing through `makeSymbolId` would make
+ * unwritable. Production code has no such need and reaches a `SymbolId` only through
+ * `makeSymbolId` / `trySymbolId` in `@aburi/core`.
  */
 export function symbolId(raw: string): SymbolId {
   return raw as SymbolId

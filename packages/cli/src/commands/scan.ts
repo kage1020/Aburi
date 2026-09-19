@@ -59,8 +59,9 @@ export interface ScanOptions {
   /**
    * A config already decided by the caller, which supersedes both `configPath` and discovery.
    * `aburi diff` sets it so its base scan, running inside a temporary worktree, reads the
-   * head's config (cli-spec.md step 3). `{ kind: "autodetect" }` is meaningful rather
-   * than equivalent to omitting the field: the caller looked and found nothing.
+   * head's config — step 3 of the ref-form Behavior `cli-spec.md` gives `aburi diff`.
+   * `{ kind: "autodetect" }` is meaningful rather than equivalent to omitting the field: the
+   * caller looked and found nothing.
    */
   pinnedConfig?: PinnedConfig
   /**
@@ -590,8 +591,13 @@ function reportUnrepresentable(
         break
       default:
         // A third reason routed to neither section would print nothing while the gate still
-        // reads `unrepresentableFiles.length` — exit 3 over an empty screen.
-        assertNever(file, "unrepresentable-file reason")
+        // reads `unrepresentableFiles.length` — exit 3 over an empty screen. The subject names
+        // where the reason came from, because the fix is a section here rather than anything
+        // in the workspace the reader is standing in.
+        assertNever(
+          file,
+          "unrepresentable-file reason from @aburi/core, which this CLI has no section for",
+        )
     }
   }
   reportUnspellable(unspellable, sayIncident, writeDetail)

@@ -1,7 +1,7 @@
 import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { classifySymbolDropHint } from "../src/index"
+import { classifySymbolDropHint, TYPESCRIPT_FILE_DROP_PATTERNS } from "../src/index"
 import { makeTsSymbolId } from "../src/qname"
 import { hintOf, makeExtractionCtx } from "./fixtures/ctx"
 
@@ -105,5 +105,22 @@ describe("classifySymbolDropHint", () => {
       reason: "pure DTO",
       category: "B",
     })
+  })
+})
+
+/**
+ * The Category-A half of this module, which is a list rather than a function and so has no
+ * behaviour a hint test reaches. Nothing else in the workspace reads it: the plugin copies it
+ * into `fileDropPatterns` and core applies it to paths, so an entry dropped from here makes
+ * every declaration file scannable — every ambient interface in a dependency's `.d.ts` landing
+ * in the IR as a data model — with every other suite still green.
+ */
+describe("the file drop patterns this plugin adds to the core standard set", () => {
+  it("names a declaration file in each of the three module spellings", () => {
+    expect([...TYPESCRIPT_FILE_DROP_PATTERNS].sort()).toEqual([
+      "**/*.d.cts",
+      "**/*.d.mts",
+      "**/*.d.ts",
+    ])
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { frameworkNextManifest, NEXT_APP_ROUTER_ROLES } from "../src/index"
+import { frameworkNextManifest, NEXT_APP_ROUTER_ROLES, NEXT_ROUTE_HTTP_VERBS } from "../src/index"
 
 describe("frameworkNextManifest", () => {
   it("declares the framework-next name and framework type", () => {
@@ -44,6 +44,21 @@ describe("public vocabulary exports", () => {
     expect(NEXT_APP_ROUTER_ROLES.get("page")).toBe("page")
     expect(NEXT_APP_ROUTER_ROLES.get("route")).toBe("route")
     expect(NEXT_APP_ROUTER_ROLES.get("component")).toBeUndefined()
+  })
+
+  it("exposes the recognized HTTP verbs so consumers can share the predicate", () => {
+    for (const verb of ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"] as const) {
+      expect(NEXT_ROUTE_HTTP_VERBS.has(verb)).toBe(true)
+    }
+    // The negative half needs the type-erased view to be askable at all: `CONNECT` and
+    // `TRACE` are real HTTP methods the App Router does not route, so they sit outside the
+    // literal union and `has()` would reject them before the set ever answered. Widening to
+    // `ReadonlySet<string>` puts the question the way a caller holding a plain export name
+    // puts it. classify.test.ts already rejects `helper` through `classifyNextSymbol`; what
+    // only this pair covers is a name that is a verb everywhere except in the App Router.
+    const untyped = NEXT_ROUTE_HTTP_VERBS as ReadonlySet<string>
+    expect(untyped.has("CONNECT")).toBe(false)
+    expect(untyped.has("TRACE")).toBe(false)
   })
 
   it("keeps the manifest extKind ids in sync with the App Router roles", () => {

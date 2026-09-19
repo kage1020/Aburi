@@ -806,8 +806,8 @@ describe("resolveCallGraph", () => {
     // If component / workspace scope ran before the parameter guard — or if the guard
     // only covered file / import scope — a caller parameter named `helper` could still
     // resolve to a workspace Symbol `helper.method` through component or
-    // workspace scope. The tier order must ensure parameters short-circuit
-    // every subsequent scope, not just the file / import scopes.
+    // workspace scope. The step order in call-resolution.md must ensure parameters
+    // short-circuit every subsequent scope, not just the file / import scopes.
     const caller = makeSymbol("ts:src/a.ts#caller", {
       component: "billing",
       signature: {
@@ -1024,5 +1024,21 @@ describe("reconstructCallEdgesFromIR", () => {
       "ts:src/a.ts#a->ts:src/c.ts#c@2",
       "ts:src/z.ts#z->ts:src/b.ts#b@4",
     ])
+  })
+
+  // The determinism case in the resolution matrix above pins `resolveCallGraph`, which is a
+  // different function reached by a different path: this one reads an already-resolved
+  // Document and has its own sort, so nothing above would catch it drifting.
+  it("is deterministic — repeated invocations return byte-identical output", () => {
+    const ir = minimalIR()
+    ir.symbols = [
+      makeSymbol("ts:src/a.ts#a", {
+        calls: [{ target: "b", line: 1, resolved: "ts:src/a.ts#b" }],
+      }),
+      makeSymbol("ts:src/a.ts#b"),
+    ]
+    const one = reconstructCallEdgesFromIR(ir)
+    const two = reconstructCallEdgesFromIR(ir)
+    expect(JSON.stringify(two)).toBe(JSON.stringify(one))
   })
 })

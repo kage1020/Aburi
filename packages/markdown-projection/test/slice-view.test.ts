@@ -5,11 +5,11 @@ import { projectDiff } from "../src/diff"
 import { makeDiff } from "./fixtures"
 
 /**
- * Slice View rendering acceptance tests. Backs docs/design/slice-view.md
- * its SV19–SV20 test criteria. The pass-side clustering itself is exercised in
- * `packages/diff/test/slice.test.ts`; here we only assert the Markdown
- * projection: section placement, per-Slice bullet shape, singleton fold,
- * empty-section omission.
+ * Slice View rendering acceptance tests. Backs the rendering conventions of
+ * docs/design/slice-view.md, and its SV19–SV20 test criteria. The pass-side
+ * clustering itself is exercised in `packages/diff/test/slice.test.ts`; here we
+ * only assert the Markdown projection: section placement, per-Slice bullet
+ * shape, singleton fold, empty-section omission.
  */
 
 const changedSym = (id: string, name: string, file: string, line = 10): SymbolChange => ({

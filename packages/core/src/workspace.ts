@@ -47,6 +47,25 @@ export interface DetectWorkspaceRootOptions {
  * Throws CoreError "workspace-root-not-found" only when no marker exists between cwd and
  * the filesystem root — callers fall back to "treat cwd as a single-project workspace" in
  * that branch rather than aborting.
+ *
+ * Because the walk runs all the way to the filesystem root, it opens manifests in directories
+ * that have nothing to do with this workspace: a `$HOME/package.json` left behind on a shared
+ * machine, or a directory a CI container is not allowed to read. A manifest that cannot be
+ * read *inside* the workspace still has to be raised — the packages it was meant to declare
+ * would otherwise go missing with nothing saying so — but one above the workspace root is
+ * somebody else's file and aborting on it leaves the user with a path they do not recognize
+ * and no way around it.
+ *
+ * Which of the two a failure is cannot be decided while the walk is still climbing, so the
+ * first failure is remembered together with the directory it happened in and answered once the
+ * outermost marker is known:
+ *
+ * - No marker anywhere: "workspace-root-not-found" wins regardless. Callers read that code as
+ *   "cwd is a single-project workspace", and a broken manifest above an absent root must not
+ *   turn that fallback into a different, harder error.
+ * - The failing directory is the workspace root or sits below it: the failure is inside the
+ *   workspace, and it is rethrown exactly as it was raised.
+ * - Otherwise the failing directory is above the workspace root, and it is ignored.
  */
 export async function detectWorkspaceRoot(
   options: DetectWorkspaceRootOptions = {},
@@ -56,8 +75,11 @@ export async function detectWorkspaceRoot(
 
   let dir = start
   let outermost: string | null = null
+  let failure: MarkerFailure | null = null
   while (true) {
-    if (await directoryHasMarker(dir)) outermost = dir
+    const probe = await probeDirectoryMarkers(dir)
+    if (probe.hasMarker) outermost = dir
+    if (failure === null && probe.failure !== null) failure = { dir, cause: probe.failure }
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
@@ -68,19 +90,68 @@ export async function detectWorkspaceRoot(
       { code: "workspace-root-not-found", value: start },
     )
   }
+  if (failure !== null && isAtOrBelow(failure.dir, outermost)) throw failure.cause
   return outermost
 }
 
-async function directoryHasMarker(dir: string): Promise<boolean> {
+/** The first marker probe that could not answer, and the directory it was probing. */
+interface MarkerFailure {
+  dir: string
+  cause: unknown
+}
+
+interface MarkerProbe {
+  /** Whether this directory carries a marker. */
+  hasMarker: boolean
+  /** The first error a probe of this directory raised, or `null` when every probe answered. */
+  failure: unknown
+}
+
+/**
+ * Probe one directory for every marker, handing a read failure back to the walk instead of
+ * throwing it.
+ *
+ * Probing still stops at the first marker found, exactly as it did when this threw: a `.git`
+ * beside an unreadable `package.json` makes the directory a root without anything ever opening
+ * that manifest, so no failure is invented for a directory that already answered. A failure
+ * recorded before the hit is still reported, because a directory that both fails a probe and
+ * carries a marker is the workspace root itself — a `Cargo.toml` workspace beside a malformed
+ * `package.json` — and that failure is inside the workspace.
+ */
+async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
+  let failure: unknown = null
+  const remember = (cause: unknown): void => {
+    if (failure === null) failure = cause
+  }
   for (const name of ROOT_MARKERS) {
-    if (await pathExists(join(dir, name))) return true
+    try {
+      if (await pathExists(join(dir, name))) return { hasMarker: true, failure }
+    } catch (cause) {
+      remember(cause)
+    }
   }
   for (const name of CONDITIONAL_ROOT_MARKERS) {
     const path = join(dir, name)
-    if (!(await pathExists(path))) continue
-    if (await fileSatisfiesWorkspacePredicate(name, path)) return true
+    try {
+      if (!(await pathExists(path))) continue
+      if (await fileSatisfiesWorkspacePredicate(name, path)) return { hasMarker: true, failure }
+    } catch (cause) {
+      remember(cause)
+    }
   }
-  return false
+  return { hasMarker: false, failure }
+}
+
+/**
+ * Is `dir` the workspace root or a directory inside it?
+ *
+ * Both paths come off the same upward walk, so one is always an ancestor of the other and a
+ * prefix comparison decides it without a `relative` round-trip. The separator guard is for a
+ * root that already ends in one (`/`, `C:\`), where appending a second would match nothing.
+ */
+function isAtOrBelow(dir: string, root: string): boolean {
+  if (dir === root) return true
+  return dir.startsWith(root.endsWith(sep) ? root : root + sep)
 }
 
 async function fileSatisfiesWorkspacePredicate(
@@ -504,10 +575,9 @@ async function readJson(path: string): Promise<unknown> {
  * `glob` — hands it to `toDocumentPath` unconverted, which is what lets the shared rule refuse
  * the character instead of spending it.
  *
- * The NFC step is the Unicode-normalization entry point for roots (ir-schema.md): a root
- * left in whatever
- * spelling the filesystem returned would disagree with a `symbols[].source.file` naming
- * the same directory, which is normalized at its own entry point.
+ * The NFC step is the Unicode-normalization entry point for roots (ir-schema.md): a root left
+ * in whatever spelling the filesystem returned would disagree with a `symbols[].source.file`
+ * naming the same directory, which is normalized at its own entry point.
  *
  * A `..` result is possible and is not normalized away: glob patterns may ascend, and a
  * directory above the workspace root genuinely is outside it. `mergeManager` drops those.

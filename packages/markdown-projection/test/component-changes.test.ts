@@ -8,9 +8,10 @@ import { emptySummary, makeDiff } from "./fixtures"
  * 🧱 Component changes (markdown-projection.md). The fields listed for a changed Component
  * come from the entry's `before` / `after`, not from its `delta`: the delta summarises three
  * axes, and a rename, a new language or an edited description moves none of them
- * (diff-algorithm.md). Entries with all three booleans `false` did not exist until that
- * section was fixed — a renderer reading only the booleans would draw them as a row whose
- * colon is followed by nothing, which is why both halves moved together.
+ * (diff-algorithm.md). Entries with all three booleans `false` did not exist until the
+ * Component diff was fixed to compare the whole record — a renderer reading only the booleans
+ * would draw them as a row whose colon is followed by nothing, which is why both halves moved
+ * together.
  *
  * `name` and `description` are free-form text out of the config file and this row reaches a PR
  * comment body through `@aburi/github-action`, so the cases below also pin that no value can

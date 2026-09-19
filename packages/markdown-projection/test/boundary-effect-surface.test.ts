@@ -99,7 +99,7 @@ describe("projectComponent — Boundary effect surface", () => {
       "[propagated from ts:src/svc.ts#Svc.persist, ts:src/other.ts#Other.helper]",
     )
     // The propagated row must NOT include a line marker (`(L…)`) because that
-    // would violate ir-schema.md / effect-propagation.md
+    // would violate ir-schema.md / effect-propagation.md.
     const propRow = md.slice(propIdx, propIdx + 200)
     expect(propRow).not.toMatch(/db\.write: `prisma\.invoice\.create` \(L\d+\)/)
   })

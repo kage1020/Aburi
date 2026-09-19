@@ -10,7 +10,7 @@ import { openGitignoreTree } from "./gitignore"
 import { fileExtension } from "./route"
 
 /**
- * Category A drop patterns from drop-list.md They are ignore globs, not IR-visible drops.
+ * Category A drop patterns from drop-list.md. They are ignore globs, not IR-visible drops.
  *
  * Exported because file discovery is no longer the only place they apply: component detection
  * counts file extensions to decide `Component.languages`, and it kept a shorter copy of part of

@@ -84,12 +84,13 @@ interface Section {
 
 /**
  * Join the document, dropping sections from the bottom until it fits (markdown-projection.md,
- * `maxBytes`). The section order is the importance order (which slice-view.md's cross-links
- * rely on too), so Syntax-only goes first and API changes last.
- * The note is rebuilt and the document re-measured on every drop, because naming one more
- * section lengthens the note. The title and Summary line cannot be dropped, so the last
- * document may still be over budget; only that one takes the "could not be brought within"
- * wording.
+ * `maxBytes`). The section order is the importance order — fixed so a reviewer can read from
+ * the top, with API changes first and Syntax-only folded at the bottom — so the bottom is the
+ * least important thing in the document and the drop order falls straight out of it:
+ * Syntax-only first, API changes last. The note is rebuilt and the document re-measured on
+ * every drop, because naming one more section lengthens the note. The title and Summary line
+ * cannot be dropped, so the last document may still be over budget; only that one takes the
+ * "could not be brought within" wording.
  */
 function assemble(
   heading: readonly string[],
@@ -812,11 +813,27 @@ function requireChangeForMember(
  * The Symbol a change is reported under (slice-view.md's Node set): `after` where both
  * sides exist, otherwise the one side the document holds. Pure `moved` is not a Node but is
  * still indexed.
+ *
+ * A `switch` rather than the two-way test it reduces to, because the two-way test is a
+ * silent default: a status added to `SymbolChange` later that happens to carry an `after`
+ * would compile and be reported under the wrong side of itself, with nothing to catch it.
+ * Spelling out every status makes the addition a compile error at the one place that has to
+ * decide which Symbol the new status is about.
  */
 function symbolForMember(change: SymbolChange): IRSymbol {
-  return change.status === "added" || change.status === "removed" || change.status === "unknown"
-    ? change.symbol
-    : change.after
+  switch (change.status) {
+    case "added":
+    case "removed":
+    case "unknown":
+      return change.symbol
+    case "changed":
+    case "moved+changed":
+    case "dropped-toggled":
+    case "moved":
+      return change.after
+    default:
+      return assertNeverChange(change)
+  }
 }
 
 function renderMemberFollowup(change: SymbolChange): string {

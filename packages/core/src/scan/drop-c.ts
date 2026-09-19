@@ -60,7 +60,7 @@ export class DropCFilter {
     suppress: readonly string[],
     keep: readonly string[],
   ) {
-    // Decorator names in `keep[]` use `@Name` syntax per drop-list.md Strip the
+    // Decorator names in `keep[]` use `@Name` syntax per drop-list.md. Strip the
     // `@` for prefix comparison — a decorator can't reach here anyway (this is
     // call-level) so the strip is defensive against consumers mixing the two syntaxes.
     //

@@ -1,6 +1,6 @@
 import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { walkFirstSymbol } from "./fixtures/ctx"
+import { BACKSLASH, walkFirstSymbol } from "./fixtures/ctx"
 
 function typesOf(rules: Rule[]): string[] {
   return rules.map((r) => r.type)
@@ -118,6 +118,38 @@ describe("walkBody — rules (LP16-LP20)", () => {
     const call = calls.find((c) => c.target === "doThing")
     expect(call?.argumentCount).toBe(0)
     expect(call?.literalArgs).toEqual([])
+  })
+
+  it("records a literal argument's escapes as the characters they name", async () => {
+    // The argument is read through the string decoder, so `\t` is a tab. Dropping the escape
+    // answered `SELECT\\t1` — the author's source text with a backslash still in it, which is
+    // not a query anything runs and reads in the IR exactly like one that is.
+    const { calls } = await walkFirstSymbol(
+      `export function f() { db.query("SELECT${BACKSLASH}t1") }`,
+    )
+    const call = calls.find((c) => c.target === "db.query")
+
+    expect(call?.literalArgs).toEqual(["SELECT\t1"])
+  })
+
+  it("keeps two literal arguments apart when neither could be read at all", async () => {
+    // `"\u12b"` is an invalid escape, so each literal's whole contents parse as an ERROR node
+    // and decode to nothing. Recording both as `""` reports two calls made with the same
+    // argument, which is what a reader of `literalArgs` goes on; the literal's own text is
+    // what the author wrote, and it keeps the two apart.
+    const { calls } = await walkFirstSymbol(
+      [
+        "export function f() {",
+        `  db.query("${BACKSLASH}u12b/a")`,
+        `  db.query("${BACKSLASH}u12b/b")`,
+        "}",
+      ].join("\n"),
+    )
+
+    expect(calls.map((c) => c.literalArgs)).toEqual([
+      [`${BACKSLASH}u12b/a`],
+      [`${BACKSLASH}u12b/b`],
+    ])
   })
 })
 

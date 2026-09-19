@@ -1,7 +1,7 @@
 import type { WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { walkBody } from "../src/index"
+import { TYPESCRIPT_FILE_EXTENSIONS, walkBody } from "../src/index"
 import { makeExtractionCtx, parseSource, requireTree, symbolsOf } from "./fixtures/ctx"
 
 /**
@@ -132,5 +132,27 @@ describe("the old-style type assertion decides which extension goes where", () =
     // file only because that file was being read as TypeScript.
     expect(await errorsOf(path, ASSERTION)).not.toEqual([])
     expect(await treeOf(path, ASSERTION)).not.toContain("type_assertion")
+  })
+})
+
+/**
+ * `fileExtensions` is how core's scan decides which plugin reads a file at all, and this list
+ * is what the plugin reports there. Nothing downstream re-derives it, so an extension dropped
+ * from `EXTENSION_GRAMMAR` takes every file of that kind out of the scan silently: the suites
+ * above would keep passing on the extensions that remain, and a workspace of `.mjs` would
+ * simply come back empty.
+ */
+describe("the extension list is still the grammar map's", () => {
+  it("names every extension this plugin claims", () => {
+    expect([...TYPESCRIPT_FILE_EXTENSIONS].sort()).toEqual([
+      ".cjs",
+      ".cts",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".mts",
+      ".ts",
+      ".tsx",
+    ])
   })
 })

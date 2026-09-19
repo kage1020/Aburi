@@ -74,7 +74,7 @@ describe("notCompared — a path both scans gave up on", () => {
   it("emits the key on a diff that lost nothing", () => {
     // Not omitted when empty. Nothing else in a diff would let a reader tell "the comparison
     // covered everything" from "this writer predates the field" — see docs/design/
-    // diff-algorithm.md
+    // diff-algorithm.md.
     const diff = diffOf(makeIR({ symbols: [kept] }), makeIR({ symbols: [kept] }))
     expect(diff.notCompared).toEqual([])
   })

@@ -69,10 +69,15 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
 }
 
 /**
- * The header line distinguishes three states: `across N files` alone claims all N were
- * analysed, which a document written before `stats.skippedFiles` existed cannot name the
- * exceptions to — and a pure projection has no stderr, so the distinction has to be in the
- * bytes.
+ * The header line, which has to leave three states apart rather than two.
+ *
+ * `across N files` alone reads as "all N were analysed", a claim the document is in no
+ * position to make whenever `parsedFiles` is lower, so that case takes the second wording.
+ * The third state shares that wording and is told apart below it: a document written before
+ * `stats.skippedFiles` existed knows files were lost but cannot name them, so
+ * `renderSkippedFiles` emits nothing and the header stands alone — where a document that can
+ * name them is followed by the list. `aburi diff` warns on stderr in that third state; a pure
+ * projection has no stderr, so the distinction has to be in the bytes.
  */
 function renderSymbolCounts(ir: IR): string {
   const { keptSymbols, droppedSymbols, totalFiles, parsedFiles } = ir.stats
@@ -144,8 +149,8 @@ function countSymbolsPerComponent(ir: IR): Map<string, number> {
 }
 
 /**
- * Mermaid `graph LR` of the workspace: every declared component is a node (isolated ones
- * included, per `docs/design/overview.md`'s full-monorepo contract), component →
+ * Mermaid `graph LR` of the workspace: every declared component is a node — isolated ones
+ * with no incident edge included, which markdown-projection.md states outright — component →
  * component dependencies are edges, and a text fallback list follows when any edge exists.
  * Above `MERMAID_NODE_LIMIT` the mermaid block is dropped and only the list survives.
  *

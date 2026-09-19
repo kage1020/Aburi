@@ -763,7 +763,7 @@ function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
 }
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
-  return [...new Set(values)].sort()
+  return [...new Set(values)].sort(compareCodeUnit)
 }
 
 function buildPluginRefs(input: ScanInput): PluginRef[] {

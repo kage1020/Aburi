@@ -51,7 +51,6 @@
   "devDependencies": {
     "@aburi/framework-nestjs": "workspace:*",
     "@aburi/lang-typescript": "workspace:*",
-    "@aburi/test-support": "workspace:*",
     "@types/node": "^26.0.1",
     "ajv": "^8.20.0",
     "tsdown": "^0.22.3",

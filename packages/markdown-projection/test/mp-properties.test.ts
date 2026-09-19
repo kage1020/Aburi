@@ -183,6 +183,22 @@ describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
     expect(md).not.toContain("## Calls")
     expect(md).not.toContain("## Fingerprint")
   })
+
+  // The dropped view is the one renderer here that does not fold a run of blank lines, so a
+  // `dropReason` reaches the document exactly as its producer wrote it. Only a plugin can
+  // construct this — nothing in the tree emits a reason spanning lines — which is why it is
+  // pinned rather than left to be rediscovered by whoever merges the renderers next.
+  it("leaves a multi-line drop reason exactly as the producer wrote it", () => {
+    const s = makeSymbol({
+      id: "ts:src/a.ts#Dto",
+      name: "Dto",
+      kind: "class",
+      dropped: true,
+      dropReason: "matched rule A\n\n\nmatched rule B",
+      fingerprint: zeroFp(),
+    })
+    expect(projectSymbolExplain(s)).toContain("matched rule A\n\n\nmatched rule B")
+  })
 })
 
 // -----------------------------------------------------------------------------

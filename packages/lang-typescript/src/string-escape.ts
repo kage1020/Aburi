@@ -3,8 +3,8 @@ import type { Node } from "web-tree-sitter"
 /**
  * What a string literal's contents decode to, and whether that is all of them.
  *
- * The two callers want different things from the same read, so the read answers both rather
- * than picking one. A module specifier keeps whatever parsed — the parser's own syntax error
+ * Its readers want different things from the same read, so the read answers both rather than
+ * picking one. A module specifier keeps whatever parsed — the parser's own syntax error
  * already accounts for the rest, and a second diagnostic would claim the author wrote no
  * module name. A name that is about to become part of a Symbol id refuses a partial read
  * instead, because what it would be believing is a name the source does not contain.
@@ -42,6 +42,40 @@ export function decodeStringLiteral(node: Node): DecodedLiteral {
   }
   return { value: parts.join(""), whole }
 }
+
+/**
+ * The characters a literal names, with its quote-stripped source text standing in when the
+ * read came back with nothing at all.
+ *
+ * `decodeStringLiteral` answers `value: ""` for two literals that are not the same thing, and
+ * `whole` is the bit that tells them apart. A literal the author wrote empty — or wrote as
+ * nothing but a line continuation — was read, and an empty string is what it says; it is kept
+ * as one, so an empty module specifier still reaches its own diagnostic. A literal whose
+ * contents stand as an ERROR node was never read, and calling it empty makes every such
+ * literal in a file identical: two routes written `app.get("\u12b/a", h)` and
+ * `app.get("\u12b/b", h)` would share a stem and be told apart only by the order they are
+ * written in, so swapping the two lines would swap their Symbol ids. The source text is what
+ * the author typed, it keeps the two apart, and the parser has already reported the syntax
+ * error that says why it is raw.
+ *
+ * A *partial* read is kept as it stands: `"./a\uZZZZb"` answers `./a`, because the fragment
+ * that did parse is nearer the value than the source text with its broken escape still in it.
+ *
+ * This is not the only judgement `whole` admits, which is why it lives here rather than inside
+ * the decoder. `memberNameSegment` in `class-members.ts` refuses a partial read outright: its
+ * answer is about to become part of a Symbol id, where believing a name the source does not
+ * contain is worse than having no name, and raw text is no fallback for something that has to
+ * be a qualified-name segment.
+ */
+export function decodeStringLiteralOrRaw(node: Node): string {
+  const { value, whole } = decodeStringLiteral(node)
+  if (whole || value !== "") return value
+  const raw = node.text
+  return raw.length >= 2 && QUOTE.test(raw) ? raw.slice(1, -1) : raw
+}
+
+/** The quotes a literal can open with — a template's is the backtick. */
+const QUOTE = /^["'`]/
 
 /**
  * Decode one `escape_sequence` node's source text into the characters it names.

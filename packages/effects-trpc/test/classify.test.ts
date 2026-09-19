@@ -318,6 +318,18 @@ describe("classifyTrpcCall — upstream contract violations", () => {
 })
 
 describe("classifyTrpcCall — purity", () => {
+  it("returns an identical result across repeated invocations (effect-plugin.md EP2)", () => {
+    // Idempotence and non-mutation are two claims, not one: a classifier that memoized on
+    // a module-level cache keyed by something it read wrong would leave both arguments
+    // untouched and still answer differently on the second call. The plugin's own test
+    // makes the same assertion through `trpcEffectsPlugin.classify`, but only because that
+    // method happens to be a one-line delegation today — pin the pure function directly.
+    const ctx = clientCtx()
+    const call = makeCall({ target: "client.user.byId.query" })
+    const runs = Array.from({ length: 5 }, () => classifyTrpcCall(call, ctx))
+    for (const run of runs) expect(run).toEqual(runs[0])
+  })
+
   it("does not mutate the CallCandidate or the ClassifyContext", () => {
     const ctx = clientCtx()
     const call = makeCall({ target: "client.user.create.mutate", argumentCount: 1 })

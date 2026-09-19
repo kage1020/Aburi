@@ -120,7 +120,7 @@ export type DiffSide = "base" | "head"
  *   temporary `git worktree add --detach`, `runScan` runs inside it, and the working
  *   tree itself is scanned as the head. The base's intermediate IR lives under
  *   `mkdtemp` so nothing is left in the user's repo, and cleanup runs in `finally`.
- *   The worktree's own directory is named after the head workspace's,
+ *   The worktree's own directory is named after the head workspace's own directory,
  *   since Component detection reads that name — see `baseWorktreeLeaf`. The head is
  *   always the working tree: the `<head>` label in the ref spec only labels the report.
  * - `--base <ir.json> --head <ir.json>` — parses both files and jumps directly to

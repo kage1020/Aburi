@@ -7,7 +7,7 @@
 // dragging the barrel's eager ajv schema compilation into every effect plugin's startup.
 // Keep it that way — a value import from a sibling module here would silently undo it.
 
-import type { CallCandidate, Confidence, EffectsManifest, ImportEdge } from "@aburi/types"
+import type { CallCandidate, Confidence, ImportEdge } from "@aburi/types"
 
 /**
  * A `.`-split callee target that has been checked for emptiness. The tuple shape records
@@ -281,9 +281,19 @@ export function receiverConfidence(
 /**
  * The manifest shape shared by every first-party effects plugin, with the two literals a
  * plugin actually chooses kept narrow so consumers can compare against them.
+ *
+ * Declared standalone rather than `extends EffectsManifest` on purpose. Extending would
+ * inherit `PluginManifest`'s optional `xPrefix` and `capabilities`, and a first-party
+ * effects manifest sets neither — `xPrefix` is the registry's to derive from `name`
+ * (`deriveXPrefix`), which is what `defineEffectsManifest`'s docblock relies on. Inheriting
+ * them would make `manifest.xPrefix` a well-typed read of a key no manifest here carries,
+ * so the mistake would surface as a silent `undefined` instead of a compile error.
+ * Dropping `extends` also drops the compiler's check that this shape still satisfies the
+ * contract the registry validates against, so `plugin-input.test.ts` states it instead: it
+ * assigns a built manifest to an `EffectsManifest` and asserts that `xPrefix` stays
+ * unreadable, which fails `pnpm typecheck` if either half stops holding.
  */
-export interface EffectsPluginManifest<Name extends string, DerivedByPrefix extends string>
-  extends EffectsManifest {
+export interface EffectsPluginManifest<Name extends string, DerivedByPrefix extends string> {
   readonly $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
   readonly name: Name
   readonly version: "0.0.0"

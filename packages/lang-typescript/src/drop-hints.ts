@@ -4,7 +4,7 @@ import { bodyNodesOf, functionValueOf } from "./ast-helpers"
 
 /**
  * Category-A skip patterns owned by this language plugin. Added on top of the core
- * standard set in drop-list.md Config-level ignores stack on top of both.
+ * standard set in drop-list.md. Config-level ignores stack on top of both.
  */
 export const TYPESCRIPT_FILE_DROP_PATTERNS: readonly string[] = [
   "**/*.d.ts",

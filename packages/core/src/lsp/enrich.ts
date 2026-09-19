@@ -283,7 +283,7 @@ interface ProcessLanguageInput {
 
 async function processLanguage(input: ProcessLanguageInput): Promise<void> {
   const symbolsByFile = groupBy(input.symbols, (symbol) => symbol.source.file)
-  const filesSorted = [...symbolsByFile.keys()].sort()
+  const filesSorted = [...symbolsByFile.keys()].sort(compareCodeUnit)
 
   const requestTimeout = input.serverConfig.requestTimeoutMs ?? 500
   const fileBudget = input.serverConfig.fileBudgetMs ?? 2000
@@ -658,7 +658,7 @@ function applyDocumentSymbols(
 function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void {
   if (symbol.signature === null || symbol.signature === undefined) return
   const existing = symbol.signature.inferredThrows ?? []
-  const merged = [...new Set([...existing, ...throws])].sort()
+  const merged = [...new Set([...existing, ...throws])].sort(compareCodeUnit)
   if (merged.length === 0) return
   symbol.signature = { ...symbol.signature, inferredThrows: merged }
 }

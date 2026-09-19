@@ -3,7 +3,7 @@ import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
 import { representativeSymbol } from "./status"
 
-/** The three inputs of the Slice View pass — docs/design/slice-view.md */
+/** The three inputs of the Slice View pass — docs/design/slice-view.md. */
 export interface SliceInput {
   /** SymbolChange records produced by `buildDiff` (pre-sort is not required). */
   changes: readonly SymbolChange[]
@@ -257,11 +257,41 @@ export function assertSliceRecordInvariant(record: SliceRecord): void {
  * `unknown` is a thing a reviewer has to look at, so it belongs in the cluster its
  * neighbours are in. Not deduplicated: `buildDiff` never mentions one id twice, and the
  * WCC primitive coalesces an accidental duplicate anyway.
+ *
+ * Written as a `switch` over every status rather than as "everything but `moved`", because
+ * the second spelling admits a status added to `SymbolChange` later without anyone deciding
+ * whether it is a Node. Node membership is what the whole pass is built on — a status
+ * silently joining the set would move Slice boundaries and the ids derived from them — so
+ * the addition has to fail the build here.
  */
 function collectNodeIds(changes: readonly SymbolChange[]): SymbolId[] {
-  return changes
-    .filter((change) => change.status !== "moved")
-    .map((change) => representativeSymbol(change).id)
+  const ids: SymbolId[] = []
+  for (const change of changes) {
+    switch (change.status) {
+      case "added":
+      case "removed":
+      case "unknown":
+      case "changed":
+      case "moved+changed":
+      case "dropped-toggled":
+        ids.push(representativeSymbol(change).id)
+        break
+      case "moved":
+        // Not a Node, and not an intermediate connector either (slice-view.md): a pure move
+        // leaves the semantic surface unchanged, so clustering it would be noise.
+        break
+      default:
+        return assertNeverChange(change)
+    }
+  }
+  return ids
+}
+
+function assertNeverChange(change: never): never {
+  throw new Error(
+    `computeSlices: unhandled SymbolChange status ${JSON.stringify(change)}; every status has ` +
+      "to declare whether it is a Slice Node (slice-view.md).",
+  )
 }
 
 /**

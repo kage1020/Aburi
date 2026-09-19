@@ -1,7 +1,7 @@
 import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import { byId, symbolsOf } from "./fixtures/ctx"
+import { BACKSLASH, byId, symbolsOf } from "./fixtures/ctx"
 
 describe("extractSymbols — structure (LP1-LP8)", () => {
   // LP1 (top-level function), LP2 (class) and LP5 (interface) are rows of the LP6b table
@@ -345,6 +345,38 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     // failure mode masking a duplicate.
     const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it.each([
+    ["a hex escape", `/hex${BACKSLASH}x41fter`, "$hexAfter", "/hexAfter"],
+    ["a tab", `/tab${BACKSLASH}tinside`, "$tab_inside", "/tab\tinside"],
+    ["an escaped backslash", `/back${BACKSLASH}${BACKSLASH}slash`, "$back_slash", "/back\\slash"],
+    // The one row whose decoded character is an ordinary letter, so the slug gains a segment
+    // character rather than the `_` the others fold to: dropping the escape left `$usrs`,
+    // which is a different route from the `/users` the author wrote.
+    ["a unicode escape", `/us${BACKSLASH}u0065rs`, "$users", "/users"],
+  ])("CS9: reads %s in the path as the character it names", async (_label, path, slug, literal) => {
+    // The path is read through the string decoder, so an escape contributes its character
+    // rather than nothing. Dropping it folded `/hex\x41fter` to `$hexfter` — a route the
+    // workspace does not serve, and one that `/hexfter` would then collide with.
+    const symbols = await symbolsOf(`app.get("${path}", h)`)
+    const sym = byId(symbols, `#app__get__${slug}__d0`)
+
+    expect(sym.derivedBy).toContain(`path-literal:${literal}`)
+  })
+
+  it("CS10: keeps two routes apart when neither path could be read at all", async () => {
+    // `"\u12b"` is an invalid escape the grammar refuses, so the literal's whole contents
+    // parse as an ERROR node and decode to nothing. Reading that as an empty path gives both
+    // registrations the bare `app__get` stem, leaving the `__dN` ordinal — which is source
+    // order — as the only thing telling them apart, so swapping the two lines swaps their ids.
+    // The literal's own text is what the author wrote, and it keeps the paths distinct.
+    const symbols = await symbolsOf(
+      [`app.get("${BACKSLASH}u12b/a", h)`, `app.get("${BACKSLASH}u12b/b", h)`].join("\n"),
+    )
+
+    const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
+    expect(ids).toEqual(["ts:src/a.ts#app__get___u12b$a__d0", "ts:src/a.ts#app__get___u12b$b__d0"])
   })
 })
 

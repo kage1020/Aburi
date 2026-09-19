@@ -502,7 +502,7 @@ export function reconstructCallEdgesFromIR(ir: IR): CallEdge[] {
 }
 
 /**
- * Step 1 (call-resolution.md) requires the resolver to leave a call
+ * Step 1 of call-resolution.md's untyped step order requires the resolver to leave a call
  * unresolved when the callee identifier shadows a caller-local declaration
  * (parameter, local variable, or nested function). The IR only surfaces the
  * parameter list today — `Symbol.signature.inputs[].name` — so this helper
@@ -600,10 +600,10 @@ function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): Resol
 }
 
 /**
- * Step 2 (call-resolution.md): resolve `head` against the top-level Symbols
- * declared in the caller's own file. For a dotted target the head must match a
- * class-shaped top-level Symbol and the joined `head.tail` qname must itself
- * exist as a Symbol id in the same file.
+ * Step 2 of call-resolution.md's untyped step order: resolve `head` against the top-level
+ * Symbols declared in the caller's own file. For a dotted target the head must match a
+ * class-shaped top-level Symbol and the joined `head.tail` qname must itself exist as a
+ * Symbol id in the same file.
  */
 function resolveInFileScope(
   caller: IRSymbol,
@@ -638,11 +638,11 @@ function resolveInFileScope(
 }
 
 /**
- * Step 3 (call-resolution.md): consult `importTable[caller.file]`. Named
- * imports and aliased imports resolve the head directly; namespace imports
+ * Step 3 of call-resolution.md's untyped step order: consult `importTable[caller.file]`.
+ * Named imports and aliased imports resolve the head directly; namespace imports
  * (`import * as ns from './y'`) resolve when the target reads `ns.member`.
- * Import specifier resolution is limited to relative paths in this pass
- * (call-resolution.md step 1); path aliases and workspace-package
+ * Import specifier resolution is limited to relative paths in this pass (step 1 of
+ * call-resolution.md's import-specifier resolution); path aliases and workspace-package
  * specifiers are the concern of the follow-up implementation.
  */
 function resolveInImportScope(
@@ -711,12 +711,11 @@ function recordAmbiguity(trace: ResolutionTrace, bucket: readonly IRSymbol[]): v
 }
 
 /**
- * Step 4 (call-resolution.md): if steps 1–3 miss and `target` is a
+ * Step 4 of call-resolution.md's untyped step order: if steps 1–3 miss and `target` is a
  * qualified name, search Symbols within the caller's component whose `name`
- * equals `target`. Unique match → medium confidence; ambiguous → null. The
- * language filter (no cross-language edges) is enforced by `ComponentIndex`'s own outer
- * language
- * key, so cross-language buckets never share a `(component, name)` cell.
+ * equals `target`. Unique match → medium confidence; ambiguous → null. The cross-language
+ * filter is enforced by `ComponentIndex`'s own outer language key, so cross-language buckets
+ * never share a `(component, name)` cell.
  * Component-scope search ignores `import` bindings — that is the whole point
  * of component scope (barrel re-exports, inheritance-style references).
  */
@@ -741,9 +740,9 @@ function resolveInComponentScope(
 }
 
 /**
- * Step 5 (call-resolution.md): same as component scope but workspace-wide within
- * a single language (cross-language edges are not emitted by the untyped tier).
- * Unique match → low confidence; ambiguous → null; no match → null.
+ * Step 5 of call-resolution.md's untyped step order: same as component scope but
+ * workspace-wide within a single language (cross-language edges are not emitted by the
+ * untyped tier). Unique match → low confidence; ambiguous → null; no match → null.
  */
 function resolveInWorkspaceScope(
   ctx: ResolveTargetContext,

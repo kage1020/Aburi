@@ -94,9 +94,6 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
-      '@aburi/test-support':
-        specifier: workspace:*
-        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1

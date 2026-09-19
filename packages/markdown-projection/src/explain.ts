@@ -176,6 +176,20 @@ function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): 
   return [...callers].sort(compareStrings)
 }
 
+/**
+ * The short summary a `dropped: true` Symbol gets instead of the axis sections, and the one
+ * renderer here that does not collapse blank runs.
+ *
+ * Every other document in this package is assembled from sections that each push their own
+ * blank line, so the fold is what keeps two adjacent sections from writing two. This one has
+ * no sections: its body is a fixed handful of lines, so there is no spacing of its own left
+ * for the fold to tidy. What it does have is `dropReason`, which reaches the document
+ * verbatim rather than through `inlineCode` — a reason is prose a reviewer reads, not a value
+ * in a code span. Folding here would therefore only ever rewrite somebody else's text, and
+ * silently reformat the one field this view exists to show. No producer in the tree emits a
+ * reason carrying a blank line, so the two behaviours differ on plugin-written IR alone;
+ * that is a reason to be deliberate about which one this is, not a reason to have no answer.
+ */
 function renderDroppedExplain(symbol: IRSymbol): string {
   const lines: string[] = []
   lines.push(`# ${inlineCode(symbol.name)} *(${symbol.kind})* — dropped`)
@@ -190,5 +204,5 @@ function renderDroppedExplain(symbol: IRSymbol): string {
   lines.push("")
   lines.push("_(dropped symbols carry no rules / effects / calls / fingerprint by IR contract.)_")
   lines.push("")
-  return renderDocument(lines)
+  return renderDocument(lines, { collapseBlankRuns: false })
 }

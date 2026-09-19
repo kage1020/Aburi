@@ -393,12 +393,26 @@ export function sortDependencies(deps: readonly Dependency[]): Dependency[] {
   )
 }
 
+export interface RenderDocumentOptions {
+  /**
+   * Fold a run of three or more newlines back to one blank line. On by default: a renderer
+   * that pushes a section's trailing `""` next to the following section's leading `""` writes
+   * a double blank line the document never meant, and every renderer here is assembled that
+   * way. Off for a renderer whose own spacing is fixed and whose lines carry a value
+   * verbatim — there the fold can only ever reach somebody else's text (`renderDroppedExplain`
+   * is the one such caller, and says why at its own definition).
+   */
+  readonly collapseBlankRuns?: boolean
+}
+
 /** A document's final bytes: collapsed blank runs, one trailing newline, `\n` throughout. */
-export function renderDocument(lines: readonly string[]): string {
-  return `${lines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd()}\n`
+export function renderDocument(
+  lines: readonly string[],
+  options: RenderDocumentOptions = {},
+): string {
+  const joined = lines.join("\n")
+  const body = options.collapseBlankRuns === false ? joined : joined.replace(/\n{3,}/g, "\n\n")
+  return `${body.trimEnd()}\n`
 }
 
 /**

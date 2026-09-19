@@ -8,7 +8,7 @@ import type {
   LanguagePlugin,
   PluginManifest,
 } from "@aburi/types"
-import { CliError, errorMessage } from "./errors"
+import { assertNever, CliError, errorMessage } from "./errors"
 
 /** Every field of the config that lists plugin refs, and the manifest type each must declare. */
 const PLUGIN_FIELDS = {
@@ -164,6 +164,10 @@ function routePlugin(
     case "effects":
       into.effects.push(plugin as unknown as EffectPlugin)
       break
+    default:
+      // A fourth plugin-bearing config field is a type error here rather than a ref the loader
+      // accepts, reports nothing about, and then never hands to the scan.
+      assertNever(field, "plugin field")
   }
 }
 

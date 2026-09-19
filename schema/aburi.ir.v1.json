@@ -210,7 +210,7 @@
         },
         "unresolved": {
           "$ref": "#/$defs/UnresolvedCallBuckets",
-          "description": "Why the remaining call sites stayed null, bucketed per call-resolution.md The five counters sum to totalCalls - resolvedCalls."
+          "description": "Why the remaining call sites stayed null, bucketed per call-resolution.md. The five counters sum to totalCalls - resolvedCalls."
         }
       }
     },
@@ -284,7 +284,7 @@
         "requestsTimedOut": {
           "type": "integer",
           "minimum": 0,
-          "description": "Requests that hit requestTimeoutMs (lsp-enrichment.md per-request fallback)."
+          "description": "Requests that hit requestTimeoutMs (the per-request fallback in lsp-enrichment.md)."
         },
         "requestsFailed": {
           "type": "integer",

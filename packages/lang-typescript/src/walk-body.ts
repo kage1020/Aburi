@@ -10,7 +10,7 @@ import {
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild, hasErrorChild, thrownValue, walkDescendants } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
-import { decodeStringLiteral } from "./string-escape"
+import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -430,7 +430,7 @@ function extractLiteral(node: Node): string | null {
     case "undefined":
       return node.text
     case "string":
-      return decodeStringLiteral(node).value
+      return decodeStringLiteralOrRaw(node)
     default:
       return null
   }

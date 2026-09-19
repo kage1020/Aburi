@@ -1,4 +1,5 @@
 import type { LanguageId, LspEnrichmentStats, LspHintRejections } from "@aburi/types"
+import { compareCodeUnit } from "../order"
 
 /**
  * Mutable accumulator for `stats.lspEnrichment` (lsp-enrichment.md): the producer's
@@ -104,7 +105,7 @@ export function finalizeStats(builder: LspStatsBuilder): LspProducerStats {
   const { languagesDisabled, hintsRejected, ...counters } = builder
   return {
     ...counters,
-    languagesDisabled: [...languagesDisabled].sort(),
+    languagesDisabled: [...languagesDisabled].sort(compareCodeUnit),
     // Zero until the resolver reports back. The pass that fills these two runs after this one
     // returns, so a caller that only enriches sees the producer half of the stats and an honest
     // "nothing has consumed these yet" for the rest — which is what `LspProducerStats` names.

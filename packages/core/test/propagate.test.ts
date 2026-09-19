@@ -263,7 +263,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
   })
 })
 
-describe("propagateEffects — additional invariants", () => {
+describe("propagateEffects — additional invariants (effect-propagation.md)", () => {
   it("derivedBy lex tie-break — two paths, smaller derivedBy wins", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),

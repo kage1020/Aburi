@@ -1,6 +1,6 @@
 /**
  * String similarity utilities dedicated to the diff engine. Kept in one file so the
- * name/signature/owner formulas are auditable side by side against diff-algorithm.md
+ * name/signature/owner formulas are auditable side by side against diff-algorithm.md.
  */
 
 /**
@@ -118,11 +118,16 @@ export function memberSimilarity(baseName: string, headName: string): number {
 /**
  * The owner gate (diff-algorithm.md, R-8) — whether two Symbols are close enough in *scope* to be
  * the same Symbol: the same owner, or one whose owner was renamed. A gate rather than a score,
- * because a shared owner token at any weight lets `UserRepo.findById` / `AdminRepo.findById`
- * outscore the real rename `UsersRepository.findById`. Two empty owners are compatible (top-level
- * Symbols share the outer scope); one empty and one not never are. Otherwise the owners must
- * correspond segment for segment, every token on each side finding a distinct partner under
- * `sameWord`.
+ * because grading the owner cannot do what R-8 asks. `UserRepo.findById` and `AdminRepo.findById`
+ * agree on their member name and their signature, so a shared `Repo` token at weight 0.2 carries
+ * them to 0.8667 against a 0.85 threshold — while `UsersRepository.findById`, which *is* the
+ * rename, shares no owner token and scores 0.8000. The collision outscores the rename, and
+ * raising the weight only moves both: at 0.3 two three-token class names sharing two tokens land
+ * on exactly 0.85.
+ *
+ * Two empty owners are compatible (top-level Symbols share the outer scope); one empty and one
+ * not never are. Otherwise the owners must correspond segment for segment, every token on each
+ * side finding a distinct partner under `sameWord`.
  */
 export function ownersAreCompatible(baseName: string, headName: string): boolean {
   return ownersCompatible(

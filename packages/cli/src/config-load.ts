@@ -24,8 +24,8 @@ export type PinnedConfig = ConfigSource
  * Decide which config a run reads, without reading it.
  *
  * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the given `cwd`,
- * per `cli-spec.md Config Resolution Order`. A config in that directory therefore wins
- * over one in an ancestor.
+ * per the Config Resolution Order list in `cli-spec.md`. A config in that directory
+ * therefore wins over one in an ancestor.
  *
  * The marker-detected workspace root plays no part here. It is the base for Symbol id
  * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for
@@ -33,8 +33,9 @@ export type PinnedConfig = ConfigSource
  * package-local config can name paths that resolve against a directory above it.
  *
  * Separated from the read so that `aburi diff` can pin the head's answer before it moves the
- * working directory (cli-spec.md step 3). Both halves of a diff then read one file, and
- * a commit touching only `aburi.json` stops reading as a change to every Symbol in the
+ * working directory — step 3 of the ref-form Behavior `cli-spec.md` gives `aburi diff`, which
+ * hands the base scan the head's config. Both halves of a diff then read one file, and a
+ * commit touching only `aburi.json` stops reading as a change to every Symbol in the
  * workspace.
  */
 export async function pinConfig(

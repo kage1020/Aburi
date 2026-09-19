@@ -220,8 +220,9 @@ export function buildDiff(
 
   symbols.sort(compareSymbolChange)
 
-  // Slice View clustering (docs/design/slice-view.md), over the resolved call edges only
-  // `slices[]` is emitted even when empty; the Markdown side omits the section.
+  // Slice View clustering (docs/design/slice-view.md), over the resolved call edges only —
+  // never `Symbol.calls[]` directly. `slices[]` is emitted even when empty; the Markdown side
+  // is what omits the section.
   const slices = computeSlices({
     changes: symbols,
     baseCallEdges: reconstructCallEdgesFromIR(input.baseIR),
@@ -280,6 +281,16 @@ type IRSide = "baseIR" | "headIR"
  * A collection `buildDiff` keys by identity, and refuses a repeat in. Reporting order is the
  * order of `IDENTIFIED_COLLECTIONS`, base side before head side. The shape gate has already
  * established that every entry is an object whose identity fields are strings.
+ *
+ * This pass used to re-establish that itself, with an array check, an object check and a
+ * string check on every entry, kept on the argument that a fourth collection added here and
+ * not to `aburi.ir.v1` would silently put them back on the live path. That argument was about
+ * a version of `identityFields` that named its fields as strings and read them off an
+ * `unknown` entry. It does not survive `identities`: a collection now supplies a typed
+ * projection out of `IR`, so a field the schema does not declare is a field `IR` does not
+ * have, and one that is not a string is not a `readonly string[]`. Both are compile errors at
+ * the entry that introduces them rather than runtime guards waiting for one — which is why
+ * the guards are gone and this note is here instead.
  */
 interface IdentifiedCollection {
   readonly field: "symbols" | "components" | "dependencies"

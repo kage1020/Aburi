@@ -18,7 +18,7 @@ export interface SerializeOptions {
  *    form matters and where the rest of the pipeline establishes it). Keys are normalized
  *    *before* rule 2 orders them: ordering the input spelling and writing the normalized
  *    one yields a document whose key order does not match the bytes it contains.
- * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md Rule 1 is what lets
+ * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md. Rule 1 is what lets
  *    that comparator agree with the rest of the codebase: this function orders normalized
  *    keys while every other ordering decision compares the string held in memory, so the
  *    two stay in step only because Unicode normalization puts both in the same form.

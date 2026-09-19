@@ -2,7 +2,7 @@ import { compareCodeUnit } from "@aburi/core"
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild, walkDescendants } from "./ast-helpers"
-import { decodeStringLiteral } from "./string-escape"
+import { decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -290,8 +290,8 @@ function readModuleSpecifier(
 type ImportSite = "import" | "re-export" | "dynamic import"
 
 /**
- * Read the contents of a specifier written as a literal, decoded (see `decodeStringLiteral`
- * for the escape and `whole` semantics).
+ * Read the contents of a specifier written as a literal, decoded (see
+ * `decodeStringLiteralOrRaw` for the escape semantics and for when the source text stands in).
  *
  * A `string` and a substitution-free `` `template` `` are the same specifier written with
  * different quotes. A template *with* a `template_substitution` is refused — joining its
@@ -301,10 +301,10 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * answers `""`, which is the caller's to judge.
  *
  * A partial read is kept: `"./a\uZZZZb"` comes back as `./a`, the parser's own syntax error
- * accounting for the rest. The quote-stripping fallback is for a literal whose contents are
- * entirely an ERROR — empty *and* not whole. Calling that one empty as well would be a third
- * diagnostic claiming the author wrote no module name, and they did; a literal that is only a
- * line continuation is empty and whole, and does reach the empty-specifier diagnostic.
+ * accounting for the rest. The fallback to source text is what keeps a literal whose contents
+ * are entirely an ERROR out of the empty-specifier diagnostic — a third complaint claiming the
+ * author wrote no module name, when they did. A literal that is only a line continuation is
+ * empty and whole, and does reach that diagnostic.
  */
 function readLiteralSpecifier(node: Node): string | null {
   if (node.type === "template_string") {
@@ -312,11 +312,7 @@ function readLiteralSpecifier(node: Node): string | null {
   } else if (node.type !== "string") {
     return null
   }
-  const { value, whole } = decodeStringLiteral(node)
-  if (whole || value !== "") return value
-  const raw = node.text
-  if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
-  return raw
+  return decodeStringLiteralOrRaw(node)
 }
 
 /**
