@@ -11,16 +11,22 @@ import { useScratchWorkspace } from "../src/scratch"
  *
  * The language plugin is the real TypeScript one wrapped in a delay, so the IR that comes
  * out of the surviving files is a real IR and `assertIRIntegrity` runs on it exactly as it
- * does in production. The delay is wall clock genuinely spent rather than a mocked one —
- * the assertions can only fail in the direction of a machine spending more time, which is
- * the direction that keeps them true.
+ * does in production. The delay is wall clock genuinely spent rather than a mocked one, so
+ * the budget has to clear two different margins and only one of them is self-correcting. A
+ * slow machine keeps "the slow file times out" true, because more time spent is the side
+ * that trips the budget. It works against "its neighbour survives": the undelayed file is
+ * charged real parse time, and a runner that stalls inside it blows a budget that has
+ * nothing to do with the delay under test. That is not a margin to shave — this suite has
+ * failed on a loaded Windows runner with an empty IR, both files timed out — so the budget
+ * is 500 ms against a parse that costs single-digit milliseconds warm, and the delay is
+ * scaled with it to keep the ratio the assertions rest on.
  */
 
 const workspace = useScratchWorkspace("parse-timeout")
 
 /**
  * The plugin defers its WASM and grammar load to the first `parseFile`, which costs about
- * 20 ms against budgets of 100. Discovery hands files over in path order, so without this
+ * 20 ms against budgets of 500. Discovery hands files over in path order, so without this
  * the file that is meant to *survive* pays that cost whenever it sorts first.
  */
 beforeAll(async () => {
@@ -75,7 +81,7 @@ describe("config.parseTimeoutMs", () => {
     await workspace.writeSource("slow.ts", "export function slowOne() { return 1 }\n")
     await workspace.writeSource("quick.ts", "export function quickOne() { return 2 }\n")
 
-    const { result } = await runScan(slowFor(["slow.ts"], 250), { parseTimeoutMs: 100 })
+    const { result } = await runScan(slowFor(["slow.ts"], 1250), { parseTimeoutMs: 500 })
 
     const names = result.ir.symbols.map((symbol) => symbol.name)
     expect(names).toContain("quickOne")
@@ -85,7 +91,7 @@ describe("config.parseTimeoutMs", () => {
   it("records the file once in skipped, and its numbers on parseTimeouts", async () => {
     await workspace.writeSource("slow.ts", "export function slowOne() { return 1 }\n")
 
-    const { result } = await runScan(slowFor(["slow.ts"], 250), { parseTimeoutMs: 100 })
+    const { result } = await runScan(slowFor(["slow.ts"], 1250), { parseTimeoutMs: 500 })
 
     expect(result.skipped).toHaveLength(1)
     const [entry] = result.skipped
@@ -97,8 +103,8 @@ describe("config.parseTimeoutMs", () => {
     expect(result.parseTimeouts).toHaveLength(1)
     const [event] = result.parseTimeouts
     expect(event?.file).toBe("slow.ts")
-    expect(event?.budgetMs).toBe(100)
-    expect(event?.elapsedMs).toBeGreaterThanOrEqual(100)
+    expect(event?.budgetMs).toBe(500)
+    expect(event?.elapsedMs).toBeGreaterThanOrEqual(500)
   })
 
   it("still reports the parse errors of a file that is broken as well as slow", async () => {
@@ -107,7 +113,7 @@ describe("config.parseTimeoutMs", () => {
     // `parseTimeoutMs` when the fix is the syntax.
     await workspace.writeSource("broken.ts", "export function ( { { {\n")
 
-    const { result } = await runScan(slowFor(["broken.ts"], 250), { parseTimeoutMs: 100 })
+    const { result } = await runScan(slowFor(["broken.ts"], 1250), { parseTimeoutMs: 500 })
 
     expect(result.parseTimeouts.map((t) => t.file)).toEqual(["broken.ts"])
     expect(result.parseErrors.map((e) => e.file)).toEqual(["broken.ts"])
@@ -118,7 +124,7 @@ describe("config.parseTimeoutMs", () => {
     await workspace.writeSource("slow.ts", "export function slowOne() { return 1 }\n")
     await workspace.writeSource("quick.ts", "export function quickOne() { return 2 }\n")
 
-    const { result } = await runScan(slowFor(["slow.ts"], 250), { parseTimeoutMs: 100 })
+    const { result } = await runScan(slowFor(["slow.ts"], 1250), { parseTimeoutMs: 500 })
 
     expect(result.ir.stats.totalFiles).toBe(2)
     expect(result.ir.stats.parsedFiles).toBe(1)
@@ -127,7 +133,7 @@ describe("config.parseTimeoutMs", () => {
   it("warns once, naming the file and the config key that raises the budget", async () => {
     await workspace.writeSource("slow.ts", "export function slowOne() { return 1 }\n")
 
-    const { warnings } = await runScan(slowFor(["slow.ts"], 250), { parseTimeoutMs: 100 })
+    const { warnings } = await runScan(slowFor(["slow.ts"], 1250), { parseTimeoutMs: 500 })
 
     const timeouts = warnings.filter((w) => w.includes("parseTimeoutMs"))
     expect(timeouts).toHaveLength(1)
@@ -141,7 +147,7 @@ describe("config.parseTimeoutMs", () => {
       'import { target } from "./slow"\nexport function caller() { return target() }\n',
     )
 
-    const { result } = await runScan(slowFor(["slow.ts"], 250), { parseTimeoutMs: 100 })
+    const { result } = await runScan(slowFor(["slow.ts"], 1250), { parseTimeoutMs: 500 })
 
     expect(result.ir.dependencies).toEqual([])
     const caller = result.ir.symbols.find((symbol) => symbol.name === "caller")
@@ -153,12 +159,12 @@ describe("config.parseTimeoutMs", () => {
     // already blown the budget by the time the quick one starts. A budget charged across
     // the run rather than per file would take the second file down with the first.
     //
-    // Both margins are wide on purpose: the slow file is over by 150 ms and the quick one
-    // spends nothing, so neither direction turns on how loaded the machine is.
+    // Both margins are wide on purpose: the slow file is over by 750 ms, and the quick one
+    // spends nothing beyond its own parse against a budget two orders of magnitude larger.
     await workspace.writeSource("a-slow.ts", "export function slowOne() { return 1 }\n")
     await workspace.writeSource("z-quick.ts", "export function quickOne() { return 2 }\n")
 
-    const { result } = await runScan(slowFor(["a-slow.ts"], 250), { parseTimeoutMs: 100 })
+    const { result } = await runScan(slowFor(["a-slow.ts"], 1250), { parseTimeoutMs: 500 })
 
     expect(result.skipped.map((s) => s.path)).toEqual(["a-slow.ts"])
     expect(result.ir.symbols.map((symbol) => symbol.name)).toEqual(["quickOne"])
