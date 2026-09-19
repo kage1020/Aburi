@@ -21,35 +21,21 @@ const CONSTRUCTION_SEGMENT = "constructor"
  * The qualified-name segment a class-body member's written name maps to, or null when the
  * member has no name the grammar can record.
  *
- * A written name and a qname segment are two different things, and null is what says so
- * without costing anything: `ir-schema.md` §3.2 answers a computed name with no Symbol and no
- * diagnostic, and every other name the grammar has no segment for gets the same answer. The
- * alternative is to hand the name's source text to the id builder and let it throw, which is
- * caught at the per-file boundary and costs the file every Symbol it had.
+ * Null rather than a throw: `ir-schema.md` answers a computed name with no Symbol and no
+ * diagnostic, and handing the name's source text to the id builder instead would cost the
+ * file every Symbol it had at the per-file boundary.
  *
- * A **quoted** name that spells an identifier is that identifier. A property key is a string:
- * `"ok"() {}` and `ok() {}` declare the same property — `tsc` calls the pair TS2393, a
- * duplicate *implementation* — so mapping both onto `ok` folds two declarations of one member
- * rather than colliding two members, which is what the fold in `addClassMembers` is for. The
- * literal is *decoded* rather than unquoted; `a-quoted-member-name.test.ts` spells out an
- * escaped name that tells the two apart.
+ * A **quoted** name that spells an identifier is that identifier — `"ok"() {}` and `ok() {}`
+ * declare the same property (TS2393), so both map onto `ok` and fold in `addClassMembers`.
+ * The literal is *decoded* rather than unquoted (`a-quoted-member-name.test.ts`), and a name
+ * the parser guessed at is refused on both halves: a partial decode answers `whole: false`,
+ * and a literal that did not parse at all leaves a bare `property_identifier` beside an ERROR
+ * — see `hasErrorChild` for why the member's own children are read rather than `hasError`.
  *
- * **A name the parser guessed at is refused**, and it arrives in two shapes. A literal that
- * parsed in part keeps its `string` node and answers `whole: false`. A literal that did not
- * parse at all leaves no literal to read: recovery re-emits the surviving characters as a bare
- * `property_identifier` and drops an ERROR beside it, so `"\uZZZZ"()` would otherwise be
- * believed as a member named `ZZZZ` — a name the source does not spell. An ERROR among the
- * member's **own** children is what says the head did not parse, and it is deliberately not
- * `member.hasError`: a broken statement or parameter list nests its ERROR deeper and leaves
- * the name alone, so a typo in a body does not make the member anonymous.
- *
- * A `number` has no segment at all. `1() {}` is addressed as `C[1]`, and the grammar's first
- * character class excludes digits, so there is nothing to map it onto that is not invented.
- *
- * `#` is not a character the grammar admits either, so a `#`-private member is spelled
- * without it — which maps `#v` and a `v` written beside it onto one id. That is its own
- * defect; the strip is here so a field reaches it the same way a method does, rather than a
- * second way.
+ * A `number` has no segment at all (`1() {}` is `C[1]`, and the grammar's first character
+ * class excludes digits). `#` is not a character the grammar admits either, so a `#`-private
+ * member is spelled without it — which maps `#v` and a `v` written beside it onto one id, a
+ * defect of its own; the strip is here so a field reaches it the same way a method does.
  */
 export function memberNameSegment(member: Node): string | null {
   if (hasErrorChild(member)) return null
@@ -70,47 +56,35 @@ function admitSegment(candidate: string): string | null {
  * The qualified-name segment extraction gives this class-body member, or null when the member
  * has no SymbolCandidate of its own.
  *
- * Two readers need the same answer and it has to be one answer: extraction asks it to decide
- * what to emit, `walkBody` asks it to decide whose body a member's calls and rules belong to,
- * and the moment they disagree a body is recorded twice or not at all. It answers with the
- * segment rather than with a boolean so extraction does not re-derive what admission already
- * computed — and so a builder cannot be handed a name the id builder then refuses.
+ * **One reader, one answer.** Extraction asks this to decide what to emit and `walkBody` asks
+ * it to decide whose body a member's calls and rules belong to; the moment they disagree a
+ * body is recorded twice or not at all. It answers with the segment rather than a boolean so
+ * extraction does not re-derive what admission already computed — and so a builder cannot be
+ * handed a name the id builder then refuses. The *arguments* have to agree too: `classNode` is
+ * the class the member is written in, which the walk reads off `body.parent` — a Symbol's
+ * `fullNode` is its **leading** declaration and need not be the class at all (`const C = 1`
+ * beside `class C {}` folds into one Symbol whose `fullNode` is the `lexical_declaration`).
  *
- * So the *arguments* have to agree too. `classNode` is the class the member is written in,
- * which the walk reads off `body.parent` — a Symbol's `fullNode` is its **leading declaration**
- * and need not be the class, or a class at all: `const C = 1` beside `class C {}` folds into
- * one Symbol whose `fullNode` is the `lexical_declaration` and whose merged body is the class's.
+ * Only a **named** class has member Symbols: the only unnamed form the statement walk reaches
+ * is an anonymous default export, where `<default>` is reserved for the class itself and
+ * `<default>.m` is not a qualified name the id builder accepts (`ir-schema.md`).
  *
- * Only a **named** class has member Symbols, and a name is the whole test: extraction reaches a
- * class through the statement walk, where the only unnamed form is an anonymous default export —
- * `<default>` is reserved for the class itself and `<default>.m` is not a qualified name the id
- * builder accepts (`ir-schema.md` §3.2). A class *expression* is never visited there at all, and
- * `export default class C {}` is a `class_declaration` rather than an expression, so no named
- * class reaches either reader without member Symbols.
+ * Four member shapes qualify. A `method_definition` is a member when `memberNameSegment` gives
+ * it one. A field holding a function is a member because calling it is what runs the body
+ * (`functionValuedField`). The other two are the shapes a member with **no body of its own**
+ * is written in, and what separates them from an overload is whether an implementation can be
+ * written beside them:
  *
- * Four member shapes qualify, and all of them need a name with a segment. A `method_definition`
- * is a member when `memberNameSegment` gives it one, which covers `ir-schema.md` §3.2's own row
- * for a computed name — no Symbol and no diagnostic — and every other name the grammar cannot
- * express. A field holding a function is a member because calling it is what runs the body;
- * see `functionValuedField`. Every other shape a class body can hold answers null for the plain
- * reason that it is neither.
- *
- * The other two are the shapes a member with **no body of its own** is written in, and what
- * separates them from an overload is whether an implementation can be written beside them.
- *
- * - `abstract_method_signature` — `abstract doIt(): void` — is a member. The language forbids
- *   an implementation beside it, so nothing else in the class declares `doIt`, and skipping it
- *   left an abstract class reporting only the methods it happened to implement. The subclasses
- *   overriding it each get their own Symbol, and the one the base declares is the API the class
- *   promises: dropping or re-typing it is the change worth a heading.
- * - `method_signature` is a member **only in an ambient class** (`declare class C { m(): void }`,
- *   `export declare class C { … }`). Written in an ordinary class body it is an overload
- *   declaration, and the implementation beside it carries the body and the parameter types the
- *   member is actually called with — so it stays skipped, which is also how a top-level overload
- *   behaves (`function_signature` is a Symbol only under a `declare`). An ambient class body has
- *   no implementations to defer to, and reading its members as overloads left `export declare
- *   class` with no methods at all. A class body of signatures and no implementation therefore
- *   still declares no members outside a `declare`, which is what `tsc` calls TS2391 anyway.
+ * - `abstract_method_signature` is a member. The language forbids an implementation beside it,
+ *   so nothing else in the class declares `doIt`, and skipping it left an abstract class
+ *   reporting only the methods it happened to implement.
+ * - `method_signature` is a member **only in an ambient class**. In an ordinary class body it
+ *   is an overload declaration and the implementation beside it carries the body and the
+ *   parameter types the member is actually called with — so it stays skipped, which is also
+ *   how a top-level `function_signature` behaves. An ambient class body has no implementations
+ *   to defer to, and reading its members as overloads left `export declare class` with no
+ *   methods at all. A class body of signatures and no implementation therefore still declares
+ *   no members outside a `declare`, which is what `tsc` calls TS2391 anyway.
  */
 export function memberSymbolSegment(classNode: Node, member: Node): string | null {
   if (nameFieldText(classNode) === null) return null
@@ -132,11 +106,8 @@ export function memberSymbolSegment(classNode: Node, member: Node): string | nul
  * class (`lang-plugin.md` LP20a).
  *
  * The name gate is the one a method gets, which it can be because a refused name is `null`
- * rather than a throw. A gate that answered by throwing would have to be stricter here than
- * for a method: a name it refuses costs the whole file, and a field is not worth one.
- *
- * `public_field_definition` is the only field shape this plugin sees — every extension it
- * claims, `.js` included, is parsed with the TypeScript or TSX grammar.
+ * rather than a throw. `public_field_definition` is the only field shape this plugin sees —
+ * every extension it claims, `.js` included, is parsed with the TypeScript or TSX grammar.
  */
 export function functionValuedField(member: Node): Node | null {
   if (member.type !== "public_field_definition") return null
@@ -146,29 +117,16 @@ export function functionValuedField(member: Node): Node | null {
 }
 
 /**
- * True for the member `new C()` runs.
+ * True for the member `new C()` runs. Read by extraction for the Symbol's `kind` and by the
+ * walk for whether the body stays on the class — one decision seen from two sides, as
+ * `memberSymbolSegment` is.
  *
- * Read by extraction for the Symbol's `kind` and by the walk for whether the body stays on the
- * class, which is one decision seen from two sides — the same reason `memberSymbolSegment` is
- * one function.
- *
- * The **segment** is what is compared, not the name's source text. A class element whose
- * *property name* is `constructor` is the constructor whatever the spelling, so
- * `"constructor"() {}` is one — read as a method it took the instance qname and collided with
- * the real constructor's.
- *
- * Two spellings that carry the segment are refused, and for one reason: neither is a property
- * name, so the language does not put either on the construction path.
- *
- * - `static`. A static member is not on the construction path, and `class C { static
- *   constructor() {} }` is legal JavaScript, which this plugin also parses.
- * - a `#`-private name. The segment drops the `#`, and the `#` is exactly what makes
- *   `#constructor` a `PrivateIdentifier` rather than a property name — `tsc` reports TS18012,
- *   a reserved word, and an engine refuses the source outright.
- *
- * Reading either as the constructor puts its body on the class as part of what instantiating
- * the class runs, and gives it the instance qname, where it collides with the real
- * constructor's.
+ * The **segment** is compared, not the source text, so `"constructor"() {}` is one too. Two
+ * spellings that carry the segment are refused because neither is a property name on the
+ * construction path: `static` (legal JavaScript, which this plugin also parses) and a
+ * `#`-private name (TS18012, and the `#` the segment drops is what makes it a
+ * `PrivateIdentifier`). Reading either as the constructor puts its body on the class and
+ * gives it the instance qname, where it collides with the real constructor's.
  */
 export function isConstructorMember(member: Node): boolean {
   if (hasChildOfType(member, "static")) return false
@@ -177,10 +135,8 @@ export function isConstructorMember(member: Node): boolean {
 }
 
 /**
- * How a member's name declares its visibility, from the shape it is written in.
- *
- * The node type and not the text, because the segment no longer carries the answer: `#v` is
- * spelled `v`. A `private_property_identifier` is the one spelling ECMAScript makes private.
+ * How a member's name declares its visibility, from the shape it is written in. The node type
+ * and not the text, because the segment no longer carries the answer: `#v` is spelled `v`.
  */
 export function hasPrivateName(member: Node): boolean {
   return member.childForFieldName("name")?.type === "private_property_identifier"

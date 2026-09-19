@@ -21,12 +21,16 @@ import type {
   VocabRegistry,
   WorkspaceManager,
 } from "@aburi/types"
+import { dependencyKey } from "../call-site"
 import { type CallEdge, resolveCallGraph } from "../callgraph"
 import { serializeCanonical } from "../canonical"
+import { countBy } from "../collections"
 import { CoreError } from "../errors"
 import { logicFingerprint } from "../fingerprint"
 import { assertIRIntegrity } from "../integrity"
+import { silentLogger } from "../logger"
 import { enrichWithLsp, type ReadFile, type ServerFactory, withHintUsage } from "../lsp"
+import { compareBy, compareCodeUnit } from "../order"
 import { type PropagationStats, propagateEffects } from "../propagate"
 import { buildComponentAttribution } from "./attribute"
 import {
@@ -54,14 +58,14 @@ export interface ScanInput {
   workspaceManagers?: readonly WorkspaceManager[]
   /**
    * The workspace's Components, which the scan both records on `IR.components` and reads
-   * back to attribute each file (component-detect.md §12).
+   * back to attribute each file (component-detect.md).
    *
    * Optional, and omitting it is a statement: a run with no Components attributes every
    * Symbol `null`, so the per-component views have nothing to group by. It stays optional
    * because a caller may legitimately have none to declare — the CLI always resolves them,
    * from the config or by detection, and a Document with an empty `components[]` is one
-   * detection was never run for rather than one that found nothing (§5 guarantees at least
-   * one Component).
+   * detection was never run for rather than one that found nothing (component-detect.md
+   * guarantees at least one Component).
    */
   components?: readonly Component[]
   /** Generator metadata for `IR.generator`. Callers (the CLI) fill in name + version. */
@@ -108,10 +112,10 @@ export interface ScanResult {
    */
   parseTimeouts: readonly ParseTimeoutEvent[]
   /**
-   * One record per call the resolver left `resolved: null`, with the §8.1
-   * bucket that explains why. Counts are aggregated into
+   * One record per call the resolver left `resolved: null`, with the
+   * call-resolution.md bucket that explains why. Counts are aggregated into
    * `ir.stats.callResolution`; the per-call detail deliberately stays out of
-   * the IR (call-resolution.md §8.1) and is surfaced by
+   * the IR (call-resolution.md) and is surfaced by
    * `aburi explain --debug-resolution`.
    */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
@@ -196,7 +200,7 @@ export interface ParseErrorRecord {
  *      Category B/C drop → fingerprint.
  *   4. Assemble the IR (Symbols + Components + Dependencies + Stats), sort every array
  *      per the schema's ordering rules.
- *   5. `assertIRIntegrity` — every ir-schema.md §14 invariant must pass before we hand the IR back.
+ *   5. `assertIRIntegrity` — every ir-schema.md invariant must pass before we hand the IR back.
  *
  * Serialization to disk is the caller's job (`writeCanonicalIR` handles the canonical
  * JSON write). Keeping serialization off the scan path lets tests assert on the IR
@@ -279,7 +283,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
       continue
     }
 
-    // The per-file exception boundary (lang-plugin.md §7.2). Every plugin call for this file
+    // The per-file exception boundary (lang-plugin.md). Every plugin call for this file
     // happens inside `runFilePipeline`, which returns its whole result at once — so a throw
     // leaves no accumulator in this function half-written, and there is nothing to unwind.
     // (Not that nothing is lost: the file's classify-timeout events go with it, because they
@@ -403,20 +407,20 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
 
   // The count the per-file warning above deliberately does not repeat. One line per plugin,
   // and only when it went wrong more than once, so the run says how far the leak got without
-  // saying it once per file.
-  for (const [plugin, count] of countByPlugin(treeReleaseFailures)) {
+  // saying it once per file. Insertion order, so these read as the tail of those lines.
+  for (const [plugin, count] of countBy(treeReleaseFailures, (failure) => failure.plugin)) {
     if (count > 1) {
       logger.warn(`Plugin ${plugin} failed to release ${count} parse trees over this run.`)
     }
   }
 
-  symbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  symbols.sort(compareBy((symbol) => symbol.id))
 
-  // Optional LSP enrichment pass (lsp-enrichment.md §2). Runs BEFORE call
+  // Optional LSP enrichment pass (lsp-enrichment.md). Runs BEFORE call
   // resolution so the LSP tier's receiver / implementer hints can feed the
   // resolver. When `config.lsp?.enabled !== true` the pass is a total no-op
-  // and returns the input unchanged; determinism (§10) is preserved because
-  // the pass writes only to the strictly bounded set of fields in §5 and only
+  // and returns the input unchanged; determinism is preserved because
+  // the pass writes only to the strictly bounded set of fields and only
   // when its cache is fully populated first.
   const enrichmentInput: Parameters<typeof enrichWithLsp>[0] = {
     symbols,
@@ -428,13 +432,13 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory
   const enrichment = await enrichWithLsp(enrichmentInput)
   const enrichedSymbols = enrichment.symbols
-  enrichedSymbols.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  enrichedSymbols.sort(compareBy((symbol) => symbol.id))
 
-  // Call-resolution + symbol → symbol edge projection (call-resolution.md §7,
-  // ir-schema.md §11). The resolver rewrites `Symbol.calls[].resolved` in
+  // Call-resolution + symbol → symbol edge projection (call-resolution.md,
+  // ir-schema.md). The resolver rewrites `Symbol.calls[].resolved` in
   // place and returns per-call-site CallEdges; those are then collapsed into
   // `(from, to, via: "call")` Dependency triples with a stable `(from, to, via)`
-  // sort. LSP hints (when present) supply the §5.2 / §5.3 tier.
+  // sort. LSP hints (when present) supply the LSP tier.
   const callGraph = resolveCallGraph({
     symbols: enrichedSymbols,
     importsByFile,
@@ -445,10 +449,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const symbolEdges = projectSymbolEdges(callGraph.edges)
 
   // Transitive effect propagation over the resolved call graph
-  // (effect-propagation.md §2). Runs AFTER call resolution and BEFORE the
+  // (effect-propagation.md). Runs AFTER call resolution and BEFORE the
   // logic-fingerprint recompute below; `api` and `syntax` axes do not read
   // `effects[]`, so only `logic` needs to be refreshed on the augmented
-  // symbols (effect-propagation.md §8).
+  // symbols (effect-propagation.md).
   const propagation = propagateEffects({
     symbols: callGraph.symbols,
     edges: callGraph.edges,
@@ -461,50 +465,23 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
           fingerprint: { ...s.fingerprint, logic: logicFingerprint(s) },
         },
   )
-  const resolvedSymbols = propagatedSymbols
 
-  // `parsedFiles` counts the files that reached the end of the pipeline with a usable tree.
-  // Stated as an invariant rather than as a list of reasons, because the list has grown
-  // three times and the arithmetic is the same each time: every entry `additionalSkipped`
-  // holds is a file this loop stopped working on, whatever stopped it, and nothing else is.
-  // A recoverable parse error stops nothing — the tree survived — so such a file still
-  // counts as parsed.
-  //
-  // One subtraction, therefore, and no counter beside it. A withdrawn file that were both
-  // listed and counted would be netted out twice, reporting two files lost for one.
-  //
-  // What the length has to mean is *at most one entry per file*, and what holds it is that
-  // every branch pushing to `additionalSkipped` ends its iteration: the three that run before
-  // the outcome switch `continue`, and the two arms inside it end their case. A push left to
-  // fall through would subtract a file the loop went on to extract, and integrity #21 could
-  // not see it — it compares the same two lengths against the same sum.
-  //
-  // Inside the switch that is checked rather than merely intended: a missing `break` is
-  // `TS7029` from `tsc` and `lint/suspicious/noFallthroughSwitchClause` from Biome, and the
-  // next arm's narrowing then fails on the payload the previous variant does not have. All
-  // three run in CI on every change.
-  //
-  // `discovered.skipped` is not netted out here: those files were never candidates, and they
-  // are added to `totalFiles` instead.
-  //
-  // Merged and sorted here rather than at the return, because `buildStats` projects it into
-  // `stats.skippedFiles`. Integrity invariant #21 compares its length against
-  // `totalFiles - parsedFiles`, which for anything this function writes is the same sum of
-  // the same two array lengths — that check is for documents arriving through `readIR`, not
-  // for this one.
-  const skipped = [...discovered.skipped, ...additionalSkipped].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-  )
+  // `parsedFiles` is one subtraction: every `additionalSkipped` entry is a file this loop
+  // stopped working on and nothing else is, which holds because every branch that pushes one
+  // ends its iteration (at most one entry per file). `discovered.skipped` is not netted out —
+  // those files were never candidates and are added to `totalFiles` instead. Integrity #21
+  // re-checks the same arithmetic only for documents arriving through `readIR`.
+  const skipped = [...discovered.skipped, ...additionalSkipped].sort(compareBy((file) => file.path))
   const stats = buildStats({
     totalFiles: discovered.files.length + discovered.skipped.length,
     parsedFiles: discovered.files.length - additionalSkipped.length,
     skipped,
-    symbols: resolvedSymbols,
+    symbols: propagatedSymbols,
     timeoutEvents,
     propagation: propagation.stats,
     // Where the two halves of `stats.lspEnrichment` meet — see `LspHintUsage` for why the
     // resolver reports rather than writes. This is the only call site that completes the
-    // §7.2 record.
+    // `stats.lspEnrichment` record.
     lspEnrichment:
       enrichment.stats === undefined
         ? undefined
@@ -529,7 +506,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     },
     workspace,
     components: sortComponents(input.components ?? []),
-    symbols: resolvedSymbols,
+    symbols: propagatedSymbols,
     dependencies: symbolEdges,
     stats,
   }
@@ -737,7 +714,7 @@ function buildStats(input: BuildStatsInput): Stats {
 
 /**
  * Sort by id, and normalize the one Class A field on `Component` (`description`, per
- * `ir-schema.md` §1.1) to an explicit `null`.
+ * `ir-schema.md`) to an explicit `null`.
  *
  * `ScanInput.components` is a public boundary: the in-tree CLI writes the key, but any other
  * `@aburi/core` caller can hand over a `Component` built against the read-side type, where
@@ -747,9 +724,9 @@ function buildStats(input: BuildStatsInput): Stats {
  * closes on the plugin boundary, on the one other Class A field that crosses a public API.
  */
 function sortComponents(components: readonly Component[]): Component[] {
-  return [...components]
+  return components
     .map((c) => ({ ...c, description: c.description ?? null }))
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .sort(compareBy((component) => component.id))
 }
 
 /**
@@ -757,7 +734,7 @@ function sortComponents(components: readonly Component[]): Component[] {
  * into deduplicated `Dependency` triples keyed on `(from, to, via)`. Multiple
  * calls from the same caller to the same callee become one Dependency — the
  * per-line detail lives on `Symbol.calls[]` and is deliberately not duplicated
- * onto Dependency (ir-schema.md §11). `direction` is fixed to `"outbound"`
+ * onto Dependency (ir-schema.md). `direction` is fixed to `"outbound"`
  * (call edges are inherently directional) and `effect` to `null` (effect
  * annotation is a separate propagation pass — effect-propagation.md).
  */
@@ -765,7 +742,7 @@ function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
   const seen = new Set<string>()
   const out: Dependency[] = []
   for (const edge of edges) {
-    const key = `${edge.from}\t${edge.to}\t${edge.via}`
+    const key = dependencyKey(edge.from, edge.to, edge.via)
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
@@ -776,16 +753,17 @@ function projectSymbolEdges(edges: readonly CallEdge[]): Dependency[] {
       effect: null,
     })
   }
-  out.sort((a, b) => {
-    if (a.from !== b.from) return a.from < b.from ? -1 : 1
-    if (a.to !== b.to) return a.to < b.to ? -1 : 1
-    return a.via < b.via ? -1 : a.via > b.via ? 1 : 0
-  })
+  out.sort(
+    (a, b) =>
+      compareCodeUnit(a.from, b.from) ||
+      compareCodeUnit(a.to, b.to) ||
+      compareCodeUnit(a.via, b.via),
+  )
   return out
 }
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
-  return [...new Set(values)].sort()
+  return [...new Set(values)].sort(compareCodeUnit)
 }
 
 function buildPluginRefs(input: ScanInput): PluginRef[] {
@@ -796,13 +774,13 @@ function buildPluginRefs(input: ScanInput): PluginRef[] {
     refs.push(buildPluginRef(plugin.manifest.name, "framework", plugin.manifest.version))
   for (const plugin of input.effects)
     refs.push(buildPluginRef(plugin.manifest.name, "effects", plugin.manifest.version))
-  refs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  refs.sort(compareBy((ref) => ref.name))
   return refs
 }
 
 /**
  * Placeholder grammar revision emitted for lang plugins that do not yet expose their
- * tree-sitter revision through the plugin surface. The schema (ir-schema §3.4) requires
+ * tree-sitter revision through the plugin surface. The schema (ir-schema.md) requires
  * a non-null value for `type: "lang"`; using a stable sentinel keeps IRs schema-valid
  * without pretending we know what revision produced them. Consumers can detect this
  * value and treat it as "pending" for cross-run comparability. A future patch that
@@ -817,26 +795,6 @@ function buildPluginRef(name: string, type: PluginRef["type"], version: string):
     version,
     grammarRevision: type === "lang" ? PENDING_GRAMMAR_REVISION : null,
   }
-}
-
-const silentLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-}
-
-/**
- * How many trees each plugin failed to release, in the order the plugins first went wrong.
- * Insertion order rather than sorted: the run has already named the first occurrence per
- * plugin on its own line, and these counts read as the tail of those lines.
- */
-function countByPlugin(failures: readonly TreeReleaseFailure[]): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const failure of failures) {
-    counts.set(failure.plugin, (counts.get(failure.plugin) ?? 0) + 1)
-  }
-  return counts
 }
 
 /**

@@ -132,13 +132,6 @@ describe("runInit — detected ids with no first-party plugin", () => {
 })
 
 describe("runInit --with-suggestions", () => {
-  it("suggests the language plugin, which the next scan cannot run without", async () => {
-    await makeWorkspace({})
-    const report = await runInit({ cwd: scratch, withSuggestions: true })
-
-    expect(report.suggestedPlugins).toContain("@aburi/lang-typescript")
-  })
-
   it("lists the language plugin before framework plugins", async () => {
     await makeWorkspace({ "@nestjs/core": "^10.0.0" })
     const report = await runInit({ cwd: scratch, withSuggestions: true })

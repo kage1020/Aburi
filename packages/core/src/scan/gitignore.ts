@@ -44,7 +44,7 @@ type Verdict = "none" | "ignored" | "kept"
  *
  * What is deliberately *not* read is `$GIT_DIR/info/exclude` and `core.excludesFile`. Both live
  * outside the tree and are per-machine, so honouring them would make the Document depend on who
- * ran the scan — the property `ir-schema.md §1` exists to defend. A `.gitignore` is committed,
+ * ran the scan — the property `ir-schema.md` exists to defend. A `.gitignore` is committed,
  * so every clone of the workspace answers the same.
  */
 export interface GitignoreTree {

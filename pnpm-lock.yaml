@@ -156,6 +156,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -181,6 +184,9 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -281,6 +287,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -306,6 +315,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -331,6 +343,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -356,6 +371,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -381,6 +399,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -409,6 +430,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -434,6 +458,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -459,6 +486,9 @@ importers:
       '@aburi/lang-typescript':
         specifier: workspace:*
         version: link:../lang-typescript
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -505,6 +535,9 @@ importers:
         specifier: ^0.26.10
         version: 0.26.10
     devDependencies:
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -527,6 +560,9 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@aburi/test-support':
+        specifier: workspace:*
+        version: link:../test-support
       '@types/node':
         specifier: ^26.0.1
         version: 26.0.1
@@ -564,6 +600,19 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.0.1)(vite@8.2.2(@types/node@26.0.1)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/test-support:
+    dependencies:
+      '@aburi/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.0.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/types:
     devDependencies:

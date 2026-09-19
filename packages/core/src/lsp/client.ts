@@ -15,14 +15,14 @@ import type { SpawnedServer } from "./transport"
  *   - A single-shot `request` that never retries. Timeout resolves with an
  *     `LspTimeout` sentinel rather than throwing, so callers can bookkeep without
  *     try/catch churn.
- *   - `didOpen` / `didClose` per §4.3 discrete file boundaries.
- *   - A `shutdown` that mirrors §4.1 (`shutdown` request → `exit` notification →
+ *   - `didOpen` / `didClose` per the discrete file boundaries of request batching.
+ *   - A `shutdown` that mirrors the handshake (`shutdown` request → `exit` notification →
  *     1 s → SIGKILL).
  *
  * Every write is bounded, notifications included: a JSON-RPC notification is
  * fire-and-forget, but the write still awaits the transport, so a clogged pipe
  * parks it exactly the way it parks a request. Which budget bounds which
- * notification, and why, is specified in lsp-enrichment.md §4.4 — that table is
+ * notification, and why, is specified in lsp-enrichment.md — that table is
  * the single source of truth and the call sites here only name their argument.
  *
  * Notifications report their outcome the way `request` does: `null` for a write
@@ -64,7 +64,7 @@ export interface LspError {
 export const LSP_TIMEOUT: LspTimeout = Object.freeze({ kind: "timeout" })
 
 /**
- * The one grace period `shutdown` is built from (lsp-enrichment.md §4.1). It
+ * The one grace period `shutdown` is built from (lsp-enrichment.md). It
  * bounds three steps that run in sequence — the `shutdown` request, the `exit`
  * notification, and the wait before SIGKILL — so a server that answers none of
  * them delays the pass by at most three of these, not indefinitely.
@@ -79,6 +79,11 @@ export function isLspFailure(value: unknown): value is LspFailure {
     ((value as { kind: unknown }).kind === "timeout" ||
       (value as { kind: unknown }).kind === "error")
   )
+}
+
+/** The message an `LspError` or a log line carries for a thrown value. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -127,13 +132,13 @@ export function createLspClient(server: SpawnedServer): LspClient {
         return {
           kind: "error",
           reason: "server-error",
-          message: error instanceof Error ? error.message : String(error),
+          message: errorMessage(error),
         }
       }
       if (isLspFailure(result)) return result
       // The handshake is not complete until `initialized` is on the wire, so a
       // write that never lands is an initialize failure. It gets the full
-      // `timeoutMs` rather than what the request left over (§4.4), which is why
+      // `timeoutMs` rather than what the request left over, which is why
       // a wholly unresponsive server can cost two of them here.
       const ack = await sendNotificationBounded(
         () => connection.sendNotification(InitializedNotification.type, {}),
@@ -143,7 +148,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
       return result as InitializeResult
     },
 
-    // `timeoutMs` is the caller's per-file budget (lsp-enrichment.md §4.4): an
+    // `timeoutMs` is the caller's per-file budget (lsp-enrichment.md): an
     // open that spends it has left nothing for the enrichment it exists to
     // enable.
     async didOpen(uri, languageId, text, timeoutMs) {
@@ -157,7 +162,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
       )
     },
 
-    // `timeoutMs` is the caller's per-request budget (§4.4): closing carries no
+    // `timeoutMs` is the caller's per-request budget: closing carries no
     // enrichment, so giving up sooner starts the next file sooner.
     async didClose(uri, timeoutMs) {
       if (disposed) return SERVER_DISCONNECTED
@@ -179,7 +184,7 @@ export function createLspClient(server: SpawnedServer): LspClient {
         return {
           kind: "error",
           reason: "server-error",
-          message: error instanceof Error ? error.message : String(error),
+          message: errorMessage(error),
         }
       }
     },
@@ -246,7 +251,7 @@ async function sendNotificationBounded(
     return {
       kind: "error",
       reason: "server-error",
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     }
   }
 }

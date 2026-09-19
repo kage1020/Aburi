@@ -1,18 +1,10 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import type { UnrepresentableFile } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import {
-  EXIT,
-  reportScanIncidents,
-  runCli,
-  runDiff,
-  runExplain,
-  runScan,
-  type ScanReport,
-} from "../src"
+import { EXIT, runCli, runDiff, runExplain, runScan, type ScanReport } from "../src"
+import { incidentLinesFrom, MemStream, scanReportWith } from "./fixtures"
 import { gitWith, populate } from "./stub-language"
 
 /**
@@ -24,17 +16,6 @@ import { gitWith, populate } from "./stub-language"
  * closed one route to that shape and its own docblock says why the shape is dangerous; these
  * are the rest of the routes.
  */
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
 
 let scratch = ""
 
@@ -264,45 +245,9 @@ function unspellable(fsPath: string, unnameablePrefix: string): UnrepresentableF
 }
 
 describe("reportScanIncidents — the fault and the code cannot disagree", () => {
-  function reportWith(overrides: Partial<ScanReport>): ScanReport {
-    return {
-      irPath: null,
-      workspaceMdPath: null,
-      componentMdPaths: [],
-      totalFiles: 0,
-      parsedFiles: 0,
-      keptSymbols: 0,
-      droppedSymbols: 0,
-      parseErrorCount: 0,
-      parseFailureCount: 0,
-      timeoutCount: 0,
-      skipped: [],
-      extractionFailures: [],
-      lspEnrichment: undefined,
-      callResolutionLine: "",
-      unresolvedCalls: [],
-      configSource: null,
-      configPinnedByCaller: false,
-      workspaceRoot: "/repo",
-      coverageFault: null,
-      unrepresentableFiles: [],
-      unresolvedDeclarations: [],
-      treeReleaseFailures: [],
-      fellBackToSingleComponent: false,
-      exitCode: EXIT.SUCCESS,
-      ...overrides,
-    }
-  }
-
-  function linesFrom(report: ScanReport, label: string | null): string[] {
-    const lines: string[] = []
-    reportScanIncidents(report, (m) => lines.push(m), label)
-    return lines
-  }
-
   it("puts the coverage line first, above the census that explains it", () => {
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         totalFiles: 1200,
         skipped: Array.from({ length: 1200 }, (_, i) => ({
           path: `src/f${i}.ts`,
@@ -333,8 +278,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // beneath it and each of those filenames is innocent, so a line blaming `util.stub` sends
     // the reader to rename the wrong thing — and two lines saying the same rename twice is a
     // list of the damage rather than a list of the work.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         totalFiles: 3,
         parsedFiles: 3,
         unrepresentableFiles: [
@@ -359,8 +304,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // The sink these go through has its failure deliberately swallowed, and the census under it
     // can run to six reasons of eleven lines. Last is the wrong place for the only account of a
     // file the artifact does not mention.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         totalFiles: 1,
         parsedFiles: 0,
         skipped: [{ path: "src/a.ts", reason: "over-size" as const, detail: "big" }],
@@ -379,8 +324,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // Measured: picomatch spends a lone backslash as an escape, so `src/v\1/**` does not match
     // `src/v\1/util.ts` while `src/v\\1/**` does. Advice naming the printed spelling would send
     // a reader round the loop to an identical exit 3, with nothing on screen to say why.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         unrepresentableFiles: [unspellable("odd\\name.stub", "odd\\name.stub")],
         exitCode: EXIT.GATE,
       }),
@@ -394,8 +339,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // Every other listing here is capped at ten with a `…and N more`, and can be: the files are
     // in `stats.skippedFiles[]`. These are in no artifact at all, so a tail would be the tool
     // declining to say the one thing only it knows. Grouping is what keeps the length sane.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         unrepresentableFiles: Array.from({ length: 12 }, (_, i) =>
           unspellable(`f${i}\\x.stub`, `f${i}\\x.stub`),
         ),
@@ -412,8 +357,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
     // `parsed (90%), below the … floor of 90%`, which reads as a bug in the tool rather than
     // as a finding about the workspace. Rounding away from each other keeps the sentence true
     // for every pair that can reach this line.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         totalFiles: 1000,
         parsedFiles: 899,
         coverageFault: { kind: "below-floor", parsedFiles: 899, totalFiles: 1000, floor: 0.9 },
@@ -450,8 +395,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
       },
     ] as const
     for (const { expected, printed, ...fault } of cases) {
-      const lines = linesFrom(
-        reportWith({
+      const lines = incidentLinesFrom(
+        scanReportWith({
           totalFiles: fault.totalFiles,
           parsedFiles: fault.parsedFiles,
           coverageFault: { kind: "below-floor", ...fault },
@@ -465,8 +410,8 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("labels it like every other line it owns", () => {
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         coverageFault: { kind: "nothing-discovered" },
         exitCode: EXIT.GATE,
       }),
@@ -476,7 +421,7 @@ describe("reportScanIncidents — the fault and the code cannot disagree", () =>
   })
 
   it("says nothing when the scan read the workspace", () => {
-    expect(linesFrom(reportWith({ totalFiles: 3, parsedFiles: 3 }), null)).toEqual([])
+    expect(incidentLinesFrom(scanReportWith({ totalFiles: 3, parsedFiles: 3 }), null)).toEqual([])
   })
 })
 
@@ -493,7 +438,7 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base"])
     expect(report.exitCode).toBe(EXIT.GATE)
-    // §6.5 says the wording is derived from what the scan actually reported "so a second
+    // `cli-spec.md` says the wording is derived from what the scan actually reported "so a second
     // reason arrives with the code right and the message still true". This is that reason.
     expect(warnings.join("\n")).toContain("base: none of the 1 file(s) it found parsed")
     expect(warnings.join("\n")).not.toContain("plugin exception")

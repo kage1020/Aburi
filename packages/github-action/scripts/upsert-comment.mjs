@@ -2,7 +2,7 @@
 // rewrite it in place, or create it when there is none.
 //
 // This is the step `comment: true` runs, and it is also what the `workflow_run` companion runs for
-// a pull request whose own token could not post — see `docs/design/github-action.md` §5.1. Those
+// a pull request whose own token could not post — see `docs/design/github-action.md`. Those
 // two callers are the reason this is a file rather than an inline script: the second one has no
 // action to call, only a checkout, and a second copy of the upsert would be a second marker string
 // to keep in step.
@@ -222,7 +222,7 @@ async function main() {
   if (size > MAX_BYTES) {
     fail(
       INPUT_ERROR,
-      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes (markdown-projection.md §6.4) and post that.`,
+      `${context.markdownPath} is ${size} bytes with the marker, over GitHub's ${MAX_BYTES}-byte comment limit; posting it would fail with a 422. Re-run the diff with a smaller --max-bytes (markdown-projection.md) and post that.`,
     )
     return
   }

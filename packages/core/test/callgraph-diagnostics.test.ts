@@ -4,8 +4,8 @@ import { makeCallSiteKey } from "../src/call-site"
 import { resolveCallGraph } from "../src/callgraph"
 import { makeSymbol, type SymbolOverrides, symbolId } from "./fixtures/ir"
 
-// call-resolution.md §8.1 — every `resolved: null` is a first-class outcome and the
-// resolver reports WHY it declined. §10.4's CR27 / CR28 / CR29 are covered here.
+// call-resolution.md — every `resolved: null` is a first-class outcome and the
+// resolver reports WHY it declined. CR27 / CR28 / CR29 are covered here.
 
 function withCalls(
   id: string,
@@ -33,7 +33,7 @@ function sig(...names: string[]): Signature {
   }
 }
 
-describe("resolveCallGraph — unresolved-call diagnostics (§8.1)", () => {
+describe("resolveCallGraph — unresolved-call diagnostics", () => {
   it("CR27: an expression receiver is bucketed `dynamic`", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "factory.save", line: 9 }])
     const result = resolveCallGraph({
@@ -132,7 +132,7 @@ describe("resolveCallGraph — unresolved-call diagnostics (§8.1)", () => {
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
   })
 
-  it("`this` / `super` with no LSP hint are bucketed `dynamic` (§4.7)", () => {
+  it("`this` / `super` with no LSP hint are bucketed `dynamic`", () => {
     const caller = withCalls("ts:src/a.ts#caller", [
       { target: "this.save", line: 2 },
       { target: "super.save", line: 3 },
@@ -260,7 +260,7 @@ describe("resolveCallGraph — unresolved-call diagnostics (§8.1)", () => {
 
   it("an LSP hint pointing at a dropped Symbol keeps the call in `dynamic`", () => {
     // Receiver hints are only ever built for `this.` / `super.` call sites, so
-    // when the hinted target turns out to be dropped the §4.7 guard has already
+    // when the hinted target turns out to be dropped the special-target guard has already
     // marked the receiver unnamed and `dynamic` is the honest bucket. Pinning it
     // here so the fallback can never quietly become `no-match`, which would send
     // a reviewer hunting for a typo that does not exist.
@@ -284,8 +284,8 @@ describe("resolveCallGraph — unresolved-call diagnostics (§8.1)", () => {
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["dynamic"])
   })
 
-  // §8.1 fixes the tie-break order — `local-scope` → `dynamic` → `ambiguous` →
-  // `external` → `no-match` — because a call can honestly answer to several
+  // call-resolution.md fixes the tie-break order — `local-scope` → `dynamic` →
+  // `ambiguous` → `external` → `no-match` — because a call can honestly answer to several
   // descriptions at once and the reviewer needs one stable verdict. Each case
   // below constructs a genuine two-way tie; without them a reordering of
   // `classifyUnresolved` would move counts between buckets on unchanged code

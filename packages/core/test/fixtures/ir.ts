@@ -28,7 +28,7 @@ export function componentId(raw: string): ComponentId {
 }
 
 /**
- * Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md §11).
+ * Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md).
  * Fixtures deliberately feed malformed endpoints to the invariants that exist to catch them,
  * so this brands whatever the case wrote rather than discriminating.
  */

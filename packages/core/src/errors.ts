@@ -17,7 +17,7 @@ export type CoreErrorCode =
    * suffix was exhausted and the root digests that separate the remainder collided, so the
    * derivation has nothing left to try; `components[]` in `aburi.json` is the way out. Raised
    * rather than returned because `aburi init` writes its result without building an IR, so the
-   * ir-schema.md §14 #2 uniqueness invariant never gets to see it.
+   * ir-schema.md #2 uniqueness invariant never gets to see it.
    */
   | "component-id-collision-unresolved"
   /** serializeCanonical encountered a value JSON cannot represent (function, symbol, bigint, …). */
@@ -30,7 +30,7 @@ export type CoreErrorCode =
   | "canonical-key-collision"
   /** An id part was not in Unicode NFC; ids are normalized at construction so both forms match. */
   | "invalid-symbol-id"
-  /** One or more of the IR invariants in ir-schema.md §14 were violated; `details` carries each violation. */
+  /** One or more of the IR invariants in ir-schema.md were violated; `details` carries each violation. */
   | "integrity-violation"
   /** Workspace root detection failed (no marker found between cwd and filesystem root). */
   | "workspace-root-not-found"
@@ -45,7 +45,7 @@ export type CoreErrorCode =
    * than of any one file — an effect plugin returning a Promise from the synchronous
    * `classify`, a language plugin emitting Symbol ids with no language prefix. Raised from
    * inside the per-file path, and the one code `scan()`'s per-file exception boundary
-   * re-throws instead of absorbing (`lang-plugin.md` §7.2): the fault repeats for every
+   * re-throws instead of absorbing (`lang-plugin.md`): the fault repeats for every
    * file, so withdrawing files one at a time would report the workspace as broken instead
    * of the plugin.
    */
@@ -68,15 +68,14 @@ export type CoreErrorCode =
   | "scan-outcome-unhandled"
   /**
    * `ResolveCallGraphInput.receiverHints` was non-empty and keyed by something other than
-   * `makeCallSiteKey`. Raised rather than ignored because the failure is otherwise invisible:
-   * every lookup misses, so the LSP tier contributes nothing and the run looks exactly like
-   * one where the language server had nothing to say. The keys carried `${file}:${line}` up
-   * to @aburi/core 0.3.0; they carry `makeCallSiteKey(file, line, target)` from 0.4.0.
+   * `makeCallSiteKey` (the keys were `${file}:${line}` up to @aburi/core 0.3.0). Raised rather
+   * than ignored because every lookup would otherwise miss in silence — see
+   * `assertReceiverHintKeys`.
    */
   | "receiver-hint-key-malformed"
 
 export interface IntegrityViolation {
-  /** Stable invariant id corresponding to the ir-schema.md §14 numbering, which is the single source of the list. */
+  /** Stable invariant id corresponding to the ir-schema.md numbering, which is the single source of the list. */
   invariant: number
   /** Identifier (Symbol id, Component id, file path, etc.) the violation is attributed to. */
   subject: string

@@ -4,7 +4,7 @@ export {
   calleeText,
   findFirstDescendantOfType,
   type SyntaxNode,
-} from "./ast"
+} from "@aburi/core"
 export { classifyReactSymbol } from "./classify"
 export {
   isPascalCase,
@@ -14,6 +14,7 @@ export {
 } from "./components"
 export {
   isReactExtKind,
+  REACT_DERIVED_BY_PREFIX,
   REACT_EXT_KIND_SET,
   REACT_EXT_KINDS,
   type ReactExtKind,

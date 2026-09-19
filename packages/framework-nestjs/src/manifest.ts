@@ -1,23 +1,10 @@
 import type { FrameworkManifest } from "@aburi/types"
 
-/**
- * Plugin ref. Doubles as the attribution prefix on the errors this plugin raises about the
- * values a language plugin handed it, so the two can never drift apart.
- */
+/** Plugin ref; also the attribution prefix on errors about values a language plugin handed over. */
 export const FRAMEWORK_NESTJS_PLUGIN_NAME = "framework-nestjs"
 
-/**
- * Manifest for `@aburi/framework-nestjs`. The registry validates this at load time; the
- * shape is locked to `FrameworkManifest` so a mismatch shows up as a compile-time error
- * rather than at run time.
- *
- * Both `extKinds` (individual enumeration) and `extKindPrefixes` (prefix ownership) are
- * declared. The individual entries let `VocabRegistry.findExtKind()` return a
- * `baseKind` fallback so a consumer that only speaks core `SymbolKind` can still render
- * the Symbol as its underlying `class` / `method` shape. The prefix declaration keeps the
- * manifest open to future additions (any `framework:nestjs:*` id the classifier emits
- * later without a manifest bump is still recognized as owned).
- */
+export const NESTJS_DERIVED_BY_PREFIX = "framework:nestjs"
+
 export const frameworkNestjsManifest: FrameworkManifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: FRAMEWORK_NESTJS_PLUGIN_NAME,
@@ -56,7 +43,7 @@ export const frameworkNestjsManifest: FrameworkManifest = {
       },
     ],
     extKindPrefixes: ["framework:nestjs"],
-    derivedByPrefixes: ["framework:nestjs"],
+    derivedByPrefixes: [NESTJS_DERIVED_BY_PREFIX],
     frameworks: ["nestjs"],
   },
 }

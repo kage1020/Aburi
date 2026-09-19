@@ -72,20 +72,13 @@ describe("parseFailOn — grammar", () => {
     ])
   })
 
-  it("rejects unknown token", () => {
-    expect(() => parseFailOn("bogus")).toThrow(FailOnParseError)
-  })
-
-  it("rejects unsupported comparator", () => {
-    expect(() => parseFailOn("changed:>=10")).toThrow(FailOnParseError)
-  })
-
-  it("rejects non-integer threshold", () => {
-    expect(() => parseFailOn("changed:>abc")).toThrow(FailOnParseError)
-  })
-
-  it("rejects negative threshold", () => {
-    expect(() => parseFailOn("changed:>-1")).toThrow(FailOnParseError)
+  it.each([
+    ["an unknown token", "bogus"],
+    ["an unsupported comparator", "changed:>=10"],
+    ["a non-integer threshold", "changed:>abc"],
+    ["a negative threshold", "changed:>-1"],
+  ])("rejects %s", (_, spec) => {
+    expect(() => parseFailOn(spec)).toThrow(FailOnParseError)
   })
 })
 

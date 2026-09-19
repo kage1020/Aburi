@@ -4,14 +4,15 @@ import { basename, dirname, resolve } from "node:path"
 import type { DiffResult } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, type GitRunner, runDiff } from "../src"
+import { fakeGit } from "./fixtures"
 
 /**
  * A ref diff scans two checkouts of one workspace, and the temporary directory the base one
  * lives in must not change what that workspace is called. Component detection reads the
- * directory name for a Component rooted at the workspace root (component-detect.md §4.1), so a
+ * directory name for a Component rooted at the workspace root (component-detect.md), so a
  * worktree at a fixed path named `base` gave the two sides different Component ids: a workspace
  * declaring neither a package name nor explicit `components[]` reported one Component added and
- * one removed on every run. The rule and its two exceptions are cli-spec.md §6.4 step 2.
+ * one removed on every run. The rule and its two exceptions are cli-spec.md step 2.
  */
 
 let scratch = ""
@@ -43,33 +44,17 @@ async function writeWorkspace(directory: string): Promise<void> {
 
 /**
  * `git` far enough to materialise the base revision: the two sides hold the same source.
- *
- * Every command `resolveViaGit` issues is modelled, and anything else throws rather than
- * answering success — the real `defaultGitRunner` rejects on a non-zero exit, and a fake that
- * cannot fail is a fake that covers a newly added git call with nothing. `worktree add` without
- * a path throws for the same reason: `args[3] ?? ""` would resolve against `process.cwd()` and
- * write the fixture into the developer's own checkout if the argument order ever changed.
+ * Anything `resolveViaGit` does not issue today throws rather than answering success, so a
+ * newly added git call is not covered by a fake that cannot fail.
  */
 function makeGit(onAdd?: (worktreeDir: string) => void): GitRunner {
-  return {
-    async run(args) {
-      const key = args.slice(0, 2).join(" ")
-      if (key === "rev-parse --verify") return { stdout: "abc\n", stderr: "" }
-      if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
-      if (key === "diff --find-renames") return { stdout: "", stderr: "" }
-      if (key === "worktree remove") return { stdout: "", stderr: "" }
-      if (key === "worktree add") {
-        const worktreeDir = args[3]
-        if (worktreeDir === undefined) {
-          throw new Error(`fake git: "worktree add" without a path: ${args.join(" ")}`)
-        }
-        onAdd?.(worktreeDir)
-        await writeWorkspace(worktreeDir)
-        return { stdout: "", stderr: "" }
-      }
-      throw new Error(`fake git: unmodelled command: ${args.join(" ")}`)
+  return fakeGit({
+    unmodelled: "throw",
+    onWorktreeAdd: async (worktreeDir) => {
+      onAdd?.(worktreeDir)
+      await writeWorkspace(worktreeDir)
     },
-  }
+  }).runner
 }
 
 interface DiffRun {

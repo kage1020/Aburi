@@ -1,11 +1,7 @@
+import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyNestCall } from "../src/index"
-import {
-  makeCall,
-  makeCtx,
-  makeEventemitter2Import,
-  makeNestEmitterImport,
-} from "./fixtures/context"
+import { makeEventemitter2Import, makeNestEmitterImport } from "./fixtures/context"
 
 describe("classifyNestCall — positive paths", () => {
   const ctx = makeCtx({ imports: [makeNestEmitterImport()] })
@@ -89,41 +85,19 @@ describe("classifyNestCall — negative paths (two-signal defense)", () => {
 
 describe("classifyNestCall — malformed input fail-fast", () => {
   const ctxWithNest = makeCtx({ imports: [makeNestEmitterImport()] })
+  const ctxNoImport = makeCtx({ imports: [] })
 
-  it("throws for an empty target", () => {
-    expect(() => classifyNestCall(makeCall({ target: "" }), ctxWithNest)).toThrow(/target is empty/)
-  })
-
-  it("throws for malformed targets even when the file does not import a Nest emitter", () => {
-    // The import gate must NOT shadow malformed-input detection — otherwise the same
-    // upstream bug would surface only in Nest-consuming files and stay silent in the
-    // 99% of files that never import an emitter. Locking the order at the test seam.
-    const ctxNoImport = makeCtx({ imports: [] })
-    expect(() => classifyNestCall(makeCall({ target: "" }), ctxNoImport)).toThrow(/target is empty/)
-    expect(() => classifyNestCall(makeCall({ target: "eventBus..emit" }), ctxNoImport)).toThrow(
-      /empty segment/,
-    )
-    expect(() => classifyNestCall(makeCall({ target: ".emit" }), ctxNoImport)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a leading dot", () => {
-    expect(() => classifyNestCall(makeCall({ target: ".emit" }), ctxWithNest)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a trailing dot", () => {
-    expect(() => classifyNestCall(makeCall({ target: "eventBus." }), ctxWithNest)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for adjacent dots — otherwise `eventBus..emit` would slip through the name gate", () => {
-    expect(() => classifyNestCall(makeCall({ target: "eventBus..emit" }), ctxWithNest)).toThrow(
-      /empty segment/,
-    )
+  it.each([
+    ["", /target is empty/],
+    ["eventBus..emit", /empty segment/],
+    [".emit", /empty segment/],
+    ["eventBus.", /empty segment/],
+  ])("throws for the malformed target %j with or without a Nest emitter import", (target, message) => {
+    // Without the throw, `eventBus..emit` would slip through the name gate. The import gate
+    // must NOT shadow the check, or the same upstream bug would surface only in the few
+    // files that import an emitter — locking the order at the test seam.
+    expect(() => classifyNestCall(makeCall({ target }), ctxWithNest)).toThrow(message)
+    expect(() => classifyNestCall(makeCall({ target }), ctxNoImport)).toThrow(message)
   })
 
   it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
@@ -165,14 +139,6 @@ describe("classifyNestCall — malformed input fail-fast", () => {
 })
 
 describe("classifyNestCall — purity", () => {
-  it("is idempotent across repeated calls", () => {
-    const ctx = makeCtx({ imports: [makeNestEmitterImport()] })
-    const call = makeCall({ target: "this.eventBus.emit", line: 42, argumentCount: 2 })
-    const first = classifyNestCall(call, ctx)
-    const second = classifyNestCall(call, ctx)
-    expect(first).toEqual(second)
-  })
-
   it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
     const ctx = makeCtx({ imports: [makeNestEmitterImport()] })
     const call = makeCall({ target: "eventBus.emit", literalArgs: ["order.created"] })

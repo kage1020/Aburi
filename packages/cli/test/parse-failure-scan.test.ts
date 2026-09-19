@@ -1,20 +1,9 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runCli, runScan } from "../src"
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
+import { MemStream } from "./fixtures"
 
 /**
  * A file the parse refused is reported as withdrawn, not as a file with warnings.

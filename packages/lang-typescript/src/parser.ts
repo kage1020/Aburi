@@ -4,6 +4,7 @@ import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import type { ParseError, ParseResult, SourceFile } from "@aburi/types"
 import { Language, Parser, type Tree } from "web-tree-sitter"
+import { walkDescendants } from "./ast-helpers"
 import { extractImports } from "./imports"
 
 const nodeRequire = createRequire(import.meta.url)
@@ -225,39 +226,24 @@ function pickGrammarForPath(path: string): string {
 }
 
 /**
- * Walk the tree to collect every syntax error node. Tree-sitter reports individual
- * ERROR nodes and MISSING nodes; both are recoverable per web-tree-sitter's semantics —
- * the tree is still usable, just imperfect — so we mark them recoverable and let the
- * pipeline continue.
+ * Every ERROR and MISSING node in the tree, in source order. Both are recoverable per
+ * web-tree-sitter's semantics — the tree is still usable, just imperfect — so the pipeline
+ * continues. Anonymous children are walked too (a MISSING `)` is one), and a subtree with no
+ * error in it is pruned.
  */
 function collectParseErrors(tree: Tree): ParseError[] {
-  const errors: ParseError[] = []
   const root = tree.rootNode
-  if (!root.hasError) return errors
-  const stack: Array<{ type: "error" | "missing"; row: number; col: number }> = []
-  walkForErrors(root, stack)
-  for (const { row, col, type } of stack) {
+  if (!root.hasError) return []
+  const errors: ParseError[] = []
+  for (const node of walkDescendants(root, { anonymous: true, descend: (n) => n.hasError })) {
+    const message = node.isError ? "syntax error" : node.isMissing ? "missing token" : null
+    if (message === null) continue
     errors.push({
-      message: type === "missing" ? "missing token" : "syntax error",
-      line: row + 1,
-      column: col + 1,
+      message,
+      line: node.startPosition.row + 1,
+      column: node.startPosition.column + 1,
       recoverable: true,
     })
   }
   return errors
-}
-
-function walkForErrors(
-  node: import("web-tree-sitter").Node,
-  out: Array<{ type: "error" | "missing"; row: number; col: number }>,
-): void {
-  if (node.isError) {
-    out.push({ type: "error", row: node.startPosition.row, col: node.startPosition.column })
-  } else if (node.isMissing) {
-    out.push({ type: "missing", row: node.startPosition.row, col: node.startPosition.column })
-  }
-  if (!node.hasError) return
-  for (const child of node.children) {
-    if (child !== null) walkForErrors(child, out)
-  }
 }

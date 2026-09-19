@@ -11,5 +11,5 @@ export {
   type NextHttpVerb,
 } from "./classify"
 export { detectModuleDirective, type ModuleDirective } from "./directives"
-export { frameworkNextManifest } from "./manifest"
+export { frameworkNextManifest, NEXT_DERIVED_BY_PREFIX } from "./manifest"
 export { NextFrameworkPlugin, nextFrameworkPlugin } from "./plugin"

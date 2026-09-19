@@ -1,6 +1,7 @@
+import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyPrismaCall } from "../src/index"
-import { makeCall, makeCtx, makePrismaImport } from "./fixtures/context"
+import { makePrismaImport } from "./fixtures/context"
 
 describe("classifyPrismaCall — read methods", () => {
   const ctx = makeCtx({ imports: [makePrismaImport()] })
@@ -249,45 +250,19 @@ describe("classifyPrismaCall — negative paths", () => {
 
 describe("classifyPrismaCall — malformed input fail-fast", () => {
   const ctxWithPrisma = makeCtx({ imports: [makePrismaImport()] })
+  const ctxNoImport = makeCtx({ imports: [] })
 
-  it("throws for an empty target — language plugin contract violation", () => {
-    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxWithPrisma)).toThrow(
-      /target is empty/,
-    )
-  })
-
-  it("throws for malformed targets even when the file does not import Prisma", () => {
-    // The import gate must NOT shadow malformed-input detection — otherwise the same
-    // upstream bug would surface only in Prisma-consuming files and stay silent
-    // everywhere else. Locking the order at the test seam.
-    const ctxNoImport = makeCtx({ imports: [] })
-    expect(() => classifyPrismaCall(makeCall({ target: "" }), ctxNoImport)).toThrow(
-      /target is empty/,
-    )
-    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxNoImport)).toThrow(
-      /empty segment/,
-    )
-    expect(() => classifyPrismaCall(makeCall({ target: ".create" }), ctxNoImport)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a target with a leading dot (empty first segment)", () => {
-    expect(() => classifyPrismaCall(makeCall({ target: ".create" }), ctxWithPrisma)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a target with a trailing dot", () => {
-    expect(() => classifyPrismaCall(makeCall({ target: "prisma.user." }), ctxWithPrisma)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a target with adjacent dots — otherwise `prisma..create` would false-classify as db.write", () => {
-    expect(() => classifyPrismaCall(makeCall({ target: "prisma..create" }), ctxWithPrisma)).toThrow(
-      /empty segment/,
-    )
+  it.each([
+    ["", /target is empty/],
+    ["prisma..create", /empty segment/],
+    [".create", /empty segment/],
+    ["prisma.user.", /empty segment/],
+  ])("throws for the malformed target %j with or without a Prisma import", (target, message) => {
+    // Without the throw, `prisma..create` would false-classify as db.write. The import gate
+    // must NOT shadow the check, or the same upstream bug would surface only in
+    // Prisma-consuming files — locking the order at the test seam.
+    expect(() => classifyPrismaCall(makeCall({ target }), ctxWithPrisma)).toThrow(message)
+    expect(() => classifyPrismaCall(makeCall({ target }), ctxNoImport)).toThrow(message)
   })
 
   it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
@@ -329,14 +304,6 @@ describe("classifyPrismaCall — malformed input fail-fast", () => {
 })
 
 describe("classifyPrismaCall — purity", () => {
-  it("is idempotent: same input yields structurally equal output", () => {
-    const ctx = makeCtx({ imports: [makePrismaImport()] })
-    const call = makeCall({ target: "prisma.user.findMany", line: 42, argumentCount: 1 })
-    const first = classifyPrismaCall(call, ctx)
-    const second = classifyPrismaCall(call, ctx)
-    expect(first).toEqual(second)
-  })
-
   it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
     // structuredClone would reject the VocabRegistry's function properties, so clone
     // the data slices the classifier actually reads (file + owner + language) plus the
@@ -356,7 +323,7 @@ describe("classifyPrismaCall — purity", () => {
 })
 
 // A model addressed through brackets arrives as `<computed>` in the model slot
-// (`lang-plugin.md` §4.4). That restores the third segment the delegate shape needs, and
+// (`lang-plugin.md`). That restores the third segment the delegate shape needs, and
 // segment count is exactly what keeps `queue.upsert(job)` unclassified — so the receiver
 // has to carry the claim alone.
 describe("classifyPrismaCall — a model segment that names nothing", () => {

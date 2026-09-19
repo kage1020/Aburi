@@ -1,7 +1,7 @@
 /**
- * LSP enrichment pass (lsp-enrichment.md §2). Consumes the language plugin's
+ * LSP enrichment pass (lsp-enrichment.md). Consumes the language plugin's
  * `IRSymbol[]` output, spawns one LSP server per configured language, opens each
- * file once, and refines a strictly bounded set of IR fields (§5):
+ * file once, and refines a strictly bounded set of IR fields:
  *
  *   - SourceRange.startColumn / endColumn (from documentSymbol)
  *   - Signature.inferredThrows            (from hover @throws parsing)
@@ -9,15 +9,15 @@
  *
  * The pass is a no-op when `lsp.enabled !== true`, when no server is configured
  * for any language present in the symbol set, or when a server fails to start.
- * Determinism (§10.3) is guaranteed by processing files in ascending path
+ * Determinism is guaranteed by processing files in ascending path
  * order, sorting each file's jobs by (Symbol id, call line, call target), and
  * — because concurrent workers finish in whatever order the server answers —
  * holding every job's response until all of them have stopped and only then
  * applying them in that sorted order. So the content of what is written, and
  * the order it is written in, do not depend on arrival. *Which* jobs get that
- * far still does: the per-file budget and the §6.1 escalation both read the
- * clock, and a file that runs out mid-way keeps what it had. That axis is
- * §6.1's, not this one's. Interface-typed receiver resolution (call-resolution.md §5.3) is
+ * far still does: the per-file budget and the fallback-tier escalation both read
+ * the clock, and a file that runs out mid-way keeps what it had. That axis is the
+ * fallback tiers', not this one's. Interface-typed receiver resolution (call-resolution.md) is
  * deferred until `IRSymbol.implements` lands; the `implementerHints` output
  * channel exists but is populated as an empty map today so downstream
  * consumers can flip on interface resolution without an API change.
@@ -34,9 +34,13 @@ import type {
 } from "@aburi/types"
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
 import { makeCallSiteKey, receiverHead } from "../call-site"
+import { groupBy } from "../collections"
 import { trySymbolId } from "../id"
+import { silentLogger } from "../logger"
+import { compareBy, compareCodeUnit } from "../order"
 import {
   createLspClient,
+  errorMessage,
   isLspFailure,
   type LspClient,
   type LspFailure,
@@ -99,7 +103,7 @@ export interface EnrichmentResult {
   receiverHints: ReadonlyMap<string, ReceiverHint>
   implementerHints: ReadonlyMap<SymbolId, readonly SymbolId[]>
   /**
-   * The producer half of `stats.lspEnrichment` (lsp-enrichment.md §7.2), or `undefined` when
+   * The producer half of `stats.lspEnrichment` (lsp-enrichment.md), or `undefined` when
    * the pass was a no-op. `hintsConsumed` and two of the five rejection buckets are the
    * resolver's to fill and are `0` here; `withHintUsage` folds its report in. A caller
    * assembling the passes itself has to do that fold, or those three stay at `0` in the IR.
@@ -153,11 +157,11 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   const servers = input.lspConfig.servers
   if (servers === undefined) return emptyResult
 
-  const logger: Logger = input.logger ?? SILENT_LOGGER
+  const logger: Logger = input.logger ?? silentLogger
   const stats = createStatsBuilder(true)
   const fallback = createFallbackState()
 
-  const symbolsByLanguage = groupSymbolsByLanguage(input.symbols)
+  const symbolsByLanguage = groupBy(input.symbols, (symbol) => symbol.language)
   const workingSymbols: IRSymbol[] = input.symbols.map((s) => cloneSymbol(s))
   const workingById = new Map<SymbolId, IRSymbol>()
   for (const s of workingSymbols) workingById.set(s.id, s)
@@ -166,7 +170,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
 
   const factory = input.serverFactory ?? defaultServerFactory
 
-  for (const [language, langSymbols] of [...symbolsByLanguage.entries()].sort(byLanguage)) {
+  for (const [language, langSymbols] of [...symbolsByLanguage].sort(compareBy(([id]) => id))) {
     const serverConfig = servers[language]
     if (serverConfig === undefined) continue
 
@@ -223,16 +227,17 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
         now: input.now ?? monotonicNow,
       })
     } catch (error) {
-      // An unexpected throw is the per-language tier of §6.1, not the end of the scan: this
+      // An unexpected throw is the per-language fallback tier, not the end of the scan: this
       // pass is optional by design, and the whole of what it can lose is the typed-tier
       // values for one language. Letting it out would take the Document with it — every
       // Symbol of every language, over an enrichment nobody asked to be load-bearing.
       //
-      // Whatever this language enriched before the throw is kept, per §6.2's SourceRange rule:
+      // Whatever this language enriched before the throw is kept, per the IR degradation rule
+      // for SourceRange:
       // a fallback leaves what was already written alone and leaves the rest at the
       // Tree-sitter tier's `null`. A half-enriched file is still a file whose columns are right.
       //
-      // The warning is the one §6.3 rule 3 allows, and it says what the reader gets rather than
+      // The warning is the one fallback rule 3 allows, and it says what the reader gets rather than
       // whose fault it is: from here a broken server and a bug in this package are the same
       // event, and by the time a throw has survived every guard `processLanguage` puts on the
       // client, the second is the likelier of the two. The debug line beside it carries what
@@ -277,8 +282,8 @@ interface ProcessLanguageInput {
 }
 
 async function processLanguage(input: ProcessLanguageInput): Promise<void> {
-  const symbolsByFile = groupSymbolsByFile(input.symbols)
-  const filesSorted = [...symbolsByFile.keys()].sort()
+  const symbolsByFile = groupBy(input.symbols, (symbol) => symbol.source.file)
+  const filesSorted = [...symbolsByFile.keys()].sort(compareCodeUnit)
 
   const requestTimeout = input.serverConfig.requestTimeoutMs ?? 500
   const fileBudget = input.serverConfig.fileBudgetMs ?? 2000
@@ -297,9 +302,9 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
     const fileStart = input.now()
     let fileFellBack = false
 
-    // Notification bounds come from the §4.4 table; `didOpen` draws on the file
+    // Notification bounds come from the timeouts table; `didOpen` draws on the file
     // budget. A write that stalls, is rejected, or is addressed to a server
-    // that has already exited is a §6.1 per-file fallback. The try/catch covers
+    // that has already exited is a per-file fallback. The try/catch covers
     // injected `ServerFactory` clients, which are free to throw where
     // `createLspClient` reports.
     try {
@@ -323,7 +328,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       input.stats.requestsIssued += 1
       const docSymbols = await requestDocumentSymbols(input.client, uri, requestTimeout)
       const requestOk = !isLspFailure(docSymbols)
-      if (!requestOk) accountForFailure(input.stats, docSymbols)
+      if (isLspFailure(docSymbols)) accountForFailure(input.stats, docSymbols)
       const requestOutcome = input.fallback.onRequest(file, requestOk)
       if (requestOutcome.escalate) fileFellBack = true
       if (requestOk) {
@@ -339,18 +344,10 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
 
     if (!fileFellBack) {
       const jobs = buildRequestJobs(fileSymbols, content)
-      // Responses are held, not applied, while workers are running: §10.3 wants
-      // the cache consumed in job order, and a write issued from inside a
-      // worker takes its order from the server's pace instead.
-      //
-      // With the target in the key no *live* collision remains for this to
-      // settle — distinct call sites key apart, identical ones hover the same
-      // position and answer the same thing, and `appendInferredThrows` merges
-      // through a sorted set — so nothing here is load-bearing today, and no
-      // test would fail if the apply moved back inside the worker. It is the
-      // structural half of the guarantee: what the file produces is decided by
-      // the sort, and a future writer of `applyJobResult` cannot reintroduce an
-      // arrival-order dependency by adding a field that does not merge.
+      // Responses are held, not applied, while workers are running: determinism wants the cache
+      // consumed in job order, and a write issued from inside a worker would take its order
+      // from the server's pace instead (no live collision depends on this today; it keeps a
+      // future non-merging field in `applyJobResult` from reintroducing arrival order).
       const responses: unknown[] = new Array(jobs.length)
       const answered: boolean[] = new Array(jobs.length).fill(false)
       try {
@@ -363,7 +360,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
           input.stats.requestsIssued += 1
           const result = await executeJob(job, input.client, uri, requestTimeout)
           const jobOk = !isLspFailure(result)
-          if (!jobOk) accountForFailure(input.stats, result)
+          if (isLspFailure(result)) accountForFailure(input.stats, result)
           const outcome = input.fallback.onRequest(file, jobOk)
           if (outcome.escalate) fileFellBack = true
           if (jobOk) {
@@ -372,18 +369,10 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
           }
         })
       } finally {
-        // Also on the way out of a throw: §6.2 keeps what a fallback had
-        // already earned, and every worker has stopped by the time
-        // `runJobsWithConcurrency` settles either way, so nothing is still
-        // writing here.
-        //
-        // Each apply carries its own `catch` for two reasons. A `finally` that
-        // throws *replaces* the exception unwinding through it, so a throw here
-        // would erase the server-side failure that caused the unwind and leave
-        // a stack pointing at the wrong cause; and inside the worker, where
-        // these applies used to run, a throwing one cost only its own result.
-        // Both properties are worth keeping even though `applyJobResult`'s
-        // lookups all return `null` rather than throw today.
+        // Also on the way out of a throw (degradation keeps what a fallback already earned; every
+        // worker has stopped by now). Each apply catches for itself so a throw here can
+        // neither replace the exception unwinding through this `finally` nor cost more than
+        // its own result.
         for (let index = 0; index < jobs.length; index += 1) {
           const job = jobs[index]
           if (job === undefined || !answered[index]) continue
@@ -404,10 +393,10 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       }
     }
 
-    // `didClose` draws on the per-request budget (§4.4). Its outcome cannot
+    // `didClose` draws on the per-request budget. Its outcome cannot
     // change what this file produced, so it is logged and nothing more — it
     // moves no counter and escalates nothing. A transport broken for good
-    // fails the next file's `didOpen` instead, which is where §6.1 escalation
+    // fails the next file's `didOpen` instead, which is where fallback escalation
     // starts.
     try {
       const closed = await input.client.didClose(uri, requestTimeout)
@@ -453,7 +442,7 @@ type RequestJob = {
 /**
  * Build the LSP request job list for a single file. Only `this.<method>` /
  * `super.<method>` shapes emit a hover job today — interface-typed receiver
- * resolution (call-resolution.md §5.3) needs an `IRSymbol.implements` seam
+ * resolution (call-resolution.md) needs an `IRSymbol.implements` seam
  * that is not yet in the IR, so we do not spend budget on `typeDefinition`
  * requests whose result we cannot act on. When that seam lands the interface
  * job type returns here.
@@ -501,7 +490,7 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
 }
 
 /**
- * The §10.3 consumption order: Symbol id ascending, then call-site line
+ * The deterministic consumption order: Symbol id ascending, then call-site line
  * ascending, then call target — the three components of a job's identity, and a
  * total order over the jobs of one file because no two of them share all three.
  *
@@ -513,9 +502,11 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
  * one — not because the pipeline's order is wrong.
  */
 function compareRequestJob(a: RequestJob, b: RequestJob): number {
-  if (a.symbolId !== b.symbolId) return a.symbolId < b.symbolId ? -1 : 1
-  if (a.callLine !== b.callLine) return a.callLine - b.callLine
-  return a.target < b.target ? -1 : a.target > b.target ? 1 : 0
+  return (
+    compareCodeUnit(a.symbolId, b.symbolId) ||
+    a.callLine - b.callLine ||
+    compareCodeUnit(a.target, b.target)
+  )
 }
 
 async function executeJob(
@@ -535,7 +526,7 @@ async function executeJob(
  * reports a healthy run: a hover that answers on time with no readable body is
  * `requestsIssued += 1` and nothing else, and its file still lands in `filesEnriched`. The
  * bucket each one writes is the only record that the answer arrived and was unusable
- * (lsp-enrichment.md §7.2).
+ * (lsp-enrichment.md).
  */
 function applyJobResult(
   job: RequestJob,
@@ -576,7 +567,7 @@ function applyJobResult(
   }
   // Counted before the write, not inside it: the hover was read all the way to a callee
   // either way, and it is that reading — not which of two identical call sites reached the
-  // key first — that the producer sum in §7.2 accounts for.
+  // key first — that the producer sum in the stats extension accounts for.
   stats.hintsProduced += 1
   // First hint for a call site wins. Results are applied in job order, so
   // "first" is the lowest-sorted job rather than the quickest response — and
@@ -667,7 +658,7 @@ function applyDocumentSymbols(
 function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void {
   if (symbol.signature === null || symbol.signature === undefined) return
   const existing = symbol.signature.inferredThrows ?? []
-  const merged = [...new Set([...existing, ...throws])].sort()
+  const merged = [...new Set([...existing, ...throws])].sort(compareCodeUnit)
   if (merged.length === 0) return
   symbol.signature = { ...symbol.signature, inferredThrows: merged }
 }
@@ -681,7 +672,7 @@ function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void
  * settle this function while the other workers were mid-request: they would go on writing
  * into the Symbols and the hint map their caller had already returned to *its* caller, and
  * sending requests to a server that had since been shut down. An IR that keeps changing after
- * the pass returns it is the determinism guarantee in lsp-enrichment.md §10.6, not untidiness.
+ * the pass returns it is the determinism guarantee in lsp-enrichment.md, not untidiness.
  *
  * The remaining jobs are run rather than abandoned, so the set of writes a failing file
  * produces is the same on a rerun. Stopping at the first failure would make it depend on how
@@ -718,32 +709,8 @@ async function runJobsWithConcurrency<T>(
   throw failures.get(first)
 }
 
-function groupSymbolsByLanguage(symbols: readonly IRSymbol[]): Map<LanguageId, IRSymbol[]> {
-  const out = new Map<LanguageId, IRSymbol[]>()
-  for (const symbol of symbols) {
-    const bucket = out.get(symbol.language) ?? []
-    bucket.push(symbol)
-    out.set(symbol.language, bucket)
-  }
-  return out
-}
-
-function groupSymbolsByFile(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
-  const out = new Map<string, IRSymbol[]>()
-  for (const symbol of symbols) {
-    const bucket = out.get(symbol.source.file) ?? []
-    bucket.push(symbol)
-    out.set(symbol.source.file, bucket)
-  }
-  return out
-}
-
-function byLanguage(a: [string, unknown], b: [string, unknown]): number {
-  return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
-}
-
 function cloneSymbol(symbol: IRSymbol): IRSymbol {
-  // `signature` and `component` are Class A (ir-schema.md §1.1), so the clone writes both
+  // `signature` and `component` are Class A (ir-schema.md), so the clone writes both
   // keys unconditionally and normalizes a missing one to `null`. The clone used to preserve
   // an absent `signature` key verbatim, which made this the one place on a writer path that
   // still distinguished absence from `null` — reachable only through an input Symbol this
@@ -779,7 +746,7 @@ function cloneSignature(
   return base
 }
 
-/** `relativePath` is a filesystem path, not a Document one — see `EnrichmentInput.fsPaths`. */
+/** `relativePath` is a filesystem path, not a Document one — see `EnrichmentInput.fileContents`. */
 function fileUriFor(workspaceRoot: string, relativePath: string): string {
   const absolute = normalizeAbsolute(workspaceRoot, relativePath)
   return pathToFileURL(absolute).toString()
@@ -816,28 +783,14 @@ function overBudget(now: () => number, startMs: number, budgetMs: number): boole
   return now() - startMs > budgetMs
 }
 
-function isTimeout(value: unknown): boolean {
-  return (
-    typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "timeout"
-  )
-}
-
-function accountForFailure(stats: LspStatsBuilder, failure: unknown): void {
-  if (isTimeout(failure)) {
-    stats.requestsTimedOut += 1
-    return
-  }
-  stats.requestsFailed += 1
+function accountForFailure(stats: LspStatsBuilder, failure: LspFailure): void {
+  if (failure.kind === "timeout") stats.requestsTimedOut += 1
+  else stats.requestsFailed += 1
 }
 
 function failureReason(failure: LspFailure): string {
   if (failure.kind === "timeout") return "timeout"
   return `${failure.reason}: ${failure.message}`
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 /**
@@ -926,8 +879,8 @@ function findMethodColumn(line: string, head: string, method: string): number | 
 function extractHoverPayload(result: unknown): string | null {
   if (result === null || result === undefined) return null
   if (typeof result === "object") {
-    const r = result as { text?: string }
-    if (typeof r.text === "string") return r.text
+    const hover = result as { text?: string }
+    if (typeof hover.text === "string") return hover.text
   }
   return null
 }
@@ -998,13 +951,6 @@ function findMemberSymbolId(
 function lastSegment(qualifiedName: string): string {
   const idx = qualifiedName.lastIndexOf(".")
   return idx < 0 ? qualifiedName : qualifiedName.slice(idx + 1)
-}
-
-const SILENT_LOGGER: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
 }
 
 async function defaultServerFactory(

@@ -1,4 +1,4 @@
-// Reservation policy. See docs/design/extension-vocab.md §5.
+// Reservation policy. See docs/design/extension-vocab.md.
 
 /**
  * Central-reservation prefixes. No plugin may declare an id or prefix that begins
@@ -41,7 +41,7 @@ export type PluginType = keyof typeof TYPE_NAMESPACE_RULES
 /**
  * Default xPrefix derivation: strip a leading "effects-" segment from the plugin
  * name. Used when the manifest does not declare xPrefix explicitly. Matches the
- * worked example in extension-vocab.md §3.1: effects-prisma → prisma → x-prisma:*.
+ * worked example in extension-vocab.md: effects-prisma → prisma → x-prisma:*.
  */
 export function deriveXPrefix(name: string): string {
   return name.startsWith("effects-") ? name.slice("effects-".length) : name

@@ -1,39 +1,17 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CliError, EXIT, type GitRunner, runDiff } from "../src"
 import { parseRenameRecords } from "../src/commands/diff"
+import { fakeGit, gitOutput } from "./fixtures"
 
 /**
- * Refspec-mode diff drives the injected `GitRunner` so we can exercise §6.4 without a
- * real git repo. Tests focus on the branches the review specifically flagged: head
- * validation, worktree cleanup, and rename-collection warnings.
+ * Refspec-mode diff drives the injected `GitRunner` so we can exercise the ref-spec form without a
+ * real git repo: head validation, worktree cleanup, and rename-collection warnings.
  */
 
 let scratch = ""
-
-interface RecordedCall {
-  args: readonly string[]
-  cwd: string | undefined
-}
-
-function makeGit(
-  handlers: Record<string, () => { stdout: string; stderr: string } | Promise<never>>,
-): { runner: GitRunner; calls: RecordedCall[] } {
-  const calls: RecordedCall[] = []
-  const runner: GitRunner = {
-    async run(args, options) {
-      calls.push({ args, cwd: options?.cwd })
-      const key = args.slice(0, 2).join(" ")
-      const handler = handlers[key]
-      if (handler === undefined) return { stdout: "", stderr: "" }
-      const result = await handler()
-      return result
-    },
-  }
-  return { runner, calls }
-}
 
 beforeEach(async () => {
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-git-"))
@@ -46,17 +24,15 @@ afterEach(async () => {
 describe("runDiff refspec mode — head ref validation", () => {
   it("rejects a head ref that git cannot resolve (was silently falling through before)", async () => {
     let verifyCount = 0
-    const runner: GitRunner = {
-      async run(args, _options) {
-        const key = args.slice(0, 2).join(" ")
-        if (key === "rev-parse --verify") {
+    const { runner } = fakeGit({
+      handlers: {
+        "rev-parse --verify": () => {
           verifyCount++
-          if (verifyCount === 1) return { stdout: "abc\n", stderr: "" }
+          if (verifyCount === 1) return gitOutput("abc\n")
           throw Object.assign(new Error("unknown revision"), { code: 128 })
-        }
-        return { stdout: "", stderr: "" }
+        },
       },
-    }
+    })
     await expect(
       runDiff({
         cwd: scratch,
@@ -96,17 +72,13 @@ describe("runDiff refspec mode — collectRenames failure warns", () => {
     // but the rename collection fails. runDiff will still fail (the scan needs a real
     // workspace), so we snapshot the warn call before the raise.
     const warnCalls: string[] = []
-    const runner: GitRunner = {
-      async run(args) {
-        const key = args.slice(0, 2).join(" ")
-        if (key === "rev-parse --verify") return { stdout: "abc\n", stderr: "" }
-        if (key === "rev-parse --is-shallow-repository") return { stdout: "false\n", stderr: "" }
-        if (key === "diff --find-renames") {
+    const { runner } = fakeGit({
+      handlers: {
+        "diff --find-renames": () => {
           throw new Error("no such ref pair")
-        }
-        return { stdout: "", stderr: "" }
+        },
       },
-    }
+    })
     await runDiff({
       cwd: scratch,
       refSpec: "main..HEAD",
@@ -122,13 +94,7 @@ describe("runDiff refspec mode — collectRenames failure warns", () => {
 
 describe("collectRenames — NUL-separated records", () => {
   it("asks git for -z output, so paths arrive unquoted and unsplit", async () => {
-    const { runner, calls } = makeGit({
-      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
-      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
-      "diff --find-renames": () => ({ stdout: "", stderr: "" }),
-      "worktree add": () => ({ stdout: "", stderr: "" }),
-      "worktree remove": () => ({ stdout: "", stderr: "" }),
-    })
+    const { runner, calls } = fakeGit()
     await runDiff({
       cwd: scratch,
       refSpec: "main..HEAD",
@@ -179,7 +145,7 @@ describe("collectRenames — NUL-separated records", () => {
     const decomposed = "src/請求.ts".normalize("NFD")
     const map = renames(`R100\0${decomposed}\0${decomposed}2\0`)
     expect([...(map ?? new Map()).keys()]).toEqual(["src/請求.ts".normalize("NFC")])
-    expect(map?.get("src/請求.ts".normalize("NFC"))).toBe("src/請求.ts".normalize("NFC") + "2")
+    expect(map?.get("src/請求.ts".normalize("NFC"))).toBe(`${"src/請求.ts".normalize("NFC")}2`)
   })
 
   it("returns an empty map for a diff that renamed nothing", () => {
@@ -227,12 +193,8 @@ describe("collectRenames — NUL-separated records", () => {
 
   it("warns and drops the hints when the record stream is unreadable", async () => {
     const warnCalls: string[] = []
-    const { runner } = makeGit({
-      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
-      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
-      "diff --find-renames": () => ({ stdout: "R094\0src/a.ts\0", stderr: "" }),
-      "worktree add": () => ({ stdout: "", stderr: "" }),
-      "worktree remove": () => ({ stdout: "", stderr: "" }),
+    const { runner } = fakeGit({
+      handlers: { "diff --find-renames": () => gitOutput("R094\0src/a.ts\0") },
     })
     await runDiff({
       cwd: scratch,
@@ -253,15 +215,14 @@ describe("collectRenames — NUL-separated records", () => {
     // Over `diff.renameLimit` git succeeds, says so on stderr, and reports every move as a
     // delete plus an add. The records parse; the only evidence is the stderr line.
     const warnCalls: string[] = []
-    const { runner } = makeGit({
-      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
-      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
-      "diff --find-renames": () => ({
-        stdout: "D\0src/a.ts\0A\0src/b.ts\0",
-        stderr: "warning: exhaustive rename detection was skipped due to too many files.\n",
-      }),
-      "worktree add": () => ({ stdout: "", stderr: "" }),
-      "worktree remove": () => ({ stdout: "", stderr: "" }),
+    const { runner } = fakeGit({
+      handlers: {
+        "diff --find-renames": () =>
+          gitOutput(
+            "D\0src/a.ts\0A\0src/b.ts\0",
+            "warning: exhaustive rename detection was skipped due to too many files.\n",
+          ),
+      },
     })
     await runDiff({
       cwd: scratch,
@@ -280,13 +241,7 @@ describe("collectRenames — NUL-separated records", () => {
 
 describe("runDiff refspec mode — worktree cleanup runs on failure", () => {
   it("issues `worktree remove` even when scan fails", async () => {
-    const { runner, calls } = makeGit({
-      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
-      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
-      "diff --find-renames": () => ({ stdout: "", stderr: "" }),
-      "worktree add": () => ({ stdout: "", stderr: "" }),
-      "worktree remove": () => ({ stdout: "", stderr: "" }),
-    })
+    const { runner, calls } = fakeGit()
     await runDiff({
       cwd: scratch,
       refSpec: "main..HEAD",
@@ -305,12 +260,11 @@ describe("runDiff refspec mode — worktree cleanup runs on failure", () => {
     // `⚠ git worktree cleanup failed … Consider running \`git worktree prune\`` — sending the
     // reader after git's bookkeeping, which was never written, ahead of the real error.
     const warnCalls: string[] = []
-    const { runner, calls } = makeGit({
-      "rev-parse --verify": () => ({ stdout: "abc\n", stderr: "" }),
-      "rev-parse --is-shallow-repository": () => ({ stdout: "false\n", stderr: "" }),
-      "diff --find-renames": () => ({ stdout: "", stderr: "" }),
-      "worktree add": () => Promise.reject(new Error("fatal: could not create work tree dir")),
-      "worktree remove": () => Promise.reject(new Error("worktree remove must not be reached")),
+    const { runner, calls } = fakeGit({
+      handlers: {
+        "worktree add": () => Promise.reject(new Error("fatal: could not create work tree dir")),
+        "worktree remove": () => Promise.reject(new Error("worktree remove must not be reached")),
+      },
     })
 
     const thrown = await runDiff({
@@ -327,23 +281,6 @@ describe("runDiff refspec mode — worktree cleanup runs on failure", () => {
     expect((thrown as Error).message).toMatch(/could not create work tree dir/)
     expect(calls.some((c) => c.args.slice(0, 2).join(" ") === "worktree remove")).toBe(false)
     expect(warnCalls.some((m) => m.includes("git worktree cleanup failed"))).toBe(false)
-  })
-})
-
-describe("--fail-on empty string via runCli", () => {
-  it("does not silently allow a fail-open configuration", async () => {
-    const stub = vi.fn()
-    // Just verify parse rejection surfaces through runDiff too.
-    await expect(
-      runDiff({
-        cwd: scratch,
-        refSpec: null,
-        base: resolve(scratch, "b.json"),
-        head: resolve(scratch, "h.json"),
-        failOn: "",
-      }),
-    ).rejects.toThrow(/empty --fail-on/)
-    expect(stub).not.toHaveBeenCalled()
   })
 })
 

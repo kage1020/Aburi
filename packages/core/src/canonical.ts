@@ -1,5 +1,6 @@
-import { describeCodePoints } from "./codepoints"
+import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError } from "./errors"
+import { compareCodeUnit } from "./order"
 
 export interface SerializeOptions {
   /**
@@ -13,14 +14,14 @@ export interface SerializeOptions {
  * Serialize any plain-JSON value into a byte-deterministic UTF-8 string.
  *
  * Three rules together guarantee bit-identical output for equal inputs:
- * 1. Every string is normalized to Unicode NFC (ir-schema.md §1.2, which states why the
+ * 1. Every string is normalized to Unicode NFC (ir-schema.md, which states why the
  *    form matters and where the rest of the pipeline establishes it). Keys are normalized
  *    *before* rule 2 orders them: ordering the input spelling and writing the normalized
  *    one yields a document whose key order does not match the bytes it contains.
- * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md §1. Rule 1 is what lets
+ * 2. Object keys are sorted by UTF-16 code unit, per ir-schema.md. Rule 1 is what lets
  *    that comparator agree with the rest of the codebase: this function orders normalized
  *    keys while every other ordering decision compares the string held in memory, so the
- *    two stay in step only because §1.2 puts both in the same form.
+ *    two stay in step only because Unicode normalization puts both in the same form.
  * 3. Array order is preserved; the caller is responsible for sorting arrays per the IR
  *    schema's per-collection ordering rules (this serializer is not in the business of
  *    interpreting which collection is which).
@@ -54,7 +55,7 @@ function write(
     case "number":
       return writeNumber(value, path)
     case "string":
-      return JSON.stringify(value.normalize("NFC"))
+      return JSON.stringify(toNfc(value))
     case "undefined":
     case "function":
     case "symbol":
@@ -72,7 +73,7 @@ function write(
     assertPlainObject(value, path)
     const entries = normalizedEntries(value as Record<string, unknown>, path)
     if (entries.length === 0) return "{}"
-    entries.sort(([a], [b]) => compareByCodeUnit(a, b))
+    entries.sort(([a], [b]) => compareCodeUnit(a, b))
     const childIndent = indent.repeat(depth + 1)
     const closeIndent = indent.repeat(depth)
     const rendered = entries.map(([k, v]) => {
@@ -112,11 +113,6 @@ function rejectNonJson(type: string, path: string): CoreError {
   )
 }
 
-/** Lexicographic compare by UTF-16 code unit (matches Array.prototype.sort default for strings). */
-function compareByCodeUnit(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
 /**
  * Own enumerable entries with `undefined` values dropped and every key normalized to NFC.
  *
@@ -133,7 +129,7 @@ function normalizedEntries(value: Record<string, unknown>, path: string): [strin
     // Skipped before the collision check on purpose: `{ [NFD]: 1, [NFC]: undefined }` writes
     // one key and loses nothing, so it is not a collision. A key with no value is not a key.
     if (entry === undefined) continue
-    const key = rawKey.normalize("NFC")
+    const key = toNfc(rawKey)
     const prior = seen.get(key)
     if (prior !== undefined) {
       throw new CoreError(

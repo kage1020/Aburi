@@ -1,7 +1,8 @@
 import type { DiffResult, SymbolChange, SymbolChanged, SymbolMovedChanged } from "@aburi/types"
+import { assertNever } from "./errors"
 
 /**
- * §6.7 — `--fail-on` value grammar. Three families collapse into one union so the CLI
+ * `cli-spec.md` — `--fail-on` value grammar. Three families collapse into one union so the CLI
  * driver can accept a comma-separated list without branching per family.
  *
  * Status family (raw `SymbolChange["status"]` plus direction subtypes):
@@ -203,7 +204,7 @@ function countMatches(token: FailOnToken, diff: DiffResult): number {
     case "syntax-changed":
       return countDeltaAxis(diff.symbols, "syntaxChanged")
     default:
-      return assertNever(token)
+      return assertNever(token, "FailOnToken")
   }
 }
 
@@ -218,10 +219,6 @@ function countDeltaAxis(
     if (delta[axis]) count++
   }
   return count
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled FailOnToken: ${JSON.stringify(value)}`)
 }
 
 /**

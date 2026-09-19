@@ -1,19 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import { makeLanguageId, type SkippedFile } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import {
-  EXIT,
-  formatFailOnMessage,
-  reportScanIncidents,
-  runCli,
-  runDiff,
-  runExplain,
-  runScan,
-  type ScanReport,
-} from "../src"
+import { EXIT, formatFailOnMessage, runCli, runDiff, runExplain, runScan } from "../src"
+import { incidentLinesFrom, MemStream, scanReportWith } from "./fixtures"
 import { gitWith, populate } from "./stub-language"
 
 /**
@@ -46,17 +37,6 @@ const PARSE_FAILED_ADVICE =
   "the language plugin refused the source. Deterministic: fix the file, or the plugin."
 const EXTRACTION_FAILED_ADVICE =
   "a plugin threw while extracting. This is the reason the run does not exit clean."
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
 
 let scratch = ""
 
@@ -193,48 +173,12 @@ describe("runScan — the report goes to the caller's sink", () => {
 })
 
 describe("reportScanIncidents — the lines a real scan cannot be made to produce", () => {
-  function reportWith(overrides: Partial<ScanReport>): ScanReport {
-    return {
-      irPath: null,
-      workspaceMdPath: null,
-      componentMdPaths: [],
-      totalFiles: 0,
-      parsedFiles: 0,
-      keptSymbols: 0,
-      droppedSymbols: 0,
-      parseErrorCount: 0,
-      parseFailureCount: 0,
-      timeoutCount: 0,
-      skipped: [],
-      extractionFailures: [],
-      lspEnrichment: undefined,
-      callResolutionLine: "",
-      unresolvedCalls: [],
-      configSource: null,
-      configPinnedByCaller: false,
-      workspaceRoot: "/repo",
-      coverageFault: null,
-      unrepresentableFiles: [],
-      unresolvedDeclarations: [],
-      treeReleaseFailures: [],
-      fellBackToSingleComponent: false,
-      exitCode: EXIT.SUCCESS,
-      ...overrides,
-    }
-  }
-
-  function linesFrom(report: ScanReport, label: string | null): string[] {
-    const lines: string[] = []
-    reportScanIncidents(report, (m) => lines.push(m), label)
-    return lines
-  }
-
   it("groups unreleased parse trees by plugin, and states what the leak costs", () => {
     // A leak moves no exit code and takes nothing out of the artifact, so a line saying only
     // that a tree was not released reads as noise. What it costs is the whole reason to print
     // it — the run that pays is the next, longer one.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         treeReleaseFailures: [
           { plugin: "lang-stub", file: "a.ts", detail: "wasm heap is gone" },
           { plugin: "lang-stub", file: "b.ts", detail: "wasm heap is gone" },
@@ -252,11 +196,11 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("says nothing about parse trees when every plugin freed its own", () => {
-    expect(linesFrom(reportWith({ treeReleaseFailures: [] }), null)).toEqual([])
+    expect(incidentLinesFrom(scanReportWith({ treeReleaseFailures: [] }), null)).toEqual([])
   })
 
   it("names the effect-classify timeout budget", () => {
-    expect(linesFrom(reportWith({ timeoutCount: 4 }), null)).toEqual([
+    expect(incidentLinesFrom(scanReportWith({ timeoutCount: 4 }), null)).toEqual([
       "⚠ 4 effect classification(s) hit the per-call timeout budget.",
     ])
   })
@@ -264,8 +208,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   it("gives every LSP line the glyph and the label, including the request census", () => {
     // The census line used to be indented and glyphless. It has its own condition and fires
     // when neither line above it did, so in a two-scan diff nothing could attribute it.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         lspEnrichment: {
           enabled: true,
           filesEnriched: 8,
@@ -286,8 +230,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("emits the census alone when nothing fell back and no language was disabled", () => {
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         lspEnrichment: {
           enabled: true,
           filesEnriched: 10,
@@ -304,11 +248,11 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("says what the typed tier bought, on a run every other counter calls healthy", () => {
-    // The whole point of the hint counters (lsp-enrichment.md §7.2): 12 hovers came back on
+    // The whole point of the hint counters (lsp-enrichment.md): 12 hovers came back on
     // time with nothing usable, so the census line above cannot fire and every number it
     // would have printed reads clean. Without this line the CLI reports a perfect run.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         lspEnrichment: {
           enabled: true,
           filesEnriched: 10,
@@ -337,8 +281,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     // Not the same as "produced none and refused none because the server was broken": a
     // workspace with no `this.` / `super.` call sites left for the LSP tier has nothing to
     // report, and a zeroed line there would be noise on every ordinary scan.
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         lspEnrichment: {
           enabled: true,
           filesEnriched: 10,
@@ -364,8 +308,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("reports a healthy typed tier too, so the line is a census and not an alarm", () => {
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         lspEnrichment: {
           enabled: true,
           filesEnriched: 10,
@@ -396,8 +340,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       reason: "extraction-failed" as const,
       detail: "plugin exploded",
     }))
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         skipped,
         extractionFailures: skipped.map((s) => ({ file: s.path, message: s.detail })),
       }),
@@ -422,23 +366,24 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       reason: "over-size" as const,
       detail: "2100000 > 1048576",
     }))
-    const lines = linesFrom(reportWith({ skipped }), null)
+    const lines = incidentLinesFrom(scanReportWith({ skipped }), null)
     expect(lines.filter((l) => l.startsWith("    "))).toHaveLength(10)
     expect(lines.some((l) => l.startsWith("    …and"))).toBe(false)
   })
 
   it("gives each reason its own ten, so a flood cannot hide the one that gates", () => {
     // A single cap across the whole listing is the failure: eleven over-size files would
-    // spend it, and the one file that set the exit code would be inside `…and N more`. §5.6
-    // promises the opposite — a reader handed a non-zero status is told which files earned it.
+    // spend it, and the one file that set the exit code would be inside `…and N more`.
+    // `cli-spec.md` promises the opposite — a reader handed a non-zero status is told which
+    // files earned it.
     const flood = Array.from({ length: 11 }, (_, i) => ({
       path: `vendor/big${i}.js`,
       reason: "over-size" as const,
       detail: "2100000 > 1048576",
     }))
     const gating = { path: "src/route.ts", reason: "extraction-failed" as const, detail: "boom" }
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         skipped: [...flood, gating],
         extractionFailures: [{ file: gating.path, message: gating.detail }],
       }),
@@ -449,8 +394,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
   })
 
   it("names every reason's files, with the detail the core wrote", () => {
-    const lines = linesFrom(
-      reportWith({
+    const lines = incidentLinesFrom(
+      scanReportWith({
         // Handed over in an order no rule produces — the order a walk of some workspace or
         // other would have produced. What comes out must not depend on it.
         skipped: [
@@ -492,7 +437,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     // The line used to be neutral about six reasons that want six different responses.
     const advice = (reason: SkippedFile["reason"], detail?: string): string => {
       const entry = detail === undefined ? { path: "f", reason } : { path: "f", reason, detail }
-      const found = linesFrom(reportWith({ skipped: [entry] }), null).find((l) =>
+      const found = incidentLinesFrom(scanReportWith({ skipped: [entry] }), null).find((l) =>
         l.startsWith(`⚠ ${reason} (1) — `),
       )
       if (found === undefined) throw new Error(`no group line for ${reason}`)
@@ -534,17 +479,13 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
       [{ path: "src/quiet.ts", reason: "over-size" as const }],
       [{ path: "src/quiet.ts", reason: "over-size" as const, detail: "" }],
     ]) {
-      expect(linesFrom(reportWith({ skipped }), null).at(-1)).toBe("    src/quiet.ts")
+      expect(incidentLinesFrom(scanReportWith({ skipped }), null).at(-1)).toBe("    src/quiet.ts")
     }
   })
 
-  it("says nothing when the scan lost nothing", () => {
-    expect(linesFrom(reportWith({}), null)).toEqual([])
-  })
-
   it("names a config that sits below the workspace root, labelled like the rest", () => {
-    const lines = linesFrom(
-      reportWith({ configSource: "/repo/apps/web/aburi.json", workspaceRoot: "/repo" }),
+    const lines = incidentLinesFrom(
+      scanReportWith({ configSource: "/repo/apps/web/aburi.json", workspaceRoot: "/repo" }),
       'base ref "main"',
     )
     expect(lines).toHaveLength(1)
@@ -558,8 +499,8 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     // did not happen — the head config is not below the worktree, and nobody ran anything from
     // a monorepo package.
     expect(
-      linesFrom(
-        reportWith({
+      incidentLinesFrom(
+        scanReportWith({
           configSource: "/repo/aburi.json",
           workspaceRoot: "/tmp/aburi-worktree-x/base",
           configPinnedByCaller: true,
@@ -687,7 +628,7 @@ describe("aburi diff — both scans it ran for you", () => {
       '⚠ base ref "main": 1 file(s) could not be parsed and were left out of the IR.',
     )
     expect(warnings).toContain("⚠ head (working tree): 1 file(s) had recoverable parse errors.")
-    // §6.4 — the head is always the current checkout, whatever the ref spec calls it. A
+    // `cli-spec.md` — the head is always the current checkout, whatever the ref spec calls it. A
     // `head ref "v1.1.0"` label would name a revision this scan never read.
     expect(warnings.join("\n")).not.toContain("v1.1.0")
   })

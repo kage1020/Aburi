@@ -6,7 +6,7 @@ import type {
 } from "@aburi/types"
 import { CoreError } from "../errors"
 
-/** Default per-call classify timeout in milliseconds, per effect-plugin.md §5.1.1. */
+/** Default per-call classify timeout in milliseconds, per effect-plugin.md. */
 export const DEFAULT_CLASSIFY_TIMEOUT_MS = 50
 
 /** Bounds enforced by the config schema — kept here so callers can validate before invoking. */
@@ -41,7 +41,7 @@ export interface ClassifyWithTimeoutOptions {
 
 /**
  * Run `plugin.classify(call, ctx)` under a soft wall-clock budget. The classifier is
- * expected to be synchronous (effect-plugin.md §5.1.1 recommends pure-function shape) so
+ * expected to be synchronous (effect-plugin.md recommends pure-function shape) so
  * the runtime cannot preempt it mid-execution — the check happens AFTER the call
  * returns. A classifier that violates the sync contract by returning a Promise is
  * caught and rejected the same way an overtime call is.
@@ -71,7 +71,7 @@ export function classifyWithTimeout(
 
   if (typeof result === "object" && result !== null && "then" in result) {
     // A classifier that returned a Promise violates the sync contract (effect-plugin.md
-    // §5.1 pure-function shape). Attach a swallow-catch so the floating rejection does
+    // pure-function shape). Attach a swallow-catch so the floating rejection does
     // not blow up the process under Node's --unhandled-rejections=strict mode, then
     // surface the misconfiguration to the caller.
     void (result as unknown as PromiseLike<unknown>).then(
@@ -79,7 +79,7 @@ export function classifyWithTimeout(
       () => undefined,
     )
     throw new CoreError(
-      `Effect plugin "${plugin.manifest.name}" returned a Promise from classify(); the sync contract in effect-plugin.md §5.1.1 requires a plain EffectClassification | null.`,
+      `Effect plugin "${plugin.manifest.name}" returned a Promise from classify(); the sync contract in effect-plugin.md requires a plain EffectClassification | null.`,
       { code: "scan-plugin-misconfigured", value: plugin.manifest.name },
     )
   }
@@ -106,7 +106,7 @@ function clampTimeout(ms: number): number {
   return ms
 }
 
-/** Default per-file extraction budget in milliseconds, per lang-plugin.md §7.1.2. */
+/** Default per-file extraction budget in milliseconds, per lang-plugin.md. */
 export const DEFAULT_PARSE_TIMEOUT_MS = 5000
 
 /**
@@ -137,7 +137,7 @@ export interface ParseTimeoutEvent {
  * plugin calls it spans are synchronous and cannot be interrupted once started — so the
  * budget bounds the work still to come rather than the work already running, and `elapsedMs`
  * at the moment of abandonment exceeds `budgetMs` by however long the last call took.
- * lang-plugin.md §7.1.2 has the full statement of what that does and does not guarantee.
+ * lang-plugin.md has the full statement of what that does and does not guarantee.
  */
 export interface ParseDeadline {
   /** The clamped budget in effect for this file. */

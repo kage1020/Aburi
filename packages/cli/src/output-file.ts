@@ -22,7 +22,7 @@ export const OUTPUT_IS_A_DIRECTORY =
  * `ENOENT` from `writeFile` in any tree that did not already hold the directory.
  *
  * What creation cannot get past is a path that cannot hold a file at all, and that is a
- * statement about what the caller typed rather than about the machine — which `cli-spec.md` §9
+ * statement about what the caller typed rather than about the machine — which `cli-spec.md`
  * puts at exit 2, the line there being who has to act. Every other failure is rethrown
  * untouched: a permission, a read-only mount or a full disk is not the reader's to fix, exit 1
  * already says so, and Node's own message names the path.

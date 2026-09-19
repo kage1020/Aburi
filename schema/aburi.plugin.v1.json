@@ -45,7 +45,7 @@
     "provides": { "$ref": "#/$defs/Provides" },
     "capabilities": {
       "$ref": "#/$defs/Capabilities",
-      "description": "Optional runtime capabilities the plugin advertises. Source-of-truth for CLI concurrency budgets (lang-plugin.md §8.1, cli-spec.md §11)."
+      "description": "Optional runtime capabilities the plugin advertises. Source-of-truth for CLI concurrency budgets (lang-plugin.md, cli-spec.md)."
     }
   },
   "allOf": [

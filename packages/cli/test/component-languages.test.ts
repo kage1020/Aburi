@@ -111,7 +111,7 @@ describe("a language plugin's own drop globs reach the census", () => {
 describe("what a failed component resolution exits with", () => {
   /**
    * Detection walks the workspace and opens rule files now, so this path spans real IO —
-   * and `cli-spec.md` §9 keeps exit 2 for bad input and exit 1 for a runtime failure. Reporting
+   * and `cli-spec.md` keeps exit 2 for bad input and exit 1 for a runtime failure. Reporting
    * an unreadable `.gitignore` as a config error sends the reader through `aburi.json` for a
    * mistake that is not there.
    */
@@ -129,9 +129,9 @@ describe("what a failed component resolution exits with", () => {
   })
 
   it("keeps the input error for a manifest that cannot be parsed", async () => {
-    // A manifest that is present and unreadable is the workspace being wrong, so §9's exit 2
-    // is what tells the reader to go and fix a file. Nothing put that code on the config side
-    // before, so even the pnpm manifest's own refusal exited 1.
+    // A manifest that is present and unreadable is the workspace being wrong, so `cli-spec.md`'s
+    // exit 2 is what tells the reader to go and fix a file. Nothing put that code on the config
+    // side before, so even the pnpm manifest's own refusal exited 1.
     await writeLanguage("src", ".ts")
     await writeFileAt("pnpm-workspace.yaml", 'packages:\n  - "apps/*"\n')
     await writeFileAt("apps/billing/package.json", "{ broken")

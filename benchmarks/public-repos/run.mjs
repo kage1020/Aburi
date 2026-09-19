@@ -3,7 +3,7 @@
  * Runs `aburi scan` and `aburi diff` against pinned commits of real public repositories
  * and writes the numbers to `results/`.
  *
- * The synthetic corpus described in docs/design/performance.md §2 measures one shape on
+ * The synthetic corpus described in docs/design/performance.md measures one shape on
  * purpose: many similar small files. Public repositories measure the shapes nobody
  * designs for — a generated file thousands of lines long, a workspace with a hundred
  * packages, a `.d.ts` wall, decorators on everything — and they are also the only way to

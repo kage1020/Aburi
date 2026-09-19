@@ -25,14 +25,14 @@ export function bodyNodesOf(symbol: SymbolCandidate<Node>): Node[] {
  *
  * Both column keys are emitted unconditionally as `null`. The tree has the columns in hand
  * (`node.startPosition.column`), and nothing in the plugin contract forbids publishing them
- * (`docs/design/lang-plugin.md` §4.3) — this plugin withholds them by choice, so that every
+ * (`docs/design/lang-plugin.md`) — this plugin withholds them by choice, so that every
  * column in an Aburi IR comes from `textDocument/documentSymbol` and one convention about
  * what a column counts, rather than from two tiers that may disagree. The choice costs
  * nothing today: `applyDocumentSymbols` in `packages/core/src/lsp/enrich.ts` overwrites both
  * keys whenever the LSP pass matches the Symbol, so a column written here would survive only
  * on the runs where no column is available anyway.
  *
- * `null` rather than an omitted key is the Class A rule of `ir-schema.md` §1.1.
+ * `null` rather than an omitted key is the Class A rule of `ir-schema.md`.
  */
 export function makeSourceRange(node: Node, ctx: ExtractionContext): WrittenSourceRange {
   return {
@@ -107,11 +107,11 @@ export function asFunctionValue(node: Node): Node | null {
   return isFunction ? value : null
 }
 
-/** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */
 /**
  * An ERROR or a MISSING token among a node's **own** children — its head, never its body.
  *
- * What it answers is "did the parser guess at this node's own text?", and that is the question
+ * This is the one place the rule "a name the parser guessed at is refused" is decided. What
+ * it answers is "did the parser guess at this node's own text?", and that is the question
  * both readers of a written name ask: a class member's name (`memberNameSegment`) and a
  * bracket access's index (`subscriptSegment`). Recovery re-emits the characters it could
  * salvage as an ordinary node and drops an ERROR beside them, so a name that looks whole is
@@ -127,6 +127,7 @@ export function hasErrorChild(node: Node): boolean {
   )
 }
 
+/** True when the node has a child of this type, named or anonymous (`static`, `get`, `set`). */
 export function hasChildOfType(node: Node, typeName: string): boolean {
   for (const child of node.children) {
     if (child !== null && child.type === typeName) return true
@@ -134,15 +135,7 @@ export function hasChildOfType(node: Node, typeName: string): boolean {
   return false
 }
 
-/** Type guard: true when the given node is NOT null. Tree-sitter APIs return `Node | null` everywhere. */
-export function isPresent(node: Node | null): node is Node {
-  return node !== null
-}
-
-/**
- * Find the first named child whose type matches `typeName`. Returns null when nothing
- * matches; walkers use this instead of manual for-loops for the common case.
- */
+/** The first named child whose type matches `typeName`, or null. */
 export function findChild(node: Node, typeName: string): Node | null {
   for (const child of node.namedChildren) {
     if (child !== null && child.type === typeName) return child
@@ -166,22 +159,44 @@ export function firstNonCommentChild(node: Node): Node | null {
   return null
 }
 
-/**
- * Yield every descendant node in a pre-order depth-first walk. Cheap iterator so callers
- * that only want to inspect nodes of a certain type do not have to write the traversal
- * themselves.
- */
-export function* walkDescendants(root: Node): Iterable<Node> {
+export interface WalkOptions {
+  /** Visit anonymous children too — a MISSING `)` is one. Named children only by default. */
+  anonymous?: boolean
+  /** When it answers false for a node, that node's subtree is skipped; the node itself is still yielded. */
+  descend?: (node: Node) => boolean
+}
+
+/** Every descendant of `root`, `root` first, in pre-order source order. */
+export function* walkDescendants(root: Node, options: WalkOptions = {}): Iterable<Node> {
+  const anonymous = options.anonymous === true
   const stack: Node[] = [root]
   while (stack.length > 0) {
     const node = stack.pop()
     if (node === undefined) break
     yield node
-    for (let i = node.namedChildCount - 1; i >= 0; i--) {
-      const child = node.namedChild(i)
+    if (options.descend !== undefined && !options.descend(node)) continue
+    const count = anonymous ? node.childCount : node.namedChildCount
+    for (let i = count - 1; i >= 0; i--) {
+      const child = anonymous ? node.child(i) : node.namedChild(i)
       if (child !== null) stack.push(child)
     }
   }
+}
+
+/** What a `throw` statement throws; for `throw new X(…)` the constructor `X`, with `viaNew` set. */
+export interface ThrownValue {
+  node: Node
+  viaNew: boolean
+}
+
+export function thrownValue(throwNode: Node): ThrownValue | null {
+  const argument = throwNode.namedChild(0)
+  if (argument === null) return null
+  if (argument.type === "new_expression") {
+    const ctor = argument.childForFieldName("constructor")
+    if (ctor !== null) return { node: ctor, viaNew: true }
+  }
+  return { node: argument, viaNew: false }
 }
 
 /**
@@ -203,11 +218,9 @@ export const AMBIENT_DECLARATION_TYPE = "ambient_declaration"
  * `declare class`'s, which is why one predicate answers for both.
  *
  * It reads the parent chain rather than a flag threaded through the statement walk, because the
- * class-member question is asked by two readers that are handed the class node and nothing else
- * (`memberSymbolSegment`) — and the moment those two disagree a body is recorded twice or not
- * at all. The chain climbed is bounded by declaration nesting depth — it runs through the
- * `statement_block`, `export_statement`, `expression_statement` and `ambient_declaration`
- * wrappers between a declaration and the module — and `program` ends it.
+ * class-member question is asked by two readers handed the class node and nothing else (see
+ * `memberSymbolSegment`). The chain climbed is bounded by declaration nesting depth and
+ * `program` ends it.
  */
 export function inAmbientContext(node: Node): boolean {
   for (let cursor = node.parent; cursor !== null; cursor = cursor.parent) {
@@ -242,13 +255,9 @@ export function statementParent(node: Node): Node | null {
 }
 
 /**
- * True when the declaration was written under an `export` keyword.
- *
- * This is the one implementation of that question. `extract-symbols` asks it under its own
- * name, `hasExportKeywordAncestor`, which reads better beside the other questions that file
- * asks of a declaration — but it delegates here rather than repeating these two lines. A second
- * copy is how a reader that stops at `node.parent` gets written again, and that reader is the
- * one `export declare class C {}` was invisible to: its export is a node further up.
+ * True when the declaration was written under an `export` keyword — the one implementation
+ * of that question. A second copy is how a reader that stops at `node.parent` gets written
+ * again, and that reader is the one `export declare class C {}` was invisible to.
  */
 export function hasExportModifier(node: Node): boolean {
   const parent = statementParent(node)

@@ -5,7 +5,7 @@ import { runInit } from "./commands/init"
 import { runScan } from "./commands/scan"
 import { resolveConfigPath } from "./config-path"
 import { readEnv } from "./env"
-import { CliError, errorCode } from "./errors"
+import { assertNever, CliError, errorCode } from "./errors"
 import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
@@ -46,14 +46,16 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
       },
     })
 
-  let outcome: ExitCode = EXIT.SUCCESS
-  const wrap = (fn: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
+  const warn = (message: string): void => {
+    stderr.write(`${message}\n`)
+  }
+  let capturedExitCode: ExitCode = EXIT.SUCCESS
+  const runCommand = (command: () => Promise<ExitCode | undefined>): (() => Promise<void>) => {
     return async () => {
       try {
-        const result = await fn()
-        outcome = result ?? EXIT.SUCCESS
+        capturedExitCode = (await command()) ?? EXIT.SUCCESS
       } catch (error) {
-        outcome = handleError(error, stderr)
+        capturedExitCode = handleError(error, stderr)
       }
     }
   }
@@ -77,17 +79,15 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         withSuggestions?: boolean
         respectGitignore?: boolean
       }) =>
-        wrap(async () => {
+        runCommand(async () => {
           const report = await runInit({
             cwd,
-            ...(cmdOptions.output === undefined ? {} : { output: cmdOptions.output }),
-            ...(cmdOptions.force === undefined ? {} : { force: cmdOptions.force }),
-            ...(cmdOptions.withSuggestions === undefined
-              ? {}
-              : { withSuggestions: cmdOptions.withSuggestions }),
-            ...(cmdOptions.respectGitignore === undefined
-              ? {}
-              : { respectGitignore: cmdOptions.respectGitignore }),
+            ...definedOnly({
+              output: cmdOptions.output,
+              force: cmdOptions.force,
+              withSuggestions: cmdOptions.withSuggestions,
+              respectGitignore: cmdOptions.respectGitignore,
+            }),
           })
           stdout.write(`✓ Wrote ${report.outputPath}\n`)
           stdout.write(
@@ -158,34 +158,30 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         config?: string
         lsp?: boolean
       }) =>
-        wrap(async () => {
-          const format = deriveFormat(cmdOptions)
+        runCommand(async () => {
           const report = await runScan({
             cwd,
-            ...(cmdOptions.outputDir === undefined ? {} : { outputDir: cmdOptions.outputDir }),
-            format,
-            ...(cmdOptions.ignore !== undefined && cmdOptions.ignore.length > 0
-              ? { ignore: cmdOptions.ignore }
-              : {}),
-            ...(cmdOptions.respectGitignore === undefined
-              ? {}
-              : { respectGitignore: cmdOptions.respectGitignore }),
-            ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
-            ...(cmdOptions.timestamp === false || env.ci ? { suppressTimestamp: true } : {}),
-            ...(cmdOptions.lsp === undefined ? {} : { lsp: cmdOptions.lsp }),
-            ...(env.logLevel === null ? {} : { logLevel: env.logLevel }),
-            ...withConfigPath(cmdOptions.config, env),
-            incidents: {
-              warn: (message: string) => {
-                stderr.write(`${message}\n`)
-              },
-            },
+            format: deriveFormat(cmdOptions),
+            ...definedOnly({
+              outputDir: cmdOptions.outputDir,
+              ignore:
+                cmdOptions.ignore !== undefined && cmdOptions.ignore.length > 0
+                  ? cmdOptions.ignore
+                  : undefined,
+              respectGitignore: cmdOptions.respectGitignore,
+              compact: cmdOptions.compact,
+              suppressTimestamp: cmdOptions.timestamp === false || env.ci ? true : undefined,
+              lsp: cmdOptions.lsp,
+              logLevel: env.logLevel ?? undefined,
+              configPath: resolveConfigPath(cmdOptions.config, env),
+            }),
+            incidents: { warn },
           })
-          // `totalFiles` excludes the files no Document path can name, by design (§5.8), so on
-          // its own this line moves in the flattering direction: a workspace of 200 with 15
-          // unnameable ones reads `185 files` and looks whole. The other two gate reasons leave
-          // their mark in these numbers; this one has to be added back or the summary
-          // contradicts the exit code beside it.
+          // `totalFiles` excludes the files no Document path can name, by design
+          // (`cli-spec.md`), so on its own this line moves in the flattering direction: a
+          // workspace of 200 with 15 unnameable ones reads `185 files` and looks whole. The
+          // other two gate reasons leave their mark in these numbers; this one has to be added
+          // back or the summary contradicts the exit code beside it.
           const unnameable = report.unrepresentableFiles.length
           stdout.write(
             `${report.keptSymbols} kept · ${report.droppedSymbols} dropped · ${report.totalFiles} files` +
@@ -228,21 +224,21 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           config?: string
         },
       ) =>
-        wrap(async () => {
+        runCommand(async () => {
           const report = await runDiff({
             cwd,
             refSpec: refspec ?? null,
-            ...(cmdOptions.base === undefined ? {} : { base: cmdOptions.base }),
-            ...(cmdOptions.head === undefined ? {} : { head: cmdOptions.head }),
-            ...(cmdOptions.outputDir === undefined ? {} : { outputDir: cmdOptions.outputDir }),
-            ...(cmdOptions.format === undefined ? {} : { format: cmdOptions.format }),
-            ...(cmdOptions.failOn === undefined ? {} : { failOn: cmdOptions.failOn }),
-            ...(cmdOptions.compact === undefined ? {} : { compact: cmdOptions.compact }),
-            ...(cmdOptions.maxBytes === undefined ? {} : { maxBytes: cmdOptions.maxBytes }),
-            ...withConfigPath(cmdOptions.config, env),
-            warn: (message: string) => {
-              stderr.write(`${message}\n`)
-            },
+            ...definedOnly({
+              base: cmdOptions.base,
+              head: cmdOptions.head,
+              outputDir: cmdOptions.outputDir,
+              format: cmdOptions.format,
+              failOn: cmdOptions.failOn,
+              compact: cmdOptions.compact,
+              maxBytes: cmdOptions.maxBytes,
+              configPath: resolveConfigPath(cmdOptions.config, env),
+            }),
+            warn,
           })
           stdout.write(`${report.summaryLine}\n`)
           if (report.callResolutionLine !== null) {
@@ -279,25 +275,23 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
           config?: string
         },
       ) =>
-        wrap(async () => {
+        runCommand(async () => {
           const outcome = await runExplain({
             cwd,
             argument,
-            ...(cmdOptions.ir === undefined ? {} : { irPath: cmdOptions.ir }),
-            ...(cmdOptions.output === undefined ? {} : { outputPath: cmdOptions.output }),
-            ...(cmdOptions.rescan === undefined ? {} : { noRescan: !cmdOptions.rescan }),
-            ...(cmdOptions.debugResolution === undefined
-              ? {}
-              : { debugResolution: cmdOptions.debugResolution }),
-            ...withConfigPath(cmdOptions.config, env),
-            warn: (message: string) => {
-              stderr.write(`${message}\n`)
-            },
+            ...definedOnly({
+              irPath: cmdOptions.ir,
+              outputPath: cmdOptions.output,
+              noRescan: cmdOptions.rescan === undefined ? undefined : !cmdOptions.rescan,
+              debugResolution: cmdOptions.debugResolution,
+              configPath: resolveConfigPath(cmdOptions.config, env),
+            }),
+            warn,
           })
           switch (outcome.kind) {
             case "single":
             case "file":
-              // §7 — when --output is set the markdown lives in the file only.
+              // `cli-spec.md` — when --output is set the markdown lives in the file only.
               // Otherwise mirror to stdout so the user can `aburi explain foo | less`.
               if (outcome.writtenTo === null) {
                 stdout.write(outcome.markdown)
@@ -338,7 +332,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               break
             }
             default:
-              return assertNeverOutcome(outcome)
+              return assertNever(outcome, "explain outcome")
           }
           return outcome.exitCode
         })(),
@@ -355,7 +349,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     }
     return handleError(error, stderr)
   }
-  return outcome
+  return capturedExitCode
 }
 
 /**
@@ -376,20 +370,12 @@ function coverageLine(doubt: CoverageDoubt): string {
   return `⚠ This IR reports ${doubt.fileCount} file(s) it did not parse but predates stats.skippedFiles, so it cannot name them; a match may be in one of them. Re-run \`aburi scan\` to record the list.`
 }
 
-/**
- * Compile-time guard on the `explain` outcome switch: a new `ExplainOutcome` member is a type
- * error here rather than a command that exits on a code with nothing written to explain it.
- */
-function assertNeverOutcome(outcome: never): never {
-  throw new Error(`Unhandled explain outcome: ${JSON.stringify(outcome)}`)
-}
-
 function isCommanderError(value: unknown): value is { code: string; message: string } {
   return errorCode(value)?.startsWith("commander.") === true
 }
 
 /**
- * Error mapping (see docs/design/cli-spec.md §9 for the exit-code contract):
+ * Error mapping (see docs/design/cli-spec.md for the exit-code contract):
  *   - `input-error` / `config-error` → EXIT.INPUT_ERROR
  *   - `runtime-error`                → EXIT.RUNTIME
  *   - `plugin-error`                 → EXIT.GATE
@@ -422,16 +408,16 @@ function handleError(error: unknown, stderr: NodeJS.WritableStream): ExitCode {
 }
 
 /**
- * §11 — `--config` takes precedence over `ABURI_CONFIG`. When neither is present the
- * object contribution is empty so the downstream command falls through to on-disk
- * config discovery.
+ * The entries of `fields` whose value is defined, so a flag that was not typed contributes no
+ * key at all: under `exactOptionalPropertyTypes` a command option spelled `x?: T` refuses an
+ * explicit `undefined`, and every command distinguishes "absent" from "default".
  */
-function withConfigPath(
-  cliFlag: string | undefined,
-  env: ReturnType<typeof readEnv>,
-): { configPath?: string } {
-  const resolved = resolveConfigPath(cliFlag, env)
-  return resolved === undefined ? {} : { configPath: resolved }
+function definedOnly<T extends object>(fields: T): { [K in keyof T]-?: Exclude<T[K], undefined> } {
+  const present: Partial<Record<keyof T, unknown>> = {}
+  for (const key of Object.keys(fields) as (keyof T)[]) {
+    if (fields[key] !== undefined) present[key] = fields[key]
+  }
+  return present as { [K in keyof T]-?: Exclude<T[K], undefined> }
 }
 
 function parseFormat(value: string): "json" | "md" | "both" {

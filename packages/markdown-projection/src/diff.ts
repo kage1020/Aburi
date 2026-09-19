@@ -17,41 +17,30 @@ import type {
   SymbolUnknown,
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
-import { compareStrings, inlineCode, isSymbolIdEndpoint, requireDropReason } from "./format"
+import {
+  compareStrings,
+  inlineCode,
+  isSymbolEdge,
+  renderDocument,
+  requireDropReason,
+} from "./format"
 
-/**
- * Options for {@link projectDiff}.
- */
+/** Options for {@link projectDiff}. */
 export interface ProjectDiffOptions {
   /**
-   * §6.4 — hard cap on the produced document, in UTF-8 bytes. Absent means no cap, which is
-   * the right answer for a file on disk and the wrong one for a PR comment: GitHub rejects a
-   * comment body over 65536 bytes with a 422, and a pull request adding roughly 310 symbols
-   * is already past it.
-   *
-   * Honoured by dropping whole sections, least important first, never by cutting the string —
-   * a cut lands inside a `<details>` block or a code fence about as often as not, and what it
-   * produces is a document GitHub renders as one open fence swallowing the rest. The title and
-   * the Summary line are never dropped, so a budget smaller than those is not achievable: the
-   * document comes back over it, with a note saying so in place of the usual one.
-   *
-   * Anything that is not a positive integer raises a `RangeError` — `0` included, which is the
-   * value a caller coming from the action's `max-bytes: 0` reaches for. No cap is spelled by
-   * leaving this out.
+   * markdown-projection.md — hard cap on the document in UTF-8 bytes (GitHub rejects a
+   * comment over 65536), honoured by dropping whole sections least important first, never by
+   * cutting the string. Must be a positive integer (`0` throws `RangeError`); absent means no
+   * cap.
    */
   readonly maxBytes?: number
 }
 
 /**
- * §6 — `out/diff.md`. Sections are emitted in the fixed importance order
- * (API changes → Syntax-only). Three sections — Moved (semantic no-op), Dropped changes
- * (drop rule flips), Syntax-only changes (implementation refactors) — are collapsed inside
- * `<details>` so PR comments stay reviewer-friendly. Moved + Changed is intentionally
- * NOT folded because the delta carries semantic impact worth reading. Empty sections
- * are dropped entirely (§5.3 rule).
- *
- * `options.maxBytes` caps the result (§6.4); without it the document is whatever the diff
- * is worth, which is what a reader opening the file wants and what a PR comment cannot take.
+ * markdown-projection.md — `out/diff.md`. Sections are emitted in the fixed importance order
+ * (API changes → Syntax-only). Moved, Dropped changes and Syntax-only changes are folded
+ * inside `<details>`; Moved + Changed is not, because its delta carries semantic impact.
+ * Empty sections are dropped.
  */
 export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}): string {
   const heading: string[] = []
@@ -94,32 +83,21 @@ interface Section {
 }
 
 /**
- * §6.4 — join the document, dropping sections from the bottom until it fits.
- *
- * The section order is the §6.1 order (why that is the importance order: §12.4), so the bottom
- * is the least important thing in the document and the drop order falls straight out of it:
- * Syntax-only first, API changes last. The note is rebuilt and the whole document re-measured on
- * every drop, because naming one more section makes the note longer — measuring once against a
- * note that does not yet say what it will say is how a budget gets missed by exactly the length
- * of the last name.
- *
- * Dropping every section is where the loop stops, and that last document may still be over
- * budget: the title and the Summary line are the one thing this cannot drop, and returning them
- * over budget beats returning a document with no idea what it is. Only *that* document — the one
- * measured and still too large — takes the note's "could not be brought within" wording, because
- * a line claiming a budget the document misses is worst exactly where it matters most, and
- * because an empty-section document often does fit.
- *
- * The count is the loop variable rather than the two arrays it would slice: an array pair needs
- * a `noUncheckedIndexedAccess` guard on an element that cannot be absent, which reads as "this
- * might be empty" at the one place the line above has just proved it is not.
+ * Join the document, dropping sections from the bottom until it fits (markdown-projection.md,
+ * `maxBytes`). The section order is the importance order — fixed so a reviewer can read from
+ * the top, with API changes first and Syntax-only folded at the bottom — so the bottom is the
+ * least important thing in the document and the drop order falls straight out of it:
+ * Syntax-only first, API changes last. The note is rebuilt and the document re-measured on
+ * every drop, because naming one more section lengthens the note. The title and Summary line
+ * cannot be dropped, so the last document may still be over budget; only that one takes the
+ * "could not be brought within" wording.
  */
 function assemble(
   heading: readonly string[],
   sections: readonly Section[],
   maxBytes: number | undefined,
 ): string {
-  if (maxBytes === undefined) return finalise([...heading, ...flatten(sections)])
+  if (maxBytes === undefined) return renderDocument([...heading, ...flatten(sections)])
   if (!Number.isInteger(maxBytes) || maxBytes <= 0) {
     throw new RangeError(
       `projectDiff: maxBytes must be a positive integer (got ${String(maxBytes)}).`,
@@ -127,7 +105,7 @@ function assemble(
   }
 
   const render = (kept: number, unachievable: boolean): string =>
-    finalise([
+    renderDocument([
       ...heading,
       ...omissionNote(sections.slice(kept), maxBytes, unachievable),
       ...flatten(sections.slice(0, kept)),
@@ -136,21 +114,14 @@ function assemble(
   for (let kept = sections.length; ; kept--) {
     const document = render(kept, false)
     if (Buffer.byteLength(document, "utf8") <= maxBytes) return document
-    // Nothing left to drop, and still too large. Say that, rather than repeat a promise the
-    // bytes below it contradict.
     if (kept === 0) return render(0, true)
   }
 }
 
 /**
- * The line that stands in for what was dropped. Sections are named in document order rather
- * than in drop order: the reader is looking for the heading that is not there, and the order
- * they looked in is the one the document is written in.
- *
- * `unachievable` is the path where every section went and the document is still over budget —
- * the title, the Summary line and this note alone weigh more than the caller allowed. It says
- * that rather than "to keep this report within N bytes", which on that one path would be a
- * document asserting the opposite of its own size.
+ * The line that stands in for what was dropped, naming sections in document order (the
+ * reader is looking for the heading that is not there). `unachievable` is the path where
+ * every section went and the document is still over budget.
  */
 function omissionNote(
   dropped: readonly Section[],
@@ -174,37 +145,27 @@ function flatten(sections: readonly Section[]): string[] {
   return sections.flatMap((section) => [...section.lines])
 }
 
-function finalise(lines: readonly string[]): string {
-  return `${lines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd()}\n`
-}
-
-/** §6.3 — one-line CLI stdout summary. */
+/** markdown-projection.md — one-line CLI stdout summary. */
 export function projectDiffSummaryLine(diff: DiffResult): string {
-  const s = diff.summary
-  return withUnknown(`+${s.added} -${s.removed} ~${s.changed} ↔${s.moved} ⤴${s.movedChanged}`, diff)
+  const summary = diff.summary
+  return withUnknown(
+    `+${summary.added} -${summary.removed} ~${summary.changed} ↔${summary.moved} ⤴${summary.movedChanged}`,
+    diff,
+  )
 }
 
 function summaryLine(diff: DiffResult): string {
-  const s = diff.summary
+  const summary = diff.summary
   return withUnknown(
-    `+${s.added} added · -${s.removed} removed · ~${s.changed} changed · ${s.moved} moved · ${s.movedChanged} moved+changed`,
+    `+${summary.added} added · -${summary.removed} removed · ~${summary.changed} changed · ${summary.moved} moved · ${summary.movedChanged} moved+changed`,
     diff,
   )
 }
 
 /**
- * Append the unknown count to a summary line, when there is one.
- *
- * Both summary lines carry it, and for the same reason: the added and removed counts beside
- * it are smaller than the truth by exactly this much, so a line that omitted it would be a
- * confident understatement. The glyph line is the one every CI job prints and the only
- * output a `--quiet` run produces, which is where a silent understatement costs most.
- *
- * Appended rather than always present, so the line a reader has learned to skim does not
- * grow a permanent `?0` on the overwhelming majority of diffs where nothing was lost.
+ * Append the unknown count to a summary line when there is one: the added and removed counts
+ * beside it are smaller than the truth by exactly this much. Appended rather than always
+ * present, so the line does not grow a permanent `?0` on diffs where nothing was lost.
  */
 function withUnknown(line: string, diff: DiffResult): string {
   const unknown = diff.summary.unknown ?? 0
@@ -224,16 +185,9 @@ interface Buckets {
 }
 
 /**
- * Section routing. §6.2 lists five buckets whose predicates overlap on the raw
- * `SymbolChange[]`: a `changed` entry with both `apiChanged` and `syntaxChanged` belongs
- * in the API section only (higher priority wins). The ordering below is:
- *
- *   1. `apiChanged`         → API changes
- *   2. `logicChanged` only  → Logic changes  (api MUST be false to reach here)
- *   3. `syntaxChanged` only → Syntax-only (both api and logic MUST be false)
- *
- * Non-overlapping buckets (added / removed / unknown / moved-only / moved+changed /
- * droppedToggled) are routed by the `status` tag alone.
+ * Section routing (markdown-projection.md). The delta flags overlap, so `routeChanged`
+ * applies a priority: `apiChanged` → API changes, else `logicChanged` → Logic changes, else
+ * `syntaxChanged` → Syntax-only. The other buckets are routed by the `status` tag alone.
  */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
@@ -272,9 +226,8 @@ function partition(changes: readonly SymbolChange[]): Buckets {
         out.unknown.push(c)
         break
       default:
-        // Every other renderer is a function whose return type forces the switch to be
-        // exhaustive. This one accumulates and returns `out`, so a status added later would
-        // simply vanish from every section of `diff.md` with nothing to catch it.
+        // This switch accumulates rather than returns, so without the guard a status added
+        // later would simply vanish from every section of `diff.md`.
         return assertNeverChange(c)
     }
   }
@@ -300,11 +253,7 @@ function appendSection(sections: Section[], heading: string, body: string[]): vo
   sections.push({ title: titleOf(heading), lines: [heading, "", ...body, ""] })
 }
 
-/**
- * §6.1 — three sections (Moved / Dropped / Syntax-only) live inside a `<details>`
- * fold-out. Skipping the wrapper when body is empty keeps the file from carrying dangling
- * empty `<details>` blocks that GitHub still renders as a clickable arrow.
- */
+/** A `<details>` fold-out; skipped when empty so GitHub renders no dangling arrow. */
 function appendFolded(sections: Section[], heading: string, body: string[]): void {
   if (body.length === 0) return
   sections.push({
@@ -356,20 +305,10 @@ function renderDeltaBody(delta: SymbolDelta): string[] {
 }
 
 /**
- * Never leave a heading with an empty body. A symbol listed as changed with nothing under
- * it reads as "no reason was found", when it means one of two things the reviewer cannot
- * distinguish: the delta carries no field-level detail, or a bucket went unrendered.
- *
- * All three flags are covered, not just the two that route into the API and Logic
- * sections. `renderMovedChanged` renders every moved+changed entry regardless of which
- * flag is set, so a syntax-only move reaches this function too — and is the case least
- * likely to carry field-level detail.
- *
- * This is a note rather than a thrown invariant because an empty delta is legitimately
- * reachable: the three flags come from comparing fingerprints in `computeSymbolDelta`, and
- * the fingerprints cover inputs the structured delta does not model, so a real document
- * can set one with every `ArrayDelta` empty. Failing the render would turn a gap in the
- * projection into a failed CI job; saying so in one line does not.
+ * Never leave a heading with an empty body: it would read as "no reason was found". A note
+ * rather than a thrown invariant, because the fingerprints cover inputs the structured delta
+ * does not model, so a real document can set a flag with every `ArrayDelta` empty. All three
+ * flags are covered because `renderMovedChanged` reaches here with syntax-only moves too.
  */
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
   if (rows.length > 0) return
@@ -416,29 +355,26 @@ function appendSignatureDelta(
 }
 
 /**
- * `ArrayDelta.added/removed/modified` is typed `unknown[]` in the generated schema layer
- * because the schema erases the per-field element type. The runtime shape, however, is
- * fixed: `delta.decorators` items are always Decorators, `delta.rules` items are Rules,
- * etc. Rather than sprinkling `as` casts, we route through predicate-narrowed helpers
- * so a schema regeneration that adds a field will fail to compile here instead of
- * silently emitting `@?` placeholders.
+ * `ArrayDelta` buckets are `unknown[]` because the schema erases the element type, while the
+ * runtime shape is fixed per field. The `as*Like` predicates narrow them without casts, so a
+ * schema regeneration fails to compile here instead of emitting `@?` placeholders.
+ *
+ * One row per decorator rather than `appendArrayGroup`'s nested list; `modified` shows the
+ * name alone because the arguments are the change.
  */
 function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]): void {
   if (delta === undefined) return
-  for (const raw of delta.added) {
-    const d = asDecoratorLike(raw)
-    if (d === null) continue
-    rows.push(`- decorator added: ${inlineCode(`@${d.raw ?? d.name}`)}`)
-  }
-  for (const raw of delta.removed) {
-    const d = asDecoratorLike(raw)
-    if (d === null) continue
-    rows.push(`- decorator removed: ${inlineCode(`@${d.raw ?? d.name}`)}`)
-  }
-  for (const raw of delta.modified) {
-    const d = asDecoratorLike(raw)
-    if (d === null) continue
-    rows.push(`- decorator modified: ${inlineCode(`@${d.name}`)}`)
+  const buckets: [string, readonly unknown[], (d: DecoratorLike) => string][] = [
+    ["added", delta.added, (d) => d.raw ?? d.name],
+    ["removed", delta.removed, (d) => d.raw ?? d.name],
+    ["modified", delta.modified, (d) => d.name],
+  ]
+  for (const [label, items, show] of buckets) {
+    for (const item of items) {
+      const decorator = asDecoratorLike(item)
+      if (decorator === null) continue
+      rows.push(`- decorator ${label}: ${inlineCode(`@${show(decorator)}`)}`)
+    }
   }
 }
 
@@ -458,10 +394,9 @@ function appendCallDelta(rows: string[], delta: SymbolDelta["calls"]): void {
 }
 
 /**
- * All three `ArrayDelta` buckets, not just added / removed. `differentiate` in
- * `@aburi/diff` routes an element whose identity key matched but whose content changed
- * into `modified`, so a rewritten guard condition, a downgraded effect confidence and a
- * call that stopped resolving all arrive there and nowhere else.
+ * All three `ArrayDelta` buckets: `@aburi/diff` routes an element whose identity key matched
+ * but whose content changed into `modified`, so a rewritten guard condition or a call that
+ * stopped resolving arrives there and nowhere else.
  */
 function appendArrayGroup(
   rows: string[],
@@ -486,10 +421,6 @@ function appendBucket(
   rows.push(`- ${label}:`)
   for (const line of lines) rows.push(`  - ${line}`)
 }
-
-// -----------------------------------------------------------------------------
-// Predicate-narrowed views of ArrayDelta entries
-// -----------------------------------------------------------------------------
 
 interface DecoratorLike {
   name: string
@@ -557,14 +488,9 @@ function asCallLike(value: unknown): CallLike | null {
 }
 
 /**
- * The delta's own rule row, which is not `ruleRow`: it renders a bucket entry nested under
- * `- rules added:`, one list level below the per-Symbol view.
- *
- * It stays inline however long the condition is. `ruleRow` breaks out to a fenced block above
- * `INLINE_CODE_MAX_LENGTH`, and a fence can live in a list item, but this row is already the
- * child of one — the block would have to be indented to the grandchild's column to stay put,
- * and a delta bucket lists the rules that moved rather than showing each in full. A widened
- * code span holds any condition on one line, which is what this row wants anyway.
+ * The delta's own rule row, nested under `- rules added:` — not `ruleRow`, and inline however
+ * long the condition: a delta bucket lists the rules that moved rather than showing each in
+ * full, and a widened code span holds any condition on one line.
  */
 function describeRuleLike(value: unknown): string | null {
   const rule = asRuleLike(value)
@@ -581,19 +507,15 @@ function describeEffectLike(value: unknown): string | null {
 }
 
 function describeCallLike(value: unknown): string | null {
-  const c = asCallLike(value)
-  if (c === null) return null
-  return `${inlineCode(c.target)} (L${c.line})`
+  const call = asCallLike(value)
+  if (call === null) return null
+  return `${inlineCode(call.target)} (L${call.line})`
 }
 
 /**
- * `Signature.inputs` entries are `{ name, type }`. Both are needed: the name identifies
- * which parameter moved, and the type is the change itself for the `modified` bucket.
- *
- * An entry that does not match the shape is dropped, as the other `describe*Like` helpers
- * do. If *every* entry fails to match, the count is emitted instead — unlike
- * `appendBucket`, which suppresses the row. The bucket is non-empty either way, and
- * "1 item(s)" at least says a parameter moved, where silence would claim none did.
+ * `Signature.inputs` entries as `name: type`. If every entry fails the shape, the count is
+ * emitted instead — unlike `appendBucket` — because "1 item(s)" at least says a parameter
+ * moved, where silence would claim none did.
  */
 function describeInputs(items: readonly unknown[]): string {
   const rendered = items
@@ -619,12 +541,7 @@ function renderInlineList(values: readonly unknown[]): string {
     .join(", ")
 }
 
-/**
- * Emit `- <label>: <values>` only when something renders. `renderInlineList` drops
- * non-strings, so a bucket holding only unexpected shapes would otherwise produce a row
- * with nothing after the colon — the same silent-blank this file exists to remove, one
- * level down. Mirrors `appendBucket`'s rule for the array groups.
- */
+/** Emit `- <label>: <values>` only when something renders, mirroring `appendBucket`. */
 function appendInlineRow(rows: string[], label: string, values: readonly unknown[]): void {
   if (values.length === 0) return
   const rendered = renderInlineList(values)
@@ -633,41 +550,34 @@ function appendInlineRow(rows: string[], label: string, values: readonly unknown
 }
 
 function renderAddedRemoved(symbols: readonly IRSymbol[]): string[] {
-  if (symbols.length === 0) return []
-  const rows: string[] = []
-  for (const s of [...symbols].sort((a, b) => compareStrings(a.id, b.id))) {
-    rows.push(`### ${inlineCode(s.name)} *(${s.kind})*`)
-    rows.push(`**File**: ${inlineCode(`${s.source.file}:${s.source.startLine}`)}`)
-    rows.push(...renderSymbolBlock(s).slice(1))
-    rows.push("")
-  }
-  return rows
+  return [...symbols]
+    .sort((a, b) => compareStrings(a.id, b.id))
+    .flatMap((symbol) => symbolEntry(symbol, []))
 }
 
 /**
- * §6.2 — the Symbols one document has and the other never looked for.
- *
- * Rendered apart from Added and Removed rather than inside them, because the reader's next
- * action is different: an entry here is not a change to review but a gap to close, and the
- * reason says how. `parse-timeout` and `unreadable` are properties of the moment rather than
- * of the workspace — a wall clock, and a file that stopped being one between the listing and
- * the read — and usually clear on a re-run. A permission or an IO failure is not among them:
- * the scan ends the run on those rather than recording a file, so nothing here can have come
- * from one. `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the
- * file or the plugin set and clear only when one of those is changed.
+ * The Symbols one document has and the other never looked for (markdown-projection.md).
+ * Apart from Added and Removed because the reader's next action differs: an entry here is a
+ * gap to close, and the reason says how — `parse-timeout` and `unreadable` usually clear on
+ * a re-run, while
+ * `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the file or the
+ * plugin set.
  */
 function renderUnknown(items: readonly SymbolUnknown[]): string[] {
-  if (items.length === 0) return []
-  const rows: string[] = []
-  for (const item of [...items].sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))) {
-    const s = item.symbol
-    rows.push(`### ${inlineCode(s.name)} *(${s.kind})*`)
-    rows.push(`**File**: ${inlineCode(`${s.source.file}:${s.source.startLine}`)}`)
-    rows.push(`**Why**: ${unknownExplanation(item)}`)
-    rows.push(...renderSymbolBlock(s).slice(1))
-    rows.push("")
-  }
-  return rows
+  return [...items]
+    .sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))
+    .flatMap((item) => symbolEntry(item.symbol, [`**Why**: ${unknownExplanation(item)}`]))
+}
+
+/** A `###` entry for one whole Symbol: heading, file line, `extraRows`, then the L2 block. */
+function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
+  return [
+    `### ${inlineCode(symbol.name)} *(${symbol.kind})*`,
+    `**File**: ${inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)}`,
+    ...extraRows,
+    ...renderSymbolBlock(symbol).slice(1),
+    "",
+  ]
 }
 
 function unknownExplanation(item: SymbolUnknown): string {
@@ -677,18 +587,10 @@ function unknownExplanation(item: SymbolUnknown): string {
 }
 
 /**
- * Files neither revision analysed, so nothing above says anything about them.
- *
- * Beside Unknown rather than inside it, and for the same reason Unknown sits apart from Added
- * and Removed: an entry is not a change to review but a gap to close. What separates the two
- * is who can close it. An Unknown Symbol needs one revision re-scanned; a file here was missed
- * by both, so the reader is looking at a standing property of the workspace — a bundle over
- * the size cap, a language no plugin claims — that every diff will keep missing until the
- * cause is changed.
- *
- * Both reasons, never one. They can differ, and the pair is what says whether a re-run is
- * enough: `parse-timeout` at the base and `over-size` at the head is one file that timed out
- * once and is permanently too large, which neither half tells you on its own.
+ * Files neither revision analysed. Beside Unknown rather than inside it: an Unknown Symbol
+ * needs one revision re-scanned, while a file here is a standing property of the workspace
+ * every diff will keep missing. Both reasons, never one — `parse-timeout` at the base and
+ * `over-size` at the head says whether a re-run is enough, which neither half does alone.
  */
 function renderNotCompared(files: readonly NotComparedFile[]): string[] {
   if (files.length === 0) return []
@@ -720,55 +622,44 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 }
 
 function renderMoved(items: readonly SymbolMoved[]): string[] {
-  if (items.length === 0) return []
-  return [...items]
-    .sort((a, b) => compareStrings(a.after.id, b.after.id))
-    .map(
-      (m) =>
-        `- ${inlineCode(m.after.name)}: ${inlineCode(m.before.source.file)} → ${inlineCode(m.after.source.file)} (${inlineCode(m.rationale)})`,
-    )
+  return sortByAfterId(items).map(
+    (entry) =>
+      `- ${inlineCode(entry.after.name)}: ${inlineCode(entry.before.source.file)} → ${inlineCode(entry.after.source.file)} (${inlineCode(entry.rationale)})`,
+  )
 }
 
 function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] {
-  if (items.length === 0) return []
-  const toDropped = items.filter((i) => i.direction === "to-dropped")
-  const toKept = items.filter((i) => i.direction === "to-kept")
+  const toDropped = items.filter((entry) => entry.direction === "to-dropped")
+  const toKept = items.filter((entry) => entry.direction === "to-kept")
   const rows: string[] = []
   if (toDropped.length > 0) {
     rows.push(`**${toDropped.length} to-dropped**`)
-    for (const i of toDropped.sort((a, b) => compareStrings(a.after.id, b.after.id))) {
-      rows.push(`- ${inlineCode(i.after.id)} — ${requireDropReason(i.after)}`)
+    for (const entry of sortByAfterId(toDropped)) {
+      rows.push(`- ${inlineCode(entry.after.id)} — ${requireDropReason(entry.after)}`)
     }
   }
   if (toKept.length > 0) {
     if (rows.length > 0) rows.push("")
     rows.push(`**${toKept.length} to-kept**`)
-    for (const i of toKept.sort((a, b) => compareStrings(a.after.id, b.after.id))) {
-      rows.push(`- ${inlineCode(i.after.id)}`)
+    for (const entry of sortByAfterId(toKept)) {
+      rows.push(`- ${inlineCode(entry.after.id)}`)
     }
   }
   return rows
 }
 
 function renderSyntaxOnly(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
-  if (items.length === 0) return []
   return sortByAfterId(items).map(
-    (i) =>
-      `- ${inlineCode(i.after.name)} (${inlineCode(`${i.after.source.file}:${i.after.source.startLine}`)})`,
+    (entry) =>
+      `- ${inlineCode(entry.after.name)} (${inlineCode(`${entry.after.source.file}:${entry.after.source.startLine}`)})`,
   )
 }
 
 /**
- * §12 — the Slice View section. Renders every non-singleton Slice as a `###`
- * subsection followed by member bullets, then collapses singleton Slices into
- * one `<details>` "Standalone changes" block. If the whole list is empty the
- * whole section is skipped (empty body → `appendSection` no-op → §12.5 omit).
- *
- * The `symbols[]` array from the diff is used to look up each member's
- * SymbolChange record for per-bullet detail (status label, file:line, delta /
- * effect summary). Members that do not appear in `symbols[]` are still
- * rendered with just the id so a rendering-side mistake never silently
- * elides a member the pass emitted.
+ * slice-view.md — the Slice View section: every non-singleton Slice as a `###` subsection
+ * with member bullets, then the singletons folded into one "Standalone changes" `<details>`.
+ * Empty input renders nothing. `symbols[]` supplies each member's SymbolChange for the
+ * per-bullet detail.
  */
 function renderSliceView(
   slices: readonly SliceRecord[],
@@ -782,8 +673,7 @@ function renderSliceView(
 
   const rows: string[] = []
   rows.push(...renderUnresolvedCallNote(slices, changeById))
-  for (let i = 0; i < nonSingleton.length; i++) {
-    const slice = nonSingleton[i] as SliceRecord
+  for (const slice of nonSingleton) {
     rows.push(...renderSliceSection(slice, changeById))
     rows.push("---")
     rows.push("")
@@ -798,18 +688,15 @@ function renderSliceView(
     )
     rows.push("")
     for (const slice of singleton) {
-      // members[0] is the Slice anchor (slice-view.md §7.1). Read from members,
-      // never by stripping the `slice:` prefix off `id` — for a record that
-      // broke the derivation that would name a Symbol outside the Slice. This
-      // package renders diffs without depending on the engine that produces
-      // them, so it does not use `sliceAnchor` from @aburi/diff.
+      // members[0] is the Slice anchor (slice-view.md). Read from members, never by
+      // stripping the `slice:` prefix off `id`: for a record that broke the derivation that
+      // would name a Symbol outside the Slice. (`sliceAnchor` lives in @aburi/diff, which
+      // this package does not depend on.)
       const memberId = slice.members[0]
       if (memberId === undefined) {
-        // Same discipline as `requireChangeForMember` below: a broken producer
-        // invariant surfaces here rather than being papered over with a cast.
         throw new Error(
           `projectDiff: slice ${slice.id} has an empty members[]; every Slice has at least one ` +
-            "member and members[0] is its anchor (slice-view.md §11.1).",
+            "member and members[0] is its anchor (slice-view.md).",
         )
       }
       const label = renderSingletonLabel(memberId, slice.id, changeById)
@@ -822,12 +709,9 @@ function renderSliceView(
 }
 
 /**
- * §12.2 — render one non-singleton Slice. The heading uses the full sliceId
- * (surrounded by backticks so Markdown viewers do not try to auto-link the
- * `:` / `/` / `#` inside it) and the member count. Each member becomes a
- * three-line bullet cluster: short qname + status italic, `**File**` line,
- * and a `↳` follow-up summarising which delta axes tripped (or, for added /
- * removed, a short "new symbol" / "removed symbol" marker).
+ * slice-view.md — one non-singleton Slice: the full slice id in a code span (so viewers do
+ * not auto-link the `:` / `/` / `#`) with the member count, then a three-line cluster per
+ * member.
  */
 function renderSliceSection(
   slice: SliceRecord,
@@ -848,15 +732,10 @@ function renderSliceSection(
 }
 
 /**
- * §12.6 — the note that turns `slice-view.md` §5.4's silent drop into something
- * a reviewer can act on. An unresolved call emits no `CallEdge`, so a Slice that
- * "should" have bridged Controller → Service may show up as two singletons
- * instead. The counts come straight from the members' own `calls[].resolved`,
- * which the diff already embeds — no new schema field, no new pass.
- *
- * Only the members' own calls are counted, and that is sufficient: §5.1 draws an
- * edge only when both endpoints are Nodes, so any edge that would have merged
- * two Slices originates at one of the members shown here.
+ * The note that turns slice-view.md's silent drop into something a reviewer can act on: an
+ * unresolved call emits no `CallEdge`, so a Slice that should have bridged two Symbols may
+ * show as two singletons. Counting the members' own `calls[].resolved` is sufficient, since
+ * the Edge set draws an edge only when both endpoints are Nodes.
  */
 function renderUnresolvedCallNote(
   slices: readonly SliceRecord[],
@@ -878,7 +757,7 @@ function renderUnresolvedCallNote(
   const verb = affectedMembers === 1 ? "makes" : "make"
   const calls = unresolvedCalls === 1 ? "1 call" : `${unresolvedCalls} calls`
   return [
-    `> ⚠ ${affectedMembers} of the changed symbols below ${verb} ${calls} the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md §8.1).`,
+    `> ⚠ ${affectedMembers} of the changed symbols below ${verb} ${calls} the resolver could not identify, so a Slice here may be split rather than genuinely disconnected (call-resolution.md).`,
     "",
   ]
 }
@@ -911,12 +790,9 @@ function renderSingletonLabel(
 }
 
 /**
- * Every Slice member is defined as a Node in slice-view.md §4.1, and every
- * Node is emitted by `buildDiff` as a SymbolChange in `diff.symbols[]`. A
- * missing entry therefore means the producer violated the pass invariant
- * ("union of all members equals the Node set", §11.2) — we throw so the
- * mismatch surfaces at render time instead of being silently masked with
- * an "unknown" label the reviewer cannot interpret.
+ * Every Slice member is a Node (slice-view.md) and every Node is a SymbolChange in
+ * `diff.symbols[]` (its emission rules), so a missing entry is a producer bug that surfaces
+ * here rather than as an "unknown" label.
  */
 function requireChangeForMember(
   memberId: SymbolId,
@@ -927,19 +803,22 @@ function requireChangeForMember(
   if (change === undefined) {
     throw new Error(
       `projectDiff: slice ${sliceId} lists member ${memberId} that is not present in diff.symbols[]; ` +
-        `every Slice member must have a corresponding SymbolChange (slice-view.md §11.2).`,
+        `every Slice member must have a corresponding SymbolChange (slice-view.md).`,
     )
   }
   return change
 }
 
 /**
- * Pick the SymbolChange's IRSymbol side that best represents the member's
- * head-visible identity (§4.1): `after` for changed / moved+changed /
- * dropped-toggled, `symbol` for added / removed. Pure `moved` never reaches
- * this function because pure moved Symbols are excluded from the Node set
- * (§4.3), but the switch stays exhaustive to keep TypeScript's type
- * narrowing engaged.
+ * The Symbol a change is reported under (slice-view.md's Node set): `after` where both
+ * sides exist, otherwise the one side the document holds. Pure `moved` is not a Node but is
+ * still indexed.
+ *
+ * A `switch` rather than the two-way test it reduces to, because the two-way test is a
+ * silent default: a status added to `SymbolChange` later that happens to carry an `after`
+ * would compile and be reported under the wrong side of itself, with nothing to catch it.
+ * Spelling out every status makes the addition a compile error at the one place that has to
+ * decide which Symbol the new status is about.
  */
 function symbolForMember(change: SymbolChange): IRSymbol {
   switch (change.status) {
@@ -950,9 +829,10 @@ function symbolForMember(change: SymbolChange): IRSymbol {
     case "changed":
     case "moved+changed":
     case "dropped-toggled":
-      return change.after
     case "moved":
       return change.after
+    default:
+      return assertNeverChange(change)
   }
 }
 
@@ -986,23 +866,7 @@ function deltaAxisSummary(delta: SymbolDelta): string {
 
 function indexChangesById(symbols: readonly SymbolChange[]): Map<SymbolId, SymbolChange> {
   const map = new Map<SymbolId, SymbolChange>()
-  for (const change of symbols) {
-    switch (change.status) {
-      case "added":
-      case "removed":
-      case "unknown":
-        map.set(change.symbol.id, change)
-        break
-      case "changed":
-      case "moved+changed":
-      case "dropped-toggled":
-        map.set(change.after.id, change)
-        break
-      case "moved":
-        map.set(change.after.id, change)
-        break
-    }
-  }
+  for (const change of symbols) map.set(symbolForMember(change).id, change)
   return map
 }
 
@@ -1026,10 +890,8 @@ function renderComponentChanges(diff: DiffResult): string[] {
     rows.push("### Changed")
     for (const ch of diff.components.changed) {
       const fields = changedComponentFields(ch.before, ch.after)
-      // Reachable without a malformed artifact: the key sweep below names an unknown field but
-      // cannot say what it is, and two documents can differ in a field neither this version nor
-      // the sweep's normalization recognises. Naming the component alone is the honest row —
-      // the artifact counted a change this renderer cannot describe.
+      // Two documents can differ in a field neither this version nor the key sweep's
+      // normalization recognises; naming the component alone is the honest row.
       rows.push(
         fields.length === 0
           ? `- ${inlineCode(ch.after.id)}`
@@ -1042,28 +904,13 @@ function renderComponentChanges(diff: DiffResult): string[] {
 }
 
 /**
- * The fields that actually differ between the two revisions of one Component, read from
- * `before` / `after` rather than from `delta`.
- *
- * `delta` summarises three axes (roots, publicApi, frameworks); a Component also carries a
- * display name, a language list and a description, and a change to those leaves all three
- * booleans `false` (diff-algorithm.md §6.1). Those entries did not exist before that section was
- * fixed, so a renderer reading only the booleans had never had to draw one — and would draw it
- * as a row whose colon is followed by nothing. Both halves moved together for that reason.
- *
- * Scalars carry their before → after inline, because that *is* the change, through a code span
- * no value can break out of (`inlineCode`): both are free-form user text out of the config
- * file, and this row reaches a PR comment body through `@aburi/github-action`. The list-valued
- * fields name themselves and leave the values to the artifact, which is what the surrounding
- * section has always done. A comma inside a scalar is why the values are spanned rather than
- * bare: the span is what tells it apart from the `, ` between fields.
- *
- * The six named fields are every field of `Component` except `id`; the sweep after them is what
- * keeps that from being a claim this function cannot honour. `aburi.ir.v1` admits additive
- * fields and `readIR` does not reject the ones it does not know (`assertIRIntegrity` types the
- * declared keys without refusing extras), so an IR written by a newer Aburi reaches an older CLI
- * intact — and `diffComponents` compares the whole record, so it will emit an entry for a field
- * this function has never heard of. It gets named rather than dropped.
+ * The fields that differ between the two revisions of one Component, read from `before` /
+ * `after` rather than `delta`: the delta summarises three axes, and a change to name,
+ * languages or description leaves all three `false` (diff-algorithm.md). Scalars carry
+ * their before → after inline through `inlineCode` (free-form config text that reaches a PR
+ * comment body); list fields name themselves. The sweep after the six named fields covers a
+ * `Component` key added to `aburi.ir.v1` later, which `diffComponents` will report and this
+ * version has never heard of.
  */
 function changedComponentFields(before: Component, after: Component): string[] {
   const fields: string[] = []
@@ -1074,7 +921,7 @@ function changedComponentFields(before: Component, after: Component): string[] {
   if (!sameList(before.publicApi ?? [], after.publicApi ?? [])) fields.push("publicApi")
   if (!sameList(before.languages, after.languages)) fields.push("languages")
   if (!sameList(before.frameworks ?? [], after.frameworks ?? [])) fields.push("frameworks")
-  // Class A (ir-schema.md §1.1): an absent key and `null` are the same answer, so the `??`
+  // Class A (ir-schema.md): an absent key and `null` are the same answer, so the `??`
   // is what keeps an older document that omits the key from reading as a description removal.
   const beforeDescription = before.description ?? null
   const afterDescription = after.description ?? null
@@ -1088,14 +935,10 @@ function changedComponentFields(before: Component, after: Component): string[] {
 }
 
 /**
- * Field names the two revisions disagree on that `changedComponentFields` has no rendering for:
- * a `Component` key added to `aburi.ir.v1` after this version was built.
- *
- * Compared by `JSON.stringify` rather than by the diff layer's canonical serializer, which lives
- * in `@aburi/core` and is not a dependency of this package. The difference only shows on a value
- * whose key order or Unicode form differs between the two sides, and it shows as a field named
- * that a reader can check — noise, where saying nothing would be silence. Nothing reaches here
- * unless `diffComponents` already decided this component changed.
+ * Field names the two revisions disagree on that `changedComponentFields` has no rendering
+ * for. Compared by `JSON.stringify`, since the canonical serializer lives in `@aburi/core`
+ * and is not a dependency here; the difference only shows on key order or Unicode form, as a
+ * named field a reader can check.
  */
 function unknownChangedFields(before: Component, after: Component): string[] {
   // Widened through `unknown`: the keys being read are by definition not on `Component`.
@@ -1139,34 +982,29 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * §6 Dependency changes — split into two levels so reviewers can scan
- * component-shape movement (architectural) separately from method call
- * movement (implementation detail). Both live in the same section heading
- * because both are `Dependency` records under the hood; the sub-headings
- * (`### Component-level added`, `### Symbol-level added`, ...) do the routing.
- * A group that has no entries collapses entirely — an empty section reads as
- * "nothing changed at this level", not as an intentional silence.
- *
- * The Unknown group appended last is the exception to both halves of that: it is not
- * level-routed, because only a Symbol endpoint has a file to lose, and its emptiness means
- * "nothing was unknown" rather than "nothing changed". See `appendUnknownDependencies`.
+ * Dependency changes (markdown-projection.md) — split into component-level (architectural)
+ * and symbol-level (implementation) groups under one heading; an empty group collapses. The
+ * Unknown group appended last is not level-routed, because only a Symbol endpoint has a file
+ * to lose.
  */
 function renderDependencyChanges(diff: DiffResult): string[] {
-  const compAdded = diff.dependencies.added.filter((d) => !isSymbolEdge(d))
-  const compRemoved = diff.dependencies.removed.filter((d) => !isSymbolEdge(d))
-  const symAdded = diff.dependencies.added.filter((d) => isSymbolEdge(d))
-  const symRemoved = diff.dependencies.removed.filter((d) => isSymbolEdge(d))
-
+  const { added, removed } = diff.dependencies
   const rows: string[] = []
-  appendDependencyGroup(rows, "Component-level added", compAdded)
-  appendDependencyGroup(rows, "Component-level removed", compRemoved)
-  appendDependencyGroup(rows, "Symbol-level added", symAdded)
-  appendDependencyGroup(rows, "Symbol-level removed", symRemoved)
-  // `?? []` for a `diff.json` produced before the field existed — the projection is handed
-  // documents it did not write. It flattens the distinction the schema asks readers to keep
-  // ("could not say" vs "nothing was unknown"), which is the right trade here and only here:
-  // the alternative is a section saying a diff might be incomplete on every document older
-  // than this field, for every diff, including the ones that lost nothing.
+  appendDependencyGroup(
+    rows,
+    "Component-level added",
+    added.filter((d) => !isSymbolEdge(d)),
+  )
+  appendDependencyGroup(
+    rows,
+    "Component-level removed",
+    removed.filter((d) => !isSymbolEdge(d)),
+  )
+  appendDependencyGroup(rows, "Symbol-level added", added.filter(isSymbolEdge))
+  appendDependencyGroup(rows, "Symbol-level removed", removed.filter(isSymbolEdge))
+  // `?? []` for a `diff.json` produced before the field existed: the alternative is a section
+  // saying the diff might be incomplete on every older document, including the ones that
+  // lost nothing.
   appendUnknownDependencies(rows, diff.dependencies.unknown ?? [])
   return rows
 }
@@ -1181,12 +1019,8 @@ function appendDependencyGroup(rows: string[], heading: string, deps: readonly D
 }
 
 /**
- * Edges neither revision deleted, listed apart from the ones they did.
- *
- * Not split by level the way the four groups above are: only a Symbol endpoint has a file to
- * lose, so every entry here is a Symbol-level edge by construction. Each line names the file
- * and the reason after the edge, because that is what tells a reviewer whether to re-run
- * (`parse-timeout`) or to fix something (`parse-failed`, `extraction-failed`).
+ * Edges neither revision deleted, each with the lost file and reason, which is what tells a
+ * reviewer whether to re-run (`parse-timeout`) or fix something (`parse-failed`).
  */
 function appendUnknownDependencies(rows: string[], unknown: readonly DependencyUnknown[]): void {
   if (unknown.length === 0) return
@@ -1201,10 +1035,6 @@ function appendUnknownDependencies(rows: string[], unknown: readonly DependencyU
   rows.push("")
 }
 
-function isSymbolEdge(d: Dependency): boolean {
-  return isSymbolIdEndpoint(d.from) || isSymbolIdEndpoint(d.to)
-}
-
 function sortByAfterId<T extends { after: IRSymbol }>(items: readonly T[]): T[] {
-  return [...items].sort((a, b) => (a.after.id < b.after.id ? -1 : a.after.id > b.after.id ? 1 : 0))
+  return [...items].sort((a, b) => compareStrings(a.after.id, b.after.id))
 }

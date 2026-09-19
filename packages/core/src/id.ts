@@ -2,13 +2,20 @@
  * Symbol and Component id construction.
  *
  * This module is the single place in the workspace that mints a branded `SymbolId` or
- * `ComponentId` (ir-schema.md §3.5). Every other package reaches one through the
+ * `ComponentId` (ir-schema.md). Every other package reaches one through the
  * constructors here or through the `isSymbolId` / `isComponentId` guards, so "is this string
  * a well-formed id?" has one implementation rather than one per call site — and an id that
  * reaches the IR has necessarily passed it.
+ *
+ * No path entry point here converts separators: a backslash is refused, never rewritten to
+ * `/`. Whether one is a separator is not decidable from the string, so the conversion belongs
+ * to the caller that knows it holds a native path — `toRelativePosix` in `workspace.ts` shows
+ * the shape, rewriting on the platform separator, which is a separator exactly where a
+ * filename cannot hold one. (This module once rewrote `\` first, which cost the shared rule
+ * its backslash clause and silently renamed any file whose name legitimately held one.)
  */
 import type { ComponentId, LanguageId, SymbolId } from "@aburi/types"
-import { describeCodePoints } from "./codepoints"
+import { describeCodePoints, toNfc } from "./codepoints"
 import { CoreError, type CoreErrorCode } from "./errors"
 
 /** Sentinel qualified name reserved for the lone default export of a module. */
@@ -20,13 +27,13 @@ const LANGUAGE_ID_PATTERN = /^[a-z][a-z0-9]*$/
 /**
  * Language tokens no plugin may claim, because a Symbol id built from them would collide
  * with an id minted in a different namespace. Today that is `slice`: Slice ids are
- * `"slice:" + <anchor Symbol id>` (slice-view.md §7.1), so a `slice` language plugin would
+ * `"slice:" + <anchor Symbol id>` (slice-view.md), so a `slice` language plugin would
  * produce Symbol ids indistinguishable from Slice ids, and deriving a Slice id from one of
  * them would yield `slice:slice:...`. The brand on `SymbolId` / `SliceId` keeps the two
  * apart inside typed code; this keeps them apart on the wire.
  *
  * Exported so `checkIRIntegrity` can enforce the same list on a document it did not build
- * (ir-schema.md §14 invariant #16) without a second copy of it.
+ * (ir-schema.md invariant #16) without a second copy of it.
  */
 export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 
@@ -50,7 +57,7 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
  * The ASCII-only grammar this replaces refused names `schema/aburi.ir.v1.json#/$defs/SymbolId`
  * already accepts — its pattern is `^[a-z][a-z0-9]*:[^#\\]+#[^\\]+$` — so a Japanese or
  * accented declaration threw here and cost its whole file at the per-file boundary. Widening
- * closes a gap between the two rather than opening one, and `lang-plugin.md` §3.2 says a qname
+ * closes a gap between the two rather than opening one, and `lang-plugin.md` says a qname
  * the grammar cannot express is a reason to widen the grammar rather than to work around it.
  *
  * What it still refuses is what is not a name at all: a destructuring pattern's text, a
@@ -71,7 +78,7 @@ const ABSOLUTE_PATH_PATTERN = /^([/\\]|[A-Za-z]:)/
  * ASCII kebab-case, matching `aburi.ir.v1.json#/$defs/ComponentId`.
  *
  * A segment may start with a digit. Component ids are derived by kebab-casing a package or
- * directory name (component-detect.md §4.1), and `3d-force-graph` / `7zip-bin` are ordinary
+ * directory name (component-detect.md), and `3d-force-graph` / `7zip-bin` are ordinary
  * npm package names — a letter-first rule would make the documented derivation partial for
  * no gain, since nothing distinguishes a Component id by its first character.
  */
@@ -128,7 +135,7 @@ export function makeSymbolId(parts: SymbolIdParts): SymbolId {
  * concatenated the parts by hand.
  *
  * A refusal is therefore never silently lossy *provided* every id in the set went through
- * `makeSymbolId` too — which invariant #17 (ir-schema.md §14) is what guarantees, including
+ * `makeSymbolId` too — which invariant #17 (ir-schema.md) is what guarantees, including
  * for a document read off disk.
  */
 export function trySymbolId(parts: SymbolIdParts): SymbolId | null {
@@ -140,12 +147,12 @@ export function trySymbolId(parts: SymbolIdParts): SymbolId | null {
 /**
  * Build a Component id. The kebab-case shape is what `components[].id` is validated against
  * on the wire, and what tells a Component endpoint apart from a Symbol endpoint in
- * `dependencies[]` (ir-schema.md §11).
+ * `dependencies[]` (ir-schema.md).
  */
 export function makeComponentId(raw: string): ComponentId {
   if (!COMPONENT_ID_PATTERN.test(raw)) {
     throw new CoreError(
-      `Component id "${raw}" violates the ASCII kebab-case pattern required by ir-schema.md §4`,
+      `Component id "${raw}" violates the ASCII kebab-case pattern required by ir-schema.md`,
       { code: "invalid-component-id", value: raw },
     )
   }
@@ -277,13 +284,9 @@ export function isDefaultExportQname(qname: string): boolean {
 
 /**
  * Validate a path that is already POSIX-separated, and normalize it to NFC. This is the file
- * walk's entry point (ir-schema.md §1.2): what it returns becomes a `symbols[].source.file`, or
- * a `stats.skippedFiles[].path` for a file the walk gave up on.
- *
- * It does not convert separators, and a backslash reaching it is refused rather than rewritten.
- * Whether one is a separator is not decidable from the string, so the conversion belongs to the
- * caller that knows it holds a native path — see `normalizeToNfc` for what that cost while it
- * happened here.
+ * walk's entry point (ir-schema.md): what it returns becomes a `symbols[].source.file`, or
+ * a `stats.skippedFiles[].path` for a file the walk gave up on. Converts no separators (see
+ * the module header).
  *
  * The shared path rule only. It does **not** answer whether a Symbol from that file could be
  * given an id: `:` and `#` are legal in a POSIX filename and legal in every path the Document
@@ -303,7 +306,7 @@ export function isDefaultExportQname(qname: string): boolean {
  * expected to copy.
  */
 export function toDocumentPath(rawPath: string): string {
-  const normalized = normalizeToNfc(rawPath)
+  const normalized = toNfc(rawPath)
   const violation = posixWorkspaceRelativeViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -391,28 +394,8 @@ export function symbolIdSeparatorSite(path: string): SymbolIdSeparatorSite | nul
 }
 
 /**
- * NFC, and nothing else: `toDocumentPath` above and `toPosixRelative` below share it, so the id
- * built from a path is spelled by the same string the Document records it as.
- *
- * It used to rewrite `\` into `/` first, on the theory that a caller might be holding a native
- * path. That cost the shared rule its backslash clause — the check ran on a string the character
- * had already been spent in — and silently renamed any file whose name legitimately held one.
- * Converting a native path is the caller's job because only the caller knows it has one;
- * `toRelativePosix` in `workspace.ts` shows the shape, rewriting on the platform separator,
- * which is a separator exactly where a filename cannot hold one.
- *
- * Shared by the two rather than one composed out of the other, so each applies its own rule and
- * reports it with its own subject. Layered, a path that breaks the shared rule
- * would be described by whichever function ran first, and a caller assembling a Symbol id would
- * be told about a "path".
- */
-function normalizeToNfc(rawPath: string): string {
-  return rawPath.normalize("NFC")
-}
-
-/**
  * Validate a path that is already POSIX-separated against the form `Symbol.id` requires, and
- * normalize it to NFC. Like `toDocumentPath`, it converts no separators.
+ * normalize it to NFC. Like `toDocumentPath`, it converts no separators (module header).
  *
  * The shared path rule plus the id rule, where `toDocumentPath` applies the shared rule alone:
  * what this returns can be the file segment of a Symbol id, where what that returns can only be
@@ -428,7 +411,7 @@ function normalizeToNfc(rawPath: string): string {
  * was building, and the more useful of the two subjects to be told about.
  */
 export function toPosixRelative(rawPath: string): string {
-  const normalized = normalizeToNfc(rawPath)
+  const normalized = toNfc(rawPath)
   const violation = symbolIdPathViolation(normalized)
   if (violation !== null) {
     throw new CoreError(violation.message, { code: violation.code, value: violation.value })
@@ -437,7 +420,7 @@ export function toPosixRelative(rawPath: string): string {
 }
 
 /**
- * Put every part into Unicode NFC — the form ir-schema.md §1.2 defines every Document
+ * Put every part into Unicode NFC — the form ir-schema.md defines every Document
  * string to be in, and the reason an id in memory and the same id on disk are one string.
  *
  * It runs before validation rather than after, so `symbolIdViolation` — which rejects a
@@ -453,9 +436,9 @@ export function toPosixRelative(rawPath: string): string {
  */
 function normalizeParts(parts: SymbolIdParts): SymbolIdParts {
   return {
-    language: parts.language.normalize("NFC"),
-    file: parts.file.normalize("NFC"),
-    qualifiedName: parts.qualifiedName.normalize("NFC"),
+    language: toNfc(parts.language),
+    file: toNfc(parts.file),
+    qualifiedName: toNfc(parts.qualifiedName),
   }
 }
 
@@ -511,10 +494,10 @@ function unnormalizedViolation(parts: SymbolIdParts): GrammarViolation | null {
     ["file", parts.file],
     ["qualified name", parts.qualifiedName],
   ] as const) {
-    if (raw === raw.normalize("NFC")) continue
+    if (raw === toNfc(raw)) continue
     return {
       code: "invalid-symbol-id",
-      message: `Symbol id ${field} ${describeCodePoints(raw)} is not in Unicode NFC; write it as ${describeCodePoints(raw.normalize("NFC"))}`,
+      message: `Symbol id ${field} ${describeCodePoints(raw)} is not in Unicode NFC; write it as ${describeCodePoints(toNfc(raw))}`,
       value: raw,
     }
   }
@@ -550,7 +533,7 @@ const SYMBOL_ID_PATH_SUBJECT = "Symbol id file path"
  * naming somewhere inside the workspace.
  *
  * Exported because `checkIRIntegrity` asks the same question of a document it did not build
- * (ir-schema.md §14 invariant #10), and one implementation is what keeps the two answers
+ * (ir-schema.md invariant #10), and one implementation is what keeps the two answers
  * equal. A path leaving the workspace is refused because the Document claims to describe
  * that workspace: `workspace.root` anchors every other path in it, so a `..` root or
  * `source.file` names something the Document has no way to be about.
@@ -630,7 +613,7 @@ function symbolIdPathViolation(path: string): GrammarViolation | null {
   if (symbolIdSeparatorSite(path) !== null) {
     return {
       code: "non-posix-path",
-      message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md §3.1)`,
+      message: `${SYMBOL_ID_PATH_SUBJECT} "${path}" contains ":" or "#", the two Symbol id separators (ir-schema.md)`,
       value: path,
     }
   }
@@ -638,7 +621,7 @@ function symbolIdPathViolation(path: string): GrammarViolation | null {
 }
 
 /**
- * Does a string satisfy the qualified-name grammar of ir-schema.md §3.1?
+ * Does a string satisfy the qualified-name grammar of ir-schema.md?
  *
  * `Symbol.name` carries a qualified name too, and `lastQnameSegment` is called on it by
  * `apiFingerprint` and by two framework classifiers. Nothing ties it to the qname inside
@@ -654,7 +637,7 @@ export function isQualifiedName(value: string): boolean {
  *
  * For a producer holding a *candidate* name with somewhere to go other than a throw. A
  * language plugin reads names the grammar has no segment for — a quoted or numeric class
- * member, a computed one — and for those `ir-schema.md` §3.2 says no Symbol rather than an
+ * member, a computed one — and for those `ir-schema.md` says no Symbol rather than an
  * error, so the plugin has to ask before it builds. Without this it could only build and
  * catch, and catching an id-builder throw means catching every other reason one is thrown.
  *

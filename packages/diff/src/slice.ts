@@ -1,15 +1,16 @@
 import { type CallEdge, computeWeaklyConnectedComponents, RESERVED_LANGUAGE_IDS } from "@aburi/core"
 import type { SliceId, SliceRecord, SymbolChange, SymbolId } from "@aburi/types"
 import { DiffError } from "./errors"
+import { representativeSymbol } from "./status"
 
-/** The three inputs of the Slice View pass — docs/design/slice-view.md §3. */
+/** The three inputs of the Slice View pass — docs/design/slice-view.md. */
 export interface SliceInput {
   /** SymbolChange records produced by `buildDiff` (pre-sort is not required). */
   changes: readonly SymbolChange[]
   /**
    * Resolved call edges from the base IR. Typically produced by
    * `reconstructCallEdgesFromIR(baseIR)` inside `buildDiff` — Slice View
-   * consumes only resolved edges (§5.4), never `Symbol.calls[]` directly.
+   * consumes only resolved edges, never `Symbol.calls[]` directly.
    */
   baseCallEdges: readonly CallEdge[]
   /** Resolved call edges from the head IR (same source rule as base). */
@@ -17,7 +18,7 @@ export interface SliceInput {
 }
 
 /**
- * Slice View clustering pass — docs/design/slice-view.md §2, §4–§8.
+ * Slice View clustering pass — docs/design/slice-view.md.
  *
  * Groups the changed-Symbol set of a diff into weakly-connected components
  * over the union of base and head call edges. Emits a `SliceRecord[]` whose
@@ -28,12 +29,12 @@ export interface SliceInput {
  * Determinism, idempotence, input-order insensitivity, and locality are all
  * guaranteed — see `computeWeaklyConnectedComponents` in `@aburi/core`.
  *
- * Returns `[]` when no SymbolChange is Node-eligible per §4.1; callers should
+ * Returns `[]` when no SymbolChange is Node-eligible; callers should
  * still serialise the empty array — the Markdown projection omits the section
- * (§9.4 / §12.5) but the JSON always emits the key so consumers never
- * distinguish "field absent" from "no slices" (§11.2).
+ * but the JSON always emits the key so consumers never
+ * distinguish "field absent" from "no slices".
  *
- * Every returned record has passed `assertSliceRecordInvariant` (§7.4).
+ * Every returned record has passed `assertSliceRecordInvariant`.
  */
 export function computeSlices(input: SliceInput): SliceRecord[] {
   const nodeIds = collectNodeIds(input.changes)
@@ -50,7 +51,7 @@ export function computeSlices(input: SliceInput): SliceRecord[] {
 const SLICE_ID_PREFIX = "slice:"
 
 /**
- * §7.1 — the single place production code derives a Slice id. Everything else
+ * The single place production code derives a Slice id. Everything else
  * in `src/` either receives an id or renders one. (Tests spell the prefix out
  * literally on purpose: an expectation written in terms of the function under
  * test would agree with it no matter what it produced.)
@@ -66,7 +67,7 @@ function sliceIdFor(anchor: SymbolId): SliceId {
 
 /**
  * Build one SliceRecord from an ascending-sorted component and check its own
- * post-condition before letting it out (§7.4 layer 1).
+ * post-condition before letting it out (slice-view.md, enforcement layer 1).
  *
  * The check is not defending against untrusted input — this function builds
  * the id itself, so the derivation clause is true by construction here and
@@ -82,7 +83,7 @@ function makeSliceRecord(members: readonly SymbolId[]): SliceRecord {
   if (anchor === undefined) {
     throw new DiffError(
       "computeSlices: the clustering utility returned an empty component; every weakly-connected " +
-        "component contains at least the node that seeded it (slice-view.md §6).",
+        "component contains at least the node that seeded it (slice-view.md).",
       { code: "slice-invariant-violated" },
     )
   }
@@ -92,7 +93,7 @@ function makeSliceRecord(members: readonly SymbolId[]): SliceRecord {
 }
 
 /**
- * §7.1 — the anchor of a Slice: its lexicographically smallest member.
+ * The anchor of a Slice: its lexicographically smallest member.
  *
  * Answers from `members[0]`. `id` is derived from the anchor, so
  * reconstructing the anchor by stripping the `"slice:"` prefix is circular at
@@ -113,17 +114,17 @@ export function sliceAnchor(record: SliceRecord): SymbolId {
   return anchor
 }
 
-/** Which clause of the §7.1 / §8.2 invariant a `SliceRecord` broke. */
+/** Which clause of the slice-view.md derivation invariant a `SliceRecord` broke. */
 export type SliceViolationKind =
   /** Not a `SliceRecord` at all: not an object, or `id` / `members` of the wrong type. */
   | "malformed-shape"
-  /** `members[]` has no entries, so the Slice has no anchor (§11.1). */
+  /** `members[]` has no entries, so the Slice has no anchor. */
   | "members-empty"
-  /** `members[]` is not in strictly ascending order, so `members[0]` need not be the smallest (§8.2, §11.1). */
+  /** `members[]` is not in strictly ascending order, so `members[0]` need not be the smallest. */
   | "members-unordered"
-  /** `id` is not `"slice:" + members[0]` (§7.1). */
+  /** `id` is not `"slice:" + members[0]`. */
   | "id-not-derived"
-  /** The anchor is itself in a reserved id namespace, so `id` would read as a doubled prefix (§7.5). */
+  /** The anchor is itself in a reserved id namespace, so `id` would read as a doubled prefix. */
   | "anchor-in-reserved-namespace"
 
 export interface SliceRecordViolation {
@@ -135,12 +136,12 @@ export interface SliceRecordViolation {
 }
 
 /**
- * Report which clause of the §7.1 / §8.2 invariant a value breaks, or `null`
+ * Report which clause of the slice-view.md derivation invariant a value breaks, or `null`
  * when it is a well-formed `SliceRecord`. Non-throwing counterpart of
  * `assertSliceRecordInvariant`: the pass wants an exception, a schema
  * validator wants a verdict it can turn into its own error.
  *
- * Takes `unknown` rather than `SliceRecord` deliberately. §7.4 layer 2 points
+ * Takes `unknown` rather than `SliceRecord` deliberately. Enforcement layer 2 points
  * this at documents written by third-party or older producers — data that has
  * not been type-checked by definition — so anything that assumed a well-typed
  * argument would crash on exactly the input it exists to reject.
@@ -184,7 +185,7 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
       subject,
       message:
         `SliceRecord anchor "${anchor}" uses the reserved language token "${reservedAnchor}", ` +
-        `so its Slice id would repeat the prefix (ir-schema.md §3.5, slice-view.md §7.5).`,
+        `so its Slice id would repeat the prefix (ir-schema.md, slice-view.md).`,
     }
   }
   for (let i = 1; i < members.length; i++) {
@@ -197,7 +198,7 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
       message:
         `SliceRecord ${subject}: members[] is not in strictly ascending order at index ${i} ` +
         `("${current}" follows "${previous}"), so members[0] is not necessarily the anchor ` +
-        `(slice-view.md §8.2 for the order, §11.1 for uniqueness).`,
+        `(slice-view.md for the order and uniqueness).`,
     }
   }
   // The one place outside `sliceIdFor` that asserts an id brand, and the reason this
@@ -211,7 +212,7 @@ export function sliceRecordViolation(value: unknown): SliceRecordViolation | nul
       subject,
       message:
         `SliceRecord id "${id}" is not derived from the anchor "${anchor}"; ` +
-        `expected "${expected}" (slice-view.md §7.1).`,
+        `expected "${expected}" (slice-view.md).`,
     }
   }
   return null
@@ -232,7 +233,7 @@ function emptyMembersViolation(subject: string): SliceRecordViolation {
     subject,
     message:
       `SliceRecord ${subject}: members[] is empty, so the Slice has no anchor ` +
-      `(slice-view.md §11.1 requires at least one member).`,
+      `(slice-view.md requires at least one member).`,
   }
 }
 
@@ -251,58 +252,55 @@ export function assertSliceRecordInvariant(record: SliceRecord): void {
 }
 
 /**
- * §4.1 Node selection: keep every SymbolChange whose status is
- * added / removed / changed / moved+changed / dropped-toggled. The identity
- * is the head-side Symbol id where present (added / changed / moved+changed /
- * dropped-toggled), the base-side id for removed. Pure moved and unchanged
- * (already stripped upstream) are excluded — §4.1 / §4.3.
+ * Node selection: every SymbolChange except pure `moved`, identified by its
+ * representative Symbol — the head side where present, the base side for `removed`.
+ * `unknown` is a thing a reviewer has to look at, so it belongs in the cluster its
+ * neighbours are in. Not deduplicated: `buildDiff` never mentions one id twice, and the
+ * WCC primitive coalesces an accidental duplicate anyway.
  *
- * The returned array is deliberately not deduplicated: a well-formed
- * SymbolChange list from `buildDiff` never mentions the same Symbol id
- * twice, and Union-Find would coalesce any accidental duplicate anyway.
+ * Written as a `switch` over every status rather than as "everything but `moved`", because
+ * the second spelling admits a status added to `SymbolChange` later without anyone deciding
+ * whether it is a Node. Node membership is what the whole pass is built on — a status
+ * silently joining the set would move Slice boundaries and the ids derived from them — so
+ * the addition has to fail the build here.
  */
 function collectNodeIds(changes: readonly SymbolChange[]): SymbolId[] {
   const ids: SymbolId[] = []
   for (const change of changes) {
-    const id = nodeIdOf(change)
-    if (id === null) continue
-    ids.push(id)
+    switch (change.status) {
+      case "added":
+      case "removed":
+      case "unknown":
+      case "changed":
+      case "moved+changed":
+      case "dropped-toggled":
+        ids.push(representativeSymbol(change).id)
+        break
+      case "moved":
+        // Not a Node, and not an intermediate connector either (slice-view.md): a pure move
+        // leaves the semantic surface unchanged, so clustering it would be noise.
+        break
+      default:
+        return assertNeverChange(change)
+    }
   }
   return ids
 }
 
-function nodeIdOf(change: SymbolChange): SymbolId | null {
-  switch (change.status) {
-    case "added":
-      return change.symbol.id
-    case "removed":
-      // §4.1 — removed uses base-side id because there is no head symbol.
-      return change.symbol.id
-    case "unknown":
-      // The one side that exists carries the id, as for added / removed. An unknown entry
-      // is a thing a reviewer has to look at, so it belongs in the cluster its neighbours
-      // are in — a Symbol whose file went missing is most useful read beside the callers
-      // that still reference it.
-      return change.symbol.id
-    case "changed":
-    case "moved+changed":
-    case "dropped-toggled":
-      return change.after.id
-    case "moved":
-      // §4.3 — pure moved is not a Node and is not used for bridging either.
-      return null
-  }
-  // Exhaustive: if SymbolChange grows a new status the compile error above
-  // fires before this fallback is reachable.
+function assertNeverChange(change: never): never {
+  throw new Error(
+    `computeSlices: unhandled SymbolChange status ${JSON.stringify(change)}; every status has ` +
+      "to declare whether it is a Slice Node (slice-view.md).",
+  )
 }
 
 /**
- * §5.1 Edge selection: union of base and head, restricted to edges whose
+ * Edge selection: union of base and head, restricted to edges whose
  * BOTH endpoints are Nodes, canonicalised to `(u, v)` with `u < v` (self-
  * loops implicitly dropped). Multi-edges collapse naturally inside the WCC
  * primitive — no explicit dedup needed.
  *
- * The union is the load-bearing rule of §5.3: a controller that called an
+ * The union is the load-bearing rule of slice-view.md: a controller that called an
  * old service in base and a new service in head needs both edges to land
  * all three Symbols in a single Slice.
  */

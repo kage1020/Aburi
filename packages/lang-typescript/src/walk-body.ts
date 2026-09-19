@@ -8,23 +8,16 @@ import {
   type WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, findChild, hasErrorChild } from "./ast-helpers"
+import { bodyNodesOf, findChild, hasErrorChild, thrownValue, walkDescendants } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
-import { decodeStringLiteral } from "./string-escape"
+import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
  *
- * Rule extraction follows the design contract:
- *   - `guard`: an `if` statement whose body contains an early exit (`throw`, `return`,
- *     `continue`, `break`, `process.exit`).
- *   - `throw`: a bare `throw new X(...)` reachable from the body.
- *   - `return`: only non-trivial return values (literals / identifiers / member chains /
- *     unary + trivial / call-only returns are all dropped per drop-list §5.3-§5.5).
- *   - `loop`: `for` / `for...in` / `for...of` / `while` / `do...while`.
- *   - `try`: try / catch / finally — the catch body's contents do NOT feed the same
- *     Symbol's rules.
- *   - `switch`: switch statement.
+ * Which statements become rules, and which returns are too trivial to, is the drop-list
+ * contract (`drop-list.md`); `visitNode` is the switch that applies it. A `catch`
+ * body's contents do not feed the same Symbol's rules (`ir-schema.md`).
  *
  * Calls are every call_expression whose callee we can normalize. `await` and `new`
  * modifiers surface as flags; each argument's literal value (if any) is captured on
@@ -40,7 +33,7 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
     // declaration, and a fold can put a class body on a Symbol another declaration heads.
     const owner = body.type === "class_body" ? body.parent : null
     if (owner !== null) visitOwnClassBody(owner, body, rules, calls)
-    else visit(body, rules, calls)
+    else visitNode(body, rules, calls)
   }
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
@@ -50,7 +43,8 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
 /**
  * A class Symbol's own body: what **defining and constructing** the class runs, per
  * `lang-plugin.md` LP20a–LP20f. Field initialisers, static blocks and the constructor stay; a
- * member whose body another Symbol records does not.
+ * member whose body another Symbol records does not — and which members those are is
+ * `memberSymbolSegment`'s one answer, shared with extraction.
  *
  * Only the *body* is skipped, never the member. A member's `bodyNode` is whatever its `body`
  * field holds — a `statement_block` for a method, the expression itself for an
@@ -72,7 +66,7 @@ function visitOwnClassBody(
   for (const member of body.namedChildren) {
     if (member === null) continue
     const memberBody = memberBodySkippedHere(classNode, member)
-    if (memberBody === null) visit(member, rules, calls)
+    if (memberBody === null) visitNode(member, rules, calls)
     else visitExcluding(member, memberBody, rules, calls)
   }
 }
@@ -88,19 +82,19 @@ function visitOwnClassBody(
  *
  * Descending an ancestor instead of visiting it reports nothing for the ancestor itself, which
  * is what is wanted: the only nodes on the path are the member and the function it holds, and
- * `visit` has no arm for either.
+ * `visitNode` has no arm for either.
  */
 function visitExcluding(node: Node, skipped: Node, rules: Rule[], calls: CallCandidate[]): void {
   for (const part of node.namedChildren) {
     // By `id`, not by reference: a field read and a children read of the same node hand back
     // different JS wrappers, so `===` never matches. `Node.equals()` answers the same question
     // and would do; `id` is a field read rather than a call across the WASM boundary
-    // (`lang-plugin.md` §8.2). Not by type: a `method_definition` has exactly one
+    // (`lang-plugin.md`). Not by type: a `method_definition` has exactly one
     // `statement_block` today, but a member shape carrying a second would start dropping it
     // without a word.
     if (part === null || part.id === skipped.id) continue
     if (isAncestorOf(part, skipped)) visitExcluding(part, skipped, rules, calls)
-    else visit(part, rules, calls)
+    else visitNode(part, rules, calls)
   }
 }
 
@@ -121,13 +115,13 @@ function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
   return (functionValuedField(member) ?? member).childForFieldName("body")
 }
 
-function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   switch (node.type) {
     case "if_statement":
       handleIfStatement(node, rules, calls)
       return
     case "throw_statement":
-      rules.push(makeRule("throw", node, { what: extractThrowWhat(node) }))
+      rules.push(makeRule("throw", node, { what: thrownValue(node)?.node.text ?? null }))
       visitCallsInside(node, calls)
       return
     case "return_statement":
@@ -149,7 +143,7 @@ function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {
     case "try_statement":
       rules.push(makeRule("try", node))
       // Only the try block's statements contribute rules/calls; catch/finally are skipped
-      // per ir-schema §8.1 so a rewritten error handler does not perturb the logic axis.
+      // per ir-schema.md so a rewritten error handler does not perturb the logic axis.
       handleTryStatement(node, rules, calls)
       return
     case "switch_statement":
@@ -170,7 +164,7 @@ function visit(node: Node, rules: Rule[], calls: CallCandidate[]): void {
 function visitChildren(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   for (const child of node.namedChildren) {
     if (child === null) continue
-    visit(child, rules, calls)
+    visitNode(child, rules, calls)
   }
 }
 
@@ -218,7 +212,7 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
 
 function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   const body = node.childForFieldName("body")
-  if (body !== null) visit(body, rules, calls)
+  if (body !== null) visitNode(body, rules, calls)
 }
 
 function handleCall(node: Node, calls: CallCandidate[]): void {
@@ -255,7 +249,7 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
 }
 
 /**
- * Trivial expression detector matching drop-list §5.5 exactly. Anything that reads like a
+ * Trivial expression detector matching drop-list.md exactly. Anything that reads like a
  * simple identifier / literal / member chain / unary wrap should NOT surface as a return
  * rule. Everything else does.
  */
@@ -292,10 +286,7 @@ function isTrivialExpr(node: Node): boolean {
 }
 
 function containsEarlyExit(node: Node): boolean {
-  const stack: Node[] = [node]
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (current === undefined) break
+  for (const current of walkDescendants(node)) {
     switch (current.type) {
       case "return_statement":
       case "throw_statement":
@@ -304,12 +295,9 @@ function containsEarlyExit(node: Node): boolean {
         return true
       case "call_expression": {
         const callee = current.childForFieldName("function")
-        if (callee !== null && normalizeCallee(callee) === "process.exit") return true
+        if (callee !== null && describeCallee(callee)?.target === "process.exit") return true
         break
       }
-    }
-    for (const child of current.namedChildren) {
-      if (child !== null) stack.push(child)
     }
   }
   return false
@@ -322,7 +310,7 @@ function containsEarlyExit(node: Node): boolean {
  * eventually in `Symbol.calls[].target` and `Symbol.effects[].target`. The
  * two flags beside it are passengers: neither is serialized, and neither
  * changes what `target` says. What the *string* says is wire-visible — a
- * bracket access contributes a segment (`lang-plugin.md` §4.4), and the logic
+ * bracket access contributes a segment (`lang-plugin.md`), and the logic
  * fingerprint reads `effects[].target`, so a change here moves IR bytes.
  */
 interface CalleeShape {
@@ -330,7 +318,7 @@ interface CalleeShape {
   /**
    * The receiver was positively identified as an expression rather than a name
    * (`getRepo().save()`, `items[0].save()`, `(a ?? b).save()`). Such a call can
-   * never resolve in the untyped tier, and `call-resolution.md` §8.1 wants it
+   * never resolve in the untyped tier, and `call-resolution.md` wants it
    * reported as `dynamic` rather than lumped in with genuine typos.
    */
   dynamic: boolean
@@ -414,7 +402,7 @@ function describeCallee(node: Node): CalleeShape | null {
  *
  * Position is not part of the question. The index of `handlers["run"]()` names the property
  * being called exactly as the one in `prisma["user"].create()` names the receiver, so the
- * terminal slot folds by the same rule (`lang-plugin.md` §4.4).
+ * terminal slot folds by the same rule (`lang-plugin.md`).
  *
  * Everything else — an identifier, a number, a substituting template, a string the
  * qualified-name grammar has no segment for — is null, and the caller writes
@@ -433,10 +421,6 @@ function subscriptSegment(node: Node): string | null {
   return whole && isQnameSegment(value) ? value : null
 }
 
-function normalizeCallee(node: Node): string | null {
-  return describeCallee(node)?.target ?? null
-}
-
 function extractLiteral(node: Node): string | null {
   switch (node.type) {
     case "number":
@@ -445,36 +429,15 @@ function extractLiteral(node: Node): string | null {
     case "null":
     case "undefined":
       return node.text
-    case "string": {
-      const parts: string[] = []
-      for (const child of node.namedChildren) {
-        if (child === null) continue
-        if (child.type === "string_fragment") parts.push(child.text)
-      }
-      if (parts.length > 0) return parts.join("")
-      const raw = node.text
-      return raw.length >= 2 ? raw.slice(1, -1) : raw
-    }
+    case "string":
+      return decodeStringLiteralOrRaw(node)
     default:
       return null
   }
 }
 
 function isUnderAwait(node: Node): boolean {
-  const parent = node.parent
-  if (parent === null) return false
-  if (parent.type === "await_expression") return true
-  return false
-}
-
-function extractThrowWhat(node: Node): string | null {
-  const arg = node.namedChild(0)
-  if (arg === null) return null
-  if (arg.type === "new_expression") {
-    const ctor = arg.childForFieldName("constructor")
-    if (ctor !== null) return ctor.text
-  }
-  return arg.text
+  return node.parent?.type === "await_expression"
 }
 
 function extractSwitchCondition(node: Node): string | null {

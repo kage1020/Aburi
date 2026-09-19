@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 import { SCHEMA_DIR } from "../scripts/codegen-lib"
 
 /**
- * `docs/design/ir-schema.md` §1.1 splits every optional IR property into Class A
+ * `docs/design/ir-schema.md` splits every optional IR property into Class A
  * (nullable — the key is always written, carrying `null` when there is no value) and
  * Class B (non-nullable — the key's presence is itself the signal). The split follows
  * mechanically from the declared type, but which one a property means only reaches a
@@ -75,7 +75,7 @@ function optionalProperties(schema: SchemaNode): OptionalProperty[] {
  * `$ref` to a definition that does. Following the `$ref` matters: `ExtKind` is a nullable
  * `$def`, so a future optional written as a bare `{"$ref": "#/$defs/ExtKind"}` would look
  * non-nullable to a shallow check and get told to declare itself Class B, the opposite of
- * what §1.1 says. Resolution is one hop deep, which covers every `$ref` shape in v1.
+ * what `ir-schema.md` says. Resolution is one hop deep, which covers every `$ref` shape in v1.
  */
 function admitsNull(node: SchemaNode, defs: Record<string, SchemaNode>): boolean {
   const resolved = node.$ref !== undefined ? defs[node.$ref.replace("#/$defs/", "")] : undefined
@@ -85,7 +85,7 @@ function admitsNull(node: SchemaNode, defs: Record<string, SchemaNode>): boolean
   return [...(node.oneOf ?? []), ...(node.anyOf ?? [])].some((branch) => admitsNull(branch, defs))
 }
 
-describe("aburi.ir.v1 optional-property conventions (ir-schema.md §1.1)", () => {
+describe("aburi.ir.v1 optional-property conventions (ir-schema.md)", () => {
   it("every optional property declares its absent-vs-null convention in `description`", async () => {
     const undeclared = optionalProperties(await readIrSchema())
       .filter(({ property }) => (property.description ?? "").trim() === "")
@@ -93,10 +93,11 @@ describe("aburi.ir.v1 optional-property conventions (ir-schema.md §1.1)", () =>
 
     expect(
       undeclared,
-      "Optional properties must state which class of ir-schema.md §1.1 they belong to: " +
+      "Optional properties must state which class of ir-schema.md they belong to: " +
         "Class A (nullable — writers always emit the key, carrying null) or " +
         "Class B (non-nullable — writers omit the key entirely). Add it to the property's " +
-        "`description` in schema/aburi.ir.v1.json and to the §1.1 table.",
+        "`description` in schema/aburi.ir.v1.json and to the Class A / Class B table of " +
+        "ir-schema.md.",
     ).toEqual([])
   })
 

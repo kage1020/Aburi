@@ -237,7 +237,7 @@
         "command": {
           "type": "string",
           "minLength": 1,
-          "description": "Server binary. PATH-resolvable or absolute path. Missing binaries trigger per-language fallback (lsp-enrichment.md §6.1)."
+          "description": "Server binary. PATH-resolvable or absolute path. Missing binaries trigger per-language fallback (lsp-enrichment.md)."
         },
         "args": {
           "type": "array",
@@ -249,13 +249,13 @@
           "type": "integer",
           "minimum": 100,
           "default": 10000,
-          "description": "Handshake timeout (lsp-enrichment.md §4.4). Default 10 s absorbs cold-disk starts."
+          "description": "Handshake timeout (lsp-enrichment.md). Default 10 s absorbs cold-disk starts."
         },
         "requestTimeoutMs": {
           "type": "integer",
           "minimum": 50,
           "default": 500,
-          "description": "Per-request timeout. Exceeding requests fall back per-request (lsp-enrichment.md §6.1). Default 500 ms."
+          "description": "Per-request timeout. Exceeding requests fall back per-request (lsp-enrichment.md). Default 500 ms."
         },
         "fileBudgetMs": {
           "type": "integer",
@@ -267,7 +267,7 @@
           "type": "integer",
           "minimum": 1,
           "default": 8,
-          "description": "Max in-flight requests per file (lsp-enrichment.md §4.3)."
+          "description": "Max in-flight requests per file (lsp-enrichment.md)."
         },
         "initializationOptions": {
           "type": "object",

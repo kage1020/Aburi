@@ -1,7 +1,7 @@
+import { component, fp, makeIR, makeSymbol } from "@aburi/test-support"
 import type { Component, IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, DiffError } from "../src"
-import { component, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
  * `buildDiff` is public API and ran no integrity check, so an IR a caller assembled in memory

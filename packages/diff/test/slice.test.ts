@@ -1,4 +1,5 @@
 import type { CallEdge } from "@aburi/core"
+import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "@aburi/test-support"
 import type { Confidence, Effect, SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { DiffError } from "../src/errors"
@@ -9,13 +10,13 @@ import {
   sliceAnchor,
   sliceRecordViolation,
 } from "../src/slice"
-import { fp, makeSymbol, sliceId, symbolId, zeroFp } from "./fixtures"
 
 /**
  * Slice View pass acceptance tests. These map to SV1–SV21 and SV23 / SV25 in
- * docs/design/slice-view.md §13; SV22 and SV24 (schema validation) live in
+ * docs/design/slice-view.md; SV22 and SV24 (schema validation) live in
  * schema.test.ts, and the cross-package SV21 shape is additionally exercised
- * end-to-end in @aburi/e2e-integration.
+ * end-to-end in @aburi/e2e-integration. The SliceRecord rejections below overlap
+ * schema.test.ts on purpose: this layer checks the pass's own guard, that one the schema.
  *
  * Helpers below build the three pass inputs — a `SymbolChange[]`, plus base
  * and head `CallEdge[]` — as compactly as possible so each test spells out
@@ -138,7 +139,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
   })
 
   it("SV5: propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
-    // §4.4 — the Boundary controller's body is byte-identical between base
+    // The Boundary controller's body is byte-identical between base
     // and head; the *only* semantic change is that effect propagation has
     // now attached a `db.write` entry with `propagated: true` because the
     // downstream service `Svc.op` began invoking a repository write. The
@@ -147,7 +148,7 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     //
     // The Slice View pass MUST NOT reach into `delta.effects` to distinguish
     // this from a "real" body change — "any status: changed is a Node" is
-    // the whole rule (§4.4). This test constructs the propagated-only case
+    // the whole rule (slice-view.md). This test constructs the propagated-only case
     // faithfully so a future refactor that added such a distinction would
     // silently break here.
     const Ctl = "ts:src/ctl.ts#Ctl.route"
@@ -334,7 +335,7 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
   })
 
   it("SV17: locality — adding an unchanged Symbol elsewhere does not change any slice", () => {
-    // Unchanged symbols never reach `changes[]` (§3 precondition 1: unchanged
+    // Unchanged symbols never reach `changes[]` (slice-view.md precondition 1: unchanged
     // is dropped upstream). So passing the same `changes[]` twice is the
     // faithful representation of "adding an unchanged symbol elsewhere".
     const { changes, edges } = buildInputs()
@@ -364,7 +365,7 @@ describe("computeSlices — Determinism (SV15–SV18)", () => {
 
 describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + robustness)", () => {
   it("SV19 (JSON side): a Node-less change set yields slices: []", () => {
-    // Only pure `moved` — not a Node per §4.1.
+    // Only pure `moved` — not a Node per slice-view.md.
     const slices = computeSlices({
       changes: [moved("ts:src/a.ts#a", "ts:src/b.ts#a")],
       baseCallEdges: [],
@@ -419,7 +420,7 @@ describe("computeSlices — Zero-Node and edge shape edge cases (SV19 partial + 
 
 describe("computeSlices — SV21: cross-language partition", () => {
   it("partitions Nodes by language when the changes span multiple languages", () => {
-    // slice-view.md §5.5 / §14.13: cross-language edges do not exist yet, so
+    // slice-view.md: cross-language edges do not exist yet, so
     // a PR touching TypeScript and Python files produces disjoint slices per
     // language. The e2e fixture only covers a single language; this unit
     // test enforces the partition property at the pass boundary — even when
@@ -444,7 +445,7 @@ describe("computeSlices — SV21: cross-language partition", () => {
     // multi-language-id.md), the WCC pass MUST cluster the two Symbols —
     // Slice View has no language-aware filter of its own. This test guards
     // against a well-meaning "only same-language edges" filter being added
-    // here, which would violate §14.13's promise ("Slice View will then
+    // here, which would violate its promise ("Slice View will then
     // automatically produce cross-language clusters via the same WCC rule
     // with no code change").
     const tsA = "ts:src/a.ts#a"
@@ -459,9 +460,9 @@ describe("computeSlices — SV21: cross-language partition", () => {
 })
 
 /**
- * §7.4 — the strictly-ascending `members[]` order and the derivation
+ * slice-view.md — the strictly-ascending `members[]` order and the derivation
  * `id === "slice:" + members[0]` compare one property against another, which no
- * JSON Schema can express (§11.1). The pass validates them itself and consumers
+ * JSON Schema can express. The pass validates them itself and consumers
  * read the anchor through a helper that answers from `members[0]`.
  */
 describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
@@ -579,7 +580,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
 })
 
 /**
- * §7.4 layer 2 points `sliceRecordViolation` at documents written by
+ * Enforcement layer 2 (slice-view.md) points `sliceRecordViolation` at documents written by
  * third-party or older producers, so its input is untyped by definition. Every
  * case here reaches it through a shape TypeScript would have rejected, which is
  * exactly what a validator receives.

@@ -1,17 +1,6 @@
-import { Writable } from "node:stream"
 import { describe, expect, it } from "vitest"
 import { EXIT, runCli } from "../src"
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
+import { MemStream } from "./fixtures"
 
 function makeStreams(): { stdout: MemStream; stderr: MemStream } {
   return { stdout: new MemStream(), stderr: new MemStream() }
@@ -68,7 +57,7 @@ describe("CL10 — diff arguments missing", () => {
   })
 })
 
-/** §6.4 — `--max-bytes` is read at argv parsing, so a typo never reaches a scan. */
+/** `cli-spec.md` — `--max-bytes` is read at argv parsing, so a typo never reaches a scan. */
 describe("diff --max-bytes", () => {
   it("rejects a value that is not a plain byte count", async () => {
     // The last one reaches the `Number.isSafeInteger` check past the regex, which is the only

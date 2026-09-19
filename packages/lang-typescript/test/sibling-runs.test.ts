@@ -1,8 +1,5 @@
-import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { extractSymbols, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { byId, symbolsOf } from "./fixtures/ctx"
 
 /**
  * What belongs to a declaration and what merely sits near it, for the two things read from
@@ -19,21 +16,6 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  *     collected blocks (signature.ts `readThrows`);
  *   - the decorators through `decorators[]`, in source order.
  */
-
-async function symbolsOf(source: string): Promise<SymbolCandidate<Node>[]> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source))
-}
-
-function byId(symbols: SymbolCandidate<Node>[], suffix: string): SymbolCandidate<Node> {
-  const match = symbols.find((s) => s.id.endsWith(suffix))
-  if (match === undefined) {
-    throw new Error(
-      `no symbol with id ending in "${suffix}" (have: ${symbols.map((s) => s.id).join(", ")})`,
-    )
-  }
-  return match
-}
 
 describe("leading comment run", () => {
   it("collects every comment in the run, not only the one touching the declaration", async () => {

@@ -1,36 +1,38 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { noopRegistry } from "@aburi/test-support"
 import type {
   BodyExtraction,
   CallCandidate,
   ClassifyContext,
   EffectClassification,
   EffectPlugin,
-  EffectsManifest,
   ExtractionContext,
   FrameworkClassifyContext,
-  FrameworkManifest,
   FrameworkPlugin,
-  LangManifest,
   LanguagePlugin,
-  Logger,
   OpaqueAstNode,
   ParseResult,
   SourceFile,
   SymbolCandidate,
   SymbolClassification,
-  VocabRegistry,
   WalkContext,
 } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CoreError, scan } from "../../src"
 import { symbolId } from "../fixtures/ir"
+import {
+  capturingLogger,
+  effectsManifest,
+  frameworkManifest,
+  stubLanguagePlugin,
+} from "../fixtures/plugins"
 
 /**
  * One file's plugin throw must cost that file and no other.
  *
- * `lang-plugin.md` §7.2 has said so since before there was a `try` anywhere in the scan:
+ * `lang-plugin.md` has said so since before there was a `try` anywhere in the scan:
  * an extraction exception skips the file and the pipeline as a whole does not stop. Until
  * the boundary existed, a single throw discarded every other file's Symbols — the run
  * produced no IR at all, so a workspace of healthy files yielded nothing because one file
@@ -40,68 +42,6 @@ import { symbolId } from "../fixtures/ir"
  * the subject: which stage raised it does not change what the boundary owes the caller, and
  * a fixture that had to reach a real guard would pin the guard instead.
  */
-
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
-
-interface Warned {
-  warn: string[]
-}
-
-function collectingLogger(warned: Warned): Logger {
-  return {
-    debug: () => {},
-    info: () => {},
-    warn: (message: string) => warned.warn.push(message),
-    error: () => {},
-  }
-}
-
-function langManifest(): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "lang-stub",
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
-
-function frameworkManifest(): FrameworkManifest {
-  return {
-    ...langManifest(),
-    name: "framework-stub",
-    type: "framework",
-  } as unknown as FrameworkManifest
-}
-
-function effectsManifest(): EffectsManifest {
-  return {
-    ...langManifest(),
-    name: "effects-stub",
-    type: "effects",
-  } as unknown as EffectsManifest
-}
 
 function candidate(file: string): SymbolCandidate<OpaqueAstNode> {
   const base = file.replace(/[^A-Za-z0-9]/g, "_")
@@ -134,24 +74,7 @@ function stubLanguage(spec?: ThrowSpec): LanguagePlugin {
     if (spec === undefined || spec.stage !== stage || spec.on !== path) return
     throw spec.error ?? new Error(`stub ${stage} refused ${path}`)
   }
-  const plugin = {
-    manifest: langManifest(),
-    languageId: "stub",
-    fileExtensions: [".stub"],
-    capabilities: {
-      hasDecorators: false,
-      hasGenerics: false,
-      hasAsync: false,
-      hasMacros: false,
-      hasPatternMatching: false,
-      hasAbstractTypes: false,
-      hasModules: false,
-      hasNamespaces: false,
-      hasTypeParameters: false,
-      hasExplicitVisibility: false,
-      hasJsDoc: false,
-    },
-    init: async () => {},
+  return stubLanguagePlugin({
     parseFile: async (file: SourceFile): Promise<ParseResult> => {
       raise("parseFile", file.path)
       return { tree: { path: file.path } as unknown as OpaqueAstNode, errors: [], imports: [] }
@@ -188,8 +111,7 @@ function stubLanguage(spec?: ThrowSpec): LanguagePlugin {
       raise("normalizeAst", symbol.source.file)
       return "stub-ast"
     },
-  }
-  return plugin as unknown as LanguagePlugin
+  })
 }
 
 function throwingFramework(on: string, error: unknown): FrameworkPlugin {
@@ -241,7 +163,7 @@ interface RunOverrides {
 }
 
 async function run(overrides: RunOverrides = {}) {
-  const warned: Warned = { warn: [] }
+  const { logger, warnings } = capturingLogger()
   const result = await scan({
     workspaceRoot: workRoot,
     config: {},
@@ -250,9 +172,9 @@ async function run(overrides: RunOverrides = {}) {
     effects: overrides.effects ?? [],
     registry: noopRegistry,
     components: [],
-    logger: collectingLogger(warned),
+    logger,
   })
-  return { result, warned }
+  return { result, warned: { warn: warnings } }
 }
 
 describe("a plugin throw withdraws its file and nothing else", () => {

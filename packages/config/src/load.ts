@@ -4,10 +4,8 @@ import { normalizeFrameworkHints } from "./framework-hints"
 import { readConfigFile } from "./parser"
 
 /**
- * Discriminated by `found`: the autodetect branch (no config on disk) carries an empty
- * config and a null source, the loaded branch carries the validated config plus its
- * synthesized framework-hint plugins. Callers narrow with `if (result.found)` instead of
- * checking `source === null`, eliminating the "I forgot to handle the autodetect case" bug.
+ * Discriminated by `found` so callers narrow with `if (result.found)` and cannot forget the
+ * autodetect case: no config on disk gives an empty config and a null source.
  */
 export type LoadedConfig =
   | {
@@ -31,18 +29,13 @@ const AUTODETECT_FALLBACK: LoadedConfig = {
 } as const
 
 /**
- * Which config to read, as a decision already made — the input counterpart of
- * `LoadedConfig`, and discriminated the same way for the same reason.
+ * Which config to read, as a decision already made. `autodetect` says "no config on disk,
+ * run the detector", and a caller handed it must not go looking for one; a `null` would
+ * read as "use the default", the opposite of what it means.
  *
- * `autodetect` is a decision, not the absence of one: it says "no config on disk, run the
- * detector", and a caller handed it must not go looking for one. Spelling that as `null`
- * would reintroduce on the input side the "I forgot to handle the autodetect case" bug that
- * `LoadedConfig.found` exists to eliminate — and `loadConfigFrom(null)` reads most naturally
- * as "read from the default", which is the opposite of what it means.
- *
- * `path` is absolute. A relative one would resolve against `process.cwd()` inside
- * `readConfigFile`, which is exactly the working-directory dependence a decided source is
- * for; callers that accept a user-typed path resolve it before they get here.
+ * `path` is absolute: a relative one would resolve against `process.cwd()` inside
+ * `readConfigFile`, which is exactly the working-directory dependence a decided source
+ * exists to remove.
  */
 export type ConfigSource =
   | { readonly kind: "file"; readonly path: string }
@@ -54,14 +47,11 @@ export function configSourceFrom(found: string | null): ConfigSource {
 }
 
 /**
- * Read, validate, and normalize the config a `ConfigSource` names.
+ * Read, validate, and normalize the config a `ConfigSource` names, without discovery.
  *
- * Separate from `loadConfig` because a caller that has already decided *which* file to read
- * must be able to say so without going back through discovery — and, crucially, without the
- * answer depending on where the process happens to be standing. `aburi diff` is that caller:
- * `cli-spec.md` §6.4 step 3 requires the base scan to use the head's `aburi.json`, and the
- * base scan runs with its cwd inside the base worktree, where discovery would find the base
- * copy again. A config change would then read as a whole-IR change.
+ * `aburi diff` needs this: the `cli-spec.md` diff behaviour requires the base scan to use the
+ * head's `aburi.json`, and the base scan runs with its cwd inside the base worktree, where
+ * discovery would find the base copy again.
  */
 export async function loadConfigFrom(source: ConfigSource): Promise<LoadedConfig> {
   if (source.kind === "autodetect") return AUTODETECT_FALLBACK
@@ -75,12 +65,8 @@ export async function loadConfigFrom(source: ConfigSource): Promise<LoadedConfig
 }
 
 /**
- * Discover, read, validate, and normalize an Aburi config.
- *
- * When no config exists, returns the autodetect-fallback variant so the caller can branch on
- * `found` and run its detector. When one exists, full schema validation and frameworkHints
- * normalization run before returning. Filesystem errors during discovery (EACCES, EIO, …)
- * surface as ConfigError — they are NOT treated as "no config".
+ * Discover, read, validate, and normalize an Aburi config. Filesystem errors during
+ * discovery (EACCES, EIO, …) surface as `ConfigError`; only absence is "no config".
  */
 export async function loadConfig(options: FindConfigOptions = {}): Promise<LoadedConfig> {
   return loadConfigFrom(configSourceFrom(await findConfig(options)))

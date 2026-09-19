@@ -1,13 +1,15 @@
+import { compareCodeUnit } from "./order"
+
 /**
  * Weakly-connected components (WCC) via Union-Find with union-by-rank and
  * path compression. Language-independent primitive used by Slice View
- * (docs/design/slice-view.md §6) to group changed Symbols by call-graph
+ * (docs/design/slice-view.md) to group changed Symbols by call-graph
  * connectivity, but the algorithm is agnostic to what a "node" is — the
  * `keyOf` callback provides a stable string identity per node.
  *
  * Complexity: `O((V + E)·α(V))`, effectively linear.
  *
- * Guarantees (see slice-view.md §10):
+ * Guarantees (see slice-view.md):
  * - Deterministic: same `(nodes, edges)` always yields the same output.
  * - Input-order insensitive: shuffling `nodes` or `edges` yields the same
  *   output.
@@ -19,13 +21,13 @@
  *
  * The two ordering guarantees are part of the contract, not an accident of the
  * implementation: Slice View derives a cluster's identity from `component[0]`
- * (slice-view.md §7.1) and asserts that derivation on every record it emits,
+ * (slice-view.md) and asserts that derivation on every record it emits,
  * so weakening either sort turns into a loud failure there rather than a
  * silently mislabelled Slice.
  *
  * Edges are treated as undirected. Edges whose endpoints are not both in
  * `nodes` are silently dropped — the caller is responsible for building the
- * Node set (Slice View §5.2 forbids bridging via non-Node Symbols, which the
+ * Node set (slice-view.md forbids bridging via non-Node Symbols, which the
  * caller enforces by omitting non-Node endpoints from the input).
  */
 export function computeWeaklyConnectedComponents<TNode>(
@@ -89,7 +91,7 @@ export function computeWeaklyConnectedComponents<TNode>(
   // is a defence-in-depth choice: the internal parent-tree shape becomes a
   // function of the sorted stream, which keeps traces reproducible and
   // simplifies debugging without changing the visible output. Output
-  // ordering is enforced separately by the `compareKey` sorts below.
+  // ordering is enforced separately by the `compareCodeUnit` sorts below.
   interface CanonEdge {
     lo: number
     hi: number
@@ -123,16 +125,12 @@ export function computeWeaklyConnectedComponents<TNode>(
   for (const bucket of bucketsByRoot.values()) {
     const sortedIndices = bucket
       .slice()
-      .sort((a, b) => compareKey(keyOf(nodesByIndex[a] as TNode), keyOf(nodesByIndex[b] as TNode)))
+      .sort((a, b) =>
+        compareCodeUnit(keyOf(nodesByIndex[a] as TNode), keyOf(nodesByIndex[b] as TNode)),
+      )
     components.push(sortedIndices.map((idx) => nodesByIndex[idx] as TNode))
   }
 
-  components.sort((a, b) => compareKey(keyOf(a[0] as TNode), keyOf(b[0] as TNode)))
+  components.sort((a, b) => compareCodeUnit(keyOf(a[0] as TNode), keyOf(b[0] as TNode)))
   return components
-}
-
-function compareKey(a: string, b: string): number {
-  if (a < b) return -1
-  if (a > b) return 1
-  return 0
 }

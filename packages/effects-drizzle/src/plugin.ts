@@ -9,16 +9,10 @@ import { classifyDrizzleCall } from "./classify"
 import { effectsDrizzleManifest } from "./manifest"
 
 /**
- * Drizzle effect plugin. Maps Drizzle ORM call expressions into the core `db.read` /
- * `db.write` / `db.transaction` effect vocabulary. See `classifyDrizzleCall` for the
- * detection strategy (chain-collapse + import-gate).
- *
- * Pure with respect to plugin state — no lazy resources, no per-run caches — so
- * repeated invocations against the same CallCandidate produce identical results. Note
- * that `classify()` can throw when the language plugin emits a malformed CallCandidate
- * (empty target, adjacent dots) or a shape-matched transaction/batch call with
- * `argumentCount === 0`; both signal upstream contract violations and are surfaced
- * rather than swallowed.
+ * Drizzle effect plugin: maps Drizzle ORM call expressions onto the core `db.read` /
+ * `db.write` / `db.transaction` vocabulary. `classify` is pure (effect-plugin.md) and throws
+ * on a malformed CallCandidate or a zero-argument `transaction` / `batch` — upstream contract
+ * violations, surfaced rather than swallowed.
  */
 class DrizzleEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsDrizzleManifest
@@ -30,13 +24,7 @@ class DrizzleEffectsPlugin implements EffectPlugin {
   }
 }
 
-/**
- * Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan
- * pipeline. The type annotation is omitted deliberately: `class implements EffectPlugin`
- * already enforces the structural contract, and inferring the narrow class type keeps
- * the manifest literals visible to consumers that want to compare against them without
- * a separate manifest import.
- */
+/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
 export const drizzleEffectsPlugin = new DrizzleEffectsPlugin()
 
 export { DrizzleEffectsPlugin }

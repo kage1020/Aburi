@@ -43,6 +43,7 @@
     "web-tree-sitter": "^0.26.10"
   },
   "devDependencies": {
+    "@aburi/test-support": "workspace:*",
     "@types/node": "^26.0.1",
     "@vscode/tree-sitter-wasm": "^0.3.1",
     "tsdown": "^0.22.3",

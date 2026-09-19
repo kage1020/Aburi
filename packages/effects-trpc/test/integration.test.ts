@@ -3,6 +3,7 @@ import {
   parseTypescriptFile,
   walkBody as walkTypescriptBody,
 } from "@aburi/lang-typescript"
+import { makeOwner, noopRegistry } from "@aburi/test-support"
 import type {
   ExtractionContext,
   ImportEdge,
@@ -13,7 +14,6 @@ import type {
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
 import { classifyTrpcCall } from "../src/index"
-import { makeOwner, noopRegistry } from "./fixtures/context"
 
 /**
  * End-to-end: parse a TypeScript source through `@aburi/lang-typescript`, walk each

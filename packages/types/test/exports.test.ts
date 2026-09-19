@@ -258,7 +258,7 @@ describe("@aburi/types public surface", () => {
     expectTypeOf(noName).toEqualTypeOf<PluginManifest>()
   })
 
-  // The three id types own separate namespaces (ir-schema.md §3.5). JSON Schema cannot say
+  // The three id types own separate namespaces (ir-schema.md). JSON Schema cannot say
   // so — all three are `{"type": "string"}` on the wire — so the distinction is layered on by
   // the codegen brand pass, and these assertions are what proves it survived regeneration.
   //
@@ -306,7 +306,7 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<Symbol["component"]>().toEqualTypeOf<ComponentId | null | undefined>()
   })
 
-  it("the write side of SourceRange is stricter than the read side (ir-schema.md §1.1)", () => {
+  it("the write side of SourceRange is stricter than the read side (ir-schema.md)", () => {
     // Class A says a writer always emits both column keys, carrying `null` when the
     // position is unknown. `WrittenSourceRange` is that rule as a type, so a plugin that
     // omits a column fails to compile instead of quietly emitting a shape the convention

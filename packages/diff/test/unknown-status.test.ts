@@ -1,7 +1,7 @@
+import { fp, makeIR, makeSymbol } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol, SkippedFile, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff } from "../src"
-import { fp, makeIR, makeSymbol } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 

@@ -1,6 +1,7 @@
 import type { Component, Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
   callRow,
+  compareEffectIdentity,
   compareStrings,
   decoratorRows,
   droppedFoldout,
@@ -8,11 +9,14 @@ import {
   fingerprintLine,
   inlineCode,
   isSymbolIdEndpoint,
+  orderEffects,
   orderFilesAscending,
   orderSymbolsWithinFile,
+  renderDocument,
   requireDropReason,
   ruleRow,
   signatureLine,
+  sortDependencies,
   symbolHeading,
 } from "./format"
 
@@ -23,13 +27,9 @@ export interface ProjectComponentInput {
 }
 
 /**
- * §5 — Emit `components/<id>.md` for one Component. `symbols[]` is expected to be the
- * subset that belongs to `component.id`; the projection layer does not filter — that
- * belongs to whoever calls it (the CLI or, in tests, the caller directly). This keeps
- * the projection layer pure and cheap to test.
- *
- * The output is line-terminator-neutral: newlines are always `\n` because §3.2 fixes
- * the ordering and §3.1 pins the dialect to CommonMark. A caller that needs CRLF must
+ * markdown-projection.md — `components/<id>.md` for one Component. `symbols[]` is expected
+ * to be the subset that belongs to `component.id`; filtering belongs to the caller, which
+ * keeps the projection pure. Newlines are always `\n`; a caller that needs CRLF must
  * post-process.
  */
 export function projectComponent(input: ProjectComponentInput): string {
@@ -64,7 +64,7 @@ export function projectComponent(input: ProjectComponentInput): string {
   )
   // Keyed by `string`: `isSymbolIdEndpoint` answers about an endpoint's silhouette, not
   // its well-formedness, so the membership test must accept whatever the document holds.
-  const symbolIdsInComponent = new Set<string>(symbols.filter((s) => !s.dropped).map((s) => s.id))
+  const symbolIdsInComponent = new Set<string>(keptSymbols.map((s) => s.id))
   const symbolLevelDeps = dependencies.filter(
     (d) =>
       (isSymbolIdEndpoint(d.from) && symbolIdsInComponent.has(d.from)) ||
@@ -73,14 +73,14 @@ export function projectComponent(input: ProjectComponentInput): string {
   if (componentLevelDeps.length > 0 || symbolLevelDeps.length > 0) {
     lines.push("## Dependencies")
     lines.push("")
-    for (const d of sortDeps(componentLevelDeps)) {
+    for (const d of sortDependencies(componentLevelDeps)) {
       const effectTag = d.effect === null ? "" : ` [${d.effect}]`
       lines.push(`- ${d.from} → ${d.to} (via ${inlineCode(d.via)})${effectTag}`)
     }
     if (symbolLevelDeps.length > 0) {
       if (componentLevelDeps.length > 0) lines.push("")
       lines.push("### Symbol edges")
-      for (const d of sortDeps(symbolLevelDeps)) {
+      for (const d of sortDependencies(symbolLevelDeps)) {
         lines.push(`- ${inlineCode(d.from)} → ${inlineCode(d.to)} (via ${inlineCode(d.via)})`)
       }
     }
@@ -98,43 +98,25 @@ export function projectComponent(input: ProjectComponentInput): string {
   if (droppedSymbols.length > 0) {
     lines.push(
       droppedFoldout(
-        droppedSymbols
-          .slice()
-          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        [...droppedSymbols]
+          .sort((a, b) => compareStrings(a.id, b.id))
           .map((s) => `${inlineCode(s.id)} — ${requireDropReason(s)}`),
       ),
     )
   }
-  return `${lines
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd()}\n`
+  return renderDocument(lines)
 }
 
 function joinCode(items: readonly string[]): string {
-  return items.map((i) => inlineCode(i)).join(", ")
-}
-
-function sortDeps(deps: readonly Dependency[]): Dependency[] {
-  return [...deps].sort((a, b) => {
-    if (a.from !== b.from) return compareStrings(a.from, b.from)
-    if (a.to !== b.to) return compareStrings(a.to, b.to)
-    return compareStrings(a.via, b.via)
-  })
+  return items.map((item) => inlineCode(item)).join(", ")
 }
 
 /**
- * Aggregate effects for Boundary Symbols in the component (framework entry
- * points — decorators with `boundary: true` or `extKind` prefixed `framework:`).
- * effect-propagation.md §4.3 explicitly puts this rollup in the projection
- * layer: propagation runs to full transitive closure regardless of boundary
- * status; the view chooses whether to surface only boundary Symbols.
- *
- * Rows list every effect (local + propagated) attached to each boundary Symbol,
- * sorted by `(id, target)`. Propagated entries include a `[propagated from …]`
- * annotation naming the direct upstream callee. Symbols with no effects are
- * skipped; if no Symbol has both boundary status and at least one effect, the
- * section is omitted entirely.
+ * Effects of the Boundary Symbols (a `boundary: true` decorator or a `framework:` extKind).
+ * effect-propagation.md puts this rollup in the projection layer: propagation runs to
+ * full closure regardless of boundary status; the view chooses what to surface. Every effect
+ * (local + propagated) per boundary Symbol, sorted by `(id, target)`; the section is omitted
+ * when no boundary Symbol has an effect.
  */
 function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
   const boundaries = symbols
@@ -148,18 +130,14 @@ function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
   if (boundaries.length === 0) return []
   const lines: string[] = ["## Boundary effect surface", ""]
   for (const s of boundaries) {
-    const cells = [...s.effects]
-      .sort((a, b) =>
-        a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
-      )
-      .map((e) => {
-        const base = `${e.id}(${inlineCode(e.target)})`
-        if (e.propagated === true) {
-          const derivedFrom = (e.derivedFrom ?? []).join(", ")
-          return `${base} [propagated from ${derivedFrom}]`
-        }
-        return base
-      })
+    const cells = [...s.effects].sort(compareEffectIdentity).map((e) => {
+      const base = `${e.id}(${inlineCode(e.target)})`
+      if (e.propagated === true) {
+        const derivedFrom = (e.derivedFrom ?? []).join(", ")
+        return `${base} [propagated from ${derivedFrom}]`
+      }
+      return base
+    })
     lines.push(`- ${inlineCode(s.name)} — ${cells.join(", ")}`)
   }
   lines.push("")
@@ -187,9 +165,9 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
 }
 
 /**
- * §5.2 — one Symbol block. Section-omit rules from §5.3 are applied here: `decorators`
- * empty → no row, `signature: null` → no row, empty `rules` / `effects` / `calls` → no
- * section, dropped fingerprint → no `<sub>` line.
+ * markdown-projection.md — one Symbol block, with its omit rules: empty `decorators` → no row,
+ * `signature: null` → no row, empty `rules` / `effects` / `calls` → no section, dropped
+ * fingerprint → no `<sub>` line.
  */
 export function renderSymbolBlock(symbol: IRSymbol): string[] {
   const rows: string[] = []
@@ -203,18 +181,7 @@ export function renderSymbolBlock(symbol: IRSymbol): string[] {
   }
   if (symbol.effects.length > 0) {
     rows.push("**Effects**:")
-    // Locally-detected entries have `line` and sort by it; propagated entries
-    // omit `line` (effect-propagation.md §5.1) and are ordered by
-    // `(id, target)` after all locals, matching the schema-wide emission order.
-    const locals = symbol.effects
-      .filter((e) => e.propagated !== true)
-      .sort((a, b) => (a.line ?? 0) - (b.line ?? 0))
-    const propagated = symbol.effects
-      .filter((e) => e.propagated === true)
-      .sort((a, b) =>
-        a.id === b.id ? compareStrings(a.target, b.target) : compareStrings(a.id, b.id),
-      )
-    for (const e of [...locals, ...propagated]) rows.push(effectRow(e))
+    for (const e of orderEffects(symbol.effects)) rows.push(effectRow(e))
   }
   if (symbol.calls.length > 0) {
     rows.push("**Calls**:")

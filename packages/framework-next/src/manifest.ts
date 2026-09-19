@@ -1,17 +1,7 @@
 import type { FrameworkManifest } from "@aburi/types"
 
-/**
- * Manifest for `@aburi/framework-next`. Locked to `FrameworkManifest` so a shape mismatch
- * shows up as a compile-time error, not a registry-load error at runtime.
- *
- * Individual `extKinds` enumeration gives `VocabRegistry.findExtKind()` a baseKind
- * fallback for consumers that only speak core `SymbolKind`; the `extKindPrefixes` prefix
- * declaration keeps the manifest open to future App Router additions without a manifest
- * bump. Both live under `framework:next`.
- *
- * `frameworks: ["nextjs"]` matches the identifier used by `@aburi/core`'s Component
- * autodetect for the `next` dependency.
- */
+export const NEXT_DERIVED_BY_PREFIX = "framework:next"
+
 export const frameworkNextManifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
   name: "framework-next",
@@ -66,7 +56,8 @@ export const frameworkNextManifest = {
       },
     ],
     extKindPrefixes: ["framework:next"],
-    derivedByPrefixes: ["framework:next"],
+    derivedByPrefixes: [NEXT_DERIVED_BY_PREFIX],
+    // Matches the identifier `@aburi/core`'s Component autodetect uses for the `next` dependency.
     frameworks: ["nextjs"],
   },
 } as const satisfies FrameworkManifest

@@ -1,16 +1,16 @@
-import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import {
   CoreError,
   detectComponents,
   detectManagers,
-  detectWorkspaceRoot,
   type UnresolvedDeclaration,
 } from "@aburi/core"
 import type { Config } from "@aburi/types"
-import { CliError, errorCode, errorMessage } from "../errors"
+import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
+import { pathKind } from "../fs-probe"
 import { OUTPUT_IS_A_DIRECTORY, writeOutputFile } from "../output-file"
+import { resolveWorkspaceRoot } from "../workspace-root"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
@@ -57,20 +57,19 @@ export interface InitReport {
 }
 
 /**
- * §4 — `aburi init`. Runs the autodetect chain (workspace root → managers → components),
- * writes an `aburi.json` (or the caller's `--output` path), and returns a structured
- * report so tests can assert on outcome without parsing stdout.
+ * `cli-spec.md` — `aburi init`. Runs the autodetect chain (workspace root → managers → components),
+ * writes an `aburi.json` (or the caller's `--output` path), and returns a structured report.
  *
- * Refuses to overwrite an existing file unless `--force` is set; the design (§4.4) uses
- * `exit 2` for that branch, mirrored here through the `InputError` -> `EXIT.INPUT_ERROR`
- * bridge in the caller.
+ * Refuses to overwrite an existing file unless `--force` is set (exit 2). The
+ * overwrite guard probes with `pathKind` so a permission-denied on `aburi.json` cannot
+ * silently bypass it and let the write clobber a file the user cannot read.
  */
 export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
   const outputPath = resolve(cwd, options.output ?? "aburi.json")
 
-  const existing = await outputPathHolds(outputPath)
+  const existing = await pathKind(outputPath)
   if (existing === "directory") {
     throw new CliError(`Cannot write ${outputPath}: ${OUTPUT_IS_A_DIRECTORY}`, "input-error")
   }
@@ -84,11 +83,6 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   const managers = await detectManagers(workspaceRoot)
   // Same wrapping rationale as `resolveComponents` in scan.ts: an id the detection cannot
   // derive is a property of the project, and belongs in the input-error exit code.
-  //
-  // There is no config to read `respectGitignore` from — this command is what writes the first
-  // one — so the flag is the only way to say it, and honouring `.gitignore` is the default
-  // because a vendored or generated tree otherwise skews the languages of the config being
-  // generated.
   let components: Awaited<ReturnType<typeof detectComponents>>
   try {
     components = await detectComponents({
@@ -108,20 +102,22 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   }
 
   const languageSet = new Set<string>()
-  for (const c of components) for (const l of c.languages) languageSet.add(l)
   const frameworkSet = new Set<string>()
-  for (const c of components) for (const f of c.frameworks ?? []) frameworkSet.add(f)
+  for (const component of components) {
+    for (const language of component.languages) languageSet.add(language)
+    for (const framework of component.frameworks ?? []) frameworkSet.add(framework)
+  }
 
   const suggestions = options.withSuggestions ? suggestPluginsFor(languageSet, frameworkSet) : []
   const contents = renderConfig({
     languages: pluginRefsFor(languageSet, LANGUAGE_TO_PLUGIN),
     frameworks: pluginRefsFor(frameworkSet, FRAMEWORK_TO_PLUGIN),
-    components: components.map((c) => ({
-      id: c.id,
-      name: c.name,
-      roots: [...c.roots].sort(),
-      languages: [...c.languages].sort(),
-      frameworks: [...(c.frameworks ?? [])].sort(),
+    components: components.map((component) => ({
+      id: component.id,
+      name: component.name,
+      roots: [...component.roots].sort(),
+      languages: [...component.languages].sort(),
+      frameworks: [...(component.frameworks ?? [])].sort(),
     })),
     suggestions,
   })
@@ -131,7 +127,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
   return {
     outputPath,
     workspaceRoot,
-    detectedManagers: managers.managers.map((m) => m.tool),
+    detectedManagers: managers.managers.map((manager) => manager.tool),
     detectedLanguages: [...languageSet].sort(),
     detectedFrameworks: [...frameworkSet].sort(),
     componentCount: components.length,
@@ -145,43 +141,6 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     overwrote: existing === "file",
     exitCode: EXIT.SUCCESS,
   }
-}
-
-async function resolveWorkspaceRoot(cwd: string): Promise<string> {
-  try {
-    return await detectWorkspaceRoot({ cwd })
-  } catch {
-    // §4.3: fall back to `cwd` when no marker exists (single-project workspace).
-    return resolve(cwd)
-  }
-}
-
-/**
- * What the `--output` path holds, as far as the overwrite guard is concerned. Only "nothing is
- * here" counts as absence: EACCES / EIO / ELOOP are re-thrown as CliError so a permission-denied
- * on `aburi.json` cannot silently bypass the guard (which would let `writeOutputFile` clobber
- * whatever the user is unable to read).
- *
- * A directory is answered apart from a file because `--force` is no remedy for one. Overwriting
- * is not what the caller needs to hear, and taking that advice only reaches the same refusal
- * from the write itself.
- */
-async function outputPathHolds(path: string): Promise<"nothing" | "file" | "directory"> {
-  try {
-    return (await stat(path)).isDirectory() ? "directory" : "file"
-  } catch (error) {
-    if (isBenignErrno(error)) return "nothing"
-    throw new CliError(`Failed to probe ${path}: ${errorMessage(error)}`, "runtime-error", {
-      cause: error,
-    })
-  }
-}
-
-const BENIGN_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
-
-function isBenignErrno(error: unknown): boolean {
-  const code = errorCode(error)
-  return code !== null && BENIGN_ERRNOS.has(code)
 }
 
 /**
@@ -224,10 +183,10 @@ function pluginRefsFor(
 }
 
 /**
- * §4.6 tail — the `--with-suggestions` banner. Install instructions name the npm package,
+ * The `--with-suggestions` banner. Install instructions name the npm package,
  * so these carry the `@aburi/` scope that `PluginRef` leaves implicit.
  *
- * Languages come first and are included unconditionally, per `cli-spec.md` §4.6: the
+ * Languages come first and are included unconditionally, per `cli-spec.md`: the
  * language plugin `init` just wrote into `languages` is a hard requirement for the next
  * `aburi scan`, where a framework plugin only adds classification.
  */
@@ -276,17 +235,19 @@ function renderConfig(input: RenderedConfigInput): string {
     $schema: CONFIG_SCHEMA_URL,
     languages: [...input.languages],
     frameworks: [...input.frameworks],
-    components: input.components.map((c) => ({
-      id: c.id,
-      name: c.name,
-      roots: [...c.roots],
-      languages: [...c.languages],
-      frameworks: [...c.frameworks],
+    components: input.components.map((component) => ({
+      id: component.id,
+      name: component.name,
+      roots: [...component.roots],
+      languages: [...component.languages],
+      frameworks: [...component.frameworks],
     })),
   }
   const json = JSON.stringify(config, null, 2)
   if (input.suggestions.length === 0) return `${json}\n`
-  const banner = input.suggestions.map((s) => `// Suggested install: pnpm add -D ${s}`).join("\n")
+  const banner = input.suggestions
+    .map((suggestion) => `// Suggested install: pnpm add -D ${suggestion}`)
+    .join("\n")
   // Insert the comment banner right after the opening `{` so the JSON stays valid JSONC.
   const insertion = `\n  ${banner.split("\n").join("\n  ")}`
   return `${json.replace("{\n", `{${insertion}\n`)}\n`

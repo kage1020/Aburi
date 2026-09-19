@@ -1,6 +1,15 @@
+import {
+  component,
+  dependency,
+  fp,
+  makeIR,
+  makeSymbol,
+  rule,
+  sig,
+  zeroFp,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { buildDiff, DiffError } from "../src"
-import { component, dependency, fp, makeIR, makeSymbol, rule, sig, zeroFp } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 

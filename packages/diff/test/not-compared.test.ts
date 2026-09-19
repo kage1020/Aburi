@@ -1,7 +1,7 @@
+import { makeIR, makeSymbol } from "@aburi/test-support"
 import type { IR, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff } from "../src"
-import { makeIR, makeSymbol } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
@@ -74,7 +74,7 @@ describe("notCompared — a path both scans gave up on", () => {
   it("emits the key on a diff that lost nothing", () => {
     // Not omitted when empty. Nothing else in a diff would let a reader tell "the comparison
     // covered everything" from "this writer predates the field" — see docs/design/
-    // diff-algorithm.md §10.1.
+    // diff-algorithm.md.
     const diff = diffOf(makeIR({ symbols: [kept] }), makeIR({ symbols: [kept] }))
     expect(diff.notCompared).toEqual([])
   })

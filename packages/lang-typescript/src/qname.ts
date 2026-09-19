@@ -9,7 +9,6 @@ import {
   makeMemberQname,
   makeNestedQname,
   makeSymbolId,
-  makeTopLevelQname,
 } from "@aburi/core"
 import type { LanguageId, SymbolId } from "@aburi/types"
 
@@ -30,10 +29,6 @@ export const TYPESCRIPT_LANGUAGE_ID: LanguageId = makeLanguageId("ts")
 
 export function makeTsSymbolId(file: string, qname: string): SymbolId {
   return makeSymbolId({ language: TYPESCRIPT_LANGUAGE_ID, file, qualifiedName: qname })
-}
-
-export function topLevelQname(name: string): string {
-  return makeTopLevelQname(name)
 }
 
 export function classMemberQname(

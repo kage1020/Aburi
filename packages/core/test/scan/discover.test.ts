@@ -461,7 +461,8 @@ const onCollidingFs = it.skipIf(process.platform === "darwin")
 
 describe("discoverFiles — a name the filesystem and the Document spell differently", () => {
   it("opens the file by the name on disk and records the normalized one", async () => {
-    // §1.2 normalizes a path on the way into the Document. A filesystem that stores what it was
+    // ir-schema.md normalizes a path on the way into the Document. A filesystem that stores what
+    // it was
     // given — NTFS, ext4 — does not answer to the result, so a `stat` under it reports ENOENT
     // and the file was recorded `unreadable`: a lost file, and a reason pointing at permissions.
     await writeFileAt("src/caf\u0065\u0301.ts", "1234")

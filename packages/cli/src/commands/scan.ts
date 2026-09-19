@@ -3,9 +3,12 @@ import { dirname, resolve } from "node:path"
 import {
   type CollidingFile,
   CoreError,
+  compareCodeUnit,
+  countBy,
   describeCodePoints,
   detectComponents,
   detectManagers,
+  groupBy,
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
@@ -40,9 +43,10 @@ import {
 } from "../artifact-paths"
 import { loadPinnedConfig, type PinnedConfig, pinConfig } from "../config-load"
 import type { LogLevel } from "../env"
-import { CliError, errorMessage } from "../errors"
+import { assertNever, CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
+import { capListing } from "../listing"
 import { createLogger } from "../logger"
 import { loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
@@ -54,26 +58,16 @@ export interface ScanOptions {
   configPath?: string
   /**
    * A config already decided by the caller, which supersedes both `configPath` and discovery.
-   *
-   * `aburi diff` sets it. Its base scan runs with `cwd` inside a temporary worktree, where
-   * discovery finds the base revision's `aburi.json` and a relative `configPath` resolves to
-   * the base copy of the file — either of which makes a commit that only edits the config
-   * read as a change to every Symbol in the workspace (cli-spec.md §6.4 step 3).
-   *
-   * `{ kind: "autodetect" }` is meaningful rather than equivalent to omitting the field: it
-   * says the caller looked and found nothing, so this scan must not look again.
+   * `aburi diff` sets it so its base scan, running inside a temporary worktree, reads the
+   * head's config — step 3 of the ref-form Behavior `cli-spec.md` gives `aburi diff`.
+   * `{ kind: "autodetect" }` is meaningful rather than equivalent to omitting the field: the
+   * caller looked and found nothing.
    */
   pinnedConfig?: PinnedConfig
   /**
    * Where a relative plugin ref (`./plugins/x.mjs`) in the config resolves from. Defaults to
-   * this scan's own workspace root, which is right whenever the config came out of the tree
-   * being scanned.
-   *
-   * `aburi diff`'s base scan is the case where it did not: §6.4.1.5 pins the plugin set to
-   * the head environment — the worktree materialises sources only, and `node_modules` is the
-   * caller's — so a relative ref in the head's config has to resolve there too. Left to the
-   * worktree, a head commit that adds `./plugins/new.mjs` makes the base scan die on a file
-   * the head reads fine.
+   * this scan's own workspace root; `aburi diff`'s base scan passes the head's, since `cli-spec.md`
+   * pins the plugin set to the head environment.
    */
   pluginRefRoot?: string
   outputDir?: string
@@ -81,69 +75,46 @@ export interface ScanOptions {
   ignore?: readonly string[]
   /**
    * Override for `Config.respectGitignore`. `true` from `--respect-gitignore`, `false` from
-   * `--no-respect-gitignore`, absent when neither was typed — which is the only value that
-   * leaves the config's own answer standing, and so the only correct one for a caller that
-   * has nothing to say about it. A caller passing the flag's default rather than omitting the
-   * field asks for that default, and gets it.
+   * `--no-respect-gitignore`, absent when neither was typed — the only value that leaves the
+   * config's own answer standing.
    */
   respectGitignore?: boolean
   compact?: boolean
   suppressTimestamp?: boolean
   strict?: boolean
   /**
-   * Override for `Config.lsp.enabled`. `true` from `--lsp`, `false` from
-   * `--no-lsp`, `undefined` when neither flag was passed (falls through to the
-   * on-disk config value). Follows the CLI override precedence rule in
-   * `docs/design/config.md` §11.
+   * Override for `Config.lsp.enabled` (`--lsp` / `--no-lsp`); `undefined` falls through to
+   * the config, per `docs/design/config.md`.
    */
   lsp?: boolean
   /**
-   * Lowest level the run's `Logger` emits, from `ABURI_LOG_LEVEL` (§11).
-   * Defaults to `"warn"`, which is what the CLI has always printed.
+   * Lowest level the run's `Logger` emits, from `ABURI_LOG_LEVEL` (`cli-spec.md`). Defaults to
+   * `"warn"`.
    */
   logLevel?: LogLevel
   /**
-   * Where this scan's incident report goes (§5.6), and what to call this scan in it. Omit it
-   * and the report goes nowhere.
-   *
-   * It is one option rather than two because the label means nothing without the sink;
-   * separate optionals would let a caller pass a label and get silence.
-   *
-   * Not the same as silence. The run's `Logger` is a separate channel — per file rather than
-   * per run, governed by `ABURI_LOG_LEVEL`, and still defaulting to `process.stderr` — so a
-   * scan with no sink here is quiet, not mute. Routing that channel to a caller-injected
-   * stream is a known gap and is not this option.
-   *
-   * The reporting lives here rather than in the command wrapper because three commands scan
-   * and only one of them was doing it. A caller that forgets the sink now loses the report for
-   * its own scan; a caller that forgot to call a separate reporter used to lose it while the
-   * scan looked handled.
+   * Where this scan's incident report goes (`cli-spec.md`). Omit it and the report goes nowhere
+   * — but not silent: the run's per-file `Logger` is a separate channel that still defaults to
+   * `process.stderr`. One option rather than two because a label means nothing without a sink.
    */
   incidents?: {
     warn: WarnFn
     /**
-     * Names this scan in its own lines — `base ref "main"`, `head (working tree)`.
-     *
-     * `aburi diff` runs two scans and the same incident means different things at each: a file
-     * withdrawn at base makes phantom `added` entries, the same file withdrawn at head makes
-     * phantom `removed` ones. Omitted when only one scan ran, where a label would be noise.
+     * Names this scan in its own lines — `base ref "main"`, `head (working tree)` — for a
+     * command that runs two scans, where the same incident means different things at each.
      */
     label?: string
   }
 }
 
 /**
- * A scan that read too little of the workspace to be worth believing.
+ * A scan that read too little of the workspace to be worth believing. Dangerous because it is
+ * a *success*: an IR with no Symbols diffs against another one as `+0 -0 ~0`, so every
+ * `--fail-on` gate downstream passes.
  *
- * The shape it produces is the dangerous one because it is a *success*: an IR with no Symbols
- * diffs against another one as `+0 -0 ~0`, so every `--fail-on` gate downstream passes and the
- * run that lost the workspace is the one that looks healthiest.
- *
- * Three kinds because the first move differs. Nothing discovered points at `ignore`, at
- * `components[].roots`, and at whether a loaded plugin claims anything in this repository —
- * questions about the config. Nothing parsed points at whatever withdrew the files, which is
- * why it carries the reason that took the most of them. Below the floor is a policy the
- * workspace opted into, so it says what it measured and what it was held to.
+ * Three kinds because the first move differs: nothing discovered points at the config, nothing
+ * parsed at whatever withdrew the files (hence the dominant reason), below the floor at a
+ * policy the workspace opted into.
  */
 export type CoverageFault =
   | { kind: "nothing-discovered" }
@@ -160,158 +131,75 @@ export interface ScanReport {
   workspaceMdPath: string | null
   componentMdPaths: string[]
   totalFiles: number
-  /**
-   * Files that reached the IR — `totalFiles` less everything on `skipped`.
-   *
-   * Read rather than derived, because it is the counter the Document itself publishes and the
-   * one integrity invariant #21 holds the skip list against. A CLI that recomputed it would be
-   * free to disagree with the artifact it just wrote.
-   */
+  /** Read off the Document rather than derived, so the CLI cannot disagree with it (integrity #21). */
   parsedFiles: number
   keptSymbols: number
   droppedSymbols: number
   /**
    * Files carrying parse errors the plugin called recoverable — every file on
-   * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error, which
-   * `parseFailureCount` counts instead. The stderr line built from this number says
-   * "recoverable", and a withdrawn file's error said the opposite.
-   *
-   * Not the same as "still reached the IR". A file abandoned on its `parseTimeoutMs` budget
-   * is counted here and is not in the IR — deliberately, because its errors really are all
-   * recoverable (the withdrawal check runs before the first deadline reading) and they are
-   * the reason `lang-plugin.md` §7.1.2 keeps them: a slow parse is often a slow parse of
-   * broken input, and a reader told only about the budget would go and raise it.
+   * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error (`parseFailureCount`).
+   * A file abandoned on its `parseTimeoutMs` budget is counted here (`lang-plugin.md`).
    */
   parseErrorCount: number
   /**
-   * Files withdrawn because the parse produced nothing usable — a null tree, or a
-   * `ParseError` the language plugin marked `recoverable: false`. The same files appear in
-   * `skipped` under `reason: "parse-failed"`.
-   *
-   * This does not move the exit code. Unlike `extractionFailures`, it describes the source
-   * rather than the plugin set: an unparseable file is a fact about the workspace, the way
-   * an over-size or timed-out one is.
+   * Files withdrawn because the parse produced nothing usable; the same files appear in
+   * `skipped` as `parse-failed`. Does not move the exit code: unparseable source is a fact
+   * about the workspace, not about the plugin set.
    */
   parseFailureCount: number
   timeoutCount: number
-  /**
-   * Files that never made it into the IR. `over-size` and `unroutable` are decided before
-   * anything is read; `unreadable` can come from either side; `parse-failed`,
-   * `parse-timeout` and `extraction-failed` are decided during extraction. Surfaced
-   * separately from `parseErrorCount` because `@aburi/core` returns these rather than
-   * printing them, and a discovery-time drop is not logged at all. Warning on stderr is the
-   * CLI's job either way.
-   */
+  /** Files that never made it into the IR; `@aburi/core` returns these rather than logging them. */
   skipped: readonly { path: string; reason: SkippedFile["reason"]; detail?: string }[]
   /**
-   * Files a plugin threw on, with what it said and the error's own code where it had one.
-   *
-   * The same files are in `skipped` under `reason: "extraction-failed"`, carrying the same
-   * message — the scan writes it to both at one site — so this is not where the message
-   * lives, and the incident report reads it from `skipped` with every other reason's. What
-   * is only here is the `code`, and the standing that goes with it: this is the one reason
-   * that means something in the run is *broken* rather than merely large, slow, or in a
-   * language no plugin claims, so it is what moves the exit code and what the `diff` fault
-   * clause counts.
+   * Files a plugin threw on. Also in `skipped` as `extraction-failed` with the same message;
+   * what is only here is the `code`, and this is the one skip reason that moves the exit code.
    */
   extractionFailures: readonly { file: string; message: string; code?: string }[]
   /**
-   * Parse trees a language plugin was asked to free and did not.
-   *
-   * Reported, not gated. Every one of these files is in the IR with its Symbols intact, so
-   * the artifact describes the workspace completely — the cost is a leak that ends a long
-   * enough run in `RangeError: WebAssembly.Memory()`, charged to whichever unrelated file was
-   * being read when the heap ran out. This is the only thing that names the plugin before
-   * that happens, which is why it is printed rather than left to the run's own log.
+   * Parse trees a language plugin was asked to free and did not. Reported, not gated: the
+   * files are in the IR, and the cost is a leak that ends a long enough run out of heap.
    */
   treeReleaseFailures: readonly TreeReleaseFailure[]
-  /**
-   * Present when the LSP enrichment pass ran (config.lsp.enabled = true and at
-   * least one server was configured). Absent when LSP was skipped entirely.
-   */
+  /** Present when the LSP enrichment pass ran; absent when LSP was skipped entirely. */
   lspEnrichment: LspEnrichmentStats | undefined
-  /**
-   * Head-side call-resolution census rendered for stdout (call-resolution.md
-   * §8.1). Always present — `scan` emits the counters unconditionally.
-   */
+  /** Head-side call-resolution census rendered for stdout (call-resolution.md). */
   callResolutionLine: string
-  /**
-   * Per-call diagnostics behind that census. Kept out of the IR by design
-   * (§8.1) and consumed by `aburi explain --debug-resolution`.
-   */
+  /** Per-call diagnostics behind that census, kept out of the IR (`call-resolution.md`). */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
-  /**
-   * Absolute path of the config that was read, or `null` when discovery found none and the
-   * run fell through to autodetect. Discovery starts at `cwd` while everything inside the
-   * config resolves against `workspaceRoot`, so which file won is not deducible from the
-   * arguments and belongs on the report.
-   */
+  /** Absolute path of the config that was read, or `null` when the run fell through to autodetect. */
   configSource: string | null
   /**
-   * Whether `configSource` was decided by the caller rather than found from `cwd`.
-   *
-   * Only one thing reads it, and it is the reason the field exists: a pinned config is
-   * routinely outside this scan's workspace root — `aburi diff` hands the base scan the head
-   * tree's `aburi.json` — and `reportConfigOutsideWorkspaceRoot` would then fire on every
-   * ref-mode diff with a sentence about a monorepo package that is not what happened.
+   * Whether `configSource` was decided by the caller rather than found from `cwd`, which
+   * exempts it from `reportConfigOutsideWorkspaceRoot`.
    */
   configPinnedByCaller: boolean
   /** Marker-detected root; the base for Symbol id paths and the config's relative globs. */
   workspaceRoot: string
-  /**
-   * Why this scan's coverage is not worth believing, or `null`.
-   *
-   * Computed once and carried, rather than left for each caller to decide from the counters:
-   * `exitCode` below is derived from this field, `reportScanIncidents` renders it, and
-   * `aburi diff` names it as the cause of its own exit. Three readings of one condition would
-   * be three chances to disagree about whether the run was green.
-   */
+  /** Why this scan's coverage is not worth believing, or `null`. `exitCode` is derived from it. */
   coverageFault: CoverageFault | null
   /**
-   * Candidate files the Document has no way to name, in path order.
-   *
-   * Nothing else on this report mentions them, and nothing in the artifact does either: the
-   * path a skip entry would need is one the shared path rule refuses, and a file counted in
-   * `totalFiles` while absent from `stats.skippedFiles` breaks integrity #21. So the run's only
-   * account of them is this list, which is why it moves the exit code — a scan that dropped
-   * source and said nothing would be a clean run over a workspace it did not describe.
+   * Candidate files the Document has no way to name (`cli-spec.md`), in path order. Nothing in the
+   * artifact mentions them, so this list is the run's only account and moves the exit code.
    */
   unrepresentableFiles: readonly UnrepresentableFile[]
-  /**
-   * Managers whose manifest declared package patterns and resolved none of them.
-   *
-   * Not a fault: the artifact is well formed, and a monorepo being set up has no packages in
-   * it yet. It is a description the reader has no other way to check, because the only trace
-   * left in the IR is `workspace.managers[].roots` being empty — which turbo emits on purpose.
-   */
+  /** Managers whose manifest declared package patterns and resolved none of them. Not a fault. */
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
-  /**
-   * Whether the whole repository was described as one Component because detection found no
-   * package. False when `components[]` in the config decided them, since then the manifest's
-   * outcome never reached the IR.
-   */
+  /** Whether the whole repository was described as one Component because detection found no package. */
   fellBackToSingleComponent: boolean
   exitCode: ExitCode
 }
 
 /**
- * §5 — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
+ * `cli-spec.md` — `aburi scan`. Resolves config, loads plugins, runs `@aburi/core` `scan`, then
  * writes IR JSON and per-Component Markdown into `--output-dir` (default `out/`).
  *
- * The function writes nothing to the process streams of its own accord: summaries are the CLI
- * wrapper's to print, and the incident report goes to `options.incidents.warn` if a caller
- * supplied one. The run's `Logger` is not covered by that — it still defaults to
- * `process.stderr`, so a caller that injects streams hears the per-run report on its own sink
- * and the per-file log lines on the real one. Integration tests can therefore assert on the
- * report and on the exact incident lines, but a captured stream is not the whole of stderr.
+ * Writes nothing to the process streams of its own accord: summaries are the CLI wrapper's
+ * to print, and the incident report goes to `options.incidents.warn` if a caller supplied one.
  */
 export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const cwd = options.cwd ?? process.cwd()
   const workspaceRoot = await resolveWorkspaceRoot(cwd)
 
-  // `??` rather than a branch: `resolveConfig` is exactly these two composed, so the
-  // precedence between the decided config and the one to decide is the operator itself
-  // rather than a sentence a later edit can contradict.
   const pinnedConfig = options.pinnedConfig ?? (await pinConfig(cwd, options.configPath))
   const loaded = await loadPinnedConfig(pinnedConfig)
   const config = mergeCliOverrides(loaded.config, options)
@@ -336,9 +224,9 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     frameworks: plugins.frameworks,
     effects: plugins.effects,
     registry: plugins.registry,
-    workspaceManagers: managers.managers.map((m) => ({
-      tool: m.tool,
-      roots: [...m.roots],
+    workspaceManagers: managers.managers.map((manager) => ({
+      tool: manager.tool,
+      roots: [...manager.roots],
     })),
     components,
     generator: await readGeneratorInfo(),
@@ -355,10 +243,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const componentMdPaths = await maybeWriteComponentMd(format, outputDir, scanResult.ir)
   if (format !== "md") {
     irPath = resolve(outputDir, IR_JSON_FILENAME)
-    // Serialization can refuse the document — two object keys that differ only in Unicode
-    // composition cannot both be written without one being lost on read-back. That is a
-    // property of the scanned project, so it belongs on the input-error exit code with the
-    // target path attached, not on the generic handler as a bare runtime failure.
+    // Serialization can refuse the document (two keys differing only in Unicode composition),
+    // which is a property of the scanned project — exit 2, with the target path attached.
     try {
       await writeCanonicalIR(scanResult.ir, irPath, {
         format: options.compact ? "compact" : "pretty",
@@ -378,7 +264,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   // withdrawn — so the two counts below would otherwise both include it, and one of them
   // would call its errors recoverable.
   const withdrawnByParse = new Set(
-    scanResult.skipped.filter((s) => s.reason === "parse-failed").map((s) => s.path),
+    scanResult.skipped.filter((file) => file.reason === "parse-failed").map((file) => file.path),
   )
 
   const coverageFault = findCoverageFault(
@@ -396,19 +282,20 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     parsedFiles: scanResult.ir.stats.parsedFiles,
     keptSymbols: scanResult.ir.stats.keptSymbols,
     droppedSymbols: scanResult.ir.stats.droppedSymbols,
-    parseErrorCount: scanResult.parseErrors.filter((p) => !withdrawnByParse.has(p.file)).length,
+    parseErrorCount: scanResult.parseErrors.filter((error) => !withdrawnByParse.has(error.file))
+      .length,
     parseFailureCount: withdrawnByParse.size,
     timeoutCount: scanResult.timeoutEvents.length,
-    skipped: scanResult.skipped.map((s) => {
+    skipped: scanResult.skipped.map((file) => {
       const entry: { path: string; reason: SkippedFile["reason"]; detail?: string } = {
-        path: s.path,
-        reason: s.reason,
+        path: file.path,
+        reason: file.reason,
       }
-      if (s.detail !== undefined) entry.detail = s.detail
+      if (file.detail !== undefined) entry.detail = file.detail
       return entry
     }),
-    extractionFailures: scanResult.extractionFailures.map((f) => ({ ...f })),
-    treeReleaseFailures: scanResult.treeReleaseFailures.map((f) => ({ ...f })),
+    extractionFailures: scanResult.extractionFailures.map((failure) => ({ ...failure })),
+    treeReleaseFailures: scanResult.treeReleaseFailures.map((failure) => ({ ...failure })),
     lspEnrichment: scanResult.ir.stats.lspEnrichment,
     callResolutionLine: formatCallResolutionLine(requireCallResolution(scanResult.ir)),
     unresolvedCalls: scanResult.unresolvedCalls,
@@ -416,26 +303,13 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     configPinnedByCaller: options.pinnedConfig !== undefined,
     workspaceRoot,
     coverageFault,
-    unrepresentableFiles: scanResult.unrepresentableFiles.map((f) => ({ ...f })),
+    unrepresentableFiles: scanResult.unrepresentableFiles.map((file) => ({ ...file })),
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
-    // Three gates (`cli-spec.md` §5.4, §5.7, §5.8), and none withholds anything the run would
-    // otherwise have written — a reviewer gets whatever `--format` asked for and a non-zero
-    // code, where before either guard existed they got the artifact and a green light.
-    //
-    // A file lost to a plugin exception says the run is broken rather than merely partial.
-    // A scan that parsed nothing says the run described nothing, which is worse in the one
-    // way that matters downstream: it is a *success* today, and an IR with no Symbols passes
-    // every `--fail-on` gate it is later compared through.
-    //
-    // Losing files while still parsing some keeps exiting 0 unless the workspace set
-    // `minParsedFileRatio`, which reaches this line as a `coverageFault` like the other two
-    // rather than as a condition of its own.
-    //
-    // A file the Document cannot name is the third: it is source the workspace holds and the
-    // artifact does not describe, and unlike every other loss there is no entry in the
-    // artifact to find it by afterwards. Nothing but this exit code and the line above it
-    // says the workspace was read incompletely.
+    // Three gates (`cli-spec.md`: exit codes, coverage, unnameable files), none of which
+    // withholds the artifact: a plugin exception says the run is broken, a coverage fault says
+    // it described nothing (or too little, under `minParsedFileRatio`), and an unnameable file
+    // is source the artifact holds no trace of.
     exitCode:
       scanResult.extractionFailures.length > 0 ||
       coverageFault !== null ||
@@ -448,70 +322,21 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     try {
       reportScanIncidents(report, incidents.warn, incidents.label ?? null)
     } catch {
-      // The report is complete and the IR is on disk by now, so the exit code must not depend
-      // on whether the channel that describes them survived. A sink writing to a closed pipe
-      // — `aburi scan 2>&1 | head -1` — would otherwise turn a gate into a runtime error and
-      // send a reader looking for a fault that is not there. There is nowhere to report the
-      // failure of the reporting channel, which is why this is the one swallow in the file.
-      //
-      // It absorbs more than the sink. Whatever line the report was on when it threw, the
-      // rest of the report goes with it — the skip section and every LSP warning after it —
-      // leaving the lines already written on screen and, for a faulted scan, a non-zero
-      // status with nothing accounting for it. The only throw not from the sink that
-      // `reportScanIncidents` can raise is a `skipped[].reason` outside this package's union,
-      // which nothing in-tree can produce; see the contract on that function.
+      // The report is complete and the IR is on disk, so the exit code must not depend on
+      // whether the sink survived (`aburi scan 2>&1 | head -1` closes it). The rest of the
+      // report is lost with it; there is nowhere to report the reporting channel's failure.
     }
   }
   return report
 }
 
 /**
- * How many withdrawn files a reason names individually before the rest are counted.
- *
- * A fault broken enough to lose one file usually loses them all, so the untruncated list is
- * the whole workspace — which on CI scrolls every other warning out of the log it was meant
- * to appear in. Ten is enough to see the shape (one path, or many) and read the detail,
- * which is identical across them when the cause is a plugin rather than the files.
- *
- * Per reason rather than across the listing. One budget shared by all six would be spent by
- * whichever reason lost the most files, and the reason that lost the most is not the reason
- * a reader most needs named: a hundred over-size files would push the one file a plugin
- * threw on — the only reason *in this listing* that moves the exit code — inside `…and N more`,
- * leaving a non-zero status with nothing on screen to account for it.
- *
- * The two gate reasons that are not skip reasons print their own sections, and one of those is
- * uncapped: where the artifact holds no copy of the list, a tail is the tool declining to say
- * what it alone knows. Here it is a pointer into `stats.skippedFiles[]`, which holds every one.
- */
-const MAX_LISTED_PER_REASON = 10
-
-/**
  * Where each reason sits in the report, and what to do about it.
  *
- * `advice` is the whole difference between them, and the one line they used to share said
- * none of it: `over-size` points at a budget, `parse-timeout` at a different budget and a
- * re-run, `unreadable` at a re-run alone — a tree that changed under the scan is the only
- * thing that produces it — `unroutable` at a bug report or at a rename, and the two
- * extraction reasons at the source and at the plugin respectively. The re-run /
- * fix-something split is the one the reason's own schema docstring draws: `parse-timeout`
- * depends on how loaded the machine was, everything else describes the file and clears only
- * when something changes.
- *
- * `rank` fixes the order the census and the groups under it come out in, which would
- * otherwise be the order the files arrived in — scan order, and so a function of where in
- * the workspace the losses happened to sit. It follows the order the schema's `reason` enum
- * declares, which is also the order the generated union lists. Not the order the schema's
- * prose beside that enum groups them in: that prose puts `over-size` and `unroutable`
- * together as decided before the file was read, and no single sequence is both.
- *
- * The ranks must stay distinct. `Array.prototype.sort` is stable and the map they order was
- * filled in scan order, so two reasons sharing a rank would tie and fall back to exactly the
- * dependency on workspace layout this exists to remove — a `number` does not say so and no
- * test would catch it.
- *
- * A `Record` over the union rather than a list, so a reason added to the schema stops the
- * build here. A list would have compiled, and quietly left the new reason's files out of the
- * report while the census above still counted them.
+ * `rank` fixes the order the census and its groups come out in (the schema's `reason` enum
+ * order) so it is not a function of where in the workspace the losses sat; the ranks must
+ * stay distinct, because `sort` is stable and a tie would fall back to scan order. A `Record`
+ * over the union rather than a list, so a reason added to the schema stops the build here.
  */
 const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: string }> = {
   "over-size": {
@@ -543,92 +368,78 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   },
 }
 
+/** A line that stands on its own: `⚠`, the scan's label when one was given, then the text. */
+type SayIncident = (line: string) => void
+
 /**
- * §5.6 — surface parse failures / soft timeouts / discovery-time skips so a scan that ate 50
- * broken files still produces a visible signal. The main summary line on stdout stays clean;
- * each clause below fires only on a non-empty incident.
+ * `cli-spec.md` stderr warnings — surface parse failures / soft timeouts / discovery-time skips
+ * so a scan that ate 50 broken files still produces a visible signal. Each clause fires only on
+ * a non-empty incident.
  *
- * `label` names the scan when more than one ran in the same command. It goes inside the
- * line, after the glyph, so `⚠` starts every line that stands on its own. The only lines
- * without it are the indented per-file listing and its `…and N more` tail, which belong to
- * the line above them and are attributed by it.
+ * `label` goes inside the line, after the glyph, so `⚠` starts every line that stands on its
+ * own; only the indented per-file listings and their `…and N more` tails go without it.
  *
- * Exported, so a caller can assemble a `ScanReport` from something other than a scan. One
- * contract comes with that: every `report.skipped[].reason` must be a member of this
- * package's `SkippedFile["reason"]`, because the skip section looks each one up in a table
- * that is total over it and has nowhere to put a seventh. A document written by a newer
- * Aburi is the way that could happen; `workspace:*` pins the two together in-tree.
+ * Exported, so a caller can assemble a `ScanReport` from something other than a scan — with
+ * the contract that every `report.skipped[].reason` is a member of this package's
+ * `SkippedFile["reason"]`, since the skip section looks each one up in a table total over it.
  */
 export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: string | null): void {
-  const say = (line: string): void => {
+  const sayIncident: SayIncident = (line) => {
     warn(label === null ? `⚠ ${line}` : `⚠ ${label}: ${line}`)
   }
   for (const line of describeUnresolvedDeclarations(
     report.unresolvedDeclarations,
     report.fellBackToSingleComponent,
   )) {
-    say(line)
+    sayIncident(line)
   }
-  reportCoverageFault(report.coverageFault, say)
-  // Directly under the coverage line, ahead of everything recoverable from the artifact. The
-  // skip census below can run to six reasons of eleven lines each, and the sink this all goes
-  // through is one whose failure is deliberately swallowed further up — so the account that
-  // exists nowhere else is the one that must not be last.
-  reportUnrepresentable(report.unrepresentableFiles, say, warn)
-  // Beside the account that exists nowhere else, and ahead of everything the artifact can be
-  // re-read for. This one predicts a failure rather than describing one: the run it belongs
-  // to finished, and the next longer one dies of the same plugin.
-  reportTreeReleaseFailures(report.treeReleaseFailures, say, warn)
-  reportConfigOutsideWorkspaceRoot(report, say)
+  reportCoverageFault(report.coverageFault, sayIncident)
+  // The two accounts that exist nowhere else come directly under the coverage line, ahead of
+  // everything recoverable from the artifact: the sink's failure is swallowed further up, so
+  // whatever is last is what a closed pipe loses.
+  reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
+  reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
+  reportConfigOutsideWorkspaceRoot(report, sayIncident)
   if (report.parseErrorCount > 0) {
-    say(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
+    sayIncident(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
   }
   if (report.parseFailureCount > 0) {
-    // Apart from the line above rather than folded into it: those files are in the IR with
-    // warnings against them, these are not in it at all, and the difference is the whole
-    // reason a reader is reading the count. The skip summary below names them too, among
-    // every other reason a file went missing; this says which of them are unparseable.
-    say(`${report.parseFailureCount} file(s) could not be parsed and were left out of the IR.`)
+    // Apart from the line above: those files are in the IR with warnings, these are not in it.
+    sayIncident(
+      `${report.parseFailureCount} file(s) could not be parsed and were left out of the IR.`,
+    )
   }
   if (report.timeoutCount > 0) {
-    say(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
+    sayIncident(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
   }
-  reportSkipped(report.skipped, say, warn)
+  reportSkipped(report.skipped, sayIncident, warn)
   const lsp = report.lspEnrichment
   if (lsp !== undefined) {
     if (lsp.filesFellBack > 0) {
-      say(
+      sayIncident(
         `LSP enrichment fell back for ${lsp.filesFellBack} file(s); IR field values in those files remain at the untyped tier.`,
       )
     }
     if (lsp.languagesDisabled.length > 0) {
-      say(`LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.`)
+      sayIncident(`LSP disabled mid-run for language(s): ${lsp.languagesDisabled.join(", ")}.`)
     }
     if (lsp.requestsTimedOut > 0 || lsp.requestsFailed > 0) {
-      // Its own line, not a detail of the two above: it has its own condition and fires when
-      // neither of them did. Left indented and glyphless it was the one warning `⚠` did not
-      // start, and in a two-scan `diff` it was the one nothing could attribute to a side.
-      say(
+      // Its own line, with its own condition: it fires when neither of the two above did.
+      sayIncident(
         `LSP requests: ${lsp.requestsIssued} issued · ${lsp.requestsTimedOut} timed out · ${lsp.requestsFailed} failed.`,
       )
     }
-    reportHints(lsp, say)
+    reportHints(lsp, sayIncident)
   }
 }
 
 /**
- * What the typed tier actually bought, on the one channel a person reads.
- *
- * The request line above cannot answer it: a hover that comes back on time carrying nothing
- * usable is a healthy row in every counter it prints (lsp-enrichment.md §7.2). So this line
- * fires whenever the pass produced a hint or refused one, and stays quiet only for a run with
- * neither — a workspace with no `this.` / `super.` call sites left for the LSP tier, where
- * there is nothing to report rather than nothing to say.
- *
- * The rejection total is printed rather than the five buckets: a count is what says whether to
- * go and look, and `stats.lspEnrichment.hintsRejected` in the IR is where looking happens.
+ * What the typed tier actually bought. The request line cannot answer it: a hover that comes
+ * back on time carrying nothing usable is a healthy row in every counter (lsp-enrichment.md).
+ * Quiet only for a run that neither produced nor refused a hint. The rejection total
+ * rather than the five buckets: `stats.lspEnrichment.hintsRejected` in the IR is where to look.
  */
-function reportHints(lsp: LspEnrichmentStats, say: (line: string) => void): void {
+function reportHints(lsp: LspEnrichmentStats, sayIncident: SayIncident): void {
   const produced = lsp.hintsProduced ?? 0
   const rejected = lsp.hintsRejected
   const refused =
@@ -640,84 +451,60 @@ function reportHints(lsp: LspEnrichmentStats, say: (line: string) => void): void
         rejected.kindMismatch +
         rejected.targetDropped
   if (produced === 0 && refused === 0) return
-  say(
+  sayIncident(
     `LSP receiver hints: ${produced} produced · ${lsp.hintsConsumed ?? 0} resolved a call · ${refused} rejected.`,
   )
 }
 
 /**
- * Parse trees a plugin was asked to free and did not.
- *
- * Grouped by plugin rather than listed by file, because the plugin is what the reader has to
- * fix and the files are only where it showed. The first file per plugin is named with what
- * went wrong; the rest are a count, the way a skip group's tail is.
- *
- * The consequence is stated because nothing else about the run says it. Every one of these
- * files is in the IR and the exit code is unmoved, so a line reading only "could not release
- * a tree" would be indistinguishable from noise — and the run that pays for it is the next,
- * longer one, which dies with the heap exhausted and blames whichever file it was on.
+ * Parse trees a plugin was asked to free and did not, grouped by plugin because the plugin is
+ * what the reader has to fix. The consequence is stated because nothing else about the run
+ * says it: the exit code is unmoved, and the run that pays is the next, longer one.
  */
 function reportTreeReleaseFailures(
   failures: ScanReport["treeReleaseFailures"],
-  say: (line: string) => void,
-  warn: WarnFn,
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
 ): void {
   if (failures.length === 0) return
-  const byPlugin = new Map<string, ScanReport["treeReleaseFailures"][number][]>()
-  for (const failure of failures) {
-    const group = byPlugin.get(failure.plugin)
-    if (group === undefined) byPlugin.set(failure.plugin, [failure])
-    else group.push(failure)
-  }
-  say(
+  sayIncident(
     `${failures.length} parse tree(s) were not released by the plugin that built them. ` +
       `A tree a plugin does not free is not reclaimed by the garbage collector, so a long ` +
       `enough run exhausts the parser's heap.`,
   )
-  for (const [plugin, group] of byPlugin) {
+  for (const [plugin, group] of groupBy(failures, (failure) => failure.plugin)) {
     const first = group[0]
     if (first === undefined) continue
-    warn(`    ${plugin} (${group.length}) — ${first.file}: ${first.detail}`)
+    writeDetail(`    ${plugin} (${group.length}) — ${first.file}: ${first.detail}`)
   }
 }
 
 /**
- * The line that accounts for this run's exit code when coverage is what earned it.
- *
- * Above the census that explains it: it is the finding, and the counts below it are the
- * evidence. Only the workspace's own manifests are reported ahead of it, because a coverage
- * number computed over the wrong set of components is not a finding a reader can act on until
- * they know the set was wrong.
- *
- * Each kind says where to look. Discovery found nothing → the config decided that, and the
- * three things in it that can. Nothing parsed → whatever withdrew the files, named. Below the
- * floor → what was measured against what the workspace asked for.
+ * The line that accounts for this run's exit code when coverage is what earned it. Above the
+ * census that explains it, and below only the workspace's own manifests: a coverage number
+ * over the wrong set of components is not something a reader can act on.
  */
-function reportCoverageFault(fault: CoverageFault | null, say: (line: string) => void): void {
+function reportCoverageFault(fault: CoverageFault | null, sayIncident: SayIncident): void {
   if (fault === null) return
   const consequence = "The IR is empty and will diff clean against any other empty IR."
   if (fault.kind === "nothing-discovered") {
-    say(
+    sayIncident(
       `No file was discovered to scan. ${consequence} Check ignore and .gitignore, ` +
         "components[].roots, and whether a loaded language plugin claims any extension in this workspace.",
     )
     return
   }
   if (fault.kind === "nothing-parsed") {
-    say(
+    sayIncident(
       `${fault.totalFiles} file(s) discovered, 0 parsed — ${fault.dominantCount} as ` +
         `${fault.dominant}. ${consequence}`,
     )
     return
   }
-  // Down for what was achieved and up for the floor, so the two never meet on one integer.
-  // Rounding both to nearest prints `899 of 1000 file(s) parsed (90%), below the floor of 90%`,
-  // which reads as a bug in the tool. Away from each other the sentence is true for every pair
-  // that reaches this line: the reading is strictly below the floor, so its floored percentage
-  // is strictly below the floor's ceilinged one. The cost is a digit of precision, on a line
-  // that already carries both exact counts.
+  // Down for what was achieved and up for the floor, so the two never meet on one integer:
+  // rounding both prints `899 of 1000 file(s) parsed (90%), below the floor of 90%`.
   const percent = Math.floor((fault.parsedFiles / fault.totalFiles) * 100)
-  say(
+  sayIncident(
     `${fault.parsedFiles} of ${fault.totalFiles} file(s) parsed (${percent}%), below the ` +
       `minParsedFileRatio floor of ${Math.ceil(fault.floor * 100)}%. ` +
       "Raise the coverage, or lower the floor if this is what the workspace looks like now.",
@@ -725,27 +512,17 @@ function reportCoverageFault(fault: CoverageFault | null, say: (line: string) =>
 }
 
 /**
- * Config discovery is anchored to `cwd`, everything inside the config to the workspace
- * root. When the two directories differ — running inside a monorepo package that has its
- * own `aburi.json` — a relative path in that file points somewhere other than where its
- * author was looking, and the scan still covers the whole workspace. Both are deliberate
- * (see `pinConfig`), and neither is visible from the command line, so say it.
- *
- * A pinned config is exempt, because for it the condition is not evidence of anything. The
- * base scan of `aburi diff` reads the head tree's `aburi.json` against a workspace root that
- * is the temporary worktree, so the two directories *never* match and the line would fire on
- * every ref-mode diff in a configured repo. It would also be describing the wrong thing: the
- * head config does not sit below the worktree, it sits in another tree entirely, and nobody
- * ran anything from a monorepo package. The half of the sentence that stays true for a pinned
- * scan — that paths inside the config resolve against the root, which for the base scan is
- * the worktree — is documented under `aburi diff` in `docs/reference/cli.md` instead, where a
- * reader meets it once rather than on every run.
+ * Config discovery is anchored to `cwd`, everything inside the config to the workspace root
+ * (see `pinConfig`). When the two differ — a monorepo package with its own `aburi.json` —
+ * neither is visible from the command line, so say it. A pinned config is exempt: `aburi
+ * diff`'s base scan reads the head tree's config against a temporary worktree, so the two
+ * never match and nobody ran anything from a package.
  */
-function reportConfigOutsideWorkspaceRoot(report: ScanReport, say: (line: string) => void): void {
+function reportConfigOutsideWorkspaceRoot(report: ScanReport, sayIncident: SayIncident): void {
   if (report.configSource === null) return
   if (report.configPinnedByCaller) return
   if (dirname(report.configSource) === report.workspaceRoot) return
-  say(
+  sayIncident(
     `Config ${report.configSource} sits below the workspace root ${report.workspaceRoot}. ` +
       `Paths inside it (ignore, components[].roots, relative plugin refs) resolve against the root, ` +
       `and the scan covers the whole workspace.`,
@@ -754,81 +531,53 @@ function reportConfigOutsideWorkspaceRoot(report: ScanReport, say: (line: string
 
 /**
  * The census of what the scan gave up on, then each reason's files with the detail
- * `@aburi/core` wrote for them.
+ * `@aburi/core` wrote for them. For `over-size`, `unroutable`, and an `unreadable` raised at
+ * discovery this is the only account there is; for the rest the core's per-file line goes to
+ * a sink `ABURI_LOG_LEVEL=error` silences.
  *
- * The details are the point. For `over-size`, `unroutable`, and an `unreadable` raised at
- * discovery this is the only account there is — those three are not logged at all — and for
- * the other three the core's per-file line goes to a sink `ABURI_LOG_LEVEL=error` silences
- * and that never reaches a caller who injected its own streams. `ScanReport.skipped` has
- * always carried the path and the detail; what dropped them was the line, whose input type
- * was `readonly { reason: string }[]`, so five of the six reasons reached the reader as a
- * bare count. (`extraction-failed` was listed, from a second field holding the same string.)
- *
- * It is a detail per file rather than per reason because a reason's files rarely share one:
- * a size and a budget, an errno, a parse position. The rule is that a detail the core
- * bothered to write is a detail this prints, so a reason added later is listed by the same
- * code that lists the six here.
+ * Capped per reason rather than across the listing: one budget would be spent by whichever
+ * reason lost the most files, pushing the one file a plugin threw on — the only reason here
+ * that moves the exit code — inside `…and N more`.
  */
 function reportSkipped(
   skipped: ScanReport["skipped"],
-  say: (line: string) => void,
-  warn: WarnFn,
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
 ): void {
   if (skipped.length === 0) return
-  // Grouped from the files and then ordered, rather than walked reason by reason: every file
-  // handed over is in a group by construction, so the census below cannot come to more than
-  // the groups under it account for.
-  const byReason = new Map<SkippedFile["reason"], ScanReport["skipped"][number][]>()
-  for (const file of skipped) {
-    const group = byReason.get(file.reason)
-    if (group === undefined) byReason.set(file.reason, [file])
-    else group.push(file)
-  }
-  const groups = [...byReason].sort(([a], [b]) => REASON_REPORT[a].rank - REASON_REPORT[b].rank)
+  const groups = [...groupBy(skipped, (file) => file.reason)].sort(
+    ([a], [b]) => REASON_REPORT[a].rank - REASON_REPORT[b].rank,
+  )
   const census = groups.map(([reason, files]) => `${reason}=${files.length}`).join(", ")
-  say(`${skipped.length} file(s) contributed no Symbols: ${census}`)
+  sayIncident(`${skipped.length} file(s) contributed no Symbols: ${census}`)
   for (const [reason, files] of groups) {
-    say(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
-    for (const file of files.slice(0, MAX_LISTED_PER_REASON)) {
-      // Empty as well as absent. Nothing in a scan produces either any more: every detail
-      // derived from a thrown value goes through `describeThrown`, which is total on
-      // non-emptiness, and the rest are built at their site from non-empty literals. But this
-      // function is exported for a report a caller assembled, where the field is optional and
-      // one that says nothing renders as `    src/x.ts: ` — a path, a colon, and silence.
+    sayIncident(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
+    const { listed, hidden } = capListing(files)
+    for (const file of listed) {
+      // Empty as well as absent: a caller-assembled report may say nothing, and `src/x.ts: `
+      // is a path, a colon, and silence.
       const detail = file.detail ?? ""
-      warn(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
+      writeDetail(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
     }
-    const hidden = files.length - MAX_LISTED_PER_REASON
-    if (hidden > 0) warn(`    …and ${hidden} more`)
+    if (hidden > 0) writeDetail(`    …and ${hidden} more`)
   }
 }
 
 /**
- * Files the Document has no way to name.
+ * Files the Document has no way to name: its own section rather than a seventh skip reason,
+ * because there is no path a skip entry could take, and this paragraph is the whole record.
  *
- * Its own section rather than a seventh skip reason. A skip entry is a path plus a reason, and
- * the path it would take is one the shared rule refuses — so there is no entry to group, no
- * count in `totalFiles` to reconcile it against, and nothing in the artifact a reader could
- * find the file by later. This paragraph is the whole record.
+ * **Uncapped**, unlike every other listing here: a truncated skip group is still recoverable
+ * from `stats.skippedFiles[]`, this one from nothing. What keeps it short is grouping by the
+ * *name* that has to change — one line per rename the reader has to perform.
  *
- * **Uncapped**, which every other listing here is not. A truncated skip group is still
- * recoverable from `stats.skippedFiles[]`; this one is recoverable from nothing, so a
- * `…and N more` would be the tool declining to say what it alone knows. What keeps it short
- * is grouping instead: one line per *name* that has to change rather than one per file, which
- * for the usual shape — a directory whose name holds the character — is a single line however many
- * files sit under it. That count is also the number of renames the reader has to perform, so
- * the listing is the length of the work rather than the length of the damage.
- *
- * The `ignore` half of the advice carries its own warning because the obvious spelling is
- * wrong. Patterns reach picomatch, which spends a lone backslash as an escape, so
- * `src/v\1/**` does not match `src/v\1/util.ts` while `src/v\\1/**` does. Printing the name
- * and then advising a pattern the name does not satisfy would send a reader round the loop
- * with an identical exit 3 and nothing on screen to say why.
+ * The `ignore` advice warns about the spelling because patterns reach picomatch, which spends
+ * a lone backslash as an escape: `src/v\1/**` does not match `src/v\1/util.ts`.
  */
 function reportUnrepresentable(
   files: ScanReport["unrepresentableFiles"],
-  say: (line: string) => void,
-  warn: WarnFn,
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
 ): void {
   const unspellable: UnnameableFile[] = []
   const colliding: CollidingFile[] = []
@@ -841,39 +590,33 @@ function reportUnrepresentable(
         colliding.push(file)
         break
       default:
-        // A third reason routed to neither section prints nothing while the gate still reads
-        // `unrepresentableFiles.length` — exit 3 over an empty screen, about the one list the
-        // artifact holds no copy of. Two `filter` calls compiled happily in that state; this
-        // does not. `reportSkipped` keeps the same property by looking its reason up in a
-        // table that is total over the union.
-        assertNeverUnrepresentable(file)
+        // A third reason routed to neither section would print nothing while the gate still
+        // reads `unrepresentableFiles.length` — exit 3 over an empty screen. The subject names
+        // where the reason came from, because the fix is a section here rather than anything
+        // in the workspace the reader is standing in.
+        assertNever(
+          file,
+          "unrepresentable-file reason from @aburi/core, which this CLI has no section for",
+        )
     }
   }
-  reportUnspellable(unspellable, say, warn)
-  reportColliding(colliding, say, warn)
-}
-
-/** Compile-time guard: a new `UnrepresentableFile` member is a type error rather than silence. */
-function assertNeverUnrepresentable(file: never): never {
-  throw new CliError(
-    `@aburi/core reported a file the Document cannot name for a reason this CLI has no section for: ${JSON.stringify(file)}`,
-    "runtime-error",
-  )
+  reportUnspellable(unspellable, sayIncident, writeDetail)
+  reportColliding(colliding, sayIncident, writeDetail)
 }
 
 /** One section per cause, because the fix differs and the two are told apart by nothing else. */
 function reportUnspellable(
   files: readonly UnnameableFile[],
-  say: (line: string) => void,
-  warn: WarnFn,
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
 ): void {
   if (files.length === 0) return
-  const byPrefix = groupBy(files, (file) => file.unnameablePrefix)
-  say(
+  const byPrefix = groupByKeyOrder(files, (file) => file.unnameablePrefix)
+  sayIncident(
     `${files.length} file(s) were left out of the IR and out of its counts, under ${byPrefix.size} name(s) with no spelling here: "/" is the only separator a Document path has, so a name holding a backslash cannot be written down at all. Rename each one below. To leave one out with ignore instead, write its backslash twice — a glob pattern spends a single one as an escape, so the name as printed does not match itself.`,
   )
   for (const [prefix, group] of byPrefix) {
-    warn(
+    writeDetail(
       group[0]?.fsPath === prefix
         ? `    ${prefix}`
         : `    ${prefix} — a directory, and the ${group.length} file(s) under it`,
@@ -883,64 +626,40 @@ function reportUnspellable(
 
 /**
  * Two spellings of one name, which the Document has one path for and therefore no name for.
+ * Every claimant is spelled out by codepoint: the names are different bytes and the same
+ * glyphs, so a terminal would print the offending line twice identically.
  *
- * Every claimant is spelled out by codepoint, and there is no way around that: the whole point
- * of the pair is that the two names are different bytes and the same glyphs, so a terminal
- * prints the offending line twice identically. This is the section a reader cannot act on
- * without being told which character differs.
- *
- * The `ignore` half is stated per outcome, because the patterns do different things and the
- * obvious summary of them is false. Measured against discovery's own options:
- *
- * - the group header excludes the claimant spelled exactly that way, if one is. The group drops
- *   to a single claimant, the collision is over, and the remaining file is scanned normally.
- * - a wildcard over the group excludes all of them, and the IR describes none.
- * - where no claimant is spelled as the header — two decomposed spellings of one composed path —
- *   the header matches nothing and the group is untouched.
- *
- * So the header is not a pattern that cannot work; it is the one that keeps a file. Which of
- * the two a reader wants is theirs to decide, and neither is the fix, which is a rename.
+ * The `ignore` half is stated per outcome because the patterns do different things: the group
+ * header excludes only the claimant spelled exactly that way (the rest stay scannable), a
+ * wildcard over the group excludes them all, and neither is the fix, which is a rename.
  */
 function reportColliding(
   files: readonly CollidingFile[],
-  say: (line: string) => void,
-  warn: WarnFn,
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
 ): void {
   if (files.length === 0) return
-  const byPath = groupBy(files, (file) => file.documentPath)
-  say(
+  const byPath = groupByKeyOrder(files, (file) => file.documentPath)
+  sayIncident(
     `${files.length} file(s) were left out of the IR and out of its counts, on ${byPath.size} path(s) more than one name claims: the Document holds every string in Unicode NFC, and these names differ only in how they are composed, so normalizing them gives one path for several files. Rename all but one of each group. ignore matches the spelling on disk, so the path below excludes whichever claimant is spelled that way and leaves the rest of the group scannable, while a wildcard over it excludes them all.`,
   )
   for (const [documentPath, group] of byPath) {
-    warn(`    ${documentPath} — claimed by ${group.length} file(s) on disk:`)
-    for (const file of group) warn(`        ${describeCodePoints(file.fsPath)}`)
+    writeDetail(`    ${documentPath} — claimed by ${group.length} file(s) on disk:`)
+    for (const file of group) writeDetail(`        ${describeCodePoints(file.fsPath)}`)
   }
 }
 
-/** Grouped and ordered by key, so the paragraph is the same paragraph on every run. */
-function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
-  const groups = new Map<string, T[]>()
-  for (const item of items) {
-    const group = groups.get(key(item))
-    if (group === undefined) groups.set(key(item), [item])
-    else group.push(item)
-  }
-  return new Map([...groups].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+/** `groupBy` ordered by key, so the paragraph is the same paragraph on every run. */
+function groupByKeyOrder<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+  return new Map([...groupBy(items, key)].sort(([a], [b]) => compareCodeUnit(a, b)))
 }
 
 /**
  * Whether this scan read enough of the workspace for its answer to mean anything.
  *
- * Two gates. `parsedFiles === 0` is unconditional: a Document with no Symbols is not a
- * description of a codebase, and the failure it produces downstream is silent — two of them
- * diff as `+0 -0 ~0`. Anything above zero is the workspace's own call, because where the line
- * sits between "lost some files" and "lost the workspace" depends on the repository, and a
- * default guess would red a build for a judgement nobody made.
- *
- * `keptSymbols` is deliberately not consulted. A file that parses cleanly and declares nothing
- * is counted as parsed, which is correct — a repository of configuration and tests is not a
- * failed scan — so a Symbol count says something about the code, and `parsedFiles` says what
- * this function is asked about.
+ * `parsedFiles === 0` is unconditional; anything above zero is the workspace's own call via
+ * `minParsedFileRatio`, since where the line sits depends on the repository. `keptSymbols` is
+ * deliberately not consulted: a repository of configuration and tests is not a failed scan.
  */
 function findCoverageFault(
   totalFiles: number,
@@ -949,9 +668,8 @@ function findCoverageFault(
   floor: number | undefined,
 ): CoverageFault | null {
   if (parsedFiles === 0) {
-    // No dominant reason means nothing was skipped, which together with nothing parsed means
-    // nothing was found. `totalFiles === 0` is that same state said a third way, so it is not
-    // checked separately — a second branch for it would be unreachable through one of them.
+    // No dominant reason means nothing was skipped, which with nothing parsed means nothing
+    // was found; `totalFiles === 0` is that same state and is not checked separately.
     const dominant = dominantReason(skipped)
     return dominant === null
       ? { kind: "nothing-discovered" }
@@ -973,20 +691,13 @@ function findCoverageFault(
 
 /**
  * The reason that took the most files, so a run that lost everything says what to look at.
- *
- * Ties go to the earlier reason in `REASON_REPORT`'s order, which makes the line a function of
- * the losses rather than of the order the walk happened to reach them in — the same reason
- * `reportSkipped` orders its groups at all.
- *
- * Returns `null` for an empty list, which under `parsedFiles === 0` means nothing was found —
- * every file found and not parsed is on this list, so an empty one and a zero parse count
- * cannot both hold while anything was discovered.
+ * Ties go to the earlier reason in `REASON_REPORT`'s order, so the line is a function of the
+ * losses rather than of scan order. `null` for an empty list.
  */
 function dominantReason(
   skipped: readonly { reason: SkippedFile["reason"] }[],
 ): { reason: SkippedFile["reason"]; count: number } | null {
-  const counts = new Map<SkippedFile["reason"], number>()
-  for (const file of skipped) counts.set(file.reason, (counts.get(file.reason) ?? 0) + 1)
+  const counts = countBy(skipped, (file) => file.reason)
   let best: { reason: SkippedFile["reason"]; count: number } | null = null
   for (const [reason, count] of counts) {
     if (best === null || count > best.count) {
@@ -1001,18 +712,15 @@ function dominantReason(
 }
 
 /**
- * `Stats.callResolution` is optional in the schema so v1 documents written
- * before the field existed stay valid, but the IR we just produced came out of
- * `scan()`, which always fills it in. Substituting zeroes here would print
- * `calls 0 · resolved 0 · unresolved 0` — a clean bill of health for a run that
- * measured nothing — so a missing field is reported as the contract breach it
- * would be.
+ * `Stats.callResolution` is optional in the schema for older documents, but `scan()` always
+ * fills it in. Substituting zeroes would print a clean bill of health for a run that measured
+ * nothing, so a missing field is reported as the contract breach it would be.
  */
 function requireCallResolution(ir: IR): CallResolutionStats {
   const stats = ir.stats.callResolution
   if (stats === undefined) {
     throw new CliError(
-      "scan() returned an IR without stats.callResolution; @aburi/core stopped emitting the call-resolution census (call-resolution.md §8.1).",
+      "scan() returned an IR without stats.callResolution; @aburi/core stopped emitting the call-resolution census (call-resolution.md).",
       "runtime-error",
     )
   }
@@ -1020,16 +728,9 @@ function requireCallResolution(ir: IR): CallResolutionStats {
 }
 
 /**
- * Refuse to scan with no language plugin resolved.
- *
- * Nothing can be parsed in that state, so the run would write an IR with zero Symbols and
- * an empty `workspace.languages` — which the IR schema rejects (`minItems: 1`) and which
- * integrity invariant #18 rejects. Catching it here instead of letting the invariant fire
- * is about the message: "no language plugin is configured, add one" says what to do, where
- * "workspace.languages is empty" describes a symptom of it.
- *
- * The shape this replaces was the dangerous one, because it was a success: an empty IR
- * diffs against another empty IR as `+0 -0 ~0`, so every `--fail-on` gate downstream passed.
+ * Refuse to scan with no language plugin resolved. Nothing can be parsed in that state, and
+ * the IR would fail its own schema (`workspace.languages` is `minItems: 1`, invariant #18);
+ * catching it here is about the message, which says what to do rather than naming a symptom.
  */
 function requireLanguagePlugin(count: number, configSource: string | null): void {
   if (count > 0) return
@@ -1055,22 +756,10 @@ function mergeCliOverrides(config: Partial<Config>, options: ScanOptions): Confi
 }
 
 /**
- * Both branches can fail on a Component id the schema cannot hold: the config branch if a
- * config reached us without ajv validation, the detection branch if a package or directory
- * name kebab-cases to nothing. Either way it is a problem with the project being scanned,
- * not a bug in Aburi, so it is wrapped as `config-error` — the exit-code table in
- * `../exit-codes` maps that to 2, and an unwrapped `CoreError` would fall through to the
- * generic handler and report 1 with no command context.
- */
-/**
- * Check a config-supplied component root against the rule the IR holds every path to.
- *
- * The config schema's `RelativePath` constrains only `minLength: 1` and "no backslash", so
- * `"../shared"` is schema-valid and used to reach the IR untouched. It would now be caught
- * by `assertIRIntegrity` at the very end of the scan — reported as an integrity violation
- * against `components[id=…].roots`, blaming the Document for what the config said, and
- * exiting 1 through the generic handler. Checking it here instead keeps the report pointed
- * at the file the user can edit, and inside the wrapper that makes it exit 2.
+ * Check a config-supplied component root against the rule the IR holds every path to. The
+ * config schema's `RelativePath` admits `"../shared"`; left to `assertIRIntegrity` at the end
+ * of the scan it would be blamed on the Document and exit 1. Checked here it names the file
+ * the user can edit, inside the wrapper that makes it exit 2.
  */
 function assertWorkspaceRelative(root: string, componentId: string): string {
   const normalized = root.normalize("NFC")
@@ -1083,13 +772,8 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
 }
 
 /**
- * The components the config declares, or undefined when it leaves them to detection.
- *
- * One definition because two readers act on it: `resolveComponents` below chooses its branch
- * by it, and `fellBackToSingleComponent` is false when the config decided them, so the report's
- * fallback line is emitted only where detection is what described the workspace. Two spellings
- * of the condition would be two chances for the report to describe a Document built the other
- * way.
+ * The components the config declares, or undefined when it leaves them to detection. Read by
+ * `resolveComponents` and by `fellBackToSingleComponent`, which must agree.
  */
 function declaredComponents(config: Partial<Config>): Config["components"] | undefined {
   const declared = config.components
@@ -1104,25 +788,13 @@ async function resolveComponents(
   const declared = declaredComponents(config)
   try {
     if (declared !== undefined) {
-      // The config schema already constrains `id` to the kebab shape, but the value arrives
-      // here as a plain string. Re-asserting it through the constructor is what turns it into
-      // a Component id, and keeps a config loaded by some other path from smuggling in a
-      // shape `components[].id` cannot hold.
+      // Ids and language tokens arrive as plain strings and go through the constructors, so a
+      // config loaded by some other path cannot smuggle in a shape the IR grammar refuses.
       return declared.map((entry) => {
-        // `publicApi` / `frameworks` are Class B and `description` is Class A
-        // (`ir-schema.md` §1.1), so the empty cases are spelled differently on purpose:
-        // the two array keys disappear, the scalar stays as an explicit `null`. Emitting
-        // `[]` here would contradict `detectComponents`, which omits them — the same
-        // Component would then have two shapes depending on whether it was configured or
-        // detected.
-        // `languages` is optional in the config schema but `minItems: 1` in the IR schema,
-        // so an entry that omits it would otherwise produce a document that fails its own
-        // schema. Fall back to the same `["ts"]` that `detectComponents` uses when frequency
-        // counting finds nothing, rather than inventing a second answer to the same question.
-        // Each entry goes through `makeLanguageId`: `ComponentOverride.languages` is a
-        // hand-written field with only `type: "string"` behind it in the config schema, so
-        // this is where a config-supplied token is checked against the IR's grammar rather
-        // than at the point it would surface as an unexplained schema failure.
+        // `publicApi` / `frameworks` are Class B and `description` is Class A (`ir-schema.md`):
+        // the empty arrays disappear, the scalar stays as `null`, matching what
+        // `detectComponents` emits. `languages` is optional in the config but `minItems: 1`
+        // in the IR, so it falls back to the same `["ts"]` detection uses.
         const languages = (entry.languages ?? []).map(makeLanguageId)
         const component: Component = {
           id: makeComponentId(entry.id),
@@ -1132,9 +804,8 @@ async function resolveComponents(
           description: entry.description ?? null,
         }
         if (entry.publicApi !== undefined && entry.publicApi.length > 0) {
-          // NFC, as `collectPublicApi` does for the detected path (ir-schema.md §1.2). The
-          // array decides an identity: `@aburi/diff` compares it against the previous
-          // revision's, which was read off disk and is therefore normalized.
+          // NFC, as `collectPublicApi` does for the detected path (ir-schema.md): the
+          // previous revision's array was read off disk and is therefore normalized.
           component.publicApi = entry.publicApi.map((pattern) => pattern.normalize("NFC"))
         }
         if (entry.frameworks !== undefined && entry.frameworks.length > 0) {
@@ -1143,12 +814,9 @@ async function resolveComponents(
         return component
       })
     }
-    // The same *drop* decision the scan is about to make: a file this run has been told to
-    // leave out of the workspace must not put a language on a component, which it did from
-    // detection's own shorter list. Not the same *routing* decision — the census counts every
-    // extension it knows, whether or not a plugin claims it, because `Component.languages`
-    // answers "what is this component written in" rather than "what did this run parse"
-    // (component-detect.md §4.4), and `aburi init` has to answer it with no plugin loaded.
+    // The same *drop* decision the scan is about to make, so an ignored file cannot put a
+    // language on a component. Not the same *routing* decision: `Component.languages` answers
+    // "what is this written in", not "what did this run parse" (component-detect.md).
     return await detectComponents({
       workspaceRoot,
       ignore: [...(config.ignore ?? []), ...languageFileDropPatterns(languages)],
@@ -1162,15 +830,10 @@ async function resolveComponents(
 }
 
 /**
- * Which of the two exit codes a failed component resolution deserves.
- *
- * Detection walks the workspace and opens every `.gitignore` on the way, so this `try` now
- * spans real IO — and `cli-spec.md §9` reserves exit 2 for bad input and exit 1 for a runtime
- * failure. Reporting an `EACCES` as a config error sends the reader through `aburi.json`
- * looking for a mistake that is not there, and the same fault would already exit 1 if the file
- * sat one directory deeper than the census reaches.
- *
- * A `CoreError` that names a config-shaped fault keeps exit 2; everything else, coded or not,
+ * Which of the two exit codes a failed component resolution deserves (`cli-spec.md`).
+ * Detection walks the workspace and opens every `.gitignore`, so an `EACCES` is possible here,
+ * and reporting it as a config error would send the reader through `aburi.json` for a mistake
+ * that is not there. A `CoreError` naming a config-shaped fault keeps exit 2; everything else
  * is the machine's.
  */
 function componentResolutionFailure(error: unknown): CliError {
@@ -1184,10 +847,8 @@ function componentResolutionFailure(error: unknown): CliError {
 
 /**
  * `CoreError` codes that mean the workspace or its config is wrong, rather than the machine.
- *
- * Listed rather than inferred: a code that is not here exits 1, so a new one added upstream is
- * reported as a runtime failure until someone decides otherwise — which is the safe direction,
- * since exit 2 is the one that tells a reader to go and edit their config.
+ * Listed rather than inferred: a new code exits 1 until someone decides otherwise, which is the
+ * safe direction.
  */
 const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<string> = new Set([
   "invalid-component-id",
@@ -1221,7 +882,7 @@ async function maybeWriteComponentMd(
   const paths: string[] = []
   await mkdir(resolve(outputDir, COMPONENTS_DIRNAME), { recursive: true })
   for (const component of ir.components) {
-    const symbolsInComponent = ir.symbols.filter((s) => s.component === component.id)
+    const symbolsInComponent = ir.symbols.filter((symbol) => symbol.component === component.id)
     const md = projectComponent({
       component,
       symbols: symbolsInComponent,

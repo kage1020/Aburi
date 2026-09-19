@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { noopRegistry } from "@aburi/test-support"
 import type {
   BodyExtraction,
   CallCandidate,
@@ -9,16 +10,12 @@ import type {
   ComponentId,
   EffectClassification,
   EffectPlugin,
-  EffectsManifest,
   ExtractionContext,
-  LangManifest,
   LanguagePlugin,
   OpaqueAstNode,
   ParseResult,
   SourceFile,
   SymbolCandidate,
-  VocabRegistry,
-  WalkContext,
 } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
@@ -29,6 +26,7 @@ import {
   serializeCanonical,
 } from "../../src"
 import { symbolId } from "../fixtures/ir"
+import { effectsManifest, stubLanguagePlugin } from "../fixtures/plugins"
 
 /**
  * Every Symbol says which Component it belongs to, and `Component.roots[]` is the whole of
@@ -105,7 +103,7 @@ describe("buildComponentAttribution", () => {
 
   it("orders colliding ids as strings, not as numbers", () => {
     // "Lower id" is `<` over the id, which is the order `components[]` itself is sorted in
-    // (ir-schema.md §1) — so `svc-10` precedes `svc-9`, as it does in the document. Spelled
+    // (ir-schema.md) — so `svc-10` precedes `svc-9`, as it does in the document. Spelled
     // out because `api` / `web` above read the same under a numeric or a natural order.
     const shared = ["packages/shared"]
     const attribution = buildComponentAttribution([
@@ -179,47 +177,6 @@ describe("buildComponentAttribution", () => {
 
 /* --- one scan, over a workspace of two components ------------------------------------- */
 
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
-
-function langManifest(): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "lang-stub",
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
-
-function effectsManifest(): EffectsManifest {
-  return {
-    ...langManifest(),
-    name: "effects-stub",
-    type: "effects",
-  } as unknown as EffectsManifest
-}
-
 /**
  * Two Symbols per file: one ordinary, and one the Category B rules drop for having no body
  * (`drop-list.md`). A dropped Symbol keeps its place in the IR, so it has to keep its
@@ -255,34 +212,14 @@ function candidates(file: string): SymbolCandidate<OpaqueAstNode>[] {
 }
 
 function stubLanguage(): LanguagePlugin {
-  const plugin = {
-    manifest: langManifest(),
-    languageId: "stub",
-    fileExtensions: [".stub"],
-    capabilities: {
-      hasDecorators: false,
-      hasGenerics: false,
-      hasAsync: false,
-      hasMacros: false,
-      hasPatternMatching: false,
-      hasAbstractTypes: false,
-      hasModules: false,
-      hasNamespaces: false,
-      hasTypeParameters: false,
-      hasExplicitVisibility: false,
-      hasJsDoc: false,
-    },
-    init: async () => {},
+  return stubLanguagePlugin({
     parseFile: async (file: SourceFile): Promise<ParseResult> => ({
       tree: { path: file.path } as unknown as OpaqueAstNode,
       errors: [],
       imports: [],
     }),
     extractSymbols: (_tree: OpaqueAstNode, ctx: ExtractionContext) => candidates(ctx.file.path),
-    walkBody: (
-      _symbol: SymbolCandidate<OpaqueAstNode>,
-      _ctx: WalkContext<OpaqueAstNode>,
-    ): BodyExtraction => ({
+    walkBody: (): BodyExtraction => ({
       rules: [],
       calls: [
         {
@@ -295,9 +232,7 @@ function stubLanguage(): LanguagePlugin {
         },
       ],
     }),
-    normalizeAst: () => "stub-ast",
-  }
-  return plugin as unknown as LanguagePlugin
+  })
 }
 
 /** Records the `owner.component` every call was classified against. */
@@ -369,7 +304,7 @@ describe("a scan of a two-component workspace", () => {
 
   it("writes the component key into the serialized bytes, `null` included", async () => {
     // `Object.hasOwn` on the in-memory Symbol cannot see this: `serializeCanonical` drops a
-    // property whose value is `undefined`, so an omitted Class A key (ir-schema.md §1.1) is
+    // property whose value is `undefined`, so an omitted Class A key (ir-schema.md) is
     // invisible in TypeScript and visible only in what lands on disk.
     const { ir } = await scanWorkspace()
     const written = JSON.parse(serializeCanonical(ir)) as {
@@ -401,7 +336,7 @@ describe("a scan of a two-component workspace", () => {
  * A stub whose every `pricing.stub` file declares one method `Pricing.calc`, and whose every
  * other file declares one function that calls it.
  *
- * The call resolver's component tier (call-resolution.md §4.5) keys on `Symbol.component`, so
+ * The call resolver's component tier (call-resolution.md) keys on `Symbol.component`, so
  * before attribution existed every Symbol sat in one "no component" bucket: two Symbols named
  * `Pricing.calc` anywhere in the workspace made the tier ambiguous, and the call resolved to
  * nothing. Populating the field is what separates them — and nothing else in this suite would

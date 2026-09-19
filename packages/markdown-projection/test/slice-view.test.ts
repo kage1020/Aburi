@@ -1,14 +1,15 @@
+import { fp, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
 import type { SliceRecord, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
-import { fp, makeDiff, makeSymbol, sliceId, symbolId } from "./fixtures"
+import { makeDiff } from "./fixtures"
 
 /**
- * Slice View rendering acceptance tests. Backs docs/design/slice-view.md §12
- * and SV19–SV20 of §13. The pass-side clustering itself is exercised in
- * `packages/diff/test/slice.test.ts`; here we only assert the Markdown
- * projection: section placement, per-Slice bullet shape, singleton fold,
- * empty-section omission.
+ * Slice View rendering acceptance tests. Backs the rendering conventions of
+ * docs/design/slice-view.md, and its SV19–SV20 test criteria. The pass-side
+ * clustering itself is exercised in `packages/diff/test/slice.test.ts`; here we
+ * only assert the Markdown projection: section placement, per-Slice bullet
+ * shape, singleton fold, empty-section omission.
  */
 
 const changedSym = (id: string, name: string, file: string, line = 10): SymbolChange => ({
@@ -47,14 +48,14 @@ const slice = (id: string, members: string[]): SliceRecord => ({
   members: members.map(symbolId),
 })
 
-describe("Slice View Markdown projection — §12", () => {
-  it("§12.5 / SV19: an empty slices[] omits the entire section from diff.md", () => {
+describe("Slice View Markdown projection", () => {
+  it("SV19: an empty slices[] omits the entire section from diff.md", () => {
     const md = projectDiff(makeDiff({ slices: [] }))
     expect(md).not.toContain("Slice View")
     expect(md).not.toContain("🧵")
   })
 
-  it("§12.1: Slice View section appears between Logic changes and Added", () => {
+  it("Slice View section appears between Logic changes and Added", () => {
     const ctlId = "ts:src/ctl.ts#Ctl.route"
     const svcId = "ts:src/svc.ts#Svc.op"
     const addedId = "ts:src/add.ts#addedFn"
@@ -92,7 +93,7 @@ describe("Slice View Markdown projection — §12", () => {
     expect(addedIdx).toBeGreaterThan(sliceIdx)
   })
 
-  it("§12.2: multi-member Slice heading includes full sliceId and member count", () => {
+  it("multi-member Slice heading includes full sliceId and member count", () => {
     const ctlId = "ts:src/ctl.ts#Ctl.route"
     const svcId = "ts:src/svc.ts#Svc.op"
     const repoId = "ts:src/repo.ts#Repo.save"
@@ -115,7 +116,7 @@ describe("Slice View Markdown projection — §12", () => {
     expect(md).toContain("`Repo.save`")
   })
 
-  it("§12.2: Slices are separated by a --- thematic break", () => {
+  it("Slices are separated by a --- thematic break", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
     const C = "ts:src/m.ts#Cx"
@@ -138,7 +139,7 @@ describe("Slice View Markdown projection — §12", () => {
     expect(md.indexOf(`slice:${A}`)).toBeLessThan(md.indexOf(`slice:${C}`))
   })
 
-  it("§12.3 / SV20: singleton slices collapse into one <details> block after multi-member slices", () => {
+  it("SV20: singleton slices collapse into one <details> block after multi-member slices", () => {
     const ctlId = "ts:src/ctl.ts#Ctl.route"
     const svcId = "ts:src/svc.ts#Svc.op"
     const solo1 = "ts:src/util.ts#formatMoney"
@@ -171,7 +172,7 @@ describe("Slice View Markdown projection — §12", () => {
     expect(md).toContain(`slice:${solo2}`)
   })
 
-  it("§12.3: all-singleton case still emits Slice View section with just the Standalone fold", () => {
+  it("all-singleton case still emits Slice View section with just the Standalone fold", () => {
     const a = "ts:src/a.ts#a"
     const b = "ts:src/b.ts#b"
     const md = projectDiff(
@@ -187,7 +188,7 @@ describe("Slice View Markdown projection — §12", () => {
     // the fold body has none because singletons are one-line bullets.
   })
 
-  it("§12.5: only-multi-member case emits no Standalone Changes heading", () => {
+  it("only-multi-member case emits no Standalone Changes heading", () => {
     const a = "ts:src/a.ts#a"
     const b = "ts:src/b.ts#b"
     const md = projectDiff(
@@ -201,9 +202,9 @@ describe("Slice View Markdown projection — §12", () => {
   })
 })
 
-// call-resolution.md §8.1 + slice-view.md §5.4 — the drop stays silent in the
+// call-resolution.md + slice-view.md — the drop stays silent in the
 // data, but the projection tells the reviewer it happened.
-describe("Slice View — unresolved-call markers (§12.6)", () => {
+describe("Slice View — unresolved-call markers", () => {
   const withUnresolved = (
     id: string,
     name: string,

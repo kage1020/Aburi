@@ -140,7 +140,7 @@ drop?: boolean
 }
 export interface LspServerConfig {
 /**
- * Server binary. PATH-resolvable or absolute path. Missing binaries trigger per-language fallback (lsp-enrichment.md §6.1).
+ * Server binary. PATH-resolvable or absolute path. Missing binaries trigger per-language fallback (lsp-enrichment.md).
  */
 command: string
 /**
@@ -148,11 +148,11 @@ command: string
  */
 args?: string[]
 /**
- * Handshake timeout (lsp-enrichment.md §4.4). Default 10 s absorbs cold-disk starts.
+ * Handshake timeout (lsp-enrichment.md). Default 10 s absorbs cold-disk starts.
  */
 initializeTimeoutMs?: number
 /**
- * Per-request timeout. Exceeding requests fall back per-request (lsp-enrichment.md §6.1). Default 500 ms.
+ * Per-request timeout. Exceeding requests fall back per-request (lsp-enrichment.md). Default 500 ms.
  */
 requestTimeoutMs?: number
 /**
@@ -160,7 +160,7 @@ requestTimeoutMs?: number
  */
 fileBudgetMs?: number
 /**
- * Max in-flight requests per file (lsp-enrichment.md §4.3).
+ * Max in-flight requests per file (lsp-enrichment.md).
  */
 concurrency?: number
 /**

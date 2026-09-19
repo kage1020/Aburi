@@ -10,72 +10,48 @@ import {
 } from "./methods"
 
 /**
- * The one terminal the client and the server share. A client call reads
- * `client.user.byId.query(input)`; a router definition reads
- * `publicProcedure.input(schema).query(resolver)`, which `normalizeCallee` collapses to
- * `publicProcedure.input.query` — the same segment count with the same terminal. The
- * server import gate is the only signal that separates them; see design decision #2 on
- * `classifyTrpcCall` for why the suppression stops at this one terminal.
- *
- * Typed as `TrpcQueryTerminal` rather than `string` on purpose: if the vocabulary ever
- * renames or drops this terminal, the annotation breaks the build instead of leaving a
- * suppression rule that silently matches nothing.
+ * The one terminal the client and the server share: `client.user.byId.query(input)` and
+ * the router's `publicProcedure.input(schema).query(resolver)` normalize to the same
+ * segment count with the same terminal, and the server import gate is the only signal that
+ * separates them (decision 2 on `classifyTrpcCall`). Typed as `TrpcQueryTerminal` so a
+ * renamed terminal breaks the build instead of leaving a suppression that matches nothing.
  */
 const SERVER_AMBIGUOUS_TERMINAL: TrpcQueryTerminal = "query"
 
 /**
- * Minimum segment count for a client call. tRPC's proxy is always addressed as
- * `<client>.<procedure path…>.<terminal>`, so even a top-level procedure
- * (`client.getUser.query()`) has three segments. Anything shorter is a proxy accessor
- * (`trpc.useUtils()`) or an unrelated call that happens to share a method name.
+ * tRPC's proxy is always `<client>.<procedure path…>.<terminal>`, so even a top-level
+ * procedure has three segments. Anything shorter is a proxy accessor (`trpc.useUtils()`) or
+ * an unrelated call sharing a method name.
  */
 const MIN_CLIENT_SEGMENTS = 3
 
 /**
  * Classify a CallCandidate against tRPC client conventions.
  *
- * Every recognized shape maps onto the core `network.rpc` id (ir-schema.md §9.1). That
- * includes subscriptions: tRPC v11 runs them over either `wsLink` (WebSocket) or
- * `httpSubscriptionLink` (SSE), and the transport is not statically decidable from the
- * call site, so committing to `network.ws` would be a guess. The query / mutation /
- * subscription distinction is carried in `derivedBy` instead, alongside the procedure
- * path — `effects-plugin:trpc:query:user.byId`. The path is the router-relative address,
- * which `Effect.target` does not give on its own: `target` still carries the local client
- * binding and the terminal.
+ * Every recognized shape maps onto the core `network.rpc` id (ir-schema.md),
+ * subscriptions included: tRPC v11 runs them over `wsLink` or `httpSubscriptionLink`, and
+ * the transport is not decidable from the call site, so `network.ws` would be a guess. The
+ * query / mutation / subscription family and the router-relative procedure path go into
+ * `derivedBy` instead (`effects-plugin:trpc:query:user.byId`), since `target` only carries
+ * the local client binding and the terminal.
  *
- * Three design decisions this function encodes:
+ * 1. **The import gate is the primary false-positive defense.** `query` / `subscribe` are
+ *    far too common to match on shape alone, so only files importing a client module
+ *    count. The known cost is a false negative on the `src/utils/trpc.ts` wrapper layout,
+ *    where consumers import the wrapper — resolving that needs the LSP enrichment tier.
+ * 2. **Server-side shapes are never effects.** A router definition is a Boundary, and
+ *    `type: "effects"` plugins may not declare extKinds (extension-vocab.md), so the
+ *    `query` terminal is refused in any file that imports `@trpc/server`. Only `query`: the
+ *    server spells its other verbs `mutation` / `subscription`, absent from the client
+ *    vocabulary.
+ * 3. **A receiver that is not a name costs the tier.** `handlers[key].query()` reaches the
+ *    segment count carrying `<computed>` where a procedure name belongs;
+ *    `CallCandidate.dynamicReceiver` marks it and the call is recorded at `medium`.
+ * 4. **One effect per call site.** tRPC is not a fluent builder, and the `then` candidate
+ *    of `await client.user.byId.query().then(cb)` falls out of the vocabulary naturally.
  *
- * **1. Import gate is the primary false-positive defense.** Terminals like `query` /
- *    `subscribe` are far too common to match on shape alone. Only files importing
- *    `@trpc/client` / `@trpc/react-query` / `@trpc/next` (or a subpath) are considered.
- *    The known cost is a false negative on the common `src/utils/trpc.ts` wrapper layout,
- *    where consuming components import the wrapper rather than tRPC itself — resolving
- *    that needs cross-file binding resolution, i.e. the LSP enrichment tier.
- *
- * **2. Server-side shapes are never effects.** A router definition is a Boundary, and
- *    `type: "effects"` plugins may not declare extKinds (extension-vocab.md §6.1), so
- *    that classification belongs to a future framework plugin. Concretely, this function
- *    refuses the `query` terminal in any file that imports `@trpc/server`: in such a file
- *    a `query`-terminated target cannot be told apart from a procedure builder. The
- *    suppression is scoped to `query` alone because the server spells its other verbs
- *    `mutation` / `subscription`, which are absent from the client vocabulary.
- *
- * **2a. A receiver that is not a name costs the tier.** `client["user"].byId.query()` is the
- *    call `client.user.byId.query()` is, and reads the same; `handlers[key].query()` is not,
- *    and reaches the same segment count carrying `<computed>` where a procedure name belongs.
- *    `CallCandidate.dynamicReceiver` is what separates them, so a call it marks is recorded at
- *    `medium` — the effect is real enough to report and the path is not one the source spells.
- *
- * **3. One effect per call site.** tRPC is not a fluent builder, so no chain collapsing
- *    is needed — but `await client.user.byId.query().then(cb)` does emit a second
- *    candidate whose terminal is `then`. It falls out of the vocabulary naturally.
- *
- * Throws when the language plugin emits a malformed target (empty string, adjacent dots)
- * or a malformed import edge. Callers should treat a thrown error as an upstream contract
- * violation, not a classification decision.
- *
- * Pure with respect to plugin state — matches the per-call timeout budget the core
- * enforces (effect-plugin.md §5.1.1).
+ * Throws on a malformed target or import edge: upstream contract violations, not
+ * classification decisions. Pure with respect to plugin state (effect-plugin.md).
  */
 export function classifyTrpcCall(
   call: CallCandidate,
@@ -83,20 +59,16 @@ export function classifyTrpcCall(
 ): EffectClassification | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_TRPC_PLUGIN_NAME, filePath: ctx.file.path }
 
-  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why the
-  // order is load-bearing.
-  //
-  // `terminal` comes straight off the validated target: stripping a leading `this` below
-  // never removes the last segment, so the two always agree.
-  const { segments: parts, last: terminal } = assertNonEmptySegments(call.target, origin)
+  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why.
+  // `terminal` is the validated last segment; the `this` strip below never removes it.
+  const { segments, last: terminal } = assertNonEmptySegments(call.target, origin)
 
   if (!hasTrpcClientImport(ctx.file.imports, ctx.file.path)) return null
 
   // `this.trpc.user.byId.query()` inside a class method carries the receiver keyword as a
-  // leading segment. Dropping it makes the procedure path identical to what the same call
-  // produces through a module-level binding, so `derivedBy` stays comparable across both.
-  const segments = parts[0] === "this" ? parts.slice(1) : parts
-  if (segments.length < MIN_CLIENT_SEGMENTS) return null
+  // leading segment; dropping it keeps `derivedBy` comparable with the module-level form.
+  const clientPath = segments[0] === "this" ? segments.slice(1) : segments
+  if (clientPath.length < MIN_CLIENT_SEGMENTS) return null
 
   if (
     terminal === SERVER_AMBIGUOUS_TERMINAL &&
@@ -107,37 +79,26 @@ export function classifyTrpcCall(
   const family = terminalFamily(terminal)
   if (family === null) return null
 
-  // Everything between the client binding and the terminal is the router-relative path.
-  // Non-empty because `slice(1, -1)` on a run of at least MIN_CLIENT_SEGMENTS (3) elements
-  // leaves at least one.
-  //
-  // This assumes the binding occupies exactly one segment, which is what
-  // `client.user.byId.query()` and (after the `this` strip) `this.trpc.user.byId.query()`
-  // both give. A client reached through a longer receiver chain — `api.trpc.user.byId.query()`,
-  // or a `this` aliased to `self` — shifts the extra receiver segments into the recorded
-  // path (`trpc.user.byId` instead of `user.byId`). The classification itself is still
-  // correct; only the path in derivedBy is over-qualified. Nothing in the target string
-  // marks where the binding ends and the router path begins, so a syntactic classifier
-  // cannot do better here — see README "Known limitations".
-  const procedurePath = segments.slice(1, -1).join(".")
+  // Everything between the client binding and the terminal is the router-relative path —
+  // non-empty, since MIN_CLIENT_SEGMENTS leaves at least one segment after `slice(1, -1)`.
+  // This assumes the binding is one segment: a client behind a longer receiver chain
+  // (`api.trpc.user.byId.query()`) shifts the extra segments into the recorded path.
+  // Nothing in the target marks where the binding ends, so a syntactic classifier cannot
+  // do better — see README "Known limitations".
+  const procedurePath = clientPath.slice(1, -1).join(".")
 
   return {
     effectId: "network.rpc",
-    // A receiver the language plugin could not read as a name is not a client binding, and
-    // the path built from it is not a procedure path: `handlers[key].query()` normalizes to
-    // `handlers.<computed>.query`, which reaches the segment count a proxy call has with none
-    // of the evidence. The shape is still recorded — an RPC written through a lookup is an
-    // RPC — at the tier that says a signal is missing, which is how the Prisma and Drizzle
-    // classifiers already read the same flag.
+    // The dynamic-receiver arm of `receiverConfidence`; tRPC has no client vocabulary or
+    // arity rule, so the other arms do not apply.
     confidence: call.dynamicReceiver === true ? "medium" : "high",
     derivedBy: `${EFFECTS_TRPC_DERIVED_BY_PREFIX}:${family}:${procedurePath}`,
   }
 }
 
 /**
- * The derivedBy family suffix for a terminal, or `null` when the terminal is outside the
- * plugin's vocabulary. The three families are pairwise disjoint, so the dispatch order
- * here carries no meaning.
+ * The derivedBy family suffix for a terminal, or `null` outside the vocabulary. The three
+ * families are pairwise disjoint, so the dispatch order carries no meaning.
  */
 function terminalFamily(terminal: string): "query" | "mutation" | "subscription" | null {
   if (isTrpcQueryTerminal(terminal)) return "query"

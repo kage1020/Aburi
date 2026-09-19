@@ -2,12 +2,15 @@ import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { SkippedFile as SkippedFileRecord } from "@aburi/types"
 import { glob } from "tinyglobby"
+import { toNfc } from "../codepoints"
 import { backslashSite, symbolIdSeparatorSite, toDocumentPath } from "../id"
+import { compareBy } from "../order"
 import { describeThrown, isVanishedFile } from "./faults"
 import { openGitignoreTree } from "./gitignore"
+import { fileExtension } from "./route"
 
 /**
- * Category A drop patterns from drop-list.md §3.1. They are ignore globs, not IR-visible drops.
+ * Category A drop patterns from drop-list.md. They are ignore globs, not IR-visible drops.
  *
  * Exported because file discovery is no longer the only place they apply: component detection
  * counts file extensions to decide `Component.languages`, and it kept a shorter copy of part of
@@ -55,7 +58,7 @@ export const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024
 export interface DiscoverOptions {
   /**
    * Workspace root absolute path. All returned file paths are POSIX-relative to this
-   * root — matches the `SourceRange.file` contract in ir-schema §12 (SourceRange).
+   * root — matches the `SourceRange.file` contract in ir-schema.md.
    */
   workspaceRoot: string
   /**
@@ -97,7 +100,7 @@ export interface DiscoverOptions {
 export interface DiscoveredFile {
   /**
    * POSIX path relative to `workspaceRoot`, in NFC: the spelling the Document holds
-   * (ir-schema.md §1.2), and the one a Symbol id is built from.
+   * (ir-schema.md), and the one a Symbol id is built from.
    */
   path: string
   /**
@@ -188,10 +191,10 @@ export interface UnnameableFile extends UnrepresentableBase {
 /**
  * A file whose name a Document path can spell, but not apart from another file's.
  *
- * Two names differing only in Unicode normalization are one path once normalized, and §1.2
- * requires the normalization: a Document that held both spellings would sort them on opposite
- * sides of the alphabet and give one construct two Symbol ids. So the Document has exactly one
- * name for two files, which is no name at all.
+ * Two names differing only in Unicode normalization are one path once normalized, and
+ * ir-schema.md requires the normalization: a Document that held both spellings would sort
+ * them on opposite sides of the alphabet and give one construct two Symbol ids. So the
+ * Document has exactly one name for two files, which is no name at all.
  *
  * Every claimant is withdrawn rather than one being kept. A rule granting the path to the
  * NFC-spelled claimant is partial — two different decomposed spellings can normalize to one
@@ -248,54 +251,28 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     absolute: false,
   })
 
-  const extensions = new Set(
-    (options.languageExtensions ?? []).map((extension) => extension.normalize("NFC")),
-  )
+  const extensions = new Set((options.languageExtensions ?? []).map(toNfc))
   const files: DiscoveredFile[] = []
   const skipped: SkippedFile[] = []
   const unrepresentableFiles: UnrepresentableFile[] = []
   const claimants = new Map<string, string[]>()
 
   for (const rawPath of matches) {
-    // `tinyglobby` returns `/` as the separator on every platform — it hands `fdir` a
-    // `pathSeparator: "/"` — so a backslash anywhere in this string is part of a filename and
-    // never a separator. That is why the rewrite that used to happen inside `toDocumentPath` had
-    // nothing to convert here, and why the check below can read this path as it stands. The
-    // guarantee is the dependency's behaviour rather than its documented contract, so a test
-    // pins it against a version bump taking it away quietly. It is a guarantee about the walk
-    // only: on Windows the gitignore matcher rewrites a backslash to `/` before matching, so a
-    // rule of `secret` would match a candidate spelled `dir\secret` — moot, because NTFS has no
-    // such filename, and that moot-ness is what the arm further down is about.
-    //
-    // Reading the raw path costs the filter the normalization `toDocumentPath` used to have
-    // done first, which is a separate matter and is handled where the comparison happens.
+    // `tinyglobby` returns `/` as the separator on every platform (it hands `fdir` a
+    // `pathSeparator: "/"`), so a backslash in this string is part of a filename. That is the
+    // dependency's behaviour rather than its documented contract, so a test pins it.
     if (extensions.size > 0 && !hasKnownExtension(rawPath, extensions)) continue
 
-    // Above every arm that *records* something, because glob-side pruning is what the
-    // matcher replaces: a `.gitignore`d file was never a candidate, so it takes no path, moves
-    // no count, and leaves no incident. The extension filter above only drops candidates, so it
-    // may sit either side; it is first because it is a set lookup, where this walks the
-    // candidate's ancestor chain and may open a rule file it has not read yet.
-    //
-    // `rawPath`, not the normalized spelling — git matches what the filesystem stores. The
-    // matcher throws on an empty, absolute, or `.`/`..`-leading path — a narrower set than the
-    // rule `toDocumentPath` applies further down, and one `glob({ absolute: false })` already
-    // guarantees. A dot-prefixed name like `.gitignore` is not among them, and neither is a
-    // backslash, which is why this can sit above the arm that withdraws such a name.
+    // Above every arm that *records* something: a `.gitignore`d file was never a candidate, so
+    // it takes no path, moves no count, and leaves no incident. Asked with `rawPath` because
+    // git matches what the filesystem stores; the matcher accepts every path `glob({ absolute:
+    // false })` returns, dot-prefixed and backslash-holding names included.
     if (gitignore !== null && (await gitignore.ignores(rawPath))) continue
 
-    // Before `toDocumentPath`, which refuses the character, and after the extension filter for
-    // the same reason the id-separator check below it is: a `notes\1.txt` in a TypeScript
-    // workspace was never a candidate, and an incident about it would be about a file the scan
-    // was never going to read.
-    //
-    // Not on `skipped`, unlike `:` and `#` — see `UnrepresentableFile` for why there is no path
-    // to record it under, and why leaving `totalFiles` is what keeps the census exact.
-    //
-    // `toDocumentPath` below can still throw, on an empty, absolute, `..` or `.` path, and that
-    // would take the walk with it where the five exits under it record and continue. No producer
-    // reaches it: `glob({ absolute: false })` returns non-empty, relative, `.`-free paths. It is
-    // the caller contract of that constructor rather than a case this loop handles.
+    // Before `toDocumentPath`, which refuses the character, and after the extension filter so
+    // a `notes\1.txt` in a TypeScript workspace is never an incident. Not on `skipped`: see
+    // `UnrepresentableFile` for why there is no path to record it under. `toDocumentPath`'s
+    // own throws (empty, absolute, `.`/`..`) are unreachable from what `glob` returns.
     const unnameable = backslashSite(rawPath)
     if (unnameable !== null) {
       unrepresentableFiles.push({
@@ -306,20 +283,16 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       continue
     }
 
-    const posix = toDocumentPath(rawPath)
+    const documentPath = toDocumentPath(rawPath)
 
     // Every candidate that got a Document path, recorded the instant it has one and before any
-    // arm can end the iteration. More than one filesystem spelling under a key is a collision,
-    // and it has to be decided over every list a candidate can land in: a path on
-    // `stats.skippedFiles[]` *and* on `symbols[].source.file` is the contradiction `buildDiff`
-    // resolves as a deletion, and two on the skip list break invariant #21 outright.
-    //
-    // Above `symbolIdSeparatorSite` for that reason, not merely for tidiness. That check reads
-    // `posix` alone, so two spellings of one name always get the same verdict from it — both
-    // would be pushed under the identical path with the pair never recorded, which is the #21
-    // breach in the paragraph above rather than something this map prevents.
-    const claimantsByPath = claimants.get(posix)
-    if (claimantsByPath === undefined) claimants.set(posix, [rawPath])
+    // arm can end the iteration: a collision has to be decided over every list a candidate can
+    // land in (two spellings on the skip list break invariant #21; one there and one on
+    // `symbols[].source.file` is the contradiction `buildDiff` reads as a deletion). Above
+    // `symbolIdSeparatorSite` because that check reads `documentPath` alone and would give
+    // both spellings the same verdict.
+    const claimantsByPath = claimants.get(documentPath)
+    if (claimantsByPath === undefined) claimants.set(documentPath, [rawPath])
     else claimantsByPath.push(rawPath)
 
     // After the extension filter, so a file no plugin claims is filtered on that alone. A
@@ -337,20 +310,20 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     // every file beneath it, and each of those filenames is innocent — `src/v#1/util.ts` is
     // fixed by renaming `v#1`, and a line blaming `util.ts` sends the reader to rename the
     // wrong thing. When the basename is the offender the two coincide.
-    const site = symbolIdSeparatorSite(posix)
-    if (site !== null) {
-      const held = site.separators.map((separator) => `"${separator}"`).join(" and ")
+    const separatorSite = symbolIdSeparatorSite(documentPath)
+    if (separatorSite !== null) {
+      const quotedSeparators = separatorSite.separators
+        .map((separator) => `"${separator}"`)
+        .join(" and ")
       skipped.push({
-        path: posix,
+        path: documentPath,
         reason: "unroutable",
-        detail: `its path segment "${site.segment}" contains ${held}, which a Symbol id is split on, so nothing declared in this file could be given an id`,
+        detail: `its path segment "${separatorSite.segment}" contains ${quotedSeparators}, which a Symbol id is split on, so nothing declared in this file could be given an id`,
       })
       continue
     }
 
-    // `rawPath`, not `posix`. The normalization belongs to the Document, and a filesystem that
-    // stores the name it was given does not answer to it — the miss reads as `ENOENT`, and the
-    // file is reported unreadable when nothing about it was.
+    // `rawPath`, not `documentPath` — see `DiscoveredFile.fsPath`.
     const absolute = resolve(workspaceRoot, rawPath)
     let size: number
     try {
@@ -362,23 +335,23 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
       // here left a smaller Document behind and exited `0`, while the identical errno on the
       // identical machine ended the run if it happened to land on the read instead.
       if (!isVanishedFile(error)) throw error
-      skipped.push({ path: posix, reason: "unreadable", detail: describeThrown(error) })
+      skipped.push({ path: documentPath, reason: "unreadable", detail: describeThrown(error) })
       continue
     }
 
     if (size > maxSize) {
-      skipped.push({ path: posix, reason: "over-size", detail: `${size} > ${maxSize}` })
+      skipped.push({ path: documentPath, reason: "over-size", detail: `${size} > ${maxSize}` })
       continue
     }
 
-    files.push({ path: posix, fsPath: rawPath, size })
+    files.push({ path: documentPath, fsPath: rawPath, size })
   }
 
   withdrawCollisions(claimants, files, skipped, unrepresentableFiles)
 
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-  skipped.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-  unrepresentableFiles.sort((a, b) => (a.fsPath < b.fsPath ? -1 : a.fsPath > b.fsPath ? 1 : 0))
+  files.sort(compareBy((file) => file.path))
+  skipped.sort(compareBy((file) => file.path))
+  unrepresentableFiles.sort(compareBy((file) => file.fsPath))
 
   return { files, skipped, unrepresentableFiles }
 }
@@ -418,13 +391,8 @@ function withdrawCollisions(
   }
 }
 
+/** Both sides in NFC: this reads the filesystem's spelling, which may arrive decomposed. */
 function hasKnownExtension(path: string, extensions: ReadonlySet<string>): boolean {
-  const dot = path.lastIndexOf(".")
-  if (dot < 0) return false
-  // Both sides in NFC. This reads the filesystem's own spelling now rather than the normalized
-  // Document path, and a filesystem that hands back decomposed names would otherwise miss an
-  // extension a plugin declared composed. Every extension in every manifest today is ASCII and
-  // normalizes to itself, so what this buys is that the answer no longer depends on which of
-  // the two spellings the filter happens to be handed.
-  return extensions.has(path.slice(dot).toLowerCase().normalize("NFC"))
+  const extension = fileExtension(path)
+  return extension !== null && extensions.has(toNfc(extension))
 }

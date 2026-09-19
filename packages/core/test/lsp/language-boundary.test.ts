@@ -1,10 +1,11 @@
-import type { Symbol as IRSymbol, LanguageId, Logger } from "@aburi/types"
+import type { Symbol as IRSymbol, LanguageId } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { DocumentSymbol, SymbolInformation } from "vscode-languageserver-protocol"
 import { makeCallSiteKey } from "../../src/call-site"
 import { makeLanguageId } from "../../src/id"
 import { enrichWithLsp } from "../../src/lsp"
 import { makeSymbol } from "../fixtures/ir"
+import { capturingLogger } from "../fixtures/plugins"
 import {
   makeClassSymbol,
   makeEnrichmentInput,
@@ -16,42 +17,18 @@ import { type MockLspClient, mockServerFactory } from "./fixtures/mock-server"
 
 /**
  * The enrichment pass is optional by design and degrades in three tiers
- * (lsp-enrichment.md §6.1), so nothing that happens inside one language may end the scan or
+ * (lsp-enrichment.md), so nothing that happens inside one language may end the scan or
  * outlive the language it happened in. The server is a child process: a throw that skips
  * `shutdown` leaves it running for the rest of the run and past it.
  */
 
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 
-interface CapturedDebug {
-  message: string
-  meta: Record<string, unknown> | undefined
-}
-
-function capturingLogger(): {
-  logger: Logger
-  warnings: string[]
-  debugs: CapturedDebug[]
-} {
-  const warnings: string[] = []
-  const debugs: CapturedDebug[] = []
-  return {
-    warnings,
-    debugs,
-    logger: {
-      debug: (message: string, meta?: Record<string, unknown>) => debugs.push({ message, meta }),
-      info: () => {},
-      warn: (m: string) => warnings.push(m),
-      error: () => {},
-    },
-  }
-}
-
 /**
- * The lines §6.3 rule 3 counts: one per language the pass gave up on, whichever of §6.1's
- * three conditions produced it. The streak wording is nothing like the other two, so a filter
- * that matched only "falling back to untyped tier" would return zero for it while looking
- * like the general helper.
+ * The lines fallback rule 3 counts: one per language the pass gave up on, whichever of the
+ * three per-language conditions produced it. The streak wording is nothing like the other
+ * two, so a filter that matched only "falling back to untyped tier" would return zero for it
+ * while looking like the general helper.
  */
 function fallbackWarnings(warnings: readonly string[]): string[] {
   return warnings.filter(
@@ -154,7 +131,7 @@ describe("a throw inside one language is a per-language fallback", () => {
     // From the language boundary a broken server and a bug in this package are the same
     // event, and by the time a throw has survived every guard `processLanguage` puts on the
     // client, the second is the likelier. The warning cannot say which; this is what does.
-    // A debug line is not a CLI warning, so §6.3 rule 3 is untouched.
+    // A debug line is not a CLI warning, so fallback rule 3 is untouched.
     const clients = new Map<LanguageId, MockLspClient>()
     const { logger, debugs } = capturingLogger()
 
@@ -174,7 +151,7 @@ describe("a throw inside one language is a per-language fallback", () => {
   })
 
   it("leaves the failed language's symbols at the untyped tier", async () => {
-    // §6.2: a fallback leaves the columns at the `null` the Tree-sitter tier wrote. It
+    // IR degradation: a fallback leaves the columns at the `null` the Tree-sitter tier wrote. It
     // invents nothing, the same way it lowers nothing.
     const clients = new Map<LanguageId, MockLspClient>()
 
@@ -191,7 +168,8 @@ describe("a throw inside one language is a per-language fallback", () => {
   })
 
   it("keeps what the language enriched before it threw", async () => {
-    // No rollback, deliberately. §6.2's `SourceRange` rule is about the columns the fallback
+    // No rollback, deliberately. The `SourceRange` degradation rule is about the columns the
+    // fallback
     // prevented, not the ones it arrived too late to prevent: re-`null`ing an enriched file
     // would make the Document depend on where in the file list the failure landed.
     const clients = new Map<LanguageId, MockLspClient>()
@@ -224,7 +202,7 @@ describe("a throw inside one language is a per-language fallback", () => {
     expect(fallbackWarnings(warnings)).toHaveLength(1)
 
     // The file the throw happened in is counted nowhere, which is deliberate and matches the
-    // initialize-failure path: `filesFellBack` is §6.3 rule 2's per-file tier, and a language
+    // initialize-failure path: `filesFellBack` is fallback rule 2's per-file tier, and a language
     // that was given up on did not fall back per file — it stopped. `src/a.ts` is enriched
     // because it was, and `src/b.ts` is in neither counter.
     expect(result.stats?.filesEnriched).toBe(1)
@@ -582,7 +560,7 @@ describe("a throw from a concurrent job", () => {
     // `Promise.all` settles on the first rejection and cancels nothing, so the surviving
     // workers went on calling a shut-down client and writing into the caller's Symbols after
     // the pass had handed them over. An IR that keeps changing after it is returned is the
-    // determinism guarantee in §10.6, not untidiness.
+    // determinism guarantee in lsp-enrichment.md, not untidiness.
     const clients = new Map<LanguageId, MockLspClient>()
     const { logger } = capturingLogger()
 
@@ -603,7 +581,7 @@ describe("a throw from a concurrent job", () => {
   })
 
   it("keeps what the file earned before the throw: the three hovers that answered", async () => {
-    // §6.2 — a fallback leaves what was already written alone. Responses are
+    // IR degradation — a fallback leaves what was already written alone. Responses are
     // held until every worker has stopped and applied from a `finally`, so the
     // throw does not cost the siblings their results. Asserted as a count and
     // by key, because "unchanged 200ms later" also holds when the answer is

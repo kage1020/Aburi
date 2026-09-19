@@ -1,4 +1,4 @@
-import { asSyntaxNode, type SyntaxNode } from "./ast"
+import { asSyntaxNode, type SyntaxNode } from "@aburi/core"
 
 /** Method name that registers middleware / error-middleware / mount points. */
 export const EXPRESS_MIDDLEWARE_METHOD = "use"
@@ -19,15 +19,11 @@ export interface UseArgumentShape {
   readonly secondArgIsIdentifier: boolean
   /** Argument count from the AST. */
   readonly argCount: number
-  /** True when at least one argument is an identifier that could NOT be arity-checked
-   * from this call site alone (i.e. an out-of-scope handler reference). */
+  /** True when some argument is a bare identifier, i.e. a handler reference that cannot be arity-checked here. */
   readonly hasIdentifierArg: boolean
 }
 
-/**
- * Inspect the `arguments` node of a call expression to classify its middleware shape.
- * Returns null when `callExpression` is not a syntax node or its arguments are missing.
- */
+/** Shape of a `.use(...)` call's arguments; `null` when the node or its arguments are missing. */
 export function analyzeUseArguments(callExpression: unknown): UseArgumentShape | null {
   const node = asSyntaxNode(callExpression)
   if (node === null) return null
@@ -48,8 +44,7 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
       const arity = functionArity(arg)
       if (arity === ERROR_MIDDLEWARE_ARITY) hasErrorHandler = true
       else if (arity === REGULAR_HANDLER_ARITY) hasRegularHandler = true
-      // Other arities are legal in Express (e.g. `app.use((req, res) => ...)` with arity
-      // 2) but do not match either middleware shape; they contribute no signal.
+      // Other arities (`(req, res) => …`) are legal but match neither shape.
       continue
     }
     if (isIdentifier(arg)) hasIdentifierArg = true
@@ -89,9 +84,7 @@ function functionArity(fn: SyntaxNode): number {
   let count = 0
   for (const child of params.namedChildren) {
     if (child === null) continue
-    // Skip trailing comments the grammar may attach as named children of the parameter
-    // list. Every other named child is a formal parameter (required / optional / rest /
-    // destructured).
+    // Every named child but a comment is a formal parameter.
     if (child.type === "comment") continue
     count += 1
   }

@@ -1,5 +1,7 @@
 import {
   checkDocumentShape,
+  compareBy,
+  compareCodeUnit,
   DOCUMENT_SUBJECT,
   reconstructCallEdgesFromIR,
   type SerializeOptions,
@@ -34,17 +36,14 @@ import {
   type SymbolPair,
 } from "./match"
 import { computeSlices } from "./slice"
-import { classifyStatus, dropDirection } from "./status"
+import { classifyStatus, dropDirection, representativeSymbol } from "./status"
 
 const DIFF_SCHEMA = "https://aburi.kage1020.com/schema/aburi.diff.v1.json"
 
 /**
- * The two counters `buildDiff` always writes, narrowed off `Summary`'s optionals.
- *
- * They are optional on the wire so a diff written before they existed stays valid, and that
- * optionality is about *documents*, not about this function — a caller holding a value it just
- * built should not have to re-decide what "absent" would have meant. Same reason
- * `diffDependencies` declares its `unknown` array present.
+ * The two counters `buildDiff` always writes. They are optional on `Summary` only so a diff
+ * written before they existed stays valid; a caller holding a freshly built value should not
+ * have to re-decide what "absent" means.
  */
 interface UnknownCounters {
   unknown: number
@@ -61,7 +60,7 @@ export interface DiffInput {
   generator?: { name: string; version: string }
   /** Optional stage-2 rename table. When null/undefined stage 2 is skipped. */
   gitRenames?: GitRenameMap | null
-  /** Passed through to computeSymbolDelta (§5.2.1 line fuzz). */
+  /** Passed through to computeSymbolDelta (line fuzz, diff-algorithm.md). */
   delta?: DeltaOptions
 }
 
@@ -70,9 +69,8 @@ const DEFAULT_GENERATOR = { name: "aburi", version: "0.0.0" }
 /**
  * Top-level entry: run the 5-stage matcher, classify each pair, produce array deltas,
  * fold in Component / Dependency diffs, and assemble the `aburi.diff.v1` JSON projection.
- * The function is pure; write-to-disk is delegated to `writeCanonicalDiff` so callers can
- * pipe the result through additional steps (Markdown projection, `--fail-on` gate) before
- * serialisation.
+ * Pure; `writeCanonicalDiff` serialises, so callers can run the Markdown projection or the
+ * `--fail-on` gate over the result first.
  */
 export function buildDiff(
   input: DiffInput,
@@ -88,19 +86,16 @@ export function buildDiff(
   )
   const stage3 = matchStageLogicFingerprint(stage2.remainingBase, stage2.remainingHead)
   const stage4 = matchStageNameSignature(stage3.remainingBase, stage3.remainingHead)
-  const stage4_5 = matchStageDroppedWeak(stage4.remainingBase, stage4.remainingHead)
+  const stageDroppedWeak = matchStageDroppedWeak(stage4.remainingBase, stage4.remainingHead)
 
   const pairs: SymbolPair[] = [
     ...stage1.matched,
     ...stage2.matched,
     ...stage3.matched,
     ...stage4.matched,
-    ...stage4_5.matched,
+    ...stageDroppedWeak.matched,
   ]
 
-  // Typed with the two counters present. They are optional on the wire, but this function
-  // writes both on every diff, and the local type is what carries that from here to the
-  // return without a cast.
   const summary: Summary & UnknownCounters = {
     unknown: 0,
     depsUnknown: 0,
@@ -119,8 +114,6 @@ export function buildDiff(
     depsAdded: 0,
     depsRemoved: 0,
   }
-  // Counted locally and assigned once below, where the other totals are, so the increment
-  // sites do not have to reason about a counter that is optional on the wire.
   let unknown = 0
 
   const symbols: SymbolChange[] = []
@@ -160,7 +153,6 @@ export function buildDiff(
       })
       continue
     }
-    // moved+changed
     summary.movedChanged++
     symbols.push({
       status: "moved+changed",
@@ -171,54 +163,43 @@ export function buildDiff(
     })
   }
 
-  const finalRemainingHead = stage4_5.remainingHead
-  const finalRemainingBase = stage4_5.remainingBase
-
-  // Read after the five matching stages, never before them. A Symbol that crossed files
-  // between the two revisions is paired by stage 2, 3 or 4 and comes out `moved` or
-  // `moved+changed`, whichever end of the move sits in the lost file — the other document
-  // holds real evidence for it either way. Only the leftovers are absences, and only an
-  // absence in a file that was never analysed is unexplained.
-  //
-  // The two loops below read opposite ends: a base leftover is looked up by the file it
-  // came from, a head leftover by the file it arrived in. In both cases the question is the
-  // same — did the document that lacks this Symbol ever read the file it is in?
-  // One construction per side, shared with the Dependency diff below. The Symbol loops and
-  // `diffDependencies` therefore read the same two maps rather than two answers to the same
-  // question — which is what makes "a Symbol reported unknown and the edges it took with it
-  // cannot disagree about which file went missing" structural instead of aspirational.
+  // Read after the matching stages: a Symbol that crossed files is paired by stage 2–4 and
+  // comes out `moved`, so only a leftover is an absence, and only one in a file the other
+  // document never analysed is unexplained. The Symbol loops and `diffDependencies` read the
+  // same two side views, so a Symbol reported unknown and the edges it took with it cannot
+  // disagree about which file went missing.
   const baseSide = dependencySideView(input.baseIR)
   const headSide = dependencySideView(input.headIR)
   const lostByHead = headSide.lostFiles
   const lostByBase = baseSide.lostFiles
 
-  for (const h of finalRemainingHead) {
-    if (h.dropped) {
+  for (const headSymbol of stageDroppedWeak.remainingHead) {
+    if (headSymbol.dropped) {
       summary.droppedAdded++
       continue
     }
-    const reason = lostByBase.get(h.source.file)
+    const reason = lostByBase.get(headSymbol.source.file)
     if (reason !== undefined) {
       unknown++
-      symbols.push({ status: "unknown", symbol: h, absentFrom: "base", reason })
+      symbols.push({ status: "unknown", symbol: headSymbol, absentFrom: "base", reason })
       continue
     }
     summary.added++
-    symbols.push({ status: "added", symbol: h })
+    symbols.push({ status: "added", symbol: headSymbol })
   }
-  for (const b of finalRemainingBase) {
-    if (b.dropped) {
+  for (const baseSymbol of stageDroppedWeak.remainingBase) {
+    if (baseSymbol.dropped) {
       summary.droppedRemoved++
       continue
     }
-    const reason = lostByHead.get(b.source.file)
+    const reason = lostByHead.get(baseSymbol.source.file)
     if (reason !== undefined) {
       unknown++
-      symbols.push({ status: "unknown", symbol: b, absentFrom: "head", reason })
+      symbols.push({ status: "unknown", symbol: baseSymbol, absentFrom: "head", reason })
       continue
     }
     summary.removed++
-    symbols.push({ status: "removed", symbol: b })
+    symbols.push({ status: "removed", symbol: baseSymbol })
   }
 
   const components = diffComponents(input.baseIR.components, input.headIR.components)
@@ -239,11 +220,9 @@ export function buildDiff(
 
   symbols.sort(compareSymbolChange)
 
-  // Slice View clustering (docs/design/slice-view.md §2). Runs after status /
-  // delta computation and before Markdown projection. Consumes the resolved
-  // CallEdge[] reconstructed from each IR — §5.4 requires only resolved edges,
-  // never `Symbol.calls[]` directly. Emits `slices[]` unconditionally (§11.2);
-  // the Markdown side omits the section when the array is empty (§12.5).
+  // Slice View clustering (docs/design/slice-view.md), over the resolved call edges only —
+  // never `Symbol.calls[]` directly. `slices[]` is emitted even when empty; the Markdown side
+  // is what omits the section.
   const slices = computeSlices({
     changes: symbols,
     baseCallEdges: reconstructCallEdgesFromIR(input.baseIR),
@@ -265,22 +244,12 @@ export function buildDiff(
 }
 
 /**
- * Paths both documents record as never analysed, with each side's own reason.
- *
- * This is the loss `unknown` cannot describe. That status is derived from the matcher's
- * leftovers — a Symbol one document holds and the other lacks — and a file skipped on both
- * sides contributes Symbols to neither, so it leaves no leftover to classify and the whole
- * document falls silent about it. Silence is the one thing it must not do here: a diff with
- * nothing to say about a path is exactly what a diff that compared it and found it unchanged
- * looks like.
- *
- * The intersection, not the union. A one-sided loss has leftovers on the other side and is
- * reported as `unknown` there; listing it here as well would count one loss twice, in two
- * vocabularies that mean different things.
- *
- * Always returns an array, empty included. Optionality in the schema covers documents written
- * before the field existed, and no arithmetic elsewhere in a diff would let a reader tell that
- * case from a run that missed nothing (docs/design/diff-algorithm.md §10.1).
+ * Paths both documents record as never analysed, with each side's reason. A file skipped on
+ * both sides contributes Symbols to neither, so it leaves no leftover for `unknown` to
+ * classify and the diff would otherwise fall silent about it — which is what a diff that
+ * compared it and found it unchanged looks like. The intersection only: a one-sided loss is
+ * already reported as `unknown` on the other side. Always an array, empty included
+ * (docs/design/diff-algorithm.md).
  */
 function filesNeitherSideRead(
   lostByBase: ReadonlyMap<RelativePath, SkipReason>,
@@ -292,10 +261,10 @@ function filesNeitherSideRead(
     if (headReason === undefined) continue
     both.push({ path, baseReason, headReason })
   }
-  return both.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  return both.sort(compareBy((file) => file.path))
 }
 
-/** §9.1 — refuse to diff across schema versions. */
+/** Refuse to diff across schema versions (diff-algorithm.md). */
 function ensureSchemasAgree(base: IR, head: IR): void {
   if (base.$schema !== head.$schema) {
     throw new DiffError(
@@ -310,17 +279,23 @@ type IRSide = "baseIR" | "headIR"
 
 /**
  * A collection `buildDiff` keys by identity, and refuses a repeat in. Reporting order is the
- * order of this array, base side before head side.
+ * order of `IDENTIFIED_COLLECTIONS`, base side before head side. The shape gate has already
+ * established that every entry is an object whose identity fields are strings.
  *
- * The identity scan also refuses an entry that is not an object or whose identity fields are
- * not strings, and for the three collections here the shape gate has established both before
- * it runs. That is not free for a fourth: the gate covers what `aburi.ir.v1` declares, so a
- * collection added here and not there would reach the scan with those guards live again.
+ * This pass used to re-establish that itself, with an array check, an object check and a
+ * string check on every entry, kept on the argument that a fourth collection added here and
+ * not to `aburi.ir.v1` would silently put them back on the live path. That argument was about
+ * a version of `identityFields` that named its fields as strings and read them off an
+ * `unknown` entry. It does not survive `identities`: a collection now supplies a typed
+ * projection out of `IR`, so a field the schema does not declare is a field `IR` does not
+ * have, and one that is not a string is not a `readonly string[]`. Both are compile errors at
+ * the entry that introduces them rather than runtime guards waiting for one — which is why
+ * the guards are gone and this note is here instead.
  */
 interface IdentifiedCollection {
   readonly field: "symbols" | "components" | "dependencies"
-  /** The fields identity is read from, in the order `keyOf` receives them. */
-  readonly identityFields: readonly string[]
+  /** The identity fields of every entry, in the order `keyOf` receives them. */
+  readonly identities: (ir: IR) => readonly (readonly string[])[]
   /** Join them the way the diff itself keys on them, or the check guards nothing. */
   readonly keyOf: (parts: readonly string[]) => string
   /** How a message names the repeated value. */
@@ -337,76 +312,57 @@ const soleField = (parts: readonly string[]): string => parts.join("")
 const IDENTIFIED_COLLECTIONS: readonly IdentifiedCollection[] = [
   {
     field: "symbols",
-    identityFields: ["id"],
+    identities: (ir) => ir.symbols.map((symbol) => [symbol.id]),
     keyOf: soleField,
     noun: "id",
     show: soleField,
     consequence:
       "stage 1 pairs Symbols by id and every later stage tracks the base Symbols it has " +
       "consumed by id, so a repeat leaves one entry out of the diff entirely or classifies " +
-      "its counterpart twice (ir-schema.md §14 #1)",
+      "its counterpart twice (ir-schema.md #1)",
   },
   {
     field: "components",
-    identityFields: ["id"],
+    identities: (ir) => ir.components.map((component) => [component.id]),
     keyOf: soleField,
     noun: "id",
     show: soleField,
     consequence:
       "Component identity is the id, so a repeat hides one entry and can report a change " +
-      "the two revisions do not contain (ir-schema.md §14 #2)",
+      "the two revisions do not contain (ir-schema.md #2)",
   },
   {
     field: "dependencies",
-    identityFields: DEPENDENCY_IDENTITY_FIELDS,
+    identities: (ir) =>
+      ir.dependencies.map((dependency) =>
+        DEPENDENCY_IDENTITY_FIELDS.map((field) => dependency[field]),
+      ),
     keyOf: dependencyIdentity,
     noun: "(from, to, via) triple",
     show: (parts) => `(${parts.join(", ")})`,
     consequence:
-      "direction and effect are deliberately outside Dependency identity (§6.2), so a " +
+      "direction and effect are deliberately outside Dependency identity " +
+      "(diff-algorithm.md), so a " +
       "repeat surfaces as an added + removed pair no reader can tell from a real flip " +
-      "(ir-schema.md §14 #13)",
+      "(ir-schema.md #13)",
   },
 ]
 
 /**
- * The three things `buildDiff` needs before stage 1 runs: a Document of the shape the schema
- * requires, a `$schema` that names something, and identities it can key on. diff-algorithm.md
- * §3.7 states the third and why it is checked here as well as at extraction time.
- *
- * The first is `checkDocumentShape` — invariant #20, and only #20. `buildDiff` is public API,
- * so an IR a caller assembled in memory arrives having passed nothing, and every field the
- * diff dereferences used to crash it with a `TypeError` that named neither the record nor the
- * field: `fingerprint` and `source` in `classifyStatus`, the four array fields in
- * `computeSymbolDelta`, `components[].roots` in `diffComponents`, `stats` in
- * `dependencySideView`. That list is the shape of the class rather than the whole of it — it
- * is one matcher change away from being out of date, which is the argument for a gate that is
- * not scoped to it. `integrity-shape.ts` makes that argument for itself and names this
- * consumer: a scope that moved with the matcher would leave a caller's IR conditionally valid.
- *
- * The second is this function's own requirement rather than the schema's, which requires only
- * that `$schema` is a string: two Documents that both say `""` agree with each other, so
- * `ensureSchemasAgree` would never fire on the pair. It is worded the way the gate words a
- * breach so one code does not come back in two shapes.
- *
- * It is equally deliberately not the semantic invariants. Those are statements about a
- * Document whose answer the diff does not depend on — an unsorted `symbols[]` diffs correctly,
- * because stage 1 keys by id — so running them would withhold an answer the matcher can give.
- * It also means `aburi diff`, which already ran the full checker in `readIR`, re-pays only the
- * structural walk.
+ * What `buildDiff` needs before stage 1 runs: a Document of the shape the schema requires
+ * (`checkDocumentShape`, invariant #20 — `buildDiff` is public API, so an IR assembled in
+ * memory arrives having passed nothing), a `$schema` that names something (two Documents
+ * that both say `""` would agree with each other), and identities it can key on
+ * (diff-algorithm.md). Deliberately not the semantic invariants: an unsorted
+ * `symbols[]` diffs correctly, so refusing it would withhold an answer the matcher can give.
  */
 function assertDiffable(ir: IR, name: IRSide): void {
   const violations = checkDocumentShape(ir)
   const first = violations[0]
   if (first !== undefined) {
-    // The subject names the record and the message names the field inside it, which is the
-    // arrangement `checkDocumentShape` writes at every depth. Adopted rather than reworded so
-    // the two gates cannot describe the same breach two ways. `DOCUMENT_SUBJECT` is its name
-    // for the root, and the side already says which document this is.
-    const subject = sidedSubject(name, first.subject)
     // The message quotes the first breach and counts the rest; `violations` carries all of
-    // them, because a caller repairing a hand-assembled Document should not have to run the
-    // diff once per field to find out what else is wrong.
+    // them so a caller repairing a hand-assembled Document does not run the diff once per field.
+    const subject = sidedSubject(name, first.subject)
     const rest = violations.length - 1
     const more = rest > 0 ? ` (and ${rest} more)` : ""
     throw new DiffError(`${subject}: ${first.message}${more}.`, {
@@ -416,35 +372,28 @@ function assertDiffable(ir: IR, name: IRSide): void {
     })
   }
   if (ir.$schema.length === 0) {
-    throw shapeError(name, `${name}: "$schema" is empty, not a schema URL.`)
+    throw new DiffError(`${name}: "$schema" is empty, not a schema URL.`, {
+      code: "ir-shape-invalid",
+      value: name,
+    })
   }
   for (const collection of IDENTIFIED_COLLECTIONS) {
-    assertUniqueIdentity(ir[collection.field], `${name}.${collection.field}`, collection)
+    assertUniqueIdentity(collection.identities(ir), `${name}.${collection.field}`, collection)
   }
 }
 
-/**
- * A shape violation's subject, prefixed with the side it came from. The prefix is what the
- * whole array needs and the message only shows for one of them — a caller reading
- * `violations` on a two-sided failure would otherwise get `symbols[0]` twice with nothing to
- * tell the documents apart.
- */
+/** A shape violation's subject prefixed with its side, so a two-sided failure is readable. */
 function sidedSubject(name: IRSide, subject: string): string {
   return subject === DOCUMENT_SUBJECT ? name : `${name}.${subject}`
 }
 
 function assertUniqueIdentity(
-  entries: unknown,
+  identities: readonly (readonly string[])[],
   subject: string,
   collection: IdentifiedCollection,
 ): void {
-  if (!Array.isArray(entries)) {
-    throw shapeError(subject, `${subject} must be an array.`)
-  }
   const firstSeen = new Map<string, number>()
-  for (const [index, entry] of entries.entries()) {
-    const entrySubject = `${subject}[${index}]`
-    const parts = identityFieldsOf(entry, entrySubject, collection)
+  for (const [index, parts] of identities.entries()) {
     const key = collection.keyOf(parts)
     const first = firstSeen.get(key)
     if (first === undefined) {
@@ -453,7 +402,7 @@ function assertUniqueIdentity(
     }
     const shown = collection.show(parts)
     throw new DiffError(
-      `${entrySubject} repeats the ${collection.noun} "${shown}" first seen at index ` +
+      `${subject}[${index}] repeats the ${collection.noun} "${shown}" first seen at index ` +
         `${first}; ${collection.consequence}.`,
       { code: "ir-identity-collision", value: shown },
     )
@@ -461,91 +410,19 @@ function assertUniqueIdentity(
 }
 
 /**
- * The identity fields of one entry, read as strings.
- *
- * Three guards in this pass have no live path today — the array check in
- * `assertUniqueIdentity`, and the object and string checks below — because the shape gate
- * runs first and establishes all three for `symbols`, `components` and `dependencies`.
- * `describeValue` is theirs alone and so is dead with them. Measured: disabling all three
- * leaves this package's suite green.
- *
- * They stay because what makes them dead is the *contents* of `IDENTIFIED_COLLECTIONS`
- * matching what `aburi.ir.v1` declares, not anything about this file — a fourth collection
- * added to that array and not to the schema puts them back on the live path, silently.
- *
- * What they used to buy is now bought earlier: a Symbol carrying no `id` had nothing to
- * collide with, passed, and derived a Slice anchored on `undefined` several stages later —
- * which `assertSliceRecordInvariant` reports as `slice-invariant-violated`, the one code the
- * CLI presents as a bug in Aburi rather than in the caller's IR.
- */
-function identityFieldsOf(
-  entry: unknown,
-  subject: string,
-  collection: IdentifiedCollection,
-): string[] {
-  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-    throw shapeError(subject, `${subject} must be an object; got ${describeValue(entry)}.`)
-  }
-  const parts: string[] = []
-  for (const field of collection.identityFields) {
-    const value = (entry as Record<string, unknown>)[field]
-    if (typeof value !== "string") {
-      throw shapeError(
-        `${subject}.${field}`,
-        `${subject}.${field} must be a string; got ${describeValue(value)}.`,
-      )
-    }
-    parts.push(value)
-  }
-  return parts
-}
-
-function shapeError(subject: string, message: string): DiffError {
-  return new DiffError(message, { code: "ir-shape-invalid", value: subject })
-}
-
-function describeValue(value: unknown): string {
-  if (value === undefined) return "undefined"
-  if (value === null) return "null"
-  if (Array.isArray(value)) return "an array"
-  return `a ${typeof value}`
-}
-
-/**
- * Deterministic ordering of the `symbols[]` output:
- * 1. by status (alphabetical) — pins added/changed/moved sections
- * 2. by the "reference" id (`after` for change/move/toggle, otherwise `symbol`)
- *
- * The result is stable byte-for-byte for equal inputs, matching the canonicalisation
- * guarantee the diff JSON must uphold when persisted to `out/diff.json`.
+ * Deterministic ordering of `symbols[]`: by status, then by the representative Symbol's id.
+ * Byte-stable for equal inputs, which the canonical `out/diff.json` relies on.
  */
 function compareSymbolChange(a: SymbolChange, b: SymbolChange): number {
-  if (a.status !== b.status) return a.status < b.status ? -1 : 1
-  const idA = referenceId(a)
-  const idB = referenceId(b)
-  return idA < idB ? -1 : idA > idB ? 1 : 0
-}
-
-function referenceId(change: SymbolChange): string {
-  if (change.status === "added" || change.status === "removed" || change.status === "unknown") {
-    return change.symbol.id
-  }
-  return change.after.id
+  return (
+    compareCodeUnit(a.status, b.status) ||
+    compareCodeUnit(representativeSymbol(a).id, representativeSymbol(b).id)
+  )
 }
 
 /**
- * The files a document's scan never analysed, by path, with why.
- *
- * `stats.skippedFiles` is Class B: absent means the writer predates the field, not that
- * nothing was lost. An empty map is the honest answer either way — with no enumeration
- * there is no absence this function can explain, and guessing from
- * `totalFiles > parsedFiles` would attach a reason to whichever Symbols happened to be
- * missing. The CLI says so on stderr instead; a diff cannot invent the list.
- */
-/**
- * Byte-deterministic serialiser for a DiffResult. Delegates to `@aburi/core`
- * `serializeCanonical` so the sort order, NFC normalisation, and codepoint key sort are
- * shared with the IR side.
+ * Byte-deterministic serialiser for a DiffResult, sharing `@aburi/core`'s canonical sort
+ * order, NFC normalisation and key sort with the IR side.
  */
 export function writeCanonicalDiff(diff: DiffResult, options: SerializeOptions = {}): string {
   return serializeCanonical(diff, options)

@@ -72,7 +72,7 @@ uses the alias.
 |---|---|---|
 | `version` | `latest` | npm dist-tag or exact version of `@aburi/cli`. `cli: dlx` only. |
 | `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`. Falls back to the PR's `base.sha..head.sha` for `pull_request` / `pull_request_target` events. |
-| `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` §6.7 for the grammar. Empty = report only. |
+| `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` for the grammar. Empty = report only. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.config.jsonc`. |
 | `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`, relative to `working-directory`. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
@@ -134,7 +134,7 @@ and bun projects work the same way, as does a workspace that builds the CLI from
 therefore has no bin link at all. The exception is **Yarn PnP**, which has no `node_modules`
 and needs `yarn node` to load `.pnp.cjs`: `cli: workspace` exits 2 there. Anything it cannot
 resolve is exit 2 with a message naming the directory it looked in —
-[`docs/design/github-action.md`](../../docs/design/github-action.md) §3 has the details.
+[`docs/design/github-action.md`](../../docs/design/github-action.md) has the details.
 
 ## Behaviour
 
@@ -276,7 +276,7 @@ jobs:
 working copy, with the artifact lookup and the pull-request resolution written out — read it as a
 reference rather than copying it, since its checkout takes the script from the repository the
 workflow lives in, which for you is not this one.
-[`docs/design/github-action.md`](../../docs/design/github-action.md) §5.1 explains what makes it
+[`docs/design/github-action.md`](../../docs/design/github-action.md) explains what makes it
 safe to give that half a writable token. Two things to know: GitHub runs the copy of a
 `workflow_run` workflow that is on your **default branch**, so it does nothing until it is merged,
 and it posts no check on the pull request.

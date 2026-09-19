@@ -2,40 +2,17 @@ import {
   extractSymbols as extractTypescriptSymbols,
   parseTypescriptFile,
 } from "@aburi/lang-typescript"
-import type { ExtractionContext, SourceFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { classifyNextSymbol } from "../src/index"
+import { makeCtx } from "./fixtures/symbol"
 
-/**
- * End-to-end: parse a TypeScript source with `@aburi/lang-typescript`, run
- * `classifyNextSymbol` on every SymbolCandidate the language plugin emits, and confirm
- * that the framework plugin correctly assigns extKinds. Locks the wire between decorator
- * / name-based extraction in the language plugin and framework classification here.
- */
+// End-to-end: real TypeScript through `@aburi/lang-typescript`, then `classifyNextSymbol`.
 
 async function classifyEach(path: string, source: string) {
   const parseResult = await parseTypescriptFile({ path, content: source })
   const tree = parseResult.tree
   if (tree === null) throw new Error("parse returned null")
-  const file: SourceFile = { path, content: source }
-  const ctx: ExtractionContext = {
-    file,
-    registry: {
-      findEffect: () => null,
-      findExtKind: () => null,
-      findFramework: () => null,
-      findDerivedByOwner: () => null,
-      isEffectOwnedBy: () => false,
-      isExtKindOwnedBy: () => false,
-      listEffects: () => [],
-      listExtKinds: () => [],
-      listFrameworks: () => [],
-      listPlugins: () => [],
-      assertEffectDeclared: () => {},
-      assertExtKindDeclared: () => {},
-    },
-    config: {},
-  }
+  const ctx = makeCtx(path, source)
   const candidates = extractTypescriptSymbols(tree, ctx)
   return candidates.map((candidate) => ({
     id: candidate.id,

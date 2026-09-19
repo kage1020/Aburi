@@ -1,10 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
-import { assertIRIntegrity, type ScanResult, scan } from "@aburi/core"
+import { assertIRIntegrity } from "@aburi/core"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { VocabRegistry } from "@aburi/plugin-registry"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
+import { scanWith } from "../src/scan-helper"
+import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * The symptom as it was reported: a class with a getter and a setter, and a scan that ends
@@ -15,39 +13,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
  * it. The same held for an overload beside its implementation and for a reopened namespace.
  */
 
-let workRoot: string
+const workspace = useScratchWorkspace("merged-declarations")
 
-beforeEach(async () => {
-  workRoot = await mkdtemp(join(tmpdir(), "aburi-merged-declarations-"))
-})
-
-afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true })
-})
-
-async function writeSource(rel: string, content: string): Promise<void> {
-  const abs = join(workRoot, rel)
-  await mkdir(dirname(abs), { recursive: true })
-  await writeFile(abs, content, "utf8")
-}
-
-async function scanWorkspace(): Promise<ScanResult> {
-  const registry = new VocabRegistry()
-  registry.register(langTypescriptPlugin.manifest)
-  return scan({
-    workspaceRoot: workRoot,
-    config: {},
-    languages: [langTypescriptPlugin],
-    frameworks: [],
-    effects: [],
-    registry,
-    components: [],
-  })
-}
+const scanWorkspace = () => scanWith(workspace.root, { languages: [langTypescriptPlugin] })
 
 describe("scan — a workspace whose entities are declared more than once", () => {
   beforeEach(async () => {
-    await writeSource(
+    await workspace.writeSource(
       "src/box.ts",
       [
         "export class Box {",
@@ -63,7 +35,7 @@ describe("scan — a workspace whose entities are declared more than once", () =
         "",
       ].join("\n"),
     )
-    await writeSource(
+    await workspace.writeSource(
       "src/repo.ts",
       [
         "export class Repo {",
@@ -76,7 +48,7 @@ describe("scan — a workspace whose entities are declared more than once", () =
         "",
       ].join("\n"),
     )
-    await writeSource(
+    await workspace.writeSource(
       "src/merged.ts",
       [
         "export namespace N {",
@@ -104,7 +76,7 @@ describe("scan — a workspace whose entities are declared more than once", () =
 
   it("gives each entity one Symbol", async () => {
     const result = await scanWorkspace()
-    const ids = result.ir.symbols.map((s) => s.id)
+    const ids = result.ir.symbols.map((symbol) => symbol.id)
 
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toContain("ts:src/box.ts#Box.value")
@@ -114,7 +86,7 @@ describe("scan — a workspace whose entities are declared more than once", () =
 
   it("keeps what the further declarations declared", async () => {
     const result = await scanWorkspace()
-    const ids = result.ir.symbols.map((s) => s.id)
+    const ids = result.ir.symbols.map((symbol) => symbol.id)
 
     // The second `namespace N` and the namespace merged into `class C` are where a rule that
     // dropped a repeated declaration outright would show: the Symbol survives and everything
@@ -126,14 +98,13 @@ describe("scan — a workspace whose entities are declared more than once", () =
 
   it("records the setter's call on the property the getter named", async () => {
     const result = await scanWorkspace()
-    const value = result.ir.symbols.find((s) => s.id === "ts:src/box.ts#Box.value")
+    const value = result.ir.symbols.find((symbol) => symbol.id === "ts:src/box.ts#Box.value")
 
     expect(value?.derivedBy).toContain("accessor-declaration")
     expect(value?.derivedBy).toContain("declaration-merged")
     expect(value?.calls?.map((c) => c.target)).toContain("audit")
-    // The property survives the drop list too. The getter's body is `return this.#v` and the
-    // setter's is where the work is, so a Symbol described by its leading declaration alone
-    // would have to answer this differently.
+    // The getter's body is `return this.#v` and the setter's is where the work is, so a
+    // Symbol described by its leading declaration alone would be dropped.
     expect(value?.dropped).toBe(false)
   })
 })

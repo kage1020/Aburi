@@ -1,12 +1,12 @@
 import { parseTypescriptFile } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
-import { isPascalCase, matchesHocNaming, returnsContextProvider, returnsJsx } from "../src/index"
-
-async function parseRoot(source: string): Promise<unknown> {
-  const result = await parseTypescriptFile({ path: "src/f.tsx", content: source })
-  if (result.tree === null) throw new Error("parse returned null")
-  return result.tree.rootNode
-}
+import {
+  hasJsxReturn,
+  isPascalCase,
+  matchesHocNaming,
+  returnsContextProvider,
+  returnsJsx,
+} from "../src/index"
 
 /** Return the body node of the first function-like declaration — matches how the plugin
  * hands `symbol.bodyNode` to `returnsContextProvider` in production. */
@@ -67,15 +67,23 @@ describe("matchesHocNaming", () => {
   })
 })
 
+// `returnsJsx` is a one-line alias of `hasJsxReturn`, whose walker jsx.test.ts already covers
+// form by form — repeating that table here would pin the same behaviour twice. What only this
+// file can pin is the alias: it is part of the package's public surface, so a barrel that
+// dropped it or an alias re-pointed at the neighbouring `returnsContextProvider` would break
+// consumers with nothing else going red. Hence both directions plus the agreement check: one
+// case alone would still pass against a predicate that is constantly true or constantly false.
 describe("returnsJsx", () => {
-  it("is true when a function returns JSX", async () => {
-    const root = await parseRoot("function C() { return <div /> }")
-    expect(returnsJsx(root)).toBe(true)
+  it("is true when the function returns JSX, and agrees with hasJsxReturn", async () => {
+    const body = await parseFunctionBody("function C() { return <div /> }")
+    expect(returnsJsx(body)).toBe(true)
+    expect(returnsJsx(body)).toBe(hasJsxReturn(body))
   })
 
-  it("is false when a function returns a plain value", async () => {
-    const root = await parseRoot("function C() { return 42 }")
-    expect(returnsJsx(root)).toBe(false)
+  it("is false when the function returns a plain value, and agrees with hasJsxReturn", async () => {
+    const body = await parseFunctionBody("function C() { return 42 }")
+    expect(returnsJsx(body)).toBe(false)
+    expect(returnsJsx(body)).toBe(hasJsxReturn(body))
   })
 })
 

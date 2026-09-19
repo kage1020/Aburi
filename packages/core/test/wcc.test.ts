@@ -43,7 +43,7 @@ describe("computeWeaklyConnectedComponents", () => {
   })
 
   it("directed cycle a→b→c→a collapses into one component (no SCC pre-condense)", () => {
-    // SV9 backing: slice-view.md §14.2 — an undirected walk over the directed
+    // SV9 backing: slice-view.md — an undirected walk over the directed
     // cycle unifies all three nodes into a single component; no SCC / DAG
     // condensation should happen inside the primitive.
     const nodes = [n("a"), n("b"), n("c")]
@@ -58,7 +58,7 @@ describe("computeWeaklyConnectedComponents", () => {
   })
 
   it("edges referencing nodes outside the node set are ignored (bridging is a caller concern)", () => {
-    // The utility should NOT quietly union across implicit external nodes; §5.2
+    // The utility should NOT quietly union across implicit external nodes; slice-view.md's
     // "no bridging via non-Node symbols" is enforced by giving this function only
     // the Node subset. Any edge whose endpoint is not in `nodes` must be dropped.
     const nodes = [n("a"), n("b")]
@@ -128,6 +128,9 @@ describe("computeWeaklyConnectedComponents", () => {
     expect(result.map((c) => c.map(keyOf))).toEqual([["a", "b"], ["m", "x"], ["z"]])
   })
 
+  // Both calls are handed the *same* two arrays, which the input-order case below cannot do
+  // because it builds a fresh pair per call. Reusing them is what catches a run that sorts
+  // its input in place, or that carries state from one call into the next.
   it("idempotence — same input twice yields structurally equal output (SV17 backing)", () => {
     const nodes = [n("c"), n("a"), n("b"), n("d")]
     const edges: [Node, Node][] = [

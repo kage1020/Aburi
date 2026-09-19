@@ -7,7 +7,7 @@ import { CoreError, detectComponents } from "../src/index"
 
 /**
  * A directory can be claimed by more than one detector, and then more than one manifest
- * describes it. Which of them answers which field is component-detect.md §4.1's priority
+ * describes it. Which of them answers which field is component-detect.md's priority
  * order; these tests are that order applied to the one pair the JS detectors produce today,
  * a `package.json` beside an nx `project.json`.
  */
@@ -94,7 +94,8 @@ describe("a directory two detectors claim", () => {
   })
 
   it("falls through to the project file for a name the package manifest does not carry", async () => {
-    // §4.1 is a priority over sources, not a single source: an absent `name` in the first is
+    // Id inference is a priority over sources, not a single source: an absent `name` in the
+    // first is
     // not an answer, and the directory name is the last resort rather than the second.
     await writeDualDetectedWorkspace()
     await writeJson("apps/billing/package.json", { private: true })
@@ -106,10 +107,10 @@ describe("a directory two detectors claim", () => {
     expect(component.name).toBe("billing-web")
   })
 
-  it("asks the next manifest for a name that answers §4.2 but yields no id", async () => {
-    // `@scope/` is a name, so §4.2 has its answer — and nothing can be built from it, so
-    // §4.1 does not. Stopping there would take the id from the directory while a project
-    // file beside it names the same directory usably.
+  it("asks the next manifest for a name that answers `name` but yields no id", async () => {
+    // `@scope/` is a name, so `name` inference has its answer — and nothing can be built from
+    // it, so `id` inference does not. Stopping there would take the id from the directory
+    // while a project file beside it names the same directory usably.
     await writeDualDetectedWorkspace()
     await writeJson("apps/billing/package.json", { name: "@scope/" })
     await writeJson("apps/billing/project.json", { name: "billing-web" })

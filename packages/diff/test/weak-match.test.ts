@@ -1,16 +1,16 @@
+import { makeIR, makeSymbol, zeroFp } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff } from "../src"
-import { makeIR, makeSymbol, zeroFp } from "./fixtures"
 
 /**
- * §3.4.5 pairs dropped Symbols on two coarse signals — the trailing segment of the qualified
- * name, and the file basename — and accepts either one alone. The section grants itself a
- * false-positive budget on the grounds that dropped Symbols sit outside the IR's main review
- * surface, but a basename hit on `index.ts` is not a weak signal, it is no signal: it is the
- * most common filename in a TypeScript monorepo, so every dropped Symbol of one kind under
- * one matched every other, and the pairings landed in `summary.moved`, which `--fail-on
- * moved` gates on.
+ * Stage 4.5 (diff-algorithm.md) pairs dropped Symbols on two coarse signals — the trailing segment
+ * of the qualified name, and the file basename — and accepts either one alone. The section grants
+ * itself a false-positive budget on the grounds that dropped Symbols sit outside the IR's main
+ * review surface, but a basename hit on `index.ts` is not a weak signal, it is no signal: it is the
+ * most common filename in a TypeScript monorepo, so every dropped Symbol of one kind under one
+ * matched every other, and the pairings landed in `summary.moved`, which `--fail-on moved` gates
+ * on.
  *
  * A signal has to identify something to be evidence. A key that exactly one dropped base and
  * one dropped head carry names a pair; a key that several carry names a group, and a group
@@ -84,7 +84,7 @@ describe("a key several Symbols carry is not evidence of a pairing", () => {
   })
 })
 
-describe("the moves §3.4.5 exists to catch still land", () => {
+describe("the moves stage 4.5 exists to catch still land", () => {
   it("a renamed directory of DTO files", () => {
     // The section's own headline example. Each name and each basename identifies one Symbol
     // on each side, so all ten pair on both halves.
@@ -202,8 +202,8 @@ describe("the two halves have equal standing", () => {
   })
 
   it("settles one base offered two heads on the lower head id", () => {
-    // The name half points at `src/z/...`, the file half at `src/c/...`. §3.4.5 scores the
-    // halves equally, so neither axis outranks the other and §3.8's id keys decide.
+    // The name half points at `src/z/...`, the file half at `src/c/...`. Stage 4.5 scores the
+    // halves equally, so neither axis outranks the other and the sweep's id keys decide.
     const base = [dropped("src/a/Shared.ts", "Alpha")]
     const head = [dropped("src/c/Shared.ts", "Beta"), dropped("src/z/Other.ts", "Alpha")]
     expect(weakPairs(base, head)).toEqual(["ts:src/a/Shared.ts#Alpha -> ts:src/c/Shared.ts#Beta"])

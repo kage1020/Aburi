@@ -1,27 +1,9 @@
-import type { DropHint, SymbolCandidate } from "@aburi/types"
+import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import {
-  classifySymbolDropHint,
-  extractSymbols,
-  parseTypescriptFile,
-  TYPESCRIPT_FILE_DROP_PATTERNS,
-} from "../src/index"
+import { classifySymbolDropHint, TYPESCRIPT_FILE_DROP_PATTERNS } from "../src/index"
 import { makeTsSymbolId } from "../src/qname"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
-
-async function hintOf(source: string, suffix: string): Promise<DropHint | null> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const symbols = extractSymbols(requireTree(result.tree), ctx)
-  const target = symbols.find((s) => s.id.endsWith(suffix))
-  if (target === undefined) {
-    throw new Error(
-      `no symbol with id ending in "${suffix}"; have: ${symbols.map((s) => s.id).join(", ")}`,
-    )
-  }
-  return classifySymbolDropHint(target, ctx)
-}
+import { hintOf, makeExtractionCtx } from "./fixtures/ctx"
 
 const CONSTANTS_PLUS_INTERFACE = [
   "export class P { static readonly A = 1 }",
@@ -50,43 +32,44 @@ const BARE_SYMBOL: SymbolCandidate<Node> = {
 
 describe("classifySymbolDropHint", () => {
   it("marks an interface as Category B with 'interface (data model)'", async () => {
-    expect(await hintOf("export interface Invoice { total: number }", "#Invoice")).toEqual({
-      reason: "interface (data model)",
-      category: "B",
-    })
+    expect(
+      await hintOf("export interface Invoice { total: number }", "ts:src/a.ts#Invoice"),
+    ).toEqual({ reason: "interface (data model)", category: "B" })
   })
 
   it("marks a type alias as Category B with 'type alias'", async () => {
-    expect(await hintOf("export type Amount = number", "#Amount")).toEqual({
+    expect(await hintOf("export type Amount = number", "ts:src/a.ts#Amount")).toEqual({
       reason: "type alias",
       category: "B",
     })
   })
 
   it("marks a class with only field declarations as pure DTO", async () => {
-    expect(await hintOf("export class Invoice { total: number = 0 }", "#Invoice")).toEqual({
-      reason: "pure DTO",
-      category: "B",
-    })
+    expect(
+      await hintOf("export class Invoice { total: number = 0 }", "ts:src/a.ts#Invoice"),
+    ).toEqual({ reason: "pure DTO", category: "B" })
   })
 
   it("marks a class with only static readonly literal fields as pure constants", async () => {
     expect(
       await hintOf(
         "export class Constants { static readonly PI = 3.14; static readonly E = 2.72 }",
-        "#Constants",
+        "ts:src/a.ts#Constants",
       ),
     ).toEqual({ reason: "pure constants", category: "B" })
   })
 
   it("does not mark a class with a method as pure DTO", async () => {
     expect(
-      await hintOf("export class InvoiceService { create() { return 1 } }", "#InvoiceService"),
+      await hintOf(
+        "export class InvoiceService { create() { return 1 } }",
+        "ts:src/a.ts#InvoiceService",
+      ),
     ).toBeNull()
   })
 
   it("marks an empty function as Category B with 'empty body'", async () => {
-    expect(await hintOf("export function noop() {}", "#noop")).toEqual({
+    expect(await hintOf("export function noop() {}", "ts:src/a.ts#noop")).toEqual({
       reason: "empty body",
       category: "B",
     })
@@ -95,7 +78,7 @@ describe("classifySymbolDropHint", () => {
   it("keeps a Symbol carrying a boundary decorator, whatever its kind", () => {
     // `decideDropReason` in core asks `decideSymbolDrop` first, which answers `null` on a
     // boundary decorator, and then asks this. So an arm here that never looks at decorators
-    // is the one that decides — `drop-list.md` §4.1 puts a boundary outside Category B, and
+    // is the one that decides — `drop-list.md` puts a boundary outside Category B, and
     // that has to hold for every kind, not only for the class arm that already checked.
     const boundary = [
       { name: "Controller", raw: "@Controller()", arguments: [], boundary: true, line: 1 },
@@ -114,19 +97,30 @@ describe("classifySymbolDropHint", () => {
     // A merged `interface C {}` contributes its `interface_body`, whose `property_signature`
     // and `method_signature` members would read as the class's own — turning `pure constants`
     // into `pure DTO`, and a DTO into a Symbol that is not dropped at all.
-    expect(await hintOf(CONSTANTS_PLUS_INTERFACE, "#P")).toEqual({
+    expect(await hintOf(CONSTANTS_PLUS_INTERFACE, "ts:src/a.ts#P")).toEqual({
       reason: "pure constants",
       category: "B",
     })
-    expect(await hintOf(DTO_PLUS_INTERFACE, "#D")).toEqual({
+    expect(await hintOf(DTO_PLUS_INTERFACE, "ts:src/a.ts#D")).toEqual({
       reason: "pure DTO",
       category: "B",
     })
   })
+})
 
-  it("exposes the TypeScript-specific file drop patterns", () => {
-    expect(TYPESCRIPT_FILE_DROP_PATTERNS).toContain("**/*.d.ts")
-    expect(TYPESCRIPT_FILE_DROP_PATTERNS).toContain("**/*.d.mts")
-    expect(TYPESCRIPT_FILE_DROP_PATTERNS).toContain("**/*.d.cts")
+/**
+ * The Category-A half of this module, which is a list rather than a function and so has no
+ * behaviour a hint test reaches. Nothing else in the workspace reads it: the plugin copies it
+ * into `fileDropPatterns` and core applies it to paths, so an entry dropped from here makes
+ * every declaration file scannable — every ambient interface in a dependency's `.d.ts` landing
+ * in the IR as a data model — with every other suite still green.
+ */
+describe("the file drop patterns this plugin adds to the core standard set", () => {
+  it("names a declaration file in each of the three module spellings", () => {
+    expect([...TYPESCRIPT_FILE_DROP_PATTERNS].sort()).toEqual([
+      "**/*.d.cts",
+      "**/*.d.mts",
+      "**/*.d.ts",
+    ])
   })
 })

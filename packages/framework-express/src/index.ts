@@ -1,11 +1,11 @@
 export {
   asSyntaxNode,
   calleeLeaf,
-  calleeRoot,
   calleeText,
   findFirstDescendantOfType,
   type SyntaxNode,
-} from "./ast"
+} from "@aburi/core"
+export { calleeRoot } from "./callee"
 export { classifyExpressSymbol } from "./classify"
 export {
   EXPRESS_DERIVED_BY_PREFIX,

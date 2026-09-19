@@ -11,6 +11,7 @@ interface RecordedCall {
   readonly method: string
   readonly url: string
   readonly body: string | null
+  readonly headers: Record<string, string>
 }
 
 interface FakeFetchOptions {
@@ -34,7 +35,8 @@ function makeFakeFetch(options: FakeFetchOptions): {
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     const method = init?.method ?? "GET"
     const body = typeof init?.body === "string" ? init.body : null
-    calls.push({ method, url, body })
+    const headers = Object.fromEntries(new Headers(init?.headers).entries())
+    calls.push({ method, url, body, headers })
 
     if (method === "GET" && url.includes("/issues/") && url.includes("/comments")) {
       const status = options.listStatus ?? 200
@@ -195,25 +197,22 @@ describe("upsertPullRequestComment", () => {
     ).rejects.toThrow(/GitHub API failed to list PR comments: 403/)
   })
 
-  it("throws when the create request fails", async () => {
-    const { fetch } = makeFakeFetch({ listPages: [[]], createStatus: 401 })
-    await expect(
-      upsertPullRequestComment({ ref: REF, body: "x", token: "t", fetch }),
-    ).rejects.toThrow(/GitHub API failed to create PR comment: 401/)
-  })
-
   it("sends bearer token and required GitHub API headers on every call", async () => {
+    const existing = { id: 5, body: `${ABURI_COMMENT_MARKER}\n\nold`, html_url: "u" }
     const { fetch, calls } = makeFakeFetch({
-      listPages: [[]],
-      createResponse: {
-        id: 1,
-        body: `${ABURI_COMMENT_MARKER}\n\nx`,
-        html_url: "u",
-      },
+      listPages: [[existing]],
+      patchResponse: { ...existing, body: `${ABURI_COMMENT_MARKER}\n\nx` },
     })
     await upsertPullRequestComment({ ref: REF, body: "x", token: "secret", fetch })
+    expect(calls.map((c) => c.method)).toEqual(["GET", "PATCH"])
     for (const call of calls) {
       expect(call.url).toContain("api.github.com")
+      expect(call.headers).toMatchObject({
+        authorization: "Bearer secret",
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+        "user-agent": "aburi-github-action",
+      })
     }
   })
 
@@ -236,38 +235,36 @@ describe("upsertPullRequestComment", () => {
     expect(calls[0]?.url.startsWith("https://ghe.example.com/api/v3/repos/")).toBe(true)
   })
 
-  it("throws when the patch request fails", async () => {
-    const existing = {
-      id: 555,
-      body: `${ABURI_COMMENT_MARKER}\n\nold`,
-      html_url: "u",
-    }
-    const { fetch } = makeFakeFetch({ listPages: [[existing]], patchStatus: 422 })
+  /** The list page that routes the upsert to a create (no marker comment) or an update. */
+  const existing = { id: 555, body: `${ABURI_COMMENT_MARKER}\n\nold`, html_url: "u" }
+  const routeTo = { create: { listPages: [[]] }, update: { listPages: [[existing]] } }
+
+  it.each([
+    {
+      write: "create" as const,
+      options: { createStatus: 401 },
+      expected: /create PR comment: 401/,
+    },
+    { write: "update" as const, options: { patchStatus: 422 }, expected: /update PR comment: 422/ },
+  ])("throws a contextual error when the $write request fails", async ({
+    write,
+    options,
+    expected,
+  }) => {
+    const { fetch } = makeFakeFetch({ ...routeTo[write], ...options })
     await expect(
       upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
-    ).rejects.toThrow(/GitHub API failed to update PR comment: 422/)
+    ).rejects.toThrow(expected)
   })
 
-  it("throws when the create response is missing id / body / html_url", async () => {
-    const { fetch } = makeFakeFetch({
-      listPages: [[]],
-      createResponse: { id: 1, body: "no html_url" },
-    })
-    await expect(
-      upsertPullRequestComment({ ref: REF, body: "x", token: "t", fetch }),
-    ).rejects.toThrow(/without id\/body\/html_url/)
-  })
-
-  it("throws when the patch response is missing id / body / html_url", async () => {
-    const existing = {
-      id: 777,
-      body: `${ABURI_COMMENT_MARKER}\n\nold`,
-      html_url: "u",
-    }
-    const { fetch } = makeFakeFetch({
-      listPages: [[existing]],
-      patchResponse: { id: 777 },
-    })
+  it.each([
+    { write: "create" as const, options: { createResponse: { id: 1, body: "no html_url" } } },
+    { write: "update" as const, options: { patchResponse: { id: 555 } } },
+  ])("throws when the $write response is missing id / body / html_url", async ({
+    write,
+    options,
+  }) => {
+    const { fetch } = makeFakeFetch({ ...routeTo[write], ...options })
     await expect(
       upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
     ).rejects.toThrow(/without id\/body\/html_url/)

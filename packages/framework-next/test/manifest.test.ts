@@ -50,8 +50,12 @@ describe("public vocabulary exports", () => {
     for (const verb of ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"] as const) {
       expect(NEXT_ROUTE_HTTP_VERBS.has(verb)).toBe(true)
     }
-    // Non-verbs are not in the literal union — the type-erased Set surface is used
-    // deliberately here to lock the runtime behavior alongside the type shape.
+    // The negative half needs the type-erased view to be askable at all: `CONNECT` and
+    // `TRACE` are real HTTP methods the App Router does not route, so they sit outside the
+    // literal union and `has()` would reject them before the set ever answered. Widening to
+    // `ReadonlySet<string>` puts the question the way a caller holding a plain export name
+    // puts it. classify.test.ts already rejects `helper` through `classifyNextSymbol`; what
+    // only this pair covers is a name that is a verb everywhere except in the App Router.
     const untyped = NEXT_ROUTE_HTTP_VERBS as ReadonlySet<string>
     expect(untyped.has("CONNECT")).toBe(false)
     expect(untyped.has("TRACE")).toBe(false)

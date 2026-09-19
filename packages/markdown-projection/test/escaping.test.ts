@@ -1,3 +1,4 @@
+import { component, effect, makeIR, makeSymbol, rule, symbolId } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   callRow,
@@ -11,12 +12,12 @@ import {
   ruleRow,
   tableCell,
 } from "../src"
-import { component, effect, makeIR, makeSymbol, rule, symbolId } from "./fixtures"
 
 /**
- * §3.4 / §5.6 — the three ways a value out of the IR used to escape the construct that
- * was meant to contain it: a fence opened at column 0 inside a list item, a backtick
- * closing a code span early, and a `|` opening a table column the header never declared.
+ * Code fragment and Rule row display (markdown-projection.md) — the three ways a value out
+ * of the IR used to escape the construct that was meant to contain it: a fence opened at
+ * column 0 inside a list item, a backtick closing a code span early, and a `|` opening a
+ * table column the header never declared.
  *
  * Every value asserted here is ordinary source text — a boolean condition long enough to
  * fence, a template literal, a path with a pipe in it — not a crafted hostile string.
@@ -118,12 +119,6 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
     ])
   })
 
-  it("keeps the compact row for a condition that fits inline", () => {
-    expect(ruleRow(rule({ type: "guard", line: 5, condition: "x > 0" }))).toEqual([
-      "- guard: `x > 0` (L5)",
-    ])
-  })
-
   it("fences at one character past the threshold and not at the threshold", () => {
     const at = "x".repeat(INLINE_CODE_MAX_LENGTH)
     const past = "x".repeat(INLINE_CODE_MAX_LENGTH + 1)
@@ -148,7 +143,7 @@ describe("ruleRow — a value that has to fence stays inside its list item", () 
   })
 
   it("fences a multiline condition under the item as well", () => {
-    // ir-schema.md §8.2 has the extractor strip newlines from this field; a writer that did
+    // ir-schema.md has the extractor strip newlines from this field; a writer that did
     // not is the reason the branch exists, so the row still has to hold together.
     expect(ruleRow(rule({ type: "switch", line: 9, condition: "a\nb" }))).toEqual([
       "- switch (L9):",

@@ -1,3 +1,4 @@
+/** The `framework:express:*` extKinds this plugin owns; `EXPRESS_EXT_KIND_SET` is the same list as a runtime set. */
 export const EXPRESS_EXT_KINDS = [
   "framework:express:router",
   "framework:express:route",

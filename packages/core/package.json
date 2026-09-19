@@ -1,7 +1,7 @@
 {
   "name": "@aburi/core",
   "version": "0.4.0",
-  "description": "Aburi core foundation: deterministic Symbol ID generation, canonical JSON serializer (NFC + codepoint-sorted keys), IR integrity checker (ir-schema.md §14), workspace root + JS/TS manager autodetect, and JS/TS Component autodetect (package.json#name / exports / dependency-driven framework discovery)",
+  "description": "Aburi core foundation: deterministic Symbol ID generation, canonical JSON serializer (NFC + codepoint-sorted keys), IR integrity checker (ir-schema.md), workspace root + JS/TS manager autodetect, and JS/TS Component autodetect (package.json#name / exports / dependency-driven framework discovery)",
   "license": "Apache-2.0",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/core#readme",
@@ -45,6 +45,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@aburi/test-support": "workspace:*",
     "@types/node": "^26.0.1",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3",

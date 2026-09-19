@@ -1,15 +1,18 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import type { ImportEdge } from "@aburi/types"
+import type { EffectsManifest, ImportEdge } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   assertImportBinding,
   assertNonEmptySegments,
+  defineEffectsManifest,
   hasLiteralFirstArgument,
   hasMatchingImport,
   identifierMentions,
   identifierWords,
+  matchesModuleOrSubpath,
   type PluginInputOrigin,
+  receiverConfidence,
 } from "../src/plugin-input"
 
 const ORIGIN: PluginInputOrigin = { plugin: "effects-example", filePath: "src/service.ts" }
@@ -235,6 +238,105 @@ describe("hasLiteralFirstArgument", () => {
   it("is false for a call with no arguments", () => {
     // Nothing to be a literal. Arity is a separate question, decided by the caller.
     expect(hasLiteralFirstArgument({ literalArgs: [] })).toBe(false)
+  })
+})
+
+describe("matchesModuleOrSubpath", () => {
+  const isDrizzle = matchesModuleOrSubpath("drizzle-orm")
+
+  it.each([
+    "drizzle-orm",
+    "drizzle-orm/postgres-js",
+    "drizzle-orm/aws-data-api/pg",
+  ])("accepts the root or any subpath: %s", (source) => {
+    expect(isDrizzle(source)).toBe(true)
+  })
+
+  it.each([
+    "drizzle",
+    "drizzle-orm-mock",
+    "not-drizzle-orm",
+    "@drizzle/kit",
+  ])("rejects the lookalike %s — the `/` is the boundary", (source) => {
+    expect(isDrizzle(source)).toBe(false)
+  })
+
+  it("accepts any of several roots", () => {
+    const isTrpcClient = matchesModuleOrSubpath("@trpc/client", "@trpc/next")
+    expect(isTrpcClient("@trpc/next/app-dir/client")).toBe(true)
+    expect(isTrpcClient("@trpc/server")).toBe(false)
+  })
+})
+
+describe("receiverConfidence", () => {
+  const namesDb = (segment: string) => segment === "db"
+  const oneArg = { argumentCount: 1 }
+  const twoArgs = { argumentCount: 2 }
+  const dynamic = { argumentCount: 1, dynamicReceiver: true }
+
+  it("is high only when the receiver is named, static, and within arity", () => {
+    expect(receiverConfidence("db", oneArg, 1, namesDb)).toBe("high")
+  })
+
+  it.each([
+    ["an unrecognized receiver", "store", oneArg, 1],
+    ["a missing receiver", undefined, oneArg, 1],
+    ["a dynamic receiver", "db", dynamic, 1],
+    ["an over-long argument list", "db", twoArgs, 1],
+  ])("is medium for %s", (_label, segment, call, max) => {
+    expect(receiverConfidence(segment, call, max, namesDb)).toBe("medium")
+  })
+
+  it("reads the arity limit off the terminal the caller passes", () => {
+    expect(receiverConfidence("db", twoArgs, 2, namesDb)).toBe("high")
+  })
+})
+
+describe("defineEffectsManifest", () => {
+  it("builds the shared effects-plugin manifest around the two chosen literals", () => {
+    const manifest = defineEffectsManifest("effects-foo", "effects-plugin:foo")
+    expect(manifest).toEqual({
+      $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+      name: "effects-foo",
+      version: "0.0.0",
+      type: "effects",
+      engines: { aburi: "*" },
+      provides: {
+        effects: [],
+        effectPrefixes: [],
+        extKinds: [],
+        extKindPrefixes: [],
+        derivedByPrefixes: ["effects-plugin:foo"],
+        frameworks: [],
+      },
+    })
+    // Narrow literals survive, and the result is an `EffectsManifest` — both compile-time.
+    const name: "effects-foo" = manifest.name
+    const prefixes: ["effects-plugin:foo"] = manifest.provides.derivedByPrefixes
+    const widened: EffectsManifest = manifest
+    expect([name, prefixes, widened.type]).toEqual([
+      "effects-foo",
+      ["effects-plugin:foo"],
+      "effects",
+    ])
+  })
+
+  it("keeps xPrefix and capabilities off the shape, so reading either is a compile error", () => {
+    // `PluginManifest` declares both optional, and `defineEffectsManifest`'s docblock leans
+    // on the first being absent: the registry derives `xPrefix` from `name`, so a manifest
+    // that carried one would be stating something nobody reads. While `EffectsPluginManifest`
+    // inherited the optionals, `manifest.xPrefix` was a well-typed read that answered
+    // `undefined` for every manifest in the repo — a mistake with nothing to catch it.
+    //
+    // Like the assignments above, this is enforced by `pnpm typecheck`, not by the runner,
+    // and it fails in both directions: should either read start compiling again, the
+    // directive goes unused and TypeScript reports it as TS2578.
+    const manifest = defineEffectsManifest("effects-foo", "effects-plugin:foo")
+    // @ts-expect-error `xPrefix` is the registry's to derive, not the manifest's to declare.
+    const xPrefix = manifest.xPrefix
+    // @ts-expect-error a first-party effects plugin claims no capabilities.
+    const capabilities = manifest.capabilities
+    expect([xPrefix, capabilities]).toEqual([undefined, undefined])
   })
 })
 

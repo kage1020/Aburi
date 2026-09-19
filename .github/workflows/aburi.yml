@@ -56,7 +56,7 @@ jobs:
       # `cli: workspace` runs the CLI this checkout builds, so the report on a pull request comes
       # from the analyser that pull request contains. It is also the only mode that can load
       # `lang-typescript`, which `aburi.json` names by package: see
-      # `docs/design/github-action.md` §3.
+      # `docs/design/github-action.md`
       - name: Aburi diff
         id: aburi
         uses: ./packages/github-action

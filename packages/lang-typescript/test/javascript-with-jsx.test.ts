@@ -1,13 +1,8 @@
 import type { WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import type { Node } from "web-tree-sitter"
-import {
-  extractSymbols,
-  parseTypescriptFile,
-  TYPESCRIPT_FILE_EXTENSIONS,
-  walkBody,
-} from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { TYPESCRIPT_FILE_EXTENSIONS, walkBody } from "../src/index"
+import { makeExtractionCtx, parseSource, requireTree, symbolsOf } from "./fixtures/ctx"
 
 /**
  * The JavaScript extensions are covered so `framework-react` can classify React sources in
@@ -45,27 +40,19 @@ const HANDLER_IN_JSX = [
 ].join("\n")
 
 async function errorsOf(path: string, content: string): Promise<string[]> {
-  const result = await parseTypescriptFile({ path, content })
+  const result = await parseSource(content, path)
   return result.errors.map((e) => `${e.line}:${e.column} ${e.message}`)
 }
 
 async function treeOf(path: string, content: string): Promise<string> {
-  const result = await parseTypescriptFile({ path, content })
+  const result = await parseSource(content, path)
   return requireTree(result.tree).rootNode.toString()
 }
 
-async function symbolsOf(path: string, content: string): Promise<[string, string][]> {
-  const result = await parseTypescriptFile({ path, content })
-  const ctx = makeExtractionCtx(path, content)
-  return extractSymbols(requireTree(result.tree), ctx).map((s) => [s.name, s.kind])
-}
-
-async function callsOf(path: string, content: string, name: string): Promise<string[]> {
-  const result = await parseTypescriptFile({ path, content })
-  const ctx = makeExtractionCtx(path, content)
-  const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.name === name)
+async function callsByNameOf(path: string, content: string, name: string): Promise<string[]> {
+  const target = (await symbolsOf(content, path)).find((s) => s.name === name)
   if (target === undefined) throw new Error(`no Symbol ${name} in fixture`)
-  const walkCtx: WalkContext<Node> = { ...ctx, symbol: target }
+  const walkCtx: WalkContext<Node> = { ...makeExtractionCtx(path, content), symbol: target }
   return walkBody(target, walkCtx).calls.map((c) => c.target)
 }
 
@@ -81,9 +68,8 @@ describe("a JavaScript file containing JSX", () => {
 
   it("extracts the component the file declares", async () => {
     // A named default export keeps its written name; `<default>` is for the anonymous form.
-    expect(await symbolsOf("app/layout.js", NEXT_APP_TEMPLATE)).toEqual([
-      ["RootLayout", "function"],
-    ])
+    const symbols = await symbolsOf(NEXT_APP_TEMPLATE, "app/layout.js")
+    expect(symbols.map((s) => [s.name, s.kind])).toEqual([["RootLayout", "function"]])
   })
 
   it("walks the calls written inside the markup", async () => {
@@ -92,12 +78,12 @@ describe("a JavaScript file containing JSX", () => {
     // interpolated one end up in no Symbol at all. The `.ts` row reads the same source with
     // the grammar `.js` used to get.
     expect(await errorsOf("app/page.js", HANDLER_IN_JSX)).toEqual([])
-    expect(await callsOf("app/page.js", HANDLER_IN_JSX, "Page")).toEqual([
+    expect(await callsByNameOf("app/page.js", HANDLER_IN_JSX, "Page")).toEqual([
       "useData",
       "track",
       "fmt",
     ])
-    expect(await callsOf("app/page.ts", HANDLER_IN_JSX, "Page")).toEqual(["useData"])
+    expect(await callsByNameOf("app/page.ts", HANDLER_IN_JSX, "Page")).toEqual(["useData"])
   })
 })
 
@@ -149,8 +135,15 @@ describe("the old-style type assertion decides which extension goes where", () =
   })
 })
 
-describe("the extension list is still the map's", () => {
-  it("names every extension this plugin claims", async () => {
+/**
+ * `fileExtensions` is how core's scan decides which plugin reads a file at all, and this list
+ * is what the plugin reports there. Nothing downstream re-derives it, so an extension dropped
+ * from `EXTENSION_GRAMMAR` takes every file of that kind out of the scan silently: the suites
+ * above would keep passing on the extensions that remain, and a workspace of `.mjs` would
+ * simply come back empty.
+ */
+describe("the extension list is still the grammar map's", () => {
+  it("names every extension this plugin claims", () => {
     expect([...TYPESCRIPT_FILE_EXTENSIONS].sort()).toEqual([
       ".cjs",
       ".cts",

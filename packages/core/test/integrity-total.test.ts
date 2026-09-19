@@ -80,7 +80,7 @@ function richIR(): IR {
     requestsTimedOut: 0,
     requestsFailed: 0,
     languagesDisabled: [],
-    // The §7.2 hint counters, so #20 actually walks `LspHintRejections` — the nested record
+    // The LSP hint counters, so #20 actually walks `LspHintRejections` — the nested record
     // is the one container in the Document that no other fixture here reaches.
     hintsProduced: 0,
     hintsConsumed: 0,

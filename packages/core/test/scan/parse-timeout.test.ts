@@ -1,17 +1,12 @@
+import { noopRegistry, silentLogger } from "@aburi/test-support"
 import type {
   BodyExtraction,
-  ExtractionContext,
   ImportEdge,
-  LangManifest,
   LanguagePlugin,
-  Logger,
   OpaqueAstNode,
   ParseError,
   ParseResult,
-  SourceFile,
   SymbolCandidate,
-  VocabRegistry,
-  WalkContext,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import configSchema from "../../../../schema/aburi.config.v1.json" with { type: "json" }
@@ -23,7 +18,7 @@ import {
   startParseDeadline,
 } from "../../src"
 import { spend } from "../fixtures/clock"
-import { symbolId } from "../fixtures/ir"
+import { stubCandidate, stubFile, stubLanguagePlugin } from "../fixtures/plugins"
 
 /**
  * `parseTimeoutMs` is a cooperative deadline: `extractSymbols` and `walkBody` are
@@ -33,64 +28,6 @@ import { symbolId } from "../fixtures/ir"
  * direction of spending more, never less, so a slow machine cannot flake them. The
  * under-budget cases pass a budget large enough that no machine could blow it.
  */
-
-const noopRegistry: VocabRegistry = {
-  findEffect: () => null,
-  findExtKind: () => null,
-  findFramework: () => null,
-  findDerivedByOwner: () => null,
-  isEffectOwnedBy: () => false,
-  isExtKindOwnedBy: () => false,
-  listEffects: () => [],
-  listExtKinds: () => [],
-  listFrameworks: () => [],
-  listPlugins: () => [],
-  assertEffectDeclared: () => {},
-  assertExtKindDeclared: () => {},
-}
-
-const silentLog: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-}
-
-const stubFile: SourceFile = { path: "test.stub", content: "" }
-
-function candidate(name: string): SymbolCandidate<OpaqueAstNode> {
-  return {
-    id: symbolId(`stub:test.stub#${name}`),
-    kind: "function",
-    extKind: null,
-    name,
-    visibility: "public",
-    decorators: [],
-    signature: null,
-    source: { file: "test.stub", startLine: 1, endLine: 2, startColumn: null, endColumn: null },
-    derivedBy: [],
-    bodyNode: {} as OpaqueAstNode,
-    fullNode: {} as OpaqueAstNode,
-  }
-}
-
-function langManifest(): LangManifest {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "lang-stub",
-    version: "0.0.0",
-    type: "lang",
-    engines: { aburi: "*" },
-    provides: {
-      effects: [],
-      effectPrefixes: [],
-      extKinds: [],
-      extKindPrefixes: [],
-      derivedByPrefixes: [],
-      frameworks: [],
-    },
-  }
-}
 
 interface StubTiming {
   parseMs?: number
@@ -110,24 +47,8 @@ interface StubCalls {
 
 function stubPlugin(timing: StubTiming, calls: StubCalls): LanguagePlugin {
   const names = timing.candidates ?? ["one"]
-  const plugin = {
-    manifest: langManifest(),
-    fileExtensions: [".stub"],
-    capabilities: {
-      hasDecorators: false,
-      hasGenerics: false,
-      hasAsync: false,
-      hasMacros: false,
-      hasPatternMatching: false,
-      hasAbstractTypes: false,
-      hasModules: false,
-      hasNamespaces: false,
-      hasTypeParameters: false,
-      hasExplicitVisibility: false,
-      hasJsDoc: false,
-    },
-    init: async () => {},
-    parseFile: async (_file: SourceFile): Promise<ParseResult> => {
+  return stubLanguagePlugin({
+    parseFile: async (): Promise<ParseResult> => {
       spend(timing.parseMs ?? 0)
       return {
         tree: timing.noTree === true ? null : ({} as OpaqueAstNode),
@@ -135,22 +56,17 @@ function stubPlugin(timing: StubTiming, calls: StubCalls): LanguagePlugin {
         imports: [...(timing.imports ?? [])],
       }
     },
-    extractSymbols: (_tree: OpaqueAstNode, _ctx: ExtractionContext) => {
+    extractSymbols: () => {
       calls.extract++
       spend(timing.extractMs ?? 0)
-      return names.map(candidate)
+      return names.map((name) => stubCandidate(name))
     },
-    walkBody: (
-      symbol: SymbolCandidate<OpaqueAstNode>,
-      _ctx: WalkContext<OpaqueAstNode>,
-    ): BodyExtraction => {
+    walkBody: (symbol: SymbolCandidate<OpaqueAstNode>): BodyExtraction => {
       calls.walk.push(symbol.name)
       spend(timing.walkMsPerCandidate ?? 0)
       return { rules: [], calls: [] }
     },
-    normalizeAst: (_symbol: SymbolCandidate<OpaqueAstNode>) => "stub-ast",
-  }
-  return plugin as unknown as LanguagePlugin
+  })
 }
 
 async function run(timing: StubTiming, parseTimeoutMs?: number) {
@@ -167,7 +83,7 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
     dropCFilter: buildDropCFilter(),
     component: null,
     treeReleaseFailures: [],
-    log: silentLog,
+    log: silentLogger,
   }
   const result = await runFilePipeline(input)
   return { result, calls }

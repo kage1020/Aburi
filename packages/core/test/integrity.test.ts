@@ -155,26 +155,6 @@ describe("checkIRIntegrity", () => {
     expect(checkIRIntegrity(ir)).toEqual([])
   })
 
-  it("#10: detects backslash paths in Symbol.source.file", () => {
-    const ir = minimalIR()
-    ir.symbols = [
-      makeSymbol("ts:src/a.ts#foo", {
-        source: { file: "src\\a.ts", startLine: 1, endLine: 1, startColumn: null, endColumn: null },
-      }),
-    ]
-    const violations = checkIRIntegrity(ir)
-    expect(violations.some((v) => v.invariant === 10)).toBe(true)
-  })
-
-  it("#10: detects absolute paths in component roots", () => {
-    const ir = minimalIR()
-    ir.components = [
-      { id: componentId("a"), name: "A", roots: ["/abs/path"], languages: [makeLanguageId("ts")] },
-    ]
-    const violations = checkIRIntegrity(ir)
-    expect(violations.some((v) => v.invariant === 10)).toBe(true)
-  })
-
   it("#10: answers the shared path table at every path site, with the stated reason", () => {
     // #10 is the rule the Symbol id constructor applies, asked of a Document Aburi did not
     // write. All three sites are checked at once, so both a missed site and a spurious one
@@ -464,7 +444,7 @@ describe("checkIRIntegrity", () => {
   })
 })
 
-describe("invariant #15 — callResolution stats census (call-resolution.md §8.1)", () => {
+describe("invariant #15 — callResolution stats census (call-resolution.md)", () => {
   function irWithOneUnresolvedCall(): ReturnType<typeof minimalIR> {
     const ir = minimalIR()
     ir.symbols = [
@@ -765,8 +745,8 @@ describe("checkIRIntegrity #19 — Unicode normalization", () => {
 
   it("refuses NFKC as a substitute: compatibility folding is not normalization here", () => {
     // NFKC maps `ﬁ` to `fi` and fullwidth `Ａ` to `A`. Under it two distinct
-    // Symbols collapse onto one id and quoted source is rewritten — the damage §1.2 scopes
-    // out. These values are already NFC, so a checker using NFKC would report them.
+    // Symbols collapse onto one id and quoted source is rewritten — the damage ir-schema.md
+    // scopes out. These values are already NFC, so a checker using NFKC would report them.
     const ir = minimalIR()
     ir.components = [makeComponent("a", { roots: ["apps/ﬁle", "apps/Ａpp"] })]
     expect(checkIRIntegrity(ir).filter((v) => v.invariant === 19)).toEqual([])

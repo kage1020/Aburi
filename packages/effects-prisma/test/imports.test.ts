@@ -66,18 +66,10 @@ describe("hasPrismaImport", () => {
     ).toBe(true)
   })
 
-  it("throws when the language plugin emits an empty ImportEdge.source", () => {
-    // ImportEdge.source is contract-guaranteed to be normalized and non-empty. Getting
-    // `""` here means the upstream language plugin failed to normalize — silently
-    // returning false would mask the bug.
-    expect(() =>
-      hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 1, dynamic: false }], PATH),
-    ).toThrow(/ImportEdge\.source is empty/)
-  })
-
-  it("names the plugin, the file, and the offending line in the thrown message", () => {
-    // `filePath` is the whole reason the parameter exists — an assertion on the
-    // "is empty" text alone would pass against an implementation that ignored it.
+  it("throws on an empty ImportEdge.source, naming the plugin, the file, and the line", () => {
+    // An empty source means the language plugin failed to normalize; returning false would
+    // mask the bug. `filePath` is the whole reason the parameter exists — an assertion on
+    // the "is empty" text alone would pass against an implementation that ignored it.
     expect(() =>
       hasPrismaImport([{ source: "", symbols: ["PrismaClient"], line: 9, dynamic: false }], PATH),
     ).toThrow(`effects-prisma (${PATH}, line 9): ImportEdge.source is empty`)

@@ -15,7 +15,7 @@ import { runScan } from "../src"
  *
  * Everything here reads the IR back off disk rather than inspecting the in-memory report:
  * `serializeCanonical` drops properties whose value is `undefined`, so an omitted Class A
- * key (ir-schema.md §1.1) is invisible in TypeScript and visible only in the written bytes.
+ * key (ir-schema.md) is invisible in TypeScript and visible only in the written bytes.
  */
 
 const ajv = new Ajv2020({ strict: false, allErrors: true })
@@ -69,7 +69,7 @@ async function scanWithComponents(components: unknown[]): Promise<Record<string,
   return JSON.parse(await readFile(report.irPath as string, "utf8")) as Record<string, unknown>
 }
 
-describe("config-declared Components (ir-schema.md §1.1)", () => {
+describe("config-declared Components (ir-schema.md)", () => {
   it("writes description as an explicit null and omits the empty Class B arrays", async () => {
     const ir = await scanWithComponents([{ id: "billing", roots: ["src"], languages: ["ts"] }])
     const components = ir.components as Array<Record<string, unknown>>

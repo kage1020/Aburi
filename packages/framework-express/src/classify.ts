@@ -1,3 +1,4 @@
+import { asSyntaxNode, calleeLeaf, calleeText } from "@aburi/core"
 import type {
   Confidence,
   ExtractionContext,
@@ -5,7 +6,7 @@ import type {
   SymbolCandidate,
   SymbolClassification,
 } from "@aburi/types"
-import { asSyntaxNode, calleeLeaf, calleeRoot, calleeText } from "./ast"
+import { calleeRoot } from "./callee"
 import type { ExpressExtKind } from "./ext-kinds"
 import { EXPRESS_DERIVED_BY_PREFIX } from "./ext-kinds"
 import { hasExpressImport } from "./imports"
@@ -13,22 +14,22 @@ import { analyzeUseArguments, EXPRESS_MIDDLEWARE_METHOD, type UseArgumentShape }
 import { extractRouterCall } from "./router"
 import { isRouteMethod } from "./routes"
 
-interface Result {
+/** `extKind` narrowed to the plugin's own union so a typo fails to compile. */
+interface ExpressClassification {
   extKind: ExpressExtKind
   derivedBy: string
   confidence: Confidence
 }
 
 /**
- * First-match-wins dispatcher. Only inspects symbols whose kind is one of the promoted
- * shapes (`const` for router instances, `call` for module-level chained-call registrations).
- * Everything else abstains with `null`.
+ * First-match-wins over `const` symbols (router instances) and `call` symbols (module-level
+ * chained-call registrations); every other kind abstains with `null`.
  */
 export function classifyExpressSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,
 ): SymbolClassification | null {
-  const result = decide(symbol, ctx)
+  const result = classifyBySymbolKind(symbol, ctx)
   if (result === null) return null
   return {
     extKind: result.extKind,
@@ -37,7 +38,10 @@ export function classifyExpressSymbol(
   }
 }
 
-function decide(symbol: SymbolCandidate<OpaqueAstNode>, ctx: ExtractionContext): Result | null {
+function classifyBySymbolKind(
+  symbol: SymbolCandidate<OpaqueAstNode>,
+  ctx: ExtractionContext,
+): ExpressClassification | null {
   if (symbol.kind === "const") return classifyConstSymbol(symbol, ctx)
   if (symbol.kind === "call") return classifyCallSymbol(symbol, ctx)
   return null
@@ -46,11 +50,10 @@ function decide(symbol: SymbolCandidate<OpaqueAstNode>, ctx: ExtractionContext):
 function classifyConstSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,
-): Result | null {
+): ExpressClassification | null {
   const routerCall = extractRouterCall(symbol.fullNode)
   if (routerCall === null) return null
-  // Router() as an identifier can come from anywhere; requiring an `express` import is the
-  // difference between "definitely Express" (high) and "matches the pattern" (medium).
+  // An `express` import is what separates "definitely Express" (high) from "matches the pattern" (medium).
   const confidence: Confidence = hasExpressImport(ctx) ? "high" : "medium"
   return {
     extKind: "framework:express:router",
@@ -62,7 +65,7 @@ function classifyConstSymbol(
 function classifyCallSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,
-): Result | null {
+): ExpressClassification | null {
   const call = asSyntaxNode(symbol.fullNode)
   if (call === null) return null
   const callee = calleeText(call)
@@ -91,16 +94,12 @@ function classifyUseCall(
   receiver: string,
   symbol: SymbolCandidate<OpaqueAstNode>,
   importAnchored: boolean,
-): Result | null {
+): ExpressClassification | null {
   const shape = analyzeUseArguments(symbol.fullNode)
   if (shape === null) return null
 
-  // Priority within `.use(...)`:
-  //   1. Error middleware — an arity-4 handler is unambiguous.
-  //   2. Mount point — a `use(pathLiteral, identifier)` shape strongly suggests a
-  //      sub-router mount, even when the identifier could theoretically be a plain
-  //      middleware reference. Downgrades confidence when import-anchoring is missing.
-  //   3. Middleware — everything else that fits the arity-3 or identifier shape.
+  // Priority: arity-4 error middleware (unambiguous) > `use(pathLiteral, identifier)` mount
+  // > anything else fitting the arity-3 or identifier shape.
   if (shape.hasErrorHandler) {
     return {
       extKind: "framework:express:error-middleware",
@@ -119,9 +118,7 @@ function classifyUseCall(
 
   if (shape.hasRegularHandler || shape.hasIdentifierArg) {
     const arity = shape.hasRegularHandler ? "arity-3" : "identifier-arg"
-    // Identifier-arg middleware is inherently more ambiguous than an inline arity-3
-    // arrow — cap it at medium even when an `express` import is present, so downstream
-    // consumers can tell the two apart.
+    // An identifier argument cannot be arity-checked here, so it is capped at medium.
     const confidence: Confidence = shape.hasRegularHandler && importAnchored ? "high" : "medium"
     return {
       extKind: "framework:express:middleware",
@@ -133,9 +130,8 @@ function classifyUseCall(
   return null
 }
 
+/** `app.use('/api', router)`: a path literal, a bare identifier, and no handler-shaped argument. */
 function isMountShape(shape: UseArgumentShape): boolean {
-  // `app.use('/api', router)` — first is a path literal, second is a bare identifier, and
-  // no handler-shaped argument was seen (otherwise error / middleware would have won).
   return (
     shape.argCount === 2 &&
     shape.firstArgIsPathLiteral &&

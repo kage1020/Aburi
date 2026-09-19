@@ -60,30 +60,6 @@ describe("makeSymbolId", () => {
     ).toThrowError(expect.objectContaining({ code: "anonymous-symbol-id-attempted" }))
   })
 
-  it("rejects backslash paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "src\\a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
-  it("rejects absolute POSIX paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "/abs/a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
-  it("rejects Windows drive-letter paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "C:/abs/a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
-  it("rejects parent-ascending paths", () => {
-    expect(() =>
-      makeSymbolId({ language: "ts", file: "../escape/a.ts", qualifiedName: "foo" }),
-    ).toThrowError(expect.objectContaining({ code: "non-posix-path" }))
-  })
-
   it("answers the shared path table on the `symbolPath` side, with the stated reason", () => {
     for (const { path, symbolPath, why } of WORKSPACE_PATH_CASES) {
       const label = `${JSON.stringify(path)} (${why})`
@@ -373,7 +349,7 @@ describe("toDocumentPath, backslashSite and symbolIdSeparatorSite", () => {
 
 describe("reserved language namespaces", () => {
   it("refuses `slice` as a language token so a Symbol id cannot masquerade as a Slice id", () => {
-    // Slice ids are "slice:" + the anchor Symbol id (slice-view.md §7.1). A `slice` language
+    // Slice ids are "slice:" + the anchor Symbol id (slice-view.md). A `slice` language
     // plugin would mint Symbol ids in that same namespace, and deriving a Slice id from one
     // would produce "slice:slice:...". The brand keeps the two apart inside typed code; this
     // keeps them apart on the wire, where the brand is erased.
@@ -418,7 +394,7 @@ describe("makeComponentId", () => {
 
   it("accepts a digit-leading segment, because npm package names have them", () => {
     // Component ids are derived by kebab-casing a package or directory name
-    // (component-detect.md §4.1). `3d-force-graph` and `7zip-bin` are real packages; a
+    // (component-detect.md). `3d-force-graph` and `7zip-bin` are real packages; a
     // letter-first rule would make that derivation partial for no benefit.
     expect(makeComponentId("3d-force-graph")).toBe("3d-force-graph")
     expect(makeComponentId("7zip-bin")).toBe("7zip-bin")
@@ -505,7 +481,7 @@ describe("id guards", () => {
 
   it("isComponentId and isSymbolId never both accept the same string", () => {
     // What the two guards are for: `dependencies[].from`/`.to` hold either kind, and the
-    // kind is recovered from the shape alone (ir-schema.md §11).
+    // kind is recovered from the shape alone (ir-schema.md).
     for (const value of ["ts:src/a.ts#foo", "billing", "not a valid id"]) {
       expect(isSymbolId(value) && isComponentId(value), value).toBe(false)
     }

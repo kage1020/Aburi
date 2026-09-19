@@ -1,8 +1,5 @@
-import type { BodyExtraction, DropHint, SymbolCandidate, WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { classifySymbolDropHint, extractSymbols, parseTypescriptFile, walkBody } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { BACKSLASH, callsOf, classOf, hintOf, idsOf, importsOf, symbolOf } from "./fixtures/ctx"
 
 /**
  * A class member's written name and its qualified-name segment are two different things, and
@@ -14,57 +11,11 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * calls the pair TS2393, a duplicate *implementation* — so the quoted spelling maps onto the
  * `ok` segment and the two fold, the way a field and a method of the same name already do.
  * What is not an identifier once decoded has no segment, and so no Symbol: its body stays on
- * the class, which is the answer `ir-schema.md` §3.2 already gives a computed name.
+ * the class, which is the answer `ir-schema.md` already gives a computed name.
  */
 
-const BACKSLASH = String.fromCharCode(92)
-
-async function symbolsOf(source: string): Promise<SymbolCandidate<Node>[]> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  return extractSymbols(requireTree(result.tree), ctx)
-}
-
-async function idsOf(source: string): Promise<string[]> {
-  return (await symbolsOf(source)).map((s) => s.id)
-}
-
-async function symbolOf(source: string, id: string): Promise<SymbolCandidate<Node>> {
-  const symbols = await symbolsOf(source)
-  const found = symbols.find((s) => s.id === id)
-  if (found === undefined) {
-    throw new Error(`no Symbol ${id}; have ${symbols.map((s) => s.id).join(", ")}`)
-  }
-  return found
-}
-
-async function walkOf(source: string, id: string): Promise<BodyExtraction> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.id === id)
-  if (target === undefined) throw new Error(`no Symbol ${id} in fixture`)
-  const walkCtx: WalkContext<Node> = { ...ctx, symbol: target }
-  return walkBody(target, walkCtx)
-}
-
-async function callsOf(source: string, id: string): Promise<string[]> {
-  return (await walkOf(source, id)).calls.map((c) => c.target)
-}
-
-async function hintOf(source: string, id: string): Promise<DropHint | null> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.id === id)
-  if (target === undefined) throw new Error(`no Symbol ${id} in fixture`)
-  return classifySymbolDropHint(target, ctx)
-}
-
 async function errorsOf(source: string): Promise<number> {
-  return (await parseTypescriptFile({ path: "src/a.ts", content: source })).errors.length
-}
-
-function classOf(...members: string[]): string {
-  return ["export class C {", ...members, "}"].join("\n")
+  return (await importsOf(source)).errors.length
 }
 
 describe("a quoted name that spells an identifier is that member", () => {
@@ -123,25 +74,21 @@ describe("a quoted name that spells an identifier is that member", () => {
   it("declares one for a field holding a function", async () => {
     // The field gate used to refuse every name that was not written as an identifier, because
     // a name the id builder refuses was a lost file. Refusal is `null` now, so it does not
-    // have to be stricter than the method gate.
+    // have to be stricter than the method gate. What the member *is* once admitted is pinned
+    // in `field-holding-a-function.test.ts`; this is only the gate.
     const source = classOf('  "ok" = () => { s() }')
-    const symbol = await symbolOf(source, "ts:src/a.ts#C.ok")
 
-    expect(symbol.kind).toBe("method")
-    expect(symbol.derivedBy).toEqual(["class-method", "field-assigned-function"])
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.ok"])
     expect(await callsOf(source, "ts:src/a.ts#C.ok")).toEqual(["s"])
   })
 
-  it("marks a quoted auto-accessor field the way it marks a bare one", async () => {
+  it("names a quoted auto-accessor field by its segment too", async () => {
     // `accessor` is read off the field and the name off the segment, so the two are
     // independent — which is only worth saying because the fixture that checks extraction and
     // the walk against each other carries the bare spelling.
-    const symbol = await symbolOf(classOf('  accessor "ok" = () => { s() }'), "ts:src/a.ts#C.ok")
-
-    expect(symbol.derivedBy).toEqual([
-      "class-method",
-      "field-assigned-function",
-      "accessor-declaration",
+    expect(await idsOf(classOf('  accessor "ok" = () => { s() }'))).toEqual([
+      "ts:src/a.ts#C",
+      "ts:src/a.ts#C.ok",
     ])
   })
 
@@ -308,21 +255,6 @@ describe("the construction path is spelled two ways", () => {
 })
 
 describe("what the segment rule does not move", () => {
-  it("still folds a private name into the public one written beside it", async () => {
-    // `#` is not a character the qname grammar admits, so `#v` is spelled `v`. That is its own
-    // open defect; decoding a quoted name does not touch it.
-    const source = classOf("  v() { a() }", "  #v() { b() }")
-
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.v"])
-  })
-
-  it("still leaves a computed name on the class", async () => {
-    const source = classOf("  [k()]() { s() }")
-
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C"])
-    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["k", "s"])
-  })
-
   it("does not turn a class into a DTO by refusing its only member a Symbol", async () => {
     // The drop-hint classifier reads what a member *is*, not whether it earned a Symbol — the
     // same reason a computed-name arrow field is behaviour rather than data.

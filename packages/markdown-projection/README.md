@@ -38,14 +38,14 @@ import {
 
 const markdown = projectDiff(diffResult)
 // review-ready Markdown with confidence badges + dropped Symbols folded under
-// <details>. Boundary sections group by symbol status per §7 of the design.
+// <details>. Boundary sections group by symbol status per the design.
 
 const forAComment = projectDiff(diffResult, { maxBytes: 65507 })
 // the same document, cut to fit: whole sections are dropped least-important-first (Syntax-only
 // before Dropped changes, API changes last) and a note under the Summary names the ones that
 // went. Never cut mid-string — that would halve a <details> block or a code fence. GitHub
 // rejects a comment body over 65536 bytes outright, so the destination decides the budget;
-// see §6.4 of the design.
+// see the design.
 //
 // Two edges worth knowing:
 //   - The title and the Summary line are never dropped, so a budget smaller than those plus the

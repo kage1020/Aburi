@@ -9,18 +9,12 @@ import { classifyNestCall } from "./classify"
 import { effectsNestManifest } from "./manifest"
 
 /**
- * NestJS effect plugin. Sits behind the language plugin's `walkBody` output, mapping
- * `<...>.<eventBus|EventEmitter2>.emit(...)` call expressions into the core
- * `event.publish` effect vocabulary.
+ * NestJS effect plugin: maps `<...>.<eventBus|EventEmitter2>.emit(...)` call expressions
+ * onto the core `event.publish` vocabulary. `classify` is pure (effect-plugin.md) and
+ * throws on a malformed CallCandidate — an upstream contract violation.
  *
- * `init` and `classify` are both pure with respect to plugin state — no lazy resources,
- * no per-run caches — so repeated invocations against the same CallCandidate produce
- * identical results. This matches the per-call timeout contract in
- * effect-plugin.md §5.1.1 and the "pure classifier" recommendation in §11.1.
- *
- * The plugin does NOT declare `dropCallees`: NestJS's built-in logger (`Logger` from
- * `@nestjs/common`) is dependency-injected on a per-provider basis, so a general prefix
- * drop would sweep too widely (docs/design/effect-plugin.md §9.2).
+ * No `dropCallees`: Nest's `Logger` is injected per provider, so a prefix drop would sweep
+ * too widely (docs/design/effect-plugin.md).
  */
 class NestEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsNestManifest
@@ -32,13 +26,7 @@ class NestEffectsPlugin implements EffectPlugin {
   }
 }
 
-/**
- * Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan
- * pipeline. The type annotation is omitted deliberately: `class implements EffectPlugin`
- * already enforces the structural contract, and inferring the narrow class type keeps
- * the manifest literals (`readonly ["effects-plugin:nest"]`, `"effects-nest"`) visible
- * to consumers that want to compare against them without a separate manifest import.
- */
+/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
 export const nestEffectsPlugin = new NestEffectsPlugin()
 
 export { NestEffectsPlugin }

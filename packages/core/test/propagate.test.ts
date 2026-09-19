@@ -20,7 +20,7 @@ function bySymbolId(symbols: IRSymbol[], id: string): IRSymbol {
   return sym
 }
 
-describe("propagateEffects — PR1..PR15 (effect-propagation.md §11)", () => {
+describe("propagateEffects — PR1..PR15 (effect-propagation.md)", () => {
   it("PR1: direct A→B propagation — B's db.write reaches A", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A", { effects: [] }),
@@ -214,6 +214,8 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md §11)", () => {
     expect(bySymbolId(out, "ts:a.ts#A").effects.some((e) => e.propagated === true)).toBe(true)
   })
 
+  // A second pass over the first pass's output, so unlike PR14 it also covers the
+  // `propagated: true` entries being skipped as locals on re-entry.
   it("PR13: idempotence — running propagation twice reproduces the same effects[] byte-for-byte", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),
@@ -261,7 +263,7 @@ describe("propagateEffects — PR1..PR15 (effect-propagation.md §11)", () => {
   })
 })
 
-describe("propagateEffects — additional invariants (§5, §8, §12.9)", () => {
+describe("propagateEffects — additional invariants (effect-propagation.md)", () => {
   it("derivedBy lex tie-break — two paths, smaller derivedBy wins", () => {
     const symbols: IRSymbol[] = [
       makeSymbol("ts:a.ts#A"),

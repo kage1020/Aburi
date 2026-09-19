@@ -4,13 +4,13 @@ const SEPARATOR_REGEX = /[:/#.]+/g
 const CONSECUTIVE_DASHES = /-{2,}/g
 
 /**
- * §8 — Symbol id → filesystem-safe basename (without `.md`).
+ * markdown-projection.md — Symbol id → filesystem-safe basename (without `.md`).
  * Rules:
  *   1. `:` / `/` / `#` / `.` → `-`
  *   2. Consecutive dashes are collapsed to a single dash
  *   3. Trailing dashes are trimmed (would look like "file--.md" otherwise)
  *
- * §8 tail — deterministic collision suffix: `SHA-256(UTF-8(id))` first 3 bytes → 6 hex
+ * Deterministic collision suffix: `SHA-256(UTF-8(id))` first 3 bytes → 6 hex
  * chars. `sanitize` alone is NOT injective (`a.b` and `a-b` both map to `a-b`), so
  * callers that persist files must pair the sanitised base with a collision-aware writer.
  * `sanitizeSymbolId` returns the base; `withCollisionSuffix` appends the deterministic
@@ -47,7 +47,7 @@ export function withCollisionSuffix(symbolId: string): string {
  * `withCollisionSuffix` directly.
  *
  * A duplicate id in the input (same string more than once) throws — the IR contract
- * (ir-schema §3) already forbids duplicate `Symbol.id`, so seeing one here means the
+ * (ir-schema.md) already forbids duplicate `Symbol.id`, so seeing one here means the
  * caller is either bypassing the integrity check or feeding the projection stale data.
  * Silent Map-overwrite of a duplicate would drop one entry from the returned filename
  * mapping.

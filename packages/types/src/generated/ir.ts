@@ -29,13 +29,13 @@ extKind: ExtKind
 name: string
 language: LanguageId
 /**
- * Component this Symbol belongs to. Class A per ir-schema.md §1.1: writers MUST emit the key on every Symbol, carrying null when the Symbol lies outside every declared Component. Readers MUST treat an absent key as null.
+ * Component this Symbol belongs to. Class A per ir-schema.md: writers MUST emit the key on every Symbol, carrying null when the Symbol lies outside every declared Component. Readers MUST treat an absent key as null.
  */
 component?: (ComponentId | null)
 visibility: Visibility
 decorators: Decorator[]
 /**
- * Callable signature. Class A per ir-schema.md §1.1: writers MUST emit the key on every Symbol, carrying null for Symbols that have no callable signature (class bodies, whole interfaces). Readers MUST treat an absent key as null.
+ * Callable signature. Class A per ir-schema.md: writers MUST emit the key on every Symbol, carrying null for Symbols that have no callable signature (class bodies, whole interfaces). Readers MUST treat an absent key as null.
  */
 signature?: (Signature | null)
 rules: Rule[]
@@ -67,32 +67,32 @@ export type RuleType = ("guard" | "throw" | "return" | "loop" | "try" | "switch"
 export interface Effect {
 id: EffectId
 /**
- * Normalized callee string (lang-plugin.md §4.4). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md §3.1, so a target carrying it matches no Symbol id and no Symbol name.
+ * Normalized callee string (lang-plugin.md). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md, so a target carrying it matches no Symbol id and no Symbol name.
  */
 target: string
 /**
- * Source line of the call that produced this effect. Class B per ir-schema.md §1.1: meaningless on a propagated entry, whose origin is N hops away, so writers MUST omit the key there rather than emit null or a placeholder (effect-propagation.md §5.1). The allOf below turns that rule into a validation error.
+ * Source line of the call that produced this effect. Class B per ir-schema.md: meaningless on a propagated entry, whose origin is N hops away, so writers MUST omit the key there rather than emit null or a placeholder (effect-propagation.md). The allOf below turns that rule into a validation error.
  */
 line?: number
 plugin: string
 confidence: Confidence
 /**
- * Evidence string from the effect plugin classifier (effect-plugin.md §4.4). Locally-detected entries carry the plugin's original value verbatim. On merge across propagation paths, the lexicographically-smallest string wins (effect-propagation.md §5.2).
+ * Evidence string from the effect plugin classifier (effect-plugin.md). Locally-detected entries carry the plugin's original value verbatim. On merge across propagation paths, the lexicographically-smallest string wins (effect-propagation.md).
  */
 derivedBy: string
 /**
- * True when the entry was produced by the effect-propagation pass (effect-propagation.md §5.1). Class B per ir-schema.md §1.1: absent on locally-detected entries. The allOf below reads presence, so a writer that emitted false where it means absent would still validate but would misreport intent.
+ * True when the entry was produced by the effect-propagation pass (effect-propagation.md). Class B per ir-schema.md: absent on locally-detected entries. The allOf below reads presence, so a writer that emitted false where it means absent would still validate but would misreport intent.
  */
 propagated?: boolean
 /**
- * Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Class B per ir-schema.md §1.1: present only when propagated=true, never emitted as [] on a locally-detected entry. The allOf below turns that into a validation error.
+ * Direct upstream callee Symbol id(s) that carried this (effectId, target) into the current Symbol. Sorted ascending. Class B per ir-schema.md: present only when propagated=true, never emitted as [] on a locally-detected entry. The allOf below turns that into a validation error.
  */
 derivedFrom?: SymbolId[]
 }
 export type EffectId = (("db.read" | "db.write" | "db.transaction" | "db.migration" | "network.http" | "network.ws" | "network.rpc" | "queue.publish" | "queue.consume" | "event.publish" | "event.subscribe" | "fs.read" | "fs.write" | "state.mutate" | "collection.mutate" | "time.now" | "time.timer" | "random" | "env.read" | "env.write" | "process.exit" | "process.signal") | string)
 export type Confidence = ("high" | "medium" | "low")
 /**
- * Either a Symbol id or a Component id; which one is recovered from the id shape (§11). Deliberately looser than SymbolId and ComponentId so that both fit and so a malformed endpoint is reported by the integrity checker rather than by the schema, which cannot say which of the two kinds was intended.
+ * Either a Symbol id or a Component id; which one is recovered from the id shape (ir-schema.md). Deliberately looser than SymbolId and ComponentId so that both fit and so a malformed endpoint is reported by the integrity checker rather than by the schema, which cannot say which of the two kinds was intended.
  */
 export type DependencyEndpoint = SymbolId | ComponentId
 
@@ -103,7 +103,7 @@ export interface IR {
 $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json"
 generator: Generator
 /**
- * ISO 8601 UTC. Excluded from fingerprint. Class B per ir-schema.md §1.1: --no-timestamp omits the key entirely rather than emitting null, so a committed IR carries no producer clock at all.
+ * ISO 8601 UTC. Excluded from fingerprint. Class B per ir-schema.md: --no-timestamp omits the key entirely rather than emitting null, so a committed IR carries no producer clock at all.
  */
 generatedAt?: string
 workspace: Workspace
@@ -146,7 +146,7 @@ name: string
  */
 roots: RelativePath[]
 /**
- * Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash). Class B per ir-schema.md §1.1: writers MUST omit the key when the component declares no public surface, never emit as [].
+ * Glob patterns or symbol ids that designate the component's public surface. POSIX (no backslash). Class B per ir-schema.md: writers MUST omit the key when the component declares no public surface, never emit as [].
  */
 publicApi?: string[]
 /**
@@ -154,11 +154,11 @@ publicApi?: string[]
  */
 languages: LanguageId[]
 /**
- * Framework plugin names that claimed this component. Class B per ir-schema.md §1.1: writers MUST omit the key when no framework matched, never emit as [].
+ * Framework plugin names that claimed this component. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as [].
  */
 frameworks?: string[]
 /**
- * Human-facing blurb for the component, supplied through config. Class A per ir-schema.md §1.1: writers MUST emit the key on every Component, carrying null when no description was supplied. Readers MUST treat an absent key as null.
+ * Human-facing blurb for the component, supplied through config. Class A per ir-schema.md: writers MUST emit the key on every Component, carrying null when no description was supplied. Readers MUST treat an absent key as null.
  */
 description?: (string | null)
 }
@@ -177,7 +177,7 @@ type: string
 outputs: string[]
 throws: string[]
 /**
- * Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md §7.1). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Class B per ir-schema.md §1.1: writers MUST omit the key entirely when nothing was inferred, never emit as [].
+ * Throws inferred from callees' declared signatures by the LSP enrichment pass (lsp-enrichment.md). Distinct from `throws` so LSP enablement never perturbs the `api` fingerprint. Class B per ir-schema.md: writers MUST omit the key entirely when nothing was inferred, never emit as [].
  * 
  * @minItems 1
  */
@@ -188,7 +188,7 @@ typeParameters: string[]
 }
 export interface Call {
 /**
- * Normalized callee string (lang-plugin.md §4.4). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md §3.1, so a target carrying it matches no Symbol id and no Symbol name.
+ * Normalized callee string (lang-plugin.md). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md, so a target carrying it matches no Symbol id and no Symbol name.
  */
 target: string
 line: number
@@ -199,11 +199,11 @@ file: RelativePath
 startLine: number
 endLine: number
 /**
- * 1-based start column, populated by the LSP enrichment pass (lsp-enrichment.md §4.2). Class A per ir-schema.md §1.1: writers MUST emit the key on every SourceRange, carrying null while no column has been recorded — the in-tree TypeScript plugin deliberately leaves it null so that every column comes from one source, and any LSP fallback leaves it null too. Readers MUST treat an absent key as null; absence only occurs on documents that predate the rule. Out of `required` solely because the promotion is breaking under §15.2 (see §15.4).
+ * 1-based start column, populated by the LSP enrichment pass (lsp-enrichment.md). Class A per ir-schema.md: writers MUST emit the key on every SourceRange, carrying null while no column has been recorded — the in-tree TypeScript plugin deliberately leaves it null so that every column comes from one source, and any LSP fallback leaves it null too. Readers MUST treat an absent key as null; absence only occurs on documents that predate the rule. Out of `required` solely because the promotion is breaking under the schema-evolution rules in ir-schema.md.
  */
 startColumn?: (number | null)
 /**
- * 1-based end column. Same Class A contract as startColumn (ir-schema.md §1.1).
+ * 1-based end column. Same Class A contract as startColumn (ir-schema.md).
  */
 endColumn?: (number | null)
 }
@@ -225,14 +225,14 @@ parsedFiles: number
 keptSymbols: number
 droppedSymbols: number
 /**
- * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md §5.1.1). Class B per ir-schema.md §1.1: writers omit the key when nothing timed out rather than emitting []; non-empty entries are kept as a determinism log.
+ * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md). Class B per ir-schema.md: writers omit the key when nothing timed out rather than emitting []; non-empty entries are kept as a determinism log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
 lspEnrichment?: LspEnrichmentStats
 callResolution?: CallResolutionStats
 /**
- * Every file the scan gave up on, and why. Class B per ir-schema.md §1.1: writers omit the key when nothing was lost rather than emitting []. Without it the only trace of a loss is totalFiles > parsedFiles, which names no file — so a diff against a document that lost one reports its Symbols as deliberately deleted API. Sorted by path; invariant #21 holds the length to totalFiles - parsedFiles.
+ * Every file the scan gave up on, and why. Class B per ir-schema.md: writers omit the key when nothing was lost rather than emitting []. Without it the only trace of a loss is totalFiles > parsedFiles, which names no file — so a diff against a document that lost one reports its Symbols as deliberately deleted API. Sorted by path; invariant #21 holds the length to totalFiles - parsedFiles.
  */
 skippedFiles?: SkippedFile[]
 }
@@ -251,7 +251,7 @@ symbolId: string
 timeoutMs: number
 }
 /**
- * Counters produced by the effect-propagation pass (effect-propagation.md §10). Always present so a run with zero propagated effects still reports the SCC shape it observed.
+ * Counters produced by the effect-propagation pass (effect-propagation.md). Always present so a run with zero propagated effects still reports the SCC shape it observed.
  */
 export interface EffectPropagationStats {
 /**
@@ -272,7 +272,7 @@ propagatedEffectCount: number
 symbolsWithPropagatedEffects: number
 }
 /**
- * Bookkeeping from the LSP enrichment pass (lsp-enrichment.md §7.2). Class B per ir-schema.md §1.1: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured. Presence is how a reader tells "ran and enriched nothing" apart from "never ran".
+ * Bookkeeping from the LSP enrichment pass (lsp-enrichment.md). Class B per ir-schema.md: present when the pass ran regardless of whether it succeeded or fell back, absent when config.lsp is not configured. Presence is how a reader tells "ran and enriched nothing" apart from "never ran".
  */
 export interface LspEnrichmentStats {
 /**
@@ -284,7 +284,7 @@ enabled: boolean
  */
 filesEnriched: number
 /**
- * Files that triggered per-file fallback (lsp-enrichment.md §6.1).
+ * Files that triggered per-file fallback (lsp-enrichment.md).
  */
 filesFellBack: number
 /**
@@ -292,7 +292,7 @@ filesFellBack: number
  */
 requestsIssued: number
 /**
- * Requests that hit requestTimeoutMs (lsp-enrichment.md §6.1 per-request fallback).
+ * Requests that hit requestTimeoutMs (the per-request fallback in lsp-enrichment.md).
  */
 requestsTimedOut: number
 /**
@@ -304,17 +304,17 @@ requestsFailed: number
  */
 languagesDisabled: LanguageId[]
 /**
- * Hovers the pass read all the way to a callee Symbol (lsp-enrichment.md §7.2). Equal to the number of hints handed to the resolver except where two identical call sites share a key: both are counted here, and the first of them to be applied is the one that keeps the key. Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was produced.
+ * Hovers the pass read all the way to a callee Symbol (lsp-enrichment.md). Equal to the number of hints handed to the resolver except where two identical call sites share a key: both are counted here, and the first of them to be applied is the one that keeps the key. Class B per ir-schema.md: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was produced.
  */
 hintsProduced?: number
 /**
- * Call sites the resolver turned into an edge from a receiver hint (call-resolution.md §5.2). Counts call sites rather than distinct hints, and only those the untyped tiers had already missed — a hint the untyped tier made unnecessary is neither consumed nor rejected. Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was consumed.
+ * Call sites the resolver turned into an edge from a receiver hint (call-resolution.md). Counts call sites rather than distinct hints, and only those the untyped tiers had already missed — a hint the untyped tier made unnecessary is neither consumed nor rejected. Class B per ir-schema.md: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counter rather than that no hint was consumed.
  */
 hintsConsumed?: number
 hintsRejected?: LspHintRejections
 }
 /**
- * Why the remaining hover results and receiver hints produced no edge (lsp-enrichment.md §7.2). Class B per ir-schema.md §1.1: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counters rather than that nothing was rejected.
+ * Why the remaining hover results and receiver hints produced no edge (lsp-enrichment.md). Class B per ir-schema.md: the current pipeline always emits it alongside the rest of this record, so absence means the document predates the counters rather than that nothing was rejected.
  */
 export interface LspHintRejections {
 /**
@@ -339,7 +339,7 @@ kindMismatch: number
 targetDropped: number
 }
 /**
- * Aggregate call-resolution outcome counters (call-resolution.md §8.1). Class B per ir-schema.md §1.1, optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all, so absence means "this document predates the counter" rather than "nothing was unresolved".
+ * Aggregate call-resolution outcome counters (call-resolution.md). Class B per ir-schema.md, optional so documents produced before the field existed stay valid; the current scan pipeline always emits it, even when the workspace contains no call sites at all, so absence means "this document predates the counter" rather than "nothing was unresolved".
  */
 export interface CallResolutionStats {
 /**
@@ -353,11 +353,11 @@ resolvedCalls: number
 unresolved: UnresolvedCallBuckets
 }
 /**
- * Why the remaining call sites stayed null, bucketed per call-resolution.md §8.1. The five counters sum to totalCalls - resolvedCalls.
+ * Why the remaining call sites stayed null, bucketed per call-resolution.md. The five counters sum to totalCalls - resolvedCalls.
  */
 export interface UnresolvedCallBuckets {
 /**
- * The callee identifier shadows a caller-local binding, so it names a runtime value rather than a Symbol (§4.2).
+ * The callee identifier shadows a caller-local binding, so it names a runtime value rather than a Symbol (call-resolution.md).
  */
 localScope: number
 /**
@@ -365,11 +365,11 @@ localScope: number
  */
 external: number
 /**
- * The receiver is not a name the untyped tier can follow: an expression receiver (`getRepo().save()`), or `this` / `super` with no LSP hint (§4.7).
+ * The receiver is not a name the untyped tier can follow: an expression receiver (`getRepo().save()`), or `this` / `super` with no LSP hint (call-resolution.md).
  */
 dynamic: number
 /**
- * More than one candidate matched in some resolution tier, so the resolver declined to pick one (§7.1).
+ * More than one candidate matched in some resolution tier, so the resolver declined to pick one (call-resolution.md).
  */
 ambiguous: number
 /**
@@ -386,7 +386,7 @@ export interface SkippedFile {
  */
 path: string
 /**
- * Why the scan stopped working on this file. `over-size` and `unroutable` are decided before it was read, `unreadable` by either discovery or the read before extraction, and `parse-failed` / `parse-timeout` / `extraction-failed` during extraction. `unroutable` means no route into the Document exists for the file: either no loaded plugin claims its extension, or a segment of its path holds `:` or `#` and so cannot be part of a Symbol id (§3.1) — both decided without reading it, and the path itself says which, since the second case is visible in it. A reader distinguishes the reasons because they call for different actions: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
+ * Why the scan stopped working on this file. `over-size` and `unroutable` are decided before it was read, `unreadable` by either discovery or the read before extraction, and `parse-failed` / `parse-timeout` / `extraction-failed` during extraction. `unroutable` means no route into the Document exists for the file: either no loaded plugin claims its extension, or a segment of its path holds `:` or `#` and so cannot be part of a Symbol id (ir-schema.md) — both decided without reading it, and the path itself says which, since the second case is visible in it. A reader distinguishes the reasons because they call for different actions: `parse-timeout` is machine-dependent and says re-run, `parse-failed` and `extraction-failed` are deterministic and say fix something.
  */
 reason: ("over-size" | "unreadable" | "unroutable" | "parse-failed" | "parse-timeout" | "extraction-failed")
 }

@@ -1,11 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { type ScanResult, scan } from "@aburi/core"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { VocabRegistry } from "@aburi/plugin-registry"
-import type { LanguagePlugin, Logger } from "@aburi/types"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import type { LanguagePlugin } from "@aburi/types"
+import { describe, expect, it } from "vitest"
+import { scanWith, warningCollector } from "../src/scan-helper"
+import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * The leak this guards is invisible from the IR: a scan that never frees a tree produces
@@ -19,20 +16,12 @@ interface TreeHandle {
   rootNode: unknown
 }
 
-let workRoot: string
-
-beforeEach(async () => {
-  workRoot = await mkdtemp(join(tmpdir(), "aburi-tree-release-"))
-})
-
-afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true })
-})
+const workspace = useScratchWorkspace("tree-release")
 
 /**
  * The real plugin, recording each tree it hands over. `Object.create` keeps the original as
- * the prototype rather than spreading it, which would copy the fields and lose the prototype
- * methods; the plugin holds no instance state, so the split receiver cannot diverge.
+ * the prototype rather than spreading it, which would lose the prototype methods; the plugin
+ * holds no instance state, so the split receiver cannot diverge.
  */
 function recording(handedOut: TreeHandle[]): LanguagePlugin {
   const base = langTypescriptPlugin as unknown as LanguagePlugin
@@ -45,48 +34,20 @@ function recording(handedOut: TreeHandle[]): LanguagePlugin {
   return wrapped
 }
 
-async function writeSource(rel: string, content: string): Promise<void> {
-  await writeFile(join(workRoot, rel), content, "utf8")
-}
-
-interface RunResult {
-  result: ScanResult
-  warnings: string[]
-}
-
-async function scanWith(language: LanguagePlugin): Promise<RunResult> {
-  const warnings: string[] = []
-  const logger: Logger = {
-    debug: () => {},
-    info: () => {},
-    warn: (message: string) => {
-      warnings.push(message)
-    },
-    error: () => {},
-  }
-  const registry = new VocabRegistry()
-  registry.register(langTypescriptPlugin.manifest)
-  const result = await scan({
-    workspaceRoot: workRoot,
-    config: {},
-    languages: [language],
-    frameworks: [],
-    effects: [],
-    registry,
-    logger,
-    components: [],
-  })
+async function scanThrough(language: LanguagePlugin) {
+  const { logger, warnings } = warningCollector()
+  const result = await scanWith(workspace.root, { languages: [language] }, {}, { logger })
   return { result, warnings }
 }
 
 describe("a scan through the real plugin", () => {
   it("leaves no parse tree alive behind it", async () => {
-    await writeSource("a.ts", "export function alpha() { return 1 }\n")
-    await writeSource("b.ts", "export class Beta { run() { return alpha() } }\n")
-    await writeSource("c.tsx", "export const Gamma = () => <div />\n")
+    await workspace.writeSource("a.ts", "export function alpha() { return 1 }\n")
+    await workspace.writeSource("b.ts", "export class Beta { run() { return alpha() } }\n")
+    await workspace.writeSource("c.tsx", "export const Gamma = () => <div />\n")
 
     const handedOut: TreeHandle[] = []
-    const { result } = await scanWith(recording(handedOut))
+    const { result } = await scanThrough(recording(handedOut))
 
     expect(handedOut).toHaveLength(3)
     expect(handedOut.map((tree) => tree.rootNode)).toEqual([null, null, null])
@@ -94,7 +55,7 @@ describe("a scan through the real plugin", () => {
   })
 
   it("frees the tree of a file whose extraction threw, and still reports the file", async () => {
-    await writeSource("boom.ts", "export function boom() { return 1 }\n")
+    await workspace.writeSource("boom.ts", "export function boom() { return 1 }\n")
 
     const handedOut: TreeHandle[] = []
     const base = recording(handedOut)
@@ -103,7 +64,7 @@ describe("a scan through the real plugin", () => {
       throw new Error("extraction exploded")
     }
 
-    const { result } = await scanWith(exploding)
+    const { result } = await scanThrough(exploding)
 
     expect(handedOut).toHaveLength(1)
     expect(handedOut[0]?.rootNode).toBeNull()
@@ -123,10 +84,10 @@ describe("a plugin whose releaseTree fails", () => {
   }
 
   it("is recorded once per file, naming the plugin and what it said", async () => {
-    await writeSource("a.ts", "export function alpha() { return 1 }\n")
-    await writeSource("b.ts", "export function beta() { return 2 }\n")
+    await workspace.writeSource("a.ts", "export function alpha() { return 1 }\n")
+    await workspace.writeSource("b.ts", "export function beta() { return 2 }\n")
 
-    const { result } = await scanWith(neverReleases())
+    const { result } = await scanThrough(neverReleases())
 
     expect(result.treeReleaseFailures).toEqual([
       { plugin: "lang-typescript", file: "a.ts", detail: "wasm heap is gone" },
@@ -135,24 +96,23 @@ describe("a plugin whose releaseTree fails", () => {
   })
 
   it("leaves the Document complete and the run's other accounts empty", async () => {
-    // A leaked tree costs the next run, not this one. Everything the scan was asked for is
-    // here, which is exactly why the structured record has to exist: nothing else about this
-    // result says anything is wrong.
-    await writeSource("a.ts", "export function alpha() { return 1 }\n")
+    // A leaked tree costs the next run, not this one, which is exactly why the structured
+    // record has to exist: nothing else about this result says anything is wrong.
+    await workspace.writeSource("a.ts", "export function alpha() { return 1 }\n")
 
-    const { result } = await scanWith(neverReleases())
+    const { result } = await scanThrough(neverReleases())
 
-    expect(result.ir.symbols.map((s) => s.name)).toContain("alpha")
+    expect(result.ir.symbols.map((symbol) => symbol.name)).toContain("alpha")
     expect(result.skipped).toEqual([])
     expect(result.extractionFailures).toEqual([])
   })
 
   it("warns once for the plugin however many files it fails on, and counts the rest", async () => {
-    await writeSource("a.ts", "export function alpha() { return 1 }\n")
-    await writeSource("b.ts", "export function beta() { return 2 }\n")
-    await writeSource("c.ts", "export function gamma() { return 3 }\n")
+    await workspace.writeSource("a.ts", "export function alpha() { return 1 }\n")
+    await workspace.writeSource("b.ts", "export function beta() { return 2 }\n")
+    await workspace.writeSource("c.ts", "export function gamma() { return 3 }\n")
 
-    const { warnings } = await scanWith(neverReleases())
+    const { warnings } = await scanThrough(neverReleases())
 
     const named = warnings.filter((w) => w.includes("wasm heap is gone"))
     expect(named).toHaveLength(1)
@@ -166,9 +126,9 @@ describe("a plugin whose releaseTree fails", () => {
   })
 
   it("says nothing more when only one file failed, since the line above already named it", async () => {
-    await writeSource("a.ts", "export function alpha() { return 1 }\n")
+    await workspace.writeSource("a.ts", "export function alpha() { return 1 }\n")
 
-    const { warnings } = await scanWith(neverReleases())
+    const { warnings } = await scanThrough(neverReleases())
 
     expect(warnings.filter((w) => w.includes("parse tree"))).toHaveLength(1)
   })

@@ -2,8 +2,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { CliError, runInit } from "../src"
+import { CliError, EXIT, runCli, runInit } from "../src"
 import { resolveConfig } from "../src/config-load"
+import { MemStream } from "./fixtures"
 
 /**
  * CL4 / CL5 — `aburi init` file-handling. Each test creates a scratch workspace so
@@ -184,7 +185,7 @@ describe("CL27 — an --output that cannot hold a file", () => {
     )
 
     expect(thrown).toBeInstanceOf(CliError)
-    // The caller's path rather than the machine's refusal — cli-spec.md §4.5 puts an
+    // The caller's path rather than the machine's refusal — cli-spec.md puts an
     // --output that cannot be written at exit 2.
     expect((thrown as CliError).code).toBe("input-error")
     expect((thrown as Error).message).toContain(resolve(scratch, "generated/aburi.json"))
@@ -232,5 +233,107 @@ describe("an --output failure that is not the path's shape", () => {
     expect(thrown).toBeInstanceOf(Error)
     expect(thrown).not.toBeInstanceOf(CliError)
     expect((thrown as { code?: unknown }).code).toBe("EACCES")
+  })
+})
+
+/**
+ * A `package.json` between the working directory and the filesystem root that will not read,
+ * and what `aburi init` does about it.
+ *
+ * This command resolves its workspace root through the shared `resolveWorkspaceRoot` rather
+ * than a private `catch { return resolve(cwd) }`, which changed who reports such a file and
+ * under which code. Four cases, because a manifest on that path is opened by the marker walk,
+ * by `detectManagers`, or by neither — and the answer follows whichever of them met it.
+ * Pinned end to end, because what matters is the pair (what the process returns, what the
+ * reader is told) and neither half is decided in one place.
+ */
+describe("aburi init — a package.json on the way to the workspace root", () => {
+  /**
+   * Through the CLI wrapper for the two failing cases, because what they produce is a thrown
+   * error and the claim being pinned is the exit code it becomes. The succeeding cases read
+   * `InitReport` directly, where the root that was settled on is visible as well as the code.
+   */
+  async function initViaCli(cwd: string): Promise<{ code: number; stderr: string }> {
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({ argv: ["init"], stdout, stderr, env: {}, cwd })
+    return { code, stderr: stderr.text() }
+  }
+
+  /** A workspace root that needs nothing read to be one, so only the extra file is in play. */
+  async function makeGitRoot(dir: string): Promise<void> {
+    await mkdir(resolve(dir, ".git"), { recursive: true })
+  }
+
+  const TRAILING_COMMA = '{ "name": "broken", }'
+
+  it("reports the root's own unparseable package.json as a runtime failure", async () => {
+    // The marker walk never opens it: `.git` answers "this is the root" first and the walk
+    // stops at the first marker it finds. The trailing comma waits for `detectManagers`, which
+    // reads the root manifest for a `workspaces` field and raises on its own account — so this
+    // case is untouched by which code resolves the root, and exits where it always did.
+    await makeGitRoot(scratch)
+    await writeFile(resolve(scratch, "package.json"), TRAILING_COMMA, "utf8")
+
+    const { code, stderr } = await initViaCli(scratch)
+
+    expect(code).toBe(EXIT.RUNTIME)
+    expect(stderr).toContain("Failed to parse JSON at")
+    expect(stderr).toContain(resolve(scratch, "package.json"))
+  })
+
+  it("reports a marker-less package's own unparseable manifest the same way", async () => {
+    // Nothing above it carries a marker either, so the walk ends in `workspace-root-not-found`
+    // — the one failure `resolveWorkspaceRoot` absorbs — and the package becomes its own
+    // workspace. `detectManagers` then opens the same file and raises, which is why a broken
+    // manifest is still reported here rather than absorbed along with the missing root.
+    const pkg = resolve(scratch, "pkg")
+    await mkdir(pkg, { recursive: true })
+    await writeFile(resolve(pkg, "package.json"), TRAILING_COMMA, "utf8")
+
+    const { code, stderr } = await initViaCli(pkg)
+
+    expect(code).toBe(EXIT.RUNTIME)
+    expect(stderr).toContain("Failed to parse JSON at")
+    expect(stderr).toContain(resolve(pkg, "package.json"))
+  })
+
+  it("runs anyway when the unparseable manifest is above the workspace root", async () => {
+    // A `$HOME/package.json` left on a shared machine. The walk only opened it because it
+    // climbs to the filesystem root; it is not part of this workspace, and stopping over it
+    // would hand the user a path they do not recognise with no way around it.
+    const outer = resolve(scratch, "outer")
+    const repo = resolve(outer, "repo")
+    await makeGitRoot(repo)
+    await writeFile(resolve(outer, "package.json"), TRAILING_COMMA, "utf8")
+
+    const report = await runInit({ cwd: repo })
+
+    expect(report.exitCode).toBe(0)
+    expect(report.workspaceRoot).toBe(repo)
+  })
+
+  // The permission has to actually deny the read, which it does not for root.
+  onPosixAsAUser("runs anyway when a manifest above the root cannot be read", async () => {
+    // Same directory as the case above, refused by the filesystem rather than by the parser —
+    // a CI container that cannot read what is above its checkout. The two arrive here as
+    // different classes of thrown value and must not be told apart on the way out.
+    const outer = resolve(scratch, "outer")
+    const repo = resolve(outer, "repo")
+    await makeGitRoot(repo)
+    const locked = resolve(outer, "package.json")
+    await writeFile(locked, JSON.stringify({ name: "outer" }), "utf8")
+    await chmod(locked, 0o000)
+
+    const outcome = await runInit({ cwd: repo }).then(
+      (report) => report,
+      (error: unknown) => error,
+    )
+
+    // Before the assertions, so a failing one still leaves the scratch directory removable.
+    await chmod(locked, 0o600)
+
+    expect(outcome).not.toBeInstanceOf(Error)
+    expect(outcome).toMatchObject({ exitCode: 0, workspaceRoot: repo })
   })
 })

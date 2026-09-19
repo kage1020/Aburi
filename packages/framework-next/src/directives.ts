@@ -1,25 +1,13 @@
 export type ModuleDirective = "client" | "server"
 
-/** Unicode Byte Order Mark. Some editors add it to UTF-8 sources; the parser transparently skips it. */
+/** Some editors prepend a BOM to UTF-8 sources; the parser skips it. */
 const UTF8_BOM = "﻿"
 
 /**
- * Detect the top-of-module `"use client"` / `"use server"` directive.
- *
- * ECMAScript treats a string-literal expression statement at the very top of the module
- * as a directive when it precedes every non-comment token. A directive prologue can
- * carry more than one directive (`'use strict'; 'use client';`); the runtime honors the
- * first `"use client"` / `"use server"` regardless of its position within that prologue,
- * so the scanner walks every string-literal statement it can consume and returns as soon
- * as it hits one it recognizes.
- *
- * The check is intentionally cheap and does not require an AST: this classifier gets
- * called once per Symbol and per-Symbol tokenization would be wasteful, especially since
- * the module-level directive is a file-level property and applies to every Symbol in the
- * file uniformly. Callers can cache the result if they want to amortize further.
- *
- * Returns the directive kind (`"client"` or `"server"`) when the prologue contains one,
- * or `null` when the prologue ends without matching either.
+ * The `"use client"` / `"use server"` directive in the module's directive prologue, or
+ * `null`. The prologue may hold several directives (`'use strict'; 'use client';`), so every
+ * leading string-literal statement is consumed. A cheap text scan rather than an AST walk,
+ * since this runs once per Symbol.
  */
 export function detectModuleDirective(source: string): ModuleDirective | null {
   let remainder = stripUtf8Bom(source)
@@ -36,19 +24,11 @@ export function detectModuleDirective(source: string): ModuleDirective | null {
   }
 }
 
-/** Skip a leading UTF-8 BOM if present. The BOM is invisible in most editors but sits in the file bytes. */
 function stripUtf8Bom(source: string): string {
   return source.startsWith(UTF8_BOM) ? source.slice(UTF8_BOM.length) : source
 }
 
-/**
- * Skip leading whitespace and both comment styles (line comments and block comments —
- * the block variant consumes greedily to the closing marker so nested `*` characters
- * inside the body do not confuse the walker).
- *
- * Returns the substring starting at the first non-comment, non-whitespace character, or
- * `null` when the entire input is comments / whitespace.
- */
+/** The input from its first non-comment, non-whitespace character, or `null` if there is none. */
 function skipLeadingCommentsAndWhitespace(source: string): string | null {
   let index = 0
   while (index < source.length) {
@@ -80,15 +60,9 @@ interface StringLiteralStatement {
 }
 
 /**
- * Read a single string-literal expression statement from the beginning of the input.
- * Returns the literal's contents plus the remainder of the source, or `null` when the
- * input does not start with a bare string statement.
- *
- * Only single quotes and double quotes are recognized — template literals cannot be
- * used for directives per the ECMAScript spec, and directives cannot use escape
- * sequences per Next.js's convention (though the spec technically permits them).
- * Keeping the parser narrow avoids false-positive matches on backticks or complex
- * escapes.
+ * Read one bare string-literal statement from the start of the input, or `null`. Only `'`
+ * and `"` qualify: the spec excludes template literals from directives, and escapes are not
+ * handled because Next.js directives never use them.
  */
 function readStringLiteralStatement(input: string): StringLiteralStatement | null {
   const first = input[0]
@@ -97,11 +71,8 @@ function readStringLiteralStatement(input: string): StringLiteralStatement | nul
   const end = input.indexOf(quote, 1)
   if (end < 0) return null
 
-  // Skip horizontal whitespace only (space / tab) — a newline ends the statement via
-  // ASI so it counts as a terminator, but consuming it here would let a `+` on the next
-  // line masquerade as a legitimate follow-up token. What actually terminates a bare
-  // directive statement is one of: end-of-input, semicolon, newline (`\r` / `\n`), or
-  // the start of a comment.
+  // Only horizontal whitespace is skipped: a newline terminates the statement (ASI), and
+  // consuming it would let a `+` on the next line read as a continuation.
   let i = end + 1
   while (i < input.length && (input[i] === " " || input[i] === "\t")) i++
 

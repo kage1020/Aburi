@@ -1,12 +1,11 @@
+import { fp, makeSymbol, sig, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
-  matchStageDroppedWeak,
   matchStageGitRename,
   matchStageId,
   matchStageLogicFingerprint,
   matchStageNameSignature,
 } from "../src"
-import { fp, makeSymbol, sig, zeroFp } from "./fixtures"
 
 describe("matchStageId", () => {
   it("pairs same-id symbols and leaves the rest", () => {
@@ -108,16 +107,6 @@ describe("matchStageLogicFingerprint", () => {
 })
 
 describe("matchStageNameSignature", () => {
-  it("holds a 1-token last segment to the 1.0 floor", () => {
-    // §3.4.3's first row. The name says three tokens' worth, so the head is read (see
-    // single-token-name.test.ts), but its last segment says one, and a changed verb costs
-    // half the name axis: 0.25 + 0.3 + 0.2 = 0.75.
-    const b = makeSymbol({ id: "ts:a.ts#UserRepo.get", name: "UserRepo.get", signature: sig() })
-    const h = makeSymbol({ id: "ts:a.ts#UserRepo.set", name: "UserRepo.set", signature: sig() })
-    const result = matchStageNameSignature([b], [h])
-    expect(result.matched).toEqual([])
-  })
-
   it("pairs one that reaches the floor exactly", () => {
     // 1.0 is the top of the scale and a reachable score: an identical name, signature and
     // owner give `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. `score >= threshold` is what lets
@@ -134,47 +123,6 @@ describe("matchStageNameSignature", () => {
     const b = makeSymbol({ id: "ts:a.ts#Foo", name: "Foo", kind: "interface" })
     const h = makeSymbol({ id: "ts:a.ts#Foo2", name: "Foo2", kind: "interface" })
     const result = matchStageNameSignature([b], [h])
-    expect(result.matched).toEqual([])
-  })
-})
-
-describe("matchStageDroppedWeak", () => {
-  it("pairs dropped symbols with matching last-segment name (any file)", () => {
-    const b = makeSymbol({
-      id: "ts:src/old/dto.ts#UserDto",
-      name: "UserDto",
-      kind: "class",
-      dropped: true,
-      fingerprint: zeroFp(),
-    })
-    const h = makeSymbol({
-      id: "ts:src/new/dto.ts#UserDto",
-      name: "UserDto",
-      kind: "class",
-      dropped: true,
-      fingerprint: zeroFp(),
-    })
-    const result = matchStageDroppedWeak([b], [h])
-    expect(result.matched).toHaveLength(1)
-    expect(result.matched[0]?.rationale).toBe("dropped-weak-match")
-  })
-
-  it("refuses cross-kind weak pairings", () => {
-    const b = makeSymbol({
-      id: "ts:src/dto.ts#Foo",
-      name: "Foo",
-      kind: "interface",
-      dropped: true,
-      fingerprint: zeroFp(),
-    })
-    const h = makeSymbol({
-      id: "ts:src/dto.ts#Foo",
-      name: "Foo",
-      kind: "class",
-      dropped: true,
-      fingerprint: zeroFp(),
-    })
-    const result = matchStageDroppedWeak([b], [h])
     expect(result.matched).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-import { CoreError } from "@aburi/core"
+import { CoreError, compareBy } from "@aburi/core"
 import type {
   ExtractionContext,
   MergedDeclaration,
@@ -36,17 +36,44 @@ import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } fro
 import { buildSignature } from "./signature"
 
 /**
- * Refuse to synthesize a placeholder name for a declaration whose grammar node has no
- * name field: doing so would collide every anonymous interface / type alias / enum on
- * the same file id, and the fingerprint pipeline uses Symbol.id as a primary key.
+ * The one refusal for a declaration this plugin cannot name. Fabricating a placeholder would
+ * collide every anonymous declaration on the same file id, and the fingerprint pipeline uses
+ * Symbol.id as a primary key — so the throw reaches the per-file boundary, which names the
+ * file, rather than the IR.
  */
+function refuseAnonymousId(message: string, value: string): never {
+  throw new CoreError(message, { code: "anonymous-symbol-id-attempted", value })
+}
+
 function requireDeclarationName(node: Node, kind: string, file: string): string {
   const name = nameFieldText(node)
   if (name !== null) return name
-  throw new CoreError(
+  return refuseAnonymousId(
     `Missing name field on ${kind} declaration in ${file}:${node.startPosition.row + 1}; the tree-sitter grammar produced an unexpected shape and this plugin refuses to fabricate a placeholder id`,
-    { code: "anonymous-symbol-id-attempted", value: `${file}:${kind}` },
+    `${file}:${kind}`,
   )
+}
+
+/**
+ * The name a class or function was written with, and its qualified name — `<default>` when
+ * it is an anonymous default export. Anonymous and not a default export is refused: this
+ * branch used to silently collapse every anonymous class expression to `<default>`.
+ */
+function declaredOrDefaultQname(
+  node: Node,
+  what: "class" | "function",
+  ctx: ExtractionContext,
+  namespacePath: readonly string[],
+): { name: string | null; qname: string } {
+  const name = nameFieldText(node)
+  if (name !== null) return { name, qname: nestedQname([...namespacePath, name]) }
+  if (!isDefaultExport(node)) {
+    refuseAnonymousId(
+      `Anonymous ${what} at ${ctx.file.path}:${node.startPosition.row + 1} is neither named nor a default export; refusing to synthesize a <default> id`,
+      ctx.file.path,
+    )
+  }
+  return { name: null, qname: defaultExportQname() }
 }
 
 /**
@@ -102,17 +129,17 @@ interface CandidateSink {
 type DeclarationGroup = [SymbolCandidate<Node>, ...SymbolCandidate<Node>[]]
 
 function makeCandidateSink(): CandidateSink {
-  const declared = new Map<string, DeclarationGroup>()
+  const byId = new Map<string, DeclarationGroup>()
   return {
     add(candidate) {
-      const group = declared.get(candidate.id)
-      if (group === undefined) declared.set(candidate.id, [candidate])
+      const group = byId.get(candidate.id)
+      if (group === undefined) byId.set(candidate.id, [candidate])
       else group.push(candidate)
     },
     list() {
-      return [...declared.values()]
+      return [...byId.values()]
         .map((group) => foldDeclarations(group, group[0]))
-        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .sort(compareBy((candidate) => candidate.id))
     },
   }
 }
@@ -183,19 +210,19 @@ function visitStatement(
     // Tree-sitter attaches decorators as `decorator:` children of the export wrapper. The
     // actual declaration sits on the `declaration:` field; falling back to the first non-
     // decorator, non-comment named child covers grammar shapes that omit the field.
-    const declared =
+    const declarationNode =
       node.childForFieldName("declaration") ??
       node.namedChildren.find(
         (c): c is Node => c !== null && c.type !== "comment" && c.type !== "decorator",
       )
-    if (declared === undefined || declared === null) return
-    visitStatement(declared, ctx, namespacePath, out, callState)
+    if (declarationNode === undefined || declarationNode === null) return
+    visitStatement(declarationNode, ctx, namespacePath, out, callState)
     return
   }
   if (node.type === AMBIENT_DECLARATION_TYPE) {
-    const declared = ambientDeclaration(node)
-    if (declared === null) return
-    visitStatement(declared, ctx, namespacePath, ambientSink(out), callState)
+    const declarationNode = ambientDeclaration(node)
+    if (declarationNode === null) return
+    visitStatement(declarationNode, ctx, namespacePath, ambientSink(out), callState)
     return
   }
   switch (node.type) {
@@ -230,13 +257,13 @@ function visitStatement(
       }
       return
     case "interface_declaration":
-      out.add(makeInterfaceCandidate(node, ctx, namespacePath))
+      out.add(makeTypeDeclarationCandidate(node, ctx, namespacePath, INTERFACE_SHAPE))
       return
     case "type_alias_declaration":
-      out.add(makeTypeAliasCandidate(node, ctx, namespacePath))
+      out.add(makeTypeDeclarationCandidate(node, ctx, namespacePath, TYPE_ALIAS_SHAPE))
       return
     case "enum_declaration":
-      out.add(makeEnumCandidate(node, ctx, namespacePath))
+      out.add(makeTypeDeclarationCandidate(node, ctx, namespacePath, ENUM_SHAPE))
       return
     case "internal_module":
     case "module":
@@ -311,11 +338,11 @@ function wrappedDeclaration(statement: Node): Node | null {
  * declaration, and it is refused. It augments the **global** scope: `interface Window { … }`
  * inside it declares a member of that scope, not of this file, and the only qualified name this
  * plugin could give it is a top-level one — where it would claim the name for this module and
- * fold with the file's own declaration of it (§4.3.1). `declare module "express" { … }` is the
- * same construct aimed at another module and is refused on the same ground, one step further in
- * (see `declaredNamespaceName`). Both are a known limit rather than an oversight: giving either its
- * Symbols needs a qname convention for a scope that is not the file's, which `ir-schema.md` §3.2
- * does not have.
+ * fold with the file's own declaration of it (`lang-plugin.md`). `declare module "express" { … }`
+ * is the same construct aimed at another module and is refused on the same ground, one step
+ * further in (see `declaredNamespaceName`). Both are a known limit rather than an oversight:
+ * giving either its Symbols needs a qname convention for a scope that is not the file's, which
+ * `ir-schema.md` does not have.
  */
 function ambientDeclaration(node: Node): Node | null {
   const inner = firstNonCommentChild(node)
@@ -327,24 +354,10 @@ function ambientDeclaration(node: Node): Node | null {
 const AMBIENT_DECLARATION = "ambient-declaration"
 
 /**
- * `out`, with every candidate reaching it marked as written under a `declare`.
- *
- * The token is stamped on the sink rather than by each builder because `declare` wraps a
- * *statement*, and everything that statement declares in turn is ambient too — a `declare
- * namespace`'s functions and nested classes, a `declare class`'s methods. Wrapping the sink is
- * what makes that one rule instead of an argument every declaration builder has to remember to
- * forward, and it cannot drift from the wrapper that established it.
- *
- * The stamp is idempotent, because the wrapping is not. `declare namespace N { declare function
- * g(): void }` is TS1038 and the grammar accepts it with no error at all, so the ambient arm is
- * taken on the way in and again on the inner statement — and `g` came out carrying the token
- * twice. Nothing downstream would have removed it: `foldDeclarations` dedupes only across an
- * entity's several declarations, and the core pipeline's `mergeDerivedBy` only across what
- * frameworks contribute.
- *
- * `list` is the wrapped sink's, so folding and ordering still happen once, over every
- * declaration in the file (§4.3.1). An ambient declaration merged with a non-ambient one keeps
- * the token, which is what the fold does with every other `derivedBy`.
+ * `out`, with every candidate reaching it marked as written under a `declare`. Stamped on the
+ * sink rather than by each builder because `declare` wraps a *statement*, and everything that
+ * statement declares in turn is ambient too. Idempotent because the wrapping is not: `declare
+ * namespace N { declare function g(): void }` (TS1038) parses, and nothing downstream dedupes.
  */
 function ambientSink(out: CandidateSink): CandidateSink {
   return {
@@ -365,22 +378,9 @@ function addClassAndMembers(
   namespacePath: readonly string[],
   out: CandidateSink,
 ): void {
-  const className = nameFieldText(node)
-  const isDefault = isDefaultExport(node)
-  // Refuse to fabricate <default> for a class that is neither named nor a default export:
-  // this branch used to silently collapse every anonymous class expression to <default>,
-  // corrupting the fingerprint pipeline once it reached the top-level walker in error.
-  if (className === null && !isDefault) {
-    throw new CoreError(
-      `Anonymous class at ${ctx.file.path}:${node.startPosition.row + 1} is neither named nor a default export; refusing to synthesize a <default> id`,
-      { code: "anonymous-symbol-id-attempted", value: ctx.file.path },
-    )
-  }
-  const qname =
-    className !== null ? nestedQname([...namespacePath, className]) : defaultExportQname()
-  const derivedBy = exportEvidence(node)
-  const candidate: SymbolCandidate<Node> = {
-    id: makeTsSymbolId(currentFile(ctx), qname),
+  const { name: className, qname } = declaredOrDefaultQname(node, "class", ctx, namespacePath)
+  out.add({
+    id: makeTsSymbolId(ctx.file.path, qname),
     kind: "class",
     extKind: null,
     name: qname,
@@ -388,15 +388,14 @@ function addClassAndMembers(
     decorators: readDecorators(node),
     signature: null,
     source: makeSourceRange(node, ctx),
-    derivedBy,
+    derivedBy: exportEvidence(node),
     bodyNode: node.childForFieldName("body"),
     fullNode: node,
-  }
-  out.add(candidate)
+  })
 
   // Members are only walked for named classes. Anonymous default classes
   // (`export default class { m() {} }`) do not have a documented member qname
-  // convention in ir-schema.md §3.2 — the `<default>` sentinel is reserved for the
+  // convention in ir-schema.md — the `<default>` sentinel is reserved for the
   // class itself, and `<default>.m` violates the identifier-segment pattern the core id
   // builder enforces. Refactor the class to a named form (or export it named separately)
   // to get member Symbols. Deferred alongside the anonymous-scope proposal.
@@ -406,16 +405,9 @@ function addClassAndMembers(
 }
 
 /**
- * One candidate per member, not per member declaration.
- *
- * `method_signature` is skipped in an ordinary class body: there it is an overload declaration,
- * and the implementation beside it carries the body and the parameter types the member is
- * actually called with. Top-level overloads behave the same way — a bare `function_signature`
- * is not a Symbol either — and a class has to match, or the same source answers differently
- * depending on where it is written. A class body with signatures and no implementation therefore
- * declares no members, which is what `tsc` calls TS2391 anyway. Under a `declare` the reading
- * inverts, because no implementation can be written beside them at all; `memberSymbolSegment`
- * owns that split, along with the `abstract_method_signature` a class body admits outright.
+ * One candidate per member, not per member declaration. Which class-body nodes are members
+ * at all — and why an overload `method_signature` is not one outside a `declare` — is
+ * `memberSymbolSegment`'s answer.
  *
  * What is left can still name one member twice: `get v()` beside `set v(n)` is one property,
  * and two `method_definition` nodes. Those fold into one candidate, and the getter is the one
@@ -432,7 +424,7 @@ function addClassMembers(
   ownerChain: readonly string[],
   out: CandidateSink,
 ): void {
-  const declared = new Map<string, MemberGroup>()
+  const byId = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
     if (member === null) continue
     const segment = memberSymbolSegment(classNode, member)
@@ -445,11 +437,11 @@ function addClassMembers(
         ? makeMethodCandidate(member, segment, ctx, ownerChain)
         : makeFieldFunctionCandidate(member, fieldFunction, segment, ctx, ownerChain)
     const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
-    const group = declared.get(candidate.id)
-    if (group === undefined) declared.set(candidate.id, [entry])
+    const group = byId.get(candidate.id)
+    if (group === undefined) byId.set(candidate.id, [entry])
     else group.push(entry)
   }
-  for (const group of declared.values()) out.add(foldMemberGroup(group))
+  for (const group of byId.values()) out.add(foldMemberGroup(group))
 }
 
 /** One `method_definition`, with the one thing about it that decides which of a pair leads. */
@@ -474,28 +466,18 @@ function makeFunctionCandidate(
   ctx: ExtractionContext,
   namespacePath: readonly string[],
 ): SymbolCandidate<Node> {
-  const funcName = nameFieldText(node)
-  const isDefault = isDefaultExport(node)
-  if (funcName === null && !isDefault) {
-    throw new CoreError(
-      `Anonymous function at ${ctx.file.path}:${node.startPosition.row + 1} is neither named nor a default export; refusing to synthesize a <default> id`,
-      { code: "anonymous-symbol-id-attempted", value: ctx.file.path },
-    )
-  }
-  const qname = funcName !== null ? nestedQname([...namespacePath, funcName]) : defaultExportQname()
+  const { qname } = declaredOrDefaultQname(node, "function", ctx, namespacePath)
   const jsDoc = readLeadingJsDoc(node)
-  const signature = buildSignature(node, jsDoc)
-  const derivedBy = exportEvidence(node)
   return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
+    id: makeTsSymbolId(ctx.file.path, qname),
     kind: "function",
     extKind: null,
     name: qname,
     visibility: computeTopLevelVisibility(node),
     decorators: readDecorators(node),
-    signature,
+    signature: buildSignature(node, jsDoc),
     source: makeSourceRange(node, ctx),
-    derivedBy,
+    derivedBy: exportEvidence(node),
     bodyNode: node.childForFieldName("body"),
     fullNode: node,
   }
@@ -536,7 +518,7 @@ function makeMethodCandidate(
     derivedBy.push("accessor-declaration")
   }
   return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
+    id: makeTsSymbolId(ctx.file.path, qname),
     kind,
     extKind: null,
     name: qname,
@@ -576,7 +558,7 @@ function makeFieldFunctionCandidate(
   const qname = classMemberQname(ownerChain, segment, isStatic ? "static" : "instance")
   const jsDoc = readLeadingJsDoc(field)
   return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
+    id: makeTsSymbolId(ctx.file.path, qname),
     kind: "method",
     extKind: null,
     name: qname,
@@ -615,102 +597,88 @@ function memberVisibility(member: Node): Visibility {
   return hasPrivateName(member) ? "private" : readAccessibilityKeyword(member)
 }
 
-function makeInterfaceCandidate(
-  node: Node,
-  ctx: ExtractionContext,
-  namespacePath: readonly string[],
-): SymbolCandidate<Node> {
-  const name = requireDeclarationName(node, "interface", ctx.file.path)
-  const qname = nestedQname([...namespacePath, name])
-  return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
-    kind: "interface",
-    extKind: null,
-    name: qname,
-    visibility: computeTopLevelVisibility(node),
-    decorators: [],
-    signature: null,
-    source: makeSourceRange(node, ctx),
-    derivedBy: ["interface-declaration", ...exportEvidence(node)],
-    bodyNode: findChild(node, "object_type") ?? findChild(node, "interface_body"),
-    fullNode: node,
-  }
+/** What one named, bodyless-by-default type declaration contributes beyond its name. */
+interface TypeDeclarationShape {
+  kind: SymbolKind
+  /** How the kind is named in the refusal message. */
+  label: string
+  /** The `derivedBy` token for this kind of declaration. */
+  token: string
+  bodyOf: (node: Node) => Node | null
 }
 
-function makeTypeAliasCandidate(
-  node: Node,
-  ctx: ExtractionContext,
-  namespacePath: readonly string[],
-): SymbolCandidate<Node> {
-  const name = requireDeclarationName(node, "type alias", ctx.file.path)
-  const qname = nestedQname([...namespacePath, name])
-  return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
-    kind: "type",
-    extKind: null,
-    name: qname,
-    visibility: computeTopLevelVisibility(node),
-    decorators: [],
-    signature: null,
-    source: makeSourceRange(node, ctx),
-    derivedBy: ["type-alias", ...exportEvidence(node)],
-    bodyNode: null,
-    fullNode: node,
-  }
+const INTERFACE_SHAPE: TypeDeclarationShape = {
+  kind: "interface",
+  label: "interface",
+  token: "interface-declaration",
+  bodyOf: (node) => findChild(node, "object_type") ?? findChild(node, "interface_body"),
 }
 
-function makeEnumCandidate(
+const TYPE_ALIAS_SHAPE: TypeDeclarationShape = {
+  kind: "type",
+  label: "type alias",
+  token: "type-alias",
+  bodyOf: () => null,
+}
+
+const ENUM_SHAPE: TypeDeclarationShape = {
+  kind: "enum",
+  label: "enum",
+  token: "enum-declaration",
+  bodyOf: () => null,
+}
+
+function makeTypeDeclarationCandidate(
   node: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
+  shape: TypeDeclarationShape,
 ): SymbolCandidate<Node> {
-  const name = requireDeclarationName(node, "enum", ctx.file.path)
+  const name = requireDeclarationName(node, shape.label, ctx.file.path)
   const qname = nestedQname([...namespacePath, name])
+  return makeBodylessCandidate(node, ctx, qname, shape.kind, shape.token, shape.bodyOf(node))
+}
+
+/** The candidate shape every declaration with no signature and no decorators shares. */
+function makeBodylessCandidate(
+  node: Node,
+  ctx: ExtractionContext,
+  qname: string,
+  kind: SymbolKind,
+  token: string,
+  bodyNode: Node | null,
+): SymbolCandidate<Node> {
   return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
-    kind: "enum",
+    id: makeTsSymbolId(ctx.file.path, qname),
+    kind,
     extKind: null,
     name: qname,
     visibility: computeTopLevelVisibility(node),
     decorators: [],
     signature: null,
     source: makeSourceRange(node, ctx),
-    derivedBy: ["enum-declaration", ...exportEvidence(node)],
-    bodyNode: null,
+    derivedBy: [token, ...exportEvidence(node)],
+    bodyNode,
     fullNode: node,
   }
 }
 
 /**
  * The dotted name a namespace declaration gives its Symbols, or null when what it names is not
- * a namespace of **this** module.
+ * a namespace of **this** module. Three shapes answer null, each of which would otherwise put
+ * something in the IR the source does not contain — or take the file down on the way:
  *
- * Three shapes answer null, and each of them would otherwise put something in the IR that the
- * source does not contain — or take the file down on the way.
+ * - **A name the parser invented.** `declare namespace` with nothing after it recovers with a
+ *   MISSING `identifier`; read as absent it reaches `requireDeclarationName`, whose throw
+ *   withdraws the whole file along with the parse error that pointed at the missing token.
+ * - **A quoted specifier** — `declare module "express" { … }`, `module "express" {}` — augments
+ *   another module, so its declarations would claim that module's names for this file and fold
+ *   with its own (`lang-plugin.md`). Reachable without the `declare`, so the throw predated it.
+ * - **No body.** `declare module` followed by `export function keep() {}` parses with no error:
+ *   `export` becomes the module's name, and a namespace called `export` entered the IR.
  *
- * - **A name the parser invented.** `declare namespace` with nothing after it recovers as an
- *   `internal_module` whose name is a MISSING `identifier` of no width. Read as an absent name
- *   it reaches `requireDeclarationName`, which throws, and the throw reaches the per-file
- *   boundary — withdrawing the whole file and with it the recoverable parse errors that were
- *   the one diagnostic pointing at the missing token. `isMissing` is what says the parser
- *   guessed, the same question `hasErrorChild` asks of a written member name.
- * - **A quoted specifier** — `declare module "express" { … }`, `module "express" {}`. It
- *   augments another module, so the declarations inside it are members of *that* module. A
- *   specifier is not a qualified-name segment (handing `"express"` to the id builder throws,
- *   §4.3), and the declarations under it would have to take bare top-level qnames, claiming
- *   another module's names for this file and folding with its own declarations of them
- *   (§4.3.1). The `declare` is the grammar's business and not `tsc`'s: this arm parses the
- *   quoted spelling written without one, so the throw was live before the wrapper was read
- *   through rather than arriving with it.
- * - **No body.** `declare module` followed by `export function keep() {}` on the next line
- *   parses with no error at all — `export` becomes the module's name. It satisfies the
- *   qualified-name grammar, so a namespace called `export` entered the IR with no diagnostic
- *   and the diff reported it as added. A namespace with no body declares nothing in any
- *   spelling, so refusing it costs nothing.
- *
- * What is left is *read* rather than type-tested, because `namespace A.B {}` carries a
- * `nested_identifier` where `namespace A {}` carries an `identifier` — admitting only the
- * latter would refuse the dotted form LP8l exists for.
+ * What is left is *read* rather than type-tested: `namespace A.B {}` carries a
+ * `nested_identifier` where `namespace A {}` carries an `identifier` (LP8l).
  */
 function declaredNamespaceName(node: Node, body: Node | null): string | null {
   if (body === null) return null
@@ -745,26 +713,21 @@ function addNamespaceAndBody(
   callState: CallExtractionState,
 ): void {
   const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
-  const declared = declaredNamespaceName(node, body)
-  if (declared === null || body === null) return
-  const segments = declared.split(".")
+  const declaredName = declaredNamespaceName(node, body)
+  if (declaredName === null || body === null) return
   const path = [...namespacePath]
-  for (const segment of segments) {
+  for (const segment of declaredName.split(".")) {
     path.push(segment)
-    const qname = nestedQname(path)
-    out.add({
-      id: makeTsSymbolId(currentFile(ctx), qname),
-      kind: "namespace",
-      extKind: null,
-      name: qname,
-      visibility: computeTopLevelVisibility(node),
-      decorators: [],
-      signature: null,
-      source: makeSourceRange(node, ctx),
-      derivedBy: ["namespace-declaration", ...exportEvidence(node)],
-      bodyNode: null,
-      fullNode: node,
-    })
+    out.add(
+      makeBodylessCandidate(
+        node,
+        ctx,
+        nestedQname(path),
+        "namespace",
+        "namespace-declaration",
+        null,
+      ),
+    )
   }
   visitModuleLevel(body, ctx, path, out, callState)
 }
@@ -779,26 +742,29 @@ function addNamespaceAndBody(
  * name in the pattern, so it produces one Symbol each — which is why this answers a list.
  * Reading the pattern's text as a name instead put `{ GET, POST }` into the id builder,
  * which refused it, and the throw cost the file every Symbol it had.
+ *
+ * `statement` is the enclosing `lexical_declaration` / `variable_declaration`: it is where
+ * the export keyword, the JSDoc and the range are read from.
  */
 function makeVariableCandidates(
   declarator: Node,
-  parent: Node,
+  statement: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
 ): SymbolCandidate<Node>[] {
   const nameNode = declarator.childForFieldName("name")
   if (nameNode !== null && isBindingPattern(nameNode)) {
     return collectPatternBindings(nameNode).map((binding) =>
-      makeDestructuredCandidate(binding, parent, ctx, namespacePath),
+      makeDestructuredCandidate(binding, statement, ctx, namespacePath),
     )
   }
-  const single = makeVariableCandidate(declarator, parent, ctx, namespacePath)
+  const single = makeVariableCandidate(declarator, statement, ctx, namespacePath)
   return single === null ? [] : [single]
 }
 
 function makeVariableCandidate(
   declarator: Node,
-  parent: Node,
+  statement: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
 ): SymbolCandidate<Node> | null {
@@ -806,21 +772,19 @@ function makeVariableCandidate(
   if (name === null) return null
   const value = functionValueOf(declarator)
   const qname = nestedQname([...namespacePath, name])
-  const id = makeTsSymbolId(currentFile(ctx), qname)
+  const id = makeTsSymbolId(ctx.file.path, qname)
   if (value !== null) {
-    const jsDoc = readLeadingJsDoc(parent)
-    const signature = buildSignature(value, jsDoc)
-    const derivedBy = ["variable-assigned-function", ...exportEvidence(parent)]
+    const jsDoc = readLeadingJsDoc(statement)
     return {
       id,
       kind: "function",
       extKind: null,
       name: qname,
-      visibility: computeTopLevelVisibility(parent),
+      visibility: computeTopLevelVisibility(statement),
       decorators: [],
-      signature,
-      source: makeSourceRange(parent, ctx),
-      derivedBy,
+      signature: buildSignature(value, jsDoc),
+      source: makeSourceRange(statement, ctx),
+      derivedBy: ["variable-assigned-function", ...exportEvidence(statement)],
       bodyNode: value.childForFieldName("body"),
       fullNode: value,
     }
@@ -830,13 +794,13 @@ function makeVariableCandidate(
     kind: "const",
     extKind: null,
     name: qname,
-    visibility: computeTopLevelVisibility(parent),
+    visibility: computeTopLevelVisibility(statement),
     decorators: [],
     signature: null,
-    source: makeSourceRange(parent, ctx),
-    derivedBy: exportEvidence(parent),
+    source: makeSourceRange(statement, ctx),
+    derivedBy: exportEvidence(statement),
     bodyNode: null,
-    fullNode: parent,
+    fullNode: statement,
   }
 }
 
@@ -907,9 +871,9 @@ function collectPatternBindings(pattern: Node): Node[] {
         // a pattern that declares nothing — and a binding lost that way leaves no Symbol, no
         // diagnostic and no `skipped` entry. `assignment_pattern` went missing exactly this
         // way. Refusing sends the file to the per-file boundary instead, which names it.
-        throw new CoreError(
+        refuseAnonymousId(
           `Unmodelled node "${node.type}" inside a destructuring pattern at ${pattern.startPosition.row + 1}; refusing to report bindings this walk may have missed`,
-          { code: "anonymous-symbol-id-attempted", value: node.type },
+          node.type,
         )
     }
   }
@@ -934,58 +898,41 @@ function collectPatternBindings(pattern: Node): Node[] {
  */
 function makeDestructuredCandidate(
   binding: Node,
-  parent: Node,
+  statement: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
 ): SymbolCandidate<Node> {
   const qname = nestedQname([...namespacePath, binding.text])
-  const derivedBy = ["destructured-binding", ...exportEvidence(parent)]
   return {
-    id: makeTsSymbolId(currentFile(ctx), qname),
+    id: makeTsSymbolId(ctx.file.path, qname),
     kind: "const",
     extKind: null,
     name: qname,
-    visibility: computeTopLevelVisibility(parent),
+    visibility: computeTopLevelVisibility(statement),
     decorators: [],
     signature: null,
-    source: makeSourceRange(parent, ctx),
-    derivedBy,
+    source: makeSourceRange(statement, ctx),
+    derivedBy: ["destructured-binding", ...exportEvidence(statement)],
     bodyNode: null,
-    fullNode: parent,
+    fullNode: statement,
   }
 }
 
 /**
- * What `derivedBy` says about a top-level declaration's **export**, and the one reader that
- * says it for every kind.
+ * What `derivedBy` says about a top-level declaration's **export**, the one reader for every
+ * kind (LP6b). The node handed in is the declaration whose statement position is being read —
+ * the `module` for a namespace, the enclosing `lexical_declaration` for a variable — and
+ * `statementParent` steps over a `declare` wrapper on the way (LP36).
  *
- * Whether a declaration was exported is a question about the statement it was written as, not
- * about which kind of declaration it is: `export interface I {}` and `export const x = 1`
- * carry the same keyword and have to answer alike (LP6b).
- *
- * **Neither question is exclusive, so the order of the two carries the rule rather than
- * reporting it.** `hasExportKeywordAncestor` is true of `export default class C {}` as well —
- * the statement is an `export_statement` in both spellings — and what separates them is that
- * `isDefaultExport` is asked first. Within one statement the default export therefore
- * *replaces* the keyword, which is the precedence the class and function paths have always
- * had: the default export is the boundary a framework plugin reads (LP6a). Across two
- * statements they **join**: `const Page = …` followed by `export default Page` reports both,
- * `promoteDefaultExports` appending to whatever the declaration already carried, which is
- * LP6a's requirement that the detached spelling report what the wrapped one does. So this is
- * a rule about a statement, and nothing here makes the two tokens alternatives on a Symbol.
- *
- * The node handed in is the declaration whose statement position is being read, and that is a
- * different node per kind — `addNamespaceAndBody` holds the `module` / `internal_module`, the
- * variable builders hold the enclosing `lexical_declaration` or `variable_declaration` (`var`
- * reaches the same builder), the rest hold the declaration itself. They are not
- * interchangeable, which is the reason one reader answers for all of them rather than each
- * builder asking for itself. Either question reaches the statement through `statementParent`,
- * which steps over a `declare` wrapper, so `export declare interface I {}` answers as the
- * spelling without the modifier does (LP36).
+ * Neither question is exclusive, so the order carries the rule: `export default class C {}`
+ * satisfies both, and asking `isDefaultExport` first makes the default export *replace* the
+ * keyword within one statement — the default export is the boundary a framework plugin reads
+ * (LP6a). Across two statements they join: `promoteDefaultExports` appends to whatever the
+ * declaration already carried.
  */
 function exportEvidence(node: Node): string[] {
   if (isDefaultExport(node)) return [EXPORT_DEFAULT]
-  return hasExportKeywordAncestor(node) ? [EXPORT_KEYWORD] : []
+  return hasExportModifier(node) ? [EXPORT_KEYWORD] : []
 }
 
 /**
@@ -996,8 +943,8 @@ function exportEvidence(node: Node): string[] {
  * that puts a token on the Symbol is a spelling this reports `public` for, so the LP6b table
  * cannot drift into checking two readers that disagree. It says nothing about a Symbol several
  * declarations wrote — `foldDeclarations` takes scalars from the leading declaration and
- * unions the lists (§4.3.1) — and there the two agree because legal source requires a merge's
- * declarations to agree about being exported (LP6b).
+ * unions the lists (`lang-plugin.md`) — and there the two agree because legal source requires a
+ * merge's declarations to agree about being exported (LP6b).
  */
 function computeTopLevelVisibility(node: Node): Visibility {
   return exportEvidence(node).length > 0 ? "public" : "internal"
@@ -1016,18 +963,11 @@ function readAccessibilityKeyword(node: Node): Visibility {
   }
 }
 
+/** The `default` an `export_statement` is written with is an anonymous token, hence the child scan. */
 function isDefaultExport(node: Node): boolean {
   const parent = statementParent(node)
   if (parent === null || parent.type !== "export_statement") return false
-  return hasDefaultKeyword(parent)
-}
-
-/** The `default` an `export_statement` is written with, which the grammar leaves anonymous. */
-function hasDefaultKeyword(statement: Node): boolean {
-  for (const child of statement.children) {
-    if (child !== null && child.type === "default") return true
-  }
-  return false
+  return hasChildOfType(parent, "default")
 }
 
 /** What `derivedBy` says when a Symbol is the module's default export. */
@@ -1045,7 +985,7 @@ const EXPORT_KEYWORD = "export-keyword"
  * `isDefaultExport` reads the parent, and the parent of `const Page = () => …` is the
  * module. The two are linked by name or not at all, which is why the names are collected up
  * front: one pass over the module's own statements, asked once, instead of a search of the
- * module per declaration (`lang-plugin.md` §8.2).
+ * module per declaration (`lang-plugin.md`).
  *
  * The wrappers are read by `unwrapValue`, the one reader that answers what a wrapper is for
  * every question this plugin asks about a node (LP7a). `export default Page satisfies NextPage`
@@ -1064,7 +1004,7 @@ function defaultExportedNames(root: Node): ReadonlySet<string> {
   const names = new Set<string>()
   for (const stmt of root.namedChildren) {
     if (stmt === null || stmt.type !== "export_statement") continue
-    if (!hasDefaultKeyword(stmt)) continue
+    if (!hasChildOfType(stmt, "default")) continue
     const value = stmt.childForFieldName("value")
     if (value === null) continue
     const inner = unwrapValue(value)
@@ -1119,48 +1059,18 @@ function promoteDefaultExports(
 }
 
 /**
- * True when the declaration was written under an `export` keyword — the name this file reads
- * the question by, delegating to the one implementation in `ast-helpers`.
- */
-function hasExportKeywordAncestor(node: Node): boolean {
-  return hasExportModifier(node)
-}
-
-function currentFile(ctx: ExtractionContext): string {
-  return ctx.file.path
-}
-
-/**
- * Read the JSDoc blocks written above a declaration, joined in source order, or `null` when
- * there are none. Only `/**`-opening comments count — an ordinary `/* … *\/` block and a `//`
- * line are not documentation, and the one consumer of this string (`readThrows`, which scans
- * it for `@throws`) has no way to tell them apart once they are in it.
+ * The JSDoc blocks written above a declaration, joined in source order, or `null` when there
+ * are none. Only `/**`-opening comments count — `readThrows` scans the joined text for
+ * `@throws` and cannot tell prose from a declaration once both are in it, and the space
+ * between a decorator and its member is where `// biome-ignore` notes and commented-out
+ * decorators are written.
  *
- * That distinction is what keeps the run safe now that it steps over decorators. The space
- * between a decorator and its member is where `// biome-ignore`, ticket references and
- * commented-out decorators are written, and a `@throws` mentioned in one of those is prose
- * about the code, not a declaration of what the member throws.
- *
- * Wrapper handling: if the declaration is inside an `export_statement` (`export function
- * f() {}`) or an `ambient_declaration` (`declare function f(): void`), or both (`export declare
- * function f(): void`), the JSDoc lives before the outermost wrapper rather than before the
- * declaration itself. Walk up to that wrapper before scanning siblings.
- *
- * The scan walks backwards from the anchor rather than reading the parent's child list and
- * searching it for the anchor's own position — see lang-plugin.md §8.2 for why a per-node
- * question has to be asked of the node: at module level that list is every statement in the
- * file, and materializing it once per declaration is what made a large single file
- * quadratic.
- *
- * What the walk does at each kind of sibling:
- *
- * - a `/**` comment is **collected**;
- * - any other comment, and a decorator, is **stepped over**. A decorator belongs to the
- *   member rather than separating anything from it (`/** doc *\/ @Get() handler() {}` is
- *   idiomatic), and a note written among them does not detach the block above it either;
- * - anything else **ends the run**, including an anonymous token. A stray `;` in a class body
- *   separates a comment from the member below it, and reading past one would hand that
- *   member a block written about nothing.
+ * The scan starts at the outermost wrapper (`export`, `declare`), since that is where the
+ * JSDoc sits, and walks backwards from the anchor rather than searching the parent's child
+ * list — at module level that list is every statement in the file, and materializing it once
+ * per declaration made a large single file quadratic (`lang-plugin.md`). A decorator and
+ * a non-doc comment are stepped over; anything else ends the run, including an anonymous
+ * token such as a stray `;`, which separates a comment from the member below it.
  */
 function readLeadingJsDoc(node: Node): string | null {
   const anchor = outerStatementWrapper(node)

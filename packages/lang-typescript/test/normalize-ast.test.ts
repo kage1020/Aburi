@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { extractSymbols, normalizeAst, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { normalizeAst } from "../src/index"
+import { symbolsOf } from "./fixtures/ctx"
 
 async function normalizeFirstSymbol(source: string): Promise<string> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const symbols = extractSymbols(requireTree(result.tree), ctx)
-  const target = symbols[0]
+  const [target] = await symbolsOf(source)
   if (target === undefined) throw new Error("no symbols in fixture")
   return normalizeAst(target)
 }

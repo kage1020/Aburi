@@ -39,6 +39,8 @@ describe("e2e: published tarball contents", () => {
   })
 
   it("ships the grammar wasms with @aburi/lang-typescript", () => {
+    // The entry must stay exactly one directory below the package root: `src/parser.ts`
+    // reaches the grammars through `../wasm/`, relative to the module's own URL.
     expect(langTypescript.paths).toEqual(
       expect.arrayContaining([
         "dist/index.mjs",
@@ -48,13 +50,6 @@ describe("e2e: published tarball contents", () => {
         "wasm/tree-sitter-tsx.wasm",
       ]),
     )
-  })
-
-  it("keeps the entry exactly one directory below the package root", () => {
-    // `src/parser.ts` reaches the grammars through `../wasm/`, relative to the module's
-    // own URL. A nested entry would resolve that outside the package.
-    expect("dist/index.mjs".split("/")).toHaveLength(2)
-    expect(langTypescript.paths).toContain("dist/index.mjs")
   })
 
   it("ships no TypeScript sources", () => {

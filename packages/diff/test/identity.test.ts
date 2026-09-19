@@ -1,16 +1,16 @@
 import { checkIRIntegrity } from "@aburi/core"
+import { component, dependency, fp, makeIR, makeSymbol } from "@aburi/test-support"
 import type { Component, Dependency, IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, DiffError } from "../src"
-import { component, dependency, fp, makeIR, makeSymbol } from "./fixtures"
 
 /**
  * `buildDiff` keys three collections by identity, all three of them Document invariants
- * (ir-schema.md §14 #1, #2, #13). diff-algorithm.md §3.7 is the canonical statement of what
+ * (ir-schema.md #1, #2, #13). diff-algorithm.md is the canonical statement of what
  * the diff does with a repeat and why it is checked at the entry point as well as at
  * extraction time.
  *
- * What each case here fixes in place is the *outcome* §3.7 forbids: every one produced an
+ * What each case here fixes in place is the *outcome* it forbids: every one produced an
  * answer rather than a crash, and an answer with an entry silently missing is one no reader
  * of the diff can tell from the truth.
  */
@@ -34,9 +34,9 @@ function thrownBy(run: () => unknown): DiffError | null {
 
 const foo = () => makeSymbol({ id: "ts:src/a.ts#foo", name: "foo" })
 
-describe("Symbol id collisions (ir-schema.md §14 #1)", () => {
+describe("Symbol id collisions (ir-schema.md #1)", () => {
   it("refuses a repeat on the head side instead of dropping one of the pair", () => {
-    // §3.7: stage 1's lookup map is last-write-wins, so the base Symbol pairs with the
+    // Stage 1's lookup map is last-write-wins, so the base Symbol pairs with the
     // *second* entry and the first appears in neither `matched` nor `added` — `usedHead`
     // then removes both. Two head Symbols in, `changed: 1, added: 0` out.
     const head = makeIR({
@@ -90,7 +90,7 @@ describe("Symbol id collisions (ir-schema.md §14 #1)", () => {
   })
 })
 
-describe("Component id collisions (ir-schema.md §14 #2)", () => {
+describe("Component id collisions (ir-schema.md #2)", () => {
   const collidingComponents = () => [
     component({ id: "a", name: "A", roots: ["apps/a"] }),
     component({ id: "a", name: "A", roots: ["apps/a2"] }),
@@ -117,17 +117,17 @@ describe("Component id collisions (ir-schema.md §14 #2)", () => {
   })
 })
 
-describe("Dependency triple collisions (ir-schema.md §14 #13)", () => {
+describe("Dependency triple collisions (ir-schema.md #13)", () => {
   const differingDirection = () => [
     dependency({ from: "a", to: "b", via: "import", direction: "outbound" }),
     dependency({ from: "a", to: "b", via: "import", direction: "inbound" }),
   ]
 
   it("refuses a repeat instead of surfacing it as an added + removed pair", () => {
-    // `depsAdded: 1, depsRemoved: 1` — which is exactly how §6.2 encodes a genuine direction
-    // flip between the two revisions. Invariant #13 names this outcome as its own reason.
-    // Differing only in `direction`, so this is also the case that pins `direction` out of
-    // the key: fold it in and the collision disappears.
+    // `depsAdded: 1, depsRemoved: 1` — which is exactly how the Dependency diff encodes a genuine
+    // direction flip between the two revisions. Invariant #13 names this outcome as its own reason.
+    // Differing only in `direction`, so this is also the case that pins `direction` out of the key:
+    // fold it in and the collision disappears.
     const head = makeIR({
       dependencies: [dependency({ from: "a", to: "b", via: "import", direction: "outbound" })],
     })
@@ -142,7 +142,7 @@ describe("Dependency triple collisions (ir-schema.md §14 #13)", () => {
     expect(error?.message).toContain("headIR.dependencies[1]")
   })
 
-  it("identifies by the triple alone, as §6.2 does", () => {
+  it("identifies by the triple alone, as diff-algorithm.md does", () => {
     // `effect` is excluded from identity on the same terms as `direction`, and is the half
     // no other case here covers: every other fixture leaves `effect` null on both entries,
     // so folding it into the key would slip past all of them.
@@ -160,7 +160,7 @@ describe("Dependency triple collisions (ir-schema.md §14 #13)", () => {
     // concatenate to the same characters and are not the same edge. Getting this wrong would
     // not only invent a collision here — `diffDependencies` keys the same way and would
     // merge them. (Core's #13 joins on a different separator, so the two implementations
-    // agree for every endpoint satisfying the §3.1 / §4 grammars and are not guaranteed to
+    // agree for every endpoint satisfying the ir-schema.md id grammars and are not guaranteed to
     // for one that does not; `buildDiff` checks no grammar.)
     const adjacent = makeIR({
       dependencies: [
@@ -245,7 +245,7 @@ describe("the identity fields are established before they are read", () => {
 })
 
 describe("the diff-side rule is the Document's rule", () => {
-  // The check restates ir-schema.md §14 #1 / #2 / #13 at the diff boundary rather than
+  // The check restates ir-schema.md #1 / #2 / #13 at the diff boundary rather than
   // running `checkIRIntegrity`, which would make `buildDiff` enforce further rules that do
   // not change its answer. A restatement is a second source of truth: if core ever stops
   // requiring one of these, this fails instead of the two quietly disagreeing. It does not

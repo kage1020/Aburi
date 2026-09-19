@@ -1,11 +1,11 @@
+import { component, decorator, effect, makeSymbol, symbolId } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { projectComponent } from "../src"
-import { component, decorator, effect, makeSymbol, symbolId } from "./fixtures"
 
 /**
  * The `## Boundary effect surface` section renders on the per-component page for
  * Symbols identified as boundaries (any decorator with `boundary: true`, or an
- * `extKind` starting with `framework:`). effect-propagation.md §4.3 places this
+ * `extKind` starting with `framework:`). effect-propagation.md places this
  * rollup in the projection layer — the IR carries the augmented `effects[]` on
  * every Symbol; the view surfaces boundaries as a fast-scan entry point.
  */
@@ -99,7 +99,7 @@ describe("projectComponent — Boundary effect surface", () => {
       "[propagated from ts:src/svc.ts#Svc.persist, ts:src/other.ts#Other.helper]",
     )
     // The propagated row must NOT include a line marker (`(L…)`) because that
-    // would violate schema §9.4 / effect-propagation.md §5.1.
+    // would violate ir-schema.md / effect-propagation.md.
     const propRow = md.slice(propIdx, propIdx + 200)
     expect(propRow).not.toMatch(/db\.write: `prisma\.invoice\.create` \(L\d+\)/)
   })

@@ -7,12 +7,9 @@ import { findConfig } from "../src/index"
 describe("findConfig", () => {
   let tmp: string
   beforeEach(async () => {
-    // `realpath` here is macOS-specific hygiene: `os.tmpdir()` returns `/tmp`
-    // which is a symlink to `/private/tmp` on macOS. Without resolving,
-    // `process.chdir(tmp)` + `process.cwd()` returns the resolved
-    // `/private/tmp/...` path while `tmp` still holds `/tmp/...`, and the
-    // string-equal assertion downstream fails despite pointing at the same
-    // directory.
+    // On macOS `os.tmpdir()` is a symlink (`/tmp` → `/private/tmp`), and `process.cwd()`
+    // after `chdir` returns the resolved path; `realpath` keeps the string-equal assertion
+    // below true.
     tmp = await realpath(await mkdtemp(join(tmpdir(), "aburi-discovery-test-")))
   })
   afterEach(async () => {
@@ -58,7 +55,6 @@ describe("findConfig", () => {
   it("returns null when no ancestor has a config", async () => {
     const nested = join(tmp, "empty")
     await mkdir(nested, { recursive: true })
-    // Walk would eventually hit FS root which definitely has no aburi.json.
     expect(await findConfig({ cwd: nested })).toBe(null)
   })
 

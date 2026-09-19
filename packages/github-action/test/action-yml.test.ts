@@ -101,7 +101,7 @@ describe("action.yml", () => {
     // The runner parses a manifest's descriptions and defaults as templates, with a context set
     // that does not include `github` — so an expression written as prose in a description fails
     // the whole manifest to load, for every consumer, before any step runs. Nothing catches that
-    // until a workflow actually calls the action. See `docs/design/github-action.md` §2.
+    // until a workflow actually calls the action. See `docs/design/github-action.md`.
     const action = await loadAction()
     const described = [
       ["the action description", action.description] as const,

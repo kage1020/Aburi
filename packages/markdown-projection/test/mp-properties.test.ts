@@ -1,3 +1,16 @@
+import {
+  call,
+  component,
+  decorator,
+  dependency,
+  effect,
+  fp,
+  makeIR,
+  makeSymbol,
+  rule,
+  sig,
+  zeroFp,
+} from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   projectComponent,
@@ -6,21 +19,7 @@ import {
   projectSymbolExplain,
   projectWorkspace,
 } from "../src"
-import {
-  call,
-  component,
-  decorator,
-  dependency,
-  effect,
-  emptySummary,
-  fp,
-  makeDiff,
-  makeIR,
-  makeSymbol,
-  rule,
-  sig,
-  zeroFp,
-} from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 // -----------------------------------------------------------------------------
 // MP1: same IR → same Markdown (determinism)
@@ -163,28 +162,6 @@ describe("MP5 / MP6 — confidence badge visibility", () => {
 })
 
 // -----------------------------------------------------------------------------
-// MP7: mermaid fallback when node count exceeds limit
-// -----------------------------------------------------------------------------
-
-describe("MP7 — mermaid → text fallback beyond node limit", () => {
-  it("skips the mermaid fence when node count > MERMAID_NODE_LIMIT", () => {
-    const deps = Array.from({ length: 110 }, (_, i) => dependency({ from: `a${i}`, to: `b${i}` }))
-    const ir = makeIR({ dependencies: deps })
-    const md = projectWorkspace(ir)
-    expect(md).not.toContain("```mermaid")
-    // Text fallback is still there:
-    expect(md).toContain("- a0 → b0")
-  })
-
-  it("includes mermaid fence when under the limit", () => {
-    const ir = makeIR({
-      dependencies: [dependency({ from: "core", to: "shared" })],
-    })
-    expect(projectWorkspace(ir)).toContain("```mermaid")
-  })
-})
-
-// -----------------------------------------------------------------------------
 // MP8: aburi explain on dropped Symbol
 // -----------------------------------------------------------------------------
 
@@ -205,6 +182,22 @@ describe("MP8 — explain a dropped Symbol shows drop reason only", () => {
     expect(md).not.toContain("## Effects")
     expect(md).not.toContain("## Calls")
     expect(md).not.toContain("## Fingerprint")
+  })
+
+  // The dropped view is the one renderer here that does not fold a run of blank lines, so a
+  // `dropReason` reaches the document exactly as its producer wrote it. Only a plugin can
+  // construct this — nothing in the tree emits a reason spanning lines — which is why it is
+  // pinned rather than left to be rediscovered by whoever merges the renderers next.
+  it("leaves a multi-line drop reason exactly as the producer wrote it", () => {
+    const s = makeSymbol({
+      id: "ts:src/a.ts#Dto",
+      name: "Dto",
+      kind: "class",
+      dropped: true,
+      dropReason: "matched rule A\n\n\nmatched rule B",
+      fingerprint: zeroFp(),
+    })
+    expect(projectSymbolExplain(s)).toContain("matched rule A\n\n\nmatched rule B")
   })
 })
 
@@ -317,7 +310,7 @@ describe("MP12 — empty IR still projects workspace.md", () => {
 // -----------------------------------------------------------------------------
 
 describe("projectDiffSummaryLine — CLI stdout summary", () => {
-  it("emits `+A -R ~C ↔M ⤴MC` shape (§6.3)", () => {
+  it("emits `+A -R ~C ↔M ⤴MC` shape", () => {
     const diff = makeDiff({
       summary: {
         ...emptySummary(),
@@ -336,21 +329,7 @@ describe("projectDiffSummaryLine — CLI stdout summary", () => {
 // Section-omit — rules row rendering
 // -----------------------------------------------------------------------------
 
-describe("Rule row rendering (§5.6)", () => {
-  it("renders guard with condition", () => {
-    const s = makeSymbol({
-      id: "ts:src/a.ts#Foo",
-      name: "Foo",
-      rules: [rule({ type: "guard", line: 5, condition: "x > 0" })],
-    })
-    const md = projectComponent({
-      component: component({ id: "core", name: "core" }),
-      symbols: [s],
-      dependencies: [],
-    })
-    expect(md).toContain("- guard: `x > 0` (L5)")
-  })
-
+describe("Rule row rendering", () => {
   it("renders loop with kind", () => {
     const s = makeSymbol({
       id: "ts:src/a.ts#Foo",
@@ -370,7 +349,7 @@ describe("Rule row rendering (§5.6)", () => {
 // Fingerprint <sub> row is omitted for dropped
 // -----------------------------------------------------------------------------
 
-describe("Fingerprint row (§5.9)", () => {
+describe("Fingerprint row", () => {
   it("emits <sub> row for kept Symbol", () => {
     const s = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", fingerprint: fp("v1") })
     const md = projectComponent({

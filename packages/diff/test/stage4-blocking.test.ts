@@ -1,18 +1,18 @@
+import { fp, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { matchStageNameSignature } from "../src"
-import { fp, makeSymbol, sig } from "./fixtures"
 
 /**
- * §3.4.0's bucket key is `(kind, signatureNullness)`, which a bulk rename leaves in one piece:
+ * Stage 4's bucket key is `(kind, signatureNullness)`, which a bulk rename leaves in one piece:
  * every method of a renamed directory shares it, so stage 4 scored the whole cross-product and
- * took 64 s at 4000 symbols against §8.3's 2 s target.
+ * took 64 s at 4000 symbols against diff-algorithm.md's 2 s target.
  *
- * Within a bucket the bases are now indexed by the tokens of their member names, and a head
- * only sees the bases sharing one. That costs nothing in recall, and the reason is arithmetic:
- * `0.5 * member + 0.3 * signature + 0.2` has to reach 0.85, the lowest row of §3.4.3's table,
- * and the signature axis is worth at most 0.3 — so `member >= 0.7` for any pairing that
- * survives. A Jaccard that high is above zero, and a Jaccard above zero is a shared token.
+ * Within a bucket the bases are now indexed by the tokens of their member names, and a head only
+ * sees the bases sharing one. That costs nothing in recall, and the reason is arithmetic: `0.5 *
+ * member + 0.3 * signature + 0.2` has to reach 0.85, the lowest row of the threshold table, and the
+ * signature axis is worth at most 0.3 — so `member >= 0.7` for any pairing that survives. A Jaccard
+ * that high is above zero, and a Jaccard above zero is a shared token.
  *
  * These are the cases where the narrowing could lose a pairing if that argument were wrong.
  */
@@ -71,9 +71,9 @@ describe("a pairing that survives always shares a member token", () => {
   })
 
   it("refuses a renamed member, which the floor already refused", () => {
-    // §3.4.3's table asks 0.85 of a 3-token member name and the other two axes cap at 0.5, so
-    // the member axis must reach 0.7 — and changing one token of three gives 0.5. No renamed
-    // member reaches stage 4's bar, so the index narrowing to shared tokens cannot cost one.
+    // The threshold table asks 0.85 of a 3-token member name and the other two axes cap at 0.5, so
+    // the member axis must reach 0.7 — and changing one token of three gives 0.5. No renamed member
+    // reaches stage 4's bar, so the index narrowing to shared tokens cannot cost one.
     expect(
       pairs(
         [method("src/a.ts", "Repo.loadConfigFile", "a")],
@@ -158,7 +158,7 @@ describe("the postings walk finds what the fallback would have", () => {
     // Two heads walking the same postings lists in one pass, each reaching its base through
     // more than one token. The stamp is per bucket and advances per head, so a stale one would
     // make the second head skip a base the first had visited — a lost pairing, which is the
-    // direction that shows. Counting a base twice does not: §3.8 claims each side once.
+    // direction that shows. Counting a base twice does not: the sweep claims each side once.
     const base = [
       ...filler(8),
       method("src/a1.ts", "Repo.loadConfigFile", "a1"),
@@ -187,7 +187,7 @@ describe("the postings walk finds what the fallback would have", () => {
 })
 
 describe("the shortcuts answer as the rule they stand in for", () => {
-  // Reaching a base through several of its tokens, and answering §3.4.6's gate without running
+  // Reaching a base through several of its tokens, and answering the owner gate without running
   // it, are optimisations. Each has to give the answer the long way round gives, and these are
   // the shapes where a wrong shortcut is visible.
 
@@ -223,7 +223,7 @@ describe("the shortcuts answer as the rule they stand in for", () => {
   })
 
   it("refuses a first segment whose token is merely similar", () => {
-    // `repo` and `report` share a prefix and nothing else — §3.4.6 admits only inflection, and
+    // `repo` and `report` share a prefix and nothing else — the gate admits only inflection, and
     // the shortcut has to apply the same test rather than a looser one.
     expect(
       pairs(
@@ -261,7 +261,7 @@ describe("the fallback path answers a bulk rename the same way", () => {
   })
 
   it("still separates the ones whose owners are unrelated", () => {
-    // Same member token throughout, so the index offers every pair and §3.4.6's gate is what
+    // Same member token throughout, so the index offers every pair and the owner gate is what
     // refuses them. The index narrows; it does not decide.
     const base = [method("src/a.ts", "UserRepo.handleRequest", "a")]
     const head = [method("src/b.ts", "AdminRepo.handleRequest", "b")]

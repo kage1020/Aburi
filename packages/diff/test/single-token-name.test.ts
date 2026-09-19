@@ -1,21 +1,21 @@
+import { fp, makeIR, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageNameSignature } from "../src"
-import { fp, makeIR, makeSymbol, sig } from "./fixtures"
 
 /**
- * §3.4.3's threshold table demands a higher score the less the name has to say, and the row
- * for a one-token name reads 1.0. That was written as an impossible score, but it is a
- * reachable one: an identical name, an identical signature and an identical owner give
- * `0.5 + 0.3 + 0.2`, exactly 1 in IEEE 754. So the row admitted exactly the pairings it
- * meant to refuse — two unrelated top-level `main(x: string): void` joined into one
- * `moved+changed`, which is what `--fail-on moved` gates on.
+ * diff-algorithm.md's threshold table demands a higher score the less the name has to say, and the
+ * row for a one-token name reads 1.0. That was written as an impossible score, but it is a
+ * reachable one: an identical name, an identical signature and an identical owner give `0.5 + 0.3 +
+ * 0.2`, exactly 1 in IEEE 754. So the row admitted exactly the pairings it meant to refuse — two
+ * unrelated top-level `main(x: string): void` joined into one `moved+changed`, which is what
+ * `--fail-on moved` gates on.
  *
  * The demand the row wanted to make is off the top of the scale, so it is not a threshold.
  * It is an admissibility rule, alongside the signature-less one: a Symbol whose qualified name
  * carries a single distinct token is not paired in stage 4 at all.
  *
- * The count is over the **qualified name**, which is the whole of what §3.4 reads about a
+ * The count is over the **qualified name**, which is the whole of what stage 4 reads about a
  * Symbol's identity — not over the last segment alone, which is what the threshold table
  * reads. `UserRepo.get` has one token in its last segment and three in its name, and it goes
  * on pairing.
@@ -68,7 +68,7 @@ describe("a one-token name is not evidence of identity", () => {
   })
 
   it("does not pair a set of them in id order", () => {
-    // Three a side, every pairing scoring 1, so §3.8's id keys chose which unrelated `main`
+    // Three a side, every pairing scoring 1, so the sweep's id keys chose which unrelated `main`
     // moved into which. The pairing was arbitrary because the candidates were indistinguishable.
     const base = ["p", "q", "r"].map((f) => fn(`src/${f}.ts`, "main", `a${f}`))
     const head = ["x", "y", "z"].map((f) => fn(`src/${f}.ts`, "main", `b${f}`))
@@ -145,8 +145,8 @@ describe("a script with no ASCII case boundary is one token, whatever it says", 
   //
   // The rule refuses them anyway, and these pin that as known rather than discovered. What it
   // costs is a stage-4 move — a cross-file move git did not record, with an edited body.
-  // Measuring the name by something other than a bare token count is §3.4.1's to change, and
-  // these tests are what will fail when it does.
+  // Measuring the name by something other than a bare token count is nameSimilarity's to change,
+  // and these tests are what will fail when it does.
 
   it("counts a Japanese name as one token", () => {
     expect(
@@ -206,7 +206,7 @@ describe("the rule is scoped to a pairing, and to stage 4", () => {
     // The property belongs to a pairing. This was once read off the head alone, on the
     // arithmetic that one token against two or more is a Jaccard of at most 1/2 and so caps
     // the total at 0.75 whichever side is short. That held while the name axis read the whole
-    // qualified name. §3.4.6's gate moved the axis to the last segment, and a one-token base
+    // qualified name. The owner gate moved the axis to the last segment, and a one-token base
     // reaches the top of the scale again: `Main.main` is one deduped token, it clears the gate
     // against `Mains.main` by inflection, and their member names are identical.
     expect(

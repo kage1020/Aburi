@@ -45,7 +45,7 @@ export const ENTRIES: readonly SchemaEntry[] = [
     aliasOverrides: {
       SymbolId: brand("SymbolId"),
       ComponentId: brand("ComponentId"),
-      // §11: one array holds both endpoint kinds and the kind is recovered from the id
+      // ir-schema.md: one array holds both endpoint kinds and the kind is recovered from the id
       // shape. The union keeps a bare string out while admitting either id.
       DependencyEndpoint: "SymbolId | ComponentId",
       // A plugin-declared token rather than an entity id, but one with a grammar
@@ -233,7 +233,7 @@ async function generateContent(entry: SchemaEntry): Promise<string> {
   const schema = JSON.parse(raw) as Record<string, unknown>
   // json-schema-to-typescript prefers schema.title over the rootName argument when
   // computing the root type name. Force-rewrite title so the generated root type matches
-  // the public API contract documented in lang-plugin.md §4, ir-schema.md, etc.
+  // the public API contract documented in lang-plugin.md, ir-schema.md, etc.
   schema.title = entry.rootName
   const ts = await compile(schema, entry.rootName, JST_OPTIONS)
 

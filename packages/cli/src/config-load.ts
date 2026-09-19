@@ -7,14 +7,10 @@ import {
   type LoadedConfig,
   loadConfigFrom,
 } from "@aburi/config"
-import { CliError, errorMessage } from "./errors"
+import { CliError, errorMessage, internalFault, unplacedErrorCode } from "./errors"
 
 /**
  * Which config a run reads, decided once so the answer survives a change of directory.
- *
- * `@aburi/config`'s own type, re-exported rather than restated: one concept spelled two ways
- * across the package boundary would need a translation step, and that step is where the two
- * spellings drift.
  *
  * The type exists because a config path is only unambiguous while the working directory
  * stays put. `aburi diff` moves it — the base scan runs with its cwd inside a temporary
@@ -28,8 +24,8 @@ export type PinnedConfig = ConfigSource
  * Decide which config a run reads, without reading it.
  *
  * Discovery and the `--config` / `ABURI_CONFIG` override both anchor to the given `cwd`,
- * per `cli-spec.md §13 Config Resolution Order`. A config in that directory therefore wins
- * over one in an ancestor.
+ * per the Config Resolution Order list in `cli-spec.md`. A config in that directory
+ * therefore wins over one in an ancestor.
  *
  * The marker-detected workspace root plays no part here. It is the base for Symbol id
  * paths, for the config's own relative globs (`ignore`, `components[].roots`) and for
@@ -37,8 +33,9 @@ export type PinnedConfig = ConfigSource
  * package-local config can name paths that resolve against a directory above it.
  *
  * Separated from the read so that `aburi diff` can pin the head's answer before it moves the
- * working directory (cli-spec.md §6.4 step 3). Both halves of a diff then read one file, and
- * a commit touching only `aburi.json` stops reading as a change to every Symbol in the
+ * working directory — step 3 of the ref-form Behavior `cli-spec.md` gives `aburi diff`, which
+ * hands the base scan the head's config. Both halves of a diff then read one file, and a
+ * commit touching only `aburi.json` stops reading as a change to every Symbol in the
  * workspace.
  */
 export async function pinConfig(
@@ -68,6 +65,7 @@ export async function pinConfig(
 export async function loadPinnedConfig(pinned: PinnedConfig): Promise<LoadedConfig> {
   if (pinned.kind === "file" && !isAbsolute(pinned.path)) {
     throw internalFault(
+      CONFIG_PHASE,
       `pinned config path ${JSON.stringify(pinned.path)} is not absolute, so which file it ` +
         `names depends on the working directory`,
       undefined,
@@ -83,11 +81,6 @@ export async function loadPinnedConfig(pinned: PinnedConfig): Promise<LoadedConf
 /**
  * Decide which config to read, anchored to `cwd`, and read it — the two halves composed, for
  * a caller that reads a config once and never moves.
- *
- * The composition is the point rather than the convenience: it is what lets `runScan` write
- * the precedence between a caller-decided config and one still to decide as a single `??`,
- * instead of a branch whose two arms could drift into two answers to "which file is the
- * config".
  */
 export async function resolveConfig(
   cwd: string,
@@ -97,27 +90,25 @@ export async function resolveConfig(
 }
 
 /**
- * Map a failure of the config load onto the CLI exit-code table (cli-spec.md §9).
+ * Map a failure of the config load onto the CLI exit-code table (cli-spec.md).
  *
  * Three different people are at fault on this path and only one of them is the reader.
  *
  * A `ConfigError` naming the file's *content* is theirs, and exit 2 sends them to edit it. So
  * is `config-not-found` — a `--config` path that names nothing is a mistyped argument, which
- * §9 spends the same code on. `config-read-failed` is neither: the file is there and the
- * filesystem refused it, which §9 spends exit 1 on, and no edit to `aburi.json` changes a
- * permission or a mount. All three keep the `Failed to load Aburi config:` prefix, because it
- * names the phase that failed rather than who is answerable for it.
+ * the exit-code table spends the same code on. `config-read-failed` is neither: the file is
+ * there and the filesystem refused it, which the exit-code table spends exit 1 on, and no edit
+ * to `aburi.json` changes a permission or a mount. All three keep the
+ * `Failed to load Aburi config:` prefix, because it names the phase that failed rather than
+ * who is answerable for it.
  *
- * Anything that is not a `ConfigError` is Aburi's own, and the reader is told so. It is not
- * hypothetical: `formatAjvErrors` throws a bare `Error` when ajv reports failure with an
- * empty `errors[]`, and says in its own docblock that this means ajv is in an unexpected
- * state rather than the config being wrong. It arrived as `Failed to load Aburi config: ajv
- * invariant violation…` on exit 2 — a sentence about the reader's file, naming something
- * they cannot find in it. This is the misdirection `classifyDiffError` avoids one file away,
- * for the same reason and in the same words.
+ * Anything that is not a `ConfigError` is Aburi's own, and the reader is told so: `formatAjvErrors`
+ * throws a bare `Error` when ajv reports failure with an empty `errors[]`, and reporting that
+ * on exit 2 sends the reader through their file for something that is not in it.
  */
 export function classifyConfigError(error: unknown): CliError {
-  if (!(error instanceof ConfigError)) return internalFault(errorMessage(error), error)
+  if (!(error instanceof ConfigError))
+    return internalFault(CONFIG_PHASE, errorMessage(error), error)
   const message = `Failed to load Aburi config: ${error.message}`
   switch (error.code) {
     case "config-not-found":
@@ -129,38 +120,12 @@ export function classifyConfigError(error: unknown): CliError {
       return new CliError(message, "config-error", { cause: error })
     case "config-read-failed":
       return new CliError(message, "runtime-error", { cause: error })
-    default: {
-      // A new `ConfigErrorCode` is a type error here rather than a code that silently takes
-      // an arm — and at runtime it degrades instead of throwing, because the compile-time
-      // check protects this repo's build and not an installed tree: `@aburi/config` and
-      // `@aburi/cli` version independently, so a compiled switch can meet a code it never
-      // saw. Throwing there would discard the one thing the reader needs, which is what the
-      // config error itself said.
-      const unplaced: never = error.code
-      return internalFault(
-        `${error.message} (config error code ${JSON.stringify(unplaced)} has no exit code)`,
-        error,
-      )
-    }
+    default:
+      return unplacedErrorCode(CONFIG_PHASE, "config", error, error.code)
   }
 }
 
-/**
- * The report for a failure that is Aburi's own rather than the reader's.
- *
- * The instruction sits on its own line because nothing that reaches here ends in punctuation:
- * a thrown message run together with the next sentence is what a reader has to unpick, and an
- * empty one leaves a doubled space where the sentence should start.
- */
-function internalFault(detail: string, cause: unknown): CliError {
-  return new CliError(
-    `Internal error while loading the Aburi config: ${detail}\n` +
-      "This is a bug in Aburi, not in your configuration — please report it at " +
-      "https://github.com/kage1020/Aburi/issues.",
-    "runtime-error",
-    { cause },
-  )
-}
+const CONFIG_PHASE = " while loading the Aburi config"
 
 /**
  * `config.output.dir`, or `undefined` when nothing sets one — for the two commands that need

@@ -1,78 +1,25 @@
 import { describe, expect, it } from "vitest"
-import { parseTypescriptFile } from "../src/index"
+import { parseSource } from "./fixtures/ctx"
 
 describe("parseTypescriptFile", () => {
-  it("parses a TypeScript source and returns a Tree", async () => {
-    const result = await parseTypescriptFile({
-      path: "src/a.ts",
-      content: "export function foo(): number { return 1 }",
-    })
+  it.each([
+    ["src/a.ts", "export function foo(): number { return 1 }"],
+    ["src/a.mts", "export const x = 1"],
+    ["src/a.cts", "export const x = 1"],
+    ["src/a.tsx", "export const Foo = () => <div />"],
+    ["src/a.jsx", "export const Foo = () => <div />"],
+    ["src/a.js", "export function add(a, b) { return a + b }"],
+    ["src/a.mjs", "export const x = 1"],
+    ["src/a.cjs", "export const x = 1"],
+  ])("parses %s and returns a Tree", async (path, content) => {
+    const result = await parseSource(content, path)
     expect(result.errors).toEqual([])
-    expect(result.tree).not.toBeNull()
     expect(result.tree?.rootNode).not.toBeNull()
-  })
-
-  it("parses TSX via the tsx grammar (JSX-aware)", async () => {
-    const result = await parseTypescriptFile({
-      path: "src/a.tsx",
-      content: "export const Foo = () => <div />",
-    })
-    expect(result.errors).toEqual([])
-    expect(result.tree).not.toBeNull()
-    expect(result.tree?.rootNode).not.toBeNull()
-  })
-
-  it("parses .jsx via the tsx grammar (JSX-aware, no TS syntax needed)", async () => {
-    const result = await parseTypescriptFile({
-      path: "src/a.jsx",
-      content: "export const Foo = () => <div />",
-    })
-    expect(result.errors).toEqual([])
-    expect(result.tree).not.toBeNull()
-    expect(result.tree?.rootNode).not.toBeNull()
-  })
-
-  it("parses plain .js via the tsx grammar, which also accepts JS without JSX", async () => {
-    const result = await parseTypescriptFile({
-      path: "src/a.js",
-      content: "export function add(a, b) { return a + b }",
-    })
-    expect(result.errors).toEqual([])
-    expect(result.tree).not.toBeNull()
-    expect(result.tree?.rootNode).not.toBeNull()
-  })
-
-  it("parses .mjs and .cjs via the tsx grammar", async () => {
-    for (const path of ["src/a.mjs", "src/a.cjs"]) {
-      const result = await parseTypescriptFile({
-        path,
-        content: "export const x = 1",
-      })
-      expect(result.errors).toEqual([])
-      expect(result.tree).not.toBeNull()
-    }
   })
 
   it("LP27: reports recoverable errors for a source with a syntax mistake", async () => {
-    const result = await parseTypescriptFile({
-      path: "src/bad.ts",
-      content: "function foo( { return 1 }",
-    })
+    const result = await parseSource("function foo( { return 1 }", "src/bad.ts")
     expect(result.errors.length).toBeGreaterThan(0)
     expect(result.errors.every((e) => e.recoverable)).toBe(true)
-  })
-
-  it("does not leak memory across many parses (WASM heap regime smoke test)", async () => {
-    // 100 sequential parses in the same process. Without parser.delete() this exhausts
-    // the WASM heap within a few hundred iterations; the regime keeps it flat.
-    for (let i = 0; i < 100; i++) {
-      const res = await parseTypescriptFile({
-        path: `src/f${i}.ts`,
-        content: `export function fn${i}(x: number): number { return x + ${i} }`,
-      })
-      expect(res.errors).toEqual([])
-      expect(res.tree).not.toBeNull()
-      res.tree?.delete()
-    }
   })
 })

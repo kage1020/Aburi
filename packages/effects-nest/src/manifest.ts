@@ -1,32 +1,11 @@
-import type { EffectsManifest } from "@aburi/types"
+import { defineEffectsManifest } from "@aburi/plugin-registry/plugin-input"
 import { EFFECTS_NEST_DERIVED_BY_PREFIX, EFFECTS_NEST_PLUGIN_NAME } from "./constants"
 
 /**
- * Manifest for `@aburi/effects-nest`. `as const satisfies EffectsManifest` keeps every
- * literal narrow so the registry sees the exact shape.
- *
- * The plugin returns the core-owned `event.publish` effect id from `classify()`; per
- * extension-vocab.md §5.1 core vocab lives in the reserved namespace and MUST NOT
- * appear in a plugin's `provides.effects`. The plugin's own `x-nest:*` namespace is
- * reserved by the derived xPrefix but currently claims no bindings. `derivedByPrefixes`
- * shares its literal with the classifier's tag builder so both stay in lockstep across
- * edits.
- *
- * `frameworks` / `extKinds` are empty by contract (an effects plugin cannot claim
- * either); the NestJS framework recognition sits in `@aburi/framework-nestjs`.
+ * See `defineEffectsManifest` for why `provides` claims no vocabulary of its own; NestJS
+ * framework recognition lives in `@aburi/framework-nestjs`.
  */
-export const effectsNestManifest = {
-  $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-  name: EFFECTS_NEST_PLUGIN_NAME,
-  version: "0.0.0",
-  type: "effects",
-  engines: { aburi: "*" },
-  provides: {
-    effects: [],
-    effectPrefixes: [],
-    extKinds: [],
-    extKindPrefixes: [],
-    derivedByPrefixes: [EFFECTS_NEST_DERIVED_BY_PREFIX],
-    frameworks: [],
-  },
-} as const satisfies EffectsManifest
+export const effectsNestManifest = defineEffectsManifest(
+  EFFECTS_NEST_PLUGIN_NAME,
+  EFFECTS_NEST_DERIVED_BY_PREFIX,
+)

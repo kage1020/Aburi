@@ -20,7 +20,7 @@ import { TYPESCRIPT_LANGUAGE_ID } from "./qname"
 import { walkBody } from "./walk-body"
 
 /**
- * Language plugin surface described in lang-plugin.md §4.1. Every method delegates to a
+ * Language plugin surface described in lang-plugin.md. Every method delegates to a
  * focused sub-module so the assembly here stays a small binding layer rather than a
  * dumping ground for parser state.
  */
@@ -58,8 +58,8 @@ class LangTypescriptPlugin implements LanguagePlugin<Tree, Node> {
   }
 
   releaseTree(tree: Tree): void {
-    // The WASM half of the memory convention in lang-plugin.md §8.1. `parseFile` frees the
-    // parser it created, and the core frees the tree here once its last reader is done —
+    // The WASM half of the memory convention lang-plugin.md describes: `parseFile` frees
+    // the parser it created, and the core frees the tree here once its last reader is done —
     // neither handle is anything the JavaScript garbage collector can reach.
     tree.delete()
   }

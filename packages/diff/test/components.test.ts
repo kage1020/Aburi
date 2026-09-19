@@ -1,14 +1,16 @@
 import { makeLanguageId } from "@aburi/core"
-import type { Component } from "@aburi/types"
+import { component, componentId, dependency } from "@aburi/test-support"
+import type { Component, ComponentDiff } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { type DependencySideView, DiffError, diffComponents, diffDependencies } from "../src"
-import { component, componentId, dependency } from "./fixtures"
 
 /**
  * Side views for two documents that skipped nothing. Every one of these tests is about
  * identity comparison, not about loss, so the honest input is a pair that has no skip list to
  * offer — which `diffDependencies` requires a caller to spell rather than default into.
  */
+type ComponentDelta = ComponentDiff["changed"][number]["delta"]
+
 const NO_LOSSES: { base: DependencySideView; head: DependencySideView } = {
   base: { symbolFiles: new Map(), lostFiles: new Map() },
   head: { symbolFiles: new Map(), lostFiles: new Map() },
@@ -30,58 +32,36 @@ describe("diffComponents (I5)", () => {
     expect(result.removed[0]?.id).toBe("billing")
   })
 
-  it("sets rootsChanged=true when roots reshuffle", () => {
-    const before = component({ id: "billing", name: "billing", roots: ["apps/billing"] })
-    const after = component({
-      id: "billing",
-      name: "billing",
-      roots: ["apps/billing", "packages/billing-domain"],
-    })
-    const result = diffComponents([before], [after])
+  it.each<[string, Partial<Component>, Partial<Component>, keyof ComponentDelta]>([
+    [
+      "roots",
+      { roots: ["apps/billing"] },
+      { roots: ["apps/billing", "packages/billing-domain"] },
+      "rootsChanged",
+    ],
+    [
+      "publicApi",
+      { publicApi: ["apps/billing/routes/**"] },
+      { publicApi: ["apps/billing/routes/**", "apps/billing/api/**"] },
+      "publicApiChanged",
+    ],
+    ["frameworks", { frameworks: [] }, { frameworks: ["nestjs"] }, "frameworksChanged"],
+  ])("flags only %s when that field moves", (_, before, after, flag) => {
+    const result = diffComponents(
+      [component({ id: "billing", name: "billing", ...before })],
+      [component({ id: "billing", name: "billing", ...after })],
+    )
     expect(result.changed).toHaveLength(1)
     expect(result.changed[0]?.delta).toEqual({
-      rootsChanged: true,
+      rootsChanged: false,
       publicApiChanged: false,
       frameworksChanged: false,
+      [flag]: true,
     })
-  })
-
-  it("sets publicApiChanged=true when publicApi globs differ", () => {
-    const before = component({
-      id: "billing",
-      name: "billing",
-      publicApi: ["apps/billing/routes/**"],
-    })
-    const after = component({
-      id: "billing",
-      name: "billing",
-      publicApi: ["apps/billing/routes/**", "apps/billing/api/**"],
-    })
-    const result = diffComponents([before], [after])
-    expect(result.changed[0]?.delta.publicApiChanged).toBe(true)
-    expect(result.changed[0]?.delta.rootsChanged).toBe(false)
-  })
-
-  it("sets frameworksChanged=true when framework hint list differs", () => {
-    const before = component({ id: "billing", name: "billing", frameworks: [] })
-    const after = component({
-      id: "billing",
-      name: "billing",
-      frameworks: ["nestjs"],
-    })
-    const result = diffComponents([before], [after])
-    expect(result.changed[0]?.delta.frameworksChanged).toBe(true)
-  })
-
-  it("does not emit changed[] entries when the whole record is stable", () => {
-    const before = component({ id: "billing", name: "billing", frameworks: [] })
-    // Same id, same everything → not in changed[].
-    const result = diffComponents([before], [before])
-    expect(result.changed).toEqual([])
   })
 
   // Change detection compares the whole Component; the three booleans summarise three axes and
-  // are not the definition of "changed" (diff-algorithm.md §6.1). A field outside them produced
+  // are not the definition of "changed" (diff-algorithm.md). A field outside them produced
   // no entry at all, so the projection had no before/after pair to render.
   it("reports a display-name change with all three delta booleans false", () => {
     const before = component({ id: "billing", name: "Billing" })
@@ -134,7 +114,7 @@ describe("diffComponents (I5)", () => {
     expect(result.changed[0]?.delta.rootsChanged).toBe(true)
   })
 
-  // ir-schema.md §1.1: an absent Class A key reads as `null` and an empty Class B list reads as
+  // ir-schema.md: an absent Class A key reads as `null` and an empty Class B list reads as
   // absent, so neither respelling is a change. A whole-record comparison has to be told this —
   // it is the one thing a byte comparison would get wrong.
   it("does not report a change when a document respells absence", () => {
@@ -177,7 +157,7 @@ describe("diffComponents (I5)", () => {
   })
 
   // The property that justifies reaching for `@aburi/core`'s canonical serializer rather than
-  // sorting keys by hand: ir-schema.md §1.2 puts every IR string in NFC, and a document that
+  // sorting keys by hand: ir-schema.md puts every IR string in NFC, and a document that
   // arrives in NFD would otherwise report an untouched component as changed on every pull
   // request. Swap the serializer for `JSON.stringify` over sorted keys and only this fails.
   it("does not report a change when a string arrives in a different Unicode form", () => {

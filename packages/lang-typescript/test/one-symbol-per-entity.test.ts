@@ -1,14 +1,6 @@
-import type { BodyExtraction, WalkContext } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import {
-  classifySymbolDropHint,
-  extractSymbols,
-  normalizeAst,
-  parseTypescriptFile,
-  walkBody,
-} from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { classifySymbolDropHint, normalizeAst } from "../src/index"
+import { idsOf, makeExtractionCtx, symbolOf, symbolsOf, walkOf } from "./fixtures/ctx"
 
 /**
  * Three ordinary TypeScript constructs declare one entity twice — an accessor pair, an
@@ -21,30 +13,6 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * now. The first declaration claims the Symbol and every scalar on it; the rest contribute
  * their rationale and their body.
  */
-
-async function symbolsOf(source: string) {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source))
-}
-
-async function idsOf(source: string): Promise<string[]> {
-  return (await symbolsOf(source)).map((s) => s.id)
-}
-
-async function symbolNamed(source: string, id: string) {
-  const found = (await symbolsOf(source)).find((s) => s.id === id)
-  if (found === undefined) throw new Error(`no Symbol ${id} in fixture`)
-  return found
-}
-
-async function walkOf(source: string, id: string): Promise<BodyExtraction> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.id === id)
-  if (target === undefined) throw new Error(`no Symbol ${id} in fixture`)
-  const walkCtx: WalkContext<Node> = { ...ctx, symbol: target }
-  return walkBody(target, walkCtx)
-}
 
 const SETTER_FIRST_DECORATED = [
   "export class A {",
@@ -96,7 +64,7 @@ describe("an overload declaration declares nothing the implementation does not",
     // The overload sits first in source order, so a rule that kept the first declaration
     // would report the Symbol as bodyless and give it the overload's parameter types.
     const source = "export class Repo { find(id: string): number; find(id: any) { return 1 } }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#Repo.find")
+    const symbol = await symbolOf(source, "ts:src/a.ts#Repo.find")
 
     expect(symbol.kind).toBe("method")
     expect(symbol.signature?.inputs).toEqual([{ name: "id", type: "any" }])
@@ -105,7 +73,7 @@ describe("an overload declaration declares nothing the implementation does not",
 
   it("keeps the constructor kind on a constructor's implementation", async () => {
     const source = "export class K { constructor(a: string); constructor(a: any) {} }"
-    expect((await symbolNamed(source, "ts:src/a.ts#K.constructor")).kind).toBe("constructor")
+    expect((await symbolOf(source, "ts:src/a.ts#K.constructor")).kind).toBe("constructor")
   })
 
   it("emits no member for a declaration with no implementation", async () => {
@@ -129,7 +97,7 @@ describe("a getter and a setter declare one member", () => {
   })
 
   it("records that it was declared as an accessor, and that two declarations made it", async () => {
-    const symbol = await symbolNamed(PAIR, "ts:src/a.ts#Box.value")
+    const symbol = await symbolOf(PAIR, "ts:src/a.ts#Box.value")
     expect(symbol.derivedBy).toContain("accessor-declaration")
     expect(symbol.derivedBy).toContain("declaration-merged")
   })
@@ -137,7 +105,7 @@ describe("a getter and a setter declare one member", () => {
   it("takes the signature from the getter", async () => {
     // A property's type is what reading it answers. Taking the setter's signature would
     // report the member as `(n) => void`, which is the type of writing it.
-    const symbol = await symbolNamed(PAIR, "ts:src/a.ts#Box.value")
+    const symbol = await symbolOf(PAIR, "ts:src/a.ts#Box.value")
     expect(symbol.signature?.inputs).toEqual([])
   })
 
@@ -153,7 +121,7 @@ describe("a getter and a setter declare one member", () => {
       "  get value() { return read() }",
       "}",
     ].join("\n")
-    const symbol = await symbolNamed(source, "ts:src/a.ts#Box.value")
+    const symbol = await symbolOf(source, "ts:src/a.ts#Box.value")
 
     expect(symbol.signature?.inputs).toEqual([])
     expect(symbol.source.startLine).toBe(3)
@@ -165,7 +133,7 @@ describe("a getter and a setter declare one member", () => {
     ["a getter alone", "export class G { get v() { return 1 } }"],
     ["a setter alone", "export class G { set v(n) {} }"],
   ])("emits one Symbol for %s, with nothing merged into it", async (_label, source) => {
-    const symbol = await symbolNamed(source, "ts:src/a.ts#G.v")
+    const symbol = await symbolOf(source, "ts:src/a.ts#G.v")
     expect(symbol.derivedBy).toContain("accessor-declaration")
     expect(symbol.derivedBy).not.toContain("declaration-merged")
     expect("mergedDeclarations" in symbol).toBe(false)
@@ -185,11 +153,11 @@ describe("a getter and a setter declare one member", () => {
 
   it("keeps a private-name pair private", async () => {
     const source = "export class P { get #v() { return 1 } set #v(n) {} }"
-    expect((await symbolNamed(source, "ts:src/a.ts#P.v")).visibility).toBe("private")
+    expect((await symbolOf(source, "ts:src/a.ts#P.v")).visibility).toBe("private")
   })
 
   it("does not call a plain method an accessor", async () => {
-    const symbol = await symbolNamed("export class A { m() {} }", "ts:src/a.ts#A.m")
+    const symbol = await symbolOf("export class A { m() {} }", "ts:src/a.ts#A.m")
     expect(symbol.derivedBy).not.toContain("accessor-declaration")
   })
 
@@ -206,7 +174,7 @@ describe("a getter and a setter declare one member", () => {
     // The getter leads the pair wherever it is written, so a fold that visited the lead first
     // would answer `[Memo, Validate]` here \u2014 descending, against `lang-plugin.md` LP15. Scalars
     // come from the lead; lists are joined by walking the declarations in source order.
-    const symbol = await symbolNamed(SETTER_FIRST_DECORATED, "ts:src/a.ts#A.v")
+    const symbol = await symbolOf(SETTER_FIRST_DECORATED, "ts:src/a.ts#A.v")
 
     expect(symbol.decorators.map((d) => d.name)).toEqual(["Validate", "Memo"])
     expect(symbol.signature?.inputs).toEqual([])
@@ -219,7 +187,7 @@ describe("a getter and a setter declare one member", () => {
       "  @Validate() set v(n) {}",
       "}",
     ].join("\n")
-    const symbol = await symbolNamed(source, "ts:src/a.ts#A.v")
+    const symbol = await symbolOf(source, "ts:src/a.ts#A.v")
 
     expect(symbol.decorators.map((d) => d.name)).toEqual(["Memo", "Validate"])
   })
@@ -230,7 +198,7 @@ describe("a getter and a setter declare one member", () => {
     // this change; what changed is the consequence — a duplicate id used to end the run, and
     // now the two fold. The IR says one member where the source has two.
     const source = "export class Q { v() { a() } #v() { b() } }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#Q.v")
+    const symbol = await symbolOf(source, "ts:src/a.ts#Q.v")
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#Q", "ts:src/a.ts#Q.v"])
     expect(symbol.derivedBy).toContain("declaration-merged")
@@ -244,7 +212,7 @@ describe("a getter and a setter declare one member", () => {
     // the survivor reports itself private. That is a property of the fold being wrong here
     // rather than of the rule, so it is pinned where the fold is instead of smoothed over.
     const source = "export class Q { #v(a: number) {} v(c: string) {} }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#Q.v")
+    const symbol = await symbolOf(source, "ts:src/a.ts#Q.v")
 
     expect(symbol.visibility).toBe("private")
     expect(symbol.signature?.inputs).toEqual([{ name: "a", type: "number" }])
@@ -257,7 +225,7 @@ describe("a getter and a setter declare one member", () => {
 
   it("does not call a pair empty-bodied when only the getter is empty", async () => {
     const source = "export class A { get v() {} set v(n) { audit(n) } }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#A.v")
+    const symbol = await symbolOf(source, "ts:src/a.ts#A.v")
     expect(classifySymbolDropHint(symbol, makeExtractionCtx("src/a.ts", source))).toBeNull()
   })
 })
@@ -299,7 +267,7 @@ describe("merged declarations are one Symbol", () => {
     // TypeScript requires the class or function to precede the namespace it merges with, so
     // source order already names which declaration carries the value.
     const source = "export class C {}\nexport namespace C { export const a = 1 }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#C")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C")
 
     expect(symbol.kind).toBe("class")
     expect(symbol.source.startLine).toBe(1)
@@ -307,7 +275,7 @@ describe("merged declarations are one Symbol", () => {
 
   it("keeps every declaration's rationale on the Symbol they made", async () => {
     const source = "export class C {}\nexport namespace C { export const a = 1 }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#C")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C")
 
     expect(symbol.derivedBy).toContain("export-keyword")
     expect(symbol.derivedBy).toContain("namespace-declaration")
@@ -320,7 +288,7 @@ describe("merged declarations are one Symbol", () => {
     // about the source that is not there. Every kind emits the token now (LP6b), which is what
     // makes a reopened `interface` reach the fold with it on both declarations.
     const source = "export interface I { a: 1 }\nexport interface I { b: 2 }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#I")
+    const symbol = await symbolOf(source, "ts:src/a.ts#I")
 
     expect(symbol.visibility).toBe("public")
     expect(symbol.derivedBy.filter((token) => token === "export-keyword")).toHaveLength(1)
@@ -329,8 +297,9 @@ describe("merged declarations are one Symbol", () => {
   it("keeps the leading declaration's visibility when a merge disagrees about the export", async () => {
     // TS2395, and the grammar accepts it — so the two answers a reader has for "was this
     // exported?" come apart here: `visibility` is the lead's scalar and `derivedBy` is the
-    // union, which is the fold's rule for every list it joins (§4.3.1). Legal source cannot
-    // reach this, which is why the rule stands rather than growing an exception for one scalar:
+    // union, which is the fold's rule for every list it joins (`lang-plugin.md`). Legal source
+    // cannot reach this, which is why the rule stands rather than growing an exception for one
+    // scalar:
     // deriving `visibility` from the union instead would change the answer for every merged
     // Symbol, including the cross-kind merges that have carried a leading declaration's
     // visibility since before this token existed.
@@ -338,7 +307,7 @@ describe("merged declarations are one Symbol", () => {
     // Reachable for an interface-interface merge only since LP6b: before it the four
     // type-side kinds emitted no token for the union to carry.
     const source = "interface I { a: 1 }\nexport interface I { b: 2 }"
-    const symbol = await symbolNamed(source, "ts:src/a.ts#I")
+    const symbol = await symbolOf(source, "ts:src/a.ts#I")
 
     expect(symbol.visibility).toBe("internal")
     expect(symbol.derivedBy).toContain("export-keyword")
@@ -351,18 +320,18 @@ describe("merged declarations are one Symbol", () => {
     // decorators before it drops anything of kind `interface`, so losing one is the
     // difference between a controller in the IR and a Symbol dropped as a data model.
     const source = ["export interface P {}", "@Controller()", "export class P {}"].join("\n")
-    const symbol = await symbolNamed(source, "ts:src/a.ts#P")
+    const symbol = await symbolOf(source, "ts:src/a.ts#P")
 
     expect(symbol.kind).toBe("interface")
     expect(symbol.decorators.map((d) => d.name)).toEqual(["Controller"])
   })
 
   it("normalizes both interface bodies into one fingerprint input", async () => {
-    const merged = await symbolNamed(
+    const merged = await symbolOf(
       "export interface I { a: string }\nexport interface I { b: string }",
       "ts:src/a.ts#I",
     )
-    const onlyFirst = await symbolNamed("export interface I { a: string }", "ts:src/a.ts#I")
+    const onlyFirst = await symbolOf("export interface I { a: string }", "ts:src/a.ts#I")
 
     expect(normalizeAst(merged)).toContain('"b"')
     expect(normalizeAst(merged)).not.toBe(normalizeAst(onlyFirst))
@@ -372,9 +341,9 @@ describe("merged declarations are one Symbol", () => {
     // An enum candidate has no `bodyNode` — its members are not Symbols — so a merged
     // declaration reaches the fingerprint only through its `fullNode`. Carrying bodies alone
     // made adding, editing or deleting the second `enum E {}` change nothing at all.
-    const one = await symbolNamed("export enum E { A }", "ts:src/a.ts#E")
-    const two = await symbolNamed(TWO_ENUMS, "ts:src/a.ts#E")
-    const other = await symbolNamed(TWO_ENUMS.replace("B", "ZZZ"), "ts:src/a.ts#E")
+    const one = await symbolOf("export enum E { A }", "ts:src/a.ts#E")
+    const two = await symbolOf(TWO_ENUMS, "ts:src/a.ts#E")
+    const other = await symbolOf(TWO_ENUMS.replace("B", "ZZZ"), "ts:src/a.ts#E")
 
     expect(normalizeAst(two)).not.toBe(normalizeAst(one))
     expect(normalizeAst(two)).not.toBe(normalizeAst(other))
@@ -385,7 +354,7 @@ describe("merged declarations are one Symbol", () => {
     // `#C.m` — only `static` gets `::`. The fold is what a duplicate id used to end the run
     // over; it is still one Symbol where the source has two, which is why the calls it
     // reports reach past its own range.
-    const symbol = await symbolNamed(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C.m")
+    const symbol = await symbolOf(CLASS_AND_NAMESPACE_MEMBER, "ts:src/a.ts#C.m")
 
     expect(await idsOf(CLASS_AND_NAMESPACE_MEMBER)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.m"])
     expect(symbol.kind).toBe("method")
@@ -492,7 +461,7 @@ describe("a dotted namespace declares each of its segments", () => {
 
   it("gives two dotted declarations under one head a single head Symbol", async () => {
     const source = TWO_DOTTED
-    const head = await symbolNamed(source, "ts:src/a.ts#A")
+    const head = await symbolOf(source, "ts:src/a.ts#A")
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#A", "ts:src/a.ts#A.B", "ts:src/a.ts#A.C"])
     expect(head.derivedBy).toContain("declaration-merged")

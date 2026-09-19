@@ -1,3 +1,4 @@
+import { call, fp, makeSymbol, rule } from "@aburi/test-support"
 import type {
   Symbol as IRSymbol,
   SymbolChange,
@@ -8,13 +9,13 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { call, emptySummary, fp, makeDiff, makeSymbol, rule } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
- * §6.4 — `maxBytes`. The document GitHub takes as a PR comment body has a 65536-byte
- * ceiling, and `projectDiff` used to emit whatever the diff was worth: roughly 210 bytes
- * per added symbol, so a pull request adding ~310 symbols produced a body the API rejected
- * with a 422 and nothing was posted at all.
+ * `maxBytes` (markdown-projection.md). The document GitHub takes as a PR comment body has a
+ * 65536-byte ceiling, and `projectDiff` used to emit whatever the diff was worth: roughly
+ * 210 bytes per added symbol, so a pull request adding ~310 symbols produced a body the API
+ * rejected with a 422 and nothing was posted at all.
  */
 
 const GITHUB_LIMIT = 65536
@@ -112,7 +113,7 @@ function crowdedDiff(addedCount: number): ReturnType<typeof makeDiff> {
   })
 }
 
-describe("projectDiff — maxBytes (§6.4)", () => {
+describe("projectDiff — maxBytes", () => {
   it("emits the whole document when no budget is given", () => {
     const md = projectDiff(crowdedDiff(400))
     expect(bytes(md)).toBeGreaterThan(GITHUB_LIMIT)

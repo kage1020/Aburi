@@ -1,4 +1,5 @@
 import type { Decorator, Symbol as IRSymbol, Signature } from "@aburi/types"
+import { compareCodeUnit } from "../order"
 import { hashCanonicalObject } from "./hash"
 import { lastQnameSegment } from "./short-name"
 import { normalizeFingerprintString } from "./string"
@@ -25,19 +26,12 @@ interface ApiInput {
 }
 
 /**
- * Compute the api axis for a single Symbol.
- *
- * The api axis captures the externally observable contract:
- *   - declaration facets (kind / extKind / visibility / async / generator)
- *   - shortName only — a class rename does not perturb every method's api
- *   - decorator identities and arguments (via canonicalized raw form and boundary flag)
- *   - the type-only shape of the signature (input types without their bound names, output
- *     and throws types, type parameters)
- *
- * The axis intentionally excludes:
+ * Compute the api axis for a single Symbol: the externally observable contract, which is
+ * every `ApiInput` field above. The axis intentionally excludes:
  *   - Symbol.language (the id already carries `<lang>:` and the language cannot change for
  *     a given id in practice)
- *   - Symbol.name's class-scope prefix (see shortName above)
+ *   - Symbol.name's class-scope prefix (only the short name, so a class rename does not
+ *     perturb every method's api)
  *   - the parameter names of the signature (they are not part of the caller-visible contract
  *     in most languages we care about)
  *   - anything from rules / effects / calls (those are the logic axis's job)
@@ -88,9 +82,7 @@ function canonicalizeSignature(signature: Signature | null): ApiInput["signature
     outputs: signature.outputs.map(normalizeFingerprintString),
     // throws are compared as a set — swapping their order in source should not register
     // as an api change. Sort by code unit for determinism.
-    throws: [...signature.throws]
-      .map(normalizeFingerprintString)
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+    throws: [...signature.throws].map(normalizeFingerprintString).sort(compareCodeUnit),
     typeParameters: signature.typeParameters.map(normalizeFingerprintString),
   }
 }

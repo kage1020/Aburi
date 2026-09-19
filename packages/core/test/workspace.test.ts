@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -76,6 +76,89 @@ describe("detectWorkspaceRoot", () => {
       await writeFile(join(tmp, marker), "{}", "utf8")
       expect(await detectWorkspaceRoot({ cwd: tmp })).toBe(tmp)
     }
+  })
+
+  // The walk climbs to the filesystem root, so it reads manifests that belong to nobody in
+  // this workspace. The five cases below are the whole rule: a read failure at or below the
+  // root is the workspace's own and is raised, one above it is not and is ignored, and
+  // neither may displace "workspace-root-not-found" when there is no root to be inside of.
+  it("raises a malformed manifest below the workspace root", async () => {
+    await mkdir(join(tmp, ".git"), { recursive: true })
+    const pkg = join(tmp, "apps", "billing")
+    await mkdir(pkg, { recursive: true })
+    await writeFile(join(pkg, "package.json"), "{ not json", "utf8")
+
+    let caught: unknown
+    try {
+      await detectWorkspaceRoot({ cwd: pkg })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("workspace-manifest-malformed")
+  })
+
+  it("raises a malformed manifest at the workspace root itself", async () => {
+    // The root is a root because of the `Cargo.toml` beside the broken manifest, so the
+    // probe that failed and the marker that answered are the same directory — the boundary
+    // case of "at or below", and the one a strict "below" test would wrongly let through.
+    await writeFile(join(tmp, "package.json"), "{ not json", "utf8")
+    await writeFile(join(tmp, "Cargo.toml"), '[workspace]\nmembers = ["crate-a"]\n', "utf8")
+
+    let caught: unknown
+    try {
+      await detectWorkspaceRoot({ cwd: tmp })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("workspace-manifest-malformed")
+  })
+
+  it("ignores a malformed manifest above the workspace root", async () => {
+    const above = join(tmp, "home")
+    const root = join(above, "repo")
+    await mkdir(join(root, ".git"), { recursive: true })
+    await writeFile(join(above, "package.json"), "{ not json", "utf8")
+
+    expect(await detectWorkspaceRoot({ cwd: root })).toBe(root)
+  })
+
+  it("ignores an unreadable manifest above the workspace root", async () => {
+    // Neither root nor Windows is refused by the permission bits, so there the file stays
+    // readable and there is nothing to assert. The case this covers is the shared machine or
+    // CI container, where a directory above the checkout belongs to somebody else.
+    if (process.platform === "win32" || process.getuid?.() === 0) return
+
+    const above = join(tmp, "home")
+    const root = join(above, "repo")
+    await mkdir(join(root, ".git"), { recursive: true })
+    const denied = join(above, "package.json")
+    await writeFile(denied, JSON.stringify({ name: "someone-else" }), "utf8")
+    await chmod(denied, 0o000)
+    try {
+      expect(await detectWorkspaceRoot({ cwd: root })).toBe(root)
+    } finally {
+      await chmod(denied, 0o600)
+    }
+  })
+
+  it("a malformed manifest above an absent root stays workspace-root-not-found", async () => {
+    // Callers read that code as "cwd is a single-project workspace" and carry on. A broken
+    // manifest above a root that does not exist must not turn that fallback into a harder
+    // error, so the absent root outranks the deferred failure.
+    const inner = join(tmp, "home", "plain")
+    await mkdir(inner, { recursive: true })
+    await writeFile(join(tmp, "home", "package.json"), "{ not json", "utf8")
+
+    let caught: unknown
+    try {
+      await detectWorkspaceRoot({ cwd: inner })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CoreError)
+    expect((caught as CoreError).code).toBe("workspace-root-not-found")
   })
 })
 

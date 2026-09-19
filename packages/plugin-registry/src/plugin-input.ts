@@ -1,12 +1,13 @@
-// Fail-fast guards, and the shared readers, over the values a language plugin hands to an
-// effect plugin.
+// Fail-fast guards and shared readers over the values a language plugin hands to an effect
+// plugin, plus the few helpers every effects plugin would otherwise repeat verbatim (its
+// manifest shape, its import gate predicate, its receiver-confidence rule).
 //
-// Deliberately import-light: this module pulls in nothing but a type from `@aburi/types`,
+// Deliberately import-light: this module pulls in nothing but types from `@aburi/types`,
 // which is what lets it ship as the `@aburi/plugin-registry/plugin-input` subpath without
 // dragging the barrel's eager ajv schema compilation into every effect plugin's startup.
 // Keep it that way — a value import from a sibling module here would silently undo it.
 
-import type { CallCandidate, ImportEdge } from "@aburi/types"
+import type { CallCandidate, Confidence, ImportEdge } from "@aburi/types"
 
 /**
  * A `.`-split callee target that has been checked for emptiness. The tuple shape records
@@ -56,9 +57,9 @@ export interface CallTargetSegments {
  * one bias that would actively mislead whoever debugs it.
  *
  * A thrown error is an upstream contract violation, not a classification decision, and
- * effect-plugin.md §10 EP3a exempts it from the "a throwing classifier is treated as
+ * effect-plugin.md EP3a exempts it from the "a throwing classifier is treated as
  * `null`" rule: it propagates rather than resolving to an unclassified call. The core's
- * per-file boundary (lang-plugin.md §7.2) is what decides the cost — the file is withdrawn,
+ * per-file boundary (lang-plugin.md) is what decides the cost — the file is withdrawn,
  * named, and quoted back with this message, and the scan exits non-zero. Degrading the
  * throw here instead would convert a language plugin bug into a quietly under-populated IR,
  * which is the outcome this guard exists to prevent.
@@ -229,4 +230,113 @@ export function identifierMentions(name: string, vocabulary: ReadonlySet<string>
  */
 export function hasLiteralFirstArgument(call: Pick<CallCandidate, "literalArgs">): boolean {
   return (call.literalArgs[0] ?? null) !== null
+}
+
+/**
+ * A predicate for `hasMatchingImport` that accepts a module root exactly or as a `<root>/`
+ * subpath: `matchesModuleOrSubpath("drizzle-orm")` accepts `drizzle-orm` and
+ * `drizzle-orm/postgres-js` but not `drizzle-orm-mock`. The `/` is what keeps third-party
+ * lookalikes out; libraries that ship deep entry points and move them between minors need
+ * this rather than a closed allowlist of full specifiers.
+ */
+export function matchesModuleOrSubpath(...roots: readonly string[]): (source: string) => boolean {
+  return (source) => roots.some((root) => source === root || source.startsWith(`${root}/`))
+}
+
+/**
+ * How much a call backs the classification its terminal suggests, for a plugin that
+ * attributes effects to a client binding it can only see by name.
+ *
+ * `high` needs every signal to agree: the receiver segment names a client binding (per the
+ * plugin's own `namesClient` vocabulary), the receiver is a binding at all rather than a
+ * collapsed expression, and the call takes no more arguments than the terminal's signature
+ * allows. Anything else is `medium` — the effect is still recorded, with the uncertainty
+ * stated, because each of the three failures is ambiguous rather than disqualifying:
+ *
+ * - An unrecognized receiver is either a client under a house naming convention or an
+ *   unrelated object sharing the verb. A syntactic classifier cannot separate the two, so it
+ *   says so in `confidence` instead of dropping the first or confidently claiming the second.
+ * - A dynamic receiver (`getDb().select()`, `pools[0].insert(users)`) was collapsed to a name
+ *   by normalization, so the name in `target` is not a binding and its spelling is not
+ *   evidence (`CallCandidate.dynamicReceiver`).
+ * - An argument list longer than the terminal takes is evidence against, not proof:
+ *   `argumentCount` is a syntactic count, and treating an overflow as "not this library"
+ *   would let one miscount erase a real write with nothing logged.
+ *
+ * A literal first argument is not a tier question and is not decided here: no ORM client
+ * method takes one, so callers reject it outright (`hasLiteralFirstArgument`).
+ */
+export function receiverConfidence(
+  clientSegment: string | undefined,
+  call: Pick<CallCandidate, "dynamicReceiver" | "argumentCount">,
+  maxArguments: number,
+  namesClient: (segment: string) => boolean,
+): Confidence {
+  if (call.dynamicReceiver === true) return "medium"
+  if (call.argumentCount > maxArguments) return "medium"
+  if (clientSegment !== undefined && namesClient(clientSegment)) return "high"
+  return "medium"
+}
+
+/**
+ * The manifest shape shared by every first-party effects plugin, with the two literals a
+ * plugin actually chooses kept narrow so consumers can compare against them.
+ *
+ * Declared standalone rather than `extends EffectsManifest` on purpose. Extending would
+ * inherit `PluginManifest`'s optional `xPrefix` and `capabilities`, and a first-party
+ * effects manifest sets neither — `xPrefix` is the registry's to derive from `name`
+ * (`deriveXPrefix`), which is what `defineEffectsManifest`'s docblock relies on. Inheriting
+ * them would make `manifest.xPrefix` a well-typed read of a key no manifest here carries,
+ * so the mistake would surface as a silent `undefined` instead of a compile error.
+ * Dropping `extends` also drops the compiler's check that this shape still satisfies the
+ * contract the registry validates against, so `plugin-input.test.ts` states it instead: it
+ * assigns a built manifest to an `EffectsManifest` and asserts that `xPrefix` stays
+ * unreadable, which fails `pnpm typecheck` if either half stops holding.
+ */
+export interface EffectsPluginManifest<Name extends string, DerivedByPrefix extends string> {
+  readonly $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
+  readonly name: Name
+  readonly version: "0.0.0"
+  readonly type: "effects"
+  readonly engines: { readonly aburi: "*" }
+  readonly provides: {
+    readonly effects: []
+    readonly effectPrefixes: []
+    readonly extKinds: []
+    readonly extKindPrefixes: []
+    readonly derivedByPrefixes: [DerivedByPrefix]
+    readonly frameworks: []
+  }
+}
+
+/**
+ * Manifest for an effects plugin that classifies onto core-owned effect ids only.
+ *
+ * `provides.effects` is empty by design: core vocabulary (`db.*`, `event.*`, `network.*`)
+ * lives in the reserved namespace and MUST NOT appear there (extension-vocab.md). The
+ * plugin's own `x-<name>:*` namespace is reserved via the `xPrefix` the registry derives
+ * from `name` (`deriveXPrefix`) and currently claims no bindings. `extKinds` and
+ * `frameworks` are empty by contract — an effects manifest declaring either is a schema
+ * error (extension-vocab.md). `derivedByPrefixes` takes the same constant the
+ * classifier builds its tags from, so the two cannot drift.
+ */
+export function defineEffectsManifest<Name extends string, DerivedByPrefix extends string>(
+  name: Name,
+  derivedByPrefix: DerivedByPrefix,
+): EffectsPluginManifest<Name, DerivedByPrefix> {
+  return {
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+    name,
+    version: "0.0.0",
+    type: "effects",
+    engines: { aburi: "*" },
+    provides: {
+      effects: [],
+      effectPrefixes: [],
+      extKinds: [],
+      extKindPrefixes: [],
+      derivedByPrefixes: [derivedByPrefix],
+      frameworks: [],
+    },
+  }
 }

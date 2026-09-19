@@ -1,7 +1,8 @@
+import { makeSymbol } from "@aburi/test-support"
 import type { ArrayDelta, SymbolChanged, SymbolDelta, SymbolMovedChanged } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
-import { emptySummary, makeDiff, makeSymbol } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
  * `ArrayDelta` has three buckets and `@aburi/diff` fills all three: `differentiate` puts

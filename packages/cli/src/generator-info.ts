@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url"
  * drift as soon as the first version bump landed.
  *
  * Reads `../../package.json` relative to the compiled bundle, memoises the parse. The
- * package.json lives inside the shipped tarball (§`files` field), so the read succeeds
+ * package.json lives inside the shipped tarball (the `files` field), so the read succeeds
  * both in the dist bundle and when running from source under Vitest.
  */
 let cached: { name: string; version: string } | null = null

@@ -1,25 +1,13 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { Writable } from "node:stream"
 import { makeLanguageId } from "@aburi/core"
 import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
 import { CliError } from "../src/errors"
-import { symbolId } from "./fixtures"
-
-class MemStream extends Writable {
-  chunks: string[] = []
-  override _write(chunk: Buffer | string, _enc: BufferEncoding, cb: () => void): void {
-    this.chunks.push(chunk.toString())
-    cb()
-  }
-  text(): string {
-    return this.chunks.join("")
-  }
-}
+import { MemStream, symbolId } from "./fixtures"
 
 let scratch = ""
 
@@ -272,7 +260,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   })
 })
 
-describe("runDiff — call-resolution census on stdout (call-resolution.md §8.1)", () => {
+describe("runDiff — call-resolution census on stdout (call-resolution.md)", () => {
   async function writePair(head: IR): Promise<{ basePath: string; headPath: string }> {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
@@ -474,7 +462,7 @@ describe("CL9 — argv routing for --fail-on", () => {
   })
 })
 
-describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md §9)", () => {
+describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", () => {
   it("maps user-fixable diff failures to config-error", () => {
     const codes = [
       "schema-mismatch",
@@ -490,7 +478,7 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md §9)
   })
 
   it("maps slice-invariant-violated to runtime-error and says it is an Aburi bug", () => {
-    // slice-view.md §7.4: this code fires only on a producer bug, so reporting
+    // slice-view.md: this code fires only on a producer bug, so reporting
     // it as a config error would send the reader to aburi.json for nothing.
     const cause = new DiffError("SliceRecord slice:a: members[] is empty.", {
       code: "slice-invariant-violated",

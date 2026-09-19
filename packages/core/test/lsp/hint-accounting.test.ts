@@ -16,12 +16,12 @@ const HOVER_METHOD = "textDocument/hover"
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 
 /**
- * lsp-enrichment.md §7.2 / §11.7 (LE24..LE27). Every counter above the hint block describes a
+ * lsp-enrichment.md (LE24..LE27). Every counter above the hint block describes a
  * *request*, and a hover that answers on time with nothing this pass can use is a healthy row
  * in all of them. These cases pin the five places a hint is lost so that a run whose typed
  * tier bought nothing cannot read like one whose server had nothing to say.
  */
-describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
+describe("LSP hint accounting (lsp-enrichment.md)", () => {
   it("counts a hint the pass wrote, and nothing else", async () => {
     const enrichment = await enrichThisFoo(() => ({
       contents: { kind: "markdown", value: "(method) C.foo(): void" },
@@ -107,7 +107,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
     expect(result.edges).toEqual([])
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
     // A declined hint is reported like a call site that never had one — call-resolution.md
-    // §8.1 leaves them in one bucket on purpose, and says the counters are where they part.
+    // leaves them in one bucket on purpose, and says the counters are where they part.
     expect(result.stats.unresolved.dynamic).toBe(1)
   })
 
@@ -150,7 +150,7 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
 
   it("leaves the hint counters at zero when the untyped tier got there first", () => {
     // A hint nothing had to consult is neither consumed nor rejected — the LSP tier only
-    // sees the call sites every untyped tier missed (call-resolution.md §5.4).
+    // sees the call sites every untyped tier missed (call-resolution.md).
     const callee = makeSymbol("ts:src/a.ts#helper", { kind: "function", name: "helper" })
     const caller = makeSymbol("ts:src/a.ts#caller", {
       kind: "function",
@@ -172,7 +172,8 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
   })
 
   // Both halves of the accounting over one line that holds two receivers. The key carries the
-  // target (§10.1), so neither call borrows the other's hint — and the counters have to add up
+  // target (a determinism rule), so neither call borrows the other's hint — and the counters
+  // have to add up
   // per call site rather than per line for that to be visible.
   it("counts a hint and a consumption for each receiver on a shared line", async () => {
     const base = makeClassSymbol("src/a.ts", "Base", 1)
@@ -319,7 +320,8 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
       noRejections({ memberNotFound: 1, unparseableHover: 1, ownerClassNotFound: 1 }),
     )
     // Every hover that came back is in exactly one of the four. Nothing else reads one, and
-    // no counter in the IR carries this total — §7.2 says so, and this is where it is held.
+    // no counter in the IR carries this total — the stats extension says so, and this is where
+    // it is held.
     expect(stats.hintsProduced + rejectedByProducer(stats)).toBe(hovers.length)
 
     const result = resolveCallGraph({
@@ -337,7 +339,8 @@ describe("LSP hint accounting (lsp-enrichment.md §7.2)", () => {
   })
 
   it("folds the resolver's half in without disturbing the producer's", () => {
-    // `withHintUsage` is the only path to a finished §7.2 record, and it adds rather than
+    // `withHintUsage` is the only path to a finished `stats.lspEnrichment` record, and it adds
+    // rather than
     // assigns — so a second fold accumulates instead of overwriting.
     const producer = {
       ...EMPTY_STATS,
@@ -407,14 +410,14 @@ function statsOf(enrichment: EnrichmentResult): LspProducerStats {
   return stats
 }
 
-/** The three buckets the enrichment pass can write — the producer side of §7.2's first sum. */
+/** The three buckets the enrichment pass can write — the producer side of the first sum. */
 function rejectedByProducer(stats: LspEnrichmentStats): number {
   const r = stats.hintsRejected
   if (r === undefined) throw new Error("expected hintsRejected to be present")
   return r.unparseableHover + r.ownerClassNotFound + r.memberNotFound
 }
 
-/** The two buckets the resolver can write — the consumer side of §7.2's second sum. */
+/** The two buckets the resolver can write — the consumer side of the second sum. */
 function rejectedByResolver(stats: LspEnrichmentStats): number {
   const r = stats.hintsRejected
   if (r === undefined) throw new Error("expected hintsRejected to be present")

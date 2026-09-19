@@ -1,15 +1,16 @@
 import type { Component, ComponentId } from "@aburi/types"
+import { toNfc } from "../codepoints"
 
 /**
  * Which Component a file belongs to, answered from `Component.roots[]` alone: the id of the
  * Component owning `file`, or `null` when the file sits under no root at all — the
- * `Symbol.component` value ir-schema.md §1.1 defines as "outside every Component".
+ * `Symbol.component` value ir-schema.md defines as "outside every Component".
  *
  * Attribution is a prefix question: a Component's root names a path — ordinarily a
  * directory, though a root that names a single file is not forbidden — and every file
  * beneath it is the Component's until a deeper root claims it. Nesting is ordinary rather
  * than exceptional: a pnpm workspace whose root is a package of its own has `roots: ["."]`
- * containing every other component's root (component-detect.md §3.1.1), so the rule has to
+ * containing every other component's root (component-detect.md), so the rule has to
  * be *longest* prefix wins rather than "the first root that matches".
  *
  * `file` is a workspace-relative POSIX path, and one that ascends out of the workspace or
@@ -77,11 +78,10 @@ const WORKSPACE_ROOT_KEY = ""
  *
  * NFC because a root read from a config and a path read from the filesystem are two strings
  * from two sources: on a filesystem that stores decomposed names, one side would spell `café`
- * the other way and the component would lose its own files (ir-schema.md §14 #19, §1.2).
+ * the other way and the component would lose its own files (ir-schema.md #19).
  */
 function pathSegments(path: string): string[] {
-  return path
-    .normalize("NFC")
+  return toNfc(path)
     .split("/")
     .filter((segment) => segment.length > 0 && segment !== ".")
 }
@@ -105,7 +105,7 @@ function rootKey(root: string): string | null {
   const segments = pathSegments(root)
   if (segments.some((segment) => segment === "..")) return null
   if (segments.length > 0) return segments.join("/")
-  return root.normalize("NFC").split("/").includes(".") ? WORKSPACE_ROOT_KEY : null
+  return toNfc(root).split("/").includes(".") ? WORKSPACE_ROOT_KEY : null
 }
 
 /**

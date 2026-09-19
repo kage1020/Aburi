@@ -1,3 +1,4 @@
+import { fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -8,7 +9,6 @@ import {
   matchStageNameSignature,
   writeCanonicalDiff,
 } from "../src"
-import { fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
 
 /**
  * Two properties the matcher owes its callers, neither of which it held.
@@ -24,7 +24,7 @@ import { fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
  * exact match — putting one name in the output as both `added` and a move source.
  *
  * The tie-break is `(base.id, head.id)` ascending, which is a total order only because ids
- * are unique within a Document (ir-schema.md §14 #1) and `buildDiff` establishes that before
+ * are unique within a Document (ir-schema.md #1) and `buildDiff` establishes that before
  * the first stage runs.
  */
 
@@ -168,7 +168,7 @@ describe("stage 4 does not depend on input order", () => {
 describe("stage 4 thresholds are unchanged", () => {
   it("still refuses a pair below the head's threshold", () => {
     // `getUser` vs `getUsers`: two tokens, so the threshold is 0.95 and the pair is refused —
-    // §3.4.3's worked example, which the reordering must not weaken.
+    // the threshold table's worked example, which the reordering must not weaken.
     const changed = changes(
       [method("src/a.ts", "Repo.getUser", "a")],
       [method("src/b.ts", "Repo.getUsers", "b")],
@@ -177,7 +177,7 @@ describe("stage 4 thresholds are unchanged", () => {
   })
 
   it("still refuses a signature-less head", () => {
-    // §3.4.3 tail: `null + null` scores 1.0 on the signature axis and would flood the bucket.
+    // `null + null` scores 1.0 on the signature axis and would flood the bucket.
     const noSig = (file: string, name: string, seed: string) =>
       makeSymbol({ id: `ts:${file}#${name}`, name, kind: "class", fingerprint: fp(seed) })
     const changed = changes(
@@ -216,7 +216,7 @@ describe("stage 3 disambiguation does not depend on input order", () => {
 
 describe("stage 3 keeps its unconditional single-candidate branch", () => {
   it("pairs one base with one head however unlike their names are", () => {
-    // §3.3: a lone candidate pairs with no similarity test at all. The reordering must not
+    // Stage 3: a lone candidate pairs with no similarity test at all. The reordering must not
     // quietly introduce the 0.85 threshold here.
     const changed = changes(
       [withLogic("src/a.ts", "Svc.alpha", "111111111111")],
@@ -239,7 +239,7 @@ describe("stage 3 keeps its unconditional single-candidate branch", () => {
 
   it("still cascades: the pair left over after a scored match pairs unconditionally", () => {
     // Two bases and two heads on one fingerprint, of which only one pairing clears 0.85.
-    // §3.3 pairs the leftovers anyway: once a round leaves a single base, it is the lone
+    // Stage 3 pairs the leftovers anyway: once a round leaves a single base, it is the lone
     // candidate and the branch above applies. Both pair, and neither similarity is tested.
     const base = [
       withLogic("src/a.ts", "Svc.createOrder", "111111111111"),
@@ -260,7 +260,7 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   it("stage 3 leaves a group whose names cannot reach 0.85", () => {
     // Two bases and one head on one fingerprint, so the lone-candidate branch does not apply
     // and the 0.85 test is the only thing standing between them. All three are
-    // signature-less, which keeps stage 4 out of it (§3.4.3 tail) and makes the outcome
+    // signature-less, which keeps stage 4 out of it and makes the outcome
     // stage 3's alone.
     const body = (file: string, name: string) =>
       makeSymbol({
@@ -275,7 +275,7 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   })
 
   it("stage 4.5 refuses a pair that hits neither the name nor the basename", () => {
-    // §3.4.5 accepts a one-sided hit and nothing less. With the threshold gone every dropped
+    // Stage 4.5 accepts a one-sided hit and nothing less. With the threshold gone every dropped
     // symbol of the same kind becomes a candidate, and the sweep pairs them at score 0.
     const diff = buildDiff({
       baseIR: makeIR({ symbols: [dropped("src/a/One.ts", "Svc.alpha")] }),
@@ -290,14 +290,14 @@ describe("the thresholds moved into the candidate filter still hold", () => {
   })
 })
 
-describe("stage 4.5 against a direct reading of §3.4.5", () => {
+describe("stage 4.5 against a direct reading of diff-algorithm.md", () => {
   // Checking the stage against a second implementation of the same algorithm proves only
-  // that it was written twice. These are the three things §3.4.5 actually claims, each
+  // that it was written twice. These are the three things the doc actually claims, each
   // established by something structurally unlike the code under test: the candidates come
   // from a brute-force cross-product, and the size they can reach comes from Kuhn’s
   // augmenting-path search rather than a component walk.
 
-  /** Every pairing §3.4.5 identifies, from the cross-product rather than from a lookup. */
+  /** Every pairing stage 4.5 identifies, from the cross-product rather than from a lookup. */
   function identifiedPairings(base: IRSymbol[], head: IRSymbol[]): [string, string][] {
     const droppedBase = base.filter((s) => s.dropped)
     const droppedHead = head.filter((s) => s.dropped)
@@ -387,7 +387,7 @@ describe("stage 4.5 against a direct reading of §3.4.5", () => {
     })
   }
 
-  it("pairs only Symbols §3.4.5 identifies, and each at most once", () => {
+  it("pairs only Symbols stage 4.5 identifies, and each at most once", () => {
     for (const { base, head } of corpora()) {
       const { matched } = matchStageDroppedWeak(base, head)
       const identified = new Set(identifiedPairings(base, head).map(([b, h]) => `${b} ${h}`))
@@ -424,7 +424,7 @@ describe("stage 4.5 against a direct reading of §3.4.5", () => {
 
 describe("stage 4.5 does not depend on input order", () => {
   it("resolves a tie to the lower base id", () => {
-    // Two bases identified by different halves of §3.4.5's score, both offering the same
+    // Two bases identified by different halves of stage 4.5's score, both offering the same
     // head: `Svc.handle` by the trailing name segment, `Shared.ts` by the file basename.
     // Every candidate carries the same weight there, so the id keys decide.
     const head = () => [dropped("src/mid/Shared.ts", "Svc.handle")]

@@ -1,7 +1,8 @@
+import { compareCodeUnit } from "@aburi/core"
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
-import { findChild, firstNonCommentChild } from "./ast-helpers"
-import { decodeStringLiteral } from "./string-escape"
+import { findChild, firstNonCommentChild, walkDescendants } from "./ast-helpers"
+import { decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -48,10 +49,10 @@ export function extractImports(tree: Tree, _source: string): ImportExtraction {
   // Dynamic imports can appear anywhere in the tree, so scan the whole thing separately.
   walkForDynamicImports(root, edges, errors)
 
-  edges.sort((a, b) => a.line - b.line || cmpString(a.source, b.source))
-  // Both lists are put in source order, and for the same reason: the dynamic-import walk is a
-  // LIFO stack, so it visits siblings back to front and would otherwise hand a reader on one
-  // line three diagnostics counting down the columns.
+  edges.sort((a, b) => a.line - b.line || compareCodeUnit(a.source, b.source))
+  // Both lists are put in source order, and for the same reason: the dynamic-import pass runs
+  // after the statement pass, so its findings would otherwise trail the file's static imports
+  // whatever line they were written on.
   errors.sort((a, b) => a.line - b.line || a.column - b.column)
   // Errors are not deduplicated the way edges are. `dedupeEdges` keys on the line among other
   // things, so it only ever collapses two writings on one line — and two broken specifiers on
@@ -110,7 +111,7 @@ function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
  * a name the target does not have. A wrong edge is worse than the missing one this replaces.
  *
  * `dynamic` is false by definition rather than by consequence: the field means "written as
- * `import()`" (`lang-plugin.md` §4.2), and a require-equals is resolved when the module
+ * `import()`" (`lang-plugin.md`), and a require-equals is resolved when the module
  * loads. The two loops in `callgraph.ts` that read a file's edges both skip a dynamic one
  * today, so the value is also what keeps this edge visible to call resolution — but that is
  * what the value buys, not what decides it.
@@ -222,34 +223,20 @@ function readReExport(node: Node, errors: ParseError[]): ImportEdge | null {
  * `import` keyword). Walk the tree and emit an edge for every one we find.
  */
 function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseError[]): void {
-  const stack: Node[] = [root]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    if (node === undefined) break
-    if (node.type === "call_expression") {
-      const callee = node.childForFieldName("function")
-      if (callee !== null && callee.type === "import") {
-        const args = node.childForFieldName("arguments")
-        // The specifier is the first argument that is not a comment. A magic comment
-        // (`import(/* webpackChunkName */ './m')`) is a named node sitting in front of it,
-        // and reading child zero unconditionally would hand the reader the comment.
-        const specifier =
-          args !== null
-            ? readModuleSpecifier(firstNonCommentChild(args), "dynamic import", errors)
-            : null
-        if (specifier !== null) {
-          edges.push({
-            source: specifier,
-            symbols: "*",
-            line: node.startPosition.row + 1,
-            dynamic: true,
-          })
-        }
-      }
-    }
-    for (const child of node.namedChildren) {
-      if (child !== null) stack.push(child)
-    }
+  for (const node of walkDescendants(root)) {
+    if (node.type !== "call_expression") continue
+    const callee = node.childForFieldName("function")
+    if (callee === null || callee.type !== "import") continue
+    const args = node.childForFieldName("arguments")
+    // The specifier is the first argument that is not a comment. A magic comment
+    // (`import(/* webpackChunkName */ './m')`) is a named node sitting in front of it,
+    // and reading child zero unconditionally would hand the reader the comment.
+    const specifier =
+      args !== null
+        ? readModuleSpecifier(firstNonCommentChild(args), "dynamic import", errors)
+        : null
+    if (specifier === null) continue
+    edges.push({ source: specifier, symbols: "*", line: node.startPosition.row + 1, dynamic: true })
   }
 }
 
@@ -264,7 +251,7 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
  *   substitution in it), or a shape this reader does not model. There is nothing to report:
  *   the author wrote something valid that static analysis cannot follow.
  * - A literal that *is* there and is empty is something someone typed, and it names no
- *   module. `ImportEdge.source` is a non-empty specifier (`lang-plugin.md` §4.4) and the
+ *   module. `ImportEdge.source` is a non-empty specifier (`lang-plugin.md`) and the
  *   shared guards in `@aburi/plugin-registry/plugin-input` throw on one that is not, so no
  *   edge can carry it.
  *
@@ -303,44 +290,21 @@ function readModuleSpecifier(
 type ImportSite = "import" | "re-export" | "dynamic import"
 
 /**
- * Read the contents of a specifier written as a literal, without its surrounding quotes.
+ * Read the contents of a specifier written as a literal, decoded (see
+ * `decodeStringLiteralOrRaw` for the escape semantics and for when the source text stands in).
  *
- * A `string` and a substitution-free `` `template` `` are both accepted, because they are
- * the same specifier written with different quotes: the module a bare template names is
- * fixed at the point it is written. A template *with* a `template_substitution` is not, and
- * is refused — joining its fragments would answer `"./"` for `` `./${p}` ``, an edge to a
- * module the author never named, which is a worse answer than none.
+ * A `string` and a substitution-free `` `template` `` are the same specifier written with
+ * different quotes. A template *with* a `template_substitution` is refused — joining its
+ * fragments would answer `"./"` for `` `./${p}` ``, an edge to a module the author never
+ * named. Anything else (an identifier, a concatenation) is a computed specifier and answers
+ * `null`, which the caller treats as nothing to say rather than as a fault; an empty literal
+ * answers `""`, which is the caller's to judge.
  *
- * Returns `null` for anything else — an identifier, a concatenation. Those are computed
- * specifiers this reader does not follow, and the caller treats them as nothing to say
- * rather than as a fault. An empty literal returns `""`, which is a different answer and is
- * the caller's to judge.
- *
- * **An escape is decoded, not skipped.** What is *read* is a literal's `string_fragment`s and
- * its `escape_sequence`s, both in source order, so `"./a\tb"` comes back as `./a`, a tab, `b`.
- * Dropping the escape used to answer `./ab` — a module that does not exist, indistinguishable
- * in the IR from one that does — and for `"\x2E/e"` it answered `/e`, which fails
- * `isRelativeSpecifier` (neither `./` nor `../`) and sent every call through that binding to
- * the `external` bucket instead of to the sibling file it names.
- *
- * Those are not the only named children a literal can have. An ERROR node is one too, and a
- * specifier keeps what parsed around it: `"./a\uZZZZb"` comes back as `./a`, with the
- * parser's own syntax error accounting for the rest. `decodeStringLiteral` reports the
- * partial read as well, and this caller is the one that does not act on it — a class member's
- * name, which becomes part of a Symbol id, refuses the same read.
- *
- * The quote-stripping fallback below is what a literal reaches when the read came back empty
- * *and* incomplete — a literal whose contents are entirely an ERROR node. Stripping the quotes
- * is what leaves the parser's own syntax error as the only thing said about it; calling it
- * empty as well would be a third diagnostic claiming the author wrote no module name, and they
- * did.
- *
- * Which is why `whole` is read here after all, for the one shape that needs it and no more. An
- * escape can decode to nothing — a line continuation joins two source lines and contributes no
- * character — so a literal that is only one comes back empty and *whole*, and reaches the
- * empty-specifier diagnostic it should. `"\uZZZZ"` comes back empty and not whole, and reaches
- * the fallback. Reading emptiness alone cannot tell those two apart, and sends the second to
- * the diagnostic this paragraph says it avoids.
+ * A partial read is kept: `"./a\uZZZZb"` comes back as `./a`, the parser's own syntax error
+ * accounting for the rest. The fallback to source text is what keeps a literal whose contents
+ * are entirely an ERROR out of the empty-specifier diagnostic — a third complaint claiming the
+ * author wrote no module name, when they did. A literal that is only a line continuation is
+ * empty and whole, and does reach that diagnostic.
  */
 function readLiteralSpecifier(node: Node): string | null {
   if (node.type === "template_string") {
@@ -348,11 +312,7 @@ function readLiteralSpecifier(node: Node): string | null {
   } else if (node.type !== "string") {
     return null
   }
-  const { value, whole } = decodeStringLiteral(node)
-  if (whole || value !== "") return value
-  const raw = node.text
-  if (raw.length >= 2 && /^["'`]/.test(raw)) return raw.slice(1, -1)
-  return raw
+  return decodeStringLiteralOrRaw(node)
 }
 
 /**
@@ -366,17 +326,11 @@ function dedupeEdges(edges: readonly ImportEdge[]): ImportEdge[] {
   const out: ImportEdge[] = []
   for (const edge of edges) {
     const symbolsKey =
-      edge.symbols === "*"
-        ? '"*"'
-        : JSON.stringify([...edge.symbols].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)))
+      edge.symbols === "*" ? '"*"' : JSON.stringify([...edge.symbols].sort(compareCodeUnit))
     const key = `${edge.line}\t${edge.source}\t${edge.dynamic}\t${symbolsKey}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(edge)
   }
   return out
-}
-
-function cmpString(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
 }

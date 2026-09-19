@@ -118,7 +118,7 @@ describe("a declared package is the directory that holds the manifest", () => {
   })
 
   it("reaches ten directory levels down and stops there", async () => {
-    // The documented ceiling for `**` (component-detect.md §3.1.1), pinned from both sides: a
+    // The documented ceiling for `**` (component-detect.md), pinned from both sides: a
     // workspace that nests its packages under a few grouping directories is ordinary, and one
     // package at the ceiling with another just past it is what says where the ceiling is.
     const deep = ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10"].join("/")
@@ -132,7 +132,7 @@ describe("a declared package is the directory that holds the manifest", () => {
   it("falls back to the whole repository when no matched directory holds a manifest", async () => {
     // `detectComponents` reads "no candidate" as "no detector hit", so patterns that matched
     // nothing land on the single-project fallback rather than on nothing at all. Whether that
-    // is the right answer depends on why they matched nothing — component-detect.md §5 carries
+    // is the right answer depends on why they matched nothing — component-detect.md carries
     // the two cases, and `DetectManagersResult.unresolved` is what tells them apart.
     await mkdir(join(tmp, "packages", "one"), { recursive: true })
     await mkdir(join(tmp, "packages", "two"), { recursive: true })
@@ -246,7 +246,8 @@ describe("the workspace root as a declared component", () => {
   })
 
   it("censuses the packages nested under it as its own subtree", async () => {
-    // §4.4 counts each component's subtree, and the root's subtree holds the other packages.
+    // `languages` inference counts each component's subtree, and the root's subtree holds the
+    // other packages.
     // A root declared beside them is the shape this rule makes ordinary, so what its
     // `languages` then contains is worth saying out loud rather than leaving to be found.
     await writePackage(".", "root-pkg")

@@ -6,7 +6,7 @@ function call(target: string): CallCandidate {
   return { target, line: 1, argumentCount: 0, inAwait: false, inNew: false, literalArgs: [] }
 }
 
-describe("buildDropCFilter — Unicode normalization (ir-schema.md §1.2)", () => {
+describe("buildDropCFilter — Unicode normalization (ir-schema.md)", () => {
   // The `target` a filter is asked about has been normalized at the scan pipeline's plugin
   // boundary. These prefixes arrive from a JSON config and a plugin manifest, neither of
   // which normalizes, so leaving them alone would make a `suppress` entry fail to match the

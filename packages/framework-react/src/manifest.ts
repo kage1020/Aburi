@@ -1,19 +1,7 @@
 import type { FrameworkManifest } from "@aburi/types"
-import type { ReactExtKind } from "./ext-kinds"
+import { REACT_DERIVED_BY_PREFIX, type ReactExtKind } from "./ext-kinds"
 
-/**
- * Manifest for `@aburi/framework-react`. Declares the seven `framework:react:*` extKinds
- * this plugin can emit plus the shared `framework:react` prefix so the vocab registry can
- * resolve future additions by prefix ownership without a manifest bump.
- *
- * `frameworks: ["react"]` matches the identifier used by `@aburi/core`'s Component
- * autodetect for the `react` npm dependency — declared once here, no config change needed
- * on the consumer side.
- *
- * Every `extKinds[].id` is pinned to the `ReactExtKind` literal union via the entry type,
- * so a typo in the manifest fails to compile and drift between the manifest and the
- * dispatcher in `classify.ts` is impossible.
- */
+/** `id` is pinned to `ReactExtKind` so the manifest cannot drift from `classify.ts`. */
 interface ReactExtKindEntry {
   id: ReactExtKind
   baseKind: "function" | "const"
@@ -75,7 +63,8 @@ export const frameworkReactManifest: FrameworkManifest = {
     effectPrefixes: [],
     extKinds: EXT_KIND_ENTRIES,
     extKindPrefixes: ["framework:react"],
-    derivedByPrefixes: ["framework:react"],
+    derivedByPrefixes: [REACT_DERIVED_BY_PREFIX],
+    // Matches the identifier `@aburi/core`'s Component autodetect uses for the `react` dependency.
     frameworks: ["react"],
   },
 }

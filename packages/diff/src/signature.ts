@@ -1,19 +1,10 @@
 import type { Signature } from "@aburi/types"
+import { jaccard } from "./similarity"
 
 /**
- * §3.4.2 signatureSimilarity — averaged type-similarity across `inputs`, `outputs`, and
- * `throws`. Follows diff-algorithm.md §3.4.2:
- * - null + null    → 1.0 (both symbols are signature-less; nothing to compare)
- * - null + non-null (either side) → 0.0
- * - both non-null: mean of three subscores
- *
- * Subscores:
- * - inputs: ordered type-string equality rate (`i-th type equal` counts as 1, else 0)
- * - outputs: same shape, but outputs is an array of type strings
- * - throws: unordered set intersection over union
- *
- * Empty subarrays on both sides count as 1.0 (they are trivially equal); on one side only
- * they count as 0.0 (asymmetric information).
+ * signatureSimilarity (diff-algorithm.md) — mean of three subscores over `inputs` (ordered
+ * type equality rate), `outputs` (same) and `throws` (Jaccard). Two null signatures score
+ * 1.0, one null scores 0.0. Empty on both sides counts as 1.0, empty on one side as 0.0.
  */
 export function signatureSimilarity(
   base: Signature | null | undefined,
@@ -24,11 +15,11 @@ export function signatureSimilarity(
   if (baseSig === null && headSig === null) return 1
   if (baseSig === null || headSig === null) return 0
   const inputsScore = compareOrderedTypes(
-    baseSig.inputs.map((i) => i.type),
-    headSig.inputs.map((i) => i.type),
+    baseSig.inputs.map((input) => input.type),
+    headSig.inputs.map((input) => input.type),
   )
   const outputsScore = compareOrderedTypes(baseSig.outputs, headSig.outputs)
-  const throwsScore = compareUnorderedSet(baseSig.throws, headSig.throws)
+  const throwsScore = jaccard(baseSig.throws, headSig.throws)
   return (inputsScore + outputsScore + throwsScore) / 3
 }
 
@@ -40,14 +31,4 @@ function compareOrderedTypes(a: readonly string[], b: readonly string[]): number
     if (a[i] === b[i]) matches++
   }
   return matches / a.length
-}
-
-function compareUnorderedSet(a: readonly string[], b: readonly string[]): number {
-  if (a.length === 0 && b.length === 0) return 1
-  const setA = new Set(a)
-  const setB = new Set(b)
-  let intersection = 0
-  for (const t of setA) if (setB.has(t)) intersection++
-  const union = setA.size + setB.size - intersection
-  return union === 0 ? 1 : intersection / union
 }

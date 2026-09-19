@@ -16,32 +16,17 @@ import {
   NESTJS_PATTERN_DECORATORS,
 } from "./decorators"
 import { type ImportedNames, readImportedNames, resolveDecoratorName } from "./imports"
+import { NESTJS_DERIVED_BY_PREFIX } from "./manifest"
 
-/**
- * Route decorator extKind. Reused for HTTP methods and pattern-style handlers alike so
- * downstream tooling can filter every framework-visible entry point with one predicate.
- */
+/** Shared by HTTP-verb and pattern-style handlers so one predicate finds every entry point. */
 const ROUTE_EXT_KIND = "framework:nestjs:route"
 
 /**
- * Classify a SymbolCandidate emitted by the language plugin.
- *
- * Returns a `SymbolClassification` when at least one NestJS decorator applies, or `null`
- * when nothing matches — returning `null` is important because the framework pipeline
- * runs classifiers with first-match-wins semantics and a hollow classification would
- * shadow other plugins that would otherwise fire.
- *
- * Symbol.kind picks the branch: classes look for `@Module` / `@Controller` /
- * `@Injectable` / `@Catch`; methods look for HTTP method decorators plus Guards /
- * Interceptors / Pipes / Filters plus microservice pattern handlers. Non-decorator NestJS
- * conventions (class-name suffixes, folder conventions) are out of scope — they would
- * belong to a separate classifier if we ever add one.
- *
- * The tables are matched against the name a decorator's binding was **imported** under, not
- * the one the source wrote, so `import { Controller as Ctrl }` still resolves (see
- * `./imports`). The index over those edges is read only when there is a decorator to
- * resolve — a member without decorators is the common case, and it must not pay for the
- * file's import list.
+ * Classes look for `@Module` / `@Controller` / `@Injectable` / `@Catch`; methods for HTTP
+ * verbs, pattern handlers and Guards / Interceptors / Pipes / Filters. `null` when nothing
+ * matches, so a hollow classification never shadows another plugin (first-match-wins).
+ * Tables are matched against the name a decorator was **imported** under (see `./imports`);
+ * the import index is only built once a decorator needs resolving.
  */
 export function classifyNestjsSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -56,19 +41,10 @@ export function classifyNestjsSymbol(
 }
 
 /**
- * The file's import index, built once per file rather than once per decorated Symbol.
- *
- * Every Symbol in a file resolves against the same edges, so rebuilding the index for each
- * one charges the file (declarations × import entries) to answer a question whose answer
- * cannot change — the shape `performance.md` §2 names as the corpus's blind spot, since a
- * single large file belongs to one shard and no amount of concurrency touches it.
- *
- * Keyed on the identity of the array the pipeline built for the file (`scan/pipeline.ts`
- * constructs one `FrameworkClassifyContext` per file and hands the classifier the same
- * `imports` reference for every candidate), so this is a memo of a pure function and not
- * plugin state: two files never collide, and an entry becomes collectable as soon as the
- * pipeline moves on. A caller that synthesizes a fresh array per call — a test, or a future
- * pipeline that stops sharing — gets the uncached path and the same answer.
+ * Per-file import index, memoized on the identity of the `imports` array the pipeline hands
+ * every candidate of a file (`scan/pipeline.ts`). Rebuilding it per decorated Symbol would
+ * charge a large single-shard file declarations × imports (`performance.md`). A fresh
+ * array per call simply takes the uncached path.
  */
 const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedNames>()
 
@@ -81,20 +57,9 @@ function importedNamesFor(ctx: FrameworkClassifyContext): ImportedNames {
 }
 
 /**
- * Class classification is winner-take-all: if `@Module` / `@Controller` / `@Injectable`
- * / `@Catch` appears, that is the class's role. When more than one class-level decorator
- * is present (e.g. `@Controller @Injectable class MyThing {}`), the first one found in
- * decorator source order wins so results stay stable across re-runs.
- *
- * `decoratorBoundaries` gets a `true` entry for every recognized class-level decorator —
- * the framework cares about the shape as a whole, not just the "winning" one, so a
- * `@Controller` that also has `@Injectable` still surfaces both in the map. The map is
- * keyed on the written name, because that is the key the core matches it against when it
- * folds the boundary flags back onto `SymbolCandidate.decorators`.
- *
- * Confidence follows the winner alone: the extKind is a claim about the winning decorator,
- * so it is that decorator's provenance that decides how far the claim is trusted. A
- * recognized loser sitting under a foreign import still contributes its boundary flag.
+ * The first class-level decorator in source order wins the role; every recognized one still
+ * flags a boundary, keyed on the written name because that is what the core matches against
+ * `SymbolCandidate.decorators`. Confidence follows the winner's provenance alone.
  */
 function classifyClass(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -119,35 +84,18 @@ function classifyClass(
   return {
     extKind: winner.extKind,
     decoratorBoundaries: boundaries,
-    // Class derivedBy uses the semantic `role` (module / controller / provider / filter)
-    // rather than the decorator identifier because NestJS renames the concept —
-    // `@Injectable` semantically means "provider", and the derivedBy string carries that
-    // meaning. Method derivedBy keeps the identifier (see classifyMethod) because HTTP verbs
-    // and handler names have no equivalent semantic rewrite.
-    derivedBy: `framework:nestjs:${winner.role}`,
+    // The semantic role, not the identifier: `@Injectable` means "provider".
+    derivedBy: `${NESTJS_DERIVED_BY_PREFIX}:${winner.role}`,
     ...confidenceOverride(confidence),
   }
 }
 
 /**
- * Method classification promotes the method to `framework:nestjs:route` when it carries
- * an HTTP verb decorator or a pattern-style entry point. Handler-only decorators
- * (Guards / Interceptors / Pipes / Filters) mark the enclosing method as a boundary
- * without assigning the route extKind — a service method wrapped in a Guard is still a
- * boundary-worthy check, but it is not the route itself.
- *
- * `derivedBy` carries the decorator identifier (`Post`, `UseGuards`, `MessagePattern`, …)
- * where class classification carries a semantic role name; the asymmetry is deliberate (see
- * classifyClass). The identifier is the **imported** one, so a file that renamed `Get` to
- * `Fetch` on import still reports `framework:nestjs:route:Get`: `derivedBy` is a closed
- * vocabulary that downstream filters and diffs read, and it would otherwise change meaning
- * with a rename that changed nothing about the route. `Decorator.name` and `.raw` keep the
- * spelling the source used.
- *
- * Confidence follows the slot that decided the answer, the same rule classifyClass states:
- * a method carrying both a route decorator and a handler decorator reports the route's
- * provenance and discards the handler's, because the route is what the extKind claims. Both
- * still contribute their boundary flags.
+ * An HTTP verb or pattern decorator makes the method a route; handler-only decorators
+ * (Guards / Interceptors / Pipes / Filters) flag a boundary without the route extKind.
+ * `derivedBy` carries the **imported** identifier (`Get`, not a local `Fetch` alias) so the
+ * closed vocabulary downstream filters read does not change with a rename; `Decorator.name`
+ * keeps the written spelling. Confidence follows the slot that decided the answer.
  */
 function classifyMethod(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -174,14 +122,14 @@ function classifyMethod(
     return {
       extKind: ROUTE_EXT_KIND,
       decoratorBoundaries: boundaries,
-      derivedBy: `framework:nestjs:route:${firstRoute.canonical}`,
+      derivedBy: `${NESTJS_DERIVED_BY_PREFIX}:route:${firstRoute.canonical}`,
       ...confidenceOverride(firstRoute.confidence),
     }
   }
   if (firstHandler !== null) {
     return {
       decoratorBoundaries: boundaries,
-      derivedBy: `framework:nestjs:handler:${firstHandler.canonical}`,
+      derivedBy: `${NESTJS_DERIVED_BY_PREFIX}:handler:${firstHandler.canonical}`,
       ...confidenceOverride(firstHandler.confidence),
     }
   }
@@ -194,26 +142,12 @@ interface ResolvedWinner {
   confidence: Confidence
 }
 
-/**
- * Spread into a `SymbolClassification` to state a confidence below the default.
- *
- * `high` is emitted as the absence of the key rather than as the value, because
- * `SymbolClassification.confidence` documents an omitted key as meaning exactly that. A
- * classification that spelled it out would be equivalent to the core but would read, to
- * anyone comparing two results, as though something had been decided.
- */
+/** `high` is the documented meaning of an omitted `confidence`, so it is spread as nothing. */
 function confidenceOverride(confidence: Confidence): { confidence?: Confidence } {
   return confidence === "high" ? {} : { confidence }
 }
 
-/**
- * Refuse to silently skip a decorator with an empty name. The upstream language plugin
- * normally guarantees non-empty identifiers, but a grammar regression could produce an
- * empty string that would then flow through `Set.has("")` / `Map.get("")` without
- * matching anything and disappear — losing the signal that the grammar produced
- * something unexpected. Match the fail-fast contract used by the language plugin's own
- * name-required helpers.
- */
+/** An empty decorator name is a language-plugin grammar regression; fail fast rather than let it fall through `Map.get("")`. */
 function assertDecoratorName(name: string, symbolId: string): void {
   if (name.length > 0) return
   throw new CoreError(
@@ -222,8 +156,6 @@ function assertDecoratorName(name: string, symbolId: string): void {
   )
 }
 
-// Re-export the decorator inspection surface symmetrically for classes and methods so a
-// consumer that wants to introspect either side does not have to import from a sub-path.
 export {
   classifyClassDecorator,
   isMethodBoundaryDecorator,

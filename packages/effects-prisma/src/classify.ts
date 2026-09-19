@@ -22,39 +22,21 @@ import {
 /**
  * Classify a CallCandidate against Prisma Client conventions.
  *
- * Recognition strategy:
- *   1. The owning file must import a Prisma Client module (see `hasPrismaImport`). No
- *      import → `null`, so callers can chain other effect plugins after this one.
- *   2. The target is split on `.`; the plugin looks at the trailing segments to match
- *      Prisma's fixed client surface. Two shapes are accepted:
- *        - `<...>.<model>.<verb>` (3+ segments) — a model delegate call. The client
- *          segment stops two-segment method collisions (Express `router.create(...)`)
- *          from false-classifying.
- *        - `<...>.$transaction` (2+ segments) — the top-level transaction API on the
- *          client itself.
- *   3. A literal first argument rules the call out — no Prisma method takes one — and the
- *      receiver and the argument count decide the tier (`classificationConfidence`).
- *   3a. A model segment that names nothing — `prisma[model].create(…)`, which arrives as
- *      `prisma.<computed>.create` — supplies the third segment without supplying a model, so
- *      the receiver has to carry the claim on its own: it must name a client binding, or the
- *      call is not classified at all.
- *   4. Malformed targets (empty string, adjacent / leading / trailing dots) throw — the
- *      language plugin's contract is a normalized non-empty callee, so a violation
- *      here is an upstream bug we surface loudly instead of silently miscategorizing.
+ * Two shapes are accepted once the file imports a Prisma Client module (`hasPrismaImport`):
+ *   - `<...>.<model>.<verb>` (3+ segments) — a model delegate call. The client segment is
+ *     what separates it from two-segment collisions such as Express `router.create(...)`.
+ *   - `<...>.$transaction` (2+ segments) — the transaction API on the client itself.
  *
- * **The import gate is not a receiver check.** It answers "does this file use Prisma",
- * which a file is free to answer yes to while most of its calls belong to something else:
- * `this.cache.items.delete(key)` is a `Map`, `session.user.update(fields)` is an object,
- * and both have three segments and a delegate verb. Step 3 is what keeps those from being
- * recorded as `db.write` at the tier a hand-annotated effect gets — a claim that
- * would then propagate through the call graph and into the diff. Where the receiver names
- * the client, the classification still lands at `high`; where it does not, the effect is
- * still emitted but at `medium`, because a syntactic classifier cannot tell a client under
- * a house naming convention apart from an unrelated object of the same shape, and silently
- * dropping the first is as wrong as confidently claiming the second.
+ * The import gate is not a receiver check: `this.cache.items.delete(key)` is a `Map` and
+ * `session.user.update(fields)` an object, both three segments with a delegate verb in a
+ * file that also uses Prisma. A literal first argument rules a call out — no Prisma method
+ * takes one — and the receiver plus argument count decide the tier, downgrading rather
+ * than dropping (`receiverConfidence`). A model addressed through brackets arrives as
+ * `<computed>` and supplies the third segment without a model, so there the receiver must
+ * name a client outright.
  *
- * The function is a pure lookup — no I/O, no state, no async — matching the per-call
- * timeout budget the core enforces (effect-plugin.md §5.1.1).
+ * Throws on a malformed target (`assertNonEmptySegments`): an upstream contract violation,
+ * not a classification decision. Pure with respect to plugin state (effect-plugin.md).
  */
 export function classifyPrismaCall(
   call: CallCandidate,
@@ -62,52 +44,36 @@ export function classifyPrismaCall(
 ): EffectClassification | null {
   const origin: PluginInputOrigin = { plugin: EFFECTS_PRISMA_PLUGIN_NAME, filePath: ctx.file.path }
 
-  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why the
-  // order is load-bearing.
-  const { segments: parts, last: method } = assertNonEmptySegments(call.target, origin)
+  // Fail-fast runs BEFORE the import gate — see `assertNonEmptySegments` for why.
+  const { segments, last: method } = assertNonEmptySegments(call.target, origin)
 
   if (!hasPrismaImport(ctx.file.imports, ctx.file.path)) return null
 
   if (isPrismaTransactionMethod(method)) {
-    // Bare `$transaction()` (single segment) is not a Prisma call — the transaction
-    // API only makes sense as a method on the client (`<client>.$transaction(...)`).
-    if (parts.length < 2) return null
-    // `$transaction` is a `$`-prefixed name Prisma owns outright, so the receiver is the
-    // main thing left to weigh. Its own arity is wider than a delegate's: the callback
-    // form takes a second options argument (`$transaction(fn, { timeout })`).
+    // A bare `$transaction()` is not a Prisma call; the API is a method on the client.
+    if (segments.length < 2) return null
     if (hasLiteralFirstArgument(call)) return null
     return {
       effectId: "db.transaction",
-      confidence: classificationConfidence(parts.at(-2), call, PRISMA_TRANSACTION_MAX_ARGUMENTS),
+      confidence: classificationConfidence(segments.at(-2), call, PRISMA_TRANSACTION_MAX_ARGUMENTS),
       derivedBy: `${EFFECTS_PRISMA_DERIVED_BY_PREFIX}:tx`,
     }
   }
 
-  // Model delegate calls need `<client>.<model>.<verb>` to distinguish them from
-  // unrelated two-segment method calls (Express `router.create(...)`, an Array's
-  // hypothetical `.findMany` collision) that would otherwise false-positive in files
-  // that colocate Prisma with another library.
-  if (parts.length < 3) return null
+  // `<client>.<model>.<verb>`: two-segment calls are `router.create(...)` and friends.
+  if (segments.length < 3) return null
 
-  // A delegate method takes an options object or nothing, so a literal first argument
-  // (`this.cache.items.delete("session")`, `map.delete("id")`) is some other API's call.
+  // A delegate takes an options object or nothing, so `map.delete("id")` is another API.
   if (hasLiteralFirstArgument(call)) return null
 
-  // The client sits immediately before the model, whatever precedes it: `prisma.user.create`,
-  // `this.prisma.user.create` and `container.services.prisma.user.create` all put it at -3.
-  const clientSegment = parts.at(-3)
+  // The client sits immediately before the model, whatever precedes it.
+  const clientSegment = segments.at(-3)
 
-  // A model addressed through brackets (`prisma[model].create(…)`) arrives with `<computed>`
-  // where the model's name belongs — three segments, one of which names nothing. Segment
-  // count is what separates a delegate call from `router.create(payload)` here, so a segment
-  // that names nothing must not be what supplies it: `queues[id].upsert(job)` and
-  // `sets[key].delete(item)` are a queue and a Set, spelled exactly like this call.
-  //
-  // The receiver is what is left to weigh, and it decides. Where it names a client binding,
-  // this is a delegate call whose model the source computes: the write is real and the open
-  // question is which model it hits, which `classificationConfidence` already answers with
-  // `medium` on the same flag. Where it does not, nothing here is Prisma but a shared verb.
-  if (clientSegment !== undefined && parts.at(-2) === COMPUTED_TARGET_SEGMENT) {
+  // `prisma[model].create(…)` arrives as `prisma.<computed>.create`: three segments, one of
+  // which names nothing. Segment count is what separates a delegate call from
+  // `queues[id].upsert(job)` / `sets[key].delete(item)`, so the receiver has to carry the
+  // claim alone; `classificationConfidence` already answers `medium` on the same flag.
+  if (clientSegment !== undefined && segments.at(-2) === COMPUTED_TARGET_SEGMENT) {
     if (!namesPrismaClient(clientSegment)) return null
   }
 

@@ -8,7 +8,16 @@ import type {
   LanguagePlugin,
   PluginManifest,
 } from "@aburi/types"
-import { CliError, errorMessage } from "./errors"
+import { assertNever, CliError, errorMessage } from "./errors"
+
+/** Every field of the config that lists plugin refs, and the manifest type each must declare. */
+const PLUGIN_FIELDS = {
+  languages: "lang",
+  frameworks: "framework",
+  effects: "effects",
+} as const satisfies Record<keyof LoadedPlugins & keyof Config, PluginManifest["type"]>
+
+type PluginField = keyof typeof PLUGIN_FIELDS
 
 export interface LoadedPlugins {
   languages: LanguagePlugin[]
@@ -24,7 +33,8 @@ export interface LoadPluginsOptions {
   /**
    * Where a relative `./plugins/*.mjs` ref resolves from. Defaults to `workspaceRoot`, and
    * differs from it only for `aburi diff`'s base scan, whose config comes from the head tree
-   * while its workspace root is the temporary worktree (`cli-spec.md` §6.4.1.5).
+   * while its workspace root is the temporary worktree (`cli-spec.md`, plugin resolution at the
+   * base ref).
    */
   pluginRefRoot?: string
   /** Dynamic import hook for testing (default: real ESM import). */
@@ -48,49 +58,32 @@ export interface LoadPluginsOptions {
  * - relative path (`./plugins/x.mjs`) — resolved from `pluginRefRoot`, which is the
  *   workspace root unless the caller says otherwise.
  *
- * Once imported, the loader accepts the following export shapes:
+ * Once imported, the loader accepts the following export shapes, first hit wins:
  *   1. `default` export whose value has a `manifest` field
  *   2. named `plugin` export whose value has a `manifest` field
  *   3. any top-level export whose value has a `manifest` field
- * The first hit wins. Plugin packages authored inside this monorepo use pattern 3 (named
- * plugin like `langTypescriptPlugin`) — no change to their surface is required.
  */
 export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPlugins> {
   const registry = new VocabRegistry()
   for (const manifest of options.syntheticPlugins ?? []) registry.register(manifest)
 
-  const languages: LanguagePlugin[] = []
-  const frameworks: FrameworkPlugin[] = []
-  const effects: EffectPlugin[] = []
-
+  const loaded: LoadedPlugins = { languages: [], frameworks: [], effects: [], registry }
   const importFn = options.importModule ?? defaultImport
-  const refs = collectRefs(options.config)
-  for (const { ref, bucket } of refs) {
-    const specifier = resolveSpecifier(ref, options.pluginRefRoot ?? options.workspaceRoot)
-    const module = await tryImport(importFn, specifier, ref)
-    const plugin = pickPlugin(module, ref)
-    registry.register(plugin.manifest)
-    routePlugin(plugin, bucket, languages, frameworks, effects, ref)
+  for (const field of Object.keys(PLUGIN_FIELDS) as PluginField[]) {
+    for (const ref of options.config[field] ?? []) {
+      const specifier = resolveSpecifier(ref, options.pluginRefRoot ?? options.workspaceRoot)
+      const module = await tryImport(importFn, specifier, ref)
+      const plugin = pickPlugin(module, ref)
+      registry.register(plugin.manifest)
+      routePlugin(plugin, field, loaded, ref)
+    }
   }
-  return { languages, frameworks, effects, registry }
+  return loaded
 }
 
-interface RefEntry {
-  ref: string
-  bucket: "lang" | "framework" | "effects"
-}
-
-function collectRefs(config: Config): RefEntry[] {
-  const out: RefEntry[] = []
-  for (const ref of config.languages ?? []) out.push({ ref, bucket: "lang" })
-  for (const ref of config.frameworks ?? []) out.push({ ref, bucket: "framework" })
-  for (const ref of config.effects ?? []) out.push({ ref, bucket: "effects" })
-  return out
-}
-
-function resolveSpecifier(ref: string, workspaceRoot: string): string {
+function resolveSpecifier(ref: string, pluginRefRoot: string): string {
   if (ref.startsWith("./") || ref.startsWith("../")) {
-    return pathToFileURL(resolve(workspaceRoot, ref)).href
+    return pathToFileURL(resolve(pluginRefRoot, ref)).href
   }
   if (ref.startsWith("@") || ref.includes("/")) return ref
   return `@aburi/${ref}`
@@ -150,34 +143,32 @@ function isPluginLike(value: unknown): value is AnyPlugin {
 
 function routePlugin(
   plugin: AnyPlugin,
-  bucket: RefEntry["bucket"],
-  languages: LanguagePlugin[],
-  frameworks: FrameworkPlugin[],
-  effects: EffectPlugin[],
+  field: PluginField,
+  into: LoadedPlugins,
   ref: string,
 ): void {
   const type = plugin.manifest.type
-  if (bucket === "lang" && type !== "lang") {
+  if (type !== PLUGIN_FIELDS[field]) {
     throw new CliError(
-      `Plugin "${ref}" is listed under languages but its manifest declares type "${type}".`,
+      `Plugin "${ref}" is listed under ${field} but its manifest declares type "${type}".`,
       "plugin-error",
     )
   }
-  if (bucket === "framework" && type !== "framework") {
-    throw new CliError(
-      `Plugin "${ref}" is listed under frameworks but its manifest declares type "${type}".`,
-      "plugin-error",
-    )
+  switch (field) {
+    case "languages":
+      into.languages.push(plugin as unknown as LanguagePlugin)
+      break
+    case "frameworks":
+      into.frameworks.push(plugin as unknown as FrameworkPlugin)
+      break
+    case "effects":
+      into.effects.push(plugin as unknown as EffectPlugin)
+      break
+    default:
+      // A fourth plugin-bearing config field is a type error here rather than a ref the loader
+      // accepts, reports nothing about, and then never hands to the scan.
+      assertNever(field, "plugin field")
   }
-  if (bucket === "effects" && type !== "effects") {
-    throw new CliError(
-      `Plugin "${ref}" is listed under effects but its manifest declares type "${type}".`,
-      "plugin-error",
-    )
-  }
-  if (bucket === "lang") languages.push(plugin as unknown as LanguagePlugin)
-  else if (bucket === "framework") frameworks.push(plugin as unknown as FrameworkPlugin)
-  else effects.push(plugin as unknown as EffectPlugin)
 }
 
 async function defaultImport(specifier: string): Promise<unknown> {

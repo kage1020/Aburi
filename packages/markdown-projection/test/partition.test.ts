@@ -1,10 +1,11 @@
+import { fp, makeSymbol } from "@aburi/test-support"
 import type { SymbolChanged, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { emptySummary, fp, makeDiff, makeSymbol } from "./fixtures"
+import { emptySummary, makeDiff } from "./fixtures"
 
 /**
- * §6.2 tail — `partition` routes overlapping delta flags by priority:
+ * markdown-projection.md — `partition` routes overlapping delta flags by priority:
  *   apiChanged > logicChanged > syntaxChanged
  * A single `changed` entry lands in exactly one of API changes / Logic changes / Syntax-only.
  */
@@ -34,69 +35,30 @@ function makeChangedEntry(delta: SymbolDelta): SymbolChanged {
   }
 }
 
+const SECTIONS = {
+  api: "## ⚠ API changes",
+  logic: "## 🔧 Logic changes",
+  syntax: "## 🎨 Syntax-only changes",
+} as const
+
 describe("partition — delta-priority routing (C4)", () => {
-  it("routes api+logic → API changes only", () => {
+  it.each<[string, Partial<SymbolDelta>, keyof typeof SECTIONS | null]>([
+    ["api+logic", { apiChanged: true, logicChanged: true }, "api"],
+    ["api+syntax", { apiChanged: true, syntaxChanged: true }, "api"],
+    ["logic+syntax", { logicChanged: true, syntaxChanged: true }, "logic"],
+    ["api+logic+syntax", { apiChanged: true, logicChanged: true, syntaxChanged: true }, "api"],
+    // Every axis false should be `unchanged` upstream; if it slips through, no section may fire.
+    ["no axis", {}, null],
+  ])("routes %s to exactly one section", (_, flags, expected) => {
     const md = projectDiff(
       makeDiff({
         summary: { ...emptySummary(), changed: 1 },
-        symbols: [makeChangedEntry(makeDelta({ apiChanged: true, logicChanged: true }))],
+        symbols: [makeChangedEntry(makeDelta(flags))],
       }),
     )
-    expect(md).toContain("## ⚠ API changes")
-    expect(md).not.toContain("## 🔧 Logic changes")
-    expect(md).not.toContain("## 🎨 Syntax-only changes")
-  })
-
-  it("routes api+syntax → API changes only", () => {
-    const md = projectDiff(
-      makeDiff({
-        summary: { ...emptySummary(), changed: 1 },
-        symbols: [makeChangedEntry(makeDelta({ apiChanged: true, syntaxChanged: true }))],
-      }),
-    )
-    expect(md).toContain("## ⚠ API changes")
-    expect(md).not.toContain("## 🎨 Syntax-only changes")
-  })
-
-  it("routes logic+syntax → Logic changes only", () => {
-    const md = projectDiff(
-      makeDiff({
-        summary: { ...emptySummary(), changed: 1 },
-        symbols: [makeChangedEntry(makeDelta({ logicChanged: true, syntaxChanged: true }))],
-      }),
-    )
-    expect(md).toContain("## 🔧 Logic changes")
-    expect(md).not.toContain("## 🎨 Syntax-only changes")
-    expect(md).not.toContain("## ⚠ API changes")
-  })
-
-  it("routes api+logic+syntax → API changes only (top of the priority chain)", () => {
-    const md = projectDiff(
-      makeDiff({
-        summary: { ...emptySummary(), changed: 1 },
-        symbols: [
-          makeChangedEntry(
-            makeDelta({ apiChanged: true, logicChanged: true, syntaxChanged: true }),
-          ),
-        ],
-      }),
-    )
-    expect(md).toContain("## ⚠ API changes")
-    expect(md).not.toContain("## 🔧 Logic changes")
-    expect(md).not.toContain("## 🎨 Syntax-only changes")
-  })
-
-  it("emits nothing for a `changed` entry where every axis is false", () => {
-    // (This should be treated as `unchanged` upstream; if it slips through the routing
-    //  must not accidentally emit a section.)
-    const md = projectDiff(
-      makeDiff({
-        summary: { ...emptySummary(), changed: 1 },
-        symbols: [makeChangedEntry(makeDelta())],
-      }),
-    )
-    expect(md).not.toContain("## ⚠ API changes")
-    expect(md).not.toContain("## 🔧 Logic changes")
-    expect(md).not.toContain("## 🎨 Syntax-only changes")
+    for (const [key, heading] of Object.entries(SECTIONS)) {
+      if (key === expected) expect(md).toContain(heading)
+      else expect(md).not.toContain(heading)
+    }
   })
 })

@@ -27,10 +27,14 @@ export function hashCanonicalObject(value: unknown): string {
 }
 
 /**
- * Hash a pre-formed UTF-8 string. `syntax` axis: the language plugin emits an already-
- * normalized AST S-expression (positions stripped, comments removed) and we only need
- * the SHA-256 → 12 hex truncation here.
+ * Hash a pre-formed UTF-8 string to `FP_HEX_LENGTH` hex chars. The `syntax` axis lands here
+ * directly because the language plugin owns its normalized AST string form.
  */
 export function hashRawString(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex").slice(0, FP_HEX_LENGTH)
+  return sha256Hex(text).slice(0, FP_HEX_LENGTH)
+}
+
+/** Full lowercase-hex SHA-256 of `text`'s UTF-8 bytes; callers pick their own truncation. */
+export function sha256Hex(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex")
 }

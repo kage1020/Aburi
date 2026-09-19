@@ -1,14 +1,14 @@
+import { call, decorator, effect, fp, makeSymbol, rule } from "@aburi/test-support"
 import type { Effect, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { computeSymbolDelta } from "../src"
-import { call, decorator, effect, fp, makeSymbol, rule } from "./fixtures"
 
 /**
- * §5.2 pairs the elements of `rules`, `calls` and `decorators` by an identity key with a
- * ±`lineFuzz` tolerance on the line, so a cosmetic shift is not reported as a change. A key
- * does not identify one element — a Symbol routinely holds two `guard` rules, two calls to one
- * target, two `@Get` — so which base element a head element takes is a choice, and §5.2.0 is
- * where the rule for making it lives.
+ * The array diff (diff-algorithm.md) pairs the elements of `rules`, `calls` and `decorators` by an
+ * identity key with a ±`lineFuzz` tolerance on the line, so a cosmetic shift is not reported as a
+ * change. A key does not identify one element — a Symbol routinely holds two `guard` rules, two
+ * calls to one target, two `@Get` — so which base element a head element takes is a choice, and the
+ * same doc is where the rule for making it lives.
  *
  * The cases here are the ones that distinguish it from the near misses: pairing by array
  * order, pairing by proximity alone, and pairing greedily rather than as a set.
@@ -377,9 +377,9 @@ describe("effects are paired under the same rule, with no line window", () => {
 })
 
 describe("array order decides only where it has to", () => {
-  // §3.8 makes Symbol pairing independent of array order, and an array delta cannot be: §5.2
-  // pairs by line, and ir-schema §14 #11 fixes the canonical order of these arrays, so reading
-  // it is reading the Document. What order must not decide is a pairing the lines already
+  // diff-algorithm.md makes Symbol pairing independent of array order, and an array delta cannot
+  // be: it pairs by line, and ir-schema.md #11 fixes the canonical order of these arrays, so
+  // reading it is reading the Document. What order must not decide is a pairing the lines already
   // settle — which is what taking the first key hit got wrong.
   it("answers the same with the base rules written the other way round", () => {
     const head = [rule({ type: "guard", line: 3, condition: "!invoice" })]
@@ -408,10 +408,10 @@ describe("array order decides only where it has to", () => {
       removed: ["!second"],
       modified: ["!edited"],
     })
-    // Reversing the base array swaps which is taken, and that is not a defect: unlike §3.8's
-    // Symbol pairing, an array delta reads array order, which ir-schema §14 #11 fixes
-    // canonically — so the reversed input below is not a conforming Document, and what is
-    // asserted of it is only that the answer is determined. §3.7 records the distinction.
+    // Reversing the base array swaps which is taken, and that is not a defect: unlike Symbol
+    // pairing, an array delta reads array order, which ir-schema.md #11 fixes canonically — so the
+    // reversed input below is not a conforming Document, and what is asserted of it is only that
+    // the answer is determined. diff-algorithm.md records the distinction.
     const reversedBase = [...equidistant].reverse()
     expect(ruleDelta(reversedBase, edited)).toEqual(ruleDelta(reversedBase, edited))
     expect(ruleDelta(reversedBase, edited)).toEqual({
@@ -438,7 +438,7 @@ describe("array order decides only where it has to", () => {
 
   it("lets one base element answer only one head element", () => {
     // Two head guards, one base guard, both a line away. One is an addition rather than a
-    // second claim on the same element, and which one is settled by §5.2.0's ordering rather
+    // second claim on the same element, and which one is settled by the pairing's ordering rather
     // than by distance: the pairings may not cross, and the first head is above the second.
     expect(
       ruleDelta(

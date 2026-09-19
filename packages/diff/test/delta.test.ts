@@ -1,6 +1,6 @@
+import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { buildDiff, classifyStatus, computeSymbolDelta, dropDirection } from "../src"
-import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "./fixtures"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
@@ -14,7 +14,7 @@ describe("a Symbol whose component moved under it", () => {
 
   it("is unchanged: redrawing a boundary is not editing the code", () => {
     // `Symbol.component` comes from `Component.roots[]` and from nothing in the file
-    // (component-detect.md §12), so a config that re-roots a package must not report every
+    // (component-detect.md), so a config that re-roots a package must not report every
     // Symbol under it as a code change — `--fail-on changed` would fire on an edit nobody
     // made. `classifyStatus` reads the three fingerprints and the path, and `component` is
     // in none of them, which is what makes that true rather than incidental.
@@ -30,7 +30,7 @@ describe("a Symbol whose component moved under it", () => {
 })
 
 // -----------------------------------------------------------------------------
-// C2 — dropped-toggled coverage (§4.1 rationale + both directions + summary)
+// C2 — dropped-toggled coverage (rationale + both directions + summary)
 // -----------------------------------------------------------------------------
 
 describe("dropped-toggled status (C2)", () => {
@@ -79,12 +79,12 @@ describe("dropped-toggled status (C2)", () => {
     const change = result.symbols[0]
     if (change?.status !== "dropped-toggled") throw new Error("expected dropped-toggled")
     expect(change.direction).toBe("to-dropped")
-    // §4.1 — delta must not appear on dropped-toggled entries.
+    // Delta must not appear on dropped-toggled entries.
     const anyChange: Record<string, unknown> = change as unknown as Record<string, unknown>
     expect(anyChange.delta).toBeUndefined()
   })
 
-  it("does NOT surface a DTO ruleset toggle as `changed` (§4.1 protection)", () => {
+  it("does NOT surface a DTO ruleset toggle as `changed`", () => {
     // Simulate a DTO rule flip: multiple symbols move from kept to dropped in one PR.
     const before = [
       makeSymbol({ id: "ts:src/a.ts#A", name: "A", kind: "class" }),
@@ -103,7 +103,7 @@ describe("dropped-toggled status (C2)", () => {
 })
 
 // -----------------------------------------------------------------------------
-// I1 — Decorator delta (§5.2.2)
+// I1 — Decorator delta
 // -----------------------------------------------------------------------------
 
 describe("Decorator delta (I1)", () => {
@@ -279,7 +279,7 @@ describe("Calls delta (I2)", () => {
 })
 
 // -----------------------------------------------------------------------------
-// signature delta three-branch behaviour (backs up the §5.3 JSDoc fix)
+// signature delta three-branch behaviour (backs up the signature-delta JSDoc fix)
 // -----------------------------------------------------------------------------
 
 describe("Signature delta three branches", () => {

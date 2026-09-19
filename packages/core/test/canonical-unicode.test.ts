@@ -3,7 +3,7 @@ import { CoreError, checkIRIntegrity, makeSymbolId, serializeCanonical } from ".
 import { makeSymbol, minimalIR } from "./fixtures/ir"
 
 /**
- * Unicode normalization, from the serializer's side. ir-schema.md §1.2 states the rule and
+ * Unicode normalization, from the serializer's side. ir-schema.md states the rule and
  * why the Document depends on it; what these cases pin is the ordering half — normalize
  * first, then order. Doing it the other way round orders by one spelling and emits another,
  * so byte-identical inputs stop producing byte-identical output and the fingerprints built

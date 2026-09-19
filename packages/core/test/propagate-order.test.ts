@@ -12,7 +12,7 @@ import { edge, effect } from "./fixtures/propagate"
 
 /**
  * `reverseTopoOrder` emits SCCs callee-first, breaking ties on the smallest SCC index as
- * effect-propagation.md §6 requires. These cases assert the permutation itself.
+ * effect-propagation.md requires. These cases assert the permutation itself.
  *
  * They have to. The SCC aggregation downstream is commutative — every merge is a min/max
  * or a lexicographic-min, and both `derivedFrom` and the propagated entries are sorted
@@ -111,7 +111,7 @@ describe("propagation through the sweep", () => {
 
     const result = propagateEffects({ symbols, edges })
 
-    // Each hop names its immediate callee (effect-propagation.md §5.2), not the origin —
+    // Each hop names its immediate callee (effect-propagation.md), not the origin —
     // so reaching `a` at all proves the sweep visited d, c and b ahead of it.
     const derivedFrom = (id: string) =>
       (result.symbols.find((s) => s.id === id)?.effects ?? [])

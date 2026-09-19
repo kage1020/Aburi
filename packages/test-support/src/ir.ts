@@ -1,4 +1,3 @@
-import { makeLanguageId } from "@aburi/core"
 import type {
   Call,
   Component,
@@ -11,6 +10,7 @@ import type {
   Fingerprint,
   IR,
   Symbol as IRSymbol,
+  LanguageId,
   Rule,
   Signature,
   SliceId,
@@ -19,8 +19,10 @@ import type {
 
 /**
  * Brand a literal as a Symbol id. Fixtures are one of the boundary layers where an id is
- * asserted rather than constructed: several cases here feed *malformed* ids to the code
- * that exists to reject them, which routing through `makeSymbolId` would make unwritable.
+ * asserted rather than constructed (ir-schema.md): several suites feed *malformed* ids to the
+ * code that exists to reject them, which routing through `makeSymbolId` would make
+ * unwritable. Production code has no such need and reaches a `SymbolId` only through
+ * `makeSymbolId` / `trySymbolId` in `@aburi/core`.
  */
 export function symbolId(raw: string): SymbolId {
   return raw as SymbolId
@@ -36,15 +38,20 @@ export function sliceId(raw: string): SliceId {
   return raw as SliceId
 }
 
-/** Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md §11). */
+/** Language-id counterpart of `symbolId`; production code goes through `makeLanguageId`. */
+export function languageId(raw: string): LanguageId {
+  return raw as LanguageId
+}
+
+/** Dependency endpoints hold either id kind and are told apart by shape (ir-schema.md). */
 export function endpoint(raw: string): DependencyEndpoint {
   return raw as DependencyEndpoint
 }
 
 /**
- * Compact IR builder for diff tests. Every field carries a schema-satisfying default so
- * cases only spell out what they intend to change. The id-shaped fields are widened back to
- * `string` so cases keep writing literals; the branding happens here, once.
+ * Compact Symbol builder. Every field carries a schema-satisfying default so cases only spell
+ * out what they intend to change; id-shaped fields are widened back to `string` so cases keep
+ * writing literals, and the branding happens here, once.
  */
 export function makeSymbol(
   overrides: Omit<Partial<IRSymbol>, "id" | "component"> & {
@@ -58,7 +65,7 @@ export function makeSymbol(
     kind: overrides.kind ?? "function",
     extKind: overrides.extKind ?? null,
     name: overrides.name,
-    language: overrides.language ?? makeLanguageId("ts"),
+    language: overrides.language ?? languageId("ts"),
     component:
       overrides.component === undefined || overrides.component === null
         ? null
@@ -108,10 +115,22 @@ export function sig(overrides: Partial<Signature> = {}): Signature {
   }
 }
 
+export function rule(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
+  return {
+    type: overrides.type,
+    line: overrides.line ?? 1,
+    condition: overrides.condition ?? null,
+    what: overrides.what ?? null,
+    expr: overrides.expr ?? null,
+    loopKind: overrides.loopKind ?? null,
+  }
+}
+
+/** `raw` carries no leading `@`, as the IR spells it; the Markdown projection adds one. */
 export function decorator(overrides: Partial<Decorator> & { name: string }): Decorator {
   return {
     name: overrides.name,
-    raw: overrides.raw ?? `@${overrides.name}()`,
+    raw: overrides.raw ?? `${overrides.name}()`,
     arguments: overrides.arguments ?? [],
     boundary: overrides.boundary ?? false,
     line: overrides.line ?? 1,
@@ -152,17 +171,6 @@ export function call(
   }
 }
 
-export function rule(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
-  return {
-    type: overrides.type,
-    line: overrides.line ?? 1,
-    condition: overrides.condition ?? null,
-    what: overrides.what ?? null,
-    expr: overrides.expr ?? null,
-    loopKind: overrides.loopKind ?? null,
-  }
-}
-
 export function component(
   overrides: Omit<Partial<Component>, "id"> & { id: string; name: string },
 ): Component {
@@ -171,7 +179,7 @@ export function component(
     name: overrides.name,
     roots: overrides.roots ?? [`apps/${overrides.id}`],
     publicApi: overrides.publicApi ?? [],
-    languages: overrides.languages ?? [makeLanguageId("ts")],
+    languages: overrides.languages ?? [languageId("ts")],
     frameworks: overrides.frameworks ?? [],
     description: overrides.description ?? null,
   }
@@ -192,16 +200,8 @@ export function dependency(
 export function makeIR(overrides: Partial<IR> & { symbols?: IRSymbol[] } = {}): IR {
   return {
     $schema: overrides.$schema ?? "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
-    generator: overrides.generator ?? {
-      name: "aburi",
-      version: "0.0.0",
-      plugins: [],
-    },
-    workspace: overrides.workspace ?? {
-      root: ".",
-      managers: [],
-      languages: [makeLanguageId("ts")],
-    },
+    generator: overrides.generator ?? { name: "aburi", version: "0.0.0", plugins: [] },
+    workspace: overrides.workspace ?? { root: ".", managers: [], languages: [languageId("ts")] },
     components: overrides.components ?? [],
     symbols: overrides.symbols ?? [],
     dependencies: overrides.dependencies ?? [],

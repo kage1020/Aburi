@@ -1,7 +1,8 @@
 import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { asFunctionValue, makeSourceRange, unwrapValue } from "./ast-helpers"
+import { asFunctionValue, findChild, makeSourceRange, unwrapValue } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
+import { decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
  * Framework-level method vocabulary that promotes a module-level chained call
@@ -26,11 +27,7 @@ const PROMOTABLE_METHOD_NAMES: ReadonlySet<string> = new Set([
   "disable",
 ])
 
-/**
- * The `__d<N>` suffix is emitted UNCONDITIONALLY (even for the first occurrence). Skipping
- * it for `N=0` used to break Symbol.id uniqueness: `app.get('/x')` seen twice and
- * `app.get('/x__d1')` seen once would both collapse to `app__get__$x__d1`.
- */
+/** How many registrations of each `receiver__method__path` stem the module has produced so far. */
 export interface CallExtractionState {
   seen: Map<string, number>
 }
@@ -45,6 +42,10 @@ export function makeCallExtractionState(): CallExtractionState {
  * whose leaf method is not in `PROMOTABLE_METHOD_NAMES` — the goal is to surface only
  * framework registration shapes (Express in particular), not arbitrary expression
  * statements.
+ *
+ * The `__d<N>` suffix is emitted UNCONDITIONALLY (even for the first occurrence). Skipping
+ * it for `N=0` used to break Symbol.id uniqueness: `app.get('/x')` seen twice and
+ * `app.get('/x__d1')` seen once would both collapse to `app__get__$x__d1`.
  */
 export function visitCallStatement(
   node: Node,
@@ -59,23 +60,19 @@ export function visitCallStatement(
   if (parsed === null) return null
   if (!PROMOTABLE_METHOD_NAMES.has(parsed.method)) return null
 
-  const receiverSegment = mangleReceiver(parsed.receiver)
-  if (receiverSegment === null) return null
+  const receiver = receiverSegment(parsed.receiver)
+  if (receiver === null) return null
 
-  const argsNode = call.childForFieldName("arguments") ?? findArgumentsChild(call)
+  const argsNode = call.childForFieldName("arguments") ?? findChild(call, "arguments")
   const literalPath = argsNode !== null ? firstStringLiteralArg(argsNode) : null
   const pathSlug = literalPath === null ? "" : slugifyPath(literalPath)
 
-  const baseQname =
-    pathSlug === ""
-      ? `${receiverSegment}__${parsed.method}`
-      : `${receiverSegment}__${parsed.method}__${pathSlug}`
+  const stem =
+    pathSlug === "" ? `${receiver}__${parsed.method}` : `${receiver}__${parsed.method}__${pathSlug}`
+  const ordinal = state.seen.get(stem) ?? 0
+  state.seen.set(stem, ordinal + 1)
+  const qname = nestedQname([`${stem}__d${ordinal}`])
 
-  const count = state.seen.get(baseQname) ?? 0
-  state.seen.set(baseQname, count + 1)
-  const finalQname = `${baseQname}__d${count}`
-
-  const qname = nestedQname([finalQname])
   const [lead, ...rest] = inlineHandlers(call)
   return {
     id: makeTsSymbolId(ctx.file.path, qname),
@@ -123,7 +120,7 @@ export function visitCallStatement(
 function inlineHandlers(call: Node): MergedDeclaration<Node>[] {
   const found: MergedDeclaration<Node>[] = []
   for (const step of spineCalls(call)) {
-    const args = step.childForFieldName("arguments") ?? findArgumentsChild(step)
+    const args = step.childForFieldName("arguments") ?? findChild(step, "arguments")
     if (args === null) continue
     for (const argument of args.namedChildren) {
       if (argument === null) continue
@@ -238,70 +235,44 @@ function firstCallExpression(exprStatement: Node): Node | null {
   return null
 }
 
-function findArgumentsChild(callExpression: Node): Node | null {
-  for (const child of callExpression.namedChildren) {
-    if (child !== null && child.type === "arguments") return child
-  }
-  return null
-}
-
 function firstStringLiteralArg(argsNode: Node): string | null {
   const first = argsNode.namedChildren[0]
   if (first === undefined || first === null) return null
   if (first.type !== "string") return null
-  const parts: string[] = []
-  for (const child of first.namedChildren) {
-    if (child === null) continue
-    if (child.type === "string_fragment") parts.push(child.text)
-  }
-  if (parts.length > 0) return parts.join("")
-  const raw = first.text
-  return raw.length >= 2 ? raw.slice(1, -1) : raw
+  return decodeStringLiteralOrRaw(first)
+}
+
+/** The characters `QNAME_SEGMENT_PATTERN` admits at the head of a segment, and after it. */
+const SEGMENT_START = /[A-Za-z_$]/
+const SEGMENT_PART = /[A-Za-z0-9_$]/
+
+function foldChar(ch: string, allowed: RegExp): string {
+  return allowed.test(ch) ? ch : "_"
 }
 
 /**
- * Turn a URL path literal into a QNAME_SEGMENT_PATTERN-safe slug. `/` becomes `$`, `:`
- * becomes `Z` (to preserve dynamic-parameter positions in a way that stays alphanumeric),
- * every other non-identifier char is folded to `_`. Empty input returns "".
+ * Turn a URL path literal into a segment-safe slug. `/` becomes `$`, `:` becomes `Z` (to
+ * preserve dynamic-parameter positions in a way that stays alphanumeric), every other
+ * non-identifier char is folded to `_`. Empty input returns "".
  */
 function slugifyPath(path: string): string {
-  if (path.length === 0) return ""
   let out = ""
   for (const ch of path) {
-    if (ch === "/") {
-      out += "$"
-      continue
-    }
-    if (ch === ":") {
-      out += "Z"
-      continue
-    }
-    if (/[A-Za-z0-9_$]/.test(ch)) {
-      out += ch
-      continue
-    }
-    out += "_"
+    out += ch === "/" ? "$" : ch === ":" ? "Z" : foldChar(ch, SEGMENT_PART)
   }
   return out
 }
 
 /**
- * Force the receiver token into a QNAME_SEGMENT_PATTERN-safe form. Returns null on empty
- * input (should be unreachable — `rootReceiver` already rejects empty identifiers — but
- * kept as a defensive gate so a future grammar change cannot silently fabricate a shared
- * placeholder qname).
+ * The receiver identifier folded into a segment-safe form. Null on empty input — unreachable,
+ * since `rootReceiver` already rejects an empty identifier, but kept so a future grammar
+ * change cannot silently fabricate a shared placeholder qname.
  */
-function mangleReceiver(name: string): string | null {
+function receiverSegment(name: string): string | null {
   if (name.length === 0) return null
-  let out = ""
-  for (const [i, ch] of Array.from(name).entries()) {
-    if (i === 0) {
-      out += /[A-Za-z_$]/.test(ch) ? ch : "_"
-      continue
-    }
-    out += /[A-Za-z0-9_$]/.test(ch) ? ch : "_"
-  }
-  return out
+  return Array.from(name)
+    .map((ch, i) => foldChar(ch, i === 0 ? SEGMENT_START : SEGMENT_PART))
+    .join("")
 }
 
 function makeDerivedBy(

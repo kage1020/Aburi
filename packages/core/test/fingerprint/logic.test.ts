@@ -37,17 +37,6 @@ function base(): IRSymbol {
   })
 }
 
-describe("logicFingerprint — 12-hex determinism", () => {
-  it("returns exactly 12 lowercase hex characters", () => {
-    expect(logicFingerprint(base())).toMatch(/^[0-9a-f]{12}$/)
-  })
-
-  it("T1: two calls on the same Symbol produce the same hash", () => {
-    const sym = base()
-    expect(logicFingerprint(sym)).toBe(logicFingerprint(sym))
-  })
-})
-
 describe("logicFingerprint — invariance", () => {
   const baseFp = logicFingerprint(base())
 

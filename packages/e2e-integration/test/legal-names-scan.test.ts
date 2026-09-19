@@ -1,8 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { scanFixture } from "../src/scan-helper"
+import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * A destructuring declaration, a non-ASCII identifier, a computed member name and a quoted or
@@ -14,17 +12,14 @@ import { scanFixture } from "../src/scan-helper"
  * see: the file reaches the IR at all, and `skipped` is empty.
  */
 
+const workspace = useScratchWorkspace("names")
+
 async function scanSources(files: Record<string, string>) {
-  const root = await mkdtemp(resolve(tmpdir(), "aburi-names-"))
-  try {
-    for (const [name, content] of Object.entries(files)) {
-      await writeFile(resolve(root, name), content, "utf8")
-    }
-    const result = await scanFixture(root)
-    return { ids: result.ir.symbols.map((s) => s.id), skipped: result.skipped }
-  } finally {
-    await rm(root, { recursive: true, force: true })
+  for (const [name, content] of Object.entries(files)) {
+    await workspace.writeSource(name, content)
   }
+  const result = await scanFixture(workspace.root)
+  return { ids: result.ir.symbols.map((symbol) => symbol.id), skipped: result.skipped }
 }
 
 describe("a file that names things legally keeps its Symbols", () => {

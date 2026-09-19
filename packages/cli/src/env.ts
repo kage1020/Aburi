@@ -1,5 +1,5 @@
 /**
- * §11 — environment-variable → CLI-behaviour mapping. Kept pure so tests can inject a
+ * `cli-spec.md` — environment-variable → CLI-behaviour mapping. Kept pure so tests can inject a
  * frozen `env` bag rather than mutating `process.env`.
  */
 

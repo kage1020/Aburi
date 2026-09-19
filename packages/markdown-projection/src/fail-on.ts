@@ -2,7 +2,7 @@ import type { Summary } from "@aburi/types"
 
 /**
  * The status buckets a fail-on gate can watch. Mirrors `SymbolChange["status"]` on the
- * diff side plus the two nested `dropped-toggled` directions the design (§4.1) calls out
+ * diff side plus the two nested `dropped-toggled` directions the design calls out
  * (`dropped-toggled:to-dropped` and `dropped-toggled:to-kept`).
  */
 export type FailOnStatus =

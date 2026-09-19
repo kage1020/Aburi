@@ -1,7 +1,7 @@
 import type { AburiEnv } from "./env"
 
 /**
- * §11 — precedence: CLI flag > `ABURI_CONFIG` env > null (falls through to on-disk
+ * `cli-spec.md` — precedence: CLI flag > `ABURI_CONFIG` env > null (falls through to on-disk
  * discovery). The design's ordering is "CLI flag > env > config file" so a runtime
  * `--config` must dominate an environment variable set at the CI level.
  *

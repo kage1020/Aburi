@@ -2,6 +2,15 @@ import type { LanguagePlugin } from "@aburi/types"
 import { CoreError } from "../errors"
 
 /**
+ * The lowercased extension of `path`, dot included (`src/A.TSX` → `.tsx`), or `null` when the
+ * name has none. The one spelling the router, discovery and the language census key by.
+ */
+export function fileExtension(path: string): string | null {
+  const dot = path.lastIndexOf(".")
+  return dot < 0 ? null : path.slice(dot).toLowerCase()
+}
+
+/**
  * Build a case-insensitive extension → LanguagePlugin dispatch table. Each plugin
  * publishes its handled extensions via `fileExtensions` (e.g. `[".ts", ".tsx"]`) and
  * the scan orchestrator uses the map to pick the right parser for each discovered file.
@@ -53,9 +62,7 @@ export class LanguageRouter {
    * "unroutable"` rather than guessing a fallback.
    */
   route(path: string): LanguagePlugin<unknown, unknown> | null {
-    const dot = path.lastIndexOf(".")
-    if (dot < 0) return null
-    const ext = path.slice(dot).toLowerCase()
-    return this.#table.get(ext) ?? null
+    const extension = fileExtension(path)
+    return extension === null ? null : (this.#table.get(extension) ?? null)
   }
 }

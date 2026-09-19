@@ -1,10 +1,10 @@
+import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
 import type { DiffResult, IR, SkippedFile } from "@aburi/types"
 import Ajv2020, { type SchemaObject } from "ajv/dist/2020.js"
 import { describe, expect, it } from "vitest"
 import diffSchema from "../../../schema/aburi.diff.v1.json" with { type: "json" }
 import irSchema from "../../../schema/aburi.ir.v1.json" with { type: "json" }
 import { buildDiff } from "../src/diff"
-import { dependency, makeIR, makeSymbol } from "./fixtures"
 
 /**
  * Instance conformance for the diff shape this change added.

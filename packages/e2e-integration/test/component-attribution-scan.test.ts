@@ -1,13 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
-import { makeComponentId, makeLanguageId, type ScanResult, scan } from "@aburi/core"
+import { makeComponentId, makeLanguageId } from "@aburi/core"
 import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { projectComponent, projectWorkspace } from "@aburi/markdown-projection"
-import { VocabRegistry } from "@aburi/plugin-registry"
 import type { Component } from "@aburi/types"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
+import { scanWith } from "../src/scan-helper"
+import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * The artefacts a reviewer opens, over a two-package workspace scanned with the real
@@ -36,11 +34,10 @@ const WEB: Component = {
   description: null,
 }
 
-let workRoot = ""
+const workspace = useScratchWorkspace("attribution-e2e")
 
 beforeEach(async () => {
-  workRoot = await mkdtemp(join(tmpdir(), "aburi-attribution-e2e-"))
-  await writeSource(
+  await workspace.writeSource(
     "packages/api/src/invoice.service.ts",
     [
       'import { PrismaClient } from "@prisma/client"',
@@ -55,7 +52,7 @@ beforeEach(async () => {
       "",
     ].join("\n"),
   )
-  await writeSource(
+  await workspace.writeSource(
     "packages/web/src/invoice-page.ts",
     [
       "export function renderInvoicePage(total: number): string {",
@@ -66,30 +63,13 @@ beforeEach(async () => {
   )
 })
 
-afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true })
-})
-
-async function writeSource(rel: string, content: string): Promise<void> {
-  const abs = join(workRoot, rel)
-  await mkdir(dirname(abs), { recursive: true })
-  await writeFile(abs, content, "utf8")
-}
-
-async function scanWorkspace(): Promise<ScanResult> {
-  const registry = new VocabRegistry()
-  registry.register(langTypescriptPlugin.manifest)
-  registry.register(prismaEffectsPlugin.manifest)
-  return scan({
-    workspaceRoot: workRoot,
-    config: {},
-    languages: [langTypescriptPlugin],
-    frameworks: [],
-    effects: [prismaEffectsPlugin],
-    registry,
-    components: [API, WEB],
-  })
-}
+const scanWorkspace = () =>
+  scanWith(
+    workspace.root,
+    { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] },
+    {},
+    { components: [API, WEB] },
+  )
 
 describe("e2e: a scanned two-package workspace fills its per-component views", () => {
   it("counts each component's Symbols in workspace.md instead of reporting zero", async () => {
@@ -119,8 +99,7 @@ describe("e2e: a scanned two-package workspace fills its per-component views", (
 
   it("gives components/<id>.md the Symbols the component holds", async () => {
     // The artefact itself, written to disk by the CLI, is covered in
-    // `packages/cli/test/component-md.test.ts`; this is the same filter over a scan driven
-    // with the full plugin lineup.
+    // `packages/cli/test/component-md.test.ts`; this is the same filter over a real scan.
     const { ir } = await scanWorkspace()
 
     const md = projectComponent({

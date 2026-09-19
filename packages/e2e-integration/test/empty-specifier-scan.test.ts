@@ -1,11 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
-import { type ScanResult, scan } from "@aburi/core"
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
-import { VocabRegistry } from "@aburi/plugin-registry"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
+import { scanWith, symbolNamed } from "../src/scan-helper"
+import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * One `import x from ""` must not end the run.
@@ -20,40 +17,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
  * that reaches the guard.
  */
 
-let workRoot: string
+const workspace = useScratchWorkspace("empty-specifier")
 
-beforeEach(async () => {
-  workRoot = await mkdtemp(join(tmpdir(), "aburi-empty-specifier-"))
-})
-
-afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true })
-})
-
-async function writeSource(rel: string, content: string): Promise<void> {
-  const abs = join(workRoot, rel)
-  await mkdir(dirname(abs), { recursive: true })
-  await writeFile(abs, content, "utf8")
-}
-
-async function scanWorkspace(): Promise<ScanResult> {
-  const registry = new VocabRegistry()
-  registry.register(langTypescriptPlugin.manifest)
-  registry.register(nestjsFrameworkPlugin.manifest)
-  return scan({
-    workspaceRoot: workRoot,
-    config: {},
+const scanWorkspace = () =>
+  scanWith(workspace.root, {
     languages: [langTypescriptPlugin],
     frameworks: [nestjsFrameworkPlugin],
-    effects: [],
-    registry,
-    components: [],
   })
-}
 
 describe("scan — a file with an empty module specifier", () => {
   beforeEach(async () => {
-    await writeSource(
+    await workspace.writeSource(
       "src/a.controller.ts",
       [
         `import { Controller, Get } from "@nestjs/common"`,
@@ -67,7 +41,7 @@ describe("scan — a file with an empty module specifier", () => {
         ``,
       ].join("\n"),
     )
-    await writeSource(
+    await workspace.writeSource(
       "src/b.service.ts",
       [
         `import { Injectable } from "@nestjs/common"`,
@@ -81,7 +55,7 @@ describe("scan — a file with an empty module specifier", () => {
 
   it("completes, and keeps both the offending file's Symbols and its neighbour's", async () => {
     const result = await scanWorkspace()
-    const names = result.ir.symbols.map((s) => s.name)
+    const names = result.ir.symbols.map((symbol) => symbol.name)
     expect(names).toContain("AController")
     expect(names).toContain("AController.list")
     expect(names).toContain("BService")
@@ -98,17 +72,16 @@ describe("scan — a file with an empty module specifier", () => {
         recoverable: true,
       },
     ])
-    // Reporting and withdrawing are separate outcomes, and the file having Symbols in the
-    // previous case is what shows this one did not withdraw it. `skipped` cannot show it:
-    // its four reasons are all discovery-side or budget-side, and a file whose parse
-    // returned no tree is counted rather than listed.
+    // Reporting and withdrawing are separate outcomes. `skipped` cannot show it: its reasons
+    // are all discovery-side or budget-side, and a file whose parse returned no tree is
+    // counted rather than listed.
     expect(result.ir.symbols.some((s) => s.source.file === "src/a.controller.ts")).toBe(true)
   })
 
   it("still resolves the decorators the surviving edges describe", async () => {
     const result = await scanWorkspace()
-    const controller = result.ir.symbols.find((s) => s.name === "AController")
-    expect(controller?.extKind).toBe("framework:nestjs:controller")
-    expect(controller?.confidence).toBe("high")
+    const controller = symbolNamed(result, "AController")
+    expect(controller.extKind).toBe("framework:nestjs:controller")
+    expect(controller.confidence).toBe("high")
   })
 })

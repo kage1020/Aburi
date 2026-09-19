@@ -1,18 +1,6 @@
-import type { BodyExtraction, Rule, WalkContext } from "@aburi/types"
+import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import type { Node } from "web-tree-sitter"
-import { extractSymbols, parseTypescriptFile, walkBody } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
-
-async function walkFirstSymbol(source: string): Promise<BodyExtraction> {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  const ctx = makeExtractionCtx("src/a.ts", source)
-  const symbols = extractSymbols(requireTree(result.tree), ctx)
-  const target = symbols[0]
-  if (target === undefined) throw new Error("no symbols in fixture")
-  const walkCtx: WalkContext<Node> = { ...ctx, symbol: target }
-  return walkBody(target, walkCtx)
-}
+import { BACKSLASH, walkFirstSymbol } from "./fixtures/ctx"
 
 function typesOf(rules: Rule[]): string[] {
   return rules.map((r) => r.type)
@@ -131,13 +119,45 @@ describe("walkBody — rules (LP16-LP20)", () => {
     expect(call?.argumentCount).toBe(0)
     expect(call?.literalArgs).toEqual([])
   })
+
+  it("records a literal argument's escapes as the characters they name", async () => {
+    // The argument is read through the string decoder, so `\t` is a tab. Dropping the escape
+    // answered `SELECT\\t1` — the author's source text with a backslash still in it, which is
+    // not a query anything runs and reads in the IR exactly like one that is.
+    const { calls } = await walkFirstSymbol(
+      `export function f() { db.query("SELECT${BACKSLASH}t1") }`,
+    )
+    const call = calls.find((c) => c.target === "db.query")
+
+    expect(call?.literalArgs).toEqual(["SELECT\t1"])
+  })
+
+  it("keeps two literal arguments apart when neither could be read at all", async () => {
+    // `"\u12b"` is an invalid escape, so each literal's whole contents parse as an ERROR node
+    // and decode to nothing. Recording both as `""` reports two calls made with the same
+    // argument, which is what a reader of `literalArgs` goes on; the literal's own text is
+    // what the author wrote, and it keeps the two apart.
+    const { calls } = await walkFirstSymbol(
+      [
+        "export function f() {",
+        `  db.query("${BACKSLASH}u12b/a")`,
+        `  db.query("${BACKSLASH}u12b/b")`,
+        "}",
+      ].join("\n"),
+    )
+
+    expect(calls.map((c) => c.literalArgs)).toEqual([
+      [`${BACKSLASH}u12b/a`],
+      [`${BACKSLASH}u12b/b`],
+    ])
+  })
 })
 
-// The `dynamic` diagnostic bucket of call-resolution.md §8.1 cannot be recovered
+// The `dynamic` diagnostic bucket of call-resolution.md cannot be recovered
 // from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
 // spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
 // the distinction alive across the AST boundary.
-describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucket)", () => {
+describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", () => {
   it("flags a call-expression receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")
     const call = calls.find((c) => c.target === "getRepo.save")
@@ -168,7 +188,7 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
     expect(call?.dynamicReceiver).toBeUndefined()
   })
 
-  it("does not flag `this` / `super` receivers — those carry their own §4.7 rule", async () => {
+  it("does not flag `this` / `super` receivers — those carry their own rule", async () => {
     const { calls } = await walkFirstSymbol(
       "export function f(this: any) { this.save(); super.save() }",
     )
@@ -216,7 +236,7 @@ describe("walkBody — dynamicReceiver (call-resolution.md §8.1 `dynamic` bucke
   })
 })
 
-// A bracket access in a callee (`lang-plugin.md` §4.4, LP20j / LP20k). Reading only the
+// A bracket access in a callee (`lang-plugin.md`, LP20j / LP20k). Reading only the
 // object part answered `prisma.create` for `prisma["user"].create()` — a call that is
 // nowhere in the program, spelled like an ordinary two-segment method call, and one
 // segment short of the delegate shape `effects-prisma` needs, so the `db.write` went with

@@ -9,14 +9,10 @@ import { classifyPrismaCall } from "./classify"
 import { effectsPrismaManifest } from "./manifest"
 
 /**
- * Prisma effect plugin. Sits behind the language plugin's `walkBody` output, mapping
- * `prisma.<model>.<verb>` and `prisma.$transaction` call expressions into the core
- * `db.read` / `db.write` / `db.transaction` effect vocabulary.
- *
- * `init` and `classify` are both pure with respect to plugin state — no lazy resources,
- * no per-run caches — so repeated invocations against the same CallCandidate produce
- * identical results. This matches the per-call timeout contract in
- * effect-plugin.md §5.1.1 and the "pure classifier" recommendation in §11.1.
+ * Prisma effect plugin: maps `prisma.<model>.<verb>` and `prisma.$transaction` call
+ * expressions onto the core `db.read` / `db.write` / `db.transaction` vocabulary. `classify`
+ * is pure (effect-plugin.md) and throws on a malformed CallCandidate — an
+ * upstream contract violation, surfaced rather than swallowed.
  */
 class PrismaEffectsPlugin implements EffectPlugin {
   readonly manifest = effectsPrismaManifest
@@ -28,14 +24,7 @@ class PrismaEffectsPlugin implements EffectPlugin {
   }
 }
 
-/**
- * Ready-to-register instance. Callers pass this to `@aburi/plugin-registry` or a scan
- * pipeline. The type annotation is omitted deliberately: `class implements EffectPlugin`
- * already enforces the structural contract, and inferring the narrow class type keeps
- * the manifest literals (`readonly ["effects-plugin:prisma"]`, `"effects-prisma"`)
- * visible to consumers that want to compare against them without a separate manifest
- * import.
- */
+/** Ready-to-register instance; left unannotated so the manifest literals stay visible. */
 export const prismaEffectsPlugin = new PrismaEffectsPlugin()
 
 export { PrismaEffectsPlugin }

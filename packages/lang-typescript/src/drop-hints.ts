@@ -4,7 +4,7 @@ import { bodyNodesOf, functionValueOf } from "./ast-helpers"
 
 /**
  * Category-A skip patterns owned by this language plugin. Added on top of the core
- * standard set in drop-list.md §3.1. Config-level ignores stack on top of both.
+ * standard set in drop-list.md. Config-level ignores stack on top of both.
  */
 export const TYPESCRIPT_FILE_DROP_PATTERNS: readonly string[] = [
   "**/*.d.ts",
@@ -28,7 +28,7 @@ export function classifySymbolDropHint(
   _ctx: ExtractionContext,
 ): DropHint | null {
   // A boundary decorator overrides every hint below, the way it overrides every core rule in
-  // `decideSymbolDrop` — `drop-list.md` §4.1. The check has to be here as well as there:
+  // `decideSymbolDrop` — `drop-list.md`. The check has to be here as well as there:
   // `decideDropReason` asks core first, core answers `null` on a boundary, and then asks this.
   // So an unguarded arm here is the one that decides, and a `@Controller()` class merged into
   // an interface written above it was dropped as a data model.
@@ -90,7 +90,7 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
           break
         }
         hasAnyField = true
-        if (!isStaticLiteralField(member)) allStaticLiteral = false
+        if (!isConstantLikeField(member)) allStaticLiteral = false
         break
       default:
         allStaticLiteral = false
@@ -105,7 +105,8 @@ function classifyClassBody(symbol: SymbolCandidate<Node>): DropHint | null {
   return null
 }
 
-function isStaticLiteralField(field: Node): boolean {
+/** A field that is `static` **or** `readonly` and holds a literal — what "pure constants" counts. */
+function isConstantLikeField(field: Node): boolean {
   let hasStatic = false
   let hasReadonly = false
   for (const child of field.children) {

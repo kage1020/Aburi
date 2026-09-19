@@ -53,7 +53,7 @@ plugin's name). Callers that only need the name read `owner.name`.
 
 A second, deliberately tiny surface: the fail-fast guards that enforce the
 language plugin's normalized-output contract
-([`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md) §4.4) before an
+([`docs/design/lang-plugin.md`](../../docs/design/lang-plugin.md)) before an
 effect plugin reads the value, plus the readers every classifier ends up needing
 over the same values.
 
@@ -76,7 +76,7 @@ message, naming the plugin and the file that produced the bad value.
 The readers answer the two questions a classifier that matches on shared method
 vocabulary has to ask before it commits — is this receiver the client, and is
 this argument shape one the library could have produced
-([`docs/design/effect-plugin.md`](../../docs/design/effect-plugin.md) §5.4):
+([`docs/design/effect-plugin.md`](../../docs/design/effect-plugin.md)):
 
 ```ts
 import {

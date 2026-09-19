@@ -1,7 +1,7 @@
 import type { OpaqueAstNode, SymbolCandidate } from "@aburi/types"
 
 /**
- * Category B — Symbol-level drop decisions per drop-list.md §4. Returned as either a
+ * Category B — Symbol-level drop decisions per drop-list.md. Returned as either a
  * `dropReason` string (the caller stamps `dropped: true` + the reason on the emitted
  * Symbol) or `null` when the Symbol is not a drop candidate.
  *
@@ -11,7 +11,7 @@ import type { OpaqueAstNode, SymbolCandidate } from "@aburi/types"
  * caller layers on top of this result.
  */
 export function decideSymbolDrop(symbol: SymbolCandidate<OpaqueAstNode>): string | null {
-  // A boundary decorator overrides every core drop rule below (drop-list.md §4.1
+  // A boundary decorator overrides every core drop rule below (drop-list.md
   // second paragraph on boundary decorators) — a framework plugin has already declared
   // the Symbol to be part of the observable surface, so removing it from the IR would
   // lose the wire.

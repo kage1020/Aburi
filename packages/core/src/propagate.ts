@@ -5,8 +5,10 @@ import type {
   Symbol as IRSymbol,
   SymbolId,
 } from "@aburi/types"
+import { callEdgeKey } from "./call-site"
 import type { CallEdge } from "./callgraph"
 import { CoreError } from "./errors"
+import { compareBy, compareCodeUnit } from "./order"
 
 function invariantFailure(message: string): never {
   throw new CoreError(`propagate: ${message}`, { code: "propagation-invariant-violated" })
@@ -51,7 +53,8 @@ function maxConfidence(a: Confidence, b: Confidence): Confidence {
   return CONFIDENCE_RANK[a] >= CONFIDENCE_RANK[b] ? a : b
 }
 
-function keyOf(effectId: string, target: string): string {
+/** The `(effectId, target)` identity effect-propagation.md merges on. */
+function effectKey(effectId: string, target: string): string {
   return `${effectId}\t${target}`
 }
 
@@ -99,10 +102,10 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         invariantFailure(`SCC member ${memberId} missing from symbolById`)
       for (const effect of symbol.effects) {
         if (effect.propagated === true) continue
-        const k = keyOf(effect.id, effect.target)
-        const existing = agg.get(k)
+        const key = effectKey(effect.id, effect.target)
+        const existing = agg.get(key)
         if (existing === undefined) {
-          agg.set(k, {
+          agg.set(key, {
             id: effect.id,
             target: effect.target,
             plugin: effect.plugin,
@@ -130,10 +133,10 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         invariantFailure(`downstream aggregate missing for SCC ${toScc}`)
       for (const downEntry of downstream.values()) {
         const propagatedConfidence = minConfidence(downEntry.confidence, edgeConfidence)
-        const k = keyOf(downEntry.id, downEntry.target)
-        const existing = agg.get(k)
+        const key = effectKey(downEntry.id, downEntry.target)
+        const existing = agg.get(key)
         if (existing === undefined) {
-          agg.set(k, {
+          agg.set(key, {
             id: downEntry.id,
             target: downEntry.target,
             plugin: downEntry.plugin,
@@ -146,9 +149,9 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         existing.confidence = maxConfidence(existing.confidence, propagatedConfidence)
         // Keep `plugin` and `derivedBy` in lock-step. When a local classification is
         // already present anywhere in the SCC the local's (plugin, derivedBy) pair
-        // wins verbatim per effect-propagation.md §5.1 — downstream cannot rename
+        // wins verbatim per effect-propagation.md — downstream cannot rename
         // either field. When there is no local, the downstream contribution with
-        // the lexicographically smallest `derivedBy` wins (§5.2) and BOTH fields
+        // the lexicographically smallest `derivedBy` wins and BOTH fields
         // move together so a reader never sees "plugin says X, derivedBy says Y".
         if (!existing.hasLocal && downEntry.derivedBy < existing.derivedBy) {
           existing.derivedBy = downEntry.derivedBy
@@ -163,7 +166,7 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
     const set = new Set<string>()
     for (const effect of symbol.effects) {
       if (effect.propagated === true) continue
-      set.add(keyOf(effect.id, effect.target))
+      set.add(effectKey(effect.id, effect.target))
     }
     localKeysBySymbol.set(symbol.id, set)
   }
@@ -177,13 +180,13 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
     const localKeys = localKeysBySymbol.get(original.id) ?? new Set()
     const mySccIdx = sccOfNode.get(original.id)
     const mySccAgg = mySccIdx !== undefined ? aggregateBySccIdx[mySccIdx] : undefined
-    const outCallees = (adjacency.get(original.id) ?? []).map((n) => n.to)
+    const outCallees = (adjacency.get(original.id) ?? []).map((edge) => edge.to)
 
     const propagatedEntries: Effect[] = []
     if (mySccAgg !== undefined) {
       for (const entry of mySccAgg.values()) {
-        if (localKeys.has(keyOf(entry.id, entry.target))) continue
-        const k = keyOf(entry.id, entry.target)
+        const key = effectKey(entry.id, entry.target)
+        if (localKeys.has(key)) continue
         const derivedFromSet = new Set<SymbolId>()
         for (const callee of outCallees) {
           // callee came from `adjacency.get(original.id)`, which only contains
@@ -195,7 +198,7 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
           const calleeAgg =
             aggregateBySccIdx[calleeSccIdx] ??
             invariantFailure(`aggregate missing for callee SCC ${calleeSccIdx}`)
-          if (calleeAgg.has(k)) derivedFromSet.add(callee)
+          if (calleeAgg.has(key)) derivedFromSet.add(callee)
         }
         if (derivedFromSet.size === 0) continue
         const derivedFrom = [...derivedFromSet].sort(compareCodeUnit)
@@ -210,10 +213,9 @@ export function propagateEffects(input: PropagateInput): PropagateResult {
         })
       }
     }
-    propagatedEntries.sort((a, b) => {
-      if (a.id !== b.id) return a.id < b.id ? -1 : 1
-      return a.target < b.target ? -1 : a.target > b.target ? 1 : 0
-    })
+    propagatedEntries.sort(
+      (a, b) => compareCodeUnit(a.id, b.id) || compareCodeUnit(a.target, b.target),
+    )
 
     if (propagatedEntries.length > 0) {
       symbolsWithPropagatedEffects += 1
@@ -248,33 +250,31 @@ function buildAdjacency(
   // brand back onto a slice of it. Holding the typed pair keeps the ids the resolver
   // produced.
   const seen = new Map<string, { from: SymbolId; to: SymbolId; confidence: Confidence }>()
-  for (const e of edges) {
+  for (const edge of edges) {
     // Every CallEdge must reference Symbols in the input set — resolveCallGraph
     // filters against `keptSymbolIds`. A dangling endpoint here means the caller
     // passed a `symbols`/`edges` pair that disagrees, and silently dropping the
     // edge would hide propagation from every path that transits it.
-    if (!adj.has(e.from)) {
-      invariantFailure(`CallEdge.from ${e.from} is not present in input symbols`)
+    if (!adj.has(edge.from)) {
+      invariantFailure(`CallEdge.from ${edge.from} is not present in input symbols`)
     }
-    if (!adj.has(e.to)) {
-      invariantFailure(`CallEdge.to ${e.to} is not present in input symbols`)
+    if (!adj.has(edge.to)) {
+      invariantFailure(`CallEdge.to ${edge.to} is not present in input symbols`)
     }
-    const key = `${e.from}\t${e.to}`
+    const key = callEdgeKey(edge.from, edge.to)
     const prior = seen.get(key)
     seen.set(key, {
-      from: e.from,
-      to: e.to,
+      from: edge.from,
+      to: edge.to,
       confidence:
-        prior === undefined ? e.confidence : maxConfidence(prior.confidence, e.confidence),
+        prior === undefined ? edge.confidence : maxConfidence(prior.confidence, edge.confidence),
     })
   }
   for (const { from, to, confidence } of seen.values()) {
     const bucket = adj.get(from)
     if (bucket !== undefined) bucket.push({ to, confidence })
   }
-  for (const bucket of adj.values()) {
-    bucket.sort((a, b) => (a.to < b.to ? -1 : a.to > b.to ? 1 : 0))
-  }
+  for (const bucket of adj.values()) bucket.sort(compareBy((edge) => edge.to))
   return adj
 }
 
@@ -408,7 +408,7 @@ function condense(
 /**
  * Kahn's algorithm over the condensed DAG, run backwards so a callee is emitted before
  * every caller that reaches it. Among SCCs ready at the same moment the smallest index
- * wins — the tie-break effect-propagation.md §6 requires.
+ * wins — the tie-break effect-propagation.md requires.
  *
  * What that tie-break does and does not buy: determinism comes from the sorts around this
  * function — the id-sorted node list, the sorted `outSccs`, and the explicit sorts applied
@@ -421,10 +421,11 @@ function condense(
  * The ready set is a binary min-heap rather than a re-sorted array. Most symbols call
  * nothing, so nearly every SCC is ready at the start: the set grows to O(V), and
  * re-sorting it on each of the V dequeues made this `O(V² log V)`. A heap brings it to
- * `O((V + E) log V)`; the log factor is unavoidable while §6 mandates a min tie-break.
+ * `O((V + E) log V)`; the log factor is unavoidable while effect-propagation.md mandates a
+ * min tie-break for SCCs.
  */
 export function reverseTopoOrder(condensed: readonly SccNode[]): number[] {
-  const remainingOut = condensed.map((n) => n.outSccs.length)
+  const remainingOut = condensed.map((scc) => scc.outSccs.length)
   const reverseAdj: number[][] = condensed.map(() => [])
   condensed.forEach((node, idx) => {
     for (const toScc of node.outSccs) reverseAdj[toScc]?.push(idx)
@@ -491,8 +492,4 @@ class MinHeap {
     }
     return top
   }
-}
-
-function compareCodeUnit(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
 }

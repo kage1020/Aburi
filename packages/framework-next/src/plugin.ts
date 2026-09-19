@@ -9,21 +9,11 @@ import type {
 import { classifyNextSymbol } from "./classify"
 import { frameworkNextManifest } from "./manifest"
 
-/**
- * Next.js framework plugin. Sits between the language plugin's extractSymbols and
- * walkBody, inspecting `SymbolCandidate.source.file` for App Router special files and
- * the surrounding module for `"use client"` / `"use server"` directives.
- *
- * `init` and `classifySymbol` are both pure with respect to plugin state — no lazy
- * resources, no per-run caches — so repeated invocations against the same Symbol
- * produce identical results.
- */
+/** Pure classifier over `SymbolCandidate.source.file` and the module directive; no lazy resources. */
 class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   readonly manifest = frameworkNextManifest
 
-  async init(_ctx: PluginContext): Promise<void> {
-    // Intentional no-op — see class-level docstring for the "no lazy resources" rationale.
-  }
+  async init(_ctx: PluginContext): Promise<void> {}
 
   classifySymbol(
     symbol: SymbolCandidate<OpaqueAstNode>,
@@ -33,11 +23,7 @@ class NextFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
   }
 }
 
-/**
- * Ready-to-register instance. `class implements FrameworkPlugin<OpaqueAstNode>` enforces
- * the structural contract; inferring the narrow class type here keeps the manifest
- * literals visible to consumers that compare against them directly.
- */
+/** Singleton so `manifest` identity is stable for consumers comparing against the constant. */
 export const nextFrameworkPlugin = new NextFrameworkPlugin()
 
 export { NextFrameworkPlugin }

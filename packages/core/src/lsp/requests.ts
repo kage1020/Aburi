@@ -1,3 +1,8 @@
+/**
+ * Typed wrappers around the 4 LSP requests the enrichment pass uses
+ * (lsp-enrichment.md). Every wrapper takes an explicit `timeoutMs` so callers
+ * can enforce per-request budgets uniformly.
+ */
 import {
   type DocumentSymbol,
   DocumentSymbolRequest,
@@ -10,17 +15,7 @@ import {
   type SymbolInformation,
   TypeDefinitionRequest,
 } from "vscode-languageserver-protocol"
-import type { LspClient, LspFailure } from "./client"
-
-/**
- * Typed wrappers around the 4 LSP requests the enrichment pass uses
- * (lsp-enrichment.md §4.2). Every wrapper takes an explicit `timeoutMs` so callers
- * can enforce §4.4 per-request budgets uniformly.
- */
-
-export interface DocSymbolHover {
-  raw: string | null
-}
+import { isLspFailure, type LspClient, type LspFailure } from "./client"
 
 export async function requestDocumentSymbols(
   client: LspClient,
@@ -48,51 +43,45 @@ export async function requestHover(
     timeoutMs,
   )
   if (res === null) return null
-  if (isFailureShape(res)) return res
+  if (isLspFailure(res)) return res
   const text = extractHoverText(res.contents)
   return text === null ? null : { text }
 }
 
-export async function requestTypeDefinition(
+export function requestTypeDefinition(
+  client: LspClient,
+  uri: string,
+  position: Position,
+  timeoutMs: number,
+): Promise<Location[] | LspFailure> {
+  return requestLocations(TypeDefinitionRequest.method, client, uri, position, timeoutMs)
+}
+
+export function requestImplementation(
+  client: LspClient,
+  uri: string,
+  position: Position,
+  timeoutMs: number,
+): Promise<Location[] | LspFailure> {
+  return requestLocations(ImplementationRequest.method, client, uri, position, timeoutMs)
+}
+
+/** The two location-valued requests share one wire shape, and so one wrapper. */
+async function requestLocations(
+  method: string,
   client: LspClient,
   uri: string,
   position: Position,
   timeoutMs: number,
 ): Promise<Location[] | LspFailure> {
   const res = await client.request<Location | Location[] | LocationLink[] | null>(
-    TypeDefinitionRequest.method,
+    method,
     { textDocument: { uri }, position },
     timeoutMs,
   )
   if (res === null) return []
-  if (isFailureShape(res)) return res
+  if (isLspFailure(res)) return res
   return normalizeLocations(res)
-}
-
-export async function requestImplementation(
-  client: LspClient,
-  uri: string,
-  position: Position,
-  timeoutMs: number,
-): Promise<Location[] | LspFailure> {
-  const res = await client.request<Location | Location[] | LocationLink[] | null>(
-    ImplementationRequest.method,
-    { textDocument: { uri }, position },
-    timeoutMs,
-  )
-  if (res === null) return []
-  if (isFailureShape(res)) return res
-  return normalizeLocations(res)
-}
-
-function isFailureShape(value: unknown): value is LspFailure {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    ((value as { kind: unknown }).kind === "timeout" ||
-      (value as { kind: unknown }).kind === "error")
-  )
 }
 
 function normalizeLocations(input: Location | Location[] | LocationLink[]): Location[] {
@@ -118,8 +107,8 @@ function extractHoverText(contents: unknown): string | null {
     return pieces.length === 0 ? null : pieces.join("\n")
   }
   if (typeof contents === "object") {
-    const c = contents as MarkupContent & { language?: string; value?: string }
-    if (typeof c.value === "string") return c.value
+    const markup = contents as MarkupContent & { language?: string; value?: string }
+    if (typeof markup.value === "string") return markup.value
   }
   return null
 }

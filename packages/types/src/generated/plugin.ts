@@ -65,7 +65,7 @@ baseKind: ("function" | "method" | "class" | "interface" | "type" | "const" | "m
 description: string
 }
 /**
- * Optional runtime capabilities the plugin advertises. Source-of-truth for CLI concurrency budgets (lang-plugin.md §8.1, cli-spec.md §11).
+ * Optional runtime capabilities the plugin advertises. Source-of-truth for CLI concurrency budgets (lang-plugin.md, cli-spec.md).
  */
 export interface Capabilities {
 /**

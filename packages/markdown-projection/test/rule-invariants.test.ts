@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { ProjectionInvariantError, ruleRow } from "../src"
 
 /**
- * Rule row rendering (§5.6). Every per-type payload the schema treats as required
+ * Rule row rendering (markdown-projection.md). Every per-type payload the schema treats as required
  * (guard→condition, throw→what, return→expr, loop→loopKind, switch/match→condition) must
  * be present. When it is not, ruleRow throws ProjectionInvariantError so an upstream
  * extractor bug does not surface as `- guard:  (L5)` in a reviewer's PR.

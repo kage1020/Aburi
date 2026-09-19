@@ -16,7 +16,7 @@ function stats(over: Partial<CallResolutionStats["unresolved"]> = {}): CallResol
 }
 
 describe("formatCallResolutionLine", () => {
-  it("lists every non-zero bucket in call-resolution.md §8.1 table order", () => {
+  it("lists every non-zero bucket in call-resolution.md table order", () => {
     expect(
       formatCallResolutionLine(
         stats({ localScope: 2, external: 30, dynamic: 60, ambiguous: 3, noMatch: 12 }),

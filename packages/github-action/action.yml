@@ -30,7 +30,7 @@ inputs:
   fail-on:
     description: >-
       Value passed to `aburi diff --fail-on`. Follows the CI gate grammar defined in
-      `docs/design/cli-spec.md` §6.7 (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
+      `docs/design/cli-spec.md` (e.g. `changed`, `removed:>10`, `dropped-toggled:to-dropped`).
       Leave empty to run in report-only mode.
     required: false
     default: ""
@@ -67,7 +67,7 @@ inputs:
   max-bytes:
     description: >-
       Size cap for `diff.md`, in UTF-8 bytes, forwarded as `--max-bytes`. The report drops whole
-      sections least-important-first to meet it (`docs/design/markdown-projection.md` §6.4) rather
+      sections least-important-first to meet it (`docs/design/markdown-projection.md`) rather
       than being cut mid-block, and says at the top which sections went. Left empty it is 65507:
       GitHub rejects a comment body over 65536 bytes with a 422, and the hidden marker takes the
       other 29. It applies whether or not this run posts the comment itself, because the artefact
@@ -211,7 +211,7 @@ runs:
         # `workspace` runs the CLI the project installed, which is the only way a config naming a
         # plugin by package can work: the CLI resolves that plugin from its own location, and under
         # `pnpm dlx` that location is the pnpm store, not the checkout. The resolver is a script
-        # rather than an inline heredoc so it can be tested; `docs/design/github-action.md` §3 is
+        # rather than an inline heredoc so it can be tested; `docs/design/github-action.md` is
         # the contract it implements, and `test/resolve-cli-bin.test.ts` runs it.
         if [ "$CLI" = "workspace" ]; then
           # stderr goes to a file, never merged into the captured stdout: a Node warning on the
@@ -241,7 +241,7 @@ runs:
         # against `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`. Applied even under
         # `comment: false`, and deliberately: that is the mode a fork's pull request runs in,
         # where the Markdown goes up as an artefact for the `workflow_run` companion to post
-        # (§5.1) — a file capped only when this job was the one posting would be rejected there
+        # (`docs/design/github-action.md`) — a file capped only when this job was the one posting would be rejected there
         # instead, which is the same 422 on the one pull request whose author cannot see the
         # companion's log. `diff.json` is uncapped, and so is `diff.md` under `max-bytes: 0`.
         #
@@ -312,7 +312,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
         # The upsert is a committed script, not a heredoc, because a second caller runs the same
         # one: the `workflow_run` companion that posts for a pull request whose own token is
-        # read-only (`docs/design/github-action.md` §5.1). It runs on the caller's Node — the same
+        # read-only (`docs/design/github-action.md`). It runs on the caller's Node — the same
         # one that just ran the CLI — and needs nothing installed.
         MARKDOWN_PATH: ${{ inputs.working-directory }}/${{ steps.diff.outputs.diff-md-path }}
         # The same pair `actions/github-script` calls `context.issue.number`, spelled out because a

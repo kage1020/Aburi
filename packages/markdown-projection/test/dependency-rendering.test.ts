@@ -1,3 +1,4 @@
+import { component, dependency, makeIR, makeSymbol } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import {
   MERMAID_NODE_LIMIT,
@@ -6,7 +7,7 @@ import {
   projectSymbolExplain,
   projectWorkspace,
 } from "../src"
-import { component, dependency, makeDiff, makeIR, makeSymbol } from "./fixtures"
+import { makeDiff } from "./fixtures"
 
 describe("workspace mermaid dependencies (symbol-edge exclusion)", () => {
   it("emits component-level dependencies into the mermaid graph", () => {
@@ -106,7 +107,7 @@ describe("workspace mermaid graph — all-component enumeration", () => {
   })
 
   it("sanitizes distinct ComponentId inputs to distinct mermaid node ids (injectivity)", () => {
-    // If ir-schema §11 ever admits `_` in ComponentId, this test breaks first — the
+    // If ir-schema.md ever admits `_` in ComponentId, this test breaks first — the
     // sanitizer's `- → _` mapping would stop being injective and node lines would
     // collide silently in the rendered graph.
     const ids = ["billing", "billing-api", "billing-api-v2", "a", "ab-c", "abc"]

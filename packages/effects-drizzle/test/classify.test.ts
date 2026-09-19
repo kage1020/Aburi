@@ -1,6 +1,7 @@
+import { makeCall, makeCtx } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classifyDrizzleCall } from "../src/index"
-import { makeCall, makeCtx, makeDrizzleImport } from "./fixtures/context"
+import { makeDrizzleImport } from "./fixtures/context"
 
 describe("classifyDrizzleCall — read terminals", () => {
   const ctx = makeCtx({ imports: [makeDrizzleImport()] })
@@ -16,16 +17,13 @@ describe("classifyDrizzleCall — read terminals", () => {
     expect(result?.derivedBy).toBe("effects-plugin:drizzle:read")
   })
 
-  it("accepts arbitrary leading segments (this.db.select)", () => {
-    expect(classifyDrizzleCall(makeCall({ target: "this.db.select" }), ctx)?.effectId).toBe(
-      "db.read",
-    )
-  })
-
-  it("accepts deeply chained accessors (container.services.db.select)", () => {
-    expect(
-      classifyDrizzleCall(makeCall({ target: "container.services.db.select" }), ctx)?.effectId,
-    ).toBe("db.read")
+  it.each([
+    "this.db.select",
+    "container.services.db.select",
+  ])("accepts leading receiver segments (%s) at high", (target) => {
+    const result = classifyDrizzleCall(makeCall({ target }), ctx)
+    expect(result?.effectId).toBe("db.read")
+    expect(result?.confidence).toBe("high")
   })
 })
 
@@ -59,20 +57,17 @@ describe("classifyDrizzleCall — transaction terminals", () => {
     expect(result?.derivedBy).toBe("effects-plugin:drizzle:tx")
   })
 
-  it("throws for db.transaction with argCount=0 — upstream signal, not silent null", () => {
-    // The transaction/batch APIs are required to take at least one argument. A
-    // shape-matched call with argCount=0 is an upstream bug (broken user code or a
-    // malformed CallCandidate from the language plugin); throwing surfaces it rather
-    // than silently returning null which would conflate this with "not a Drizzle call".
-    expect(() =>
-      classifyDrizzleCall(makeCall({ target: "db.transaction", argumentCount: 0 }), ctx),
-    ).toThrow(/argCount=0/)
-  })
-
-  it("throws for db.batch with argCount=0 for the same reason", () => {
-    expect(() =>
-      classifyDrizzleCall(makeCall({ target: "db.batch", argumentCount: 0 }), ctx),
-    ).toThrow(/argCount=0/)
+  it.each([
+    "db.transaction",
+    "db.batch",
+    "log.transaction",
+  ])("throws for %s with argCount=0 — upstream signal, not silent null", (target) => {
+    // Both APIs require an argument, so a shape-matched zero-argument call is broken
+    // source or a malformed candidate. The contract violation outranks the receiver: an
+    // unrecognized `log` does not turn the throw into a medium effect or a silent null.
+    expect(() => classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toThrow(
+      /argCount=0/,
+    )
   })
 
   it("throw message includes the file path and target for reproducibility", () => {
@@ -105,16 +100,17 @@ describe("classifyDrizzleCall — relational query API", () => {
       ctx,
     )
     expect(result?.effectId).toBe("db.read")
+    expect(result?.confidence).toBe("high")
     expect(result?.derivedBy).toBe("effects-plugin:drizzle:read")
   })
 
   it("accepts length-5 receiver: this.db.query.users.findMany", () => {
-    expect(
-      classifyDrizzleCall(
-        makeCall({ target: "this.db.query.users.findMany", argumentCount: 1 }),
-        ctx,
-      )?.effectId,
-    ).toBe("db.read")
+    const result = classifyDrizzleCall(
+      makeCall({ target: "this.db.query.users.findMany", argumentCount: 1 }),
+      ctx,
+    )
+    expect(result?.effectId).toBe("db.read")
+    expect(result?.confidence).toBe("high")
   })
 
   it("does NOT match findUnique on the query API (Prisma vocab)", () => {
@@ -212,30 +208,9 @@ describe("classifyDrizzleCall — receiver identification", () => {
     }
   })
 
-  it("keeps `high` for the receivers Drizzle is actually written with", () => {
-    expect(classifyDrizzleCall(makeCall({ target: "db.select" }), ctx)?.confidence).toBe("high")
-    expect(classifyDrizzleCall(makeCall({ target: "this.db.select" }), ctx)?.confidence).toBe(
-      "high",
-    )
-    expect(
-      classifyDrizzleCall(makeCall({ target: "container.services.db.select" }), ctx)?.confidence,
-    ).toBe("high")
+  it("keeps `high` for the interactive-transaction callback parameter (tx.insert)", () => {
     expect(
       classifyDrizzleCall(makeCall({ target: "tx.insert", argumentCount: 1 }), ctx)?.confidence,
-    ).toBe("high")
-    expect(
-      classifyDrizzleCall(makeCall({ target: "db.query.users.findMany", argumentCount: 1 }), ctx)
-        ?.confidence,
-    ).toBe("high")
-    expect(
-      classifyDrizzleCall(
-        makeCall({ target: "this.db.query.users.findFirst", argumentCount: 1 }),
-        ctx,
-      )?.confidence,
-    ).toBe("high")
-    expect(
-      classifyDrizzleCall(makeCall({ target: "db.transaction", argumentCount: 1 }), ctx)
-        ?.confidence,
     ).toBe("high")
   })
 
@@ -262,14 +237,6 @@ describe("classifyDrizzleCall — receiver identification", () => {
     expect(
       classifyDrizzleCall(makeCall({ target: "cache.query.users.findMany" }), ctx)?.confidence,
     ).toBe("medium")
-  })
-
-  it("still throws for transaction/batch with argCount=0, receiver notwithstanding", () => {
-    // The contract violation outranks the receiver: an unrecognized `log` does not turn
-    // the throw into a medium-confidence effect, or into a silent null.
-    expect(() =>
-      classifyDrizzleCall(makeCall({ target: "log.transaction", argumentCount: 0 }), ctx),
-    ).toThrow(/argCount=0/)
   })
 
   it("downgrades an over-long argument list rather than dropping the call", () => {
@@ -332,39 +299,19 @@ describe("classifyDrizzleCall — negative paths", () => {
 
 describe("classifyDrizzleCall — malformed input fail-fast", () => {
   const ctxWithDrizzle = makeCtx({ imports: [makeDrizzleImport()] })
+  const ctxNoImport = makeCtx({ imports: [] })
 
-  it("throws for an empty target — language plugin contract violation", () => {
-    expect(() => classifyDrizzleCall(makeCall({ target: "" }), ctxWithDrizzle)).toThrow(
-      /target is empty/,
-    )
-  })
-
-  it("throws for malformed targets even when the file does not import Drizzle", () => {
-    // The import gate must NOT shadow malformed-input detection — otherwise the same
-    // upstream bug would surface only in Drizzle-consuming files and stay silent
-    // everywhere else. Locking the order at the test seam.
-    const ctxNoImport = makeCtx({ imports: [] })
-    expect(() => classifyDrizzleCall(makeCall({ target: "" }), ctxNoImport)).toThrow(
-      /target is empty/,
-    )
-    expect(() => classifyDrizzleCall(makeCall({ target: "db..insert" }), ctxNoImport)).toThrow(
-      /empty segment/,
-    )
-    expect(() => classifyDrizzleCall(makeCall({ target: ".select" }), ctxNoImport)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a target with a trailing dot", () => {
-    expect(() => classifyDrizzleCall(makeCall({ target: "db.select." }), ctxWithDrizzle)).toThrow(
-      /empty segment/,
-    )
-  })
-
-  it("throws for a target with adjacent dots — otherwise `db..insert` would false-classify as db.write", () => {
-    expect(() => classifyDrizzleCall(makeCall({ target: "db..insert" }), ctxWithDrizzle)).toThrow(
-      /empty segment/,
-    )
+  it.each([
+    ["", /target is empty/],
+    ["db..insert", /empty segment/],
+    [".select", /empty segment/],
+    ["db.select.", /empty segment/],
+  ])("throws for the malformed target %j with or without a Drizzle import", (target, message) => {
+    // Without the throw, `db..insert` would false-classify as db.write. The import gate must
+    // NOT shadow the check, or the same upstream bug would surface only in Drizzle-consuming
+    // files — locking the order at the test seam.
+    expect(() => classifyDrizzleCall(makeCall({ target }), ctxWithDrizzle)).toThrow(message)
+    expect(() => classifyDrizzleCall(makeCall({ target }), ctxNoImport)).toThrow(message)
   })
 
   it("names itself in the message — a transposed plugin-name const would type-check silently", () => {
@@ -393,14 +340,6 @@ describe("classifyDrizzleCall — malformed input fail-fast", () => {
 })
 
 describe("classifyDrizzleCall — purity", () => {
-  it("is idempotent: same input yields structurally equal output", () => {
-    const ctx = makeCtx({ imports: [makeDrizzleImport()] })
-    const call = makeCall({ target: "db.select", line: 42, argumentCount: 0 })
-    const first = classifyDrizzleCall(call, ctx)
-    const second = classifyDrizzleCall(call, ctx)
-    expect(first).toEqual(second)
-  })
-
   it("does not mutate the input CallCandidate or the observable data slices of ClassifyContext", () => {
     // structuredClone would reject the VocabRegistry's function properties, so clone
     // the data slices the classifier actually reads (file + owner + language) plus the

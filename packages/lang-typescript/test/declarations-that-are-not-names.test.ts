@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { extractSymbols, langTypescriptManifest, parseTypescriptFile } from "../src/index"
-import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
+import { langTypescriptManifest } from "../src/index"
+import { idsOf, importsOf, symbolsOf } from "./fixtures/ctx"
 
 /**
  * Three legal shapes fed something that is not a name into the Symbol-id builder, which
@@ -12,15 +12,6 @@ import { makeExtractionCtx, requireTree } from "./fixtures/ctx"
  * — the same position `lang-plugin.md` LP26e takes on a computed module specifier, and for
  * the same reason: it is not a fault in the source.
  */
-
-async function symbolsOf(source: string) {
-  const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-  return extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source))
-}
-
-async function symbolIdsOf(source: string): Promise<string[]> {
-  return (await symbolsOf(source)).map((s) => s.id)
-}
 
 describe("a destructuring declaration declares its bindings", () => {
   it.each([
@@ -39,13 +30,13 @@ describe("a destructuring declaration declares its bindings", () => {
     ["an array rest", "export const [a, ...r] = pair", ["a", "r"]],
     ["both kinds nested", "export const { a: [b, { c }] } = m", ["b", "c"]],
   ])("extracts one Symbol per binding — %s", async (_label, source, names) => {
-    expect(await symbolIdsOf(source)).toEqual(names.map((n) => `ts:src/a.ts#${n}`))
+    expect(await idsOf(source)).toEqual(names.map((n) => `ts:src/a.ts#${n}`))
   })
 
   it("reads the value side of a rename, not the key being read from", async () => {
     // `{ a: b }` binds `b`. `a` is a property name on the right-hand side's type — nothing is
     // declared under it, and a Symbol called `a` would be a name this file does not define.
-    expect(await symbolIdsOf("export const { a: b } = m")).toEqual(["ts:src/a.ts#b"])
+    expect(await idsOf("export const { a: b } = m")).toEqual(["ts:src/a.ts#b"])
   })
 
   it.each([
@@ -58,7 +49,7 @@ describe("a destructuring declaration declares its bindings", () => {
     // grammar has two node types for a default — `object_assignment_pattern` for the object
     // shorthand and `assignment_pattern` everywhere else — and covering only the first is
     // how the array and renamed forms came to bind nothing at all.
-    expect(await symbolIdsOf(source)).toEqual(["ts:src/a.ts#a"])
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#a"])
   })
 
   it.each([
@@ -71,7 +62,7 @@ describe("a destructuring declaration declares its bindings", () => {
     // says nothing. Passing over it would drop the declaration with no Symbol and no word,
     // which is the failure this whole change is about; refusing sends the file to the
     // per-file boundary, which names it.
-    await expect(symbolIdsOf(source)).rejects.toThrow(/Unmodelled node "member_expression"/)
+    await expect(idsOf(source)).rejects.toThrow(/Unmodelled node "member_expression"/)
   })
 
   it.each([
@@ -81,7 +72,7 @@ describe("a destructuring declaration declares its bindings", () => {
     // A comment is a named child of both pattern kinds, and the walk refuses a node type it
     // does not model rather than passing over it — so this is the case that keeps the
     // refusal from firing on ordinary source.
-    expect(await symbolIdsOf(source)).toEqual(["ts:src/a.ts#a", "ts:src/a.ts#b"])
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#a", "ts:src/a.ts#b"])
   })
 
   it("gives every binding the kind and range a plain const gets", async () => {
@@ -132,7 +123,7 @@ describe("a destructuring declaration declares its bindings", () => {
   })
 
   it("prefixes each binding with the namespace it is declared in", async () => {
-    expect(await symbolIdsOf("export namespace N { export const { a, b } = m }")).toEqual([
+    expect(await idsOf("export namespace N { export const { a, b } = m }")).toEqual([
       "ts:src/a.ts#N",
       "ts:src/a.ts#N.a",
       "ts:src/a.ts#N.b",
@@ -180,7 +171,7 @@ describe("every rationale extraction emits is one the manifest declares", () => 
 
 describe("a computed member name costs its member and nothing else", () => {
   it("keeps the class and every member that has a name", async () => {
-    const ids = await symbolIdsOf("export class A { [Symbol.iterator]() {} m() {} }")
+    const ids = await idsOf("export class A { [Symbol.iterator]() {} m() {} }")
 
     // Before, the whole file was lost — `A` and `m` with it — because the id builder was
     // handed `[Symbol.iterator]` and refused it.
@@ -196,13 +187,8 @@ describe("a computed member name costs its member and nothing else", () => {
     // Normalising the brackets into a segment is refused rather than deferred: any mangling
     // invents a name the source does not contain, two different computed keys can collapse
     // onto one segment, and nothing can read it back to what was written.
-    const result = await parseTypescriptFile({ path: "src/a.ts", content: source })
-    const ids = extractSymbols(requireTree(result.tree), makeExtractionCtx("src/a.ts", source)).map(
-      (s) => s.id,
-    )
-
-    expect(ids).toEqual(["ts:src/a.ts#A"])
-    expect(result.errors).toEqual([])
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#A"])
+    expect((await importsOf(source)).errors).toEqual([])
   })
 })
 
@@ -212,11 +198,11 @@ describe("an identifier the grammar refused is a Symbol now", () => {
     ["an accented function", "export function café() {}", "café"],
     ["a Japanese class", "export class クラス {}", "クラス"],
   ])("extracts %s", async (_label, source, name) => {
-    expect(await symbolIdsOf(source)).toEqual([`ts:src/a.ts#${name}`])
+    expect(await idsOf(source)).toEqual([`ts:src/a.ts#${name}`])
   })
 
   it("keeps a whole file that mixes one with ordinary declarations", async () => {
-    const ids = await symbolIdsOf("export function ユーザー取得() {}\nexport function ok() {}")
+    const ids = await idsOf("export function ユーザー取得() {}\nexport function ok() {}")
 
     // Sorted by id, which is how `extractSymbols` returns them — not source order.
     expect(ids).toEqual(["ts:src/a.ts#ok", "ts:src/a.ts#ユーザー取得"])
