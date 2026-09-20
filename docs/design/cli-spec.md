@@ -486,15 +486,20 @@ With file inputs: skip steps 1-3 and start at step 5.
 
 ### 6.4.1 Git Pre-Validation (Ref Form)
 
-Before creating the worktree, the following checks run in order; on failure, exit 1 with a concrete remediation message on stderr:
+Before creating the worktree, the following checks run in order; on failure, a concrete remediation message on stderr. The exit code follows §9's line: a ref that names nothing is what the reader typed, or where they ran the command (exit 2); a checkout whose shape the command cannot work with is exit 1.
 
-| Check | Failure message |
-|---|---|
-| `git rev-parse <base>` succeeds | `Base ref '<base>' not found. If this is a CI shallow clone, run: git fetch --deepen=50 origin <base>` |
-| Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` |
-| Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` |
-| `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) |
-| On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) |
+| Check | Failure message | exit |
+|---|---|---|
+| `git rev-parse --verify <ref>` succeeds for `<base>`, then `<head>`. When it does not, the run asks git two more questions to say why, because git's own stderr (`Needed a single revision`) does not distinguish a mistyped ref from a repository with nothing to name — and `git fetch` is the wrong remedy for two of the three | `<Base|Head> ref '<ref>' could not be resolved: <cwd> is not inside a git repository. Run aburi diff from inside one, or compare IR files with --base/--head.` — when `git rev-parse --is-inside-work-tree` fails or is not `true` | 2 |
+| | `<Base|Head> ref '<ref>' could not be resolved: the repository at <cwd> has no commits yet, so there is no revision to compare.` — when `git rev-list --all --max-count=1` prints nothing | 2 |
+| | `<Base|Head> ref '<ref>' could not be resolved: no such revision in this repository. Check the spelling, or fetch the branch first.` — or, when `git rev-parse --is-shallow-repository` is `true`, `… Check the spelling; if it is right, this is a shallow clone whose history may stop short of it — run: git fetch --deepen=50 origin <ref>` | 2 |
+| `git` can be spawned at all | `git executable not found in PATH. aburi diff <base>..<head> requires a working git installation. Install git or use --base/--head with pre-generated IR files.` | 1 |
+| Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` | 1 |
+| Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` | 1 |
+| `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) | — |
+| On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) | — |
+
+The two diagnosing questions are asked only once a ref has failed, so a run whose refs resolve pays for no extra git calls; and each answers "cannot tell" on its own failure rather than throwing, so a diagnosis never replaces the failure it was explaining with a stranger one.
 
 #### 6.4.1.5 Plugin Dependency Resolution at the Base Ref
 
@@ -524,8 +529,8 @@ Or `fetch-depth: 50` or more, at a depth that includes the base ref. The default
 | code | Meaning |
 |---|---|
 | 0 | Diff computed successfully (regardless of whether differences exist) |
-| 1 | Computation error (invalid IR, git error) |
-| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing) |
+| 1 | Computation error (invalid IR, git error, an output the disk refused) |
+| 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
 The second cause is about greenness, not about counts. A file a plugin threw on is recorded in
@@ -1005,6 +1010,11 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL25 | `aburi init --output config/aburi.jsonc` where `config/` does not exist | Creates the directory, writes the file, exit 0 |
 | CL26 | `aburi explain <id> --output docs/alpha.md` where `docs/` does not exist | Creates the directory, writes the Markdown, exit 0 |
 | CL27 | `aburi init` or `aburi explain` with an `--output` that names a directory, or whose parent path is an existing file | exit 2, the path and the remedy on stderr |
+| CL28 | `aburi scan --output-dir notadir` or `aburi diff … --output-dir notadir` where `notadir` is a file | exit 2; stderr names the command, the output directory, the path and `--output-dir` |
+| CL29 | `aburi scan` into a directory the process may not write to | exit 1; stderr names the command, the artefact that did not land and the errno — never the bare errno alone |
+| CL30 | `aburi diff main..HEAD` outside any git repository | exit 2, "is not inside a git repository", no `git fetch` advice |
+| CL31 | `aburi diff HEAD~1..HEAD` in a repository with no commits | exit 2, "has no commits yet", no `git fetch` advice |
+| CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 
 ## 18. Design Decisions
 

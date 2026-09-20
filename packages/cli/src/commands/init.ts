@@ -9,8 +9,12 @@ import type { Config } from "@aburi/types"
 import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { pathKind } from "../fs-probe"
-import { OUTPUT_IS_A_DIRECTORY, writeOutputFile } from "../output-file"
+import { type OutputTarget, outputIsADirectory, writeOutputFile } from "../output-file"
 import { resolveWorkspaceRoot } from "../workspace-root"
+
+/** The one file this command writes, named as its `--output` failure reports it. */
+const INIT_OUTPUT: OutputTarget = { command: "init", flag: "--output" }
+const CONFIG_ARTEFACT = "the config"
 
 const CONFIG_SCHEMA_URL = "https://aburi.kage1020.com/schema/aburi.config.v1.json"
 
@@ -71,7 +75,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
 
   const existing = await pathKind(outputPath)
   if (existing === "directory") {
-    throw new CliError(`Cannot write ${outputPath}: ${OUTPUT_IS_A_DIRECTORY}`, "input-error")
+    throw outputIsADirectory(INIT_OUTPUT, CONFIG_ARTEFACT, outputPath)
   }
   if (existing === "file" && !options.force) {
     throw new CliError(
@@ -122,7 +126,7 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     suggestions,
   })
 
-  await writeOutputFile(outputPath, contents)
+  await writeOutputFile(INIT_OUTPUT, CONFIG_ARTEFACT, outputPath, contents)
 
   return {
     outputPath,

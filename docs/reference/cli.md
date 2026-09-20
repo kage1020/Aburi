@@ -19,7 +19,7 @@ aburi <command> [flags]
 |---|---|
 | `0` | Success, no gate tripped. |
 | `1` | Runtime failure: an I/O error, an unexpected exception, or `explain` found no match. |
-| `2` | Bad invocation: an unknown flag, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target. |
+| `2` | Bad invocation: an unknown flag, a missing input file, a malformed `--fail-on`, an ambiguous `explain` target, a ref `diff` cannot resolve. |
 | `3` | **Gate.** A `--fail-on` clause tripped, a plugin failed, or the scan read too little of the workspace to be trusted. |
 
 CI gates on `3`.
@@ -86,7 +86,7 @@ Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
 
 | Flag | Effect |
 |---|---|
-| `--output-dir <dir>` | Where to write. Falls back to `output.dir` in the config, then `out`. |
+| `--output-dir <dir>` | Where to write. Falls back to `output.dir` in the config, then `out`. Created if missing; a path a file already stands on exits `2` and names it. |
 | `--format <fmt>` | `json`, `md`, or `both` (default). `--no-md` and `--no-json` are shorthands. |
 | `--ignore <glob>` | An extra exclusion for this run. Repeatable. |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override the config for this run. |
@@ -156,10 +156,10 @@ scanning.
 
 | Flag | Effect |
 |---|---|
-| `<base>..<head>` | Ref-spec dispatch. |
+| `<base>..<head>` | Ref-spec dispatch. A ref git cannot resolve exits `2`, and the message says whether that is because the directory is not a repository, the repository has no commits, or the name is unknown. |
 | `--base <path>` `--head <path>` | File-mode dispatch. Mutually exclusive with the ref-spec. |
 | `--fail-on <spec>` | The CI gate. See below. |
-| `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. |
+| `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. Created if missing; a path a file already stands on exits `2` and names it. |
 | `--format <fmt>` | `json`, `md`, or `both`. |
 | `--compact` | JSON without indentation. |
 | `--max-bytes <n>` | Cap `diff.md` at n bytes. See below. |

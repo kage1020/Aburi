@@ -9,15 +9,19 @@ import { CliError, type GitRunner, runDiff } from "../src"
  * so the injected runner exists only to make a pass through it loud: any spec that reaches
  * `rev-parse` was accepted, and these specs must not be.
  *
- * `parseFailure` asserts the `input-error` code rather than `CliError` alone, because
- * `assertRefResolvable` wraps a runner's own throw into a `CliError` too — a `runtime-error`
- * one. Without the code, a spec that reached git would satisfy the guard this file is built on.
+ * `parseFailure` asserts that git was never asked anything, not merely that a `CliError` came
+ * back: `assertRefResolvable` wraps a runner's own throw into an `input-error` too — a ref it
+ * could not resolve — so neither the class nor the code would tell a rejected spec from one
+ * that reached git and was refused there.
  */
 
 let scratch = ""
 
+let gitCalls: string[] = []
+
 const refusingGit: GitRunner = {
   async run(args) {
+    gitCalls.push(args.join(" "))
     throw new Error(`git must not run for a rejected ref spec (got: git ${args.join(" ")})`)
   },
 }
@@ -35,11 +39,13 @@ async function parseFailure(refSpec: string): Promise<CliError> {
   )
   expect(error).toBeInstanceOf(CliError)
   expect((error as CliError).code).toBe("input-error")
+  expect(gitCalls).toEqual([])
   return error as CliError
 }
 
 beforeEach(async () => {
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-refspec-"))
+  gitCalls = []
 })
 
 afterEach(async () => {

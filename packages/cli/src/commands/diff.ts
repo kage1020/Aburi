@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, resolve } from "node:path"
 import { buildDiff, DiffError, type GitRenameMap, writeCanonicalDiff } from "@aburi/diff"
@@ -17,9 +17,13 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import { joinCapped } from "../listing"
+import { createOutputDir, type OutputTarget, writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
+
+/** Both artefacts this command writes land under `--output-dir`, and a failure says so. */
+const DIFF_OUTPUT: OutputTarget = { command: "diff", flag: "--output-dir" }
 
 export type { WarnFn }
 
@@ -195,7 +199,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     throw error
   }
 
-  await mkdir(outputDir, { recursive: true })
+  await createOutputDir(DIFF_OUTPUT, outputDir)
   const format = options.format ?? "both"
 
   let diffJsonPath: string | null = null
@@ -205,7 +209,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
     const serialized = writeCanonicalDiff(diff, {
       format: options.compact ? "compact" : "pretty",
     })
-    await writeFile(diffJsonPath, serialized, "utf8")
+    await writeOutputFile(DIFF_OUTPUT, DIFF_JSON_FILENAME, diffJsonPath, serialized)
   }
   if (format === "json" && options.maxBytes !== undefined) {
     // Not an input error: the action passes `--max-bytes` without consulting `--format`, so
@@ -233,7 +237,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
         )
       }
     }
-    await writeFile(diffMdPath, markdown, "utf8")
+    await writeOutputFile(DIFF_OUTPUT, DIFF_MD_FILENAME, diffMdPath, markdown)
   }
 
   // `cli-spec.md` stdout shape
@@ -715,11 +719,17 @@ async function runScanInDir(
 }
 
 /**
- * `git rev-parse --verify` fails distinguishably for two very different situations:
+ * `git rev-parse --verify` fails the same way for very different situations, and only one of
+ * them is a ref that does not exist:
  *   1. `git` is not installed on the host (`ENOENT` spawn failure) — reporting this as
- *      "base ref not found" is a wrong-remediation nightmare in CI logs.
- *   2. `git` is installed but the ref cannot be resolved (bad name, shallow clone).
- * We split them so the user gets the correct next step for each.
+ *      "base ref not found" is a wrong-remediation nightmare in CI logs. Exit 1: the machine's.
+ *   2. The directory is not inside a git repository at all. `git fetch` cannot help.
+ *   3. The repository has no commits yet, so no ref — not even `HEAD~1` — names a revision.
+ *   4. `git` is installed, the repository is real, and the ref cannot be resolved (a bad name,
+ *      a branch never fetched, a shallow clone whose history stops short of it).
+ * The last three are about what the reader named and where they ran the command, so they are
+ * input errors (exit 2, `cli-spec.md` §6.5); git's own stderr cannot tell 3 from 4 (both are
+ * `Needed a single revision`), which is why the diagnosis asks it two more questions.
  */
 async function assertRefResolvable(
   git: GitRunner,
@@ -737,12 +747,81 @@ async function assertRefResolvable(
         { cause: error },
       )
     }
-    const roleTag = role === "base" ? "Base" : "Head"
-    throw new CliError(
-      `${roleTag} ref '${ref}' could not be resolved. If this is a CI shallow clone, run: git fetch --deepen=50 origin ${ref}`,
-      "runtime-error",
-      { cause: error },
+    throw await diagnoseUnresolvedRef(git, cwd, ref, role, error)
+  }
+}
+
+/**
+ * Which of the three reader-side reasons a ref did not resolve, as the error to throw.
+ *
+ * Asked only after a ref has failed, so a healthy run pays for no extra git calls. Each probe
+ * answers "cannot tell" on its own failure rather than throwing, because a diagnosis that
+ * throws would replace the failure it was diagnosing with a stranger one.
+ */
+async function diagnoseUnresolvedRef(
+  git: GitRunner,
+  cwd: string,
+  ref: string,
+  role: "base" | "head",
+  cause: unknown,
+): Promise<CliError> {
+  const prefix = `${role === "base" ? "Base" : "Head"} ref '${ref}' could not be resolved`
+  if (!(await isInsideWorkTree(git, cwd))) {
+    return new CliError(
+      `${prefix}: ${cwd} is not inside a git repository. Run aburi diff from inside one, or compare IR files with --base/--head.`,
+      "input-error",
+      { cause },
     )
+  }
+  if (!(await hasCommits(git, cwd))) {
+    return new CliError(
+      `${prefix}: the repository at ${cwd} has no commits yet, so there is no revision to compare.`,
+      "input-error",
+      { cause },
+    )
+  }
+  const remedy = (await isShallow(git, cwd))
+    ? `Check the spelling; if it is right, this is a shallow clone whose history may stop short of it — run: git fetch --deepen=50 origin ${ref}`
+    : "Check the spelling, or fetch the branch first."
+  return new CliError(`${prefix}: no such revision in this repository. ${remedy}`, "input-error", {
+    cause,
+  })
+}
+
+/**
+ * Whether `cwd` is inside a git working tree. Outside any repository git exits 128, which the
+ * runner rejects, and that rejection is the answer; inside `.git` itself it prints `false`.
+ */
+async function isInsideWorkTree(git: GitRunner, cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await git.run(["rev-parse", "--is-inside-work-tree"], { cwd })
+    return stdout.trim() === "true"
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether any ref names a commit. `rev-list --all` prints nothing in a repository with no
+ * commits and exits 0, which `rev-parse --verify HEAD` does not distinguish from a bad name.
+ * A failure of the probe itself answers `true`: "no commits" is a claim this must not make
+ * on no evidence.
+ */
+async function hasCommits(git: GitRunner, cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await git.run(["rev-list", "--all", "--max-count=1"], { cwd })
+    return stdout.trim().length > 0
+  } catch {
+    return true
+  }
+}
+
+async function isShallow(git: GitRunner, cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await git.run(["rev-parse", "--is-shallow-repository"], { cwd })
+    return stdout.trim() === "true"
+  } catch {
+    return false
   }
 }
 

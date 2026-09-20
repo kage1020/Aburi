@@ -109,8 +109,9 @@ export interface FakeGitOptions {
 }
 
 /**
- * A `git` far enough for `runDiff`'s ref mode: the five commands `resolveViaGit` issues are
- * modelled with the answers of a healthy, non-shallow repository, and every call is recorded.
+ * A `git` far enough for `runDiff`'s ref mode: the commands `resolveViaGit` issues, and the two
+ * more it asks when a ref does not resolve, are modelled with the answers of a healthy,
+ * non-shallow repository with commits, and every call is recorded.
  */
 export function fakeGit(options: FakeGitOptions = {}): {
   runner: GitRunner
@@ -119,6 +120,8 @@ export function fakeGit(options: FakeGitOptions = {}): {
   const calls: RecordedGitCall[] = []
   const handlers: NonNullable<FakeGitOptions["handlers"]> = {
     "rev-parse --verify": () => gitOutput("abc\n"),
+    "rev-parse --is-inside-work-tree": () => gitOutput("true\n"),
+    "rev-list --all": () => gitOutput("abc\n"),
     "rev-parse --is-shallow-repository": () => gitOutput("false\n"),
     "diff --find-renames": () => gitOutput(),
     "worktree add": async (args) => {

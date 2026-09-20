@@ -10,9 +10,10 @@ export const EXIT = {
   RUNTIME: 1,
   /**
    * Input error: bad argv, a file named and missing or malformed, unresolvable IR shape,
-   * ambiguous explain target, a config or `--fail-on` grammar mistake. The line against
-   * `RUNTIME` is who has to act (`cli-spec.md`, the exit-code table): a mistyped path is the
-   * reader's, a permission is not.
+   * ambiguous explain target, a config or `--fail-on` grammar mistake, a ref `aburi diff`
+   * cannot resolve, an output path a file already stands on. The line against `RUNTIME` is
+   * who has to act (`cli-spec.md`, the exit-code table): a mistyped path is the reader's, a
+   * permission is not.
    */
   INPUT_ERROR: 2,
   /**

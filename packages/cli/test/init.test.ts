@@ -216,7 +216,7 @@ describe("CL27 — an --output that cannot hold a file", () => {
 const onPosixAsAUser = it.skipIf(process.platform === "win32" || process.getuid?.() === 0)
 
 describe("an --output failure that is not the path's shape", () => {
-  onPosixAsAUser("is rethrown as it was thrown, not called an input error", async () => {
+  onPosixAsAUser("is the command's runtime failure, not an input error", async () => {
     await makeMinimalPnpmWorkspace()
     const locked = resolve(scratch, "locked")
     await mkdir(locked, { recursive: true })
@@ -230,9 +230,14 @@ describe("an --output failure that is not the path's shape", () => {
     // Before the assertions, so a failing one still leaves the scratch directory removable.
     await chmod(locked, 0o700)
 
-    expect(thrown).toBeInstanceOf(Error)
-    expect(thrown).not.toBeInstanceOf(CliError)
-    expect((thrown as { code?: unknown }).code).toBe("EACCES")
+    // Wrapped rather than rethrown raw: the errno alone named the path and nothing else, so
+    // the message now says which command and which artefact, and keeps the errno after it.
+    expect(thrown).toBeInstanceOf(CliError)
+    expect((thrown as CliError).code).toBe("runtime-error")
+    expect((thrown as Error).message).toContain("aburi init could not write the config to ")
+    expect((thrown as Error).message).toContain(resolve(scratch, "locked/aburi.json"))
+    expect((thrown as Error).message).toContain("EACCES")
+    expect((thrown as Error).cause).toMatchObject({ code: "EACCES" })
   })
 })
 

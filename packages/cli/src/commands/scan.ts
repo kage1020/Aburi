@@ -1,4 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import {
   type CollidingFile,
@@ -15,11 +14,11 @@ import {
   posixWorkspaceRelativeViolation,
   type SkippedFile,
   scan,
+  serializeCanonical,
   type TreeReleaseFailure,
   type UnnameableFile,
   type UnrepresentableFile,
   type UnresolvedDeclaration,
-  writeCanonicalIR,
 } from "@aburi/core"
 import {
   formatCallResolutionLine,
@@ -48,10 +47,14 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { capListing } from "../listing"
 import { createLogger } from "../logger"
+import { createOutputDir, type OutputTarget, writeOutputFile } from "../output-file"
 import { loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
+
+/** Every artefact this command writes lands under `--output-dir`, and a failure says so. */
+const SCAN_OUTPUT: OutputTarget = { command: "scan", flag: "--output-dir" }
 
 export interface ScanOptions {
   cwd?: string
@@ -236,7 +239,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const format = options.format ?? "both"
   const outputDir = resolveOutputDir(cwd, options.outputDir, config.output?.dir)
-  await mkdir(outputDir, { recursive: true })
+  await createOutputDir(SCAN_OUTPUT, outputDir)
 
   let irPath: string | null = null
   const workspaceMdPath = await maybeWriteWorkspaceMd(format, outputDir, scanResult.ir, options)
@@ -244,20 +247,22 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   if (format !== "md") {
     irPath = resolve(outputDir, IR_JSON_FILENAME)
     // Serialization can refuse the document (two keys differing only in Unicode composition),
-    // which is a property of the scanned project — exit 2, with the target path attached.
+    // which is a property of the scanned project — exit 2, with the target path attached. The
+    // write is a separate step so that a disk refusing the bytes is reported as what it is
+    // (exit 1, the command and the artefact named) rather than as a fault in the project.
+    let serialized: string
     try {
-      await writeCanonicalIR(scanResult.ir, irPath, {
+      serialized = serializeCanonical(scanResult.ir, {
         format: options.compact ? "compact" : "pretty",
       })
     } catch (error) {
       throw new CliError(
-        `Failed to write IR to ${irPath}: ${errorMessage(error)}`,
+        `Failed to serialize the IR for ${irPath}: ${errorMessage(error)}`,
         "config-error",
-        {
-          cause: error,
-        },
+        { cause: error },
       )
     }
+    await writeOutputFile(SCAN_OUTPUT, "the IR", irPath, serialized)
   }
 
   // A withdrawn file's parse errors are still reported — they are the account of why it was
@@ -869,7 +874,7 @@ async function maybeWriteWorkspaceMd(
   const md = projectWorkspace(ir, {
     suppressTimestamp: options.suppressTimestamp ?? false,
   })
-  await writeFile(path, md, "utf8")
+  await writeOutputFile(SCAN_OUTPUT, WORKSPACE_MD_FILENAME, path, md)
   return path
 }
 
@@ -880,7 +885,6 @@ async function maybeWriteComponentMd(
 ): Promise<string[]> {
   if (format === "json") return []
   const paths: string[] = []
-  await mkdir(resolve(outputDir, COMPONENTS_DIRNAME), { recursive: true })
   for (const component of ir.components) {
     const symbolsInComponent = ir.symbols.filter((symbol) => symbol.component === component.id)
     const md = projectComponent({
@@ -889,7 +893,7 @@ async function maybeWriteComponentMd(
       dependencies: ir.dependencies,
     })
     const path = resolve(outputDir, COMPONENTS_DIRNAME, `${component.id}.md`)
-    await writeFile(path, md, "utf8")
+    await writeOutputFile(SCAN_OUTPUT, `the Markdown for component "${component.id}"`, path, md)
     paths.push(path)
   }
   return paths
