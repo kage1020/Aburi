@@ -195,6 +195,9 @@ With `--quiet`, only the final line:
 ```
 ⚠ Config /repo/apps/web/aburi.json sits below the workspace root /repo. …
 ⚠ 3 file(s) had recoverable parse errors.
+    src/widget.tsx: 4 errors, first at 31:12 — syntax error
+    src/panel.tsx: 12:4 — syntax error
+    src/table.tsx: 88:9 — syntax error
 ⚠ 1 file(s) could not be parsed and were left out of the IR.
 ⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
 ⚠ over-size (3) — larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.
@@ -206,6 +209,12 @@ With `--quiet`, only the final line:
 ⚠ extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
+
+The first of those lines names its files, which nothing else does: they are in the IR, so
+`stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
+Each is given the position its parse came apart at, and a count when more than one error was
+reported — the rest are on `ScanResult.parseErrors` for a caller that wants them. Every other
+per-file listing here is recoverable from the artifact; this one is the run's only account.
 
 The two parse lines are counted apart rather than summed. The first counts files whose errors the
 plugin called recoverable; the second counts files the parse refused. A withdrawn file's errors
@@ -272,6 +281,18 @@ came from:
 
 ```
 ⚠ base ref "main": 3 file(s) had recoverable parse errors.
+```
+
+`aburi diff` also folds the two scans' recoverable-error counts into one line of its own, and
+names the files under it with the side on each entry — the two scans read different trees, so a
+path doubtful on one side and clean on the other is the likeliest cause of the added / removed
+movement that line warns about:
+
+```
+⚠ Files with recoverable parse errors (base 1, head 2) reached the IR rather than stats.skippedFiles, …
+    base src/panel.tsx: 12:4 — syntax error
+    head src/panel.tsx: 12:4 — syntax error
+    head src/widget.tsx: 4 errors, first at 31:12 — syntax error
 ```
 
 `⚠` starts every line that stands on its own. The only lines without it are the indented

@@ -17,7 +17,7 @@ import { evaluateFailOn, type FailOnClause, formatTriggered, parseFailOn } from 
 import { pathExists } from "../fs-probe"
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
-import { joinCapped } from "../listing"
+import { joinCapped, writeListing } from "../listing"
 import { createOutputDir, writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
@@ -324,6 +324,15 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
     `⚠ Files with recoverable parse errors (${where}) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. ` +
       `Their Symbol sets can be short, which moves added / removed without a file having been skipped.`,
   )
+  // Which files, so the warning can be acted on rather than only believed. The side is on every
+  // line: the two scans are of different trees, and a path can be doubtful on one and clean on
+  // the other — which is itself the most likely cause of the added / removed the line warns about.
+  for (const side of affected) {
+    writeListing(
+      scans[side].parseErrorFiles.map((file) => `${side} ${file.path}: ${file.detail}`),
+      warn,
+    )
+  }
 }
 
 /**

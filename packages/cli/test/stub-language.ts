@@ -68,6 +68,19 @@ export const plugin = {
         imports: [],
       }
     }
+    if (file.path.includes("noisy")) {
+      // More than one recoverable error on a single file, which is what a real grammar
+      // produces: tree-sitter raises an ERROR per construct it could not place, so the CLI's
+      // per-file line has to summarize rather than print them all.
+      return {
+        tree,
+        errors: [
+          { message: "stray token", line: 2, column: 1, recoverable: true },
+          { message: "stray token", line: 9, column: 7, recoverable: true },
+        ],
+        imports: [],
+      }
+    }
     if (file.path.includes("warn")) {
       return {
         tree,

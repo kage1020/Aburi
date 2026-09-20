@@ -693,6 +693,7 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | ID | Input | Expected |
 |---|---|---|
 | LP27 | file containing a syntax error | returns a recoverable error, extracts Symbols where possible |
+| LP27a | a bare `&` in JSX — `<p>Subscription & Billing</p>`, `href="/x?a=1&b=2"` | no parse error. The tsx grammar reads `&` as the opening of an HTML character reference and errors when no `;` closes it, which makes prose and a tracking URL indistinguishable from a broken file; the plugin drops that one shape so the recoverable-error count stays worth reading. Narrow on purpose: the run has to open with an ampersand-led token *and* sit among a JSX element's children or inside a JSX attribute's string, so a truncation — which raises its ERROR at `program` — still reports, including in a file that carries both |
 | LP28 | completely broken file | returns a non-recoverable error and a null tree, the core withdraws it |
 | LP28a | a file the plugin parsed but refuses — a usable tree paired with a `recoverable: false` error | the core withdraws it on the same terms as LP28. The tree is never handed to `extractSymbols`, `walkBody` or `normalizeAst`, and the refusal is quoted in `ScanResult.skipped` |
 

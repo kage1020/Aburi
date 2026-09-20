@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import type { ParseError, ParseResult, SourceFile } from "@aburi/types"
-import { Language, Parser, type Tree } from "web-tree-sitter"
+import { Language, type Node, Parser, type Tree } from "web-tree-sitter"
 import { walkDescendants } from "./ast-helpers"
 import { extractImports } from "./imports"
 
@@ -226,10 +226,10 @@ function pickGrammarForPath(path: string): string {
 }
 
 /**
- * Every ERROR and MISSING node in the tree, in source order. Both are recoverable per
- * web-tree-sitter's semantics — the tree is still usable, just imperfect — so the pipeline
- * continues. Anonymous children are walked too (a MISSING `)` is one), and a subtree with no
- * error in it is pruned.
+ * Every ERROR and MISSING node in the tree, in source order, less the ones `isJsxEntityArtifact`
+ * identifies as the grammar's own. Both kinds are recoverable per web-tree-sitter's semantics —
+ * the tree is still usable, just imperfect — so the pipeline continues. Anonymous children are
+ * walked too (a MISSING `)` is one), and a subtree with no error in it is pruned.
  */
 function collectParseErrors(tree: Tree): ParseError[] {
   const root = tree.rootNode
@@ -238,6 +238,7 @@ function collectParseErrors(tree: Tree): ParseError[] {
   for (const node of walkDescendants(root, { anonymous: true, descend: (n) => n.hasError })) {
     const message = node.isError ? "syntax error" : node.isMissing ? "missing token" : null
     if (message === null) continue
+    if (node.isError && isJsxEntityArtifact(node)) continue
     errors.push({
       message,
       line: node.startPosition.row + 1,
@@ -246,4 +247,40 @@ function collectParseErrors(tree: Tree): ParseError[] {
     })
   }
   return errors
+}
+
+/**
+ * Whether this ERROR is the tsx grammar's `&` limitation rather than something wrong with the
+ * file (`lang-plugin.md` LP27a).
+ *
+ * The tsx grammar `@vscode/tree-sitter-wasm` ships reads `&` inside JSX as the opening of an
+ * HTML character reference and errors when no `;` closes it. So `<CardTitle>Subscription &
+ * Billing</CardTitle>` and `href="/x?utm_source=a&utm_medium=b"` — ordinary prose and a
+ * tracking URL — are parse errors, while `&amp;`, `&nbsp;` and `{"a & b"}` are not. 0.3.1 is
+ * the newest published grammar, so this is not something a version bump settles.
+ *
+ * What it costs is the signal rather than the data: the file still reaches the IR, and the
+ * same component written with `&` and with `&amp;` extracts the same Symbols — same signature,
+ * same `calls[]`, including a call sited after the error. What it did cost is the CLI's
+ * recoverable-parse-error warning, which on a React codebase fired on 3% of files as a matter
+ * of course and stopped being worth reading.
+ *
+ * The shape is deliberately narrow, so a file that really was truncated is not dropped with it.
+ * Both halves have to hold:
+ *
+ *   - the run the grammar could not place opens with an ampersand-led token (`&`, `&&`, `&=`),
+ *     which is what the misread entity leaves behind and what a truncation does not produce; and
+ *   - the ERROR sits directly among a JSX element's children — which is where the grammar
+ *     parents a fragment's children too — or inside a JSX attribute's string value.
+ *
+ * A truncation raises its own ERROR at `program`, outside both positions, and is reported even
+ * when the same file also carries one of these: `export const U = () => <div><p>a & b</p>`
+ * reports the truncation and not the ampersand.
+ */
+function isJsxEntityArtifact(node: Node): boolean {
+  if (node.child(0)?.type.startsWith("&") !== true) return false
+  const parent = node.parent
+  if (parent === null) return false
+  if (parent.type === "jsx_element") return true
+  return parent.type === "string" && parent.parent?.type === "jsx_attribute"
 }

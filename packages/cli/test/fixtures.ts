@@ -101,6 +101,7 @@ export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
     parsedFiles: 0,
     keptSymbols: 0,
     droppedSymbols: 0,
+    parseErrorFiles: [],
     parseErrorCount: 0,
     parseFailureCount: 0,
     timeoutCount: 0,
