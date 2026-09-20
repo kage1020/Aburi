@@ -219,10 +219,11 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     expect(incidentLinesFrom(scanReportWith({ treeReleaseFailures: [] }), null)).toEqual([])
   })
 
-  it("names the files behind the recoverable-error count, capped", () => {
-    // The count alone was the whole warning, and the files are in the IR rather than in
-    // `stats.skippedFiles[]`, so there was nowhere else to look them up. The cap is the same
-    // one every other listing here uses: the shape of the loss, not the record of it.
+  it("names every file behind the recoverable-error count, uncapped", () => {
+    // The count alone was the whole warning, and mostly these files are in the IR rather than
+    // in `stats.skippedFiles[]`, so there is nowhere else to look them up. That is why the
+    // `MAX_LISTED` cap does not apply: over the only account of something, `…and N more` is
+    // the loss rather than the shape of it. Twelve is past the cap on purpose.
     const lines = incidentLinesFrom(
       scanReportWith({
         parseErrorFiles: Array.from({ length: 12 }, (_, i) => ({
@@ -235,9 +236,10 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     )
 
     expect(lines[0]).toBe("⚠ 12 file(s) had recoverable parse errors.")
-    expect(lines[1]).toBe("    src/c0.tsx: 3:5 — syntax error")
-    expect(lines).toHaveLength(12)
-    expect(lines.at(-1)).toBe("    …and 2 more")
+    expect(lines.slice(1)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `    src/c${i}.tsx: 3:5 — syntax error`),
+    )
+    expect(lines.join("\n")).not.toContain("more")
   })
 
   it("leaves the per-file lines unlabelled, like every other listing", () => {
@@ -740,11 +742,16 @@ describe("aburi diff — both scans it ran for you", () => {
     // added / removed counts then move with no file having gone missing.
     expect(warnings.join("\n")).toContain("recoverable parse errors")
     expect(warnings.join("\n")).toContain("added / removed")
-    // Which files, with the side on every line: the two scans read different trees, and a path
-    // doubtful on one side and clean on the other is the likeliest cause of the movement the
-    // sentence above warns about. Here the fixture puts the same file on both.
-    expect(warnings).toContain("    base warn.stub: 2:1 — stray token")
-    expect(warnings).toContain("    head warn.stub: 2:1 — stray token")
+    // The files are named once per side, by each scan's own report, whose header carries the
+    // side. This command adds the consequence and no second listing: it runs both scans, so
+    // repeating their lines here would print every doubtful path a third time.
+    expect(warnings).toEqual([
+      '⚠ base ref "main": 1 file(s) had recoverable parse errors.',
+      "    warn.stub: 2:1 — stray token",
+      "⚠ head (working tree): 1 file(s) had recoverable parse errors.",
+      "    warn.stub: 2:1 — stray token",
+      expect.stringContaining("added / removed"),
+    ])
   })
 
   it("keeps all three lines when a file is lost on both sides", async () => {

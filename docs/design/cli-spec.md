@@ -193,11 +193,11 @@ With `--quiet`, only the final line:
 ### 5.6 stderr (Warnings)
 
 ```
-⚠ Config /repo/apps/web/aburi.json sits below the workspace root /repo. …
 ⚠ 3 file(s) had recoverable parse errors.
     src/widget.tsx: 4 errors, first at 31:12 — syntax error
     src/panel.tsx: 12:4 — syntax error
     src/table.tsx: 88:9 — syntax error
+⚠ Config /repo/apps/web/aburi.json sits below the workspace root /repo. …
 ⚠ 1 file(s) could not be parsed and were left out of the IR.
 ⚠ 5 file(s) contributed no Symbols: over-size=3, parse-failed=1, extraction-failed=1
 ⚠ over-size (3) — larger than maxFileSizeBytes. Raise the budget, or leave them out with ignore.
@@ -210,11 +210,19 @@ With `--quiet`, only the final line:
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
 
-The first of those lines names its files, which nothing else does: they are in the IR, so
+The parse-error line names its files, which nothing else does: mostly they are in the IR, so
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
-Each is given the position its parse came apart at, and a count when more than one error was
-reported — the rest are on `ScanResult.parseErrors` for a caller that wants them. Every other
-per-file listing here is recoverable from the artifact; this one is the run's only account.
+Two kinds are in that list all the same, under a different reason — a file abandoned on its
+`parseTimeoutMs` budget, and one a plugin threw on after parsing with recoverable errors — and
+the skip entry there carries the clock or the plugin's message rather than the errors, so the
+line above is still the only place the errors are named.
+
+Each file is given the first error reported for it, and a count when there was more than one;
+an embedder wanting all of them reads `ScanResult.parseErrors`, which this line summarizes
+rather than reprints. The listing is uncapped, for the reason §5.8's is: a `…and N more` tail
+over the run's only account of something is the loss rather than a summary of it. The listings
+that *are* capped are the ones the artifact records in full — the skip census below, which
+`stats.skippedFiles[]` holds entire.
 
 The two parse lines are counted apart rather than summed. The first counts files whose errors the
 plugin called recoverable; the second counts files the parse refused. A withdrawn file's errors
@@ -273,8 +281,10 @@ at `ABURI_LOG_LEVEL=error` the per-file lines are gone, and for `over-size`, `un
 `unreadable` raised during discovery there is no `Logger` line to lose — those three are decided
 before extraction and are not logged at all, so the report is their only account.
 
-§5.8's paragraph sits directly under the coverage line and above this census — ahead of
-everything that is recoverable from the artifact, because it is the one section that is not.
+§5.8's paragraph, the unreleased-tree line and the parse-error listing sit directly under the
+coverage line and above this census — ahead of everything that is recoverable from the artifact,
+because they are the sections that are not. A sink that closes takes whatever is last, so what
+exists nowhere else goes first.
 
 A command that runs more than one scan labels them, after the glyph, with the scan the line
 came from:

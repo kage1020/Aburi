@@ -46,7 +46,7 @@ import type { LogLevel } from "../env"
 import { assertNever, CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
-import { writeListing } from "../listing"
+import { writeFullListing, writeListing } from "../listing"
 import { createLogger } from "../logger"
 import { createOutputDir, type OutputCommand, writeOutputFile } from "../output-file"
 import { loadPlugins } from "../plugin-loader"
@@ -147,9 +147,15 @@ export interface ScanReport {
    * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error (`parseFailureCount`).
    * A file abandoned on its `parseTimeoutMs` budget is counted here (`lang-plugin.md`).
    *
-   * These files are in the IR, so `stats.skippedFiles[]` does not name them and neither does
-   * anything else in the artifact: this list is the run's only account of *which* files they
-   * were. `parseErrorCount` is its length rather than a second count, so the two cannot drift.
+   * Mostly these files are in the IR, and then nothing in the artifact names them: that is
+   * what makes this list the run's only account of *which* files they were. The exceptions are
+   * the ones withdrawn for something other than their parse — the timed-out file just
+   * mentioned, and a file a plugin threw on after parsing with recoverable errors. Those do
+   * appear in `stats.skippedFiles[]`, under that other reason, whose detail carries the clock
+   * or the plugin's message rather than the errors.
+   *
+   * `parseErrorCount` is set from this list's length where the report is built. Nothing in the
+   * type holds them together, so a second construction site would have to do the same.
    */
   parseErrorFiles: readonly { path: string; detail: string }[]
   /** How many files `parseErrorFiles` names. */
@@ -440,22 +446,13 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     sayIncident(line)
   }
   reportCoverageFault(report.coverageFault, sayIncident)
-  // The two accounts that exist nowhere else come directly under the coverage line, ahead of
+  // The accounts that exist nowhere else come directly under the coverage line, ahead of
   // everything recoverable from the artifact: the sink's failure is swallowed further up, so
   // whatever is last is what a closed pipe loses.
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
+  reportParseErrors(report.parseErrorFiles, sayIncident, warn)
   reportConfigOutsideWorkspaceRoot(report, sayIncident)
-  if (report.parseErrorCount > 0) {
-    sayIncident(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
-    // The only place these files are named. Everything else this function lists is recoverable
-    // from `stats.skippedFiles[]`; a file that parsed with errors is not in that list, because
-    // it was not skipped.
-    writeListing(
-      report.parseErrorFiles.map((file) => `${file.path}: ${file.detail}`),
-      warn,
-    )
-  }
   if (report.parseFailureCount > 0) {
     // Apart from the line above: those files are in the IR with warnings, these are not in it.
     sayIncident(
@@ -506,6 +503,33 @@ function reportHints(lsp: LspEnrichmentStats, sayIncident: SayIncident): void {
   if (produced === 0 && refused === 0) return
   sayIncident(
     `LSP receiver hints: ${produced} produced · ${lsp.hintsConsumed ?? 0} resolved a call · ${refused} rejected.`,
+  )
+}
+
+/**
+ * Files that parsed with errors the plugin called recoverable, and the first error each one
+ * reported. Named rather than only counted, because a count says a number of files somewhere
+ * in the workspace need looking at without saying which — `lang-plugin.md` leaves what counts
+ * as recoverable to the plugin, so the reader cannot narrow it down from the count either.
+ *
+ * **Uncapped**, for the reason `reportUnrepresentable` is: for most of these files the line is
+ * the run's only account of them (see `ScanReport.parseErrorFiles` for the two kinds that are
+ * also in `stats.skippedFiles[]`), and a `…and N more` tail over the only account is the loss
+ * rather than a summary of it.
+ *
+ * Gated on the list rather than on `parseErrorCount`, so an empty list cannot print a header
+ * over nothing if the two ever come apart.
+ */
+function reportParseErrors(
+  files: ScanReport["parseErrorFiles"],
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
+): void {
+  if (files.length === 0) return
+  sayIncident(`${files.length} file(s) had recoverable parse errors.`)
+  writeFullListing(
+    files.map((file) => `${file.path}: ${file.detail}`),
+    writeDetail,
   )
 }
 
