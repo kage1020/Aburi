@@ -579,7 +579,7 @@ For symbols with `dropped: true`, all fingerprints are fixed to the 12-hex strin
 
 Guaranteed by Aburi internals. Item 20 restates the schema's own structural requirements, because nothing in the pipeline runs a schema validator — `readIR` checks `$schema` and hands the parsed object to the integrity checker — and the nineteen relational rules above it are statements about a Document of that shape:
 
-1. `symbols[].id` is unique within the Document
+1. `symbols[].id` is unique within the Document. The scan decides this per file as well, while the offending file can still be withdrawn and named (`lang-plugin.md` §7.2) — an id carries the file it came from, so a collision is normally within one file's candidates. This check is the backstop for what that one cannot see: a plugin that wrote a path other than the file's own
 2. `components[].id` is unique within the Document
 3. If `symbols[].component` is non-null, it exists in `components[].id`
 4. If `dependencies[].from` / `to` is in symbol-id form, it exists in `symbols[].id`

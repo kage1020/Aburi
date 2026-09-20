@@ -36,7 +36,7 @@ const REFUSAL = "parse reported a non-recoverable error at 12:4 — unterminated
 const PARSE_FAILED_ADVICE =
   "the language plugin refused the source. Deterministic: fix the file, or the plugin."
 const EXTRACTION_FAILED_ADVICE =
-  "a plugin threw while extracting. This is the reason the run does not exit clean."
+  "a plugin threw while extracting, or its Symbols could not enter the document. This is the reason the run does not exit clean."
 
 let scratch = ""
 

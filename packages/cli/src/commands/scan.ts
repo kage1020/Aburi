@@ -381,7 +381,8 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   },
   "extraction-failed": {
     rank: 6,
-    advice: "a plugin threw while extracting. This is the reason the run does not exit clean.",
+    advice:
+      "a plugin threw while extracting, or its Symbols could not enter the document. This is the reason the run does not exit clean.",
   },
 }
 

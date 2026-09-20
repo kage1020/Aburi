@@ -10,6 +10,7 @@ import type {
   FrameworkPlugin,
   ImportEdge,
   IR,
+  Symbol as IRSymbol,
   LanguagePlugin,
   Logger,
   LspEnrichmentStats,
@@ -120,7 +121,9 @@ export interface ScanResult {
    */
   unresolvedCalls: readonly UnresolvedCallDiagnostic[]
   /**
-   * One record per file withdrawn because a plugin threw while extracting it, in scan order.
+   * One record per file withdrawn during extraction, in scan order: a plugin threw, or the
+   * file's Symbols could not enter the document (§7.2 — `describeIdCollision`, which carries
+   * `code: "duplicate-symbol-id"` and is the one entry here nothing raised an error for).
    * These files also appear in `skipped` under `reason: "extraction-failed"`, which is what
    * a reader wanting the count consults; this carries the message beside it, the way
    * `parseTimeouts` carries the numbers `skipped` has nowhere to put.
@@ -163,7 +166,7 @@ export interface ScanResult {
 }
 
 /**
- * A file the scan withdrew because extracting it threw.
+ * A file the scan withdrew during extraction.
  *
  * `message` is the thrown error's message, or the value stringified when a plugin threw
  * something that was not an `Error`. There is no stack: the caller needs to know which file
@@ -175,6 +178,12 @@ export interface ScanResult {
  * `anonymous-symbol-id-attempted`, which a reader can act on by changing the source — from a
  * plugin that crashed, which they can only report. Matching on the message text is the
  * alternative, and it is not one.
+ *
+ * One entry here was not thrown at all: `duplicate-symbol-id`, where the pipeline ran to
+ * completion and the file's Symbols then could not satisfy ir-schema.md invariant #1
+ * (`describeIdCollision`). It is on this list because the consequence is the one this list
+ * means — the file is gone and the run is not green — and a caller branching on `code`
+ * rather than on how the file was lost needs it here to see it.
  */
 export interface ExtractionFailure {
   file: string
@@ -251,6 +260,10 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const importsByFile = new Map<string, readonly ImportEdge[]>()
   const fileContents = new Map<string, ReadFile>()
   const dynamicCallSites = new Set<string>()
+  // Which file contributed each id so far. Invariant #1 is the one integrity rule that is
+  // decidable while a file can still be withdrawn, and this is what makes it decidable:
+  // `assertIRIntegrity` sees the assembled document and can only refuse the whole of it.
+  const idOwner = new Map<string, string>()
   for (const discoveredFile of discovered.files) {
     // Discovery's `languageExtensions` filter already narrowed the file list to extensions
     // the router recognizes. If `route()` still returns null here it means the extension
@@ -382,6 +395,26 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         break
       }
       case "extracted": {
+        // Invariant #1, where the file can still be withdrawn and named. Ahead of every
+        // accumulator below, so a refusal leaves nothing half-written — the same property the
+        // exception boundary above gets from `runFilePipeline` returning its result at once.
+        const collision = describeIdCollision(result.symbols, idOwner)
+        if (collision !== null) {
+          additionalSkipped.push({
+            path: discoveredFile.path,
+            reason: "extraction-failed",
+            detail: collision,
+          })
+          extractionFailures.push({
+            file: discoveredFile.path,
+            message: collision,
+            code: "duplicate-symbol-id",
+          })
+          logger.warn(`Skipped ${discoveredFile.path}: ${collision}`)
+          break
+        }
+        for (const symbol of result.symbols) idOwner.set(symbol.id, result.path)
+
         // Held for LSP enrichment, and only for files that reached the IR. Nothing would
         // currently read a refused file's text if it were held — the pass builds one document
         // per file it has Symbols for, and a file that produced none is never looked up — so
@@ -553,6 +586,59 @@ function describeParseFailure(errors: readonly ParseError[]): string {
 
 function quote(error: ParseError): string {
   return `${error.line}:${error.column} — ${error.message}`
+}
+
+/**
+ * Why this file's Symbols cannot enter the document, or `null` when they can.
+ *
+ * `lang-plugin.md` §7.2 says one file's bug costs that file: a qualified name the grammar
+ * refuses costs its file and is named in `skipped`. Invariant #1 was the exception — two
+ * Symbols under one id reached `assertIRIntegrity` after every file had been extracted, and
+ * the run produced no document at all, so a workspace of healthy files yielded nothing
+ * because one file confused one plugin. Deciding it here puts it back under the same rule.
+ *
+ * Both shapes are answered, because the check that catches only the first would leave the
+ * document-wide one as the first line of defence for the second rather than the backstop it
+ * is meant to be:
+ *
+ *   - Two of this file's own Symbols under one id. This is the shape that actually happens —
+ *     `#76` was three ordinary TypeScript constructs reaching it — because an id carries the
+ *     file it came from, so a collision is normally within one file's candidates.
+ *   - An id an earlier file already contributed. Only a plugin that wrote a path other than
+ *     the file's own can produce this, since nothing else puts two files' ids in one
+ *     namespace: discovery withdraws two spellings of one Document path before either is
+ *     read, and a routed file goes to exactly one plugin.
+ *
+ * Which of the two Symbols to keep is not core's to decide — they are the plugin's output and
+ * it has said nothing that separates them — and picking one silently is the failure `#76` is
+ * about. So the file goes, whole, and the message names what collided.
+ */
+function describeIdCollision(
+  symbols: readonly IRSymbol[],
+  idOwner: ReadonlyMap<string, string>,
+): string | null {
+  const here = new Map<string, IRSymbol>()
+  for (const symbol of symbols) {
+    const twin = here.get(symbol.id)
+    if (twin !== undefined) {
+      // The lines, because the id names the qualified name the two share and nothing else
+      // tells them apart — the reader has two declarations to find, not one.
+      return (
+        `two Symbols share the id "${symbol.id}" (lines ${twin.source.startLine} and ` +
+        `${symbol.source.startLine}); the language plugin gave two declarations one qualified ` +
+        `name, and nothing it reported separates them`
+      )
+    }
+    const owner = idOwner.get(symbol.id)
+    if (owner !== undefined) {
+      return (
+        `Symbol id "${symbol.id}" was already contributed by ${owner}. An id carries the file ` +
+        `it came from, so the language plugin wrote a path that is not this file's`
+      )
+    }
+    here.set(symbol.id, symbol)
+  }
+  return null
 }
 
 /**

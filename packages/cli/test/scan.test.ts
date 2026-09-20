@@ -244,7 +244,7 @@ describe("runScan — a file a plugin threw on", () => {
     expect(code).toBe(3)
     // The reason that earned the 3, and the file that earned it, on the reader's screen —
     // the message being the plugin's own account of what it refused.
-    expect(stderr.text()).toContain("⚠ extraction-failed (1) — a plugin threw while extracting.")
+    expect(stderr.text()).toContain("⚠ extraction-failed (1) — a plugin threw while extracting,")
     expect(stderr.text()).toContain('    src/route.ts: qualified name "a\u{1F642}"')
   })
 

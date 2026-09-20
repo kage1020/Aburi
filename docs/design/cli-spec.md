@@ -203,7 +203,7 @@ With `--quiet`, only the final line:
     public/data.js: 1100000 > 1048576
 ⚠ parse-failed (1) — the language plugin refused the source. Deterministic: fix the file, or the plugin.
     src/broken.ts: parse reported a non-recoverable error at 12:4 — unterminated string
-⚠ extraction-failed (1) — a plugin threw while extracting. This is the reason the run does not exit clean.
+⚠ extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
 
