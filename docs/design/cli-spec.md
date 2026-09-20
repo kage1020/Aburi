@@ -212,10 +212,11 @@ With `--quiet`, only the final line:
 
 The parse-error line names its files, which nothing else does: mostly they are in the IR, so
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
-Two kinds are in that list all the same, under a different reason — a file abandoned on its
-`parseTimeoutMs` budget, and one a plugin threw on after parsing with recoverable errors — and
-the skip entry there carries the clock or the plugin's message rather than the errors, so the
-line above is still the only place the errors are named.
+One kind is in that list all the same, under a different reason: a file abandoned on its
+`parseTimeoutMs` budget is named on both lines, and its skip entry carries the clock rather than
+the errors, so the line above is still the only place those are named. A file a plugin threw on
+is not that case — the result never materialized, so it has no parse errors to carry and does
+not reach this line.
 
 Each file is given the first error reported for it, and a count when there was more than one;
 an embedder wanting all of them reads `ScanResult.parseErrors`, which this line summarizes

@@ -148,11 +148,11 @@ export interface ScanReport {
    * A file abandoned on its `parseTimeoutMs` budget is counted here (`lang-plugin.md`).
    *
    * Mostly these files are in the IR, and then nothing in the artifact names them: that is
-   * what makes this list the run's only account of *which* files they were. The exceptions are
-   * the ones withdrawn for something other than their parse — the timed-out file just
-   * mentioned, and a file a plugin threw on after parsing with recoverable errors. Those do
-   * appear in `stats.skippedFiles[]`, under that other reason, whose detail carries the clock
-   * or the plugin's message rather than the errors.
+   * what makes this list the run's only account of *which* files they were. The exception is
+   * the timed-out file just mentioned. It is withdrawn, so `stats.skippedFiles[]` names it
+   * under `parse-timeout` — with the clock rather than the errors — and it is named on both
+   * lines. A file a plugin *threw* on is not the same case and is not here at all: the result
+   * never materialized, so there was nothing to carry its parse errors (`core/scan/scan.ts`).
    *
    * `parseErrorCount` is set from this list's length where the report is built. Nothing in the
    * type holds them together, so a second construction site would have to do the same.
