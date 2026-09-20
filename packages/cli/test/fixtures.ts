@@ -1,5 +1,8 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { resolve } from "node:path"
 import { Writable } from "node:stream"
-import type { ComponentId, SliceId, SymbolId } from "@aburi/types"
+import { makeLanguageId } from "@aburi/core"
+import type { ComponentId, IR, SliceId, SymbolId } from "@aburi/types"
 import { EXIT, type GitRunner, reportScanIncidents, type ScanReport } from "../src"
 
 /**
@@ -23,6 +26,57 @@ export function componentId(raw: string): ComponentId {
 /** Slice-id counterpart of `symbolId`, same rationale. */
 export function sliceId(raw: string): SliceId {
   return raw as SliceId
+}
+
+/**
+ * A schema-valid IR that describes nothing: the smallest document `readIR` accepts, for tests
+ * whose subject is what a command does around the comparison rather than the comparison.
+ */
+export function emptyIR(): IR {
+  return {
+    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
+    generator: { name: "aburi", version: "0.0.0", plugins: [] },
+    workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
+    components: [],
+    symbols: [],
+    dependencies: [],
+    stats: {
+      totalFiles: 0,
+      parsedFiles: 0,
+      keptSymbols: 0,
+      droppedSymbols: 0,
+      effectPropagation: {
+        sccCount: 0,
+        maxSccSize: 0,
+        propagatedEffectCount: 0,
+        symbolsWithPropagatedEffects: 0,
+      },
+    },
+  }
+}
+
+/**
+ * The smallest workspace `aburi scan` reads for real: a manifest, a config naming
+ * `lang-typescript`, and one source file that parses and declares nothing. Every report of it
+ * carries zero Symbols while the scan still read the repository — the distinction the coverage
+ * gate rests on, since a workspace where nothing parsed is not a success.
+ */
+export async function writeTypeScriptWorkspace(directory: string, name: string): Promise<void> {
+  await writeFile(
+    resolve(directory, "package.json"),
+    JSON.stringify({ name, private: true }),
+    "utf8",
+  )
+  await writeFile(
+    resolve(directory, "aburi.json"),
+    JSON.stringify({
+      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
+      languages: ["lang-typescript"],
+    }),
+    "utf8",
+  )
+  await mkdir(resolve(directory, "src"), { recursive: true })
+  await writeFile(resolve(directory, "src/quiet.ts"), "// declares nothing\n", "utf8")
 }
 
 /** A writable stream that keeps what was written, for capturing `runCli`'s stdout / stderr. */

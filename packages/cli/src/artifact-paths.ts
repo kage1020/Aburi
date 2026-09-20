@@ -17,6 +17,14 @@ export const COMPONENTS_DIRNAME = "components"
 export const DEFAULT_OUTPUT_DIRNAME = "out"
 
 /**
+ * The two places that decide the directory, as a remedy names them. Kept beside
+ * `resolveOutputDir`, which is what reads them, so a message cannot name a key or a flag that
+ * the resolution no longer consults. Deliberately no filename: discovery accepts more than
+ * one, and `--config` can point anywhere.
+ */
+export const OUTPUT_DIR_SOURCES = "--output-dir (or output.dir in the config)"
+
+/**
  * The directory a command writes its artefacts into, or reads them back from — against `cwd`,
  * not the workspace root, like every other path-bearing flag. `configured` is
  * `config.output.dir`, which stands exactly where the flag would (`cli-spec.md`,

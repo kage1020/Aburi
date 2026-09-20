@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -50,12 +50,16 @@ describe("runDiff refspec mode — head ref validation", () => {
 /**
  * A ref that does not resolve, and what the run says about it. `git rev-parse --verify` fails
  * the same way outside a repository, in one with no commits, and for a mistyped name, so the
- * diagnosis asks two more questions — and every answer is the reader's to act on (exit 2),
+ * diagnosis asks two more questions — and every *answer* is the reader's to act on (exit 2),
  * because `git fetch` is the wrong remedy for two of the three and a mistyped ref is bad input.
+ * A question git refuses is not an answer: the run then ends at exit 1 with git's own report,
+ * because whatever refused the ref is still refusing, and a guess would replace the one
+ * precise sentence there is (dubious ownership, and its `safe.directory` remedy) with a wrong one.
  */
-describe("runDiff refspec mode — why a ref did not resolve", () => {
-  const unresolvable = () => {
-    throw Object.assign(new Error("fatal: Needed a single revision"), { code: 128 })
+describe("CL30–CL32 — why a ref did not resolve", () => {
+  const GIT_SAID = "fatal: Needed a single revision"
+  const refused = (what: string) => () => {
+    throw Object.assign(new Error(what), { code: 128 })
   }
 
   async function failure(handlers: FakeGitOptions["handlers"]): Promise<{
@@ -63,7 +67,7 @@ describe("runDiff refspec mode — why a ref did not resolve", () => {
     asked: string[]
   }> {
     const { runner, calls } = fakeGit({
-      handlers: { "rev-parse --verify": unresolvable, ...handlers },
+      handlers: { "rev-parse --verify": refused(GIT_SAID), ...handlers },
     })
     const error = await runDiff({
       cwd: scratch,
@@ -79,43 +83,71 @@ describe("runDiff refspec mode — why a ref did not resolve", () => {
     return { error: error as CliError, asked: calls.map((c) => c.args.slice(0, 2).join(" ")) }
   }
 
-  it("says the directory is not a git repository, and does not suggest fetching", async () => {
+  it("CL30 — says the directory is not a git repository, and does not suggest fetching", async () => {
+    // git refuses the question and nothing git would open stands above `scratch` — which is
+    // the pair that means "outside any repository", and the only one that does.
     const { error } = await failure({
-      "rev-parse --is-inside-work-tree": () => {
-        throw Object.assign(new Error("fatal: not a git repository"), { code: 128 })
-      },
+      "rev-parse --is-inside-work-tree": refused("fatal: not a git repository"),
     })
     expect(error.code).toBe("input-error")
     expect(error.message).toContain("Base ref 'main' could not be resolved")
     expect(error.message).toContain(`${scratch} is not inside a git repository`)
     expect(error.message).toContain("--base/--head")
+    expect(error.message).toContain(GIT_SAID)
     expect(error.message).not.toContain("git fetch")
   })
 
-  it("says the repository has no commits, and does not suggest fetching", async () => {
+  it("passes git's own report on, at exit 1, when it refuses the question inside a repository", async () => {
+    // A `.git` above the directory means the refusal was about that repository — dubious
+    // ownership is the everyday case — and git's report names the remedy this run cannot.
+    await mkdir(resolve(scratch, ".git"))
+    const said = "fatal: detected dubious ownership in repository"
+    const { error } = await failure({
+      "rev-parse --verify": refused(said),
+      "rev-parse --is-inside-work-tree": refused(said),
+    })
+    expect(error.code).toBe("runtime-error")
+    expect(error.message).toContain("Base ref 'main' could not be resolved")
+    expect(error.message).toContain(said)
+    expect(error.message).not.toContain("is not inside a git repository")
+    expect(error.message).not.toContain("git fetch")
+  })
+
+  it("names a git directory that is not a working tree", async () => {
+    const { error } = await failure({
+      "rev-parse --is-inside-work-tree": () => gitOutput("false\n"),
+    })
+    expect(error.code).toBe("input-error")
+    expect(error.message).toContain("not a working tree")
+    expect(error.message).toContain("--base/--head")
+  })
+
+  it("CL31 — says the repository has no commits, and does not suggest fetching", async () => {
     const { error } = await failure({ "rev-list --all": () => gitOutput("") })
     expect(error.code).toBe("input-error")
     expect(error.message).toContain("has no commits yet")
+    expect(error.message).toContain(GIT_SAID)
     expect(error.message).not.toContain("git fetch")
   })
 
-  it("calls a ref no revision answers to an input error, with the spelling to check", async () => {
+  it("does not call a ref misspelt when git would not say whether there are commits", async () => {
+    const { error } = await failure({ "rev-list --all": refused("fatal: bad object HEAD") })
+    expect(error.code).toBe("runtime-error")
+    expect(error.message).not.toContain("no such revision")
+    expect(error.message).not.toContain("has no commits")
+    expect(error.message).toContain(GIT_SAID)
+  })
+
+  it("CL32 — calls a ref no revision answers to an input error, with the spelling to check", async () => {
     const { error } = await failure({})
     expect(error.code).toBe("input-error")
     expect(error.message).toContain("Base ref 'main' could not be resolved")
     expect(error.message).toContain("no such revision")
     expect(error.message).toContain("Check the spelling")
-    // A full clone has all the history there is, so deepening it is not the advice.
+    expect(error.message).toContain(GIT_SAID)
+    // The clone that follows this advice is refused by the shallow check anyway
+    // (`assertNotShallow`), so deepening it is not the advice.
     expect(error.message).not.toContain("--deepen")
-  })
-
-  it("keeps the deepen remedy for the one case it can help: a shallow clone", async () => {
-    const { error } = await failure({
-      "rev-parse --is-shallow-repository": () => gitOutput("true\n"),
-    })
-    expect(error.code).toBe("input-error")
-    expect(error.message).toContain("shallow clone")
-    expect(error.message).toContain("git fetch --deepen=50 origin main")
   })
 
   it("asks the diagnosing questions only after a ref has failed", async () => {
@@ -138,6 +170,8 @@ describe("runDiff refspec mode — why a ref did not resolve", () => {
       // The worktree refusal ends the run; the calls before it are what this asserts.
     })
     const asked = calls.map((c) => c.args.slice(0, 2).join(" "))
+    // Positive first, so the two absences below cannot pass on a run that never reached git.
+    expect(asked).toContain("rev-parse --verify")
     expect(asked).not.toContain("rev-parse --is-inside-work-tree")
     expect(asked).not.toContain("rev-list --all")
 
@@ -147,13 +181,9 @@ describe("runDiff refspec mode — why a ref did not resolve", () => {
   })
 
   it("names the head when it is the head that failed", async () => {
-    let verifyCount = 0
     const { error } = await failure({
-      "rev-parse --verify": () => {
-        verifyCount++
-        if (verifyCount === 1) return gitOutput("abc\n")
-        throw Object.assign(new Error("fatal: Needed a single revision"), { code: 128 })
-      },
+      "rev-parse --verify": (args) =>
+        args[2] === "HEAD" ? refused(GIT_SAID)() : gitOutput("abc\n"),
     })
     expect(error.message).toContain("Head ref 'HEAD' could not be resolved")
   })

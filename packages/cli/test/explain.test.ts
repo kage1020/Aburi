@@ -277,7 +277,11 @@ describe("CL27 — an --output that cannot hold a file", () => {
 
     expect(thrown).toBeInstanceOf(CliError)
     expect((thrown as CliError).code).toBe("input-error")
-    expect((thrown as Error).message).toContain(resolve(scratch, "generated/explain/get-user.md"))
+    // The command and the artefact, not only the path: a message reading `aburi init could
+    // not write the config` would leave the path assertion green.
+    expect((thrown as Error).message).toContain(
+      `aburi explain could not write the explain Markdown to ${resolve(scratch, "generated/explain/get-user.md")}`,
+    )
     expect((thrown as Error).message).toContain("--output")
   })
 

@@ -166,7 +166,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
-| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing). A config that exists and cannot be read is `1` — see §9 |
+| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
 | 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
@@ -486,20 +486,22 @@ With file inputs: skip steps 1-3 and start at step 5.
 
 ### 6.4.1 Git Pre-Validation (Ref Form)
 
-Before creating the worktree, the following checks run in order; on failure, a concrete remediation message on stderr. The exit code follows §9's line: a ref that names nothing is what the reader typed, or where they ran the command (exit 2); a checkout whose shape the command cannot work with is exit 1.
+Before creating the worktree, the following checks run in order; on failure, a concrete remediation message on stderr. The exit code follows §9's line: a ref that names nothing is what the reader typed, or where they ran the command (exit 2); a checkout whose shape the command cannot work with, or a git that will not answer, is exit 1.
 
 | Check | Failure message | exit |
 |---|---|---|
-| `git rev-parse --verify <ref>` succeeds for `<base>`, then `<head>` (the message opens `Head ref` when it is the head that failed). When it does not, the run asks git two more questions to say why, because git's own stderr (`Needed a single revision`) does not distinguish a mistyped ref from a repository with nothing to name — and `git fetch` is the wrong remedy for two of the three | `Base ref '<ref>' could not be resolved: <cwd> is not inside a git repository. Run aburi diff from inside one, or compare IR files with --base/--head.` — when `git rev-parse --is-inside-work-tree` fails or is not `true` | 2 |
+| `git rev-parse --verify <ref>` succeeds for `<base>`, then `<head>` (the message opens `Head ref` when it is the head that failed). When it does not, the run asks git two more questions to say why, because git's own stderr (`Needed a single revision`) does not distinguish a mistyped ref from a repository with nothing to name — and `git fetch` is the wrong remedy for two of the three. Each message ends with what git itself reported, in parentheses | `Base ref '<ref>' could not be resolved: <cwd> is not inside a git repository. Run aburi diff from inside one, or compare IR files with --base/--head.` — when `git rev-parse --is-inside-work-tree` is refused *and* nothing git would open (a `.git`, or `GIT_DIR`) stands at `<cwd>` or above it. A refusal with a `.git` above is not this: it is the row below | 2 |
+| | `Base ref '<ref>' could not be resolved: <cwd> is inside a git directory, not a working tree. …` — when that probe prints `false` | 2 |
 | | `Base ref '<ref>' could not be resolved: the repository at <cwd> has no commits yet, so there is no revision to compare.` — when `git rev-list --all --max-count=1` prints nothing | 2 |
-| | `Base ref '<ref>' could not be resolved: no such revision in this repository. Check the spelling, or fetch the branch first.` — or, when `git rev-parse --is-shallow-repository` is `true`, `… Check the spelling; if it is right, this is a shallow clone whose history may stop short of it — run: git fetch --deepen=50 origin <ref>` | 2 |
+| | `Base ref '<ref>' could not be resolved: no such revision in this repository. Check the spelling, or fetch the branch first.` — when both questions were answered. No `--deepen` advice: the shallow check below refuses the clone that would follow it | 2 |
+| | `Base ref '<ref>' could not be resolved, and git would not say why. What it reported: <git's stderr>` — when git refuses either question inside a repository. Dubious ownership is the everyday case, and git's own report carries the `safe.directory` remedy, which no diagnosis of ours could | 1 |
 | `git` can be spawned at all | `git executable not found in PATH. aburi diff <base>..<head> requires a working git installation. Install git or use --base/--head with pre-generated IR files.` | 1 |
 | Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` | 1 |
 | Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` | 1 |
 | `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) | — |
 | On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) | — |
 
-The two diagnosing questions are asked only once a ref has failed, so a run whose refs resolve pays for no extra git calls; and each answers "cannot tell" on its own failure rather than throwing, so a diagnosis never replaces the failure it was explaining with a stranger one.
+The two diagnosing questions are asked only once a ref has failed, so a run whose refs resolve pays for no extra git calls. Only an answer becomes a diagnosis: a question git refuses ends the run with git's own words rather than with a guess, because whatever refused the ref is still refusing, and a guess would replace the one precise sentence there is with a wrong one at the wrong exit code.
 
 #### 6.4.1.5 Plugin Dependency Resolution at the Base Ref
 
@@ -522,7 +524,7 @@ Required setup when using `aburi diff` in CI:
     fetch-depth: 0    # full history (aburi diff fails on shallow clones)
 ```
 
-Or `fetch-depth: 50` or more, at a depth that includes the base ref. The default of `1` cannot be used.
+Nothing less: the pre-validation above refuses a shallow repository outright, so a `fetch-depth` of `50` produces a clone this command will not diff, and the default of `1` cannot be used either.
 
 ### 6.5 Exit Codes
 
@@ -1011,8 +1013,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL26 | `aburi explain <id> --output docs/alpha.md` where `docs/` does not exist | Creates the directory, writes the Markdown, exit 0 |
 | CL27 | `aburi init` or `aburi explain` with an `--output` that names a directory, or whose parent path is an existing file | exit 2, the path and the remedy on stderr |
 | CL28 | `aburi scan --output-dir notadir` or `aburi diff … --output-dir notadir` where `notadir` is a file | exit 2; stderr names the command, the output directory, the path and `--output-dir` |
-| CL29 | `aburi scan` into a directory the process may not write to | exit 1; stderr names the command, the artefact that did not land and the errno — never the bare errno alone |
-| CL30 | `aburi diff main..HEAD` outside any git repository | exit 2, "is not inside a git repository", no `git fetch` advice |
+| CL29 | `aburi scan` into a directory the process may not write to, or under a name the filesystem refuses | exit 1; stderr names the command, the artefact that did not land and the errno — never the bare errno alone, and no flag to point elsewhere, since none would help |
+| CL30 | `aburi diff main..HEAD` outside any git repository | exit 2, "is not inside a git repository", git's own report appended, no `git fetch` advice. Inside a repository git refuses to open, exit 1 with that report instead |
 | CL31 | `aburi diff HEAD~1..HEAD` in a repository with no commits | exit 2, "has no commits yet", no `git fetch` advice |
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
 

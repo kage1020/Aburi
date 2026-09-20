@@ -7,35 +7,12 @@ import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
 import { CliError } from "../src/errors"
-import { MemStream, symbolId } from "./fixtures"
+import { emptyIR, MemStream, symbolId } from "./fixtures"
 
 let scratch = ""
 
-function makeEmptyIR(): IR {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
-    generator: { name: "aburi", version: "0.0.0", plugins: [] },
-    workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
-    components: [],
-    symbols: [],
-    dependencies: [],
-    stats: {
-      totalFiles: 0,
-      parsedFiles: 0,
-      keptSymbols: 0,
-      droppedSymbols: 0,
-      effectPropagation: {
-        sccCount: 0,
-        maxSccSize: 0,
-        propagatedEffectCount: 0,
-        symbolsWithPropagatedEffects: 0,
-      },
-    },
-  }
-}
-
 function makeIRWithAdded(): IR {
-  const ir = makeEmptyIR()
+  const ir = emptyIR()
   return {
     ...ir,
     symbols: [
@@ -137,7 +114,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   it("diffs two IR files and writes out/diff.json + out/diff.md", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
     const report = await runDiff({
       cwd: scratch,
@@ -195,7 +172,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   it("warns, rather than fails, when a budget cannot be met", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(makeIRWithManyAdded(20)), "utf8")
     const warnings: string[] = []
     const report = await runDiff({
@@ -216,7 +193,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   it("warns that --max-bytes has nothing to cap under --format json", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
     const warnings: string[] = []
     const report = await runDiff({
@@ -235,7 +212,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   it("rejects a --max-bytes that is not a positive integer, before scanning anything", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
     await expect(
       runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null, maxBytes: 0 }),
@@ -245,7 +222,7 @@ describe("runDiff — --base/--head (file mode)", () => {
   it("fires --fail-on and returns EXIT.GATE", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
     const report = await runDiff({
       cwd: scratch,
@@ -264,7 +241,7 @@ describe("runDiff — call-resolution census on stdout (call-resolution.md)", ()
   async function writePair(head: IR): Promise<{ basePath: string; headPath: string }> {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(head), "utf8")
     return { basePath, headPath }
   }
@@ -436,7 +413,7 @@ describe("CL9 — argv routing for --fail-on", () => {
   it("returns EXIT.GATE from runCli end-to-end", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
-    await writeFile(basePath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
     await writeFile(headPath, JSON.stringify(makeIRWithAdded()), "utf8")
     const stdout = new MemStream()
     const stderr = new MemStream()
@@ -520,14 +497,14 @@ describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", (
 describe("runDiff — a base IR that is not shaped like a Document", () => {
   /** Write an IR file with one top-level key removed. */
   async function writeIRWithout(path: string, key: string): Promise<void> {
-    const ir = makeEmptyIR() as unknown as Record<string, unknown>
+    const ir = emptyIR() as unknown as Record<string, unknown>
     delete ir[key]
     await writeFile(path, JSON.stringify(ir), "utf8")
   }
 
   /** Write an IR file with one top-level key replaced. */
   async function writeIRWith(path: string, key: string, value: unknown): Promise<void> {
-    const ir = makeEmptyIR() as unknown as Record<string, unknown>
+    const ir = emptyIR() as unknown as Record<string, unknown>
     ir[key] = value
     await writeFile(path, JSON.stringify(ir), "utf8")
   }
@@ -536,7 +513,7 @@ describe("runDiff — a base IR that is not shaped like a Document", () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
     await write(basePath)
-    await writeFile(headPath, JSON.stringify(makeEmptyIR()), "utf8")
+    await writeFile(headPath, JSON.stringify(emptyIR()), "utf8")
     let caught: unknown
     try {
       await runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null })

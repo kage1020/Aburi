@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { runCli, runScan } from "../src"
 import { CliError } from "../src/errors"
-import { MemStream } from "./fixtures"
+import { MemStream, writeTypeScriptWorkspace } from "./fixtures"
 
 /**
  * runScan integration tests — use a minimal on-disk workspace so config resolution and
@@ -25,21 +25,7 @@ let scratch = ""
 
 beforeEach(async () => {
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-scan-"))
-  await writeFile(
-    resolve(scratch, "package.json"),
-    JSON.stringify({ name: "scan-fixture", private: true }),
-    "utf8",
-  )
-  await writeFile(
-    resolve(scratch, "aburi.json"),
-    JSON.stringify({
-      $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-      languages: ["lang-typescript"],
-    }),
-    "utf8",
-  )
-  await mkdir(resolve(scratch, "src"), { recursive: true })
-  await writeFile(resolve(scratch, "src/quiet.ts"), "// declares nothing\n", "utf8")
+  await writeTypeScriptWorkspace(scratch, "scan-fixture")
 })
 
 afterEach(async () => {

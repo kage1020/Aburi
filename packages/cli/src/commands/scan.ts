@@ -47,17 +47,20 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { capListing } from "../listing"
 import { createLogger } from "../logger"
-import { createOutputDir, type OutputTarget, writeOutputFile } from "../output-file"
+import { createOutputDir, type OutputCommand, writeOutputFile } from "../output-file"
 import { loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
-/** Every artefact this command writes lands under `--output-dir`, and a failure says so. */
-const SCAN_OUTPUT: OutputTarget = { command: "scan", flag: "--output-dir" }
-
 export interface ScanOptions {
   cwd?: string
+  /**
+   * The command this scan runs under, which is what a failed write names: `aburi diff` runs
+   * two scans and `aburi explain` one, and a reader who typed either must not be told that
+   * `aburi scan` failed. Defaults to `"scan"`.
+   */
+  command?: OutputCommand
   configPath?: string
   /**
    * A config already decided by the caller, which supersedes both `configPath` and discovery.
@@ -235,15 +238,24 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     generator: await readGeneratorInfo(),
     logger: createLogger(options.logLevel === undefined ? {} : { minimum: options.logLevel }),
   }
+  // Ahead of the scan: a destination that cannot hold the outputs is refused before the
+  // workspace is read for them.
+  const command = options.command ?? "scan"
+  const outputDir = resolveOutputDir(cwd, options.outputDir, config.output?.dir)
+  await createOutputDir(command, outputDir)
   const scanResult = await scan(scanInput)
 
   const format = options.format ?? "both"
-  const outputDir = resolveOutputDir(cwd, options.outputDir, config.output?.dir)
-  await createOutputDir(SCAN_OUTPUT, outputDir)
 
   let irPath: string | null = null
-  const workspaceMdPath = await maybeWriteWorkspaceMd(format, outputDir, scanResult.ir, options)
-  const componentMdPaths = await maybeWriteComponentMd(format, outputDir, scanResult.ir)
+  const workspaceMdPath = await maybeWriteWorkspaceMd(
+    command,
+    format,
+    outputDir,
+    scanResult.ir,
+    options,
+  )
+  const componentMdPaths = await maybeWriteComponentMd(command, format, outputDir, scanResult.ir)
   if (format !== "md") {
     irPath = resolve(outputDir, IR_JSON_FILENAME)
     // Serialization can refuse the document (two keys differing only in Unicode composition),
@@ -262,7 +274,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
         { cause: error },
       )
     }
-    await writeOutputFile(SCAN_OUTPUT, "the IR", irPath, serialized)
+    await writeOutputFile({ command, artefact: "the IR", path: irPath }, serialized)
   }
 
   // A withdrawn file's parse errors are still reported — they are the account of why it was
@@ -864,6 +876,7 @@ const CONFIG_COMPONENT_ERROR_CODES: ReadonlySet<string> = new Set([
 ])
 
 async function maybeWriteWorkspaceMd(
+  command: OutputCommand,
   format: "json" | "md" | "both",
   outputDir: string,
   ir: IR,
@@ -874,11 +887,12 @@ async function maybeWriteWorkspaceMd(
   const md = projectWorkspace(ir, {
     suppressTimestamp: options.suppressTimestamp ?? false,
   })
-  await writeOutputFile(SCAN_OUTPUT, WORKSPACE_MD_FILENAME, path, md)
+  await writeOutputFile({ command, artefact: "the workspace Markdown", path }, md)
   return path
 }
 
 async function maybeWriteComponentMd(
+  command: OutputCommand,
   format: "json" | "md" | "both",
   outputDir: string,
   ir: IR,
@@ -893,7 +907,10 @@ async function maybeWriteComponentMd(
       dependencies: ir.dependencies,
     })
     const path = resolve(outputDir, COMPONENTS_DIRNAME, `${component.id}.md`)
-    await writeOutputFile(SCAN_OUTPUT, `the Markdown for component "${component.id}"`, path, md)
+    await writeOutputFile(
+      { command, artefact: `the Markdown for component "${component.id}"`, path },
+      md,
+    )
     paths.push(path)
   }
   return paths

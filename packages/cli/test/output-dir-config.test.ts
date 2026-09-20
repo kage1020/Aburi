@@ -1,8 +1,7 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { detectWorkspaceRoot, makeLanguageId } from "@aburi/core"
-import type { IR } from "@aburi/types"
+import { detectWorkspaceRoot } from "@aburi/core"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { type GitRunner, runDiff, runExplain, runScan } from "../src"
 import {
@@ -12,6 +11,7 @@ import {
   resolveOutputDir,
 } from "../src/artifact-paths"
 import { CliError } from "../src/errors"
+import { emptyIR } from "./fixtures"
 
 /**
  * `config.output.dir` is the documented default for `--output-dir` in three places and had no
@@ -66,29 +66,6 @@ async function writeBrokenConfig(directory: string): Promise<void> {
     '{ "languages": ["lang-typescript"], "output": { "dir": "artifacts"',
     "utf8",
   )
-}
-
-function emptyIR(): IR {
-  return {
-    $schema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json",
-    generator: { name: "aburi", version: "0.0.0", plugins: [] },
-    workspace: { root: ".", managers: [], languages: [makeLanguageId("ts")] },
-    components: [],
-    symbols: [],
-    dependencies: [],
-    stats: {
-      totalFiles: 0,
-      parsedFiles: 0,
-      keptSymbols: 0,
-      droppedSymbols: 0,
-      effectPropagation: {
-        sccCount: 0,
-        maxSccSize: 0,
-        propagatedEffectCount: 0,
-        symbolsWithPropagatedEffects: 0,
-      },
-    },
-  }
 }
 
 /** Two identical IR files, so `aburi diff` runs without git and writes its artefacts. */
