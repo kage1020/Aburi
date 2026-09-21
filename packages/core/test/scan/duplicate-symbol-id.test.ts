@@ -47,6 +47,7 @@ function candidate(file: string, name: string, line: number): SymbolCandidate<Op
 function stubLanguage(
   emit: (path: string) => readonly SymbolCandidate<OpaqueAstNode>[],
   parseErrorsFor: (path: string) => ParseResult["errors"] = () => [],
+  dropWhen: (symbol: SymbolCandidate<OpaqueAstNode>) => boolean = () => false,
 ): LanguagePlugin {
   return stubLanguagePlugin({
     parseFile: async (file: SourceFile): Promise<ParseResult> => ({
@@ -55,6 +56,8 @@ function stubLanguage(
       imports: [],
     }),
     extractSymbols: (_tree, ctx) => [...emit(ctx.file.path)],
+    symbolDropHint: (symbol) =>
+      dropWhen(symbol) ? { reason: "stub dropped it", category: "B" } : null,
   })
 }
 
@@ -95,12 +98,13 @@ const workspace = useStubWorkspace("duplicate-symbol-id")
 async function run(
   emit: (path: string) => readonly SymbolCandidate<OpaqueAstNode>[],
   parseErrorsFor?: (path: string) => ParseResult["errors"],
+  dropWhen?: (symbol: SymbolCandidate<OpaqueAstNode>) => boolean,
 ) {
   const { logger, warnings } = capturingLogger()
   const result = await scan({
     workspaceRoot: workspace.root,
     config: {},
-    languages: [stubLanguage(emit, parseErrorsFor)],
+    languages: [stubLanguage(emit, parseErrorsFor, dropWhen)],
     frameworks: [],
     effects: [],
     registry: noopRegistry,
@@ -258,5 +262,23 @@ describe("a withdrawn file's recoverable parse errors", () => {
     const { result } = await run(TWINS_IN_ONE_FILE, RECOVERABLE_ON_BAD)
     expect(result.skipped.map((s) => s.path)).toEqual(["bad.stub"])
     expect(result.extractionFailures.map((f) => f.code)).toEqual(["duplicate-symbol-id"])
+  })
+})
+
+describe("a dropped Symbol colliding with a kept one", () => {
+  it("still withdraws the file, because a drop keeps the id", async () => {
+    // `pipeline.ts` keeps dropped candidates in `result.symbols` — a drop is a statement
+    // about the Symbol's shape, not a removal — so the pair is two entries under one id and
+    // reaches the Document as one. Skipping the check for them would put the backstop back
+    // in charge of exactly the case the per-file check exists for.
+    const { result } = await run(
+      TWINS_IN_ONE_FILE,
+      undefined,
+      (symbol) => symbol.source.startLine === 9,
+    )
+    expect(result.skipped.map((s) => [s.path, s.reason])).toEqual([
+      ["bad.stub", "extraction-failed"],
+    ])
+    expect(result.ir.symbols.map((s) => s.source.file)).toEqual(["a.stub", "c.stub"])
   })
 })
