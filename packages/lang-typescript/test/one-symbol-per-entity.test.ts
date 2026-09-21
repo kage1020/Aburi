@@ -6,8 +6,10 @@ import { idsOf, makeExtractionCtx, symbolOf, symbolsOf, walkOf } from "./fixture
  * Three ordinary TypeScript constructs declare one entity twice — an accessor pair, an
  * overload beside its implementation, and a merged declaration. Extraction answered one
  * SymbolCandidate per *declaration*, so each produced two Symbols with one id, and integrity
- * invariant #1 refused the document. That check runs once over the whole scan, so a single
- * `get`/`set` pair ended the run rather than costing its own file.
+ * invariant #1 refused the document. That check ran once over the whole scan, so a single
+ * `get`/`set` pair ended the run rather than costing its own file. The scan decides invariant
+ * #1 per file now, so the same bug would cost one file — but the file it costs is still one
+ * this plugin could have extracted, which is what these tests are about.
  *
  * TypeScript models all three the same way: one entity, several declarations. So does this
  * now. The first declaration claims the Symbol and every scalar on it; the rest contribute

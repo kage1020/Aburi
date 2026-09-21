@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { noopRegistry } from "@aburi/test-support"
 import type {
@@ -19,7 +18,7 @@ import type {
   SymbolClassification,
   WalkContext,
 } from "@aburi/types"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { CoreError, scan } from "../../src"
 import { symbolId } from "../fixtures/ir"
 import {
@@ -27,6 +26,7 @@ import {
   effectsManifest,
   frameworkManifest,
   stubLanguagePlugin,
+  useStubWorkspace,
 } from "../fixtures/plugins"
 
 /**
@@ -141,20 +141,7 @@ function throwingEffects(on: string, error: unknown): EffectPlugin {
   return plugin as unknown as EffectPlugin
 }
 
-let workRoot: string
-
-beforeEach(async () => {
-  workRoot = await mkdtemp(join(tmpdir(), "aburi-extraction-boundary-"))
-  // Two files either side of the failing one in discovery order, so a boundary that
-  // withdrew the rest of the run rather than the file would be visible in both directions.
-  await writeFile(join(workRoot, "a.stub"), "a", "utf8")
-  await writeFile(join(workRoot, "bad.stub"), "bad", "utf8")
-  await writeFile(join(workRoot, "c.stub"), "c", "utf8")
-})
-
-afterEach(async () => {
-  await rm(workRoot, { recursive: true, force: true })
-})
+const workspace = useStubWorkspace("extraction-boundary")
 
 interface RunOverrides {
   language?: LanguagePlugin
@@ -165,7 +152,7 @@ interface RunOverrides {
 async function run(overrides: RunOverrides = {}) {
   const { logger, warnings } = capturingLogger()
   const result = await scan({
-    workspaceRoot: workRoot,
+    workspaceRoot: workspace.root,
     config: {},
     languages: [overrides.language ?? stubLanguage()],
     frameworks: overrides.frameworks ?? [],
@@ -245,7 +232,7 @@ describe("what the caller is told", () => {
   })
 
   it("records two failures in discovery order when two files throw", async () => {
-    await writeFile(join(workRoot, "b.stub"), "b", "utf8")
+    await writeFile(join(workspace.root, "b.stub"), "b", "utf8")
     const language = stubLanguage()
     const failing: LanguagePlugin = Object.create(language)
     failing.extractSymbols = (_tree, ctx) => {
@@ -295,7 +282,7 @@ describe("a file the read cannot reach", () => {
   function deleting(victim: string): LanguagePlugin {
     const language: LanguagePlugin = Object.create(stubLanguage())
     language.parseFile = async (file: SourceFile) => {
-      if (file.path === "a.stub") await rm(join(workRoot, victim))
+      if (file.path === "a.stub") await rm(join(workspace.root, victim))
       return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
     }
     return language
@@ -327,13 +314,13 @@ describe("a file the read cannot reach", () => {
     // answers ENOTDIR, Windows answers ENOENT for the identical act. A predicate holding only
     // ENOENT ends the run on POSIX and absorbs it on Windows, which is one commit producing
     // two different outcomes by platform.
-    await mkdir(join(workRoot, "sub"))
-    await writeFile(join(workRoot, "sub", "d.stub"), "d", "utf8")
+    await mkdir(join(workspace.root, "sub"))
+    await writeFile(join(workspace.root, "sub", "d.stub"), "d", "utf8")
     const language: LanguagePlugin = Object.create(stubLanguage())
     language.parseFile = async (file: SourceFile) => {
       if (file.path === "a.stub") {
-        await rm(join(workRoot, "sub"), { recursive: true })
-        await writeFile(join(workRoot, "sub"), "no longer a directory", "utf8")
+        await rm(join(workspace.root, "sub"), { recursive: true })
+        await writeFile(join(workspace.root, "sub"), "no longer a directory", "utf8")
       }
       return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
     }
@@ -366,8 +353,8 @@ describe("a file the read cannot reach", () => {
     language.parseFile = async (file: SourceFile) => {
       if (file.path === "a.stub") {
         // Replace `bad.stub` with a directory: reading it fails with EISDIR, not ENOENT.
-        await rm(join(workRoot, "bad.stub"))
-        await mkdir(join(workRoot, "bad.stub"))
+        await rm(join(workspace.root, "bad.stub"))
+        await mkdir(join(workspace.root, "bad.stub"))
       }
       return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
     }

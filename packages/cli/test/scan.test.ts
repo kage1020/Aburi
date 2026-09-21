@@ -191,7 +191,7 @@ describe("runScan — config-supplied publicApi", () => {
  * IdentifierName does not admit, and the id grammar refuses it. The destructuring pattern
  * that used to sit here is read as its bindings now.
  */
-describe("runScan — a file a plugin threw on", () => {
+describe("runScan — a file withdrawn during extraction", () => {
   beforeEach(async () => {
     await mkdir(resolve(scratch, "src"), { recursive: true })
     await writeFile(resolve(scratch, "src", "route.ts"), "export const a\u{1F642} = 1\n", "utf8")
@@ -244,7 +244,10 @@ describe("runScan — a file a plugin threw on", () => {
     expect(code).toBe(3)
     // The reason that earned the 3, and the file that earned it, on the reader's screen —
     // the message being the plugin's own account of what it refused.
-    expect(stderr.text()).toContain("⚠ extraction-failed (1) — a plugin threw while extracting,")
+    expect(stderr.text()).toContain(
+      "⚠ extraction-failed (1) — a plugin threw while extracting, or its Symbols could not " +
+        "enter the Document. This is the reason the run does not exit clean.",
+    )
     expect(stderr.text()).toContain('    src/route.ts: qualified name "a\u{1F642}"')
   })
 

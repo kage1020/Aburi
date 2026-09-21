@@ -8,9 +8,11 @@ import { useScratchWorkspace } from "../src/scratch"
  * The symptom as it was reported: a class with a getter and a setter, and a scan that ends
  * with `[#1] ts:src/box.ts#Box.value: duplicate Symbol id` and no document.
  *
- * Integrity runs once over the whole IR at the end of the scan, outside the per-file
- * boundary, so this was not one file's problem — every other file in the workspace went with
- * it. The same held for an overload beside its implementation and for a reopened namespace.
+ * Integrity ran once over the whole IR at the end of the scan, outside the per-file boundary,
+ * so this was not one file's problem — every other file in the workspace went with it. The
+ * same held for an overload beside its implementation and for a reopened namespace. The scan
+ * decides invariant #1 per file now, so the blast radius would be `box.ts` alone; what these
+ * tests hold is the fix upstream of that, where the pair is one Symbol and no file is lost.
  */
 
 const workspace = useScratchWorkspace("merged-declarations")

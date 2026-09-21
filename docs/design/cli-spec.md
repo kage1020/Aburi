@@ -167,7 +167,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
 | 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
-| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a plugin exception that withdrew a file, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
+| 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
 
@@ -214,9 +214,11 @@ The parse-error line names its files, which nothing else does: mostly they are i
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
 One kind is in that list all the same, under a different reason: a file abandoned on its
 `parseTimeoutMs` budget is named on both lines, and its skip entry carries the clock rather than
-the errors, so the line above is still the only place those are named. A file a plugin threw on
-is not that case — the result never materialized, so it has no parse errors to carry and does
-not reach this line.
+the errors, so the line above is still the only place those are named. A file withdrawn for a
+duplicate Symbol id is named on both lines for the same reason: its extraction ran to a result,
+so the parse errors it carries are real observations about the file and are kept. A file a
+plugin threw on is the one case that is not — the result never materialized, so it has no parse
+errors to carry and does not reach this line.
 
 Each file is given the first error reported for it, and a count when there was more than one;
 an embedder wanting all of them reads `ScanResult.parseErrors`, which this line summarizes
@@ -258,13 +260,13 @@ losses happened to sit.
 The listing is capped at ten files **per reason**, with a "…and N more" tail. Per reason rather
 than across the whole listing because one shared budget belongs to whichever reason lost the
 most files, and that is not the reason a reader most needs named: a hundred over-size files
-would push the one file a plugin threw on — the only reason that moves the exit code to `3`
+would push the one file withdrawn during extraction — the only reason that moves the exit code to `3`
 (§5.4) — inside the tail, leaving a non-zero status with nothing on screen to account for it.
 Every other reason leaves the code at `0`.
 
 `extraction-failed` is listed by that rule like any other reason rather than by one of its own.
-Its files were listed twice while it had its own clause: the message a plugin threw with is
-written to both `skipped[].detail` and `extractionFailures[].message` at a single site in the
+Its files were listed twice while it had its own clause: the message the withdrawal was made
+with is written to both `skipped[].detail` and `extractionFailures[].message` at a single site in the
 scan. `ScanReport.extractionFailures` is unchanged — it still carries the error's `code`, and it
 is still what decides the exit code and what the `diff` fault clause counts.
 
@@ -349,8 +351,8 @@ one is named per file directly below (§5.6) either way.
 parsed, which is correct — a repository of configuration and tests is not a failed scan — so a
 Symbol count says something about the code where `parsedFiles` says what this policy is about.
 
-Neither gate withholds anything the run would otherwise have written, as neither does for a
-plugin exception: a reviewer gets whatever `--format` asked for and a non-zero code rather than
+Neither gate withholds anything the run would otherwise have written, as neither does for an
+extraction fault: a reviewer gets whatever `--format` asked for and a non-zero code rather than
 the artifact and a green light. `--format md` writes no IR either way, so "the IR is written" is
 a claim about what gating does not change rather than about what a gated run always produces.
 
@@ -567,7 +569,7 @@ Nothing less: the pre-validation above refuses a shallow repository outright, so
 | 2 | Argument error (`<base>..<head>` syntax violation; one of `--base/--head` missing; a ref that resolves to nothing — §6.4.1; an `--output-dir` a file stands on) |
 | 3 | Changes matching `--fail-on` were detected (CI gate), or one of the two scans this command ran did not exit clean (§5.6) |
 
-The second cause is about greenness, not about counts. A file a plugin threw on is recorded in
+The second cause is about greenness, not about counts. A file withdrawn during extraction is recorded in
 `stats.skippedFiles`, so its Symbols already classify as `unknown` rather than as deletions and
 the diff overstates nothing. The exit code is what would be wrong: the same workspace makes
 `aburi scan` exit `3`, and asking it for a diff instead must not turn it green.
@@ -584,9 +586,9 @@ and behind the other two faults, because an unnameable file leaves `totalFiles` 
 whose whole candidate set is unnameable discovers nothing and that fault is this one's
 consequence, while leaving the denominator can only raise the parsed ratio and so cannot produce
 either of the others. A coverage collapse reddens a diff the
-same way a plugin exception does, and names itself — `The base scan parsed none of the 1200
-file(s) it found` — rather than falling back to "did not exit clean". A plugin exception is named
-first when both apply, because a scan that threw on every file has the coverage fault as a
+same way an extraction fault does, and names itself — `The base scan parsed none of the 1200
+file(s) it found` — rather than falling back to "did not exit clean". An extraction fault is named
+first when both apply, because a scan that withdrew every file has the coverage fault as a
 consequence of it rather than as a second finding.
 
 When a gate clause and a scan fault both apply the code is `3` either way, both messages are
@@ -632,7 +634,7 @@ scan reported one, and only ref mode can: `parseErrorCount` is a property of the
 document it wrote, so `--base` / `--head` has nothing to read.
 
 `--base` / `--head` is not silent about faults, though. `stats.skippedFiles[].reason` persists
-`extraction-failed`, so file mode can see that a plugin threw when a document was written even
+`extraction-failed`, so file mode can see that a file was withdrawn when a document was written even
 though it never watched it happen; it names those paths per side. It does **not** gate on them:
 the fault already had its exit code in the run that hit it, and failing here would red a job for
 someone else's incident, on documents the caller pinned deliberately. `DiffReport.faultedScans`
@@ -1037,6 +1039,7 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL18 | `aburi --config ./custom.json scan` | Uses the specified config |
 | CL19 | `aburi explain <name>` where a plugin threw during the rescan | exit 3, incident lines on stderr |
 | CL20 | `aburi diff main..HEAD` where a plugin threw at the base ref | exit 3 with no `--fail-on` clause, base-labelled lines on stderr |
+| CL20a | `aburi scan` where a plugin emitted two Symbols under one id for one file (`lang-plugin.md` LP28b) | exit 3 and the IR still written, with that file on the `extraction-failed` lines a throw reaches — the wording there names both causes, since nothing threw. `aburi diff` gates the same way, and its fault clause says `extraction withdrew N file(s)` rather than naming an exception |
 | CL21 | `aburi explain src/route.ts --ir <ir>` where that IR names `src/route.ts` in `stats.skippedFiles` | exit 3, the file and its skip reason on stderr, nothing on stdout |
 | CL22 | `aburi explain <pattern>` with no match, against an IR that skipped files | exit 1, `No matches` plus a line counting them |
 | CL23 | `aburi scan` in a workspace holding a source file whose name contains a backslash | exit 3, the name to rename on stderr, and the file not counted in `stats.totalFiles` |

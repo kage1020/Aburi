@@ -91,7 +91,7 @@ export interface DiffReport {
   triggered: { clause: FailOnClause; observed: number } | null
   /**
    * Sides whose own scan reported a fault — `ScanReport.exitCode` other than success, which
-   * means a plugin threw while extracting a file, or the scan read too little of the workspace
+   * means a file was withdrawn during extraction, or the scan read too little of the workspace
    * to be believed (`cli-spec.md`). The two can hold on different sides at once, which is
    * why the warning built from this list says each side's cause rather than one about both.
    *
@@ -355,8 +355,8 @@ function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], war
  * look, and both scans' reports are already on this stderr above this one (`cli-spec.md`).
  * This clause exists to account for the exit code, so it names the cause and stops.
  *
- * A plugin exception comes first when one scan has more than one. It is the reason that says
- * something in the run is broken, and a scan that threw on every file it found has the coverage
+ * An extraction fault comes first when one scan has more than one. It is the reason that says
+ * something in the run is broken, and a scan that withdrew every file it found has the coverage
  * fault as a consequence of it rather than as a second finding. That reading holds *within* a
  * scan and not across two, which is why it is decided here rather than by the caller.
  *
@@ -371,8 +371,8 @@ function warnOnScanFault(scans: ScanPair, faultedScans: readonly DiffSide[], war
  * said is the honest answer to a cause we cannot name.
  */
 function describeScanFault(report: ScanReport): string {
-  const thrown = report.extractionFailures.length
-  if (thrown > 0) return `a plugin exception withdrew ${thrown} file(s)`
+  const withdrawn = report.extractionFailures.length
+  if (withdrawn > 0) return `extraction withdrew ${withdrawn} file(s)`
   const fault = report.coverageFault
   // Before "discovered no file to read" and after the other two faults, because the direction
   // of cause runs one way: an unnameable file leaves `totalFiles`, so a workspace whose whole
@@ -402,7 +402,8 @@ function describeScanFault(report: ScanReport): string {
  * File mode ran no scan, but the documents remember one.
  *
  * `stats.skippedFiles[].reason` persists `extraction-failed`, so `--base` / `--head` can see
- * that a plugin threw when a document was written even though it never watched it happen. Left
+ * that a file was withdrawn when a document was written even though it never watched it
+ * happen. Left
  * silent, a workspace that makes `aburi scan` exit 3 produced two IRs that diff clean — and
  * scan-in-one-job, diff-in-another is the shape `cli-spec.md` recommends when git is not
  * available.
@@ -413,12 +414,12 @@ function describeScanFault(report: ScanReport): string {
  */
 function warnOnRecordedFaults(irs: Record<DiffSide, IR>, warn: WarnFn): void {
   for (const side of SIDES) {
-    const thrown = (irs[side].stats.skippedFiles ?? []).filter(
+    const withdrawn = (irs[side].stats.skippedFiles ?? []).filter(
       (file) => file.reason === "extraction-failed",
     )
-    if (thrown.length === 0) continue
+    if (withdrawn.length === 0) continue
     warn(
-      `⚠ ${side} IR records ${thrown.length} file(s) a plugin threw on: ${joinCapped(thrown.map((file) => file.path))}. ` +
+      `⚠ ${side} IR records ${withdrawn.length} file(s) withdrawn during extraction: ${joinCapped(withdrawn.map((file) => file.path))}. ` +
         `The scan that wrote it exited 3; this diff does not, because the fault was reported where it happened.`,
     )
   }

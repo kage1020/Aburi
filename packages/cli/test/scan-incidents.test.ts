@@ -36,7 +36,7 @@ const REFUSAL = "parse reported a non-recoverable error at 12:4 — unterminated
 const PARSE_FAILED_ADVICE =
   "the language plugin refused the source. Deterministic: fix the file, or the plugin."
 const EXTRACTION_FAILED_ADVICE =
-  "a plugin threw while extracting, or its Symbols could not enter the document. This is the reason the run does not exit clean."
+  "a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean."
 
 let scratch = ""
 
@@ -710,7 +710,7 @@ describe("aburi diff — both scans it ran for you", () => {
     // side that reported it. A second reason gates now, and a sentence about a joined list of
     // sides would state one side's cause about both.
     expect(warnings).toContain(
-      "⚠ base: a plugin exception withdrew 1 file(s). This run exits 3 even though " +
+      "⚠ base: extraction withdrew 1 file(s). This run exits 3 even though " +
         "the diff was written. Fix it, or the comparison is against a workspace one side could not read.",
     )
   })
@@ -791,8 +791,8 @@ describe("aburi diff — both scans it ran for you", () => {
     expect(report.faultedScans).toBeNull()
     // `stats.skippedFiles[].reason` persists `extraction-failed`, so this mode can see that a
     // plugin threw when the documents were written even though it never watched it happen.
-    expect(warnings.join("\n")).toContain("base IR records 1 file(s) a plugin threw on")
-    expect(warnings.join("\n")).toContain("head IR records 1 file(s) a plugin threw on")
+    expect(warnings.join("\n")).toContain("base IR records 1 file(s) withdrawn during extraction")
+    expect(warnings.join("\n")).toContain("head IR records 1 file(s) withdrawn during extraction")
     expect(warnings.join("\n")).toContain("boom.stub")
     // Warned, not gated: the fault already had its exit code in the run that hit it, and these
     // are documents the caller pinned deliberately.
@@ -822,7 +822,7 @@ describe("aburi diff — both scans it ran for you", () => {
       warn: (m) => warnings.push(m),
     })
     await rm(baseWorkspace, { recursive: true, force: true })
-    expect(warnings.join("\n")).toContain("base IR records 1 file(s) a plugin threw on")
+    expect(warnings.join("\n")).toContain("base IR records 1 file(s) withdrawn during extraction")
     expect(warnings.join("\n")).not.toContain("head IR records")
   })
 
@@ -839,7 +839,7 @@ describe("aburi diff — both scans it ran for you", () => {
       warn: (m) => warnings.push(m),
     })
     expect(report.exitCode).toBe(EXIT.SUCCESS)
-    expect(warnings.join("\n")).not.toContain("a plugin threw on")
+    expect(warnings.join("\n")).not.toContain("withdrawn during extraction")
   })
 
   it("keeps the clause alongside the fault, so neither hides the other", async () => {
@@ -879,5 +879,67 @@ describe("runExplain — the report reaches a programmatic caller too", () => {
     })
     expect(outcome.exitCode).toBe(EXIT.GATE)
     expect(warnings.join("\n")).toContain("plugin threw")
+  })
+})
+
+/**
+ * `extraction-failed` has two causes and the CLI reports them the same way.
+ *
+ * A throw was the only one for as long as the group existed, so every assertion above reaches
+ * these lines through `boom.stub`. A duplicate Symbol id withdraws a file without anything
+ * throwing (`lang-plugin.md` §7.2, LP28b), and nothing below the core saw it until here.
+ */
+describe("aburi scan — a file withdrawn for a duplicate Symbol id", () => {
+  it("reports it on the same lines a throw reaches, with the core's message", async () => {
+    await populate(scratch, ["ok.stub", "twin.stub"])
+    const lines: string[] = []
+    await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => lines.push(m) },
+    })
+    expect(lines).toEqual([
+      "⚠ 1 file(s) contributed no Symbols: extraction-failed=1",
+      `⚠ extraction-failed (1) — ${EXTRACTION_FAILED_ADVICE}`,
+      '    twin.stub: two Symbols share the id "stub:twin.stub#twin_stub" (lines 1 and 7); ' +
+        "the language plugin gave two declarations one qualified name, and nothing it " +
+        "reported separates them",
+    ])
+  })
+
+  it("gates the run and still writes the IR the surviving file produced", async () => {
+    // The whole point of the change: `ok.stub` is in the document, and the exit code is not
+    // green. Before it, the scan threw on the assembled document and wrote nothing at all.
+    await populate(scratch, ["ok.stub", "twin.stub"])
+    const report = await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+    })
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(report.irPath).not.toBeNull()
+    expect(report.keptSymbols).toBe(1)
+    expect(report.extractionFailures.map((f) => [f.file, f.code])).toEqual([
+      ["twin.stub", "duplicate-symbol-id"],
+    ])
+  })
+
+  it("earns the diff fault clause without claiming an exception", async () => {
+    // The clause `describeScanFault` writes is the line a reader greps out of a CI log to
+    // account for the exit code, so it has to be true of a withdrawal that never threw.
+    await populate(scratch, ["ok.stub", "twin.stub"])
+    const warnings: string[] = []
+    const report = await runDiff({
+      cwd: scratch,
+      refSpec: "main..HEAD",
+      git: gitWith(["ok.stub"]),
+      outputDir: resolve(scratch, "out"),
+      warn: (m) => warnings.push(m),
+    })
+    expect(report.exitCode).toBe(EXIT.GATE)
+    expect(report.faultedScans).toEqual(["head"])
+    expect(warnings.join("\n")).toContain("head: extraction withdrew 1 file(s)")
+    expect(warnings.join("\n")).not.toContain("exception")
   })
 })

@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type {
   BodyExtraction,
   EffectsManifest,
@@ -12,6 +15,7 @@ import type {
   SourceFile,
   SymbolCandidate,
 } from "@aburi/types"
+import { afterEach, beforeEach } from "vitest"
 import { symbolId } from "./ir"
 
 const PLUGIN_SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
@@ -147,4 +151,29 @@ export function capturingLogger(): {
       error: () => {},
     },
   }
+}
+
+/**
+ * A scratch workspace of three `.stub` files, `a` / `bad` / `c`, torn down after each test.
+ *
+ * Three rather than one because the tests that use it are about blast radius: a check that
+ * withdrew the run rather than the offending file shows up as a missing `a.stub` *and* a
+ * missing `c.stub`, one either side of `bad.stub` in discovery order (which is ascending by
+ * path). The names are load-bearing for that reason, so the caller does not choose them.
+ *
+ * Call it at the top of a `describe`; it registers its own `beforeEach` / `afterEach` and
+ * hands back an object whose `root` is the current test's directory.
+ */
+export function useStubWorkspace(prefix: string): { readonly root: string } {
+  const handle = { root: "" }
+  beforeEach(async () => {
+    handle.root = await mkdtemp(join(tmpdir(), `aburi-${prefix}-`))
+    await writeFile(join(handle.root, "a.stub"), "a", "utf8")
+    await writeFile(join(handle.root, "bad.stub"), "bad", "utf8")
+    await writeFile(join(handle.root, "c.stub"), "c", "utf8")
+  })
+  afterEach(async () => {
+    await rm(handle.root, { recursive: true, force: true })
+  })
+  return handle
 }

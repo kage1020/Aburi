@@ -15,9 +15,14 @@ import { fakeGit } from "./fixtures"
 
 /**
  * A file is refused outright if its path contains `bad`, keeps a recoverable error and its
- * Symbol if it contains `warn`, makes extraction throw if it contains `boom`, and is clean
- * otherwise — so `ok.stub` is the quiet one. Which of them exist is up to the caller, so
- * a fixture can differ between the base worktree and the working tree.
+ * Symbol if it contains `warn`, makes extraction throw if it contains `boom`, emits two
+ * Symbols under one id if it contains `twin`, and is clean otherwise — so `ok.stub` is the
+ * quiet one. Which of them exist is up to the caller, so a fixture can differ between the
+ * base worktree and the working tree.
+ *
+ * `twin` and `boom` are the two ways into `extraction-failed`, and only `boom` throws. The
+ * CLI reports them identically on purpose (`cli-spec.md` §5.6), so a fixture that needs to
+ * show the non-throwing one reaching those lines names a file `twin`.
  *
  * By substring rather than by exact name because discovery sorts by path, and a fixture that
  * needs two files of one behaviour, or needs a given behaviour to arrive second, has to be
@@ -93,27 +98,28 @@ export const plugin = {
   extractSymbols: (tree, ctx) => {
     if (ctx.file.path.includes("boom")) throw new Error("plugin exploded")
     const name = ctx.file.path.replace(/[^A-Za-z0-9]/g, "_")
-    return [
-      {
-        id: "stub:" + ctx.file.path + "#" + name,
-        kind: "function",
-        extKind: null,
-        name,
-        visibility: "public",
-        decorators: [],
-        signature: null,
-        source: {
-          file: ctx.file.path,
-          startLine: 1,
-          endLine: 2,
-          startColumn: null,
-          endColumn: null,
-        },
-        derivedBy: [],
-        bodyNode: tree,
-        fullNode: tree,
+    const at = (startLine) => ({
+      id: "stub:" + ctx.file.path + "#" + name,
+      kind: "function",
+      extKind: null,
+      name,
+      visibility: "public",
+      decorators: [],
+      signature: null,
+      source: {
+        file: ctx.file.path,
+        startLine,
+        endLine: startLine + 1,
+        startColumn: null,
+        endColumn: null,
       },
-    ]
+      derivedBy: [],
+      bodyNode: tree,
+      fullNode: tree,
+    })
+    // One id, two declarations — the shape a plugin that forgot to fold merged declarations
+    // produces. Nothing throws; the core refuses the pair.
+    return ctx.file.path.includes("twin") ? [at(1), at(7)] : [at(1)]
   },
   walkBody: () => ({ rules: [], calls: [] }),
   normalizeAst: () => "stub-ast",

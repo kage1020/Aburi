@@ -362,7 +362,10 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
  * Left in, the group is not a degraded result but a broken run: two `DiscoveredFile`s with one
  * path make the pipeline read two different files — each by its own `fsPath` — and mint one
  * Symbol id for both, which invariant #1 refuses, ending the scan on a message about ids that
- * names neither filename. Two on the skip list break #21's "no path appears twice" the same way.
+ * names neither filename. The scan's per-file check does not save it: each file's ids name
+ * that file's own Document path and are unique among its own candidates, so both pass, and
+ * only the document-wide backstop sees the pair. This dedup is what keeps that from being
+ * reachable. Two on the skip list break #21's "no path appears twice" the same way.
  *
  * They leave `totalFiles` with the rest of `unrepresentableFiles`, for the reason that list
  * exists: the Document cannot name them, so it cannot count them either without the census

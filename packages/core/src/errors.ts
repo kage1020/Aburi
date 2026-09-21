@@ -50,14 +50,6 @@ export type CoreErrorCode =
    * of the plugin.
    */
   | "scan-plugin-misconfigured"
-  /**
-   * A file was withdrawn because its Symbols could not satisfy ir-schema.md invariant #1: two
-   * of them carried one id, or one carried an id an earlier file had already contributed.
-   * A property of the file's own extraction, so the scan withdraws that file and keeps going
-   * (`lang-plugin.md` §7.2) rather than refusing the document. Never thrown — it reaches a
-   * caller on `ScanResult.extractionFailures[].code`, because nothing raised an error for it.
-   */
-  | "duplicate-symbol-id"
   /** A `.gitignore` — the workspace root's or any nested one — exists as a regular file and could not be used: an I/O error, a permission, or a line no regex engine will compile, which is reported against the line that holds it. A name that is not a regular file is not a rule file, and neither is a missing one; both are silently no patterns, as they are to git. */
   | "scan-gitignore-unreadable"
   /** `ScanInput.workspaceRoot` was not an absolute path; scan cannot resolve files reliably. */

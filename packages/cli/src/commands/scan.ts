@@ -151,8 +151,10 @@ export interface ScanReport {
    * what makes this list the run's only account of *which* files they were. The exception is
    * the timed-out file just mentioned. It is withdrawn, so `stats.skippedFiles[]` names it
    * under `parse-timeout` — with the clock rather than the errors — and it is named on both
-   * lines. A file a plugin *threw* on is not the same case and is not here at all: the result
-   * never materialized, so there was nothing to carry its parse errors (`core/scan/scan.ts`).
+   * lines. A file withdrawn for a duplicate Symbol id is the same shape: its extraction ran to
+   * a result, so the parse errors it carries are real observations about the file and are kept.
+   * A file a plugin *threw* on is the one case that is not here at all — the result never
+   * materialized, so there was nothing to carry its parse errors (`core/scan/scan.ts`).
    *
    * `parseErrorCount` is set from this list's length where the report is built. Nothing in the
    * type holds them together, so a second construction site would have to do the same.
@@ -170,8 +172,9 @@ export interface ScanReport {
   /** Files that never made it into the IR; `@aburi/core` returns these rather than logging them. */
   skipped: readonly { path: string; reason: SkippedFile["reason"]; detail?: string }[]
   /**
-   * Files a plugin threw on. Also in `skipped` as `extraction-failed` with the same message;
-   * what is only here is the `code`, and this is the one skip reason that moves the exit code.
+   * Files withdrawn during extraction — a plugin threw, or the file's Symbols could not enter
+   * the Document. Also in `skipped` as `extraction-failed` with the same message; what is only
+   * here is the `code`, and this is the one skip reason that moves the exit code.
    */
   extractionFailures: readonly { file: string; message: string; code?: string }[]
   /**
@@ -341,7 +344,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
     // Three gates (`cli-spec.md`: exit codes, coverage, unnameable files), none of which
-    // withholds the artifact: a plugin exception says the run is broken, a coverage fault says
+    // withholds the artifact: an extraction fault says the run is broken, a coverage fault says
     // it described nothing (or too little, under `minParsedFileRatio`), and an unnameable file
     // is source the artifact holds no trace of.
     exitCode:
@@ -399,7 +402,7 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   "extraction-failed": {
     rank: 6,
     advice:
-      "a plugin threw while extracting, or its Symbols could not enter the document. This is the reason the run does not exit clean.",
+      "a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.",
   },
 }
 
@@ -614,8 +617,8 @@ function reportConfigOutsideWorkspaceRoot(report: ScanReport, sayIncident: SayIn
  * a sink `ABURI_LOG_LEVEL=error` silences.
  *
  * Capped per reason rather than across the listing: one budget would be spent by whichever
- * reason lost the most files, pushing the one file a plugin threw on — the only reason here
- * that moves the exit code — inside `…and N more`.
+ * reason lost the most files, pushing the one file withdrawn during extraction — the only
+ * reason here that moves the exit code — inside `…and N more`.
  */
 function reportSkipped(
   skipped: ScanReport["skipped"],

@@ -454,7 +454,7 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
       outputDir: resolve(scratch, "out"),
       warn: (m) => warnings.push(m),
     })
-    expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
+    expect(warnings.join("\n")).toContain("base: extraction withdrew 1 file(s)")
   })
 
   it("says each faulted side's own cause rather than one side's about both", async () => {
@@ -472,7 +472,7 @@ describe("aburi diff and aburi explain — the scans they ran for you", () => {
     })
     expect(report.faultedScans).toEqual(["base", "head"])
     expect(warnings.join("\n")).toContain(
-      "⚠ base: a plugin exception withdrew 1 file(s); head: none of the 2 file(s) it found parsed.",
+      "⚠ base: extraction withdrew 1 file(s); head: none of the 2 file(s) it found parsed.",
     )
   })
 
@@ -575,7 +575,7 @@ describe("aburi scan — a file no Document path can name", () => {
         outputDir: resolve(scratch, "out"),
         warn: (m) => warnings.push(m),
       })
-      expect(warnings.join("\n")).toContain("base: a plugin exception withdrew 1 file(s)")
+      expect(warnings.join("\n")).toContain("base: extraction withdrew 1 file(s)")
       expect(warnings.join("\n")).not.toContain("base: 1 file(s) have names")
     },
   )
@@ -644,7 +644,9 @@ describe("aburi scan — two spellings of one name", () => {
   onCollidingFs("reports both instead of ending the scan on a duplicate id", async () => {
     // Before this, the two were one `DiscoveredFile` path twice: the pipeline read whichever
     // file the lookup found, twice, and minted its Symbol id twice — so `assertIRIntegrity`
-    // ended the run on `[#1] duplicate Symbol id`, naming neither filename.
+    // ended the run on `[#1] duplicate Symbol id`, naming neither filename. Still the
+    // document-wide check rather than the scan's per-file one, which cannot see this pair:
+    // each read's ids name its own Document path and are unique among its own candidates.
     const warnings: string[] = []
     await populate(scratch, ["ok.stub"])
     await writeFile(resolve(scratch, "caf\u0065\u0301.stub"), "a", "utf8")

@@ -89,8 +89,10 @@ function declaredOrDefaultQname(
  * One entity gets one candidate, however many declarations wrote it. TypeScript lets an
  * accessor pair, an overload and its implementation, and a merged interface / namespace all
  * name the same thing, and answering one candidate per *declaration* put two Symbols under
- * one id — which integrity invariant #1 refuses for the whole document, not for the file
- * that wrote it. See `makeCandidateSink` for what the second declaration contributes.
+ * one id, which integrity invariant #1 refuses. The scan now withdraws the one file that
+ * wrote them rather than the whole document, but a plugin that leans on that is still
+ * dropping a file it could have extracted. See `makeCandidateSink` for what the second
+ * declaration contributes.
  *
  * A last pass links each `export default <identifier>` statement back to the declaration it
  * names: written apart from its declaration, that export leaves no evidence on the
