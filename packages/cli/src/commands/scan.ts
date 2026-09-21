@@ -32,6 +32,7 @@ import type {
   IR,
   LanguagePlugin,
   LspEnrichmentStats,
+  ParseError,
   UnresolvedCallDiagnostic,
 } from "@aburi/types"
 import {
@@ -45,7 +46,7 @@ import type { LogLevel } from "../env"
 import { assertNever, CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
-import { capListing } from "../listing"
+import { writeFullListing, writeListing } from "../listing"
 import { createLogger } from "../logger"
 import { createOutputDir, type OutputCommand, writeOutputFile } from "../output-file"
 import { loadPlugins } from "../plugin-loader"
@@ -145,7 +146,19 @@ export interface ScanReport {
    * Files carrying parse errors the plugin called recoverable — every file on
    * `ScanResult.parseErrors` except the ones withdrawn *for* a parse error (`parseFailureCount`).
    * A file abandoned on its `parseTimeoutMs` budget is counted here (`lang-plugin.md`).
+   *
+   * Mostly these files are in the IR, and then nothing in the artifact names them: that is
+   * what makes this list the run's only account of *which* files they were. The exception is
+   * the timed-out file just mentioned. It is withdrawn, so `stats.skippedFiles[]` names it
+   * under `parse-timeout` — with the clock rather than the errors — and it is named on both
+   * lines. A file a plugin *threw* on is not the same case and is not here at all: the result
+   * never materialized, so there was nothing to carry its parse errors (`core/scan/scan.ts`).
+   *
+   * `parseErrorCount` is set from this list's length where the report is built. Nothing in the
+   * type holds them together, so a second construction site would have to do the same.
    */
+  parseErrorFiles: readonly { path: string; detail: string }[]
+  /** How many files `parseErrorFiles` names. */
   parseErrorCount: number
   /**
    * Files withdrawn because the parse produced nothing usable; the same files appear in
@@ -284,6 +297,10 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     scanResult.skipped.filter((file) => file.reason === "parse-failed").map((file) => file.path),
   )
 
+  const parseErrorFiles = scanResult.parseErrors
+    .filter((record) => !withdrawnByParse.has(record.file))
+    .map((record) => ({ path: record.file, detail: describeParseErrors(record.errors) }))
+
   const coverageFault = findCoverageFault(
     scanResult.ir.stats.totalFiles,
     scanResult.ir.stats.parsedFiles,
@@ -299,8 +316,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     parsedFiles: scanResult.ir.stats.parsedFiles,
     keptSymbols: scanResult.ir.stats.keptSymbols,
     droppedSymbols: scanResult.ir.stats.droppedSymbols,
-    parseErrorCount: scanResult.parseErrors.filter((error) => !withdrawnByParse.has(error.file))
-      .length,
+    parseErrorFiles,
+    parseErrorCount: parseErrorFiles.length,
     parseFailureCount: withdrawnByParse.size,
     timeoutCount: scanResult.timeoutEvents.length,
     skipped: scanResult.skipped.map((file) => {
@@ -386,6 +403,24 @@ const REASON_REPORT: Record<SkippedFile["reason"], { rank: number; advice: strin
   },
 }
 
+/**
+ * What a file's recoverable parse errors amount to, for the one line the warning gives each file.
+ *
+ * The count and the first position, not every error: tree-sitter reports one ERROR node per
+ * construct it could not place, so a single unterminated brace can produce dozens, and the first
+ * is where the recovery began. The rest are on `ScanResult.parseErrors` for a caller that wants
+ * them.
+ *
+ * The empty case is unreachable — the core records a file on `parseErrors` only when it has at
+ * least one — but the list arrives as a plain array, so it is answered rather than asserted.
+ */
+function describeParseErrors(errors: readonly ParseError[]): string {
+  const first = errors[0]
+  if (first === undefined) return "parse errors reported without detail"
+  const where = `${first.line}:${first.column} — ${first.message}`
+  return errors.length === 1 ? where : `${errors.length} errors, first at ${where}`
+}
+
 /** A line that stands on its own: `⚠`, the scan's label when one was given, then the text. */
 type SayIncident = (line: string) => void
 
@@ -412,15 +447,13 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     sayIncident(line)
   }
   reportCoverageFault(report.coverageFault, sayIncident)
-  // The two accounts that exist nowhere else come directly under the coverage line, ahead of
+  // The accounts that exist nowhere else come directly under the coverage line, ahead of
   // everything recoverable from the artifact: the sink's failure is swallowed further up, so
   // whatever is last is what a closed pipe loses.
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
+  reportParseErrors(report.parseErrorFiles, sayIncident, warn)
   reportConfigOutsideWorkspaceRoot(report, sayIncident)
-  if (report.parseErrorCount > 0) {
-    sayIncident(`${report.parseErrorCount} file(s) had recoverable parse errors.`)
-  }
   if (report.parseFailureCount > 0) {
     // Apart from the line above: those files are in the IR with warnings, these are not in it.
     sayIncident(
@@ -471,6 +504,33 @@ function reportHints(lsp: LspEnrichmentStats, sayIncident: SayIncident): void {
   if (produced === 0 && refused === 0) return
   sayIncident(
     `LSP receiver hints: ${produced} produced · ${lsp.hintsConsumed ?? 0} resolved a call · ${refused} rejected.`,
+  )
+}
+
+/**
+ * Files that parsed with errors the plugin called recoverable, and the first error each one
+ * reported. Named rather than only counted, because a count says a number of files somewhere
+ * in the workspace need looking at without saying which — `lang-plugin.md` leaves what counts
+ * as recoverable to the plugin, so the reader cannot narrow it down from the count either.
+ *
+ * **Uncapped**, for the reason `reportUnrepresentable` is: for most of these files the line is
+ * the run's only account of them (see `ScanReport.parseErrorFiles` for the two kinds that are
+ * also in `stats.skippedFiles[]`), and a `…and N more` tail over the only account is the loss
+ * rather than a summary of it.
+ *
+ * Gated on the list rather than on `parseErrorCount`, so an empty list cannot print a header
+ * over nothing if the two ever come apart.
+ */
+function reportParseErrors(
+  files: ScanReport["parseErrorFiles"],
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
+): void {
+  if (files.length === 0) return
+  sayIncident(`${files.length} file(s) had recoverable parse errors.`)
+  writeFullListing(
+    files.map((file) => `${file.path}: ${file.detail}`),
+    writeDetail,
   )
 }
 
@@ -570,14 +630,15 @@ function reportSkipped(
   sayIncident(`${skipped.length} file(s) contributed no Symbols: ${census}`)
   for (const [reason, files] of groups) {
     sayIncident(`${reason} (${files.length}) — ${REASON_REPORT[reason].advice}`)
-    const { listed, hidden } = capListing(files)
-    for (const file of listed) {
-      // Empty as well as absent: a caller-assembled report may say nothing, and `src/x.ts: `
-      // is a path, a colon, and silence.
-      const detail = file.detail ?? ""
-      writeDetail(detail.length === 0 ? `    ${file.path}` : `    ${file.path}: ${detail}`)
-    }
-    if (hidden > 0) writeDetail(`    …and ${hidden} more`)
+    writeListing(
+      files.map((file) => {
+        // Empty as well as absent: a caller-assembled report may say nothing, and `src/x.ts: `
+        // is a path, a colon, and silence.
+        const detail = file.detail ?? ""
+        return detail.length === 0 ? file.path : `${file.path}: ${detail}`
+      }),
+      writeDetail,
+    )
   }
 }
 

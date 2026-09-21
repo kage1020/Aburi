@@ -11,6 +11,7 @@ import {
   sig,
   zeroFp,
 } from "@aburi/test-support"
+import type { SymbolDroppedToggled } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   projectComponent,
@@ -237,6 +238,84 @@ describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () =
     const md = projectDiff(diff)
     expect(md).toContain("## 🎨 Syntax-only changes")
     expect(md).not.toContain("## ⚠ API changes")
+  })
+})
+
+// -----------------------------------------------------------------------------
+// Folded summary counts source entries, not rendered Markdown rows (§6.1)
+// -----------------------------------------------------------------------------
+
+describe("Folded section summary counts (§6.1)", () => {
+  it("counts entries in all three folded sections", () => {
+    const makeToggle = (
+      id: string,
+      direction: SymbolDroppedToggled["direction"],
+    ): SymbolDroppedToggled => {
+      const before = makeSymbol({
+        id,
+        name: id.split("#")[1] ?? id,
+        dropped: direction === "to-kept",
+        dropReason: direction === "to-kept" ? "pure DTO" : null,
+      })
+      const after = makeSymbol({
+        id,
+        name: before.name,
+        dropped: direction === "to-dropped",
+        dropReason: direction === "to-dropped" ? "pure DTO" : null,
+      })
+      return { status: "dropped-toggled", before, after, direction }
+    }
+
+    const makeSyntaxOnly = (id: string) => {
+      const before = makeSymbol({ id, name: id.split("#")[1] ?? id, fingerprint: fp("v1") })
+      return {
+        status: "changed" as const,
+        before,
+        after: makeSymbol({
+          ...before,
+          fingerprint: { ...fp("v1"), syntax: `syntax-${id}` },
+        }),
+        delta: {
+          apiChanged: false,
+          logicChanged: false,
+          syntaxChanged: true,
+          componentChanged: false,
+          visibilityChanged: false,
+          rules: { added: [], removed: [], modified: [] },
+          effects: { added: [], removed: [], modified: [] },
+          calls: { added: [], removed: [], modified: [] },
+          decorators: { added: [], removed: [], modified: [] },
+          signature: null,
+        },
+      }
+    }
+
+    const makeMoved = (name: string) => ({
+      status: "moved" as const,
+      before: makeSymbol({ id: `ts:src/old.ts#${name}`, name }),
+      after: makeSymbol({ id: `ts:src/new.ts#${name}`, name }),
+      rationale: "git-rename" as const,
+    })
+
+    const diff = makeDiff({
+      symbols: [
+        makeMoved("MovedA"),
+        makeMoved("MovedB"),
+        makeToggle("ts:src/a.ts#A", "to-dropped"),
+        makeToggle("ts:src/a.ts#B", "to-dropped"),
+        makeToggle("ts:src/a.ts#C", "to-kept"),
+        makeSyntaxOnly("ts:src/a.ts#SyntaxA"),
+        makeSyntaxOnly("ts:src/a.ts#SyntaxB"),
+      ],
+      summary: { ...emptySummary(), moved: 2, changed: 2, droppedToggled: 3 },
+    })
+
+    const md = projectDiff(diff)
+    expect(md.match(/<summary>2 entries<\/summary>/g)).toHaveLength(2)
+    expect(md).toContain("<summary>3 entries</summary>")
+    expect(md).toContain("**2 to-dropped**")
+    expect(md).toContain("**1 to-kept**")
+    expect(md).toContain("- `ts:src/a.ts#A` — pure DTO")
   })
 })
 

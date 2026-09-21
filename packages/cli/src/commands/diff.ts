@@ -324,6 +324,9 @@ function warnOnRecoverableParseErrors(scans: ScanPair | null, warn: WarnFn): voi
     `⚠ Files with recoverable parse errors (${where}) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. ` +
       `Their Symbol sets can be short, which moves added / removed without a file having been skipped.`,
   )
+  // Counted here and not listed: this command runs both scans, and each one's own report named
+  // its files on this stderr above (`cli-spec.md`). What this line adds is the consequence for
+  // the diff, which neither scan is in a position to say.
 }
 
 /**

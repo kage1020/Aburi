@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 import type { ParseError, ParseResult, SourceFile } from "@aburi/types"
-import { Language, Parser, type Tree } from "web-tree-sitter"
+import { Language, type Node, Parser, type Tree } from "web-tree-sitter"
 import { walkDescendants } from "./ast-helpers"
 import { extractImports } from "./imports"
 
@@ -226,10 +226,10 @@ function pickGrammarForPath(path: string): string {
 }
 
 /**
- * Every ERROR and MISSING node in the tree, in source order. Both are recoverable per
- * web-tree-sitter's semantics — the tree is still usable, just imperfect — so the pipeline
- * continues. Anonymous children are walked too (a MISSING `)` is one), and a subtree with no
- * error in it is pruned.
+ * Every ERROR and MISSING node in the tree, in source order, less the ones `isJsxEntityArtifact`
+ * identifies as the grammar's own. Both kinds are recoverable per web-tree-sitter's semantics —
+ * the tree is still usable, just imperfect — so the pipeline continues. Anonymous children are
+ * walked too (a MISSING `)` is one), and a subtree with no error in it is pruned.
  */
 function collectParseErrors(tree: Tree): ParseError[] {
   const root = tree.rootNode
@@ -238,6 +238,7 @@ function collectParseErrors(tree: Tree): ParseError[] {
   for (const node of walkDescendants(root, { anonymous: true, descend: (n) => n.hasError })) {
     const message = node.isError ? "syntax error" : node.isMissing ? "missing token" : null
     if (message === null) continue
+    if (node.isError && isJsxEntityArtifact(node)) continue
     errors.push({
       message,
       line: node.startPosition.row + 1,
@@ -246,4 +247,72 @@ function collectParseErrors(tree: Tree): ParseError[] {
     })
   }
   return errors
+}
+
+/**
+ * The tokens whose presence in an unplaceable run means the file, not the grammar, is at fault.
+ *
+ * JSX text is delimited by exactly these four characters: `<` and `>` open and close a tag, and
+ * `{` and `}` an expression container. Everything else between two tags is text the grammar
+ * accepts. So a run that holds one of them is a real syntax error — a bare `}` or `>` in JSX text
+ * is TS1381 / TS1382, which `tsc` and Babel both reject — while a run of ordinary words is not.
+ *
+ * Only inside a JSX element's children. An attribute's *string value* is a string literal, where
+ * all four are ordinary characters: `href="/x?a=1&b=2}"` is legal, and refusing it here would
+ * make the warning over-report the thing it is meant to stop over-reporting.
+ */
+const JSX_TEXT_DELIMITERS: ReadonlySet<string> = new Set(["{", "}", "<", ">"])
+
+/**
+ * Whether this ERROR is the tsx grammar's `&` limitation rather than something wrong with the
+ * file (`lang-plugin.md` LP27a).
+ *
+ * The tsx grammar `@vscode/tree-sitter-wasm` ships reads `&` inside JSX as the opening of an
+ * HTML character reference and errors when no `;` closes it. So `<CardTitle>Subscription &
+ * Billing</CardTitle>` and `href="/x?utm_source=a&utm_medium=b"` — ordinary prose and a tracking
+ * URL — are parse errors, while `&amp;`, `&nbsp;` and `{"a & b"}` are not. No published grammar
+ * has fixed it as of 2026-09, and the dependency is a `^0.3.1` range, so this is not waiting on a
+ * version bump; the suite in `test/jsx-entity-artifact.test.ts` is what will say when it is.
+ *
+ * What it costs is the signal rather than the data: the file still reaches the IR, and the same
+ * component written with `&` and with `&amp;` extracts the same Symbols — same signature, same
+ * `calls[]`, including a call sited after the error. What it did cost is the CLI's
+ * recoverable-parse-error warning, which on a React codebase fired on 3% of files as a matter of
+ * course and stopped being worth reading.
+ *
+ * Three conditions, and the *first two* are what keep a broken file reporting:
+ *
+ *   - The run opens with a token beginning with `&` (`&`, `&&`, `&=`, `&&=` — whatever the lexer
+ *     made of the misread entity). A file broken some other way does not open its run with one.
+ *   - It holds none of `JSX_TEXT_DELIMITERS`. tree-sitter merges an adjacent unparseable run into
+ *     one ERROR node, so without this an `&` earlier in the same JSX children swallows whatever
+ *     follows it: `<div>a & } b</div>` went silent, and `a & b` with `{foo(}` on the next line
+ *     went silent *and* lost `foo` from `calls[]` — while the same source on one line reported.
+ *     Recovery does not give the call back either way; what this restores is the warning that the
+ *     file is doubtful, which is the whole thing the filter claims not to cost.
+ *   - It sits directly among a JSX element's children — which is where the grammar parents a
+ *     fragment's children too, since it has no `jsx_fragment` node — or inside a JSX attribute's
+ *     string value, where the delimiter rule does not apply for the reason given above.
+ *
+ * The position is *not* what makes it safe, and tightening it would not help. A truncation's own
+ * ERROR is parented by whatever encloses the break — `statement_block`, `object`, `arrow_function`,
+ * the root node itself — not reliably by `program`, and sometimes what survives is a MISSING
+ * rather than an ERROR. This file's `"a stray `<` among the children"` case is parented by
+ * `jsx_element`, inside the accepted position, and reports because of the token rules alone.
+ */
+function isJsxEntityArtifact(node: Node): boolean {
+  if (node.child(0)?.type.startsWith("&") !== true) return false
+  const parent = node.parent
+  if (parent === null) return false
+  if (parent.type === "jsx_element") return !holdsJsxTextDelimiter(node)
+  return parent.type === "string" && parent.parent?.type === "jsx_attribute"
+}
+
+/** Whether any token directly in this run is one of the four characters JSX text cannot hold. */
+function holdsJsxTextDelimiter(node: Node): boolean {
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i)
+    if (child !== null && JSX_TEXT_DELIMITERS.has(child.type)) return true
+  }
+  return false
 }

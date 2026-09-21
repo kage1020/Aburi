@@ -93,12 +93,31 @@ describe("runScan — the report goes to the caller's sink", () => {
     })
     expect(lines).toEqual([
       "⚠ 1 file(s) had recoverable parse errors.",
+      "    warn.stub: 2:1 — stray token",
       "⚠ 1 file(s) could not be parsed and were left out of the IR.",
       "⚠ 2 file(s) contributed no Symbols: parse-failed=1, extraction-failed=1",
       `⚠ parse-failed (1) — ${PARSE_FAILED_ADVICE}`,
       `    bad.stub: ${REFUSAL}`,
       `⚠ extraction-failed (1) — ${EXTRACTION_FAILED_ADVICE}`,
       "    boom.stub: plugin exploded",
+    ])
+  })
+
+  it("summarizes a file that reported more than one error, and says where recovery began", async () => {
+    // Every error, per file, would be the whole listing on one broken grammar. The first
+    // position is the one that matters: it is where the parse came apart, and everything after
+    // it is recovery. The rest stay on `ScanResult.parseErrors`.
+    await populate(scratch, ["noisy.stub", "ok.stub"])
+    const lines: string[] = []
+    await runScan({
+      cwd: scratch,
+      outputDir: resolve(scratch, "out"),
+      format: "json",
+      incidents: { warn: (m: string) => lines.push(m) },
+    })
+    expect(lines).toEqual([
+      "⚠ 1 file(s) had recoverable parse errors.",
+      "    noisy.stub: 2 errors, first at 2:1 — stray token",
     ])
   })
 
@@ -140,6 +159,7 @@ describe("runScan — the report goes to the caller's sink", () => {
     expect(code).toBe(EXIT.GATE)
     expect(stderr.text()).toBe(
       "⚠ 1 file(s) had recoverable parse errors.\n" +
+        "    warn.stub: 2:1 — stray token\n" +
         "⚠ 1 file(s) could not be parsed and were left out of the IR.\n" +
         "⚠ 2 file(s) contributed no Symbols: parse-failed=1, extraction-failed=1\n" +
         `⚠ parse-failed (1) — ${PARSE_FAILED_ADVICE}\n` +
@@ -197,6 +217,44 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
 
   it("says nothing about parse trees when every plugin freed its own", () => {
     expect(incidentLinesFrom(scanReportWith({ treeReleaseFailures: [] }), null)).toEqual([])
+  })
+
+  it("names every file behind the recoverable-error count, uncapped", () => {
+    // The count alone was the whole warning, and mostly these files are in the IR rather than
+    // in `stats.skippedFiles[]`, so there is nowhere else to look them up. That is why the
+    // `MAX_LISTED` cap does not apply: over the only account of something, `…and N more` is
+    // the loss rather than the shape of it. Twelve is past the cap on purpose.
+    const lines = incidentLinesFrom(
+      scanReportWith({
+        parseErrorFiles: Array.from({ length: 12 }, (_, i) => ({
+          path: `src/c${i}.tsx`,
+          detail: "3:5 — syntax error",
+        })),
+        parseErrorCount: 12,
+      }),
+      null,
+    )
+
+    expect(lines[0]).toBe("⚠ 12 file(s) had recoverable parse errors.")
+    expect(lines.slice(1)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `    src/c${i}.tsx: 3:5 — syntax error`),
+    )
+    expect(lines.join("\n")).not.toContain("more")
+  })
+
+  it("leaves the per-file lines unlabelled, like every other listing", () => {
+    const lines = incidentLinesFrom(
+      scanReportWith({
+        parseErrorFiles: [{ path: "src/a.tsx", detail: "3:5 — syntax error" }],
+        parseErrorCount: 1,
+      }),
+      'base ref "main"',
+    )
+
+    expect(lines).toEqual([
+      '⚠ base ref "main": 1 file(s) had recoverable parse errors.',
+      "    src/a.tsx: 3:5 — syntax error",
+    ])
   })
 
   it("names the effect-classify timeout budget", () => {
@@ -628,6 +686,7 @@ describe("aburi diff — both scans it ran for you", () => {
       '⚠ base ref "main": 1 file(s) could not be parsed and were left out of the IR.',
     )
     expect(warnings).toContain("⚠ head (working tree): 1 file(s) had recoverable parse errors.")
+    expect(warnings).toContain("    warn.stub: 2:1 — stray token")
     // `cli-spec.md` — the head is always the current checkout, whatever the ref spec calls it. A
     // `head ref "v1.1.0"` label would name a revision this scan never read.
     expect(warnings.join("\n")).not.toContain("v1.1.0")
@@ -683,6 +742,16 @@ describe("aburi diff — both scans it ran for you", () => {
     // added / removed counts then move with no file having gone missing.
     expect(warnings.join("\n")).toContain("recoverable parse errors")
     expect(warnings.join("\n")).toContain("added / removed")
+    // The files are named once per side, by each scan's own report, whose header carries the
+    // side. This command adds the consequence and no second listing: it runs both scans, so
+    // repeating their lines here would print every doubtful path a third time.
+    expect(warnings).toEqual([
+      '⚠ base ref "main": 1 file(s) had recoverable parse errors.',
+      "    warn.stub: 2:1 — stray token",
+      "⚠ head (working tree): 1 file(s) had recoverable parse errors.",
+      "    warn.stub: 2:1 — stray token",
+      expect.stringContaining("added / removed"),
+    ])
   })
 
   it("keeps all three lines when a file is lost on both sides", async () => {
