@@ -106,6 +106,10 @@ function isCamelBoundary(prev: string, curr: string): boolean {
  * lengthens — which matters, since a foreign character is counted as a word of its own and
  * `ユーザー` would be admitted on the strength of it.
  *
+ * `scx=Hangul` covers the conjoining jamo as well as the syllable blocks. NFC composes those
+ * into blocks before any of this reads them, so what is counted is the syllable; a
+ * compatibility jamo, which does not compose, is counted as the one character it is.
+ *
  * An alphabetic script with no case — Arabic, Hebrew, Thai — is deliberately not here. Its
  * characters are letters, not morphemes or syllables, so a run of them is one word and the
  * token count is already right about it; a multi-word identifier in those scripts separates
