@@ -13,9 +13,14 @@ import { buildDiff, matchStageNameSignature } from "../src"
  *
  * The demand the row wanted to make is off the top of the scale, so it is not a threshold.
  * It is an admissibility rule, alongside the signature-less one: a Symbol whose qualified name
- * carries a single distinct token is not paired in stage 4 at all.
+ * says only one thing is not paired in stage 4 at all.
  *
- * The count is over the **qualified name**, which is the whole of what stage 4 reads about a
+ * What counts as "one thing" is `nameEvidence`, not the distinct-token count. The two agree
+ * wherever the tokeniser can find the words — which is every cased script, and any script at
+ * all once a separator is written — and part company where it cannot: a run of Han or kana is
+ * one token and several words. The last block here is that difference.
+ *
+ * The measure is over the **qualified name**, which is the whole of what stage 4 reads about a
  * Symbol's identity — not over the last segment alone, which is what the threshold table
  * reads. `UserRepo.get` has one token in its last segment and three in its name, and it goes
  * on pairing.
@@ -75,9 +80,9 @@ describe("a one-token name is not evidence of identity", () => {
     expect(pairs(base, head)).toEqual([])
   })
 
-  it("counts distinct tokens, so an owner that repeats the last segment adds nothing", () => {
+  it("measures distinct tokens, so an owner that repeats the last segment adds nothing", () => {
     // `Main.main` tokenises to `{main}`: the token sets are deduped, so an owner that repeats
-    // its member name adds nothing a Jaccard can see. The rule counts what the score can.
+    // its member name adds nothing a Jaccard can see. The rule measures what the score can.
     expect(
       pairs([method("src/a.ts", "Main.main", "aaa")], [method("src/b.ts", "Main.main", "bbb")]),
     ).toEqual([])
@@ -137,44 +142,78 @@ describe("the qualified name is what carries the evidence", () => {
   })
 })
 
-describe("a script with no ASCII case boundary is one token, whatever it says", () => {
-  // `tokenizeName` finds camel humps by comparing code points against `a`-`z` and `A`-`Z`, so
-  // a name in a script that has no such boundary comes back whole however much it says. The
-  // count is a proxy for that, and here the proxy is wrong: `ユーザー情報を取得する` is not a
-  // name two unrelated Symbols carry by coincidence the way two carry `main`.
+describe("a name the tokeniser cannot segment still says what it says", () => {
+  // `tokenizeName` finds word boundaries by case, so a name in a script that has no case comes
+  // back whole however much it says. The rule used to read that count as the measure of how
+  // much a name says, and refused `ユーザー情報を取得する` on the same footing as `main` —
+  // which is wrong about it: two unrelated Symbols do not carry that name by coincidence.
   //
-  // The rule refuses them anyway, and these pin that as known rather than discovered. What it
-  // costs is a stage-4 move — a cross-file move git did not record, with an edited body.
-  // Measuring the name by something other than a bare token count is nameSimilarity's to change,
-  // and these tests are what will fail when it does.
+  // `nameEvidence` measures it instead. A character of a morphemic script is a word with no
+  // boundary written after it, so it counts as one; a token of any other script is one word
+  // whatever its length. These pair now, and the ones that really are one word still do not.
 
-  it("counts a Japanese name as one token", () => {
+  it("pairs a Japanese name across a file move with an edited body", () => {
     expect(
       pairs(
         [fn("src/legacy/user.ts", "ユーザー情報を取得する", "aaa")],
         [fn("src/api/user.ts", "ユーザー情報を取得する", "bbb")],
       ),
-    ).toEqual([])
+    ).toEqual([
+      "ts:src/legacy/user.ts#ユーザー情報を取得する -> ts:src/api/user.ts#ユーザー情報を取得する",
+    ])
   })
 
-  it("counts a Chinese name as one token", () => {
+  it("pairs a Chinese name the same way", () => {
     expect(
       pairs([fn("src/a.ts", "获取用户信息", "aaa")], [fn("src/b.ts", "获取用户信息", "bbb")]),
-    ).toEqual([])
+    ).toEqual(["ts:src/a.ts#获取用户信息 -> ts:src/b.ts#获取用户信息"])
   })
 
-  it("does not see the camel hump in a Cyrillic name either", () => {
+  it("pairs a Korean name the same way", () => {
+    expect(
+      pairs([fn("src/a.ts", "사용자정보조회", "aaa")], [fn("src/b.ts", "사용자정보조회", "bbb")]),
+    ).toEqual(["ts:src/a.ts#사용자정보조회 -> ts:src/b.ts#사용자정보조회"])
+  })
+
+  it("sees the camel hump in a Cyrillic name, which is a second token", () => {
+    // Not the morphemic rule: the case boundary is Unicode now, so this splits into two
+    // tokens the way `getUser` does and is admissible on the count alone.
     expect(
       pairs(
         [fn("src/a.ts", "получитьПользователя", "aaa")],
         [fn("src/b.ts", "получитьПользователя", "bbb")],
       ),
+    ).toEqual(["ts:src/a.ts#получитьПользователя -> ts:src/b.ts#получитьПользователя"])
+  })
+
+  it("still refuses a single Cyrillic word, as it refuses a single English one", () => {
+    // No hump, so one token and one word. `главная` is Russian for `main` and is treated as
+    // `main` is — the rule is about how much a name says, not about which script says it.
+    expect(pairs([fn("src/a.ts", "главная", "aaa")], [fn("src/b.ts", "главная", "bbb")])).toEqual(
+      [],
+    )
+  })
+
+  it("still refuses a long single English word", () => {
+    // Length is not the measure. `initialize` is ten characters and one word, and two
+    // unrelated top-level `initialize(x: string)` are exactly the coincidence the rule is for.
+    expect(
+      pairs([fn("src/a.ts", "initialize", "aaa")], [fn("src/b.ts", "initialize", "bbb")]),
     ).toEqual([])
   })
 
-  it("splits such a name on a separator, and on its ASCII half", () => {
-    // Two tokens each, so both are read and pair. The boundary is the tokeniser's alphabet,
-    // not the script.
+  it("still refuses a single word of a caseless alphabetic script", () => {
+    // Arabic has no case, so this is one token — but its characters are letters rather than
+    // morphemes, so it is one word and the count was already right about it. A multi-word
+    // Arabic identifier separates its words, and the tokeniser splits on the separator.
+    expect(pairs([fn("src/a.ts", "مستخدم", "aaa")], [fn("src/b.ts", "مستخدم", "bbb")])).toEqual([])
+    expect(
+      pairs([method("src/a.ts", "مستخدم.احصل", "aaa")], [method("src/b.ts", "مستخدم.احصل", "bbb")]),
+    ).toEqual(["ts:src/a.ts#مستخدم.احصل -> ts:src/b.ts#مستخدم.احصل"])
+  })
+
+  it("splits such a name on a separator, and on its Latin half", () => {
+    // Unchanged: both were admissible before this on their token count alone.
     expect(
       pairs(
         [method("src/a.ts", "ユーザー.取得", "aaa")],
@@ -189,9 +228,20 @@ describe("a script with no ASCII case boundary is one token, whatever it says", 
     ).toEqual(["ts:src/a.ts#UserRepo.取得 -> ts:src/b.ts#UserRepo.取得"])
   })
 
-  it("leaves stages 1 to 3 to carry these names", () => {
-    // Which is what keeps the loss narrow: an unchanged move is stage 3's, and an unmoved
-    // change never reaches stage 4 at all.
+  it("does not pair two different names that merely share a script", () => {
+    // Admissibility is not a score. Both say plenty, and they say different things: the
+    // member Jaccard is 0, so the composite cannot reach any row of the table.
+    expect(
+      pairs(
+        [fn("src/a.ts", "ユーザー情報を取得する", "aaa")],
+        [fn("src/b.ts", "注文履歴を保存する", "bbb")],
+      ),
+    ).toEqual([])
+  })
+
+  it("leaves stages 1 to 3 where they were", () => {
+    // An unchanged move is still stage 3's, decided on the fingerprint without asking the
+    // name to carry anything.
     expect(
       pairs(
         [fn("src/a.ts", "ユーザー情報を取得する", "same")],

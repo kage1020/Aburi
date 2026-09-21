@@ -8,10 +8,12 @@
  * Pascal boundaries, `_`, `.`, `::` and digit runs: `InvoiceService.createInvoice` →
  * `["invoice", "service", "create"]`. De-duplicated because Jaccard relies on set semantics.
  *
- * The camel boundary is ASCII, so a name in a script with no ASCII case boundary and no
- * separator is one token however long it is (`ユーザー情報を取得する`, `получитьПользователя`).
- * That makes the token count a poor measure of how much such a name says — see the
- * admissibility rule of diff-algorithm.md's threshold table.
+ * The camel boundary is Unicode case, not the ASCII ranges, so `получитьПользователя` splits
+ * at its hump the way `getUser` does. What no case rule can split is a script that has no
+ * case at all: `ユーザー情報を取得する` and `获取用户信息` come back whole however much they
+ * say. That is a fact about the writing system rather than about the name, which is why the
+ * token count is not what diff-algorithm.md §3.4.3 asks how much a name says — see
+ * `nameEvidence`.
  */
 export function tokenizeName(input: string): string[] {
   const seen = new Set<string>()
@@ -47,17 +49,73 @@ function splitCamel(word: string): string[] {
   return chunks
 }
 
+const LOWER = /\p{Ll}/u
+const UPPER = /\p{Lu}|\p{Lt}/u
+const DIGIT = /\p{Nd}/u
+
+/**
+ * Unicode case rather than the ASCII ranges, so a hump is a hump in every cased script:
+ * `получитьПользователя` splits into two the way `getUser` does. Titlecase counts as upper,
+ * for the digraphs that carry it (`ǅ`), since it opens a word exactly as an uppercase letter
+ * would. A script with no case reaches none of these arms and is left whole, which is the
+ * right answer — there is no boundary in it to find.
+ */
 function isCamelBoundary(prev: string, curr: string): boolean {
-  const prevLower = prev >= "a" && prev <= "z"
-  const prevUpper = prev >= "A" && prev <= "Z"
-  const prevDigit = prev >= "0" && prev <= "9"
-  const currLower = curr >= "a" && curr <= "z"
-  const currUpper = curr >= "A" && curr <= "Z"
-  const currDigit = curr >= "0" && curr <= "9"
+  const prevLower = LOWER.test(prev)
+  const prevUpper = UPPER.test(prev)
+  const prevDigit = DIGIT.test(prev)
+  const currLower = LOWER.test(curr)
+  const currUpper = UPPER.test(curr)
+  const currDigit = DIGIT.test(curr)
   if (prevLower && currUpper) return true
   if ((prevLower || prevUpper) && currDigit) return true
   if (prevDigit && (currLower || currUpper)) return true
   return false
+}
+
+/**
+ * Characters that are a morpheme on their own, so that a run of them is several words with
+ * nothing between them to split on. Han, the two kana, and Hangul syllables.
+ *
+ * `Script_Extensions` rather than `Script`, so the marks that belong to a run without being
+ * of its script come with it — U+30FC, the prolonged sound mark in `ユーザー`, is `Common`
+ * under `Script` and would otherwise read as foreign to the word it is part of.
+ *
+ * An alphabetic script with no case — Arabic, Hebrew, Thai — is deliberately not here. Its
+ * characters are letters, not morphemes, so a run of them is one word and the token count is
+ * already right about it; a multi-word identifier in those scripts separates its words, and
+ * `tokenizeName` splits on the separator.
+ */
+const MORPHEMIC = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}]/u
+
+/**
+ * How much a qualified name says, in units of "one thing named".
+ *
+ * The distinct-token count is this number for every name the tokeniser can segment, and every
+ * caller wanting *granularity* — how coarse a Jaccard over these tokens will be — should keep
+ * reading that count instead. This answers the different question diff-algorithm.md §3.4.3
+ * asks: could two unrelated Symbols carry this name by coincidence? One word could be carried
+ * twice; a phrase could not.
+ *
+ * A token of a cased or alphabetic script is one word, so it is worth 1 — `main`, `handler`
+ * and `initialize` alike, however long they run, because length is not what makes a word
+ * coincidental. A token of a morphemic script carries a word per character with no boundary
+ * written between them, so each of those characters is worth 1: `获取用户信息` is six, which
+ * is what it says, and is no more a coincidence than `getUserInformation`. Any remainder of a
+ * mixed token is worth 1 between them.
+ */
+export function nameEvidence(qname: string): number {
+  let total = 0
+  for (const token of tokenizeName(qname)) {
+    let morphemic = 0
+    let rest = false
+    for (const ch of token) {
+      if (MORPHEMIC.test(ch)) morphemic++
+      else rest = true
+    }
+    total += morphemic + (rest ? 1 : 0)
+  }
+  return total
 }
 
 /**

@@ -160,12 +160,12 @@ Dropped symbols all share the fingerprint `"000000000000"`, so they would collid
 # Bucket pre-filter (O(N) hash bucketing) suppresses K^2
 buckets = group remainingBase by (kind, signatureNullness)
         → { (kind, sigNull): [base symbols] }
-        skipping any base with tokenize(b.name).length <= 1     # §3.4.3, inadmissible
+        skipping any base with nameEvidence(b.name) <= 1        # §3.4.3, inadmissible
 
 candidates = []
 for h in remainingHead:
   if h.signature === null: continue                       # §3.4.3, inadmissible
-  if tokenize(h.name).length <= 1: continue               # §3.4.3, inadmissible
+  if nameEvidence(h.name) <= 1: continue                  # §3.4.3, inadmissible
   bucket = buckets.get((h.kind, 'has-sig'))
   if !bucket: continue
   threshold = thresholdFor(h.name)                        # §3.4.3
@@ -243,14 +243,16 @@ Two kinds of Symbol are skipped before any threshold applies, because for them a
 
 ```
 if h.signature === null:            skip the head entirely, leave for added/removed
-if tokenize(s.name).length <= 1:    skip the Symbol, either side, leave for added/removed
+if nameEvidence(s.name) <= 1:       skip the Symbol, either side, leave for added/removed
 ```
 
 **A null signature** makes `signatureSimilarity(null, null)` return 1.0 against every candidate. The bucket key partitions by signature nullness, so a signature-less head only ever sees signature-less candidates — there is nothing in its bucket it could legitimately pair with, and the rule needs no condition on them.
 
 **A one-token qualified name** is the whole of what §3.4 has to read about that Symbol's identity. `main` supplies one word and an empty owner, so a top-level `main(x: string): void` scores 1.0 against any other top-level `main(x: string): void` and two unrelated CLI entry points are reported as one `moved+changed` — which `--fail-on moved` gates on. The first threshold row was written to prevent exactly this and could not, because 1.0 is the top of the scale.
 
-The count is over the **whole qualified name** — the member and its owner together, which is everything §3.4 knows a Symbol by — and not over the last segment alone, which is what `thresholdFor` reads. `UserRepo.get` supplies three tokens and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
+The measure is over the **whole qualified name** — the member and its owner together, which is everything §3.4 knows a Symbol by — and not over the last segment alone, which is what `thresholdFor` reads. `UserRepo.get` supplies three and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
+
+It is `nameEvidence` (§3.4.1) and not the distinct-token count, which are the same number wherever the tokeniser can find a name's words and part company where it cannot. The two rules in this section therefore read the same name differently on purpose: `thresholdFor` asks how coarse the Jaccard will be, which really is the token count, and this rule asks how much the name says, which is not.
 
 The rule reads **both sides**, because the property belongs to a pairing rather than to one end of it.
 
@@ -258,7 +260,7 @@ It once read the head alone, on an arithmetic licence: a one-token name on eithe
 
 **What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged. What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
 
-The band is wider than it looks on codebases with non-Latin identifiers, because §3.4.1's tokeniser reads such a name as one token however much it says. `ユーザー情報を取得する` is refused on the same footing as `main`, and for that name the proxy is simply wrong: two unrelated Symbols do not carry it by coincidence. The rule keeps the count anyway rather than special-casing a script, because the fix is to measure what a name says by something better than a bare distinct-token count, and that is §3.4.1's to change. Tests pin the current behaviour so the change is visible when it comes.
+The band was once much wider on codebases with non-Latin identifiers, because the rule read the distinct-token count and §3.4.1's tokeniser reads `ユーザー情報を取得する` as one token however much it says. That refused it on the same footing as `main`, where the proxy is simply wrong: two unrelated Symbols do not carry that name by coincidence. `nameEvidence` is what closed that, and it closes it for the reason rather than for the script — a name of one word is still refused whatever wrote it, `главная` and `مستخدم` alongside `main`.
 
 Stage 3 is untouched by all of this: an identical logic fingerprint is proof on its own and does not ask the name to carry anything, so a `main` that moved file unchanged is still a move.
 
@@ -302,17 +304,39 @@ tokenize("InvoiceService.createInvoice") = ["invoice", "service", "create", "inv
 jaccard(A, B) = |A ∩ B| / |A ∪ B|
 ```
 
-**The camel boundary is ASCII.** The split compares code points against `a`–`z`, `A`–`Z` and `0`–`9`, so a name written in a script with no ASCII case boundary and no separator comes back whole:
+**The camel boundary is Unicode case.** The split tests `\p{Ll}`, `\p{Lu}`/`\p{Lt}` and `\p{Nd}` rather than the ASCII ranges, so a hump is a hump in every cased script. What no case rule can find is a boundary in a script that has no case, so such a name comes back whole:
 
 ```
+tokenize("получитьПользователя")  = ["получить", "пользователя"]   (2 — the hump registers)
 tokenize("ユーザー情報を取得する") = ["ユーザー情報を取得する"]     (1)
 tokenize("获取用户信息")           = ["获取用户信息"]               (1)
-tokenize("получитьПользователя")  = ["получитьпользователя"]       (1 — the camel hump does not register)
+tokenize("مستخدم")                = ["مستخدم"]                     (1 — caseless, and one word)
 tokenize("ユーザー.取得")          = ["ユーザー", "取得"]           (2 — a separator still splits)
-tokenize("UserRepo.取得")          = ["user", "repo", "取得"]       (3 — the ASCII half splits)
+tokenize("UserRepo.取得")          = ["user", "repo", "取得"]       (3 — the Latin half splits)
 ```
 
-Jaccard is unharmed by this: two names that tokenise whole still score 1.0 against each other and 0 against anything else, which is the right answer for identical and for unrelated names alike. What it does harm is any reading of the **count** as a measure of how much a name says — §3.4.3's admissibility rule is the one place that does, and it states the cost there.
+Jaccard is unharmed by this: two names that tokenise whole still score 1.0 against each other and 0 against anything else, which is the right answer for identical and for unrelated names alike. The count is likewise the right measure of the Jaccard's *granularity*, which is what §3.4.3's threshold table reads: a one-token name admits only 0 and 1 whatever script wrote it.
+
+What the count is not is a measure of **how much a name says**. `获取用户信息` is one token and six words. §3.4.3's admissibility rule is the one place that asks that question, and it reads `nameEvidence` instead:
+
+```
+nameEvidence(qname) = Σ over distinct tokens of:
+                        (morphemic characters in the token)
+                      + (1 if anything else is in it)
+
+where a morphemic character is one of Script_Extensions Han, Hiragana, Katakana or Hangul
+```
+
+A character of those scripts is a word with no boundary written after it, so it counts as the word it is. A token of any other script — cased or caseless, Latin or Arabic — is one word however long it runs, because length is not what makes a name coincidental: `initialize` is ten characters and one word, exactly as `main` is four and one. `Script_Extensions` rather than `Script` so that a mark belonging to a run comes with it; U+30FC, the prolonged sound mark in `ユーザー`, is `Common` under `Script`.
+
+An alphabetic script with no case is deliberately not morphemic. Its characters are letters rather than words, so a run of them is one word and the token count was already right; a multi-word identifier in such a script writes a separator, and the tokeniser splits on it (`مستخدم.احصل` → 2).
+
+```
+nameEvidence("main")                = 1     nameEvidence("获取用户信息")           = 6
+nameEvidence("initialize")          = 1     nameEvidence("ユーザー情報を取得する") = 11
+nameEvidence("مستخدم")              = 1     nameEvidence("получитьПользователя") = 2
+nameEvidence("Main.main")           = 1     nameEvidence("UserRepo.取得")          = 4
+```
 
 #### 3.4.6 The owner gate (R-8: avoiding same-name method collisions)
 
@@ -1001,6 +1025,10 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF16 | Same rule differing only in line (within ±2) | no delta.rules.modified (line fuzz) |
 | DF17 | Same-condition rule with a large line difference (>2) | delta as added + removed |
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
+| DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word |
+| DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
+| DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` counts a morphemic character as the word it is (§3.4.1) |
+| DF19c | `получитьПользователя` moved file with an edited body | as DF19b, on its token count alone: the camel boundary is Unicode case, so the hump splits |
 
 ## 10.1 Diff schema compatibility policy
 

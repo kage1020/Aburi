@@ -36,6 +36,7 @@ export {
   jaccardTokens,
   lastSegment,
   memberSimilarity,
+  nameEvidence,
   nameSimilarity,
   ownersAreCompatible,
   tokenizeName,
