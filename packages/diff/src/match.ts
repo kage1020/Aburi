@@ -472,9 +472,11 @@ function memberTokens(qname: string): readonly string[] {
  * owner), 2 tokens → 0.95 (refuses `getUser` vs `getUsers`), otherwise 0.85.
  *
  * The token count, not `nameEvidence`, and deliberately: these rows are about how coarse a
- * Jaccard over those tokens can be. One token admits only 0 and 1, two admit thirds and a
- * half, and the bar rises to meet that. `ユーザー情報を取得する` is one token whatever it
- * says, so its name axis really is all-or-nothing and the first row is right about it.
+ * Jaccard over those tokens can be, and the bar rises to meet that. One token against a name
+ * of `n` scores 0 or `1/n`, so nothing short of an identical single token reaches 1.0 and the
+ * composite tops out at `0.5 × 0.5 + 0.3 + 0.2 = 0.75` below it — under every row. A name of
+ * one token really is all-or-nothing on its name axis, `ユーザー情報を取得する` included
+ * however much it says, and the first row is right about it.
  */
 const EXACT_MATCH_ONLY = 1
 const TWO_TOKEN_THRESHOLD = 0.95
@@ -506,10 +508,11 @@ function thresholdFor(qname: string): number {
  * belongs to a pairing (`Main.main` clears the owner gate against `Mains.main` on an
  * identical member name).
  *
- * `nameEvidence` rather than the token count, which is the same number wherever the tokeniser
- * can segment a name and a different one where it cannot: `ユーザー情報を取得する` is one
- * token and says eleven things, and two unrelated Symbols no more carry it by coincidence than
- * they carry `getUserInformation`.
+ * `nameEvidence` rather than the token count, which agree on a name whose words the tokeniser
+ * can find and part company on a run it cannot segment: `ユーザー情報を取得する` is one token,
+ * and a floor on the words in its runs puts it well past one, so two unrelated Symbols no more
+ * carry it by coincidence than they carry `getUserInformation`. What it buys such a name is
+ * narrower than this rule, since `thresholdFor` still reads one token and asks the full 1.0.
  */
 function saysEnoughToPair(qname: string): boolean {
   return nameEvidence(qname) > 1

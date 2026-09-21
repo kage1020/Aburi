@@ -15,10 +15,13 @@ import { buildDiff, matchStageNameSignature } from "../src"
  * It is an admissibility rule, alongside the signature-less one: a Symbol whose qualified name
  * says only one thing is not paired in stage 4 at all.
  *
- * What counts as "one thing" is `nameEvidence`, not the distinct-token count. The two agree
- * wherever the tokeniser can find the words — which is every cased script, and any script at
- * all once a separator is written — and part company where it cannot: a run of Han or kana is
- * one token and several words. The last block here is that difference.
+ * What counts as "one thing" is `nameEvidence`, not the distinct-token count. The two agree on
+ * a name whose words the tokeniser can find, and part company on a run it cannot segment,
+ * where the measure reads the run rather than the token: `ユーザー.取得` is two tokens and
+ * two runs, and `获取用户信息` is one token and six characters. A run counts as its characters
+ * over the longest a single word of that script runs, which is a floor on the words in it, so
+ * a phrase is admitted and a single long word is not. The last two blocks here are that
+ * difference and the limit of it.
  *
  * The measure is over the **qualified name**, which is the whole of what stage 4 reads about a
  * Symbol's identity — not over the last segment alone, which is what the threshold table
@@ -148,9 +151,10 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
   // much a name says, and refused `ユーザー情報を取得する` on the same footing as `main` —
   // which is wrong about it: two unrelated Symbols do not carry that name by coincidence.
   //
-  // `nameEvidence` measures it instead. A character of a morphemic script is a word with no
-  // boundary written after it, so it counts as one; a token of any other script is one word
-  // whatever its length. These pair now, and the ones that really are one word still do not.
+  // `nameEvidence` measures it instead: a run of such a script counts as its characters over
+  // the longest a single word of it runs — three for Han, six for kana and Hangul — which is
+  // a floor on how many words are in the run. A phrase clears it. A single word does not,
+  // which is the next block.
 
   it("pairs a Japanese name across a file move with an edited body", () => {
     expect(
@@ -248,6 +252,72 @@ describe("a name the tokeniser cannot segment still says what it says", () => {
         [fn("src/b.ts", "ユーザー情報を取得する", "same")],
       ),
     ).toEqual(["ts:src/a.ts#ユーザー情報を取得する -> ts:src/b.ts#ユーザー情報を取得する"])
+  })
+})
+
+describe("a single word is a single word, however it is written", () => {
+  // The floor is what separates these from the block above. Counting each character as a word
+  // would admit every one of them: `メイン` is `main` in three characters, `초기화` is
+  // `initialize` in three, `ハンドラー` is `handler` in five. Two unrelated Symbols carry
+  // these by coincidence exactly as they carry their English counterparts, so the rule this
+  // file is about has to go on refusing them.
+  const oneWord = ["値", "取得", "する", "初期化", "メイン", "초기화", "ユーザー", "ハンドラー"]
+
+  it.each(oneWord)("refuses two unrelated top-level `%s`", (name) => {
+    expect(pairs([fn("src/a.ts", name, "aaa")], [fn("src/b.ts", name, "bbb")])).toEqual([])
+  })
+
+  it("refuses them on the base side too", () => {
+    expect(
+      pairs([method("src/a.ts", "ハンドラー.実行", "aaa")], [method("src/b.ts", "実行", "bbb")]),
+    ).toEqual([])
+  })
+
+  it("admits the phrases they are built into", () => {
+    // The same characters, said at phrase length: the floor clears 1 and the pairing is back.
+    expect(
+      pairs(
+        [fn("src/a.ts", "初期化処理を実行する", "aaa")],
+        [fn("src/b.ts", "初期化処理を実行する", "bbb")],
+      ),
+    ).toEqual(["ts:src/a.ts#初期化処理を実行する -> ts:src/b.ts#初期化処理を実行する"])
+  })
+
+  it("gives the same verdict for either normalisation of the name", () => {
+    // `ガイド取得` decomposed is one more code point than composed. The tokeniser normalises
+    // first, so the measure does not turn on which spelling reached the IR.
+    const composed = "\u30AC\u30A4\u30C9\u53D6\u5F97"
+    const decomposed = "\u30AB\u3099\u30A4\u30C9\u53D6\u5F97"
+    expect(pairs([fn("src/a.ts", composed, "aaa")], [fn("src/b.ts", composed, "bbb")])).toEqual([
+      `ts:src/a.ts#${composed} -> ts:src/b.ts#${composed}`,
+    ])
+    expect(pairs([fn("src/a.ts", decomposed, "aaa")], [fn("src/b.ts", decomposed, "bbb")])).toEqual(
+      [`ts:src/a.ts#${decomposed} -> ts:src/b.ts#${decomposed}`],
+    )
+  })
+})
+
+describe("what admissibility buys such a name, and what it does not", () => {
+  it("recovers the signature-identical move, not the whole band", () => {
+    // Admissibility is stage 4's door, not its threshold. The name is still one token, so
+    // `thresholdFor` reads its last segment as one and demands the full 1.0 — which an
+    // identical signature reaches and an edited one does not. A Latin name of the same
+    // reach has two tokens in its last segment and the 0.95 row to fall back on.
+    const added = sig({ inputs: [ONE_INPUT, { name: "y", type: "number" }] })
+    const head = (name: string): IRSymbol =>
+      makeSymbol({
+        id: `ts:src/b.ts#${name}`,
+        name,
+        signature: added,
+        fingerprint: fp("bbb"),
+        source: { file: "src/b.ts", startLine: 1, endLine: 2 },
+      })
+    expect(
+      pairs([fn("src/a.ts", "ユーザー情報を取得する", "aaa")], [head("ユーザー情報を取得する")]),
+    ).toEqual([])
+    expect(
+      pairs([fn("src/a.ts", "getUserInformation", "aaa")], [head("getUserInformation")]),
+    ).toEqual(["ts:src/a.ts#getUserInformation -> ts:src/b.ts#getUserInformation"])
   })
 })
 

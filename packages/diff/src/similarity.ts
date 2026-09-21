@@ -8,6 +8,10 @@
  * Pascal boundaries, `_`, `.`, `::` and digit runs: `InvoiceService.createInvoice` →
  * `["invoice", "service", "create"]`. De-duplicated because Jaccard relies on set semantics.
  *
+ * The input is normalised to NFC first, so a name spelled with combining marks tokenises as
+ * the name it is: `ガ` written U+30AB U+3099 is the same one token as U+30AC, and a Hangul
+ * syllable written as conjoining jamo is the same one token as its precomposed block.
+ *
  * The camel boundary is Unicode case, not the ASCII ranges, so `получитьПользователя` splits
  * at its hump the way `getUser` does. What no case rule can split is a script that has no
  * case at all: `ユーザー情報を取得する` and `获取用户信息` come back whole however much they
@@ -18,7 +22,7 @@
 export function tokenizeName(input: string): string[] {
   const seen = new Set<string>()
   const out: string[] = []
-  for (const raw of input.split(/[.:_\-\s/]+/)) {
+  for (const raw of input.normalize("NFC").split(/[.:_\-\s/]+/)) {
     if (raw.length === 0) continue
     for (const piece of splitCamel(raw)) {
       const norm = piece.toLowerCase()
@@ -33,17 +37,20 @@ export function tokenizeName(input: string): string[] {
 function splitCamel(word: string): string[] {
   const chunks: string[] = []
   let current = ""
+  let prev = ""
   for (const ch of word) {
     if (current === "") {
       current = ch
+      prev = ch
       continue
     }
-    if (isCamelBoundary(current.slice(-1), ch)) {
+    if (isCamelBoundary(prev, ch)) {
       chunks.push(current)
       current = ch
     } else {
       current += ch
     }
+    prev = ch
   }
   if (current.length > 0) chunks.push(current)
   return chunks
@@ -59,6 +66,11 @@ const DIGIT = /\p{Nd}/u
  * for the digraphs that carry it (`ǅ`), since it opens a word exactly as an uppercase letter
  * would. A script with no case reaches none of these arms and is left whole, which is the
  * right answer — there is no boundary in it to find.
+ *
+ * `prev` is the previous code point, carried along by `splitCamel` rather than sliced back
+ * off the chunk: slicing takes one UTF-16 code unit, which is half of an astral character,
+ * and a lone surrogate is of no category at all. The cased scripts outside the BMP — Adlam,
+ * Deseret, Osage — are the ones that were left whole by that.
  */
 function isCamelBoundary(prev: string, curr: string): boolean {
   const prevLower = LOWER.test(prev)
@@ -74,22 +86,39 @@ function isCamelBoundary(prev: string, curr: string): boolean {
 }
 
 /**
- * Characters that are a morpheme on their own, so that a run of them is several words with
- * nothing between them to split on. Han, the two kana, and Hangul syllables.
+ * The scripts that write a word without writing where it ends, and the longest a single word
+ * runs in each.
  *
- * `Script_Extensions` rather than `Script`, so the marks that belong to a run without being
- * of its script come with it — U+30FC, the prolonged sound mark in `ユーザー`, is `Common`
- * under `Script` and would otherwise read as foreign to the word it is part of.
+ * Han writes a morpheme per character, and the longest single word it spells is three of
+ * them — `初期化`, `数据库`, `处理器` — so three Han characters are worth one word. Kana and
+ * Hangul write a syllable per character, and a word takes more of those: `ハンドラー` is one
+ * word in five, `コンピュータ` and `데이터베이스` one in six. Six, then, for both.
+ *
+ * Six is the longest word assumed, not the longest there is: `アプリケーション` is one word
+ * in eight and is admitted on that. The constants sit where they do because a name of seven
+ * syllables is more often a phrase (`사용자정보조회`) than a loanword, and admitting a long
+ * single word costs a wrong pairing where refusing a phrase costs the whole fix this rule
+ * exists for.
+ *
+ * `Script_Extensions` rather than `Script`, so a character that belongs to a run without
+ * being of its script comes with it: U+30FC, the prolonged sound mark in `ユーザー`, is a
+ * modifier letter of script `Common` and would otherwise read as foreign to the word it
+ * lengthens — which matters, since a foreign character is counted as a word of its own and
+ * `ユーザー` would be admitted on the strength of it.
  *
  * An alphabetic script with no case — Arabic, Hebrew, Thai — is deliberately not here. Its
- * characters are letters, not morphemes, so a run of them is one word and the token count is
- * already right about it; a multi-word identifier in those scripts separates its words, and
- * `tokenizeName` splits on the separator.
+ * characters are letters, not morphemes or syllables, so a run of them is one word and the
+ * token count is already right about it; a multi-word identifier in those scripts separates
+ * its words, and `tokenizeName` splits on the separator.
  */
-const MORPHEMIC = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}]/u
+const HAN = /\p{scx=Han}/u
+const SYLLABIC = /[\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}]/u
+const MARK = /\p{M}/u
+const HAN_CHARS_PER_WORD = 3
+const SYLLABIC_CHARS_PER_WORD = 6
 
 /**
- * How much a qualified name says, in units of "one thing named".
+ * How much a qualified name says, counted in words.
  *
  * The distinct-token count is this number for every name the tokeniser can segment, and every
  * caller wanting *granularity* — how coarse a Jaccard over these tokens will be — should keep
@@ -99,23 +128,41 @@ const MORPHEMIC = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}]/u
  *
  * A token of a cased or alphabetic script is one word, so it is worth 1 — `main`, `handler`
  * and `initialize` alike, however long they run, because length is not what makes a word
- * coincidental. A token of a morphemic script carries a word per character with no boundary
- * written between them, so each of those characters is worth 1: `获取用户信息` is six, which
- * is what it says, and is no more a coincidence than `getUserInformation`. Any remainder of a
- * mixed token is worth 1 between them.
+ * coincidental. A run of a script that writes no word boundary cannot be segmented, so it is
+ * counted instead: its characters divided by the longest a single word of that script runs,
+ * which is a floor on the number of words in it. `获取用户信息` is six Han characters, so it
+ * says at least two words and is admitted; `ハンドラー` is five kana, so it says at least
+ * one, which is what `handler` says and not enough to pair on.
+ *
+ * Characters are counted once each, the way tokens are — `取得取得` says what `取得` says,
+ * as `getGet` says what `get` says. Combining marks are not counted: after NFC they are the
+ * remainder of a character that did not compose, not a word.
+ *
+ * The number is a floor rather than a count, so it is fractional where a run is: `取得` is
+ * two thirds of a word, `getUser` is exactly 2.
  */
 export function nameEvidence(qname: string): number {
-  let total = 0
+  const counted = new Set<string>()
+  let han = 0
+  let syllabic = 0
+  let words = 0
   for (const token of tokenizeName(qname)) {
-    let morphemic = 0
-    let rest = false
+    let alphabetic = false
     for (const ch of token) {
-      if (MORPHEMIC.test(ch)) morphemic++
-      else rest = true
+      if (MARK.test(ch)) continue
+      const isHan = HAN.test(ch)
+      if (!isHan && !SYLLABIC.test(ch)) {
+        alphabetic = true
+        continue
+      }
+      if (counted.has(ch)) continue
+      counted.add(ch)
+      if (isHan) han++
+      else syllabic++
     }
-    total += morphemic + (rest ? 1 : 0)
+    if (alphabetic) words++
   }
-  return total
+  return words + han / HAN_CHARS_PER_WORD + syllabic / SYLLABIC_CHARS_PER_WORD
 }
 
 /**

@@ -35,6 +35,16 @@ describe("tokenizeName", () => {
     expect(tokenizeName("mapǅevo")).toEqual(["map", "ǆevo"])
   })
 
+  it("finds the hump in a cased script outside the BMP", () => {
+    // `splitCamel` used to compare the last UTF-16 code unit of the chunk against the next
+    // code point, so after an astral character it tested a lone surrogate and matched no
+    // category at all. Deseret, Adlam and Osage have case and live above U+FFFF.
+    expect(tokenizeName("\u{10428}\u{10401}")).toEqual(["\u{10428}", "\u{10429}"])
+    expect(tokenizeName("\u{1E922}\u{1E901}")).toEqual(["\u{1E922}", "\u{1E923}"])
+    // And the digit boundary, which an astral `\p{Nd}` lost the same way.
+    expect(tokenizeName("get\u{1D7CE}")).toEqual(["get", "\u{1D7CE}"])
+  })
+
   it("splits a digit run in a non-ASCII script too", () => {
     expect(tokenizeName("пользователь2Id")).toEqual(["пользователь", "2", "id"])
   })
@@ -59,19 +69,41 @@ describe("nameEvidence", () => {
     expect(nameEvidence("")).toBe(0)
   })
 
-  it("counts a morphemic character as the word it is", () => {
-    // Six Han characters are six words with no boundary written between them, which is what
-    // the token count cannot see.
-    expect(nameEvidence("获取用户信息")).toBe(6)
-    expect(nameEvidence("사용자정보조회")).toBe(7)
-    expect(nameEvidence("ユーザー情報を取得する")).toBe(11)
+  it("counts a run it cannot segment by its characters, floored to words", () => {
+    // Three Han characters are the longest a single word runs, so six of them are at least
+    // two words. Kana and Hangul take six, so seven syllables are at least one word and a bit.
+    expect(nameEvidence("获取用户信息")).toBe(2)
+    expect(nameEvidence("사용자정보조회")).toBe(7 / 6)
+    // Four Han characters and six distinct kana (`ー` twice).
+    expect(nameEvidence("ユーザー情報を取得する")).toBe(4 / 3 + 1)
+  })
+
+  it("refuses a single word of a script that writes no word boundary", () => {
+    // The point of the divisor. Each of these is one word — `get`, `main`, `initialize`,
+    // `user`, `handler` — and each would clear a bar of "two or more characters".
+    for (const oneWord of [
+      "値",
+      "取得",
+      "する",
+      "初期化",
+      "メイン",
+      "초기화",
+      "ユーザー",
+      "ハンドラー",
+    ]) {
+      expect({ name: oneWord, evidence: nameEvidence(oneWord) <= 1 }).toEqual({
+        name: oneWord,
+        evidence: true,
+      })
+    }
   })
 
   it("keeps a prolonged sound mark with the kana it lengthens", () => {
-    // U+30FC is script Common; under `Script` rather than `Script_Extensions` it would read
-    // as a foreign character and add a spurious unit of its own.
-    expect(nameEvidence("ユーザー")).toBe(4)
-    expect(nameEvidence("ー")).toBe(1)
+    // U+30FC is a modifier letter of script Common; under `Script` rather than
+    // `Script_Extensions` it would read as a foreign character worth a word of its own, and
+    // `ユーザー` — three distinct kana and two of those marks — would be admitted on them.
+    expect(nameEvidence("ユーザー")).toBe(3 / 6)
+    expect(nameEvidence("ー")).toBe(1 / 6)
   })
 
   it("is not a length measure — a long word is still one word", () => {
@@ -87,21 +119,34 @@ describe("nameEvidence", () => {
     expect(nameEvidence("مستخدم.احصل")).toBe(2)
   })
 
-  it("counts an astral-plane Han character once, not twice", () => {
+  it("counts an astral-plane character once, not twice", () => {
     // U+20BB7 is a surrogate pair in UTF-16. The scan iterates code points, so it is one
-    // character and one word; counting UTF-16 units would double every Extension-B name.
-    expect(nameEvidence("\u{20BB7}\u{20BB7}")).toBe(2)
-    expect(nameEvidence("\u{20BB7}")).toBe(1)
+    // character; counting UTF-16 units would double every Extension-B name.
+    expect(nameEvidence("\u{20BB7}")).toBe(1 / 3)
+    expect(nameEvidence("\u{20BB7}\u{2A6B2}")).toBe(2 / 3)
   })
 
   it("adds one for whatever a mixed token has besides its morphemes", () => {
-    expect(nameEvidence("UserRepo.取得")).toBe(4)
-    expect(nameEvidence("取得User")).toBe(3)
+    expect(nameEvidence("UserRepo.取得")).toBe(2 + 2 / 3)
+    expect(nameEvidence("取得User")).toBe(1 + 2 / 3)
   })
 
-  it("dedups the way the token set does, since that is what the score reads", () => {
+  it("dedups the way the token set does, inside a run as well as across tokens", () => {
+    // `getGet` is one token after dedup, and `取得取得` says what `取得` says for the same
+    // reason: a repeat is not a second thing named.
     expect(nameEvidence("Main.main")).toBe(1)
-    expect(nameEvidence("取得.取得")).toBe(2)
+    expect(nameEvidence("取得.取得")).toBe(2 / 3)
+    expect(nameEvidence("取得取得")).toBe(nameEvidence("取得"))
+    expect(nameEvidence("ああああ")).toBe(nameEvidence("あ"))
+  })
+
+  it("gives the same answer for either normalisation of a name", () => {
+    // `ガ` is one character precomposed and two decomposed, and a Hangul syllable is one
+    // block or three conjoining jamo. NFC first, so the verdict does not turn on which
+    // spelling a toolchain emitted.
+    expect(nameEvidence("\u30AB\u3099")).toBe(nameEvidence("\u30AC"))
+    expect(nameEvidence("\u1100\u1161\u11A8")).toBe(nameEvidence("\uAC01"))
+    expect(tokenizeName("\u30AB\u3099")).toEqual(tokenizeName("\u30AC"))
   })
 })
 

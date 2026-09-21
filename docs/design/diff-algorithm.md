@@ -252,7 +252,7 @@ if nameEvidence(s.name) <= 1:       skip the Symbol, either side, leave for adde
 
 The measure is over the **whole qualified name** — the member and its owner together, which is everything §3.4 knows a Symbol by — and not over the last segment alone, which is what `thresholdFor` reads. `UserRepo.get` supplies three and goes on pairing though its last segment supplies one; the threshold row that still governs it is the one above. Tokens are deduped (§3.4.1), so `Main.main` supplies one and is skipped: the formula cannot tell it from a bare `main`.
 
-It is `nameEvidence` (§3.4.1) and not the distinct-token count, which are the same number wherever the tokeniser can find a name's words and part company where it cannot. The two rules in this section therefore read the same name differently on purpose: `thresholdFor` asks how coarse the Jaccard will be, which really is the token count, and this rule asks how much the name says, which is not.
+It is `nameEvidence` (§3.4.1) and not the distinct-token count. The two agree on a name whose words the tokeniser can find, and part company on a run it cannot segment, where the measure reads the run and not the token: `ユーザー.取得` is two tokens and `1 1/6` words. The two rules in this section therefore read the same name differently on purpose: `thresholdFor` asks how coarse the Jaccard will be, which really is the token count, and this rule asks how much the name says, which is not.
 
 The rule reads **both sides**, because the property belongs to a pairing rather than to one end of it.
 
@@ -260,7 +260,9 @@ It once read the head alone, on an arithmetic licence: a one-token name on eithe
 
 **What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged. What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
 
-The band was once much wider on codebases with non-Latin identifiers, because the rule read the distinct-token count and §3.4.1's tokeniser reads `ユーザー情報を取得する` as one token however much it says. That refused it on the same footing as `main`, where the proxy is simply wrong: two unrelated Symbols do not carry that name by coincidence. `nameEvidence` is what closed that, and it closes it for the reason rather than for the script — a name of one word is still refused whatever wrote it, `главная` and `مستخدم` alongside `main`.
+The band was once much wider on codebases with non-Latin identifiers, because the rule read the distinct-token count and §3.4.1's tokeniser reads `ユーザー情報を取得する` as one token however much it says. That refused it on the same footing as `main`, where the proxy is simply wrong: two unrelated Symbols do not carry that name by coincidence. `nameEvidence` is what closed that, and it closes it for the reason rather than for the script — a name of one word is still refused whatever wrote it. `главная` and `مستخدم` alongside `main`; and, since the measure is a floor on words rather than a count of characters, `メイン` and `초기화` and `ハンドラー` alongside the same three.
+
+What a morphemic name gets back is narrower than the rule's own band, and the reason is the threshold table rather than this rule. Such a name is one token, so `thresholdFor` hands it `EXACT_MATCH_ONLY` and only an identical signature past a compatible owner reaches 1.0: `ユーザー情報を取得する` moved file with an edited body is a pair, and the same move with one added input is not, where `getUserInformation` — two tokens in its last segment — has the 0.95 row to fall back on. Admissibility opens the door; the row still decides who comes through.
 
 Stage 3 is untouched by all of this: an identical logic fingerprint is proof on its own and does not ask the name to carry anything, so a `main` that moved file unchanged is still a move.
 
@@ -315,28 +317,36 @@ tokenize("ユーザー.取得")          = ["ユーザー", "取得"]           
 tokenize("UserRepo.取得")          = ["user", "repo", "取得"]       (3 — the Latin half splits)
 ```
 
-Jaccard is unharmed by this: two names that tokenise whole still score 1.0 against each other and 0 against anything else, which is the right answer for identical and for unrelated names alike. The count is likewise the right measure of the Jaccard's *granularity*, which is what §3.4.3's threshold table reads: a one-token name admits only 0 and 1 whatever script wrote it.
+Jaccard is unharmed by this: two names that tokenise whole still score 1.0 against each other and 0 against anything else, which is the right answer for identical and for unrelated names alike. The count is likewise the right measure of the Jaccard's *granularity*, which is what §3.4.3's threshold table reads: one token against a name of `n` scores 0 or `1/n`, so nothing but an identical single token reaches 1.0, and the composite tops out at `0.5 × 0.5 + 0.3 + 0.2 = 0.75` below that — under every row of the table. A one-token name is therefore all-or-nothing on its name axis whatever script wrote it, which is what the first row is calibrated to.
 
-What the count is not is a measure of **how much a name says**. `获取用户信息` is one token and six words. §3.4.3's admissibility rule is the one place that asks that question, and it reads `nameEvidence` instead:
-
-```
-nameEvidence(qname) = Σ over distinct tokens of:
-                        (morphemic characters in the token)
-                      + (1 if anything else is in it)
-
-where a morphemic character is one of Script_Extensions Han, Hiragana, Katakana or Hangul
-```
-
-A character of those scripts is a word with no boundary written after it, so it counts as the word it is. A token of any other script — cased or caseless, Latin or Arabic — is one word however long it runs, because length is not what makes a name coincidental: `initialize` is ten characters and one word, exactly as `main` is four and one. `Script_Extensions` rather than `Script` so that a mark belonging to a run comes with it; U+30FC, the prolonged sound mark in `ユーザー`, is `Common` under `Script`.
-
-An alphabetic script with no case is deliberately not morphemic. Its characters are letters rather than words, so a run of them is one word and the token count was already right; a multi-word identifier in such a script writes a separator, and the tokeniser splits on it (`مستخدم.احصل` → 2).
+What the count is not is a measure of **how much a name says**. `获取用户信息` is one token and a phrase. §3.4.3's admissibility rule is the one place that asks that question, and it reads `nameEvidence` instead:
 
 ```
-nameEvidence("main")                = 1     nameEvidence("获取用户信息")           = 6
-nameEvidence("initialize")          = 1     nameEvidence("ユーザー情報を取得する") = 11
-nameEvidence("مستخدم")              = 1     nameEvidence("получитьПользователя") = 2
-nameEvidence("Main.main")           = 1     nameEvidence("UserRepo.取得")          = 4
+nameEvidence(qname) = (number of distinct tokens holding anything else)
+                    + (distinct Han characters)      / 3
+                    + (distinct kana and Hangul)     / 6
+
+over the NFC form of the name; combining marks are not counted
 ```
+
+A token of a script that writes its word boundaries is one word however long it runs, because length is not what makes a name coincidental: `initialize` is ten characters and one word, exactly as `main` is four and one. A run of a script that writes no boundary cannot be segmented, so it is counted instead, and the divisor is **the longest a single word of that script runs**. Han writes a morpheme per character and spells its longest single words in three — `初期化`, `数据库`, `处理器`. Kana and Hangul write a syllable per character and take more: `ハンドラー` is one word in five, `コンピュータ` and `데이터베이스` one in six.
+
+The quotient is therefore a *floor* on the number of words in the run, which is what the rule needs — it admits only when the run cannot be a single word. It is fractional where a run is: `取得` is two thirds of a word and `getUser` is exactly 2.
+
+`Script_Extensions` rather than `Script` so that a character belonging to a run comes with it. U+30FC, the prolonged sound mark in `ユーザー`, is a modifier letter of script `Common`; read as foreign it would count as a word of its own, and `ユーザー` — three kana and two marks — would be admitted on the strength of them. Characters are counted once each, as tokens are, so `取得取得` says what `取得` says. NFC first, so a decomposed `ガ` is the one character it spells and Hangul jamo are the syllable they compose.
+
+An alphabetic script with no case is deliberately not in either bucket. Its characters are letters rather than morphemes or syllables, so a run of them is one word and the token count was already right; a multi-word identifier in such a script writes a separator, and the tokeniser splits on it (`مستخدم.احصل` → 2).
+
+```
+nameEvidence("main")                = 1       nameEvidence("获取用户信息")           = 2
+nameEvidence("initialize")          = 1       nameEvidence("ユーザー情報を取得する") = 2 1/3
+nameEvidence("مستخدم")              = 1       nameEvidence("사용자정보조회")         = 1 1/6
+nameEvidence("Main.main")           = 1       nameEvidence("получитьПользователя") = 2
+nameEvidence("初期化")              = 1       nameEvidence("UserRepo.取得")          = 2 2/3
+nameEvidence("ハンドラー")          = 5/6     nameEvidence("ユーザー.取得")          = 1 1/6
+```
+
+Six is the longest word the measure assumes, not the longest there is: `アプリケーション` is one word in eight and is admitted as though it were more. The constants sit where they do because a name of seven syllables is more often a phrase (`사용자정보조회`) than a loanword, and a wrong pairing costs less than the band of real moves a higher divisor would refuse.
 
 #### 3.4.6 The owner gate (R-8: avoiding same-name method collisions)
 
@@ -1027,8 +1037,10 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
 | DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
-| DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` counts a morphemic character as the word it is (§3.4.1) |
+| DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` floors an unsegmentable run to the words it must hold (§3.4.1) |
 | DF19c | `получитьПользователя` moved file with an edited body | as DF19b, on its token count alone: the camel boundary is Unicode case, so the hump splits |
+| DF19d | A name of one word written without word boundaries — `メイン`, `초기화`, `ハンドラー`, `取得` | as DF19; the floor puts each under a word, as `main` and `handler` are |
+| DF19e | `ユーザー情報を取得する` moved file with an edited body **and** an added input | added: 1, removed: 1 — one token in its last segment, so §3.4.3's first threshold row asks the full 1.0 |
 
 ## 10.1 Diff schema compatibility policy
 
