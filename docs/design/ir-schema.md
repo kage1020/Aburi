@@ -57,6 +57,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `Component.description` | **yes** | **A** | always emitted; `null` when the component carries no description |
 | `Symbol.component` | **yes** | **A** | always emitted; `null` when the Symbol lies outside every Component |
 | `Symbol.signature` | **yes** | **A** | always emitted; `null` for Symbols with no callable signature |
+| `Decorator.qualifier` | no | B | omitted when the decorator was written as a bare name; never `""` (§6) |
 | `Signature.inferredThrows` | no | B | omitted when nothing was inferred; never `[]` (§7) |
 | `Effect.line` | no | B | present iff the entry is locally detected (schema-enforced by the `allOf`'s required/forbidden flip, §9.4) |
 | `Effect.propagated` | no | B | present iff `true`. Convention only — the schema's `if` treats `false` and absent alike, so `propagated: false` validates while violating this rule (§9.4) |
@@ -360,7 +361,8 @@ Symbols with `dropped: true` have `rules`/`effects`/`calls`/`fingerprint` set to
 ```jsonc
 {
   "name": "Post",                             // required
-  "raw": "Post('/invoices')",                 // required, verbatim source
+  "qualifier": "nest",                        // Class B (§1.1): absent unless the decorator was written through a receiver
+  "raw": "nest.Post('/invoices')",            // required, verbatim source
   "arguments": ["'/invoices'"],               // required, string representations of the arguments
   "boundary": true,                           // required
   "line": 14                                  // required
@@ -368,6 +370,8 @@ Symbols with `dropped: true` have `rules`/`effects`/`calls`/`fingerprint` set to
 ```
 
 The `boundary: true` determination is made by the framework plugin. The Aburi core does not hardcode it.
+
+`name` is the decorator's leaf identifier, and `qualifier` is the receiver it was written through, verbatim: `@nest.Post()` gives `nest`, `@a.b.C()` gives `a.b`, and `@Post()` gives none. It is **Class B** per §1.1 — a bare decorator omits the key outright, never `null` and never `""`, and the schema enforces `minLength: 1` so an empty string cannot be written by accident. A consumer resolving it against `ImportEdge.namespaceBinding` takes its first dot-separated segment, which is the only part that can name a local binding ([lang-plugin.md](./lang-plugin.md) §5.2.2). Splitting it out of `name` is what lets a namespace import be told from a bare one; `raw` still quotes the whole written form, so nothing that reads `raw` needs to change.
 
 ## 7. Signature
 

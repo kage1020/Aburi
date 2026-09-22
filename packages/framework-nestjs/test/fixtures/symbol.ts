@@ -35,3 +35,17 @@ export function makeDecorator(name: string, args: string[] = [], line = 1): Deco
     line,
   }
 }
+
+/**
+ * A decorator written through a receiver — `@nest.Controller("/x")` — which is what the
+ * language plugin emits with `qualifier` set. `name` stays the leaf, as it does in the IR.
+ */
+export function makeQualifiedDecorator(
+  qualifier: string,
+  name: string,
+  args: string[] = [],
+  line = 1,
+): Decorator {
+  const bare = makeDecorator(name, args, line)
+  return { ...bare, qualifier, raw: `${qualifier}.${bare.raw}` }
+}

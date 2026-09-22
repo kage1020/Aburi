@@ -110,6 +110,7 @@ function readDecorator(node: Node): Decorator | null {
     const args = argsNode !== null ? readCallArguments(argsNode) : []
     return {
       name,
+      ...qualifierOf(callee),
       raw: inner.text,
       arguments: args,
       boundary: false,
@@ -121,6 +122,7 @@ function readDecorator(node: Node): Decorator | null {
   const name = leafIdentifier(inner)
   return {
     name,
+    ...qualifierOf(inner),
     raw: inner.text,
     arguments: [],
     boundary: false,
@@ -136,6 +138,38 @@ function leafIdentifier(node: Node): string {
     if (property !== null) return property.text
   }
   return node.text
+}
+
+/**
+ * The receiver a decorator was written through, as `Decorator.qualifier` — `nest` for
+ * `@nest.Controller()`, `a.b` for `@a.b.C()`, nothing for `@Controller()`.
+ *
+ * `leafIdentifier` throws the receiver away, which is right for the name but loses the only
+ * thing that says *where the name came from*: `@nest.Controller()` and `@tsed.Controller()`
+ * both arrive as `Controller`, and a framework plugin matching names against the file's
+ * import edges cannot tie either back to its module, because a namespace edge binds the
+ * object rather than any name on it (framework-plugin.md).
+ *
+ * The whole receiver is carried, not its first segment, because the IR quotes what was
+ * written; a consumer resolving a namespace binding takes the first segment itself, since
+ * that is the only part of `a.b` that can name something in scope.
+ *
+ * The receiver is taken as it stands, with no test that it looks like a path. The grammar
+ * has already made that test: a decorator is `@` followed by an identifier, a member
+ * expression or a call, so a receiver that names nothing — `@arr[0].C()`, `@(a).C()`,
+ * `@pick().C()`, `@ns["C"]()` — is not parsed as a decorator at all and never reaches here.
+ * What does reach here besides a dotted run of names is `this` and an optional chain
+ * (`@a?.C()`, whose object is `a`), and both are quoted as written; neither names an import,
+ * so a consumer resolving them finds nothing, which is the right answer for both.
+ *
+ * Returned as a spread so the key is absent rather than null on a bare decorator — the
+ * Class B discipline `Decorator.qualifier` is declared under (ir-schema.md §1.1).
+ */
+function qualifierOf(callee: Node | null): { qualifier?: string } {
+  if (callee === null || callee.type !== "member_expression") return {}
+  const object = callee.childForFieldName("object")
+  if (object === null || object.text.length === 0) return {}
+  return { qualifier: object.text }
 }
 
 function readCallArguments(argsNode: Node): string[] {

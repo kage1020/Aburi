@@ -15,7 +15,7 @@ import {
   NESTJS_HTTP_METHOD_DECORATORS,
   NESTJS_PATTERN_DECORATORS,
 } from "./decorators"
-import { type ImportedNames, readImportedNames, resolveDecoratorName } from "./imports"
+import { type ImportedBindings, readImportedNames, resolveDecoratorName } from "./imports"
 import { NESTJS_DERIVED_BY_PREFIX } from "./manifest"
 
 /** Shared by HTTP-verb and pattern-style handlers so one predicate finds every entry point. */
@@ -25,8 +25,9 @@ const ROUTE_EXT_KIND = "framework:nestjs:route"
  * Classes look for `@Module` / `@Controller` / `@Injectable` / `@Catch`; methods for HTTP
  * verbs, pattern handlers and Guards / Interceptors / Pipes / Filters. `null` when nothing
  * matches, so a hollow classification never shadows another plugin (first-match-wins).
- * Tables are matched against the name a decorator was **imported** under (see `./imports`);
- * the import index is only built once a decorator needs resolving.
+ * Tables are matched against the name a decorator was **imported** under, or written on the
+ * module object it came through (see `./imports`); the import index is only built once a
+ * decorator needs resolving.
  */
 export function classifyNestjsSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -46,9 +47,9 @@ export function classifyNestjsSymbol(
  * charge a large single-shard file declarations × imports (`performance.md`). A fresh
  * array per call simply takes the uncached path.
  */
-const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedNames>()
+const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedBindings>()
 
-function importedNamesFor(ctx: FrameworkClassifyContext): ImportedNames {
+function importedNamesFor(ctx: FrameworkClassifyContext): ImportedBindings {
   const cached = importedNamesByFile.get(ctx.imports)
   if (cached !== undefined) return cached
   const names = readImportedNames(ctx.imports, ctx.file.path)
@@ -63,7 +64,7 @@ function importedNamesFor(ctx: FrameworkClassifyContext): ImportedNames {
  */
 function classifyClass(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  names: ImportedNames,
+  names: ImportedBindings,
 ): SymbolClassification | null {
   const boundaries: Record<string, true> = {}
   let winner: { extKind: string; role: string } | null = null
@@ -71,7 +72,7 @@ function classifyClass(
 
   for (const decorator of symbol.decorators) {
     assertDecoratorName(decorator.name, symbol.id)
-    const resolved = resolveDecoratorName(decorator.name, names)
+    const resolved = resolveDecoratorName(decorator.name, decorator.qualifier, names)
     const hit = classifyClassDecorator(resolved.canonical)
     if (hit === undefined) continue
     boundaries[decorator.name] = true
@@ -99,7 +100,7 @@ function classifyClass(
  */
 function classifyMethod(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  names: ImportedNames,
+  names: ImportedBindings,
 ): SymbolClassification | null {
   const boundaries: Record<string, true> = {}
   let firstRoute: ResolvedWinner | null = null
@@ -108,7 +109,7 @@ function classifyMethod(
   for (const decorator of symbol.decorators) {
     const written = decorator.name
     assertDecoratorName(written, symbol.id)
-    const { canonical, confidence } = resolveDecoratorName(written, names)
+    const { canonical, confidence } = resolveDecoratorName(written, decorator.qualifier, names)
     if (!isMethodBoundaryDecorator(canonical)) continue
     boundaries[written] = true
     if (NESTJS_HTTP_METHOD_DECORATORS.has(canonical) || NESTJS_PATTERN_DECORATORS.has(canonical)) {

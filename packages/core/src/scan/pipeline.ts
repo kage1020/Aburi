@@ -497,6 +497,10 @@ interface ClassifyCallsInput {
  *   already normalized by `normalizeImportEdge` below. Leaving this side alone makes a
  *   decorator renamed on import fail to resolve on a file that spells its identifiers
  *   decomposed, which is the silent miss `readImportedNames` exists to prevent.
+ * - `decorators[].qualifier`, for the same reason one field over: it is matched against
+ *   `ImportEdge.namespaceBinding`, which `normalizeImportEdge` normalizes, and a receiver
+ *   left decomposed would miss the namespace edge that names its module and fall back to
+ *   the leaf name alone.
  *
  * `decorators[].raw` is left alone for the reason the signature's type strings are: it is a
  * quotation of source text (ir-schema.md), not a value anything matches against.
@@ -536,13 +540,24 @@ function mapPreservingIdentity<T>(items: T[], transform: (item: T) => T): T[] {
   return changed ? next : items
 }
 
-/** Only `name` is normalized; `raw` and `arguments` are quotations of source text. */
+/**
+ * Only `name` and `qualifier` are normalized — the two a framework plugin matches against
+ * the file's import edges. `raw` and `arguments` are quotations of source text.
+ *
+ * The rebuild writes `qualifier` back only when the decorator had one, so a bare decorator
+ * keeps the key absent rather than gaining an `undefined` the Class B discipline forbids.
+ */
 function normalizeDecoratorNames(
   decorators: SymbolCandidate<OpaqueAstNode>["decorators"],
 ): SymbolCandidate<OpaqueAstNode>["decorators"] {
   return mapPreservingIdentity(decorators, (decorator) => {
     const name = toNfc(decorator.name)
-    return name === decorator.name ? decorator : { ...decorator, name }
+    const written = decorator.qualifier
+    const qualifier = typeof written === "string" ? toNfc(written) : written
+    if (name === decorator.name && qualifier === written) return decorator
+    const next = { ...decorator, name }
+    if (qualifier !== undefined) next.qualifier = qualifier
+    return next
   })
 }
 

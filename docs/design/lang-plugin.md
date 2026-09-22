@@ -369,7 +369,7 @@ See [`effect-plugin.md`](./effect-plugin.md) for the detailed interface.
 
 ### 5.2 Cooperation with framework plugins
 
-The language plugin extracts each Decorator up to its **raw string, arguments, and name**. The `boundary` flag is filled in by the core querying the framework plugin.
+The language plugin extracts each Decorator up to its **raw string, arguments, name, and qualifier** (the receiver it was written through, `ir-schema.md` §6). The `boundary` flag is filled in by the core querying the framework plugin.
 
 #### 5.2.1 First-match-wins among framework plugins
 
@@ -397,7 +397,7 @@ The detailed interface is deferred to a future `framework-plugin.md` (this docum
 
 The language plugin reports a decorator under the identifier the source wrote. That identifier is not reliable evidence on its own, in either direction: `import { Controller as Ctrl }` writes a framework boundary under a name no table holds, and a `@Controller` from a competing library writes a foreign name that every table holds. A plugin that matches names against its vocabulary resolves the identifier through `ctx.imports` first:
 
-| What the edges say about the written name | Match against | Confidence |
+| What the edges say about the name | Match against | Confidence |
 |---|---|---|
 | imported from a module the plugin owns | the imported name | `high` |
 | imported from any other module | the imported name | `medium` |
@@ -407,7 +407,11 @@ The middle row **downgrades rather than refuses**. Re-exporting a framework's vo
 
 Two consequences follow for the plugin's outputs. `SymbolClassification.decoratorBoundaries` is keyed on the **written** name, because that is what the core matches against `Decorator.name` when it folds the result back in. `derivedBy` carries the **imported** name, because it is a closed vocabulary that diffs and filters read, and renaming an import changes nothing about what the decorator does.
 
-A qualified decorator (`@nest.Controller()`) reaches the plugin as its leaf identifier; `Decorator` carries no qualifier, so it cannot be tied back to a namespace edge and falls in the last row. That row is therefore the one place the table is not ordered by how much the file disclosed: a namespace import from a competing library is trusted further than the named import of the same decorator, and nothing available at this layer can separate them.
+A **qualified** decorator (`@nest.Controller()`) is read the same way, one column over: `Decorator.qualifier` carries the receiver, and it is resolved against `ImportEdge.namespaceBinding` rather than against the edges' symbol lists. Only the receiver's first dot-separated segment can name a binding — `a.b` in `@a.b.C()` reaches scope as `a` — so that segment is what the lookup uses, and the name matched against the vocabulary is the leaf as written, because a namespace import renames nothing. The same three rows then apply to the module the receiver names: owned → `high`, any other module → `medium`, bound to nothing the edges mention → `high` on the leaf.
+
+A qualified decorator must **not** fall back to the named-import index when its receiver is unbound. The leaf is a property of a module object, not an identifier in the file's scope, so a `Controller` imported by name from somewhere else says nothing about `@nest.Controller()`, and reading it would attribute the decorator to a module it was never written through.
+
+Both halves are necessary for the table to be ordered by how much the file disclosed. A plugin that drops the qualifier sees only the leaf, and a namespace import from a competing library then lands in the last row — trusted further than the named import of the very same decorator. A plugin that keeps the qualifier but never indexes namespace edges gets the same result by the other road.
 
 Two shapes reach the edge list without binding anything in local scope, and a plugin matching names should know both. A re-export (`export { X } from './y'`) names a symbol the file republishes rather than uses — and its aliased form arrives as the source-side name alone, since the language plugin composes `" as "` on imports but not on re-exports. Because re-exports do not bind, a name can appear on two edges in a file that compiles, so a plugin needs a duplicate rule and should say which of its outcomes are order-independent.
 
@@ -628,6 +632,11 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | ID | Input | Expected |
 |---|---|---|
 | LP14 | `@Post('/x') method()` | decorators[0] = { name: "Post", raw: "Post('/x')", arguments: ["'/x'"], boundary: `<determined by the framework plugin>`, line: ... } |
+| LP14a | `@nest.Post('/x') method()` | name = "Post", qualifier = "nest", raw = "nest.Post('/x')". The leaf and the receiver are reported apart so a consumer can tell a namespace import from a bare name (§5.2.2); `raw` still quotes the whole written form |
+| LP14b | a decorator written as a bare name (`@Post()`, `@Post`) | **no `qualifier` key at all** — Class B per `ir-schema.md` §1.1, never `null` and never `""` |
+| LP14c | a nested receiver (`@a.b.C()`) | qualifier = "a.b", carried whole. Which segment names a binding is the consumer's rule, not the extractor's |
+| LP14d | a receiver that is not a plain path — `@arr[0].C()`, `@(a).C()`, `@pick().C()`, `@ns["C"]()` | decorators = []. The grammar admits only an identifier, a member expression, or a call on one, so these are not decorators to begin with and nothing is reported to qualify |
+| LP14e | a receiver the grammar does admit but that binds nothing — `@this.C()`, `@a?.C()` | the receiver object verbatim: `this`, and `a` for the optional chain, whose `?.` belongs to the chain rather than to the object. The extractor quotes what was written; a consumer matching it against an import edge finds nothing and falls in the unbound row of §5.2.2 |
 | LP15 | two decorators | 2 entries in decorators[], **ascending by source position** — not by line, which two on one line share, and never by name, which would make a consumer that reads the first one depend on the alphabet. On a Symbol several declarations wrote (§4.3.1) the order is still source position, across all of them: the lists join in declaration order, which is why the fold visits declarations in source order rather than leading declaration first |
 | LP15a | a decorated member followed by an undecorated one | the second member's decorators = [] — the run belongs to the member it sits above, and does not leak down |
 | LP15b | a comment between two decorators, or between the decorators and the declaration | all of the decorators, in source order — a comment is written wherever the author put it and does not end the run |

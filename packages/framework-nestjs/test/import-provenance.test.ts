@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { classifyNestjsSymbol } from "../src/index"
-import { makeCandidate, makeCtx, makeDecorator, makeImport } from "./fixtures/symbol"
+import {
+  makeCandidate,
+  makeCtx,
+  makeDecorator,
+  makeImport,
+  makeQualifiedDecorator,
+} from "./fixtures/symbol"
 
 /**
  * What the file's import edges say about a decorator's written name, and what the
@@ -168,15 +174,20 @@ describe("provenance decides how far the classification is trusted", () => {
     expect(result?.confidence).toBeUndefined()
   })
 
-  it("reads a namespace import as binding nothing, so the leaf name still classifies", () => {
-    // `import * as nest from "@nestjs/common"` + `@nest.Controller()`. The language plugin
-    // hands the framework the leaf identifier, and the edge carries no named binding, so the
-    // decorator is resolved as an unbound name.
+  it("reads a namespace import through the decorator's own receiver", () => {
+    // `import * as nest from "@nestjs/common"` + `@nest.Controller()`. The edge binds the
+    // module object rather than any name on it, and `Decorator.qualifier` is what ties the
+    // leaf back to it. Right answer, and now for the reason rather than by default.
     const result = classifyNestjsSymbol(
-      makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("nest", "Controller")],
+      }),
       makeCtx({ imports: [{ ...makeImport(NEST, "*"), namespaceBinding: "nest" }] }),
     )
     expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.decoratorBoundaries).toEqual({ Controller: true })
     expect(result?.confidence).toBeUndefined()
   })
 
@@ -236,18 +247,125 @@ describe("provenance decides how far the classification is trusted", () => {
     expect(result?.decoratorBoundaries).toEqual({ Get: true, UseGuards: true })
   })
 
-  it("trusts a namespace import from a competing library, which is the limit of this reading", () => {
-    // `import * as rc from "routing-controllers"` + `@rc.Controller()`. The named-import form
-    // of the same decorator downgrades to `medium`; this one cannot, because the edge binds
-    // only the namespace object and `Decorator` carries no qualifier to tie the leaf back to
-    // it. Pinned as the accepted limit rather than left to be rediscovered as a bug.
+  it("downgrades a namespace import from a competing library, as the named form does", () => {
+    // `import * as rc from "routing-controllers"` + `@rc.Controller()`. This was the reported
+    // bug: with no qualifier to read, the decorator fell into the unbound tier and a competing
+    // library was trusted further than a named import of the same decorator.
     const result = classifyNestjsSymbol(
-      makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("rc", "Controller")],
+      }),
       makeCtx({
         imports: [{ ...makeImport("routing-controllers", "*"), namespaceBinding: "rc" }],
       }),
     )
     expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("reads the receiver rather than a same-named binding from somewhere else", () => {
+    // `import { Controller } from "@nestjs/common"` alongside `import * as tsed from
+    // "@tsed/common"`, with `@tsed.Controller()` written. The leaf is a property of the
+    // module object, not the local binding, so the NestJS named import says nothing about it.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("tsed", "Controller")],
+      }),
+      makeCtx({
+        imports: [
+          makeImport(NEST, ["Controller"], 1),
+          { ...makeImport("@tsed/common", "*", 2), namespaceBinding: "tsed" },
+        ],
+      }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("resolves a nested receiver on its first segment, which is the part in scope", () => {
+    // `@ns.deep.Controller()` reaches scope as `ns`; the rest addresses properties of the
+    // module object, which no edge describes.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("ns.deep", "Controller")],
+      }),
+      makeCtx({
+        imports: [{ ...makeImport("routing-controllers", "*"), namespaceBinding: "ns" }],
+      }),
+    )
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("leaves a receiver no edge mentions in the unbound tier", () => {
+    // `@decorators.Controller()` off a locally built object, or a file scanned without its
+    // imports. Nothing says where it came from, which is the tier that reads the written name.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("local", "Controller")],
+      }),
+      makeCtx({ imports: [{ ...makeImport(NEST, "*"), namespaceBinding: "nest" }] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it.each([
+    ["NestJS edge first", NEST, "routing-controllers"],
+    ["NestJS edge second", "routing-controllers", NEST],
+  ])("resolves a namespace bound twice in favour of the NestJS edge (%s)", (_label, first, second) => {
+    // Reachable through re-exports, the way a doubly-bound name is. Same tiebreak.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("ns", "Controller")],
+      }),
+      makeCtx({
+        imports: [
+          { ...makeImport(first, "*", 1), namespaceBinding: "ns" },
+          { ...makeImport(second, "*", 2), namespaceBinding: "ns" },
+        ],
+      }),
+    )
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it("ignores a namespace edge that binds nothing in scope", () => {
+    // `import "@nestjs/common"` for its side effects, or `export * from` — `symbols` is `"*"`
+    // with no `namespaceBinding`, so there is no receiver any decorator could be written
+    // through and the edge must not bind the empty string.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("nest", "Controller")],
+      }),
+      makeCtx({ imports: [makeImport(NEST, "*")] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it("names a qualified route after its leaf, which a namespace import cannot rename", () => {
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "method",
+        name: "C.list",
+        decorators: [makeQualifiedDecorator("nest", "Get")],
+      }),
+      makeCtx({ imports: [{ ...makeImport(NEST, "*"), namespaceBinding: "nest" }] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:route")
+    expect(result?.derivedBy).toBe("framework:nestjs:route:Get")
+    expect(result?.decoratorBoundaries).toEqual({ Get: true })
     expect(result?.confidence).toBeUndefined()
   })
 

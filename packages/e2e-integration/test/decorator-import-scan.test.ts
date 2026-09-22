@@ -85,6 +85,60 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
     expect(symbolNamed(result, "D4Controller").confidence).toBe("high")
   })
 
+  it("ties a namespace-imported decorator back to the module it was written through", async () => {
+    // `Decorator.qualifier` carries the receiver, and the framework resolves it against the
+    // edge's `namespaceBinding`. The boundary flags still come back on the leaf name, which
+    // is what `Decorator.name` holds.
+    await workspace.writeSource(
+      "src/d5.controller.ts",
+      [
+        `import * as nest from "@nestjs/common"`,
+        ``,
+        `@nest.Controller("/d5")`,
+        `export class D5Controller {`,
+        `  @nest.Get("/list")`,
+        `  list() { return [] }`,
+        `}`,
+        ``,
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const controller = symbolNamed(result, "D5Controller")
+    const route = symbolNamed(result, "D5Controller.list")
+
+    expect(controller.extKind).toBe("framework:nestjs:controller")
+    expect(controller.confidence).toBe("high")
+    expect(controller.decorators.map((d) => [d.name, d.qualifier, d.boundary])).toEqual([
+      ["Controller", "nest", true],
+    ])
+    expect(route.extKind).toBe("framework:nestjs:route")
+    expect(route.derivedBy).toContain("framework:nestjs:route:Get")
+  })
+
+  it("says it is less sure about a namespace import from a competing library", async () => {
+    // The reported bug (#164). `@tsed.Controller()` used to be indistinguishable from
+    // `@nest.Controller()` — the qualifier was thrown away, so both arrived as the leaf
+    // `Controller` with nothing naming a module, and both came back `high`.
+    await workspace.writeSource(
+      "src/d6.controller.ts",
+      [
+        `import * as tsed from "@tsed/common"`,
+        ``,
+        `@tsed.Controller("/d6")`,
+        `export class D6Controller {`,
+        `  find() { return null }`,
+        `}`,
+        ``,
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const controller = symbolNamed(result, "D6Controller")
+    expect(controller.extKind).toBe("framework:nestjs:controller")
+    expect(controller.confidence).toBe("medium")
+  })
+
   it("classifies a decorator from a competing library, but says it is less sure", async () => {
     await workspace.writeSource(
       "src/d3.controller.ts",
