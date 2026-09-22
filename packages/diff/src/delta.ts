@@ -1,4 +1,4 @@
-import { stringArraysEqual } from "@aburi/core"
+import { compareCodeUnit, stringArraysEqual } from "@aburi/core"
 import type {
   ArrayDelta,
   Call,
@@ -234,8 +234,20 @@ function diffEffects(base: readonly Effect[], head: readonly Effect[]): ArrayDel
 }
 
 function effectsEqual(a: Effect, b: Effect): boolean {
+  // `line` is position rather than content; `derivedBy` is plugin-issued evidence text whose
+  // wording may change independently of the effect identity already carried by `plugin`.
+  // Readers compare `derivedFrom` as a set so documents from another producer remain tolerant
+  // of source ordering, matching effect-propagation.md §5.1's reader rule for `propagated`.
   return (
-    a.id === b.id && a.target === b.target && a.plugin === b.plugin && a.confidence === b.confidence
+    a.id === b.id &&
+    a.target === b.target &&
+    a.plugin === b.plugin &&
+    a.confidence === b.confidence &&
+    (a.propagated ?? false) === (b.propagated ?? false) &&
+    stringArraysEqual(
+      [...(a.derivedFrom ?? [])].sort(compareCodeUnit),
+      [...(b.derivedFrom ?? [])].sort(compareCodeUnit),
+    )
   )
 }
 

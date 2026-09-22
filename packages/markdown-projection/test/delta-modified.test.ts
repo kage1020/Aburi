@@ -92,6 +92,32 @@ describe("rules / effects / calls — modified bucket", () => {
     expect(md).toContain("prisma.user.create")
   })
 
+  it("renders a propagated effect with its direct sources", () => {
+    const md = render(
+      changed({
+        effects: {
+          ...emptyDelta(),
+          modified: [
+            {
+              id: "db.write",
+              target: "prisma.user.create",
+              plugin: "effects-prisma",
+              confidence: "high",
+              derivedBy: "effects-plugin:prisma:write",
+              propagated: true,
+              derivedFrom: ["ts:src/repository.ts#Repository.save"],
+            },
+          ],
+        },
+      }),
+    )
+
+    expect(md).toContain("effects modified")
+    expect(md).toContain(
+      "db.write: `prisma.user.create` [propagated from ts:src/repository.ts#Repository.save]",
+    )
+  })
+
   it("renders a call that stopped resolving", () => {
     const md = render(
       changed({

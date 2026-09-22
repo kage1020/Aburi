@@ -165,6 +165,14 @@ describe("Decorator delta (I1)", () => {
 
 describe("Effects delta (I2)", () => {
   const shared = fp("v1")
+  const propagatedEffect = (source: string) =>
+    effect({
+      id: "db.write",
+      target: "prisma.user.create",
+      plugin: "effects-prisma",
+      propagated: true,
+      derivedFrom: [source],
+    })
   const baseSym = makeSymbol({
     id: "ts:src/a.ts#Foo",
     name: "Foo",
@@ -214,6 +222,71 @@ describe("Effects delta (I2)", () => {
     const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 0 })
     expect(delta.effects?.added).toHaveLength(0)
     expect(delta.effects?.removed).toHaveLength(0)
+    expect(delta.effects?.modified).toHaveLength(0)
+  })
+
+  it("emits modified when an effect changes from local to propagated", () => {
+    const h = makeSymbol({
+      ...baseSym,
+      effects: [propagatedEffect("ts:src/repository.ts#Repository.save")],
+    })
+    const delta = computeSymbolDelta(baseSym, h)
+    expect(delta.effects?.modified).toEqual(h.effects)
+  })
+
+  it("emits modified when a propagated effect's direct source changes", () => {
+    const b = makeSymbol({ ...baseSym, effects: [propagatedEffect("ts:src/a.ts#a")] })
+    const h = makeSymbol({
+      ...baseSym,
+      effects: [propagatedEffect("ts:src/b.ts#b")],
+    })
+    const delta = computeSymbolDelta(b, h)
+    expect(delta.effects?.modified).toEqual(h.effects)
+  })
+
+  it("treats a propagated effect's direct sources as a set", () => {
+    const b = makeSymbol({
+      ...baseSym,
+      effects: [
+        effect({
+          id: "db.write",
+          target: "prisma.user.create",
+          plugin: "effects-prisma",
+          propagated: true,
+          derivedFrom: ["ts:src/a.ts#a", "ts:src/b.ts#b"],
+        }),
+      ],
+    })
+    const h = makeSymbol({
+      ...b,
+      effects: [
+        effect({
+          id: "db.write",
+          target: "prisma.user.create",
+          plugin: "effects-prisma",
+          propagated: true,
+          derivedFrom: ["ts:src/b.ts#b", "ts:src/a.ts#a"],
+        }),
+      ],
+    })
+    const delta = computeSymbolDelta(b, h)
+    expect(delta.effects?.modified).toHaveLength(0)
+  })
+
+  it("treats an omitted propagated flag like explicit false", () => {
+    const h = makeSymbol({
+      ...baseSym,
+      effects: [
+        effect({
+          id: "db.write",
+          target: "prisma.user.create",
+          plugin: "effects-prisma",
+          line: 10,
+          propagated: false,
+        }),
+      ],
+    })
+    const delta = computeSymbolDelta(baseSym, h)
     expect(delta.effects?.modified).toHaveLength(0)
   })
 

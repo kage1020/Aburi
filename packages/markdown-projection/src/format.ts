@@ -309,10 +309,17 @@ function assertNeverRule(rule: Rule): never {
  */
 export function effectRow(eff: Effect): string {
   if (eff.propagated === true) {
-    const derivedFrom = (eff.derivedFrom ?? []).join(", ")
-    return `- ${eff.id}: ${inlineCode(eff.target)} [propagated from ${derivedFrom}] [${eff.plugin}]${confidenceBadge(eff.confidence)}`
+    return `- ${eff.id}: ${inlineCode(eff.target)} ${propagatedFromSuffix(eff.derivedFrom ?? [])} [${eff.plugin}]${confidenceBadge(eff.confidence)}`
   }
   return `- ${eff.id}: ${inlineCode(eff.target)} (L${eff.line}) [${eff.plugin}]${confidenceBadge(eff.confidence)}`
+}
+
+/** Shared rendering for the direct sources required on every propagated effect. */
+export function propagatedFromSuffix(derivedFrom: readonly string[]): string {
+  if (derivedFrom.length === 0) {
+    throw new ProjectionInvariantError("derivedFrom", "propagated Effect")
+  }
+  return `[propagated from ${derivedFrom.join(", ")}]`
 }
 
 /**

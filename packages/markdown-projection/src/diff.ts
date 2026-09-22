@@ -21,6 +21,7 @@ import {
   compareStrings,
   inlineCode,
   isSymbolEdge,
+  propagatedFromSuffix,
   renderDocument,
   requireDropReason,
 } from "./format"
@@ -457,7 +458,9 @@ interface RuleLike {
 interface EffectLike {
   id: string
   target: string
-  line: number
+  line?: number | undefined
+  propagated?: boolean | undefined
+  derivedFrom?: readonly string[] | undefined
 }
 interface CallLike {
   target: string
@@ -496,9 +499,24 @@ function asRuleLike(value: unknown): RuleLike | null {
 
 function asEffectLike(value: unknown): EffectLike | null {
   if (!isRecord(value)) return null
-  const { id, target, line } = value
-  if (typeof id !== "string" || typeof target !== "string" || typeof line !== "number") return null
-  return { id, target, line }
+  const { id, target, line, propagated, derivedFrom } = value
+  if (typeof id !== "string" || typeof target !== "string") return null
+  if (line !== undefined && typeof line !== "number") return null
+  if (propagated !== undefined && typeof propagated !== "boolean") return null
+  if (
+    derivedFrom !== undefined &&
+    (!Array.isArray(derivedFrom) ||
+      !derivedFrom.every((source): source is string => typeof source === "string"))
+  ) {
+    return null
+  }
+  return {
+    id,
+    target,
+    line,
+    propagated,
+    derivedFrom,
+  }
 }
 
 function asCallLike(value: unknown): CallLike | null {
@@ -524,6 +542,10 @@ function describeRuleLike(value: unknown): string | null {
 function describeEffectLike(value: unknown): string | null {
   const eff = asEffectLike(value)
   if (eff === null) return null
+  if (eff.propagated === true) {
+    return `${eff.id}: ${inlineCode(eff.target)} ${propagatedFromSuffix(eff.derivedFrom ?? [])}`
+  }
+  if (eff.line === undefined) return null
   return `${eff.id}: ${inlineCode(eff.target)} (L${eff.line})`
 }
 

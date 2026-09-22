@@ -12,6 +12,7 @@ import {
   orderEffects,
   orderFilesAscending,
   orderSymbolsWithinFile,
+  propagatedFromSuffix,
   renderDocument,
   requireDropReason,
   ruleRow,
@@ -133,8 +134,7 @@ function renderBoundaryEffectSurface(symbols: readonly IRSymbol[]): string[] {
     const cells = [...s.effects].sort(compareEffectIdentity).map((e) => {
       const base = `${e.id}(${inlineCode(e.target)})`
       if (e.propagated === true) {
-        const derivedFrom = (e.derivedFrom ?? []).join(", ")
-        return `${base} [propagated from ${derivedFrom}]`
+        return `${base} ${propagatedFromSuffix(e.derivedFrom ?? [])}`
       }
       return base
     })
