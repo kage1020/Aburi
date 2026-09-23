@@ -8,7 +8,7 @@ export {
   NESTJS_PATTERN_DECORATORS,
 } from "./classify"
 export {
-  type ImportedNames,
+  type ImportedBindings,
   isNestjsModule,
   type ResolvedDecoratorName,
   readImportedNames,

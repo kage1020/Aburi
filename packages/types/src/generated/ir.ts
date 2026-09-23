@@ -164,6 +164,10 @@ description?: (string | null)
 }
 export interface Decorator {
 name: string
+/**
+ * Receiver the decorator was written through, verbatim: `@nest.Controller()` gives `nest` and `@a.b.C()` gives `a.b`, while `@Controller()` has none. A consumer resolving it against `ImportEdge.namespaceBinding` takes its first dot-separated segment, which is the only part that can name a local binding. Class B per ir-schema.md: writers MUST omit the key entirely when the decorator was written as a bare name, never emit as null or "".
+ */
+qualifier?: string
 raw: string
 arguments: string[]
 boundary: boolean

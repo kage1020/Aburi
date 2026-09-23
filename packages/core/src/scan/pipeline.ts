@@ -5,6 +5,7 @@ import type {
   ComponentId,
   Confidence,
   Config,
+  Decorator,
   DropHint,
   Effect,
   EffectPlugin,
@@ -416,6 +417,22 @@ interface FrameworkMergeResult {
   confidence: Confidence
 }
 
+/**
+ * The key a framework plugin files a boundary flag under: the decorator as the source wrote
+ * it, receiver included — `nest.Controller` for `@nest.Controller()`, `Controller` for
+ * `@Controller()`.
+ *
+ * The leaf alone would collide. Two decorators on one Symbol can share it and still resolve
+ * differently once a receiver is readable, and the plugin cannot separate them from its side
+ * because this fold is what matches its answer back onto the Symbols. Keying both ends on the
+ * written form is what keeps `boundary: true` on the decorator that earned it, which matters
+ * because `drop-b.ts` reads that flag to decide what survives.
+ */
+function decoratorBoundaryKey(decorator: Decorator): string {
+  const { qualifier } = decorator
+  return qualifier === undefined ? decorator.name : `${qualifier}.${decorator.name}`
+}
+
 function mergeFrameworkClassification(
   candidate: SymbolCandidate<OpaqueAstNode>,
   frameworks: readonly FrameworkPlugin[],
@@ -425,7 +442,7 @@ function mergeFrameworkClassification(
     const result = framework.classifySymbol(candidate, ctx) as SymbolClassification | null
     if (result === null) continue
     const decorators = candidate.decorators.map((d) => {
-      const override = result.decoratorBoundaries?.[d.name]
+      const override = result.decoratorBoundaries?.[decoratorBoundaryKey(d)]
       return override === undefined ? d : { ...d, boundary: override }
     })
     return {
@@ -497,6 +514,10 @@ interface ClassifyCallsInput {
  *   already normalized by `normalizeImportEdge` below. Leaving this side alone makes a
  *   decorator renamed on import fail to resolve on a file that spells its identifiers
  *   decomposed, which is the silent miss `readImportedNames` exists to prevent.
+ * - `decorators[].qualifier`, for the same reason one field over: it is matched against
+ *   `ImportEdge.namespaceBinding`, which `normalizeImportEdge` normalizes, and a receiver
+ *   left decomposed would miss the namespace edge that names its module and fall back to
+ *   the leaf name alone.
  *
  * `decorators[].raw` is left alone for the reason the signature's type strings are: it is a
  * quotation of source text (ir-schema.md), not a value anything matches against.
@@ -536,13 +557,24 @@ function mapPreservingIdentity<T>(items: T[], transform: (item: T) => T): T[] {
   return changed ? next : items
 }
 
-/** Only `name` is normalized; `raw` and `arguments` are quotations of source text. */
+/**
+ * Only `name` and `qualifier` are normalized — the two a framework plugin matches against
+ * the file's import edges. `raw` and `arguments` are quotations of source text.
+ *
+ * The rebuild writes `qualifier` back only when the decorator had one, so a bare decorator
+ * keeps the key absent rather than gaining an `undefined` the Class B discipline forbids.
+ */
 function normalizeDecoratorNames(
   decorators: SymbolCandidate<OpaqueAstNode>["decorators"],
 ): SymbolCandidate<OpaqueAstNode>["decorators"] {
   return mapPreservingIdentity(decorators, (decorator) => {
     const name = toNfc(decorator.name)
-    return name === decorator.name ? decorator : { ...decorator, name }
+    const written = decorator.qualifier
+    const qualifier = typeof written === "string" ? toNfc(written) : written
+    if (name === decorator.name && qualifier === written) return decorator
+    const next = { ...decorator, name }
+    if (qualifier !== undefined) next.qualifier = qualifier
+    return next
   })
 }
 

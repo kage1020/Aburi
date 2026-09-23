@@ -153,6 +153,32 @@ export function assertImportBinding(
 }
 
 /**
+ * Reject a namespace edge's `namespaceBinding` when it is present but empty.
+ *
+ * Absent is legitimate and means the edge binds nothing in scope — a side-effect import, a
+ * clause that binds no local name, an `export * from`. Empty is not: a binding is an
+ * identifier, so no emitter in this repo can produce `""`, and `ImportEdge` is hand-written
+ * rather than schema-validated, which leaves the shape reachable from a third-party language
+ * plugin.
+ *
+ * The two must not share a `continue`, for the reason `assertImportBinding` gives about the
+ * other half of the same edge: a caller that skips an entry on an empty binding hands the
+ * written name back to its own "no edge mentions this" branch, which is generally the most
+ * trusting one. An edge that says a module is bound here would then raise confidence in the
+ * decorator written through it, having named nothing.
+ */
+export function assertNamespaceBinding(
+  binding: string,
+  edge: ImportEdge,
+  origin: PluginInputOrigin,
+): void {
+  if (binding.length > 0) return
+  throw new Error(
+    `${origin.plugin} (${origin.filePath}, line ${edge.line}): ImportEdge.namespaceBinding is empty — language plugin emitted an unnormalized import edge`,
+  )
+}
+
+/**
  * True when any import edge's module specifier satisfies `matches`, after every edge has
  * been checked for an empty `source`.
  *

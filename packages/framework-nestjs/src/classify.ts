@@ -1,6 +1,7 @@
 import { CoreError } from "@aburi/core"
 import type {
   Confidence,
+  Decorator,
   FrameworkClassifyContext,
   ImportEdge,
   OpaqueAstNode,
@@ -15,7 +16,7 @@ import {
   NESTJS_HTTP_METHOD_DECORATORS,
   NESTJS_PATTERN_DECORATORS,
 } from "./decorators"
-import { type ImportedNames, readImportedNames, resolveDecoratorName } from "./imports"
+import { type ImportedBindings, readImportedNames, resolveDecoratorName } from "./imports"
 import { NESTJS_DERIVED_BY_PREFIX } from "./manifest"
 
 /** Shared by HTTP-verb and pattern-style handlers so one predicate finds every entry point. */
@@ -25,8 +26,9 @@ const ROUTE_EXT_KIND = "framework:nestjs:route"
  * Classes look for `@Module` / `@Controller` / `@Injectable` / `@Catch`; methods for HTTP
  * verbs, pattern handlers and Guards / Interceptors / Pipes / Filters. `null` when nothing
  * matches, so a hollow classification never shadows another plugin (first-match-wins).
- * Tables are matched against the name a decorator was **imported** under (see `./imports`);
- * the import index is only built once a decorator needs resolving.
+ * Tables are matched against the name a decorator was **imported** under, or written on the
+ * module object it came through (see `./imports`); the import index is only built once a
+ * decorator needs resolving.
  */
 export function classifyNestjsSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -46,9 +48,9 @@ export function classifyNestjsSymbol(
  * charge a large single-shard file declarations × imports (`performance.md`). A fresh
  * array per call simply takes the uncached path.
  */
-const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedNames>()
+const importedNamesByFile = new WeakMap<readonly ImportEdge[], ImportedBindings>()
 
-function importedNamesFor(ctx: FrameworkClassifyContext): ImportedNames {
+function importedNamesFor(ctx: FrameworkClassifyContext): ImportedBindings {
   const cached = importedNamesByFile.get(ctx.imports)
   if (cached !== undefined) return cached
   const names = readImportedNames(ctx.imports, ctx.file.path)
@@ -58,12 +60,13 @@ function importedNamesFor(ctx: FrameworkClassifyContext): ImportedNames {
 
 /**
  * The first class-level decorator in source order wins the role; every recognized one still
- * flags a boundary, keyed on the written name because that is what the core matches against
- * `SymbolCandidate.decorators`. Confidence follows the winner's provenance alone.
+ * flags a boundary, keyed on the **written** form (`boundaryKey`) because that is what the
+ * core matches against `SymbolCandidate.decorators`. Confidence follows the winner's
+ * provenance alone.
  */
 function classifyClass(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  names: ImportedNames,
+  names: ImportedBindings,
 ): SymbolClassification | null {
   const boundaries: Record<string, true> = {}
   let winner: { extKind: string; role: string } | null = null
@@ -71,10 +74,11 @@ function classifyClass(
 
   for (const decorator of symbol.decorators) {
     assertDecoratorName(decorator.name, symbol.id)
-    const resolved = resolveDecoratorName(decorator.name, names)
+    assertDecoratorQualifier(decorator.qualifier, decorator.name, symbol.id)
+    const resolved = resolveDecoratorName(decorator, names)
     const hit = classifyClassDecorator(resolved.canonical)
     if (hit === undefined) continue
-    boundaries[decorator.name] = true
+    boundaries[boundaryKey(decorator)] = true
     if (winner !== null) continue
     winner = hit
     confidence = resolved.confidence
@@ -99,18 +103,18 @@ function classifyClass(
  */
 function classifyMethod(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  names: ImportedNames,
+  names: ImportedBindings,
 ): SymbolClassification | null {
   const boundaries: Record<string, true> = {}
   let firstRoute: ResolvedWinner | null = null
   let firstHandler: ResolvedWinner | null = null
 
   for (const decorator of symbol.decorators) {
-    const written = decorator.name
-    assertDecoratorName(written, symbol.id)
-    const { canonical, confidence } = resolveDecoratorName(written, names)
+    assertDecoratorName(decorator.name, symbol.id)
+    assertDecoratorQualifier(decorator.qualifier, decorator.name, symbol.id)
+    const { canonical, confidence } = resolveDecoratorName(decorator, names)
     if (!isMethodBoundaryDecorator(canonical)) continue
-    boundaries[written] = true
+    boundaries[boundaryKey(decorator)] = true
     if (NESTJS_HTTP_METHOD_DECORATORS.has(canonical) || NESTJS_PATTERN_DECORATORS.has(canonical)) {
       firstRoute ??= { canonical, confidence }
     } else {
@@ -147,11 +151,54 @@ function confidenceOverride(confidence: Confidence): { confidence?: Confidence }
   return confidence === "high" ? {} : { confidence }
 }
 
+/**
+ * The key a boundary flag is filed under: the decorator as the source wrote it, receiver
+ * included. `@nest.Controller()` is `nest.Controller` and `@Controller()` is `Controller`.
+ *
+ * The leaf alone is not a key. Two decorators on one Symbol can share it while resolving
+ * differently — `@Ctrl()` under `import { Controller as Ctrl }` classifies, `@x.Ctrl()`
+ * canonicalises to `Ctrl` and matches nothing — and a shared key would flag both, putting
+ * `boundary: true` on a decorator that was never classified. That flag is read by
+ * `scan/drop-b.ts`, so it decides which Symbols survive.
+ *
+ * `SymbolClassification.decoratorBoundaries` has always been documented as keyed on the
+ * written name; before `Decorator.qualifier` existed the leaf *was* the written name, and
+ * the two only came apart when a receiver could be read. The core builds the same key from
+ * `qualifier` and `name` when it folds the result back (`scan/pipeline.ts`).
+ */
+function boundaryKey(decorator: Decorator): string {
+  const { qualifier } = decorator
+  return qualifier === undefined ? decorator.name : `${qualifier}.${decorator.name}`
+}
+
 /** An empty decorator name is a language-plugin grammar regression; fail fast rather than let it fall through `Map.get("")`. */
 function assertDecoratorName(name: string, symbolId: string): void {
   if (name.length > 0) return
   throw new CoreError(
     `Empty decorator name on Symbol "${symbolId}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
+    { code: "anonymous-symbol-id-attempted", value: symbolId },
+  )
+}
+
+/**
+ * A qualifier that cannot name anything, for the reason `assertImportBinding` gives about an
+ * import's halves: an empty one is not a name, and letting it through would send a qualified
+ * decorator down the bare-name path — the named-import index its own contract says it must
+ * never reach. A leading dot is the same fault one character over, since the head segment of
+ * `.a` is `""`, which misses every key and lands in the most trusting tier instead.
+ *
+ * The schema forbids both (`minLength: 1`, and a receiver is a path), so neither is a
+ * legitimate input, which is what makes throwing the right answer rather than skipping.
+ */
+function assertDecoratorQualifier(
+  qualifier: string | undefined,
+  name: string,
+  symbolId: string,
+): void {
+  if (qualifier === undefined) return
+  if (qualifier.length > 0 && !qualifier.startsWith(".")) return
+  throw new CoreError(
+    `Decorator "${name}" on Symbol "${symbolId}" carries an unusable qualifier "${qualifier}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
     { code: "anonymous-symbol-id-attempted", value: symbolId },
   )
 }

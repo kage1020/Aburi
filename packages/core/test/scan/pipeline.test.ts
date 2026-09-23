@@ -437,6 +437,44 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
     expect(result.symbols[0]?.decorators.map((d) => d.name)).toEqual([composed])
   })
 
+  it("normalizes decorators[].qualifier, which is matched against the namespace binding", async () => {
+    // The other half of the same comparison: a qualified decorator is resolved through
+    // `ImportEdge.namespaceBinding`, normalized on this boundary a few lines down. A receiver
+    // left decomposed misses the edge that names its module, and the decorator falls back to
+    // the tier that reads its leaf name alone.
+    const candidate = {
+      ...baseCandidate(),
+      decorators: [
+        {
+          name: "Controller",
+          qualifier: decomposed,
+          raw: `@${decomposed}.Controller()`,
+          arguments: [],
+          boundary: false,
+          line: 1,
+        },
+      ],
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    expect(result.symbols[0]?.decorators.map((d) => d.qualifier)).toEqual([composed])
+  })
+
+  it("leaves a bare decorator without a qualifier key at all", async () => {
+    // Class B: the key is absent, not `undefined`. A rebuild that spread `qualifier` back
+    // unconditionally would put one on every decorator the moment any sibling needed
+    // normalizing, and the serializer would then have to decide what to do with it.
+    const candidate = {
+      ...baseCandidate(),
+      decorators: [
+        { name: decomposed, raw: `@${decomposed}()`, arguments: [], boundary: false, line: 1 },
+      ],
+    }
+    const result = await runPipelineWithStubs({ candidate })
+    const decorator = result.symbols[0]?.decorators[0]
+    expect(decorator?.name).toBe(composed)
+    expect(decorator === undefined ? [] : Object.keys(decorator)).not.toContain("qualifier")
+  })
+
   it("leaves decorators[].raw alone, because it is a quotation of source", async () => {
     const candidate = {
       ...baseCandidate(),
