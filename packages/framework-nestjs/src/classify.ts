@@ -73,7 +73,8 @@ function classifyClass(
   let confidence: Confidence = "high"
 
   for (const decorator of symbol.decorators) {
-    assertDecoratorShape(decorator, symbol.id)
+    assertDecoratorName(decorator.name, symbol.id)
+    assertDecoratorQualifier(decorator.qualifier, decorator.name, symbol.id)
     const resolved = resolveDecoratorName(decorator, names)
     const hit = classifyClassDecorator(resolved.canonical)
     if (hit === undefined) continue
@@ -109,7 +110,8 @@ function classifyMethod(
   let firstHandler: ResolvedWinner | null = null
 
   for (const decorator of symbol.decorators) {
-    assertDecoratorShape(decorator, symbol.id)
+    assertDecoratorName(decorator.name, symbol.id)
+    assertDecoratorQualifier(decorator.qualifier, decorator.name, symbol.id)
     const { canonical, confidence } = resolveDecoratorName(decorator, names)
     if (!isMethodBoundaryDecorator(canonical)) continue
     boundaries[boundaryKey(decorator)] = true
@@ -169,29 +171,34 @@ function boundaryKey(decorator: Decorator): string {
   return qualifier === undefined ? decorator.name : `${qualifier}.${decorator.name}`
 }
 
+/** An empty decorator name is a language-plugin grammar regression; fail fast rather than let it fall through `Map.get("")`. */
+function assertDecoratorName(name: string, symbolId: string): void {
+  if (name.length > 0) return
+  throw new CoreError(
+    `Empty decorator name on Symbol "${symbolId}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
+    { code: "anonymous-symbol-id-attempted", value: symbolId },
+  )
+}
+
 /**
- * An empty decorator name is a language-plugin grammar regression; fail fast rather than let
- * it fall through `Map.get("")`.
- *
- * A qualifier gets the same treatment for the reason `assertImportBinding` gives about an
+ * A qualifier that cannot name anything, for the reason `assertImportBinding` gives about an
  * import's halves: an empty one is not a name, and letting it through would send a qualified
  * decorator down the bare-name path — the named-import index its own contract says it must
  * never reach. A leading dot is the same fault one character over, since the head segment of
- * `.a` is `""`, which misses every key and lands in the most trusting tier. The schema
- * forbids both (`minLength: 1`, and a receiver is a path), so neither is a legitimate input.
+ * `.a` is `""`, which misses every key and lands in the most trusting tier instead.
+ *
+ * The schema forbids both (`minLength: 1`, and a receiver is a path), so neither is a
+ * legitimate input, which is what makes throwing the right answer rather than skipping.
  */
-function assertDecoratorShape(decorator: Decorator, symbolId: string): void {
-  if (decorator.name.length === 0) {
-    throw new CoreError(
-      `Empty decorator name on Symbol "${symbolId}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
-      { code: "anonymous-symbol-id-attempted", value: symbolId },
-    )
-  }
-  const { qualifier } = decorator
+function assertDecoratorQualifier(
+  qualifier: string | undefined,
+  name: string,
+  symbolId: string,
+): void {
   if (qualifier === undefined) return
   if (qualifier.length > 0 && !qualifier.startsWith(".")) return
   throw new CoreError(
-    `Decorator "${decorator.name}" on Symbol "${symbolId}" carries an unusable qualifier "${qualifier}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
+    `Decorator "${name}" on Symbol "${symbolId}" carries an unusable qualifier "${qualifier}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
     { code: "anonymous-symbol-id-attempted", value: symbolId },
   )
 }
