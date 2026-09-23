@@ -329,11 +329,21 @@ describe("Calls delta (I2)", () => {
     expect(delta.calls?.removed).toHaveLength(0)
   })
 
-  it("emits added + removed once drift exceeds the fuzz window", () => {
+  it("treats an unchanged call as the same call however far it drifted", () => {
     const h = makeSymbol({
       ...baseSym,
       calls: [call({ target: "helper.doWork", line: 100 })],
       fingerprint: { ...shared, syntax: "syn-diff" },
+    })
+    const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 2 })
+    expect(delta.calls).toEqual({ added: [], removed: [], modified: [] })
+  })
+
+  it("emits added + removed once an edited call drifts past the fuzz window", () => {
+    const h = makeSymbol({
+      ...baseSym,
+      calls: [call({ target: "helper.doWork", line: 100, resolved: "ts:src/helper.ts#doWork" })],
+      fingerprint: { ...shared, logic: "logic-diff" },
     })
     const delta = computeSymbolDelta(baseSym, h, { lineFuzz: 2 })
     expect(delta.calls?.added).toHaveLength(1)
