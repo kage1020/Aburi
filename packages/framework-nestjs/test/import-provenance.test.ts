@@ -187,7 +187,7 @@ describe("provenance decides how far the classification is trusted", () => {
       makeCtx({ imports: [{ ...makeImport(NEST, "*"), namespaceBinding: "nest" }] }),
     )
     expect(result?.extKind).toBe("framework:nestjs:controller")
-    expect(result?.decoratorBoundaries).toEqual({ Controller: true })
+    expect(result?.decoratorBoundaries).toEqual({ "nest.Controller": true })
     expect(result?.confidence).toBeUndefined()
   })
 
@@ -354,6 +354,147 @@ describe("provenance decides how far the classification is trusted", () => {
     expect(result?.confidence).toBeUndefined()
   })
 
+  it("reads a receiver bound by a default import, as it reads a namespace one", () => {
+    // `import nest from "@nestjs/common"` binds the module object too, and the language
+    // plugin reports it as `symbols: ["nest"]` with no `namespaceBinding`. Reading only the
+    // namespace index would leave the same disclosure in the unbound tier one spelling over.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("nest", "Controller")],
+      }),
+      makeCtx({ imports: [makeImport(NEST, ["nest"])] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it("downgrades a receiver a competing library's default import bound", () => {
+    // The half of the inversion a namespace-only lookup left open: this used to come back
+    // `high`, above the `medium` the same decorator gets when imported by name.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("tsed", "Controller")],
+      }),
+      makeCtx({ imports: [makeImport("@tsed/common", ["tsed"])] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("prefers the namespace binding when both kinds of edge bind the receiver", () => {
+    // A file that binds `nest` twice does not compile, but re-exports reach the edge list
+    // without binding, so the two indexes can disagree. The namespace edge is consulted
+    // first, which keeps the answer independent of which map a given spelling landed in.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("nest", "Controller")],
+      }),
+      makeCtx({
+        imports: [
+          { ...makeImport(NEST, "*", 1), namespaceBinding: "nest" },
+          makeImport("@tsed/common", ["nest"], 2),
+        ],
+      }),
+    )
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it("does not read a qualified decorator's leaf through the named-import index", () => {
+    // The file imports `Controller` by name from NestJS and writes `@tsed.Controller()`.
+    // Resolving the leaf would call that a NestJS decorator; only the receiver may be read,
+    // and nothing binds `tsed`, so the written name stands.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeQualifiedDecorator("tsed", "Controller")],
+      }),
+      makeCtx({ imports: [makeImport(NEST, ["Controller"])] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBeUndefined()
+  })
+
+  it("throws on a namespace edge whose binding is present but empty", () => {
+    // Absent means the edge binds nothing; empty is not a name at all, and skipping it would
+    // hand the decorator to the most trusting tier with nothing recording the skip.
+    expect(() =>
+      classifyNestjsSymbol(
+        makeCandidate({
+          kind: "class",
+          name: "C",
+          decorators: [makeQualifiedDecorator("nest", "Controller")],
+        }),
+        makeCtx({ imports: [{ ...makeImport(NEST, "*"), namespaceBinding: "" }] }),
+      ),
+    ).toThrow(/namespaceBinding is empty/)
+  })
+
+  it.each([
+    ["", "empty"],
+    [".a", "leading dot"],
+  ])("throws on a qualifier of %s (%s), which the schema forbids", (qualifier) => {
+    // Both would fall through to a lookup that misses every key and answers `high`: the
+    // empty one by taking the bare-name path, the dotted one because its head segment is "".
+    expect(() =>
+      classifyNestjsSymbol(
+        makeCandidate({
+          kind: "class",
+          name: "C",
+          decorators: [{ ...makeDecorator("Controller"), qualifier }],
+        }),
+        makeCtx({ imports: [makeImport(NEST, ["Controller"])] }),
+      ),
+    ).toThrow(/unusable qualifier/)
+  })
+
+  it("keys a boundary on the written form, so a shared leaf does not flag both decorators", () => {
+    // `@Ctrl()` resolves through the alias and classifies; `@x.Ctrl()` resolves on its
+    // receiver, canonicalises to `Ctrl` and matches nothing. They share a leaf, so a
+    // leaf-keyed record would put `boundary: true` on the one that was never classified.
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "class",
+        name: "C",
+        decorators: [makeDecorator("Ctrl", [], 1), makeQualifiedDecorator("x", "Ctrl", [], 2)],
+      }),
+      makeCtx({ imports: [makeImport(NEST, ["Controller as Ctrl"])] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.decoratorBoundaries).toEqual({ Ctrl: true })
+  })
+
+  it("takes a method's confidence from the slot that decided it, across the two forms", () => {
+    // One qualified and one bare decorator landing in different tiers. The route is decided
+    // by the first recognized HTTP verb in source order, and the confidence follows it —
+    // not the handler decorator that resolved differently.
+    const imports = [
+      { ...makeImport("@tsed/common", "*", 1), namespaceBinding: "tsed" },
+      makeImport(NEST, ["UseGuards"], 2),
+    ]
+    const result = classifyNestjsSymbol(
+      makeCandidate({
+        kind: "method",
+        name: "C.list",
+        decorators: [
+          makeQualifiedDecorator("tsed", "Get", [], 1),
+          makeDecorator("UseGuards", [], 2),
+        ],
+      }),
+      makeCtx({ imports }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:route")
+    expect(result?.derivedBy).toBe("framework:nestjs:route:Get")
+    expect(result?.decoratorBoundaries).toEqual({ "tsed.Get": true, UseGuards: true })
+    expect(result?.confidence).toBe("medium")
+  })
+
   it("names a qualified route after its leaf, which a namespace import cannot rename", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({
@@ -365,7 +506,7 @@ describe("provenance decides how far the classification is trusted", () => {
     )
     expect(result?.extKind).toBe("framework:nestjs:route")
     expect(result?.derivedBy).toBe("framework:nestjs:route:Get")
-    expect(result?.decoratorBoundaries).toEqual({ Get: true })
+    expect(result?.decoratorBoundaries).toEqual({ "nest.Get": true })
     expect(result?.confidence).toBeUndefined()
   })
 

@@ -441,7 +441,7 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
     // The other half of the same comparison: a qualified decorator is resolved through
     // `ImportEdge.namespaceBinding`, normalized on this boundary a few lines down. A receiver
     // left decomposed misses the edge that names its module, and the decorator falls back to
-    // the tier that reads its leaf name alone — which is the misattribution #164 was about.
+    // the tier that reads its leaf name alone.
     const candidate = {
       ...baseCandidate(),
       decorators: [

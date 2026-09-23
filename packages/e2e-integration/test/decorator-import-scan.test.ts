@@ -117,9 +117,9 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
   })
 
   it("says it is less sure about a namespace import from a competing library", async () => {
-    // The reported bug (#164). `@tsed.Controller()` used to be indistinguishable from
-    // `@nest.Controller()` — the qualifier was thrown away, so both arrived as the leaf
-    // `Controller` with nothing naming a module, and both came back `high`.
+    // `@tsed.Controller()` used to be indistinguishable from `@nest.Controller()` — the
+    // qualifier was thrown away, so both arrived as the leaf `Controller` with nothing
+    // naming a module, and both came back `high`.
     await workspace.writeSource(
       "src/d6.controller.ts",
       [
@@ -135,6 +135,27 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
 
     const result = await scanWorkspace()
     const controller = symbolNamed(result, "D6Controller")
+    expect(controller.extKind).toBe("framework:nestjs:controller")
+    expect(controller.confidence).toBe("medium")
+  })
+
+  it("reads a receiver bound by a default import, not only a namespace one", async () => {
+    // `import tsed from "@tsed/common"` binds the module object through the named-import
+    // index instead — the language plugin reports it as `symbols: ["tsed"]`. A plugin
+    // reading only namespace edges leaves this file in the most-trusting tier.
+    await workspace.writeSource(
+      "src/d7.controller.ts",
+      [
+        `import tsed from "@tsed/common"`,
+        ``,
+        `@tsed.Controller("/d7")`,
+        `export class D7Controller {}`,
+        ``,
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const controller = symbolNamed(result, "D7Controller")
     expect(controller.extKind).toBe("framework:nestjs:controller")
     expect(controller.confidence).toBe("medium")
   })

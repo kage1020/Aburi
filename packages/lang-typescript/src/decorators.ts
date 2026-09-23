@@ -148,19 +148,28 @@ function leafIdentifier(node: Node): string {
  * thing that says *where the name came from*: `@nest.Controller()` and `@tsed.Controller()`
  * both arrive as `Controller`, and a framework plugin matching names against the file's
  * import edges cannot tie either back to its module, because a namespace edge binds the
- * object rather than any name on it (framework-plugin.md).
+ * object rather than any name on it (lang-plugin.md §5.2.2).
  *
  * The whole receiver is carried, not its first segment, because the IR quotes what was
  * written; a consumer resolving a namespace binding takes the first segment itself, since
  * that is the only part of `a.b` that can name something in scope.
  *
- * The receiver is taken as it stands, with no test that it looks like a path. The grammar
- * has already made that test: a decorator is `@` followed by an identifier, a member
- * expression or a call, so a receiver that names nothing — `@arr[0].C()`, `@(a).C()`,
- * `@pick().C()`, `@ns["C"]()` — is not parsed as a decorator at all and never reaches here.
- * What does reach here besides a dotted run of names is `this` and an optional chain
- * (`@a?.C()`, whose object is `a`), and both are quoted as written; neither names an import,
- * so a consumer resolving them finds nothing, which is the right answer for both.
+ * The rule is stated by this function and nothing else: a qualifier is reported when the
+ * callee is a `member_expression` with an object, and in no other case. The grammar is not
+ * the guard it might look like. It accepts more than a name, a dotted run and a call —
+ * `@(a.b)` parses clean, as a parenthesized expression, and `leafIdentifier`'s fallback
+ * names that decorator `(a.b)` with no qualifier. And the receivers that never arrive —
+ * `@arr[0].C()`, `@(a).C()`, `@pick().C()`, `@ns["C"]()` — are not refused by the grammar
+ * either: each *is* parsed as a decorator, of the leading fragment the grammar could take,
+ * and then wrapped in an ERROR node that leaves it no longer a preceding sibling of the
+ * declaration, which is why `collectDecoratorNodes` does not reach it. That is a property of
+ * error recovery, not a guarantee, and a grammar bump can move it.
+ *
+ * What does arrive besides a dotted run of names is `this` (`@this.C()`, which parses
+ * cleanly) and the object of an optional chain (`@a?.C()`, which does not — the `?` lands in
+ * an ERROR child of a recovered `member_expression`, so the object field still reads `a`).
+ * Both are quoted as written, and neither names an import, so a consumer resolving them
+ * finds nothing, which is the right answer for both.
  *
  * Returned as a spread so the key is absent rather than null on a bare decorator — the
  * Class B discipline `Decorator.qualifier` is declared under (ir-schema.md §1.1).

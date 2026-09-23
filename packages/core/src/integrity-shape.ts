@@ -73,6 +73,7 @@ const COMPONENT: RecordSpec = {
 
 const DECORATOR: RecordSpec = {
   name: str,
+  qualifier: optional(str),
   raw: str,
   arguments: strs,
   boundary: bool,

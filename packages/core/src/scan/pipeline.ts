@@ -5,6 +5,7 @@ import type {
   ComponentId,
   Confidence,
   Config,
+  Decorator,
   DropHint,
   Effect,
   EffectPlugin,
@@ -416,6 +417,22 @@ interface FrameworkMergeResult {
   confidence: Confidence
 }
 
+/**
+ * The key a framework plugin files a boundary flag under: the decorator as the source wrote
+ * it, receiver included — `nest.Controller` for `@nest.Controller()`, `Controller` for
+ * `@Controller()`.
+ *
+ * The leaf alone would collide. Two decorators on one Symbol can share it and still resolve
+ * differently once a receiver is readable, and the plugin cannot separate them from its side
+ * because this fold is what matches its answer back onto the Symbols. Keying both ends on the
+ * written form is what keeps `boundary: true` on the decorator that earned it, which matters
+ * because `drop-b.ts` reads that flag to decide what survives.
+ */
+function decoratorBoundaryKey(decorator: Decorator): string {
+  const { qualifier } = decorator
+  return qualifier === undefined ? decorator.name : `${qualifier}.${decorator.name}`
+}
+
 function mergeFrameworkClassification(
   candidate: SymbolCandidate<OpaqueAstNode>,
   frameworks: readonly FrameworkPlugin[],
@@ -425,7 +442,7 @@ function mergeFrameworkClassification(
     const result = framework.classifySymbol(candidate, ctx) as SymbolClassification | null
     if (result === null) continue
     const decorators = candidate.decorators.map((d) => {
-      const override = result.decoratorBoundaries?.[d.name]
+      const override = result.decoratorBoundaries?.[decoratorBoundaryKey(d)]
       return override === undefined ? d : { ...d, boundary: override }
     })
     return {

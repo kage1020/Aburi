@@ -322,8 +322,13 @@ export interface SymbolClassification {
   /** Newly assigned extKind, e.g. `"framework:nestjs:controller"`. */
   extKind?: ExtKind
   /**
-   * Decorator name → boundary flag overrides applied to SymbolCandidate.decorators
+   * Written decorator form → boundary flag overrides applied to SymbolCandidate.decorators
    * after framework classification.
+   *
+   * The key is the decorator as the source wrote it, receiver included: `Controller` for
+   * `@Controller()`, `nest.Controller` for `@nest.Controller()`. The leaf alone would collide
+   * — two decorators on one Symbol can share it while resolving to different vocabulary once
+   * `Decorator.qualifier` is readable — and a shared key flags both.
    */
   decoratorBoundaries?: Record<string, boolean>
   /** Plugin-defined rationale. */

@@ -1,6 +1,7 @@
 import { CoreError } from "@aburi/core"
 import type {
   Confidence,
+  Decorator,
   FrameworkClassifyContext,
   ImportEdge,
   OpaqueAstNode,
@@ -59,8 +60,9 @@ function importedNamesFor(ctx: FrameworkClassifyContext): ImportedBindings {
 
 /**
  * The first class-level decorator in source order wins the role; every recognized one still
- * flags a boundary, keyed on the written name because that is what the core matches against
- * `SymbolCandidate.decorators`. Confidence follows the winner's provenance alone.
+ * flags a boundary, keyed on the **written** form (`boundaryKey`) because that is what the
+ * core matches against `SymbolCandidate.decorators`. Confidence follows the winner's
+ * provenance alone.
  */
 function classifyClass(
   symbol: SymbolCandidate<OpaqueAstNode>,
@@ -71,11 +73,11 @@ function classifyClass(
   let confidence: Confidence = "high"
 
   for (const decorator of symbol.decorators) {
-    assertDecoratorName(decorator.name, symbol.id)
-    const resolved = resolveDecoratorName(decorator.name, decorator.qualifier, names)
+    assertDecoratorShape(decorator, symbol.id)
+    const resolved = resolveDecoratorName(decorator, names)
     const hit = classifyClassDecorator(resolved.canonical)
     if (hit === undefined) continue
-    boundaries[decorator.name] = true
+    boundaries[boundaryKey(decorator)] = true
     if (winner !== null) continue
     winner = hit
     confidence = resolved.confidence
@@ -107,11 +109,10 @@ function classifyMethod(
   let firstHandler: ResolvedWinner | null = null
 
   for (const decorator of symbol.decorators) {
-    const written = decorator.name
-    assertDecoratorName(written, symbol.id)
-    const { canonical, confidence } = resolveDecoratorName(written, decorator.qualifier, names)
+    assertDecoratorShape(decorator, symbol.id)
+    const { canonical, confidence } = resolveDecoratorName(decorator, names)
     if (!isMethodBoundaryDecorator(canonical)) continue
-    boundaries[written] = true
+    boundaries[boundaryKey(decorator)] = true
     if (NESTJS_HTTP_METHOD_DECORATORS.has(canonical) || NESTJS_PATTERN_DECORATORS.has(canonical)) {
       firstRoute ??= { canonical, confidence }
     } else {
@@ -148,11 +149,49 @@ function confidenceOverride(confidence: Confidence): { confidence?: Confidence }
   return confidence === "high" ? {} : { confidence }
 }
 
-/** An empty decorator name is a language-plugin grammar regression; fail fast rather than let it fall through `Map.get("")`. */
-function assertDecoratorName(name: string, symbolId: string): void {
-  if (name.length > 0) return
+/**
+ * The key a boundary flag is filed under: the decorator as the source wrote it, receiver
+ * included. `@nest.Controller()` is `nest.Controller` and `@Controller()` is `Controller`.
+ *
+ * The leaf alone is not a key. Two decorators on one Symbol can share it while resolving
+ * differently — `@Ctrl()` under `import { Controller as Ctrl }` classifies, `@x.Ctrl()`
+ * canonicalises to `Ctrl` and matches nothing — and a shared key would flag both, putting
+ * `boundary: true` on a decorator that was never classified. That flag is read by
+ * `scan/drop-b.ts`, so it decides which Symbols survive.
+ *
+ * `SymbolClassification.decoratorBoundaries` has always been documented as keyed on the
+ * written name; before `Decorator.qualifier` existed the leaf *was* the written name, and
+ * the two only came apart when a receiver could be read. The core builds the same key from
+ * `qualifier` and `name` when it folds the result back (`scan/pipeline.ts`).
+ */
+function boundaryKey(decorator: Decorator): string {
+  const { qualifier } = decorator
+  return qualifier === undefined ? decorator.name : `${qualifier}.${decorator.name}`
+}
+
+/**
+ * An empty decorator name is a language-plugin grammar regression; fail fast rather than let
+ * it fall through `Map.get("")`.
+ *
+ * A qualifier gets the same treatment for the reason `assertImportBinding` gives about an
+ * import's halves: an empty one is not a name, and letting it through would send a qualified
+ * decorator down the bare-name path — the named-import index its own contract says it must
+ * never reach. A leading dot is the same fault one character over, since the head segment of
+ * `.a` is `""`, which misses every key and lands in the most trusting tier. The schema
+ * forbids both (`minLength: 1`, and a receiver is a path), so neither is a legitimate input.
+ */
+function assertDecoratorShape(decorator: Decorator, symbolId: string): void {
+  if (decorator.name.length === 0) {
+    throw new CoreError(
+      `Empty decorator name on Symbol "${symbolId}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
+      { code: "anonymous-symbol-id-attempted", value: symbolId },
+    )
+  }
+  const { qualifier } = decorator
+  if (qualifier === undefined) return
+  if (qualifier.length > 0 && !qualifier.startsWith(".")) return
   throw new CoreError(
-    `Empty decorator name on Symbol "${symbolId}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
+    `Decorator "${decorator.name}" on Symbol "${symbolId}" carries an unusable qualifier "${qualifier}"; the upstream language plugin produced an unexpected grammar shape and this classifier refuses to silently skip it`,
     { code: "anonymous-symbol-id-attempted", value: symbolId },
   )
 }

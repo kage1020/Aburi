@@ -32,6 +32,30 @@ describe("e2e: emitted IR validates against schema/aburi.ir.v1.json", () => {
     for (const id of ir.workspace.languages) expect(id).toMatch(/^[a-z][a-z0-9]*$/)
   })
 
+  it("accepts a Decorator carrying a qualifier, and rejects the shapes Class B forbids", () => {
+    // The fixture has no `import * as` and writes no qualified decorator, so nothing else in
+    // the suite reaches the schema with a `qualifier` at all — in either direction. The key
+    // is optional, `minLength: 1`, and of type string, which makes absent, `""` and `null`
+    // three different answers the schema has to give.
+    const decorated = ir.symbols.find((symbol) => symbol.decorators.length > 0)
+    expect(decorated).toBeDefined()
+    const withQualifier = (qualifier: unknown) => ({
+      ...ir,
+      symbols: ir.symbols.map((symbol) =>
+        symbol === decorated
+          ? {
+              ...symbol,
+              decorators: symbol.decorators.map((d, i) => (i === 0 ? { ...d, qualifier } : d)),
+            }
+          : symbol,
+      ),
+    })
+
+    expect(violations(withQualifier("nest"))).toEqual([])
+    expect(violations(withQualifier("")).length).toBeGreaterThan(0)
+    expect(violations(withQualifier(null)).length).toBeGreaterThan(0)
+  })
+
   it("keeps every Symbol.language inside workspace.languages", () => {
     const declared = new Set<string>(ir.workspace.languages)
     const used = new Set(ir.symbols.map((symbol) => symbol.language))
