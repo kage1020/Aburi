@@ -460,7 +460,10 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 - signature.throws added: `NotFoundError`
 - decorator added: `@UseGuards(AuthGuard)`
 - decorator removed: `@UseGuards(LegacyGuard)`
+- decorator modified: `@tsed.Post`
 ```
+
+`added` and `removed` print the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4). `modified` prints `qualifier.name`: the arguments are dropped because they may be the change, and the receiver is kept because it may be. Both fall back to `qualifier.name` when `raw` is absent. A modified row shows the head side only, so a receiver lost (`@nest.Post` → `@Post`) reads `@Post`, the same as an argument edit.
 
 #### 🔧 Logic changes
 

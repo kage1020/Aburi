@@ -559,20 +559,18 @@ function appendSignatureDelta(
  * runtime shape is fixed per field. The `as*Like` predicates narrow them without casts, so a
  * schema regeneration fails to compile here instead of emitting `@?` placeholders.
  *
- * One row per decorator rather than `appendArrayGroup`'s nested list; `modified` shows the
- * name without its arguments, because the arguments may be the change, and with its receiver,
- * because the receiver may be.
+ * One row per decorator rather than `appendArrayGroup`'s nested list. `added` and `removed`
+ * print `raw`, which quotes the receiver, as the non-delta list does; `modified` drops the
+ * arguments, because they may be the change, and keeps the receiver so that it is not the one
+ * row that loses it. `modified` holds the head side only, so a receiver lost reads as the bare
+ * name.
  */
 function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]): void {
   if (delta === undefined) return
   const buckets: [string, readonly unknown[], (d: DecoratorLike) => string][] = [
-    ["added", delta.added, (d) => d.raw ?? d.name],
-    ["removed", delta.removed, (d) => d.raw ?? d.name],
-    [
-      "modified",
-      delta.modified,
-      (d) => (d.qualifier === undefined ? d.name : `${d.qualifier}.${d.name}`),
-    ],
+    ["added", delta.added, (d) => d.raw ?? qualifiedName(d)],
+    ["removed", delta.removed, (d) => d.raw ?? qualifiedName(d)],
+    ["modified", delta.modified, qualifiedName],
   ]
   for (const [label, items, show] of buckets) {
     for (const item of items) {
@@ -581,6 +579,10 @@ function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]):
       rows.push(`- decorator ${label}: ${inlineCode(`@${show(decorator)}`)}`)
     }
   }
+}
+
+function qualifiedName(d: DecoratorLike): string {
+  return d.qualifier === undefined ? d.name : `${d.qualifier}.${d.name}`
 }
 
 function appendRuleDelta(rows: string[], delta: SymbolDelta["rules"]): void {
@@ -661,7 +663,8 @@ function asDecoratorLike(value: unknown): DecoratorLike | null {
   if (typeof name !== "string") return null
   return {
     name,
-    qualifier: typeof qualifier === "string" ? qualifier : undefined,
+    // Empty is as malformed as absent, and would print `@.Post`.
+    qualifier: typeof qualifier === "string" && qualifier !== "" ? qualifier : undefined,
     raw: typeof raw === "string" ? raw : undefined,
   }
 }

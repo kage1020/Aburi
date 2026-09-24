@@ -131,7 +131,10 @@ export function decorator(overrides: Partial<Decorator> & { name: string }): Dec
   return {
     name: overrides.name,
     ...(overrides.qualifier === undefined ? {} : { qualifier: overrides.qualifier }),
-    raw: overrides.raw ?? `${overrides.name}()`,
+    // `raw` is the whole written form, receiver included.
+    raw:
+      overrides.raw ??
+      `${overrides.qualifier === undefined ? "" : `${overrides.qualifier}.`}${overrides.name}()`,
     arguments: overrides.arguments ?? [],
     boundary: overrides.boundary ?? false,
     line: overrides.line ?? 1,

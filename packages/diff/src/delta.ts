@@ -334,11 +334,17 @@ function diffDecorators(
 }
 
 /**
- * `qualifier` is compared and `raw` is not. `raw` quotes the source, so comparing it would report
- * a reformat as an edit; `qualifier` is what a framework plugin resolves the decorator through, so
- * `@nest.Post()` → `@tsed.Post()` moves the Symbol's classification and its api fingerprint, and
- * the delta has to say why. A Document written before the field existed omits it on every
- * decorator, which reads as `null` on both sides and reports nothing.
+ * `name`, `qualifier` and `arguments` are compared; `raw` and `boundary` are not.
+ *
+ * The api fingerprint hashes the normalized `raw`, which quotes the receiver, so
+ * `@nest.Post()` → `@tsed.Post()` moves it and the delta has to say why. `raw` itself is left out
+ * because `(name, qualifier, arguments)` is its structured decomposition, and comparing the quoted
+ * text would report a reformat as an edit. `boundary` is derived by plugins rather than written,
+ * so comparing it would report a decorator that reads the same on both sides as modified.
+ *
+ * An absent `qualifier` reads as `null`. Two Documents written before the field existed are both
+ * `null` and report nothing, but a stored base from such a producer, set against a head that
+ * carries the field, reports each qualified decorator as modified, once.
  */
 function decoratorsEqual(a: Decorator, b: Decorator): boolean {
   return (

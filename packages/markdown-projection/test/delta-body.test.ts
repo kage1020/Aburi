@@ -176,6 +176,54 @@ describe("renderDeltaBody — decorator branches", () => {
     expect(md).toContain("- decorator modified: `@tsed.Post`")
   })
 
+  it("modified → carries a multi-segment receiver whole", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [],
+        removed: [],
+        modified: [
+          {
+            name: "Post",
+            qualifier: "a.b",
+            raw: "a.b.Post()",
+            arguments: [],
+            boundary: false,
+            line: 7,
+          },
+        ],
+      },
+    })
+    expect(md).toContain("- decorator modified: `@a.b.Post`")
+  })
+
+  it("added without raw → falls back to the name with its receiver, as modified shows it", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [{ name: "Post", qualifier: "nest", arguments: [], boundary: false, line: 3 }],
+        removed: [],
+        modified: [],
+      },
+    })
+    expect(md).toContain("- decorator added: `@nest.Post`")
+  })
+
+  it("an empty qualifier is treated as absent rather than printed as `@.Post`", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [],
+        removed: [],
+        modified: [
+          { name: "Post", qualifier: "", raw: "Post()", arguments: [], boundary: false, line: 7 },
+        ],
+      },
+    })
+    expect(md).toContain("- decorator modified: `@Post`")
+    expect(md).not.toContain("@.Post")
+  })
+
   it("skips malformed entries silently rather than emitting `@?`", () => {
     const md = renderWith({
       ...baseDelta(),

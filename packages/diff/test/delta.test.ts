@@ -339,9 +339,30 @@ describe("Decorator delta — qualifier", () => {
     expect(delta.decorators?.modified).toEqual([post("nest")])
   })
 
-  it("reports nothing for a Document written before qualifier existed", () => {
-    // Both sides bare: the key is absent on every decorator, not a change.
-    const delta = computeSymbolDelta(withDecorators([post()], "a"), withDecorators([post()], "b"))
+  it("emits modified when a receiver is lost, and names the head side only", () => {
+    const delta = computeSymbolDelta(
+      withDecorators([post("nest")], "a"),
+      withDecorators([post()], "b"),
+    )
+    // `modified` carries the head element, so the row reads `@Post`, as an argument edit would.
+    expect(delta.decorators?.modified).toStrictEqual([post()])
+  })
+
+  it("carries a multi-segment receiver whole", () => {
+    const delta = computeSymbolDelta(
+      withDecorators([post("nest")], "a"),
+      withDecorators([post("a.b")], "b"),
+    )
+    expect(delta.decorators?.modified).toStrictEqual([post("a.b")])
+  })
+
+  it("does not compare raw, so a reformat of the same decorator is no change", () => {
+    // Both sides bare, and `raw` differs in spacing only. A comparison that read `raw` would
+    // report this as modified.
+    const delta = computeSymbolDelta(
+      withDecorators([{ ...post(), raw: 'Post("/x")' }], "a"),
+      withDecorators([{ ...post(), raw: 'Post( "/x" )' }], "b"),
+    )
     expect(delta.decorators).toEqual({ added: [], removed: [], modified: [] })
   })
 })

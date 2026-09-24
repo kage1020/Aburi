@@ -714,8 +714,11 @@ Decorator delta (modified):
 
 `arguments` is combined with line fuzz for the modified determination:
 - Same name + within line fuzz + differing arguments → modified
-- Same name + within line fuzz + differing `qualifier` (the receiver: `@nest.Post` → `@tsed.Post`, or a receiver gained or lost) → modified. The receiver is what a framework plugin resolves the decorator through, so it moves `confidence` and the api fingerprint, and a delta that ignored it would leave that fingerprint change unexplained. A Document written before `qualifier` existed omits it everywhere, which compares as absent on both sides and reports nothing
-- `raw` itself is never compared: it quotes the source, and comparing it would report a reformat as an edit
+- Same name + within line fuzz + differing `qualifier` (the receiver: `@nest.Post` → `@tsed.Post`, or a receiver gained or lost) → modified. The api fingerprint hashes the normalized `raw`, which quotes the receiver, so a receiver edit moves that fingerprint, and a delta that ignored it would leave the move unexplained
+- An absent `qualifier` compares as absent. Two Documents written before the field existed report nothing, but a base stored by such a producer and diffed through `--base` against a head that carries the field reports each qualified decorator as modified, once. `aburi diff <base>..<head>` re-scans the base with the head's producer, so it never meets this case
+- `raw` itself is never compared: `(name, qualifier, arguments)` is its structured decomposition, and comparing the quoted text would report a reformat as an edit
+- `boundary` is not compared either: plugins derive it rather than the source writing it, so a flip would show as a modified decorator that reads the same on both sides. A boundary flip still moves the api fingerprint with nothing in the decorator delta to explain it; how to show it is a display question of its own
+- A same-name pair further apart than the line fuzz is not paired by the near pass, so a receiver edit that also moved that far reports as `added` + `removed`, as a changed argument list does
 - Same name + same arguments + same qualifier + only line differs, by any distance → implicitly the same (not shown in the delta)
 
 ##### 5.2.3 `modified` determination for Component diffs
