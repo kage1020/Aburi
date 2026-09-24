@@ -48,6 +48,11 @@ describe("DiffError — invalid-line-fuzz", () => {
     expect(() => computeSymbolDelta(base, head, { lineFuzz: MAX_LINE_FUZZ })).not.toThrow()
   })
 
+  it("names the option, not a config key, since aburi.json has no key for it", () => {
+    expect(() => computeSymbolDelta(base, head, { lineFuzz: 11 })).toThrow(/^lineFuzz must be/)
+    expect(() => computeSymbolDelta(base, head, { lineFuzz: 0.5 })).toThrow(/^lineFuzz must be/)
+  })
+
   it("propagates through buildDiff when delta.lineFuzz is invalid", () => {
     const ir = makeIR({ symbols: [base] })
     const modifiedHead = makeIR({ symbols: [head] })

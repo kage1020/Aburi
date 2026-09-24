@@ -696,9 +696,11 @@ It does not decide whether an *unchanged* element survived. That one is paired b
 pass (§5.2.0), which has no window, so a body that moved any distance reports nothing for the
 rules, calls and decorators it kept.
 
-Adjustable via `config.diff.lineFuzz` (default: `2`, `0` disables fuzz, maximum `10`). `0`
-pairs an edit only with an element on the same line; it does not stop an unchanged element
-from pairing.
+The window is `2` and is not a setting: `aburi.json` has no key for it, because it changes
+only how an edit reads, never which Symbols changed. A caller of `@aburi/diff` can pass
+`lineFuzz` to `computeSymbolDelta`, or as `delta.lineFuzz` to `buildDiff` (`0` to `10`; anything
+else throws `invalid-line-fuzz`). `0` pairs an edit only with an element on the same line; it does not stop
+an unchanged element from pairing.
 
 However, fingerprints themselves contain no line information (D4 §4), so line fuzz is **for delta display only**. It does not affect fingerprint equality checks.
 
