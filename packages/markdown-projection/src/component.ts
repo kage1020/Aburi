@@ -192,13 +192,22 @@ export function renderSymbolBlock(symbol: IRSymbol): string[] {
   const sig = signatureLine(symbol.signature)
   if (sig !== null) rows.push(`**Signature**: ${sig}`)
   if (symbol.rules.length > 0) {
-    pushList("**Rules**:", [...symbol.rules].sort((a, b) => a.line - b.line).flatMap(ruleRow))
+    pushList(
+      "**Rules**:",
+      [...symbol.rules].sort((a, b) => a.line - b.line).flatMap((r) => ruleRow(r)),
+    )
   }
   if (symbol.effects.length > 0) {
-    pushList("**Effects**:", orderEffects(symbol.effects).map(effectRow))
+    pushList(
+      "**Effects**:",
+      orderEffects(symbol.effects).map((e) => effectRow(e)),
+    )
   }
   if (symbol.calls.length > 0) {
-    pushList("**Calls**:", [...symbol.calls].sort((a, b) => a.line - b.line).map(callRow))
+    pushList(
+      "**Calls**:",
+      [...symbol.calls].sort((a, b) => a.line - b.line).map((c) => callRow(c)),
+    )
   }
   const fp = fingerprintLine(symbol.fingerprint)
   if (fp !== null) push(fp)
