@@ -336,7 +336,7 @@ describe("DF16 — same rule, line drift within fuzz (±2)", () => {
     })
     const h = makeSymbol({
       ...b,
-      // 5→6 within default fuzz (±2)
+      // 5→6, same condition: the exact pass pairs it, at any lineFuzz
       rules: [rule({ type: "guard", line: 6, condition: "x > 0" })],
       // Force fingerprint to differ so we hit the delta path
       fingerprint: { ...shared, syntax: "syn-changed" },

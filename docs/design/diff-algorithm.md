@@ -622,8 +622,8 @@ deleted neighbour can; whatever is left over is then paired by proximity, which 
 genuine edit lands.
 
 **Why the exact pass has no line window.** Non-crossing, below, is what stops an element from
-pairing with one it was never beside; an absolute distance adds nothing to that guarantee. What
-it does add is a refusal of exactly the case the exact pass exists for. A function that moved
+pairing with one it was never beside. A window on the exact pass would add a refusal of exactly
+the case that pass exists for. A function that moved
 14 lines down its file with nothing edited — one guard inserted above it is enough — would
 otherwise lose every pairing it had, and each call and rule would come back as one `added`
 and one `removed`, listed under both headings with only the line suffix to tell them apart.
@@ -631,6 +631,16 @@ Distance stays in the pass as the tie-breaker of the score, which is where it ra
 otherwise equal sets. The window belongs to the second pass: once the contents disagree,
 proximity is the only evidence that two elements are one edited element rather than a
 deletion and an unrelated insertion that share a key.
+
+The window did one other thing, and dropping it gives that up: it stopped a *distant* exact
+counterpart from outranking a *near* edit. With base `guard@10 "!x"` and head `guard@11 "!y"`,
+`guard@60 "!x"`, the exact pass pairs `!x` with its copy fifty lines down, so `!y` has nothing
+left to be an edit of and reads as added, where the window used to report `!y` modified and `!x`
+added. Likewise base `!a@10`, `!b@20` against head `!b@10`, `!c@20` reads as `!a` removed and
+`!c` added rather than two edits. Both readings are defensible, and this one is what the first
+pass promises: an element nothing touched is claimed by its own counterpart before an edited
+neighbour can take it. The trade is lopsided in its favour — a body that moved is the ordinary
+case, and a near edit beside a far identical copy the unusual one.
 
 **Why non-crossing, and only within a key.** ir-schema §14 #11 orders these arrays by line, so
 `i < j` means element `i` sits above element `j` in the file. Two pairings of one key that
@@ -699,7 +709,7 @@ Decorator delta (modified):
 - @UseGuards: arguments AuthGuard → AuthGuard,RoleGuard
 ```
 
-`raw` is combined with line fuzz for the modified determination:
+`arguments` is combined with line fuzz for the modified determination:
 - Same name + within line fuzz + differing arguments → modified
 - Same name + same arguments + only line differs, by any distance → implicitly the same (not shown in the delta)
 
@@ -1058,10 +1068,10 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF14 | Dropped Symbol disappeared (basename also changed) | Counted in droppedRemoved |
 | DF14b | Dropped Symbol moved to another directory (same basename) | moved: 1, rationale: "dropped-weak-match" |
 | DF15 | Schema version mismatch | fatal error |
-| DF16 | Same rule differing only in line (within ±2) | no delta.rules.modified (line fuzz) |
+| DF16 | Same rule differing only in line (within ±2) | no delta.rules.modified — the exact pass pairs it, at any `lineFuzz` including `0`; DF17a is the same at any distance |
 | DF17 | Rule of one type whose condition changed, with a large line difference (>2) | delta as added + removed |
 | DF17a | Same-condition rule with a large line difference (>2) — a body that moved | no delta.rules entry; the exact pass has no window (§5.2.0) |
-| DF17b | Two same-type rules where one moved past the other by more than the window | the one that crossed as added + removed; the other unchanged — non-crossing, not the window, refuses it |
+| DF17b | Two same-type rules where one moved past the other by more than the window | the one that crossed as added + removed; the other unchanged — non-crossing takes the nearer exact pairing, and the window then refuses the one it displaced. A crossing within the window is repaired by the second pass and reports nothing |
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
 | DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
