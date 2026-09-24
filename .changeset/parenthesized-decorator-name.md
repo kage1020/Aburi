@@ -9,7 +9,8 @@ A decorator written in parentheses is named after what it encloses
 name matched no framework's vocabulary, so a class decorated that way stayed unclassified even when
 the file imported `Controller` from `@nestjs/common`. `@(nest\n  .Controller)` also put a line break
 into `Decorator.name`. A name, a member path or a call in parentheses is now read through them:
-`Controller`, `Controller` with qualifier `nest`, and so on. `raw` still quotes the parentheses.
+`Controller`, `Controller` with qualifier `nest`, and so on, also when only an argument inside
+them is malformed. `raw` still quotes the parentheses.
 
 TypeScript accepts any expression there, but the grammar does not. `@(x as any)`, `@(x!)` and
 `@(a[b])` reach the extractor only through error recovery, and there is no name to read from them.

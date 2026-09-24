@@ -1,6 +1,6 @@
 import { type Decorator, UNNAMED_DECORATOR } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { firstNonCommentChild } from "./ast-helpers"
+import { firstNonCommentChild, hasErrorChild } from "./ast-helpers"
 
 /**
  * Read every decorator attached to a specific declaration node.
@@ -108,12 +108,13 @@ function readDecorator(node: Node): Decorator | null {
 
   if (inner.type === "call_expression") {
     const callee = inner.childForFieldName("function")
-    const name = callee !== null ? leafIdentifier(throughParentheses(callee)) : UNNAMED_DECORATOR
+    const target = callee === null ? null : throughParentheses(callee)
+    const name = target === null ? UNNAMED_DECORATOR : leafIdentifier(target)
     const argsNode = inner.childForFieldName("arguments")
     const args = argsNode !== null ? readCallArguments(argsNode) : []
     return {
       name,
-      ...qualifierOf(callee === null ? null : throughParentheses(callee)),
+      ...qualifierOf(target),
       raw,
       arguments: args,
       boundary: false,
@@ -143,14 +144,21 @@ function readDecorator(node: Node): Decorator | null {
  * Parentheses the parser had to repair are not read through. TypeScript accepts any
  * expression there, but the grammar's decorator rule takes only a name, a path or a call, so
  * `@(x as any)`, `@(x!)`, `@(a[b])`, `@(C<T>)` and `@(new C())` arrive with an ERROR node
- * inside, beside a fragment — `x`, `a`, `C`, or a call of `new` — that is not the decorator.
- * Naming it after that fragment would be a guess, so such a decorator stays enclosed and gets
- * no name. `((C))` needs no loop either: the grammar does not accept it, and error recovery
+ * beside a fragment — `x`, `a`, `C`, or a call of `new` — that is not the decorator. Naming
+ * it after that fragment would be a guess, so such a decorator stays enclosed and gets no
+ * name. `((C))` needs no loop either: the grammar does not accept it, and error recovery
  * leaves it outside the declaration's run.
+ *
+ * The repair that counts is one in the head: an ERROR or MISSING token among the children of
+ * the parentheses, or of the expression they enclose — which is where it lands for every form
+ * above. A broken argument list nests its ERROR deeper, so `@(Controller(a b))` keeps the name
+ * `@Controller(a b)` has; `hasErrorChild` says why that is the rule.
  */
 function throughParentheses(node: Node): Node {
-  if (node.type !== "parenthesized_expression" || node.hasError) return node
-  return firstNonCommentChild(node) ?? node
+  if (node.type !== "parenthesized_expression" || hasErrorChild(node)) return node
+  const enclosed = firstNonCommentChild(node)
+  if (enclosed === null || hasErrorChild(enclosed)) return node
+  return enclosed
 }
 
 /**
@@ -165,6 +173,8 @@ function leafIdentifier(node: Node): string {
   if (node.type === "identifier" || node.type === "type_identifier") return node.text
   if (node.type === "member_expression") {
     const property = node.childForFieldName("property")
+    // No input is known to reach the empty case: a MISSING property is a head repair that
+    // `throughParentheses` refuses first. The check keeps `name` from ever being "".
     if (property !== null && property.text.length > 0) return property.text
   }
   return UNNAMED_DECORATOR
