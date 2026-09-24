@@ -316,7 +316,10 @@ function callsEqual(a: Call, b: Call): boolean {
   return a.target === b.target && (a.resolved ?? null) === (b.resolved ?? null)
 }
 
-/** Decorator identity is `name`; the argument list decides `modified` (diff-algorithm.md). */
+/**
+ * Decorator identity is `name`; the argument list and the receiver decide `modified`
+ * (diff-algorithm.md).
+ */
 function diffDecorators(
   base: readonly Decorator[],
   head: readonly Decorator[],
@@ -330,8 +333,19 @@ function diffDecorators(
   return classifyArrayDelta(base.map(mapper), head.map(mapper), decoratorsEqual, lineFuzz)
 }
 
+/**
+ * `qualifier` is compared and `raw` is not. `raw` quotes the source, so comparing it would report
+ * a reformat as an edit; `qualifier` is what a framework plugin resolves the decorator through, so
+ * `@nest.Post()` → `@tsed.Post()` moves the Symbol's classification and its api fingerprint, and
+ * the delta has to say why. A Document written before the field existed omits it on every
+ * decorator, which reads as `null` on both sides and reports nothing.
+ */
 function decoratorsEqual(a: Decorator, b: Decorator): boolean {
-  return a.name === b.name && stringArraysEqual(a.arguments, b.arguments)
+  return (
+    a.name === b.name &&
+    (a.qualifier ?? null) === (b.qualifier ?? null) &&
+    stringArraysEqual(a.arguments, b.arguments)
+  )
 }
 
 /**

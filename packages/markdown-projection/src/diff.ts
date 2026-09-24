@@ -560,14 +560,19 @@ function appendSignatureDelta(
  * schema regeneration fails to compile here instead of emitting `@?` placeholders.
  *
  * One row per decorator rather than `appendArrayGroup`'s nested list; `modified` shows the
- * name alone because the arguments are the change.
+ * name without its arguments, because the arguments may be the change, and with its receiver,
+ * because the receiver may be.
  */
 function appendDecoratorDelta(rows: string[], delta: SymbolDelta["decorators"]): void {
   if (delta === undefined) return
   const buckets: [string, readonly unknown[], (d: DecoratorLike) => string][] = [
     ["added", delta.added, (d) => d.raw ?? d.name],
     ["removed", delta.removed, (d) => d.raw ?? d.name],
-    ["modified", delta.modified, (d) => d.name],
+    [
+      "modified",
+      delta.modified,
+      (d) => (d.qualifier === undefined ? d.name : `${d.qualifier}.${d.name}`),
+    ],
   ]
   for (const [label, items, show] of buckets) {
     for (const item of items) {
@@ -624,6 +629,7 @@ function appendBucket(
 
 interface DecoratorLike {
   name: string
+  qualifier?: string | undefined
   raw?: string | undefined
 }
 interface RuleLike {
@@ -651,10 +657,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asDecoratorLike(value: unknown): DecoratorLike | null {
   if (!isRecord(value)) return null
-  const name = value.name
-  const raw = value.raw
+  const { name, qualifier, raw } = value
   if (typeof name !== "string") return null
-  return { name, raw: typeof raw === "string" ? raw : undefined }
+  return {
+    name,
+    qualifier: typeof qualifier === "string" ? qualifier : undefined,
+    raw: typeof raw === "string" ? raw : undefined,
+  }
 }
 
 function asRuleLike(value: unknown): RuleLike | null {

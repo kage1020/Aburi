@@ -702,9 +702,9 @@ from pairing.
 
 However, fingerprints themselves contain no line information (D4 §4), so line fuzz is **for delta display only**. It does not affect fingerprint equality checks.
 
-##### 5.2.2 Handling of arguments in Decorator deltas
+##### 5.2.2 Handling of arguments and receivers in Decorator deltas
 
-Decorators are identified by `(name)`, but differences in `arguments` are shown in the delta:
+Decorators are identified by `(name)`, but differences in `arguments` and `qualifier` are shown in the delta:
 
 ```
 Decorator delta (modified):
@@ -714,7 +714,9 @@ Decorator delta (modified):
 
 `arguments` is combined with line fuzz for the modified determination:
 - Same name + within line fuzz + differing arguments → modified
-- Same name + same arguments + only line differs, by any distance → implicitly the same (not shown in the delta)
+- Same name + within line fuzz + differing `qualifier` (the receiver: `@nest.Post` → `@tsed.Post`, or a receiver gained or lost) → modified. The receiver is what a framework plugin resolves the decorator through, so it moves `confidence` and the api fingerprint, and a delta that ignored it would leave that fingerprint change unexplained. A Document written before `qualifier` existed omits it everywhere, which compares as absent on both sides and reports nothing
+- `raw` itself is never compared: it quotes the source, and comparing it would report a reformat as an edit
+- Same name + same arguments + same qualifier + only line differs, by any distance → implicitly the same (not shown in the delta)
 
 ##### 5.2.3 `modified` determination for Component diffs
 

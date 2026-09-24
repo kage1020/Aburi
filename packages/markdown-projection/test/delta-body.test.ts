@@ -153,6 +153,29 @@ describe("renderDeltaBody — decorator branches", () => {
     expect(md).toContain("- decorator modified: `@UseGuards`")
   })
 
+  it("modified → keeps the receiver, which may be what changed", () => {
+    // `@nest.Post()` → `@tsed.Post()` is modified on its qualifier alone; `@Post` would name
+    // neither side of that edit.
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [],
+        removed: [],
+        modified: [
+          {
+            name: "Post",
+            qualifier: "tsed",
+            raw: "tsed.Post('/x')",
+            arguments: ["'/x'"],
+            boundary: true,
+            line: 7,
+          },
+        ],
+      },
+    })
+    expect(md).toContain("- decorator modified: `@tsed.Post`")
+  })
+
   it("skips malformed entries silently rather than emitting `@?`", () => {
     const md = renderWith({
       ...baseDelta(),
