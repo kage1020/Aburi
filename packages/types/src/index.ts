@@ -132,4 +132,4 @@ export type {
   WrittenSourceRange,
 } from "./plugins"
 // ---------- Reserved IR strings (values, not types) ----------
-export { COMPUTED_TARGET_SEGMENT } from "./vocabulary"
+export { COMPUTED_TARGET_SEGMENT, UNNAMED_DECORATOR } from "./vocabulary"

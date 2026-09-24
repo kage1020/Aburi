@@ -116,6 +116,40 @@ describe("scan — decorator provenance through @aburi/framework-nestjs", () => 
     expect(route.derivedBy).toContain("framework:nestjs:route:Get")
   })
 
+  it("classifies a decorator written in parentheses as the one it encloses", async () => {
+    // `@(Controller)` and `@(nest\n  .Controller)` are legal and parse cleanly. Read as their
+    // text, they were named `(Controller)` and `(nest\n  .Controller)`, matched no table, and
+    // left the class unclassified with a line break in `Decorator.name`.
+    await workspace.writeSource(
+      "src/d6.controller.ts",
+      [
+        `import { Controller } from "@nestjs/common"`,
+        `import * as nest from "@nestjs/common"`,
+        ``,
+        `@(Controller)`,
+        `export class D6Controller {}`,
+        ``,
+        `@(nest`,
+        `  .Controller)`,
+        `export class D7Controller {}`,
+        ``,
+      ].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const bare = symbolNamed(result, "D6Controller")
+    const qualified = symbolNamed(result, "D7Controller")
+
+    expect(bare.extKind).toBe("framework:nestjs:controller")
+    expect(bare.decorators.map((d) => [d.name, d.qualifier, d.boundary])).toEqual([
+      ["Controller", undefined, true],
+    ])
+    expect(qualified.extKind).toBe("framework:nestjs:controller")
+    expect(qualified.decorators.map((d) => [d.name, d.qualifier, d.boundary])).toEqual([
+      ["Controller", "nest", true],
+    ])
+  })
+
   it("says it is less sure about a namespace import from a competing library", async () => {
     // `@tsed.Controller()` used to be indistinguishable from `@nest.Controller()` — the
     // qualifier was thrown away, so both arrived as the leaf `Controller` with nothing

@@ -163,6 +163,9 @@ frameworks?: string[]
 description?: (string | null)
 }
 export interface Decorator {
+/**
+ * The decorator's leaf identifier: `Post` for `@Post()`, `@nest.Post()` and `@(nest.Post)`. Parentheses around a name, a member path or a call are read through. Where the expression leaves no name to read (`@(x as any)`, `@(a[b])`), the reserved `<expression>` (`UNNAMED_DECORATOR` in @aburi/types), with the source text kept in `raw`.
+ */
 name: string
 /**
  * Receiver the decorator was written through, verbatim: `@nest.Controller()` gives `nest` and `@a.b.C()` gives `a.b`, while `@Controller()` has none. A consumer resolving it against `ImportEdge.namespaceBinding` takes its first dot-separated segment, which is the only part that can name a local binding. Class B per ir-schema.md: writers MUST omit the key entirely when the decorator was written as a bare name, never emit as null or "".

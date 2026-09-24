@@ -77,14 +77,13 @@ describe("Decorator.qualifier", () => {
     expect(decorators).toEqual([])
   })
 
-  it("LP14f: reports no qualifier for a receiver that is not a member expression", async () => {
-    // `@(a.b)` parses cleanly — a parenthesized expression is a legal decorator — and reaches
-    // the extractor, where `leafIdentifier` falls back to the node's text. So the grammar
-    // admits more than a name, a dotted run and a call, and the rule about what carries a
-    // qualifier is the extractor's own: a member expression with an object, and nothing else.
+  it("LP14f: reads the receiver through the parentheses it was written in", async () => {
+    // `@(a.b)` parses cleanly, and the parentheses change nothing about which decorator it
+    // is. The rule about what carries a qualifier is still the extractor's own — a member
+    // expression with an object — applied to what the parentheses enclose.
     const decorators = await decoratorsOf(["@(a.b)", "export class C {}", ""].join("\n"), "#C")
-    expect(decorators[0]).not.toHaveProperty("qualifier")
-    expect(decorators[0]?.name).toBe("(a.b)")
+    expect(decorators[0]?.qualifier).toBe("a")
+    expect(decorators[0]?.name).toBe("b")
   })
 
   it("LP14b: omits the key on a bare decorator written without arguments", async () => {
