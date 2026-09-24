@@ -168,26 +168,39 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
  * markdown-projection.md — one Symbol block, with its omit rules: empty `decorators` → no row,
  * `signature: null` → no row, empty `rules` / `effects` / `calls` → no section, dropped
  * fingerprint → no `<sub>` line.
+ *
+ * A blank line follows each list section that something comes after. Without it the next label
+ * or the `<sub>` line is a lazy continuation of the last bullet's paragraph, so CommonMark
+ * renders it inside that bullet — unless the bullet ends in a fence, which a paragraph cannot
+ * continue, so the same label would land in or out of the list by the length of a condition.
  */
 export function renderSymbolBlock(symbol: IRSymbol): string[] {
   const rows: string[] = []
+  let afterList = false
+  const push = (row: string) => {
+    if (afterList) rows.push("")
+    afterList = false
+    rows.push(row)
+  }
+  const pushList = (label: string, items: readonly string[]) => {
+    push(label)
+    rows.push(...items)
+    afterList = true
+  }
   rows.push(symbolHeading(symbol))
   rows.push(...decoratorRows(symbol.decorators))
   const sig = signatureLine(symbol.signature)
   if (sig !== null) rows.push(`**Signature**: ${sig}`)
   if (symbol.rules.length > 0) {
-    rows.push("**Rules**:")
-    for (const r of [...symbol.rules].sort((a, b) => a.line - b.line)) rows.push(...ruleRow(r))
+    pushList("**Rules**:", [...symbol.rules].sort((a, b) => a.line - b.line).flatMap(ruleRow))
   }
   if (symbol.effects.length > 0) {
-    rows.push("**Effects**:")
-    for (const e of orderEffects(symbol.effects)) rows.push(effectRow(e))
+    pushList("**Effects**:", orderEffects(symbol.effects).map(effectRow))
   }
   if (symbol.calls.length > 0) {
-    rows.push("**Calls**:")
-    for (const c of [...symbol.calls].sort((a, b) => a.line - b.line)) rows.push(callRow(c))
+    pushList("**Calls**:", [...symbol.calls].sort((a, b) => a.line - b.line).map(callRow))
   }
   const fp = fingerprintLine(symbol.fingerprint)
-  if (fp !== null) rows.push(fp)
+  if (fp !== null) push(fp)
   return rows
 }
