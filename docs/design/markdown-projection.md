@@ -634,26 +634,57 @@ that loses its report.
 `projectDiff(diff, { maxBytes })` caps the result. Absent, there is no cap: a file on disk should
 hold everything, and `diff.json` always does.
 
-The cap is honoured by **dropping whole sections**, never by cutting the string. A cut at 65536
-bytes lands inside a `<details>` block or a code fence as often as not, and what GitHub then
-renders is an open fence swallowing the rest of the report. Sections go in ascending order of
+The cap is honoured **section by section**, never by cutting the string. A cut at 65536 bytes
+lands inside a `<details>` block or a code fence as often as not, and what GitHub then renders is
+an open fence swallowing the rest of the report. Sections give way in ascending order of
 importance, which is the §6.1 order read from the bottom: Syntax-only first, API changes last.
 
-What survives is therefore always a prefix of the §6.1 order — a reviewer never loses an API
-change while an implementation refactor stays. The title and the Summary line are never dropped,
+A section can give way in two steps. The sections whose entries are whole Symbols — API changes,
+Logic changes, Added, Removed, Unknown, Moved + Changed — have a **names-only form**: the same
+heading, a line saying the entries are short, and one row per Symbol,
+
+```md
+- `handleInvoice` *(function)* — `src/billing/invoice.ts:42`
+```
+
+(Unknown adds the skip reason and side, Moved + Changed the file it moved from). A few hundred of
+those fit in a few kilobytes, where the full entries of one large section can take forty. The
+other sections are already lists, or are views (Slice View, Component and Dependency changes) with
+nothing shorter to say, and have only their full form.
+
+The walk has two phases:
+
+1. The sections shown in full shrink to a **prefix** of the §6.1 order, one section at a time from
+   the bottom. Every section below that prefix is shown names-only where it has that form, and
+   omitted where it does not.
+2. Once no section is left in full, the names-only sections are dropped, again from the bottom.
+
+So a reviewer never loses an API change while an implementation refactor stays, and a section that
+can still say *which* Symbols changed is never dropped while one above it is shown whole. The
+headings that survive are always in §6.1 order. The title and the Summary line are never dropped,
 so a budget smaller than those is not achievable and the document comes back over it.
 
-A section is the smallest unit: one section larger than the whole budget is dropped entirely, even
-when it was the only one. A branch that adds two thousand symbols therefore gets a Summary line and
-the note, and reads the rest from `diff.json` or the uncapped artefact. Trimming entries inside a
-section, so such a report keeps its first few hundred, is a future refinement — worth having, and
-not at the price of a comment that never posts.
+This matters most for the largest diffs. Dropping whole sections alone left #290 — 302 symbols
+deleted — with API changes as its only section, and named none of the 302, although `➖ Removed`
+is what `--fail-on removed` gates on: the red check and the section that explains it went
+together. Under the two phases, every one of them is named.
 
-A capped document says so, directly under the Summary:
+A capped document says so, directly under the Summary, telling the short sections apart from the
+ones that went:
 
 ```md
 > ⚠ **3 sections were omitted** to keep this report within 65507 bytes: 🔗 Dependency changes, 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
 ```
+
+```md
+> ⚠ **5 sections list names only** and **5 sections were omitted** to keep this report within 65507 bytes. Names only: ⚠ API changes, 🔧 Logic changes, ➕ Added, ➖ Removed, 🔀 Moved + Changed. Omitted: 🧵 Slice View, 🔀 Moved, 🧱 Component changes, 🔗 Dependency changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
+```
+
+The last sentence is the pointer to what the cap removed. `projectDiff` cannot know where that
+is, so without help it says only that the full report is the same diff rendered without a cap; a
+caller that wrote one passes `fullReport` and the sentence names it. `aburi diff --max-bytes`
+writes the uncapped document as `diff.full.md` whenever the cap changed anything, and its note
+reads ``The full report, the same diff without a size cap, is `diff.full.md` beside `diff.md`.``
 
 On the one path that comes back over budget — every section dropped and the remainder still too
 large — the note says that instead, because a line promising a budget the bytes below it miss is
@@ -666,8 +697,9 @@ worst exactly where it matters most:
 `aburi diff` also warns on stderr when it writes such a file, so a caller who asked for a number
 and got a bigger one hears it from the tool as well as from the document.
 
-Sections are named in document order rather than in the order they were dropped: the reader is
-looking for a heading that is not there, and that is the order they looked in.
+Sections are named in document order rather than in the order they gave way: the reader is
+looking for a heading that is not there, or reading one that is short, and that is the order they
+looked in.
 
 The budget is measured on the whole document in UTF-8 bytes, note included — naming one more
 section makes the note longer, so a budget checked against a note that does not yet say what it
@@ -791,7 +823,8 @@ All Markdown projection output is **English, with fixed wording**.
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
-| MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. The sections kept are a prefix of the §6.1 order, and a note names the ones that went |
+| MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. The sections kept in full are a prefix of the §6.1 order; below it every section is names-only where it has that form and omitted otherwise, and names-only sections go, from the bottom, only once none is left in full. A note names the short ones and the omitted ones apart |
+| MP13a | diff of the shape of #290 (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
 
 ## 12. Design decisions
 

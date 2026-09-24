@@ -17,7 +17,7 @@ export const GITHUB_COMMENT_MAX_BYTES = 65536
 /**
  * What a report rendered for the default marker may weigh: the ceiling less that marker and its
  * separator. This is the number to render with — `aburi diff --max-bytes <n>`
- * (`markdown-projection.md`) drops whole sections to meet it — and the default
+ * (`markdown-projection.md`) shortens and then drops sections to meet it — and the default
  * `scripts/resolve-max-bytes.mjs` holds.
  *
  * The action passes it on every run that writes Markdown, `comment: false` included, because

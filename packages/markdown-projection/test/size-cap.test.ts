@@ -6,6 +6,7 @@ import type {
   SymbolDelta,
   SymbolDroppedToggled,
   SymbolMoved,
+  SymbolMovedChanged,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
@@ -246,5 +247,135 @@ describe("projectDiff — maxBytes", () => {
     for (const maxBytes of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(() => projectDiff(crowdedDiff(1), { maxBytes })).toThrow(RangeError)
     }
+  })
+})
+
+describe("projectDiff — maxBytes degrades a section before dropping it", () => {
+  // #290: `+142 added · -302 removed · ~326 changed · 25 moved · 44 moved+changed`. Dropping whole
+  // sections left API changes standing alone, and the 302 deleted symbols — the ones
+  // `--fail-on removed` gates on — were named nowhere.
+  const COMMENT_BUDGET = 65507
+
+  /** A symbol heavy enough that a few hundred of them cannot all be rendered in full. */
+  function heavySymbol(name: string): IRSymbol {
+    return makeSymbol({
+      id: `ts:packages/cli/src/commands/${name}.ts#${name}`,
+      name,
+      fingerprint: fp(name),
+      rules: Array.from({ length: 4 }, (_, i) =>
+        rule({ type: "guard", condition: `options.${name}Flag${i} !== undefined`, line: 10 + i }),
+      ),
+      calls: Array.from({ length: 6 }, (_, i) => call({ target: `helper${i}.run`, line: 20 + i })),
+    })
+  }
+
+  function movedChanged(name: string): SymbolMovedChanged {
+    const before = heavySymbol(name)
+    return {
+      status: "moved+changed",
+      before,
+      after: { ...before, source: { ...before.source, file: `src/moved/${name}.ts` } },
+      rationale: "git-rename",
+      delta: delta({ logicChanged: true }),
+    }
+  }
+
+  function changedHeavy(name: string, flags: Partial<SymbolDelta>): SymbolChanged {
+    const before = heavySymbol(name)
+    return {
+      status: "changed",
+      before,
+      after: { ...before, fingerprint: fp(`${name}-v2`) },
+      delta: delta(flags),
+    }
+  }
+
+  const pad = (i: number) => String(i).padStart(4, "0")
+  const removed = Array.from({ length: 302 }, (_, i) => heavySymbol(`removed${pad(i)}`))
+  const shapeOf290 = makeDiff({
+    summary: {
+      ...emptySummary(),
+      added: 142,
+      removed: 302,
+      changed: 326,
+      moved: 25,
+      movedChanged: 44,
+    },
+    symbols: [
+      ...Array.from({ length: 142 }, (_, i) => ({
+        status: "added" as const,
+        symbol: heavySymbol(`added${pad(i)}`),
+      })),
+      ...removed.map((symbol) => ({ status: "removed" as const, symbol })),
+      ...Array.from({ length: 60 }, (_, i) => changedHeavy(`api${pad(i)}`, { apiChanged: true })),
+      ...Array.from({ length: 180 }, (_, i) =>
+        changedHeavy(`logic${pad(i)}`, { logicChanged: true }),
+      ),
+      ...Array.from({ length: 86 }, (_, i) =>
+        changedHeavy(`syntax${pad(i)}`, { syntaxChanged: true }),
+      ),
+      ...Array.from({ length: 25 }, (_, i) => moved(`moved${pad(i)}`)),
+      ...Array.from({ length: 44 }, (_, i) => movedChanged(`movedChanged${pad(i)}`)),
+    ],
+  })
+
+  it("names every removed symbol of a #290-sized diff within the comment budget", () => {
+    expect(bytes(projectDiff(shapeOf290))).toBeGreaterThan(COMMENT_BUDGET)
+    const md = projectDiff(shapeOf290, { maxBytes: COMMENT_BUDGET })
+    expect(bytes(md)).toBeLessThanOrEqual(COMMENT_BUDGET)
+    for (const symbol of removed) {
+      expect(md).toContain(
+        `- \`${symbol.name}\` *(${symbol.kind})* — \`${symbol.source.file}:${symbol.source.startLine}\``,
+      )
+    }
+  })
+
+  it("says which sections are short and which are gone, apart", () => {
+    const md = projectDiff(shapeOf290, { maxBytes: COMMENT_BUDGET })
+    const note = md.split("\n").find((line) => line.startsWith("> ⚠")) ?? ""
+    expect(note).toMatch(
+      /\*\*\d+ sections list names only\*\* and \*\*\d+ sections were omitted\*\*/,
+    )
+    const namesOnly = note.slice(note.indexOf("Names only:"), note.indexOf("Omitted:"))
+    const omitted = note.slice(note.indexOf("Omitted:"))
+    expect(namesOnly).toContain("➖ Removed")
+    expect(omitted).not.toContain("➖ Removed")
+    expect(omitted).toContain("🎨 Syntax-only changes")
+    // And in place, for a reader who opened the section rather than the note.
+    const removedSection = md.slice(md.indexOf("## ➖ Removed"))
+    expect(removedSection.split("\n")[2]).toMatch(/^_Names and locations only/)
+  })
+
+  it("never drops a section that could be shortened while one above it is still whole", () => {
+    // At every budget, walk the headings the document kept: once one is short, every one below
+    // it is short or gone, and a section with a names-only form is gone only when no section
+    // is left whole.
+    const full = bytes(projectDiff(shapeOf290))
+    const shortenable = ["⚠ API changes", "🔧 Logic changes", "➕ Added", "➖ Removed"]
+    for (let budget = full; budget > 2000; budget = Math.floor(budget * 0.8)) {
+      const md = projectDiff(shapeOf290, { maxBytes: budget })
+      const sections = md.split("\n## ").slice(1)
+      const isShort = (section: string) => section.includes("_Names and locations only")
+      const firstShort = sections.findIndex(isShort)
+      if (firstShort >= 0) expect(sections.slice(firstShort).every(isShort)).toBe(true)
+      const anyWhole = sections.some((section) => !isShort(section))
+      if (anyWhole) {
+        for (const title of shortenable) expect(md).toContain(`## ${title}`)
+      }
+      expect(bytes(md)).toBeLessThanOrEqual(budget)
+    }
+  })
+
+  it("drops the names-only lists from the bottom once nothing else is left to give", () => {
+    const md = projectDiff(shapeOf290, { maxBytes: 12000 })
+    expect(bytes(md)).toBeLessThanOrEqual(12000)
+    expect(md).toContain("## ⚠ API changes")
+    expect(md).not.toContain("## 🔀 Moved + Changed")
+  })
+
+  it('says only "omitted" once every section is gone', () => {
+    const md = projectDiff(crowdedDiff(0), { maxBytes: 1 })
+    expect(md).toContain("**5 sections were omitted**")
+    expect(md).not.toContain("names only")
   })
 })

@@ -206,7 +206,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--compact", "compact JSON output")
     .option(
       "--max-bytes <n>",
-      "cap diff.md at n UTF-8 bytes, dropping whole sections least-important-first (GitHub rejects a comment body over 65536)",
+      "cap diff.md at n UTF-8 bytes, shortening sections to names and then dropping them least-important-first (GitHub rejects a comment body over 65536)",
       parseMaxBytes,
     )
     .option("--config <path>", "config file path")

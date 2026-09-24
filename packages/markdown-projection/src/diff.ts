@@ -30,11 +30,18 @@ import {
 export interface ProjectDiffOptions {
   /**
    * markdown-projection.md — hard cap on the document in UTF-8 bytes (GitHub rejects a
-   * comment over 65536), honoured by dropping whole sections least important first, never by
-   * cutting the string. Must be a positive integer (`0` throws `RangeError`); absent means no
+   * comment over 65536), honoured by shortening sections to names and locations and then
+   * dropping them, least important first, never by cutting the string. Must be a positive integer (`0` throws `RangeError`); absent means no
    * cap.
    */
   readonly maxBytes?: number
+  /**
+   * Where the uncapped report can be read, as Markdown, for the note a capped document carries
+   * (`The full report, the same diff without a size cap, is <fullReport>.`). Absent, the note
+   * says only that the full report is the same diff rendered without a cap. Read only when
+   * `maxBytes` changed the document.
+   */
+  readonly fullReport?: string
 }
 
 /**
@@ -53,17 +60,47 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
   const buckets = partition(diff.symbols)
   const sections: Section[] = []
 
-  appendSection(sections, "## ⚠ API changes", renderChangedList(buckets.apiChanged))
-  appendSection(sections, "## 🔧 Logic changes", renderChangedList(buckets.logicOnly))
+  appendSection(
+    sections,
+    "## ⚠ API changes",
+    renderChangedList(buckets.apiChanged),
+    indexChanged(buckets.apiChanged),
+  )
+  appendSection(
+    sections,
+    "## 🔧 Logic changes",
+    renderChangedList(buckets.logicOnly),
+    indexChanged(buckets.logicOnly),
+  )
   appendSection(sections, "## 🧵 Slice View", renderSliceView(diff.slices, diff.symbols))
-  appendSection(sections, "## ➕ Added", renderAddedRemoved(buckets.added))
-  appendSection(sections, "## ➖ Removed", renderAddedRemoved(buckets.removed))
-  appendSection(sections, "## ❔ Unknown", renderUnknown(buckets.unknown))
+  appendSection(
+    sections,
+    "## ➕ Added",
+    renderAddedRemoved(buckets.added),
+    indexSymbols(buckets.added),
+  )
+  appendSection(
+    sections,
+    "## ➖ Removed",
+    renderAddedRemoved(buckets.removed),
+    indexSymbols(buckets.removed),
+  )
+  appendSection(
+    sections,
+    "## ❔ Unknown",
+    renderUnknown(buckets.unknown),
+    indexUnknown(buckets.unknown),
+  )
   // `?? []` renders nothing for a diff that predates the field, which is the right answer:
   // such a document cannot say what it missed, and a section built from an assumed empty list
   // would report "nothing was missed" on every archived diff.
   appendSection(sections, "## 🚫 Not compared", renderNotCompared(diff.notCompared ?? []))
-  appendSection(sections, "## 🔀 Moved + Changed", renderMovedChanged(buckets.movedChanged))
+  appendSection(
+    sections,
+    "## 🔀 Moved + Changed",
+    renderMovedChanged(buckets.movedChanged),
+    indexMovedChanged(buckets.movedChanged),
+  )
   appendFolded(sections, "## 🔀 Moved", renderMoved(buckets.moved), buckets.moved.length)
   appendSection(sections, "## 🧱 Component changes", renderComponentChanges(diff))
   appendSection(sections, "## 🔗 Dependency changes", renderDependencyChanges(diff))
@@ -80,33 +117,46 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     buckets.syntaxOnly.length,
   )
 
-  return assemble(heading, sections, options.maxBytes)
+  return assemble(heading, sections, options.maxBytes, options.fullReport)
 }
 
 /**
  * One rendered `##` block, kept whole so the size cap has something it can drop without
  * leaving half a document behind. `title` is the heading without its `## `, for the note
- * that names what went.
+ * that names what went. `short` is the same section as a names-and-locations list, for the
+ * sections whose entries are whole Symbols; the size cap falls back to it before it drops
+ * the section.
  */
 interface Section {
   readonly title: string
   readonly lines: readonly string[]
+  readonly short?: readonly string[]
 }
 
+/** How the size cap shows one section: whole, as its names-only list, or not at all. */
+type Form = "full" | "short" | "omitted"
+
 /**
- * Join the document, dropping sections from the bottom until it fits (markdown-projection.md,
- * `maxBytes`). The section order is the importance order — fixed so a reviewer can read from
- * the top, with API changes first and Syntax-only folded at the bottom — so the bottom is the
- * least important thing in the document and the drop order falls straight out of it:
- * Syntax-only first, API changes last. The note is rebuilt and the document re-measured on
- * every drop, because naming one more section lengthens the note. The title and Summary line
- * cannot be dropped, so the last document may still be over budget; only that one takes the
- * "could not be brought within" wording.
+ * Join the document, degrading and then dropping sections from the bottom until it fits
+ * (markdown-projection.md, `maxBytes`). The section order is the importance order — fixed so
+ * a reviewer can read from the top, with API changes first and Syntax-only folded at the
+ * bottom — so the bottom is the least important thing in the document.
+ *
+ * The walk has two phases. First the sections shown in full shrink to a prefix, one section at
+ * a time from the bottom, and everything below that prefix is shown names-only where it has a
+ * names-only form and omitted where it has not: a section that can still say *which* Symbols
+ * changed is never dropped while one above it is still shown whole. Only once no section is
+ * shown in full do the names-only lists go, again from the bottom.
+ *
+ * The note is rebuilt and the document re-measured at every step, because naming one more
+ * section lengthens it. The title and Summary line cannot be dropped, so the last document
+ * may still be over budget; only that one takes the "could not be brought within" wording.
  */
 function assemble(
   heading: readonly string[],
   sections: readonly Section[],
   maxBytes: number | undefined,
+  fullReport: string | undefined,
 ): string {
   if (maxBytes === undefined) return renderDocument([...heading, ...flatten(sections)])
   if (!Number.isInteger(maxBytes) || maxBytes <= 0) {
@@ -115,41 +165,91 @@ function assemble(
     )
   }
 
-  const render = (kept: number, unachievable: boolean): string =>
+  const render = (forms: readonly Form[], unachievable: boolean): string =>
     renderDocument([
       ...heading,
-      ...omissionNote(sections.slice(kept), maxBytes, unachievable),
-      ...flatten(sections.slice(0, kept)),
+      ...omissionNote(sections, forms, maxBytes, unachievable, fullReport),
+      ...sections.flatMap((section, index) => linesIn(section, forms[index] ?? "omitted")),
     ])
+  const fits = (document: string): boolean => Buffer.byteLength(document, "utf8") <= maxBytes
 
-  for (let kept = sections.length; ; kept--) {
-    const document = render(kept, false)
-    if (Buffer.byteLength(document, "utf8") <= maxBytes) return document
-    if (kept === 0) return render(0, true)
+  for (const forms of capSteps(sections)) {
+    const document = render(forms, false)
+    if (fits(document)) return document
   }
+  return render(
+    sections.map((): Form => "omitted"),
+    true,
+  )
 }
 
 /**
- * The line that stands in for what was dropped, naming sections in document order (the
- * reader is looking for the heading that is not there). `unachievable` is the path where
- * every section went and the document is still over budget.
+ * Every arrangement the cap may try, most generous first: the full prefix shrinking from
+ * `sections.length` to `0` with the rest names-only or omitted, then the names-only lists
+ * dropped from the bottom. The last arrangement omits everything.
+ */
+function* capSteps(sections: readonly Section[]): Generator<Form[]> {
+  const below = (section: Section): Form => (section.short === undefined ? "omitted" : "short")
+  for (let full = sections.length; full >= 0; full--) {
+    yield sections.map((section, index) => (index < full ? "full" : below(section)))
+  }
+  const forms = sections.map(below)
+  for (let index = sections.length - 1; index >= 0; index--) {
+    if (forms[index] !== "short") continue
+    forms[index] = "omitted"
+    yield [...forms]
+  }
+}
+
+function linesIn(section: Section, form: Form): readonly string[] {
+  if (form === "full") return section.lines
+  if (form === "short") return section.short ?? []
+  return []
+}
+
+/**
+ * The line that stands in for what was shortened or dropped, naming sections in document
+ * order (the reader is looking for the heading, and that is the order they look in).
+ * `unachievable` is the path where every section went and the document is still over budget.
  */
 function omissionNote(
-  dropped: readonly Section[],
+  sections: readonly Section[],
+  forms: readonly Form[],
   maxBytes: number,
   unachievable: boolean,
+  fullReport: string | undefined,
 ): string[] {
-  if (dropped.length === 0) return []
-  const subject = dropped.length === 1 ? "1 section was" : `${dropped.length} sections were`
-  const names = dropped.map((section) => section.title).join(", ")
+  const titlesIn = (form: Form) =>
+    sections.filter((_, index) => forms[index] === form).map((section) => section.title)
+  const shortened = titlesIn("short")
+  const omitted = titlesIn("omitted")
+  if (shortened.length === 0 && omitted.length === 0) return []
   const budget = unachievable
     ? `and this report still could not be brought within ${maxBytes} bytes`
     : `to keep this report within ${maxBytes} bytes`
+  const shortClaim = `**${countSections(shortened.length)} names only**`
+  const omittedClaim = `**${countSections(omitted.length, true)} omitted**`
+  const pointer =
+    fullReport === undefined
+      ? "The full report is the same diff rendered without a size cap."
+      : `The full report, the same diff without a size cap, is ${fullReport}.`
+  if (omitted.length === 0) {
+    return [`> ⚠ ${shortClaim} ${budget}: ${shortened.join(", ")}. ${pointer}`, ""]
+  }
+  if (shortened.length === 0) {
+    return [`> ⚠ ${omittedClaim} ${budget}: ${omitted.join(", ")}. ${pointer}`, ""]
+  }
   return [
-    `> ⚠ **${subject} omitted** ${budget}: ${names}. ` +
-      `The full report is the same diff rendered without a size cap.`,
+    `> ⚠ ${shortClaim} and ${omittedClaim} ${budget}. ` +
+      `Names only: ${shortened.join(", ")}. Omitted: ${omitted.join(", ")}. ${pointer}`,
     "",
   ]
+}
+
+/** "1 section lists" / "3 sections list", or with `passive` "1 section was" / "3 sections were". */
+function countSections(count: number, passive = false): string {
+  if (passive) return count === 1 ? "1 section was" : `${count} sections were`
+  return count === 1 ? "1 section lists" : `${count} sections list`
 }
 
 function flatten(sections: readonly Section[]): string[] {
@@ -259,10 +359,27 @@ function routeChanged(
   else if (delta.syntaxChanged) out.syntaxOnly.push(change)
 }
 
-function appendSection(sections: Section[], heading: string, body: string[]): void {
+/**
+ * `index`, when given, is the section's names-only form (one row per entry) for the size cap
+ * to fall back to. It is rendered under the same heading, with a line saying what it is, so a
+ * reader who lands on the section rather than on the note still knows the entries are short.
+ */
+function appendSection(
+  sections: Section[],
+  heading: string,
+  body: string[],
+  index?: readonly string[],
+): void {
   if (body.length === 0) return
-  sections.push({ title: titleOf(heading), lines: [heading, "", ...body, ""] })
+  sections.push({
+    title: titleOf(heading),
+    lines: [heading, "", ...body, ""],
+    ...(index === undefined ? {} : { short: [heading, "", NAMES_ONLY_LINE, "", ...index, ""] }),
+  })
 }
+
+const NAMES_ONLY_LINE =
+  "_Names and locations only: the full entries did not fit within the size cap._"
 
 /**
  * §6.1 — three sections (Moved / Dropped / Syntax-only) live inside a `<details>`
@@ -662,6 +779,32 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
     rows.push("")
   }
   return rows
+}
+
+/** One names-only row: `name` *(kind)* — `file:line`, with `suffix` after it when given. */
+function indexRow(symbol: IRSymbol, suffix = ""): string {
+  const location = inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)
+  return `- ${inlineCode(symbol.name)} *(${symbol.kind})* — ${location}${suffix}`
+}
+
+function indexSymbols(symbols: readonly IRSymbol[]): string[] {
+  return [...symbols].sort((a, b) => compareStrings(a.id, b.id)).map((symbol) => indexRow(symbol))
+}
+
+function indexChanged(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
+  return sortByAfterId(items).map((item) => indexRow(item.after))
+}
+
+function indexUnknown(items: readonly SymbolUnknown[]): string[] {
+  return [...items]
+    .sort((a, b) => compareStrings(a.symbol.id, b.symbol.id))
+    .map((item) => indexRow(item.symbol, ` (${item.reason} at ${item.absentFrom})`))
+}
+
+function indexMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
+  return sortByAfterId(items).map((item) =>
+    indexRow(item.after, ` (from ${inlineCode(item.before.source.file)})`),
+  )
 }
 
 function renderMoved(items: readonly SymbolMoved[]): string[] {

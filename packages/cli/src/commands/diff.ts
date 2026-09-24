@@ -9,7 +9,12 @@ import {
   projectDiffSummaryLine,
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
+import {
+  DIFF_FULL_MD_FILENAME,
+  DIFF_JSON_FILENAME,
+  DIFF_MD_FILENAME,
+  resolveOutputDir,
+} from "../artifact-paths"
 import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
 import { CliError, errorCode, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -239,10 +244,14 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   }
   if (format !== "json") {
     diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
-    const markdown = projectDiff(
-      diff,
-      options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes },
-    )
+    const uncapped = projectDiff(diff)
+    const markdown =
+      options.maxBytes === undefined
+        ? uncapped
+        : projectDiff(diff, {
+            maxBytes: options.maxBytes,
+            fullReport: `\`${DIFF_FULL_MD_FILENAME}\` beside \`${DIFF_MD_FILENAME}\``,
+          })
     // The one case the projection cannot meet is a budget smaller than the title, the Summary
     // line and the omission note together (`markdown-projection.md`). It says so in the
     // document; this says so to the caller, who asked for a number and got a bigger one.
@@ -258,6 +267,18 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       { command: "diff", artefact: "the diff Markdown", path: diffMdPath },
       markdown,
     )
+    // The note in a capped report points at the uncapped one, so it has to exist whenever the
+    // cap changed anything, and not otherwise: a `diff.full.md` left from an earlier run in the
+    // same directory would be a full report of some other diff.
+    const fullMdPath = resolve(outputDir, DIFF_FULL_MD_FILENAME)
+    if (markdown === uncapped) {
+      await rm(fullMdPath, { force: true })
+    } else {
+      await writeOutputFile(
+        { command: "diff", artefact: "the uncapped diff Markdown", path: fullMdPath },
+        uncapped,
+      )
+    }
   }
 
   // `cli-spec.md` stdout shape

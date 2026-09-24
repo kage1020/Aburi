@@ -1,12 +1,13 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import { makeLanguageId } from "@aburi/core"
 import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
 import { CliError } from "../src/errors"
+import { pathExists } from "../src/fs-probe"
 import { emptyIR, MemStream, symbolId } from "./fixtures"
 
 let scratch = ""
@@ -167,6 +168,40 @@ describe("runDiff — --base/--head (file mode)", () => {
     if (capped.diffJsonPath === null) throw new Error("expected diffJsonPath")
     const diffJson = await readFile(capped.diffJsonPath, "utf8")
     expect(diffJson).toContain("Added0399")
+
+    // The note points at the uncapped report, so that report is written beside it.
+    expect(markdown).toContain("is `diff.full.md` beside `diff.md`.")
+    const fullMdPath = resolve(dirname(capped.diffMdPath), "diff.full.md")
+    expect(await readFile(fullMdPath, "utf8")).toBe(full)
+  })
+
+  it("writes diff.full.md only when the cap changed the report", async () => {
+    // A full report left over from an earlier capped run would describe some other diff.
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
+    await writeFile(headPath, JSON.stringify(makeIRWithChangeAndManyAdded(400)), "utf8")
+    const capped = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      maxBytes: 2_000,
+    })
+    if (capped.diffMdPath === null) throw new Error("expected diffMdPath")
+    const fullMdPath = resolve(dirname(capped.diffMdPath), "diff.full.md")
+    expect(await pathExists(fullMdPath)).toBe(true)
+
+    await writeFile(headPath, JSON.stringify(makeIRWithChangeAndManyAdded(1)), "utf8")
+    const fits = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: headPath,
+      refSpec: null,
+      maxBytes: 65_507,
+    })
+    expect(fits.diffMdPath).not.toBeNull()
+    expect(await pathExists(fullMdPath)).toBe(false)
   })
 
   it("warns, rather than fails, when a budget cannot be met", async () => {
