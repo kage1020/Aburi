@@ -12,15 +12,15 @@ the whole body with a 422 and posting nothing. A minimal symbol renders at rough
 a branch adding about 310 symbols crossed it. The run that lost its report was the large refactor,
 which is the one the report was for, and the failure named a status code rather than a size.
 
-`projectDiff(diff, { maxBytes })` caps the document. It is met by dropping whole sections, not by
+`projectDiff(diff, { maxBytes })` caps the document. It is met section by section, never by
 cutting the string: the sections are `<details>` blocks and fenced code, and a cut inside either
 renders as an unclosed element swallowing the rest — a report that looks broken rather than
-shortened, and says nothing about what is missing. Sections go in ascending order of importance,
-which is the emission order read from the bottom (Syntax-only, then Dropped changes, then
-Dependency changes, …), so what survives is always a prefix of it and an API change is never lost
-while an implementation refactor stays. The title and the Summary line are never dropped. A capped
-document says so directly under the Summary, naming the sections in the order the reader looked
-for them:
+shortened, and says nothing about what is missing. Sections give way in ascending order of
+importance, which is the emission order read from the bottom (Syntax-only, then Dropped changes,
+then Dependency changes, …), so an API change is never lost while an implementation refactor
+stays; a section of whole symbols is cut to its names and locations before it goes. The title and
+the Summary line are never dropped. A capped document says so directly under the Summary, naming
+the sections in the order the reader looked for them:
 
 ```md
 > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
@@ -56,10 +56,10 @@ flag renders a smaller one. Neither can re-render a finished document, but neith
 that never mentions size. `GITHUB_COMMENT_MAX_BYTES` and `ABURI_COMMENT_BODY_MAX_BYTES` are
 exported for callers posting Aburi reports themselves.
 
-A section is the smallest unit the cap can drop, so a branch that adds two thousand symbols gets
-the Summary line and the note rather than its first few hundred entries — the full report is in
-`diff.json` and in an uncapped render. Trimming entries within a section is the obvious next step;
-it is not a reason to keep posting nothing.
+A section is the smallest unit the cap drops, so a branch that adds two thousand symbols gets
+their names rather than their first few hundred entries, or the note alone when even the names do
+not fit. The full report is in `diff.json`, and `aburi diff` writes the uncapped Markdown as
+`diff.full.md` beside the capped one.
 
 **Compatibility.** `projectDiff` takes the budget as a second argument and is unchanged without
 one; every existing caller keeps the whole document. A workflow using the action does get a capped

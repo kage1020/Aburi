@@ -10,7 +10,7 @@ import { CliError, errorCode, errorMessage } from "./errors"
  * example, a permission-denied on `aburi.json` cannot slip past `aburi init`'s overwrite guard
  * and let the write clobber a file the user cannot read.
  */
-const ABSENT_ERRNOS = new Set(["ENOENT", "ENOTDIR"])
+export const ABSENT_ERRNOS: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"])
 
 async function probe<T>(path: string, read: () => Promise<T>, absent: T): Promise<T> {
   try {

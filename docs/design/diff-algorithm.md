@@ -48,11 +48,14 @@ Using a git worktree allows generating the base IR while keeping head intact, so
 ```bash
 <output-dir>/diff.json     # diff result (aburi.diff.v1.json schema)
 <output-dir>/diff.md       # Markdown projection for pasting into PR comments
+<output-dir>/diff.full.md  # diff.md without its size cap, only when --max-bytes shortened it
 ```
 
 `<output-dir>` is `--output-dir`, then `config.output.dir`, then `out` — resolved against the
-working directory in every case. The two filenames are the contract; the rest of this document
-writes them as `out/diff.json` / `out/diff.md`, which is the default run.
+working directory in every case. The filenames are the contract; the rest of this document
+writes them as `out/diff.json` / `out/diff.md`, which is the default run. `diff.full.md` exists
+only beside a `diff.md` whose size cap changed it, and every other run removes it
+([`cli-spec.md`](./cli-spec.md) §6.3).
 
 A one-line summary goes to `stdout`; details are referred to the Markdown file.
 

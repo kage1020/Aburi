@@ -1,7 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import { OUTPUT_DIR_SOURCES } from "./artifact-paths"
 import { CliError, errorCode, errorMessage } from "./errors"
+import { ABSENT_ERRNOS } from "./fs-probe"
 
 /** The commands that write artefacts, as a failure names them: `aburi scan could not write …`. */
 export type OutputCommand = "init" | "scan" | "diff" | "explain"
@@ -51,6 +52,22 @@ export async function writeOutputFile(output: OutputArtefact, contents: string):
 }
 
 /**
+ * Remove an artefact an earlier run may have left, so a file that no longer describes this
+ * run cannot sit beside the ones that do. Nothing there is the ordinary case and is not a
+ * failure; anything else fails the way a write to the same path would, so the same disk state
+ * gets the same exit code whether this run wrote the file or removed it.
+ */
+export async function removeOutputFile(output: OutputArtefact): Promise<void> {
+  try {
+    await rm(output.path)
+  } catch (error) {
+    const code = errorCode(error)
+    if (code !== null && ABSENT_ERRNOS.has(code)) return
+    throw cannotWrite(output, error, "remove")
+  }
+}
+
+/**
  * Create the directory `aburi scan` and `aburi diff` write into. Both call it ahead of the
  * scan or the comparison, so an unusable destination is refused before anything is computed
  * for it, and the failure reads like a write of anything else in it.
@@ -81,8 +98,12 @@ export function outputIsADirectory(output: OutputArtefact): CliError {
  * The error for a write that failed, decided by whether a remedy exists: none means the
  * machine's fault, one means the caller's.
  */
-function cannotWrite(output: OutputArtefact, error: unknown): CliError {
-  const prefix = describeWrite(output)
+function cannotWrite(
+  output: OutputArtefact,
+  error: unknown,
+  verb: "write" | "remove" = "write",
+): CliError {
+  const prefix = describeWrite(output, verb)
   const detail = errorMessage(error)
   const remedy = unusablePath(error, OUTPUT_FLAG[output.command])
   if (remedy === null) {
@@ -91,8 +112,10 @@ function cannotWrite(output: OutputArtefact, error: unknown): CliError {
   return new CliError(`${prefix}: ${remedy} (${detail})`, "input-error", { cause: error })
 }
 
-function describeWrite(output: OutputArtefact): string {
-  return `aburi ${output.command} could not write ${output.artefact} to ${output.path}`
+function describeWrite(output: OutputArtefact, verb: "write" | "remove" = "write"): string {
+  return verb === "write"
+    ? `aburi ${output.command} could not write ${output.artefact} to ${output.path}`
+    : `aburi ${output.command} could not remove ${output.artefact} at ${output.path}`
 }
 
 /**
@@ -105,7 +128,8 @@ function describeWrite(output: OutputArtefact): string {
  * is that same file further up the path; which of the two Node reports is only how far the
  * walk got before it hit the file. `EISDIR` can only come from the write, which truncates
  * rather than refusing an existing file, so it is the output path itself naming a directory
- * that is already there.
+ * that is already there. `ERR_FS_EISDIR` is the same fact from `rm`, which raises its own code
+ * rather than the errno.
  */
 function unusablePath(error: unknown, flag: "--output" | "--output-dir"): string | null {
   switch (errorCode(error)) {
@@ -115,6 +139,7 @@ function unusablePath(error: unknown, flag: "--output" | "--output-dir"): string
         ? "a file stands where one of its parent directories would go. Remove that file, or pass --output <path> elsewhere."
         : `a file stands where the directory would go. Remove that file, or point ${OUTPUT_DIR_SOURCES} elsewhere.`
     case "EISDIR":
+    case "ERR_FS_EISDIR":
       return isADirectory(flag)
     default:
       return null

@@ -130,7 +130,8 @@ aburi diff <base>..<head>       [flags]
 aburi diff --base <a.json> --head <b.json>  [flags]
 ```
 
-Compares two revisions and writes `diff.json` and `diff.md`.
+Compares two revisions and writes `diff.json` and `diff.md` (and `diff.full.md` when
+`--max-bytes` shortened `diff.md`).
 
 **Ref mode** verifies both refs with git, checks out the base into a temporary
 worktree, and scans it. Aburi scans the head from your working tree, and uses
@@ -181,9 +182,12 @@ A GitHub comment body cannot exceed 65536 bytes, and the report is written to be
 one. A minimal symbol takes about 210 bytes of it, so a branch adding a few hundred symbols
 produces a report GitHub refuses outright — the review that needed it most gets nothing.
 
-`--max-bytes` caps `diff.md`. It is met least important first, not by cutting the text mid-fence:
-a section of whole symbols is cut to one name-and-location line per symbol before any section is
-dropped, and the report says at the top which sections are short and which went:
+`--max-bytes` caps `diff.md`. It is met least important first, not by cutting the text mid-fence.
+Sections are kept most important first, each at its smallest — a section of whole symbols as one
+name-and-location line per symbol — and a section is dropped only when it cannot fit even beside
+every more important one cut that far. The name lists then get their full entries back, from the
+top, as far as the budget allows. The report says at the top which sections are short and which
+went:
 
 ```
 > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report, the same diff without a size cap, is `diff.full.md` beside `diff.md`.
@@ -192,8 +196,8 @@ dropped, and the report says at the top which sections are short and which went:
 The sections that survive are always the important ones: API changes go last, Syntax-only first.
 `diff.json` is never capped, so nothing is lost from the artefact you can query. When the cap
 changed anything, the uncapped report is written beside the capped one as `diff.full.md`, which
-is what the note points at; a run whose report fit removes any `diff.full.md` left from an
-earlier one.
+is what the note points at; every other run, whatever its `--format`, removes any
+`diff.full.md` left from an earlier one.
 
 The CLI has no cap unless you pass one: omitting `--max-bytes` writes the whole document.
 `--max-bytes 0` is not the way to say that — it exits `2`, along with every other value that is
