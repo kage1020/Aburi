@@ -492,7 +492,7 @@ The error message is `Symbol ID collision at <file>: <id>`, prompting the user t
 
 The identity pass runs behind a shape gate, and both exist for the same reason. `buildDiff` calls `checkDocumentShape` — invariant #20, and only #20 — on each side first, raising `ir-shape-invalid` named by the record the breach sits in and the field inside it. Without it, every field the diff dereferences crashed with a `TypeError` naming neither: `fingerprint` and `source` during classification (§4), `calls`, `decorators`, `effects` and `rules` during the delta (§5), `components[].roots` in §6.1, and `stats` in the side view §6.2 builds, which reads `stats.skippedFiles` unconditionally. That enumeration is the shape of the class rather than the whole of it, and it is one change to the matcher away from being out of date — which is the argument for a gate that is not scoped to the fields the matcher happens to read. What the gate establishes is what the `IR` brand asserts, so a scope that moved with the matcher would leave a caller's Document conditionally valid. With it in place, the identity pass's own type guards have no live path, and `DiffError` carries the full violation array beside the message so a caller repairing a Document is not made to run the diff once per field.
 
-The entry-point check stops at shape and identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule. #19 (Unicode normalisation) changes the answer, because matching compares raw strings and an NFD id on one side misses the NFC spelling of the same name on the other. #11 (array ordering) changes it too, through §5.2: an array delta pairs elements by line within a window, so two IRs whose `rules[]` disagree only in the order of two same-typed rules twenty lines apart report two modifications rather than nothing. Neither is enforced here because the diff has no standing to rewrite its inputs, not because they are harmless — and note that #11 no longer reaches *matching*, which §3.8 makes independent of array order.
+The entry-point check stops at shape and identity rather than delegating to the whole integrity checker. Most of the remaining rules would make `buildDiff` refuse a Document over something that does not change its answer — #3 (a `component` reference that resolves), #7 (the effect vocabulary) and #15 (the `callResolution` census) are all read by no part of the diff. Note that this argument does *not* extend to every rule. #19 (Unicode normalisation) changes the answer, because matching compares raw strings and an NFD id on one side misses the NFC spelling of the same name on the other. #11 (array ordering) changes it too, through §5.2: an array delta pairs elements in array order, so when a body moves twenty lines, two same-typed rules written in the other order on one side report one of them as added and removed, where the canonical order reports nothing. Neither is enforced here because the diff has no standing to rewrite its inputs, not because they are harmless — and note that #11 no longer reaches *matching*, which §3.8 makes independent of array order.
 
 ### 3.8 Choosing among candidate pairings
 
@@ -586,10 +586,13 @@ For each array, **three kinds of delta** are computed:
 
 Element identity criteria — the key that makes two elements *candidates*; choosing among
 several candidates is §5.2.0:
-- Rule: `(type)`, with the line fuzzed to ±2 (§5.2.1)
+- Rule: `(type)`; an edited one is paired within ±2 lines (§5.2.1)
 - Effect: `(id, target)`, with no line window at all
-- Call: `(target)`, line fuzzed
-- Decorator: `(name)`, line fuzzed (§5.2.2)
+- Call: `(target)`; an edited one is paired within the line window
+- Decorator: `(name)`; an edited one is paired within the line window (§5.2.2)
+
+An element whose content is unchanged has no line window in any array: it pairs with its
+counterpart however far the body moved (§5.2.0).
 
 ##### 5.2.0 Choosing among elements that share a key
 
@@ -600,11 +603,10 @@ It is made in two passes, and each pass chooses a **set** of pairings rather tha
 time:
 
 ```
-for contentMustAgree in [true, false]:
-  admissible(b, h) = same key
-                     and |b.line - h.line| <= lineFuzz
-                     and (content equal, if contentMustAgree)
-  take the best set of admissible pairings over the elements still free, where
+for admissible in [exact, near]:
+  exact(b, h) = same key and content equal
+  near(b, h)  = same key and |b.line - h.line| <= lineFuzz
+  for each key, take the best set of admissible pairings over its elements still free, where
     - the pairings do not cross: i1 < i2 implies j1 < j2
     - more pairings beats fewer
     - among sets of equal size, less total |b.line - h.line| wins
@@ -619,12 +621,37 @@ counterpart, so the pass that only considers exact counterparts claims it before
 deleted neighbour can; whatever is left over is then paired by proximity, which is where a
 genuine edit lands.
 
-**Why non-crossing.** ir-schema §14 #11 orders these arrays by line, so `i < j` means element
-`i` sits above element `j` in the file. Two pairings that crossed would have an element move
-above one it was below — not a line shift but a different element. The constraint is also what
-makes the best set reachable by a suffix recurrence rather than by a general assignment
-algorithm, and what settles ties: between two otherwise indistinguishable candidates the one
-that keeps the pairings in order is the one taken.
+**Why the exact pass has no line window.** Non-crossing, below, is what stops an element from
+pairing with one it was never beside. A window on the exact pass would add a refusal of exactly
+the case that pass exists for. A function that moved
+14 lines down its file with nothing edited — one guard inserted above it is enough — would
+otherwise lose every pairing it had, and each call and rule would come back as one `added`
+and one `removed`, listed under both headings with only the line suffix to tell them apart.
+Distance stays in the pass as the tie-breaker of the score, which is where it ranks two
+otherwise equal sets. The window belongs to the second pass: once the contents disagree,
+proximity is the only evidence that two elements are one edited element rather than a
+deletion and an unrelated insertion that share a key.
+
+The window did one other thing, and dropping it gives that up: it stopped a *distant* exact
+counterpart from outranking a *near* edit. With base `guard@10 "!x"` and head `guard@11 "!y"`,
+`guard@60 "!x"`, the exact pass pairs `!x` with its copy fifty lines down, so `!y` has nothing
+left to be an edit of and reads as added, where the window used to report `!y` modified and `!x`
+added. Likewise base `!a@10`, `!b@20` against head `!b@10`, `!c@20` reads as `!a` removed and
+`!c` added rather than two edits. Both readings are defensible, and this one is what the first
+pass promises: an element nothing touched is claimed by its own counterpart before an edited
+neighbour can take it. The trade is lopsided in its favour — a body that moved is the ordinary
+case, and a near edit beside a far identical copy the unusual one.
+
+**Why non-crossing, and only within a key.** ir-schema §14 #11 orders these arrays by line, so
+`i < j` means element `i` sits above element `j` in the file. Two pairings of one key that
+crossed would have an element move above another of its key that it was below — not a line
+shift but a different element. Elements of different keys are never candidates for each other,
+so their relative order identifies nothing: a call to `scan` that moved below a call to `mkdir`
+is still the call to `scan`, and holding it to the order of every other call would report it
+as added and removed. The constraint is also what makes the best set reachable by a suffix
+recurrence rather than by a general assignment algorithm, and what settles ties: between two
+otherwise indistinguishable candidates the one that keeps the pairings in order is the one
+taken.
 
 **Why a set and not one element at a time.** A greedy pass takes the pairing in front of it,
 and a nearer pairing can cost a farther one its only partner:
@@ -633,21 +660,20 @@ and a nearer pairing can cost a farther one its only partner:
 |---|---|---|---|---|
 | `guard@1 "!user"`, `guard@3 "!invoice"` | `guard@3 "!invoice"` | removed **and** modified `!invoice` | removed `!user` | removed `!user` |
 | `guard@1 "!a"`, `guard@2 "!b"` | `guard@2 "!a"`, `guard@3 "!b"` | nothing | modified `!a`, modified `!b` | nothing |
-| `guard@1 "!a"`, `guard@2 "!a"` | `guard@3 "!a"`, `guard@4 "!a"` | nothing | added `!a`, removed `!a` | nothing |
+| `guard@1 "!a"`, `guard@2 "!b"` | `guard@3 "!c"`, `guard@4 "!d"` | modified `!c`, modified `!d` | modified `!c`, added `!d`, removed `!a` | modified `!c`, modified `!d` |
 
 Row 1 is a deleted guard: taking the first key hit inside the window let the surviving guard
 claim the deleted one's slot, so an untouched element was reported as `removed` and `modified`
 at once, under contradictory buckets, and the element actually deleted appeared nowhere.
 
-Row 2 is two guards shifted down a line together with nothing edited — the noise line fuzz
-exists to suppress, which pairing by proximity alone reintroduces.
+Row 2 is two guards shifted down a line together with nothing edited — the noise the exact
+pass exists to suppress, which pairing by proximity alone reintroduces.
 
-Row 3 is the same shift where the two guards are also *identical*, so the exact pass cannot
-tell them apart either. Greedily, the first head element is nearest the **second** base
-element; claiming it strands the other head outside the window, and a block that moved intact
-comes back as an add and a remove. Choosing the pair of pairings together costs one more line
-of total movement and reports nothing, which is the right answer. Two calls to one target and
-two copies of one decorator are the ordinary way this arises.
+Row 3 is the same shift where both guards were also *edited*, so the exact pass has nothing to
+claim and the whole block is the second pass's. Greedily, the first head element is nearest
+the **second** base element; claiming it strands the other head outside the window, and two
+edits come back as an edit, an add and a remove. Choosing the pair of pairings together costs
+more total movement and reports two edits, which is the right answer.
 
 **What is not promised.** The result depends on the order of the arrays, and cannot not: it
 pairs by line, and #11 is what fixes that order. Reversing an array produces a different
@@ -655,11 +681,21 @@ answer — and a non-canonical Document. §3.8 achieves order-independence for S
 because ids give it a total order that comes from content; §5.2 has no counterpart, and
 §3.7 records the distinction.
 
-##### 5.2.1 Rationale for line fuzz##### 5.2.1 Rationale for line fuzz
+##### 5.2.1 Rationale for line fuzz
 
-Line numbers shift slightly under manual edits, so treating rules with the same `(type, condition)` as the same rule makes the delta more readable. By default a difference of up to ±2 lines is tolerated; beyond that they are treated as distinct rules.
+Line fuzz decides one question: whether an edited element is the same element as the one it
+replaced. A guard whose condition changed from `!user` to `!admin` one line lower is an edit
+and reads as `modified`; the same pair forty lines apart is more likely a deletion and an
+unrelated insertion, and reads as `removed` and `added`. By default a difference of up to ±2
+lines is tolerated for this; beyond that the two are treated as distinct elements.
 
-Adjustable via `config.diff.lineFuzz` (default: `2`, `0` disables fuzz, maximum `10`). Projects that shift 5 lines due to sweeping prettier config changes can raise it to `5`, etc.
+It does not decide whether an *unchanged* element survived. That one is paired by the exact
+pass (§5.2.0), which has no window, so a body that moved any distance reports nothing for the
+rules, calls and decorators it kept.
+
+Adjustable via `config.diff.lineFuzz` (default: `2`, `0` disables fuzz, maximum `10`). `0`
+pairs an edit only with an element on the same line; it does not stop an unchanged element
+from pairing.
 
 However, fingerprints themselves contain no line information (D4 §4), so line fuzz is **for delta display only**. It does not affect fingerprint equality checks.
 
@@ -673,9 +709,9 @@ Decorator delta (modified):
 - @UseGuards: arguments AuthGuard → AuthGuard,RoleGuard
 ```
 
-`raw` is combined with line fuzz for the modified determination:
+`arguments` is combined with line fuzz for the modified determination:
 - Same name + within line fuzz + differing arguments → modified
-- Same name + same arguments + only line differs → implicitly the same (not shown in the delta)
+- Same name + same arguments + only line differs, by any distance → implicitly the same (not shown in the delta)
 
 ##### 5.2.3 `modified` determination for Component diffs
 
@@ -1032,8 +1068,10 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF14 | Dropped Symbol disappeared (basename also changed) | Counted in droppedRemoved |
 | DF14b | Dropped Symbol moved to another directory (same basename) | moved: 1, rationale: "dropped-weak-match" |
 | DF15 | Schema version mismatch | fatal error |
-| DF16 | Same rule differing only in line (within ±2) | no delta.rules.modified (line fuzz) |
-| DF17 | Same-condition rule with a large line difference (>2) | delta as added + removed |
+| DF16 | Same rule differing only in line (within ±2) | no delta.rules.modified — the exact pass pairs it, at any `lineFuzz` including `0`; DF17a is the same at any distance |
+| DF17 | Rule of one type whose condition changed, with a large line difference (>2) | delta as added + removed |
+| DF17a | Same-condition rule with a large line difference (>2) — a body that moved | no delta.rules entry; the exact pass has no window (§5.2.0) |
+| DF17b | Two same-type rules where one moved past the other by more than the window | the one that crossed as added + removed; the other unchanged — non-crossing takes the nearer exact pairing, and the window then refuses the one it displaced. A crossing within the window is repaired by the second pass and reports nothing |
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
 | DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
@@ -1075,7 +1113,7 @@ Stage 4.5 runs with the false-positive risk priced in, under the premise that "d
 ### 11.3 Why line fuzz (±2) is used only for delta display
 
 Including line numbers in fingerprint computation would change every logic FP the moment a single blank line is inserted. Fingerprints are kept line-free ([`fingerprint.md`](./fingerprint.md) §4).
-However, listing rules that differ only in line as distinct items hurts delta readability. The ±2 tolerance applies at display time only.
+However, listing rules that differ only in line as distinct items hurts delta readability. Lines therefore enter the delta only to pair an edited element with its predecessor (±2), and to rank equal sets of pairings (§5.2.0); both happen at display time only.
 
 ### 11.4 Why unchanged is excluded from the output
 

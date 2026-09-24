@@ -18,18 +18,20 @@ export const MIN_LINE_FUZZ = 0
 
 export interface DeltaOptions {
   /**
-   * Line fuzz for rule/call identity (diff-algorithm.md). Must be an integer in
+   * Line fuzz for pairing an edited rule/call/decorator with its predecessor
+   * (diff-algorithm.md); an unchanged one pairs however far it moved. Must be an integer in
    * `[MIN_LINE_FUZZ, MAX_LINE_FUZZ]` (`0..10`); anything outside — or a non-finite value —
-   * throws `DiffError({ code: "invalid-line-fuzz" })`. Setting `0` disables fuzz; omitting
-   * the field falls back to `DEFAULT_LINE_FUZZ` (2).
+   * throws `DiffError({ code: "invalid-line-fuzz" })`. Setting `0` pairs an edit only with an
+   * element on the same line, and does not stop an unchanged element from pairing; omitting the
+   * field falls back to `DEFAULT_LINE_FUZZ` (2).
    */
   lineFuzz?: number
 }
 
 /**
  * The full per-Symbol delta between two paired Symbols (diff-algorithm.md). The axis booleans
- * come from fingerprint comparison; the array deltas from identity-preserving diff with line
- * fuzz.
+ * come from fingerprint comparison; the array deltas from identity-preserving pairing, with line
+ * fuzz deciding only how far an edited element may sit from the one it replaced.
  */
 export function computeSymbolDelta(
   base: IRSymbol,
@@ -79,19 +81,29 @@ interface Identified<T> {
 }
 
 /**
- * Array diff (diff-algorithm.md) — pair the two sides by identity key within ±`lineFuzz`,
- * then classify each element into `added` / `removed` / `modified`. `modified` fires only
- * when a pairing holds and the content differs, so a cosmetic line shift produces nothing.
+ * Array diff (diff-algorithm.md) — pair the two sides by identity key, then classify each
+ * element into `added` / `removed` / `modified`. `modified` fires only when a pairing holds
+ * and the content differs, so a line shift on its own produces nothing.
  *
  * Several elements of one Symbol routinely share a key — two `guard` rules, two `@Get` — so
  * which base element a head element takes is a real choice. Two passes make it:
- * first the elements whose key **and content** agree, then whatever is left. An untouched
- * element is therefore claimed by its own counterpart before an edited or deleted neighbour
- * can take it, and the remainder pairs by proximity, where a genuine edit lands.
+ * first the elements whose key **and content** agree, wherever they sit, then whatever is
+ * left, within ±`lineFuzz`. An untouched element is therefore claimed by its own counterpart
+ * before an edited or deleted neighbour can take it, however far the body moved, and the
+ * remainder pairs by proximity, where a genuine edit lands.
+ *
+ * The exact pass has no line window because it needs none: non-crossing already stops an
+ * element from pairing with one it was never beside, and an absolute distance would refuse
+ * exactly the case the pass exists for — an unchanged body that moved further than the
+ * window. The window stays on the second pass, where it is all that separates an edit from
+ * an unrelated element that happens to share the key.
  *
  * Each pass is an order-preserving assignment rather than a per-element search, because a
- * greedy pass can take a pairing that leaves a better set unreachable: two identical guards
- * shifted down two lines would come back as an `added` and a `removed`.
+ * greedy pass can take a pairing that leaves a better set unreachable: two edited guards
+ * shifted down two lines would come back as an edit, an `added` and a `removed`. The order it
+ * preserves is the order among elements of one key. Elements of different keys are never
+ * candidates for each other, so which sits above which says nothing about identity — a call
+ * that moved below a different call is still the same call.
  */
 function classifyArrayDelta<T>(
   base: readonly Identified<T>[],
@@ -102,16 +114,26 @@ function classifyArrayDelta<T>(
   const freeBase = new Set(base.map((_, index) => index))
   const freeHead = new Set(head.map((_, index) => index))
   const partnerOf = new Map<number, Identified<T>>()
-  for (const contentMustAgree of [true, false]) {
-    const admits = (b: Identified<T>, h: Identified<T>): boolean =>
-      b.key === h.key &&
-      Math.abs(b.line - h.line) <= lineFuzz &&
-      (!contentMustAgree || isEqual(b.item, h.item))
-    for (const [baseIndex, headIndex] of assignInOrder(base, head, freeBase, freeHead, admits)) {
-      freeBase.delete(baseIndex)
-      freeHead.delete(headIndex)
-      const counterpart = base[baseIndex]
-      if (counterpart !== undefined) partnerOf.set(headIndex, counterpart)
+  // Each predicate checks the key itself, although the grouping below already guarantees it:
+  // for signature inputs the key carries the position and `isEqual` does not, so a pairing
+  // reached by any other route would otherwise cross positions with nothing to stop it.
+  const passes: Array<(b: Identified<T>, h: Identified<T>) => boolean> = [
+    (b, h) => b.key === h.key && isEqual(b.item, h.item),
+    (b, h) => b.key === h.key && Math.abs(b.line - h.line) <= lineFuzz,
+  ]
+  const groups = groupByKey(base, head)
+  for (const admits of passes) {
+    for (const group of groups) {
+      const pairs = assignInOrder(
+        group.base.filter((slot) => freeBase.has(slot.index)),
+        group.head.filter((slot) => freeHead.has(slot.index)),
+        admits,
+      )
+      for (const [b, h] of pairs) {
+        freeBase.delete(b.index)
+        freeHead.delete(h.index)
+        partnerOf.set(h.index, b.element)
+      }
     }
   }
 
@@ -124,6 +146,31 @@ function classifyArrayDelta<T>(
   }
   const removed = base.filter((_, index) => freeBase.has(index)).map((b) => b.item)
   return { added, removed, modified }
+}
+
+/** One element with its position in the whole array, so a pairing needs no index remap. */
+interface Slot<T> {
+  index: number
+  element: Identified<T>
+}
+
+/** The elements of each key on either side, in array order; only a shared key pairs. */
+function groupByKey<T>(
+  base: readonly Identified<T>[],
+  head: readonly Identified<T>[],
+): Array<{ base: Slot<T>[]; head: Slot<T>[] }> {
+  const byKey = new Map<string, { base: Slot<T>[]; head: Slot<T>[] }>()
+  const groupOf = (key: string) => {
+    let group = byKey.get(key)
+    if (group === undefined) {
+      group = { base: [], head: [] }
+      byKey.set(key, group)
+    }
+    return group
+  }
+  for (const [index, element] of base.entries()) groupOf(element.key).base.push({ index, element })
+  for (const [index, element] of head.entries()) groupOf(element.key).head.push({ index, element })
+  return [...byKey.values()].filter((group) => group.base.length > 0 && group.head.length > 0)
 }
 
 /** How good an assignment is: more pairings first, then less total line movement. */
@@ -139,56 +186,61 @@ function outranks(a: AssignmentScore, b: AssignmentScore): boolean {
 }
 
 /**
- * The best set of non-crossing pairings between the still-free elements of `base` and `head`,
- * as `[baseIndex, headIndex]` in ascending order.
+ * The best set of non-crossing pairings between `base` and `head` — the still-free elements of
+ * one key, which the caller has already grouped — as slot pairs in ascending order.
  *
  * Non-crossing is the whole content of the rule, and ir-schema.md #11 licenses it: these
- * arrays are ordered by line, so two pairings that cross would have an element move above one
- * it was below, which is a different element rather than a line shift. It also makes the
- * optimum reachable by a suffix recurrence. Maximising the count before minimising distance
- * stops a near pairing from being taken at the cost of a far one that would otherwise have no
- * partner at all.
+ * arrays are ordered by line, so two pairings that cross would have an element move above
+ * another of its key that it was below, which is a different element rather than a line
+ * shift. It also makes the optimum reachable by a suffix recurrence. Maximising the count
+ * before minimising distance stops a near pairing from being taken at the cost of a far one
+ * that would otherwise have no partner at all.
  */
 function assignInOrder<T>(
-  base: readonly Identified<T>[],
-  head: readonly Identified<T>[],
-  freeBase: ReadonlySet<number>,
-  freeHead: ReadonlySet<number>,
+  base: readonly Slot<T>[],
+  head: readonly Slot<T>[],
   admits: (b: Identified<T>, h: Identified<T>) => boolean,
-): Array<[number, number]> {
+): Array<[Slot<T>, Slot<T>]> {
   // best[i][j] is the score of the best assignment over base[i..] and head[j..].
   const best: AssignmentScore[][] = Array.from({ length: base.length + 1 }, () =>
     Array.from({ length: head.length + 1 }, () => EMPTY_ASSIGNMENT),
   )
-  const pairingAt = (i: number, j: number): AssignmentScore | null => {
+  const pairingAt = (
+    i: number,
+    j: number,
+  ): { score: AssignmentScore; pair: [Slot<T>, Slot<T>] } | null => {
     const b = base[i]
     const h = head[j]
-    if (b === undefined || h === undefined) return null
-    if (!freeBase.has(i) || !freeHead.has(j) || !admits(b, h)) return null
+    if (b === undefined || h === undefined || !admits(b.element, h.element)) return null
     const rest = best[i + 1]?.[j + 1] ?? EMPTY_ASSIGNMENT
-    return { pairs: rest.pairs + 1, distance: rest.distance + Math.abs(b.line - h.line) }
+    const distance = rest.distance + Math.abs(b.element.line - h.element.line)
+    return { score: { pairs: rest.pairs + 1, distance }, pair: [b, h] }
   }
   for (let i = base.length - 1; i >= 0; i--) {
     for (let j = head.length - 1; j >= 0; j--) {
       const skipBase = best[i + 1]?.[j] ?? EMPTY_ASSIGNMENT
       const skipHead = best[i]?.[j + 1] ?? EMPTY_ASSIGNMENT
       let winner = outranks(skipBase, skipHead) ? skipBase : skipHead
-      const paired = pairingAt(i, j)
-      if (paired !== null && outranks(paired, winner)) winner = paired
+      const paired = pairingAt(i, j)?.score
+      if (paired !== undefined && outranks(paired, winner)) winner = paired
       const row = best[i]
       if (row !== undefined) row[j] = winner
     }
   }
 
   // Walk the table back down, taking a pairing wherever it is what the optimum was built from.
-  const chosen: Array<[number, number]> = []
+  const chosen: Array<[Slot<T>, Slot<T>]> = []
   let i = 0
   let j = 0
   while (i < base.length && j < head.length) {
     const here = best[i]?.[j] ?? EMPTY_ASSIGNMENT
     const paired = pairingAt(i, j)
-    if (paired !== null && paired.pairs === here.pairs && paired.distance === here.distance) {
-      chosen.push([i, j])
+    if (
+      paired !== null &&
+      paired.score.pairs === here.pairs &&
+      paired.score.distance === here.distance
+    ) {
+      chosen.push(paired.pair)
       i++
       j++
       continue
