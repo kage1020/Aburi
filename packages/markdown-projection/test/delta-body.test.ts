@@ -153,6 +153,77 @@ describe("renderDeltaBody — decorator branches", () => {
     expect(md).toContain("- decorator modified: `@UseGuards`")
   })
 
+  it("modified → keeps the receiver, which may be what changed", () => {
+    // `@nest.Post()` → `@tsed.Post()` is modified on its qualifier alone; `@Post` would name
+    // neither side of that edit.
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [],
+        removed: [],
+        modified: [
+          {
+            name: "Post",
+            qualifier: "tsed",
+            raw: "tsed.Post('/x')",
+            arguments: ["'/x'"],
+            boundary: true,
+            line: 7,
+          },
+        ],
+      },
+    })
+    expect(md).toContain("- decorator modified: `@tsed.Post`")
+  })
+
+  it("modified → carries a multi-segment receiver whole", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [],
+        removed: [],
+        modified: [
+          {
+            name: "Post",
+            qualifier: "a.b",
+            raw: "a.b.Post()",
+            arguments: [],
+            boundary: false,
+            line: 7,
+          },
+        ],
+      },
+    })
+    expect(md).toContain("- decorator modified: `@a.b.Post`")
+  })
+
+  it("added without raw → falls back to the name with its receiver, as modified shows it", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [{ name: "Post", qualifier: "nest", arguments: [], boundary: false, line: 3 }],
+        removed: [],
+        modified: [],
+      },
+    })
+    expect(md).toContain("- decorator added: `@nest.Post`")
+  })
+
+  it("an empty qualifier is treated as absent rather than printed as `@.Post`", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      decorators: {
+        added: [],
+        removed: [],
+        modified: [
+          { name: "Post", qualifier: "", raw: "Post()", arguments: [], boundary: false, line: 7 },
+        ],
+      },
+    })
+    expect(md).toContain("- decorator modified: `@Post`")
+    expect(md).not.toContain("@.Post")
+  })
+
   it("skips malformed entries silently rather than emitting `@?`", () => {
     const md = renderWith({
       ...baseDelta(),

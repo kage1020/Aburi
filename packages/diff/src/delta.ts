@@ -316,7 +316,10 @@ function callsEqual(a: Call, b: Call): boolean {
   return a.target === b.target && (a.resolved ?? null) === (b.resolved ?? null)
 }
 
-/** Decorator identity is `name`; the argument list decides `modified` (diff-algorithm.md). */
+/**
+ * Decorator identity is `name`; the argument list and the receiver decide `modified`
+ * (diff-algorithm.md).
+ */
 function diffDecorators(
   base: readonly Decorator[],
   head: readonly Decorator[],
@@ -330,8 +333,25 @@ function diffDecorators(
   return classifyArrayDelta(base.map(mapper), head.map(mapper), decoratorsEqual, lineFuzz)
 }
 
+/**
+ * `name`, `qualifier` and `arguments` are compared; `raw` and `boundary` are not.
+ *
+ * The api fingerprint hashes the normalized `raw`, which quotes the receiver, so
+ * `@nest.Post()` → `@tsed.Post()` moves it and the delta has to say why. `raw` itself is left out
+ * because `(name, qualifier, arguments)` is its structured decomposition, and comparing the quoted
+ * text would report a reformat as an edit. `boundary` is derived by plugins rather than written,
+ * so comparing it would report a decorator that reads the same on both sides as modified.
+ *
+ * An absent `qualifier` reads as `null`. Two Documents written before the field existed are both
+ * `null` and report nothing, but a stored base from such a producer, set against a head that
+ * carries the field, reports each qualified decorator as modified, once.
+ */
 function decoratorsEqual(a: Decorator, b: Decorator): boolean {
-  return a.name === b.name && stringArraysEqual(a.arguments, b.arguments)
+  return (
+    a.name === b.name &&
+    (a.qualifier ?? null) === (b.qualifier ?? null) &&
+    stringArraysEqual(a.arguments, b.arguments)
+  )
 }
 
 /**

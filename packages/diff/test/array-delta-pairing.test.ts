@@ -348,6 +348,34 @@ describe("the same rule applies to the other keyed arrays", () => {
       [["/a"]],
     )
   })
+
+  it("decorators: an unchanged receiver is claimed before a nearer edited one", () => {
+    // `@tsed.Post` was written above an unchanged `@nest.Post`, pushing it down two lines. The
+    // edited one is nearer the base, but the exact pass pairs the unchanged one first, so the
+    // new decorator reads as added rather than as a receiver edit beside an added `@nest.Post`.
+    const post = (qualifier: string, line: number) =>
+      decorator({ name: "Post", qualifier, line, arguments: ["/x"] })
+    const delta = computeSymbolDelta(
+      symbolWith({ decorators: [post("nest", 1)] }, "a"),
+      symbolWith({ decorators: [post("tsed", 1), post("nest", 3)] }, "b"),
+      { lineFuzz: 2 },
+    )
+    expect(delta.decorators).toEqual({ added: [post("tsed", 1)], removed: [], modified: [] })
+  })
+
+  it("decorators: a receiver edit that also moved beyond lineFuzz is added + removed", () => {
+    // The near pass does not reach it, as it does not reach a changed argument list that far.
+    const delta = computeSymbolDelta(
+      symbolWith({ decorators: [decorator({ name: "Post", qualifier: "nest", line: 1 })] }, "a"),
+      symbolWith({ decorators: [decorator({ name: "Post", qualifier: "tsed", line: 10 })] }, "b"),
+      { lineFuzz: 2 },
+    )
+    expect(delta.decorators).toEqual({
+      added: [decorator({ name: "Post", qualifier: "tsed", line: 10 })],
+      removed: [decorator({ name: "Post", qualifier: "nest", line: 1 })],
+      modified: [],
+    })
+  })
 })
 
 describe("pairings are chosen as a set, not one element at a time", () => {

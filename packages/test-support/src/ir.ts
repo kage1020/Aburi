@@ -130,7 +130,11 @@ export function rule(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
 export function decorator(overrides: Partial<Decorator> & { name: string }): Decorator {
   return {
     name: overrides.name,
-    raw: overrides.raw ?? `${overrides.name}()`,
+    ...(overrides.qualifier === undefined ? {} : { qualifier: overrides.qualifier }),
+    // `raw` is the whole written form, receiver included.
+    raw:
+      overrides.raw ??
+      `${overrides.qualifier === undefined ? "" : `${overrides.qualifier}.`}${overrides.name}()`,
     arguments: overrides.arguments ?? [],
     boundary: overrides.boundary ?? false,
     line: overrides.line ?? 1,

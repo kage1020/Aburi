@@ -702,9 +702,9 @@ from pairing.
 
 However, fingerprints themselves contain no line information (D4 §4), so line fuzz is **for delta display only**. It does not affect fingerprint equality checks.
 
-##### 5.2.2 Handling of arguments in Decorator deltas
+##### 5.2.2 Handling of arguments and receivers in Decorator deltas
 
-Decorators are identified by `(name)`, but differences in `arguments` are shown in the delta:
+Decorators are identified by `(name)`, but differences in `arguments` and `qualifier` are shown in the delta:
 
 ```
 Decorator delta (modified):
@@ -714,7 +714,12 @@ Decorator delta (modified):
 
 `arguments` is combined with line fuzz for the modified determination:
 - Same name + within line fuzz + differing arguments → modified
-- Same name + same arguments + only line differs, by any distance → implicitly the same (not shown in the delta)
+- Same name + within line fuzz + differing `qualifier` (the receiver: `@nest.Post` → `@tsed.Post`, or a receiver gained or lost) → modified. The api fingerprint hashes the normalized `raw`, which quotes the receiver, so a receiver edit moves that fingerprint, and a delta that ignored it would leave the move unexplained
+- An absent `qualifier` compares as absent. Two Documents written before the field existed report nothing, but a base stored by such a producer and diffed through `--base` against a head that carries the field reports each qualified decorator as modified, once. `aburi diff <base>..<head>` re-scans the base with the head's producer, so it never meets this case
+- `raw` itself is never compared: `(name, qualifier, arguments)` is its structured decomposition, and comparing the quoted text would report a reformat as an edit
+- `boundary` is not compared either: plugins derive it rather than the source writing it, so a flip would show as a modified decorator that reads the same on both sides. A boundary flip still moves the api fingerprint with nothing in the decorator delta to explain it; how to show it is a display question of its own
+- A same-name pair further apart than the line fuzz is not paired by the near pass, so a receiver edit that also moved that far reports as `added` + `removed`, as a changed argument list does
+- Same name + same arguments + same qualifier + only line differs, by any distance → implicitly the same (not shown in the delta)
 
 ##### 5.2.3 `modified` determination for Component diffs
 

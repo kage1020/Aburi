@@ -1,4 +1,5 @@
 import { call, decorator, effect, fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
+import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, classifyStatus, computeSymbolDelta, dropDirection } from "../src"
 
@@ -306,6 +307,63 @@ describe("Effects delta (I2)", () => {
     const delta = computeSymbolDelta(baseSym, h)
     expect(delta.effects?.added).toHaveLength(1)
     expect(delta.effects?.removed).toHaveLength(1)
+  })
+})
+
+describe("Decorator delta — qualifier", () => {
+  const withDecorators = (decorators: IRSymbol["decorators"], seed: string) =>
+    makeSymbol({ id: "ts:src/a.ts#Foo.create", name: "create", decorators, fingerprint: fp(seed) })
+  const post = (qualifier?: string) =>
+    decorator({
+      name: "Post",
+      ...(qualifier === undefined ? {} : { qualifier }),
+      arguments: ['"/x"'],
+      line: 3,
+    })
+
+  it("emits modified when only the receiver changed", () => {
+    // `@nest.Post("/x")` → `@tsed.Post("/x")`: the classification behind the api fingerprint
+    // moved, so the decorator list has to say so.
+    const delta = computeSymbolDelta(
+      withDecorators([post("nest")], "a"),
+      withDecorators([post("tsed")], "b"),
+    )
+    expect(delta.decorators).toEqual({ added: [], removed: [], modified: [post("tsed")] })
+  })
+
+  it("emits modified when a receiver is gained", () => {
+    const delta = computeSymbolDelta(
+      withDecorators([post()], "a"),
+      withDecorators([post("nest")], "b"),
+    )
+    expect(delta.decorators?.modified).toEqual([post("nest")])
+  })
+
+  it("emits modified when a receiver is lost, and names the head side only", () => {
+    const delta = computeSymbolDelta(
+      withDecorators([post("nest")], "a"),
+      withDecorators([post()], "b"),
+    )
+    // `modified` carries the head element, so the row reads `@Post`, as an argument edit would.
+    expect(delta.decorators?.modified).toStrictEqual([post()])
+  })
+
+  it("carries a multi-segment receiver whole", () => {
+    const delta = computeSymbolDelta(
+      withDecorators([post("nest")], "a"),
+      withDecorators([post("a.b")], "b"),
+    )
+    expect(delta.decorators?.modified).toStrictEqual([post("a.b")])
+  })
+
+  it("does not compare raw, so a reformat of the same decorator is no change", () => {
+    // Both sides bare, and `raw` differs in spacing only. A comparison that read `raw` would
+    // report this as modified.
+    const delta = computeSymbolDelta(
+      withDecorators([{ ...post(), raw: 'Post("/x")' }], "a"),
+      withDecorators([{ ...post(), raw: 'Post( "/x" )' }], "b"),
+    )
+    expect(delta.decorators).toEqual({ added: [], removed: [], modified: [] })
   })
 })
 
