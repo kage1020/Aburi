@@ -284,21 +284,24 @@ export interface FrameworkClassifyContext extends ExtractionContext {
 
 // --- Effect classification context ---
 
+/**
+ * A decorator of the Symbol an effect plugin classifies against, cut to what classification
+ * reads. `qualifier` is the receiver that `@tsed.Post()` was written through, present only when
+ * there was one. Only its first dot-separated segment can name a local binding, so resolve that
+ * segment against `FileSummary.imports`, as `Decorator.qualifier` and lang-plugin.md §5.2.2 say.
+ *
+ * `raw`, `arguments` and `line` are left out: a `Decorator` field reaches effect plugins only
+ * by being named here.
+ */
+export type OwnerDecorator = Pick<Decorator, "name" | "qualifier" | "boundary">
+
 export interface OwnerSummary {
   id: SymbolId
   kind: SymbolKind
   name: string
   /** Already populated by framework plugin (lang-plugin.md). */
   extKind: ExtKind
-  /**
-   * The owner's decorators, cut to what classification reads. `qualifier` is the receiver that
-   * `@tsed.Post()` was written through, present only when there was one, so a plugin can
-   * resolve it against `FileSummary.imports` the way a framework plugin does.
-   *
-   * `raw`, `arguments` and `line` are left out: a `Decorator` field reaches effect plugins
-   * only by being named here.
-   */
-  decorators: Pick<Decorator, "name" | "qualifier" | "boundary">[]
+  decorators: OwnerDecorator[]
   component: ComponentId | null
 }
 

@@ -317,13 +317,56 @@ describe("runFilePipeline — effect classify dispatch", () => {
       body: { rules: [], calls: [stubCall("db.save")] },
     })
 
-    expect(seen).toEqual([
+    // Strict, so the bare one must have no `qualifier` key at all, not one holding `undefined`.
+    expect(seen).toStrictEqual([
       [
         { name: "Post", qualifier: "tsed", boundary: false },
         { name: "Get", boundary: false },
       ],
     ])
-    expect(seen[0]?.[1]).not.toHaveProperty("qualifier")
+  })
+
+  it("hands the effect plugin a boundary a framework plugin keyed on the qualified decorator", async () => {
+    const seen: ClassifyContext["owner"]["decorators"][] = []
+    const fw: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-qualified"),
+      init: async () => {},
+      classifySymbol: (): SymbolClassification => ({
+        extKind: "framework:tsed:route",
+        decoratorBoundaries: { "tsed.Post": true },
+        derivedBy: "framework-qualified:hit",
+      }),
+    }
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-owner"),
+      init: async () => {},
+      classify: (_call: CallCandidate, ctx: ClassifyContext) => {
+        seen.push(ctx.owner.decorators)
+        return null
+      },
+    }
+    const candidate = stubCandidate("Fn", {
+      decorators: [
+        {
+          name: "Post",
+          qualifier: "tsed",
+          raw: "@tsed.Post()",
+          arguments: [],
+          boundary: false,
+          line: 1,
+        },
+      ],
+      source: { file: "test.stub", startLine: 1, endLine: 5, startColumn: null, endColumn: null },
+    })
+
+    await runPipelineWithStubs({
+      frameworks: [fw],
+      effects: [eff],
+      candidate,
+      body: { rules: [], calls: [stubCall("db.save")] },
+    })
+
+    expect(seen).toStrictEqual([[{ name: "Post", qualifier: "tsed", boundary: true }]])
   })
 
   it("leaves unclassified calls in Symbol.calls[] with resolved:null", async () => {
@@ -511,9 +554,9 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
       ],
     }
     const result = await runPipelineWithStubs({ candidate })
-    const decorator = result.symbols[0]?.decorators[0]
-    expect(decorator?.name).toBe(composed)
-    expect(decorator === undefined ? [] : Object.keys(decorator)).not.toContain("qualifier")
+    expect(result.symbols[0]?.decorators).toStrictEqual([
+      { name: composed, raw: `@${decomposed}()`, arguments: [], boundary: false, line: 1 },
+    ])
   })
 
   it("leaves decorators[].raw alone, because it is a quotation of source", async () => {

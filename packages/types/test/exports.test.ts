@@ -26,6 +26,7 @@ import type {
   LanguageCapabilities,
   LanguagePlugin,
   ManifestEffectVocab,
+  OwnerDecorator,
   OwnerSummary,
   ParseResult,
   PluginContext,
@@ -87,7 +88,7 @@ describe("@aburi/types public surface", () => {
   })
 
   it("keeps an effect plugin's view of a decorator to the fields it names", () => {
-    type OwnerDecorator = OwnerSummary["decorators"][number]
+    expectTypeOf<OwnerSummary["decorators"]>().toEqualTypeOf<OwnerDecorator[]>()
     expectTypeOf<OwnerDecorator>().toEqualTypeOf<{
       name: string
       qualifier?: string
