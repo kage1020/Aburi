@@ -1,6 +1,6 @@
-import type { Decorator } from "@aburi/types"
+import { type Decorator, UNNAMED_DECORATOR } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { firstNonCommentChild } from "./ast-helpers"
+import { firstNonCommentChild, hasErrorChild } from "./ast-helpers"
 
 /**
  * Read every decorator attached to a specific declaration node.
@@ -97,21 +97,25 @@ function precedingDecorators(declaration: Node): Node[] {
 function readDecorator(node: Node): Decorator | null {
   // The decorator wraps either a call_expression (@Foo(...)) or a bare identifier / member
   // access (@Foo, @Ns.Foo). A comment may be written between the `@` and the expression —
-  // `@/* why */ Foo()` parses — and `leafIdentifier` falls back to a node's text, so taking
-  // the first named child unconditionally would name the decorator after the comment.
-  const inner = firstNonCommentChild(node)
-  if (inner === null) return null
+  // `@/* why */ Foo()` parses — so taking the first named child unconditionally would read
+  // the comment as the decorator.
+  const written = firstNonCommentChild(node)
+  if (written === null) return null
+  const inner = throughParentheses(written)
   const line = node.startPosition.row + 1
+  // `raw` quotes what was written, parentheses included, whatever `inner` reads through.
+  const raw = written.text
 
   if (inner.type === "call_expression") {
     const callee = inner.childForFieldName("function")
-    const name = callee !== null ? leafIdentifier(callee) : ""
+    const target = callee === null ? null : throughParentheses(callee)
+    const name = target === null ? UNNAMED_DECORATOR : leafIdentifier(target)
     const argsNode = inner.childForFieldName("arguments")
     const args = argsNode !== null ? readCallArguments(argsNode) : []
     return {
       name,
-      ...qualifierOf(callee),
-      raw: inner.text,
+      ...qualifierOf(target),
+      raw,
       arguments: args,
       boundary: false,
       line,
@@ -123,21 +127,57 @@ function readDecorator(node: Node): Decorator | null {
   return {
     name,
     ...qualifierOf(inner),
-    raw: inner.text,
+    raw,
     arguments: [],
     boundary: false,
     line,
   }
 }
 
+/**
+ * The expression a pair of parentheses encloses: `(Controller)` is `Controller`,
+ * `(nest.Controller)` is `nest.Controller` and `(pick("x"))` is the call. Parentheses around
+ * a name, a path or a call change nothing about which decorator it is, so reading through them
+ * is what lets `@(Controller)` match the vocabulary `@Controller` does. A comment inside the
+ * parentheses is skipped, as one after the `@` is.
+ *
+ * Parentheses the parser had to repair are not read through. TypeScript accepts any
+ * expression there, but the grammar's decorator rule takes only a name, a path or a call, so
+ * `@(x as any)`, `@(x!)`, `@(a[b])`, `@(C<T>)` and `@(new C())` arrive with an ERROR node
+ * beside a fragment — `x`, `a`, `C`, or a call of `new` — that is not the decorator. Naming
+ * it after that fragment would be a guess, so such a decorator stays enclosed and gets no
+ * name. `((C))` needs no loop either: the grammar does not accept it, and error recovery
+ * leaves it outside the declaration's run.
+ *
+ * The repair that counts is one in the head: an ERROR or MISSING token among the children of
+ * the parentheses, or of the expression they enclose — which is where it lands for every form
+ * above. A broken argument list nests its ERROR deeper, so `@(Controller(a b))` keeps the name
+ * `@Controller(a b)` has; `hasErrorChild` says why that is the rule.
+ */
+function throughParentheses(node: Node): Node {
+  if (node.type !== "parenthesized_expression" || hasErrorChild(node)) return node
+  const enclosed = firstNonCommentChild(node)
+  if (enclosed === null || hasErrorChild(enclosed)) return node
+  return enclosed
+}
+
+/**
+ * `Ns.Foo` → `Foo`; `Foo` → `Foo`; anything else → `UNNAMED_DECORATOR`.
+ *
+ * The anything else is a parenthesized decorator `throughParentheses` could not read. Reporting
+ * the node's text there would put arbitrary source, line breaks included, into a field that
+ * every consumer treats as an identifier. The decorator is kept, since it is still in the
+ * source, and `raw` carries its text.
+ */
 function leafIdentifier(node: Node): string {
-  // `Ns.Foo` → `Foo`; `Foo` → `Foo`.
   if (node.type === "identifier" || node.type === "type_identifier") return node.text
   if (node.type === "member_expression") {
     const property = node.childForFieldName("property")
-    if (property !== null) return property.text
+    // No input is known to reach the empty case: a MISSING property is a head repair that
+    // `throughParentheses` refuses first. The check keeps `name` from ever being "".
+    if (property !== null && property.text.length > 0) return property.text
   }
-  return node.text
+  return UNNAMED_DECORATOR
 }
 
 /**
@@ -156,14 +196,14 @@ function leafIdentifier(node: Node): string {
  *
  * The rule is stated by this function and nothing else: a qualifier is reported when the
  * callee is a `member_expression` with an object, and in no other case. The grammar is not
- * the guard it might look like. It accepts more than a name, a dotted run and a call —
- * `@(a.b)` parses clean, as a parenthesized expression, and `leafIdentifier`'s fallback
- * names that decorator `(a.b)` with no qualifier. And the receivers that never arrive —
- * `@arr[0].C()`, `@(a).C()`, `@pick().C()`, `@ns["C"]()` — are not refused by the grammar
- * either: each *is* parsed as a decorator, of the leading fragment the grammar could take,
- * and then wrapped in an ERROR node that leaves it no longer a preceding sibling of the
- * declaration, which is why `collectDecoratorNodes` does not reach it. That is a property of
- * error recovery, not a guarantee, and a grammar bump can move it.
+ * the guard it might look like. It parses a path in parentheses cleanly — `@(a.b)` — and
+ * this function sees what `throughParentheses` read out of it, so that gives `a`, while a
+ * parenthesized expression the grammar had to repair gets no name and no qualifier. And the
+ * receivers that never arrive — `@arr[0].C()`, `@(a).C()`, `@pick().C()`, `@ns["C"]()` — are
+ * not refused by the grammar either: each *is* parsed as a decorator, of the leading fragment
+ * the grammar could take, and then wrapped in an ERROR node that leaves it no longer a
+ * preceding sibling of the declaration, which is why `collectDecoratorNodes` does not reach
+ * it. That is a property of error recovery, not a guarantee, and a grammar bump can move it.
  *
  * What does arrive besides a dotted run of names is `this` (`@this.C()`, which parses
  * cleanly) and the object of an optional chain (`@a?.C()`, which does not — the `?` lands in

@@ -43,7 +43,7 @@ import type {
   VocabRegistry,
   WrittenSourceRange,
 } from "../src/index"
-import { COMPUTED_TARGET_SEGMENT } from "../src/index"
+import { COMPUTED_TARGET_SEGMENT, UNNAMED_DECORATOR } from "../src/index"
 
 // Pure type-level tests. They compile-time-assert that the public surface stays
 // importable and shaped roughly as designed. No runtime cost beyond Vitest's
@@ -170,6 +170,12 @@ describe("@aburi/types public surface", () => {
     // fixed position. Two hand-written copies is one misspelling away from a segment that
     // matches nothing, and neither the types nor the schema would say so.
     expect(COMPUTED_TARGET_SEGMENT).toBe("<computed>")
+  })
+
+  it("exports the reserved decorator name for an expression that has none", () => {
+    // Written by a language plugin into `Decorator.name`, and read by anything that prints or
+    // matches decorator names.
+    expect(UNNAMED_DECORATOR).toBe("<expression>")
   })
 
   it("marks CallCandidate.dynamicReceiver optional so existing plugins stay valid", () => {

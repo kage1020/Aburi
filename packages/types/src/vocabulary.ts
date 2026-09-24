@@ -23,3 +23,19 @@
  * treat it as absent evidence, never as a name that happens to be spelled oddly.
  */
 export const COMPUTED_TARGET_SEGMENT = "<computed>"
+
+/**
+ * The `Decorator.name` written where the decorator's expression has no name to read —
+ * `@(x as any)`, `@(x!)`, `@(a[b])` (`lang-plugin.md`).
+ *
+ * TypeScript accepts any parenthesized expression as a decorator. A name, a member path or a
+ * call in parentheses is read through them; anything else has no name to read. It is still a
+ * decorator, so it stays in the list, with its text in `raw`; carrying the text in `name`
+ * instead would put arbitrary source, line breaks included, into a field every consumer
+ * treats as an identifier.
+ *
+ * `<` cannot begin an identifier, so the name matches no framework's vocabulary: a plugin
+ * matching names against a table needs no case for it. Treat it as a decorator whose name is
+ * unknown, never as one spelled oddly.
+ */
+export const UNNAMED_DECORATOR = "<expression>"

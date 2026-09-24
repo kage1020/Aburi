@@ -540,7 +540,11 @@
       "additionalProperties": false,
       "required": ["arguments", "boundary", "line", "name", "raw"],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The decorator's leaf identifier: `Post` for `@Post()`, `@nest.Post()` and `@(nest.Post)`. Parentheses around a name, a member path or a call are read through. Where the expression leaves no name to read (`@(x as any)`, `@(a[b])`), the reserved `<expression>` (`UNNAMED_DECORATOR` in @aburi/types), with the source text kept in `raw`."
+        },
         "qualifier": {
           "type": "string",
           "minLength": 1,
