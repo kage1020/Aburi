@@ -290,7 +290,15 @@ export interface OwnerSummary {
   name: string
   /** Already populated by framework plugin (lang-plugin.md). */
   extKind: ExtKind
-  decorators: { name: string; boundary: boolean }[]
+  /**
+   * The owner's decorators, cut to what classification reads. `qualifier` is the receiver that
+   * `@tsed.Post()` was written through, present only when there was one, so a plugin can
+   * resolve it against `FileSummary.imports` the way a framework plugin does.
+   *
+   * `raw`, `arguments` and `line` are left out: a `Decorator` field reaches effect plugins
+   * only by being named here.
+   */
+  decorators: Pick<Decorator, "name" | "qualifier" | "boundary">[]
   component: ComponentId | null
 }
 

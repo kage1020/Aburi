@@ -19,6 +19,7 @@ import type {
   LanguagePlugin,
   Logger,
   OpaqueAstNode,
+  OwnerSummary,
   ParsedTree,
   ParseError,
   SourceFile,
@@ -640,6 +641,14 @@ function normalizeCallStrings(call: CallCandidate): CallCandidate {
   return target === call.target ? call : { ...call, target }
 }
 
+/**
+ * A bare decorator stays without a `qualifier` key, as it is on the `Decorator` it came from.
+ */
+function ownerDecorator(decorator: Decorator): OwnerSummary["decorators"][number] {
+  const { name, qualifier, boundary } = decorator
+  return qualifier === undefined ? { name, boundary } : { name, qualifier, boundary }
+}
+
 function classifyCalls(input: ClassifyCallsInput): {
   effects: Effect[]
   calls: Call[]
@@ -653,7 +662,7 @@ function classifyCalls(input: ClassifyCallsInput): {
     kind: input.candidate.kind,
     name: input.candidate.name,
     extKind: input.candidate.extKind,
-    decorators: input.candidate.decorators.map((d) => ({ name: d.name, boundary: d.boundary })),
+    decorators: input.candidate.decorators.map(ownerDecorator),
     component: input.component,
   }
 

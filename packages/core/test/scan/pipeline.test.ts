@@ -2,6 +2,7 @@ import { noopRegistry, silentLogger } from "@aburi/test-support"
 import type {
   BodyExtraction,
   CallCandidate,
+  ClassifyContext,
   EffectClassification,
   EffectPlugin,
   FrameworkPlugin,
@@ -283,6 +284,46 @@ describe("runFilePipeline — effect classify dispatch", () => {
 
     expect(result.symbols[0]?.effects[0]?.plugin).toBe("effects-second")
     expect(result.symbols[0]?.effects[0]?.id).toBe("db.write")
+  })
+
+  it("hands the effect plugin each owner decorator's receiver, and none for a bare one", async () => {
+    const seen: ClassifyContext["owner"]["decorators"][] = []
+    const eff: EffectPlugin = {
+      manifest: effectsManifest("effects-owner"),
+      init: async () => {},
+      classify: (_call: CallCandidate, ctx: ClassifyContext) => {
+        seen.push(ctx.owner.decorators)
+        return null
+      },
+    }
+    const candidate = stubCandidate("Fn", {
+      decorators: [
+        {
+          name: "Post",
+          qualifier: "tsed",
+          raw: "@tsed.Post()",
+          arguments: [],
+          boundary: false,
+          line: 1,
+        },
+        { name: "Get", raw: "@Get()", arguments: [], boundary: false, line: 2 },
+      ],
+      source: { file: "test.stub", startLine: 1, endLine: 5, startColumn: null, endColumn: null },
+    })
+
+    await runPipelineWithStubs({
+      effects: [eff],
+      candidate,
+      body: { rules: [], calls: [stubCall("db.save")] },
+    })
+
+    expect(seen).toEqual([
+      [
+        { name: "Post", qualifier: "tsed", boundary: false },
+        { name: "Get", boundary: false },
+      ],
+    ])
+    expect(seen[0]?.[1]).not.toHaveProperty("qualifier")
   })
 
   it("leaves unclassified calls in Symbol.calls[] with resolved:null", async () => {

@@ -6,6 +6,7 @@ import type {
   ComponentId,
   Config,
   ConfigPluginRef,
+  Decorator,
   Dependency,
   DependencyEndpoint,
   DiffGenerator,
@@ -25,6 +26,7 @@ import type {
   LanguageCapabilities,
   LanguagePlugin,
   ManifestEffectVocab,
+  OwnerSummary,
   ParseResult,
   PluginContext,
   PluginManifest,
@@ -82,6 +84,20 @@ describe("@aburi/types public surface", () => {
     expectTypeOf<ClassifyContext>().toHaveProperty("owner")
     expectTypeOf<ClassifyContext>().toHaveProperty("file")
     expectTypeOf<ClassifyContext>().toHaveProperty("language")
+  })
+
+  it("keeps an effect plugin's view of a decorator to the fields it names", () => {
+    type OwnerDecorator = OwnerSummary["decorators"][number]
+    expectTypeOf<OwnerDecorator>().toEqualTypeOf<{
+      name: string
+      qualifier?: string
+      boundary: boolean
+    }>()
+    // A field added to `Decorator` fails this until it is either passed on in `OwnerSummary` or
+    // added to the fields effect plugins do without.
+    expectTypeOf<Exclude<keyof Decorator, keyof OwnerDecorator>>().toEqualTypeOf<
+      "raw" | "arguments" | "line"
+    >()
   })
 
   it("models lang plugin extraction inputs/outputs", () => {

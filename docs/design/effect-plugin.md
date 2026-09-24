@@ -100,7 +100,7 @@ interface OwnerSummary {
   kind: SymbolKind
   name: string
   extKind: string | null                     // value already determined by the framework plugin
-  decorators: { name: string; boundary: boolean }[]
+  decorators: { name: string; qualifier?: string; boundary: boolean }[]
   component: string | null
 }
 
@@ -111,6 +111,8 @@ interface FileSummary {
 ```
 
 Providing `imports` lets the effect plugin distinguish whether "the identifier `prisma` comes from `@prisma/client` or is a local homegrown variable".
+
+`decorators[].qualifier` is `Decorator.qualifier` (ir-schema.md) passed through: the receiver that `@tsed.Post()` was written through (`tsed`), absent for a bare `@Post()`. Resolving it against `imports` answers the same question for a decorator. The other `Decorator` fields (`raw`, `arguments`, `line`) are not passed; a field added to `Decorator` reaches effect plugins only once `OwnerSummary` names it, and a type test in `@aburi/types` fails until that is decided.
 
 ### 4.4 `EffectClassification`
 
