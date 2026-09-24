@@ -8,6 +8,7 @@ import {
   sig,
   zeroFp,
 } from "@aburi/test-support"
+import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, DiffError } from "../src"
 
@@ -335,7 +336,7 @@ describe("DF16 — same rule, line drift within fuzz (±2)", () => {
     })
     const h = makeSymbol({
       ...b,
-      // 5→6 within default fuzz (±2)
+      // 5→6, same condition: the exact pass pairs it, at any lineFuzz
       rules: [rule({ type: "guard", line: 6, condition: "x > 0" })],
       // Force fingerprint to differ so we hit the delta path
       fingerprint: { ...shared, syntax: "syn-changed" },
@@ -349,27 +350,51 @@ describe("DF16 — same rule, line drift within fuzz (±2)", () => {
   })
 })
 
-describe("DF17 — same rule with big line drift (> fuzz)", () => {
-  it("produces added + removed pair", () => {
+describe("DF17 — edited rule with big line drift (> fuzz)", () => {
+  const rulesDelta = (base: IRSymbol["rules"], head: IRSymbol["rules"]) => {
     const shared = fp("v1")
-    const b = makeSymbol({
-      id: "ts:src/a.ts#Foo",
-      name: "Foo",
-      fingerprint: shared,
-      rules: [rule({ type: "guard", line: 5, condition: "x > 0" })],
-    })
-    const h = makeSymbol({
-      ...b,
-      rules: [rule({ type: "guard", line: 55, condition: "x > 0" })],
-      fingerprint: { ...shared, syntax: "syn-changed" },
-    })
+    const b = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", fingerprint: shared, rules: base })
+    const h = makeSymbol({ ...b, rules: head, fingerprint: { ...shared, syntax: "syn-changed" } })
     const result = diff(makeIR({ symbols: [b] }), makeIR({ symbols: [h] }), {
       delta: { lineFuzz: 2 },
     })
     const c = findChange(result.symbols, (x) => x.status === "changed")
     if (c.status !== "changed") throw new Error("unreachable")
-    expect(c.delta.rules?.added).toHaveLength(1)
-    expect(c.delta.rules?.removed).toHaveLength(1)
+    return c.delta.rules
+  }
+
+  it("produces added + removed pair", () => {
+    const delta = rulesDelta(
+      [rule({ type: "guard", line: 5, condition: "x > 0" })],
+      [rule({ type: "guard", line: 55, condition: "x >= 0" })],
+    )
+    expect(delta?.added).toHaveLength(1)
+    expect(delta?.removed).toHaveLength(1)
+  })
+
+  it("DF17a: an unchanged rule pairs however far it moved", () => {
+    expect(
+      rulesDelta(
+        [rule({ type: "guard", line: 5, condition: "x > 0" })],
+        [rule({ type: "guard", line: 55, condition: "x > 0" })],
+      ),
+    ).toEqual({ added: [], removed: [], modified: [] })
+  })
+
+  it("DF17b: a rule that moved past a same-type sibling is still added + removed", () => {
+    const moved = rule({ type: "guard", line: 60, condition: "x > 0" })
+    const delta = rulesDelta(
+      [
+        rule({ type: "guard", line: 5, condition: "x > 0" }),
+        rule({ type: "guard", line: 6, condition: "y > 0" }),
+      ],
+      [rule({ type: "guard", line: 5, condition: "y > 0" }), moved],
+    )
+    expect(delta).toEqual({
+      added: [moved],
+      removed: [rule({ type: "guard", line: 5, condition: "x > 0" })],
+      modified: [],
+    })
   })
 })
 
