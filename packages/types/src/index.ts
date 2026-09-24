@@ -118,6 +118,7 @@ export type {
   Logger,
   MergedDeclaration,
   OpaqueAstNode,
+  OwnerDecorator,
   OwnerSummary,
   ParsedTree,
   ParseError,

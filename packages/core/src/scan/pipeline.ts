@@ -19,6 +19,8 @@ import type {
   LanguagePlugin,
   Logger,
   OpaqueAstNode,
+  OwnerDecorator,
+  OwnerSummary,
   ParsedTree,
   ParseError,
   SourceFile,
@@ -510,10 +512,10 @@ interface ClassifyCallsInput {
  *   segment to decide that a parameter shadows a Symbol of the same name
  *   (call-resolution.md). Missing that comparison emits an edge to an unrelated
  *   Symbol, which then carries effects through propagation.
- * - `decorators[].name`, which a framework plugin resolves against `ImportEdge.symbols` —
- *   already normalized by `normalizeImportEdge` below. Leaving this side alone makes a
- *   decorator renamed on import fail to resolve on a file that spells its identifiers
- *   decomposed, which is the silent miss `readImportedNames` exists to prevent.
+ * - `decorators[].name`, which a framework or effect plugin resolves against
+ *   `ImportEdge.symbols` — already normalized by `normalizeImportEdge` below. Leaving this side
+ *   alone makes a decorator renamed on import fail to resolve on a file that spells its
+ *   identifiers decomposed, which is the silent miss `readImportedNames` exists to prevent.
  * - `decorators[].qualifier`, for the same reason one field over: it is matched against
  *   `ImportEdge.namespaceBinding`, which `normalizeImportEdge` normalizes, and a receiver
  *   left decomposed would miss the namespace edge that names its module and fall back to
@@ -558,8 +560,8 @@ function mapPreservingIdentity<T>(items: T[], transform: (item: T) => T): T[] {
 }
 
 /**
- * Only `name` and `qualifier` are normalized — the two a framework plugin matches against
- * the file's import edges. `raw` and `arguments` are quotations of source text.
+ * Only `name` and `qualifier` are normalized — the two a framework or effect plugin matches
+ * against the file's import edges. `raw` and `arguments` are quotations of source text.
  *
  * The rebuild writes `qualifier` back only when the decorator had one, so a bare decorator
  * keeps the key absent rather than gaining an `undefined` the Class B discipline forbids.
@@ -640,6 +642,14 @@ function normalizeCallStrings(call: CallCandidate): CallCandidate {
   return target === call.target ? call : { ...call, target }
 }
 
+/**
+ * A bare decorator stays without a `qualifier` key, as it is on the `Decorator` it came from.
+ */
+function ownerDecorator(decorator: Decorator): OwnerDecorator {
+  const { name, qualifier, boundary } = decorator
+  return qualifier === undefined ? { name, boundary } : { name, qualifier, boundary }
+}
+
 function classifyCalls(input: ClassifyCallsInput): {
   effects: Effect[]
   calls: Call[]
@@ -648,12 +658,12 @@ function classifyCalls(input: ClassifyCallsInput): {
   const classifiedEffects: Effect[] = []
   const survivingCalls: Call[] = []
   const dynamicCallSites: string[] = []
-  const owner = {
+  const owner: OwnerSummary = {
     id: input.candidate.id,
     kind: input.candidate.kind,
     name: input.candidate.name,
     extKind: input.candidate.extKind,
-    decorators: input.candidate.decorators.map((d) => ({ name: d.name, boundary: d.boundary })),
+    decorators: input.candidate.decorators.map(ownerDecorator),
     component: input.component,
   }
 

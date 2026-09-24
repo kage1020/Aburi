@@ -100,9 +100,11 @@ interface OwnerSummary {
   kind: SymbolKind
   name: string
   extKind: string | null                     // value already determined by the framework plugin
-  decorators: { name: string; boundary: boolean }[]
+  decorators: OwnerDecorator[]
   component: string | null
 }
+
+type OwnerDecorator = Pick<Decorator, 'name' | 'qualifier' | 'boundary'>
 
 interface FileSummary {
   path: string
@@ -111,6 +113,8 @@ interface FileSummary {
 ```
 
 Providing `imports` lets the effect plugin distinguish whether "the identifier `prisma` comes from `@prisma/client` or is a local homegrown variable".
+
+`decorators[].qualifier` is `Decorator.qualifier` (ir-schema.md) passed through: the receiver that `@tsed.Post()` was written through (`tsed`), absent for a bare `@Post()`. Resolving it against `imports` answers the same question for a decorator, by the rule lang-plugin.md §5.2.2 gives: only the first dot-separated segment can name a local binding, so `@a.b.C()` resolves through `a`, and comparing the whole `a.b` with `ImportEdge.namespaceBinding` finds nothing. The other `Decorator` fields (`raw`, `arguments`, `line`) are not passed; a field added to `Decorator` reaches effect plugins only once `OwnerDecorator` names it, and a type test in `@aburi/types` fails `pnpm typecheck` until that is decided (`pnpm test` alone cannot fail it, because `expectTypeOf` erases at runtime).
 
 ### 4.4 `EffectClassification`
 
