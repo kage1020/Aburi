@@ -38,9 +38,11 @@ in place instead of piling up a new one.
 
 ::: tip A large pull request still gets a comment
 GitHub refuses a comment body over 65536 bytes, which is about 310 added symbols' worth of
-report. The action renders to fit rather than being refused: whole sections are dropped from the
-least important end — Syntax-only first, API changes last — and a note at the top names them.
-`diff.json` keeps everything. Pass `max-bytes: 0` to turn the cap off.
+report. The action renders to fit rather than being refused: sections of whole symbols are cut
+to names and locations, and sections are dropped from the least important end — Syntax-only
+first, API changes last — only when that still does not fit. A note at the top names them, and
+`diff.full.md` in the uploaded artefact holds the full report. `diff.json` keeps everything. Pass
+`max-bytes: 0` to turn the cap off.
 :::
 
 ::: warning `fetch-depth: 0` is required

@@ -9,7 +9,12 @@ import {
   projectDiffSummaryLine,
 } from "@aburi/markdown-projection"
 import type { IR, IRRef, NotComparedFile } from "@aburi/types"
-import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME, resolveOutputDir } from "../artifact-paths"
+import {
+  DIFF_FULL_MD_FILENAME,
+  DIFF_JSON_FILENAME,
+  DIFF_MD_FILENAME,
+  resolveOutputDir,
+} from "../artifact-paths"
 import { configuredOutputDir, type PinnedConfig, pinConfig } from "../config-load"
 import { CliError, errorCode, errorMessage, internalFault, unplacedErrorCode } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
@@ -18,7 +23,7 @@ import { pathExists } from "../fs-probe"
 import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import { joinCapped } from "../listing"
-import { createOutputDir, writeOutputFile } from "../output-file"
+import { createOutputDir, removeOutputFile, writeOutputFile } from "../output-file"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
@@ -80,6 +85,11 @@ export interface GitRunner {
 export interface DiffReport {
   diffJsonPath: string | null
   diffMdPath: string | null
+  /**
+   * The uncapped report, written only when `maxBytes` had to shorten `diff.md` — the file its
+   * note points at. `null` whenever `diff.md` is the whole report or was not written.
+   */
+  diffFullMdPath: string | null
   summaryLine: string
   /**
    * Head-side call-resolution census (call-resolution.md), rendered for
@@ -175,6 +185,16 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   // And created now, for the same reason: a destination that cannot hold the report is
   // refused before two scans are run for it.
   await createOutputDir("diff", outputDir)
+  // The uncapped report is written only when this run's cap shortens `diff.md`, so one an
+  // earlier run left here would be the full report of some other diff. It goes now, whatever
+  // the format, so the order is always "remove, then write if needed", and a path that cannot
+  // be cleared is refused before the scans rather than after.
+  const fullMdPath = resolve(outputDir, DIFF_FULL_MD_FILENAME)
+  await removeOutputFile({
+    command: "diff",
+    artefact: "the uncapped diff Markdown an earlier run left",
+    path: fullMdPath,
+  })
   const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
     inputs,
     options,
@@ -237,16 +257,26 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
       `⚠ --max-bytes has no effect under --format json: the cap applies to ${DIFF_MD_FILENAME}, which this run does not write.`,
     )
   }
+  let diffFullMdPath: string | null = null
   if (format !== "json") {
     diffMdPath = resolve(outputDir, DIFF_MD_FILENAME)
-    const markdown = projectDiff(
-      diff,
-      options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes },
-    )
-    // The one case the projection cannot meet is a budget smaller than the title, the Summary
-    // line and the omission note together (`markdown-projection.md`). It says so in the
-    // document; this says so to the caller, who asked for a number and got a bigger one.
-    if (options.maxBytes !== undefined) {
+    const uncapped = projectDiff(diff)
+    let markdown = uncapped
+    if (options.maxBytes !== undefined && Buffer.byteLength(uncapped, "utf8") > options.maxBytes) {
+      // The target before the pointer: a capped `diff.md` names this file, so a failure here
+      // must leave no `diff.md` naming a file that is not there.
+      await writeOutputFile(
+        { command: "diff", artefact: "the uncapped diff Markdown", path: fullMdPath },
+        uncapped,
+      )
+      diffFullMdPath = fullMdPath
+      markdown = projectDiff(diff, {
+        maxBytes: options.maxBytes,
+        fullReportLocation: `\`${DIFF_FULL_MD_FILENAME}\` beside \`${DIFF_MD_FILENAME}\``,
+      })
+      // The one case the projection cannot meet is a budget smaller than the title, the
+      // Summary line and the omission note together (`markdown-projection.md`). It says so in
+      // the document; this says so to the caller, who asked for a number and got a bigger one.
       const written = Buffer.byteLength(markdown, "utf8")
       if (written > options.maxBytes) {
         warn(
@@ -291,6 +321,7 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   return {
     diffJsonPath,
     diffMdPath,
+    diffFullMdPath,
     summaryLine,
     callResolutionLine:
       callResolution === undefined ? null : formatCallResolutionLine(callResolution),

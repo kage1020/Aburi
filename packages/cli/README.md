@@ -35,11 +35,15 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
 
 ## `--max-bytes`
 
-`aburi diff --max-bytes <n>` caps `diff.md` at n UTF-8 bytes by dropping whole sections,
-least-important-first, and naming them in a note under the Summary — a byte cut would leave a
-`<details>` block or a code fence open. It exists because a GitHub comment body cannot exceed
+`aburi diff --max-bytes <n>` caps `diff.md` at n UTF-8 bytes, least-important-first: sections are
+kept most important first at their smallest — a section of whole symbols as one name-and-location
+line per symbol — and one is dropped only when it cannot fit even beside every more important one
+cut that far; the lists then get their full entries back from the top as the budget allows. A
+note under the Summary names both kinds — a byte cut would leave a `<details>` block or a code
+fence open. It exists because a GitHub comment body cannot exceed
 65536 bytes and the report is written to be pasted into one: at roughly 210 bytes per symbol, a
-few hundred added symbols is enough to be refused. `diff.json` is never capped.
+few hundred added symbols is enough to be refused. `diff.json` is never capped, and when the cap
+changed the report the uncapped Markdown is written beside it as `diff.full.md`.
 
 ## `--fail-on` grammar
 

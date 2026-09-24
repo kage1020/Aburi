@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runCli, runScan } from "../src"
 import {
   COMPONENTS_DIRNAME,
+  DIFF_FULL_MD_FILENAME,
   DIFF_JSON_FILENAME,
   DIFF_MD_FILENAME,
   IR_JSON_FILENAME,
@@ -211,6 +212,21 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
     expect(stderr).toContain(
       `aburi diff could not write the diff Markdown to ${resolve(scratch, "out", DIFF_MD_FILENAME)}`,
     )
+  })
+
+  it("names the uncapped report an earlier run left when it cannot be removed", async () => {
+    // Every run clears `diff.full.md` before it computes anything, so a directory standing
+    // there is refused the same way whether or not this run's cap would have written one.
+    const { base, head } = await writeIRPair()
+    await mkdir(resolve(scratch, "out", DIFF_FULL_MD_FILENAME), { recursive: true })
+
+    const { exitCode, stderr } = await run(["diff", "--base", base, "--head", head])
+
+    expect(exitCode).toBe(EXIT.INPUT_ERROR)
+    expect(stderr).toContain(
+      `aburi diff could not remove the uncapped diff Markdown an earlier run left at ${resolve(scratch, "out", DIFF_FULL_MD_FILENAME)}`,
+    )
+    expect(stderr).toContain("--output-dir")
   })
 
   it("is refused before either IR is read", async () => {

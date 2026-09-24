@@ -11,7 +11,7 @@ snapshot-test outputs without stubbing side effects.
 |---|---|---|
 | `projectWorkspace(ir, options?)` | L0 workspace overview (component list + dependency edges); `options.suppressTimestamp` mirrors the CLI's `--no-timestamp` for reproducible snapshots. | `out/workspace.md` |
 | `projectComponent({ component, symbols, dependencies })` | L1 + L2 component detail (public API surface + module logic). The single-argument form makes it explicit that the caller must have pre-filtered `symbols` / `dependencies` to the ones belonging to `component`. | `out/components/<id>.md` |
-| `projectDiff(diff, { maxBytes? })` | Review-facing PR summary (added / removed / changed / moved with confidence badges), optionally capped to a byte budget | `out/diff.md`, PR comment |
+| `projectDiff(diff, { maxBytes?, fullReportLocation? })` | Review-facing PR summary (added / removed / changed / moved with confidence badges), optionally capped to a byte budget; `fullReportLocation` names where the uncapped report is, for the note a capped one carries | `out/diff.md`, PR comment |
 | `projectSymbolExplain(symbol)` | Per-Symbol detail (rules / effects / calls / dropped fold-out) | `aburi explain` stdout |
 
 Also exports the `formatFailOnClause` / `formatFailOnTriggered` helpers that
@@ -41,9 +41,10 @@ const markdown = projectDiff(diffResult)
 // <details>. Boundary sections group by symbol status per the design.
 
 const forAComment = projectDiff(diffResult, { maxBytes: 65507 })
-// the same document, cut to fit: whole sections are dropped least-important-first (Syntax-only
-// before Dropped changes, API changes last) and a note under the Summary names the ones that
-// went. Never cut mid-string — that would halve a <details> block or a code fence. GitHub
+// the same document, cut to fit: sections are kept most important first at their smallest (a
+// section of whole symbols as names and locations only), a section is dropped only when it
+// cannot fit even so, and the name lists then get their full entries back from the top. A note
+// under the Summary names the short sections and the ones that went. Never cut mid-string — that would halve a <details> block or a code fence. GitHub
 // rejects a comment body over 65536 bytes outright, so the destination decides the budget;
 // see the design.
 //

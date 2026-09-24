@@ -474,11 +474,11 @@ aburi diff --base <ir.json> --head <ir.json>               # specify existing IR
 |---|---|
 | `--base <path>` | Base IR file path (instead of a ref) |
 | `--head <path>` | Head IR file path |
-| `--output-dir <path>` | Destination for diff.json / diff.md (default: `config.output.dir`, then `out`) |
+| `--output-dir <path>` | Destination for diff.json / diff.md / diff.full.md (default: `config.output.dir`, then `out`) |
 | `--format <json\|md\|both>` | Output format |
 | `--filter <kinds>` | Comma-separated restriction to change kinds (`added,removed,changed,moved,moved+changed`) |
 | `--fail-on <kinds>` | Exit 3 if even one change of the given kinds (status granularity) exists (for CI gates) |
-| `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, dropping whole sections least-important-first ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
+| `--max-bytes <n>` | Cap `diff.md` at n UTF-8 bytes, keeping sections most important first at their smallest (names only for a section of whole Symbols) and then growing the name lists back to full entries from the top ([`markdown-projection.md`](./markdown-projection.md) §6.4). `diff.json` is never capped, and when the cap changed the report the uncapped one is written as `diff.full.md` beside it. Absent: no cap — `0` is exit 2 here, not the opt-out it is on the action input. Warns when `--format json` leaves it nothing to cap, and when the budget could not be met |
 | `--quiet` | Limit stdout to a single final summary line |
 
 ### 6.3 Arguments
@@ -512,7 +512,7 @@ With refs:
    - A future `--base-config <path>` may be provided to override this (planned — see the [roadmap](../roadmap.md))
 4. Run `aburi scan` on the head (the original cwd)
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
-6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`
+6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since it would be the full report of another diff; a path there that cannot be removed is refused like one that cannot be written
 7. Print a one-line summary to stdout
 8. Clean up the worktree
 

@@ -156,13 +156,18 @@ about 210 bytes per symbol, so a branch adding a few hundred of them would hit t
 review that loses its comment would be the large one.
 
 The action renders the report to fit instead: it passes `--max-bytes 65507` (the limit, less the
-29-byte marker it prepends). The projection meets the budget by dropping whole sections, least
-important first — Syntax-only before Dropped changes, API changes last — and the report says at
-the top which ones went:
+29-byte marker it prepends). The projection meets the budget from the least important section
+up — Syntax-only before Dropped changes, API changes last. A section whose entries are whole
+symbols (API and Logic changes, Added, Removed, Unknown, Moved + Changed) is first cut down to one
+line per symbol, name and location, and any section is dropped only if it cannot fit even beside
+every more important one cut that far. The report says at
+the top which sections are short and which went:
 
-> ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
+> ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report, the same diff without a size cap, is `diff.full.md` beside `diff.md`.
 
-`diff.json` is never capped, so the artefact keeps everything the comment could not.
+`diff.json` is never capped, and when the cap changed the report the CLI also writes the
+uncapped Markdown as `diff.full.md`, so an artefact upload of the output directory keeps
+everything the comment could not.
 
 The cap applies under `comment: false` too — that is the mode a fork's pull request runs in, where
 the Markdown is posted later by the companion workflow below. Set `max-bytes: 0` if you want the

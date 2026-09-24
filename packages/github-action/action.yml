@@ -66,9 +66,11 @@ inputs:
     default: "true"
   max-bytes:
     description: >-
-      Size cap for `diff.md`, in UTF-8 bytes, forwarded as `--max-bytes`. The report drops whole
-      sections least-important-first to meet it (`docs/design/markdown-projection.md`) rather
-      than being cut mid-block, and says at the top which sections went. Left empty it is 65507:
+      Size cap for `diff.md`, in UTF-8 bytes, forwarded as `--max-bytes`. The report meets it
+      least-important-first (`docs/design/markdown-projection.md`) rather than being cut
+      mid-block: sections of whole symbols are cut to names and locations before a section is
+      dropped, and the report says at the top which sections are short and which went, pointing
+      at `diff.full.md` for the rest. Left empty it is 65507:
       GitHub rejects a comment body over 65536 bytes with a 422, and the hidden marker takes the
       other 29. It applies whether or not this run posts the comment itself, because the artefact
       is what a `workflow_run` companion posts for a fork's pull request. Set to `0` for no cap;

@@ -1,12 +1,13 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import { makeLanguageId } from "@aburi/core"
 import { DiffError } from "@aburi/diff"
 import type { CallResolutionStats, IR } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { classifyDiffError, EXIT, runCli, runDiff } from "../src"
+import { classifyDiffError, DIFF_FULL_MD_FILENAME, EXIT, runCli, runDiff } from "../src"
 import { CliError } from "../src/errors"
+import { pathExists } from "../src/fs-probe"
 import { emptyIR, MemStream, symbolId } from "./fixtures"
 
 let scratch = ""
@@ -167,6 +168,41 @@ describe("runDiff — --base/--head (file mode)", () => {
     if (capped.diffJsonPath === null) throw new Error("expected diffJsonPath")
     const diffJson = await readFile(capped.diffJsonPath, "utf8")
     expect(diffJson).toContain("Added0399")
+
+    // The note points at the uncapped report, so that report is written beside it.
+    expect(markdown).toContain("is `diff.full.md` beside `diff.md`.")
+    expect(capped.diffFullMdPath).toBe(resolve(dirname(capped.diffMdPath), DIFF_FULL_MD_FILENAME))
+    if (capped.diffFullMdPath === null) throw new Error("expected diffFullMdPath")
+    expect(await readFile(capped.diffFullMdPath, "utf8")).toBe(full)
+  })
+
+  it("writes diff.full.md only when the cap changed the report", async () => {
+    // A full report left over from an earlier capped run would describe some other diff, so
+    // every run that does not write one removes it: one that fits its budget, one with no
+    // budget, and one that writes no Markdown at all.
+    const basePath = resolve(scratch, "base.json")
+    const headPath = resolve(scratch, "head.json")
+    await writeFile(basePath, JSON.stringify(makeIRWithKept("aaa000000000")), "utf8")
+    const run = async (added: number, options: { maxBytes?: number; format?: "json" }) => {
+      await writeFile(headPath, JSON.stringify(makeIRWithChangeAndManyAdded(added)), "utf8")
+      return runDiff({ cwd: scratch, base: basePath, head: headPath, refSpec: null, ...options })
+    }
+    const capped = await run(400, { maxBytes: 2_000 })
+    const fullMdPath = capped.diffFullMdPath
+    if (fullMdPath === null) throw new Error("expected diffFullMdPath")
+    expect(await pathExists(fullMdPath)).toBe(true)
+
+    for (const options of [
+      { maxBytes: 65_507 },
+      {},
+      { maxBytes: 2_000, format: "json" as const },
+    ]) {
+      await run(400, { maxBytes: 2_000 })
+      expect(await pathExists(fullMdPath)).toBe(true)
+      const next = await run(1, options)
+      expect(next.diffFullMdPath).toBeNull()
+      expect(await pathExists(fullMdPath)).toBe(false)
+    }
   })
 
   it("warns, rather than fails, when a budget cannot be met", async () => {
@@ -188,6 +224,9 @@ describe("runDiff — --base/--head (file mode)", () => {
     const written = Buffer.byteLength(await readFile(report.diffMdPath, "utf8"), "utf8")
     expect(written).toBeGreaterThan(10)
     expect(warnings.join("\n")).toContain(`diff.md is ${written} bytes, over the 10 requested`)
+    // Its note still points at the uncapped report, so that is written too.
+    if (report.diffFullMdPath === null) throw new Error("expected diffFullMdPath")
+    expect(await pathExists(report.diffFullMdPath)).toBe(true)
   })
 
   it("warns that --max-bytes has nothing to cap under --format json", async () => {

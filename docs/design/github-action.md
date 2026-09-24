@@ -236,9 +236,14 @@ run that loses its comment is the large refactor, the one most worth reading.
 
 So the action renders the report to fit rather than discovering the ceiling at the API: it passes
 `--max-bytes 65507`, which is the 65536-byte limit less the 29-byte marker line the upsert
-prepends. The projection meets that by dropping whole sections, least important first, and says at
-the top of the report which ones it dropped ([`markdown-projection.md`](./markdown-projection.md)
-§6.4). `diff.json` is not capped: the artefact keeps everything the comment could not.
+prepends. The projection meets that least important first: it keeps sections most important
+first at their smallest, a section of whole symbols as a name-and-location list, drops a section
+only when it cannot fit even beside every more important one cut that far, and then grows the
+lists back to full entries from the top. The report says at the top which sections it shortened
+and which it dropped ([`markdown-projection.md`](./markdown-projection.md)
+§6.4). `diff.json` is not capped, and when the cap changed the report the CLI writes the uncapped
+Markdown beside it as `diff.full.md`, which the note names: an upload of the output directory, as
+`aburi.yml` does with its `aburi-diff` artifact, keeps everything the comment could not.
 
 The budget is `ABURI_COMMENT_BODY_MAX_BYTES` in `src/comment.ts`, and `test/action-yml.test.ts`
 holds the manifest's copy of the number to it — a marker of a different length moves the budget,
