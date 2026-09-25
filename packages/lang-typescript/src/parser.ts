@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import type { ParseError, ParseResult, SourceFile } from "@aburi/types"
 import { Language, type Node, Parser, type Tree } from "web-tree-sitter"
 import { walkDescendants } from "./ast-helpers"
+import { reparseImportTypes } from "./import-type-reparse"
 import { extractImports } from "./imports"
 
 const nodeRequire = createRequire(import.meta.url)
@@ -173,7 +174,7 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
   const parser = new Parser()
   try {
     parser.setLanguage(language)
-    const tree = parser.parse(file.content)
+    const tree = repairedOrFirst(parser, parser.parse(file.content), file.content)
     if (tree === null) {
       return {
         tree: null,
@@ -202,6 +203,23 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
     }
   } finally {
     parser.delete()
+  }
+}
+
+/**
+ * `first`, or the tree `reparseImportTypes` gives in its place. `first` is released when it is
+ * replaced, and when the second parse throws, since the caller would never receive it.
+ */
+function repairedOrFirst(parser: Parser, first: Tree | null, source: string): Tree | null {
+  if (first === null || !first.rootNode.hasError) return first
+  try {
+    const repaired = reparseImportTypes(parser, first, source, (t) => collectParseErrors(t).length)
+    if (repaired === null) return first
+    first.delete()
+    return repaired
+  } catch (error) {
+    first.delete()
+    throw error
   }
 }
 
