@@ -87,6 +87,26 @@ function raise(
 }
 
 /**
+ * Refuse an id `m` declares twice. The commit is a `Map.set` per entry, so the later declaration
+ * would replace the earlier whatever the two said, and the schema's `uniqueItems` compares whole
+ * entries, so two descriptions of one id pass it.
+ */
+function raiseOnRepeat(m: PluginManifest, kind: string, entries: readonly { id: string }[]): void {
+  const seen = new Set<string>()
+  for (const { id } of entries) {
+    if (seen.has(id)) {
+      raise(
+        `${kind} "${id}" is declared twice by plugin "${m.name}".`,
+        "duplicate-id",
+        [m.name],
+        id,
+      )
+    }
+    seen.add(id)
+  }
+}
+
+/**
  * Concrete VocabRegistry. Each `register` call validates the manifest in isolation
  * (type-namespace rules, reserved-namespace, xPrefix consistency), then validates
  * against the current registry state (id / prefix / framework conflicts, prefix
@@ -129,6 +149,8 @@ export class VocabRegistry implements VocabRegistryContract {
     this.#validateReserved(manifest)
     this.#validateTypeNamespaces(manifest)
     this.#validateXPrefix(manifest)
+    raiseOnRepeat(manifest, "Effect id", manifest.provides.effects)
+    raiseOnRepeat(manifest, "extKind id", manifest.provides.extKinds)
     this.#validateConflicts(manifest)
 
     // Commit.
@@ -197,7 +219,10 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   #validateTypeNamespaces(m: PluginManifest): void {
-    const rules = TYPE_NAMESPACE_RULES[m.type as PluginType]
+    // Own keys only: a hand-built manifest's `type: "toString"` would find the prototype's.
+    const rules = Object.hasOwn(TYPE_NAMESPACE_RULES, m.type)
+      ? TYPE_NAMESPACE_RULES[m.type as PluginType]
+      : undefined
     if (!rules) {
       raise(`Plugin "${m.name}" has unknown type "${m.type}"`, "manifest-invalid", [m.name])
     }

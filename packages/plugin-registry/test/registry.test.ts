@@ -1,3 +1,4 @@
+import type { PluginManifest } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { RegistryError, VocabRegistry } from "../src/index"
 import { effectsManifest, frameworkManifest, langManifest } from "./fixtures/manifests"
@@ -184,6 +185,32 @@ describe("VocabRegistry.register (AC5 exact duplicate id / prefix, V2/V3)", () =
     const b = frameworkManifest({ name: "framework-b" })
     b.provides.frameworks.push("nestjs")
     expectRegistryError(() => reg.register(b), "duplicate-id")
+  })
+})
+
+describe("VocabRegistry.register (V3a one manifest declaring an id twice)", () => {
+  it("rejects an effect id declared twice with different descriptions", () => {
+    const reg = new VocabRegistry()
+    const m = effectsManifest({ name: "effects-demo", xPrefix: "demo" })
+    m.provides.effects.push(
+      { id: "x-demo:read", description: "reads a row" },
+      { id: "x-demo:read", description: "something else" },
+    )
+    const err = expectRegistryError(() => reg.register(m), "duplicate-id")
+    expect(err.value).toBe("x-demo:read")
+    expect(reg.listEffects()).toEqual([])
+  })
+
+  it("rejects an extKind id declared twice with different descriptions", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest({ name: "lang-demo" })
+    m.provides.extKinds.push(
+      { id: "fp:pipe", baseKind: "function", description: "a" },
+      { id: "fp:pipe", baseKind: "class", description: "b" },
+    )
+    const err = expectRegistryError(() => reg.register(m), "duplicate-id")
+    expect(err.value).toBe("fp:pipe")
+    expect(reg.listExtKinds()).toEqual([])
   })
 })
 
@@ -463,6 +490,17 @@ describe("VocabRegistry.register (stableStringify hardening — C1)", () => {
     const m = langManifest()
     const withMap = { ...m, weird: new Map() } as unknown as typeof m
     expectRegistryError(() => reg.register(withMap), "manifest-invalid")
+  })
+})
+
+describe("VocabRegistry.register (plugin type lookup)", () => {
+  it.each([
+    "toString",
+    "constructor",
+    "__proto__",
+  ])("rejects type %s as manifest-invalid rather than reading Object.prototype", (type) => {
+    const m = { ...langManifest({ name: "lang-demo" }), type } as unknown as PluginManifest
+    expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
   })
 })
 
