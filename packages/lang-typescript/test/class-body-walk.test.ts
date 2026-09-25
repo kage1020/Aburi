@@ -152,10 +152,30 @@ describe("a class Symbol keeps what defining and constructing it runs", () => {
   it.each([
     ["a method", classOf("  m(x = f()) { g() }")],
     ["a field holding a function", classOf("  m = (x = f()) => { g() }")],
-  ])("keeps %s's parameter default, which no member Symbol walks", async (_label, source) => {
-    // A member Symbol's `bodyNode` is the function's body, so its parameter list is not walked
-    // there (LP20d). Skipping the whole member rather than its body would lose `f` entirely.
-    await expectCalls(source, { "ts:src/a.ts#C": ["f"], "ts:src/a.ts#C.m": ["g"] })
+  ])("gives %s's parameter default to the member, not the class", async (_label, source) => {
+    // A default runs on every call that omits its argument (LP20d), so it is the member's, and
+    // the class skips the parameter list the member walks rather than counting it twice.
+    await expectCalls(source, { "ts:src/a.ts#C": [], "ts:src/a.ts#C.m": ["f", "g"] })
+  })
+
+  it.each([
+    ["a method", classOf("  m(@Body(pipe()) x = f()) { g() }")],
+    ["a field holding a function", classOf("  m = (@Body(pipe()) x = f()) => { g() }")],
+  ])("keeps a parameter decorator on the class for %s", async (_label, source) => {
+    // A parameter's decorator runs when the class is defined, as a member's does.
+    await expectCalls(source, {
+      "ts:src/a.ts#C": ["Body", "pipe"],
+      "ts:src/a.ts#C.m": ["f", "g"],
+    })
+  })
+
+  it("gives a constructor's parameter default to both, as it does the constructor's body", async () => {
+    // `new C()` runs the constructor and resolves to the class (LP20b), so the class keeps the
+    // whole constructor, and `#C.constructor` walks its own parameters like any member.
+    await expectCalls(classOf("  constructor(private p = makeP()) { init() }"), {
+      "ts:src/a.ts#C": ["makeP", "init"],
+      "ts:src/a.ts#C.constructor": ["makeP", "init"],
+    })
   })
 
   it("does not treat a static member named constructor as the construction path", async () => {

@@ -157,6 +157,30 @@ describe("walkBody — rules (LP16-LP20)", () => {
 // from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
 // spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
 // the distinction alive across the AST boundary.
+describe("walkBody — parameter defaults (LP20d)", () => {
+  async function targetsOf(source: string): Promise<string[]> {
+    return (await walkFirstSymbol(source)).calls.map((c) => c.target)
+  }
+
+  it.each([
+    ["a function", "export function f(x = g()) { h() }", ["g", "h"]],
+    ["an arrow", "export const a = (y = k()) => l()", ["k", "l"]],
+    ["a function expression", "export const e = function (y = k()) { l() }", ["k", "l"]],
+    ["a destructured parameter", "export function d({ a = mk() } = dflt()) {}", ["mk", "dflt"]],
+    ["an inline handler", "app.get('/x', (req = dflt()) => handle())", ["dflt", "handle"]],
+  ])("walks %s's parameter defaults with its body", async (_label, source, expected) => {
+    expect(await targetsOf(source)).toEqual(expected)
+  })
+
+  it("puts a default written on an earlier line first", async () => {
+    const { calls } = await walkFirstSymbol("export function f(\n  x = g(),\n) {\n  h()\n}")
+    expect(calls.map((c) => [c.target, c.line])).toEqual([
+      ["g", 2],
+      ["h", 4],
+    ])
+  })
+})
+
 describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", () => {
   it("flags a call-expression receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")

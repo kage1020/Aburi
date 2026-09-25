@@ -32,12 +32,31 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
     // The class is read off the body, not off the Symbol: `fullNode` is the **leading**
     // declaration, and a fold can put a class body on a Symbol another declaration heads.
     const owner = body.type === "class_body" ? body.parent : null
-    if (owner !== null) visitOwnClassBody(owner, body, rules, calls)
-    else visitNode(body, rules, calls)
+    if (owner !== null) {
+      visitOwnClassBody(owner, body, rules, calls)
+      continue
+    }
+    const parameters = body.parent?.childForFieldName("parameters")
+    if (parameters) visitParameterDefaults(parameters, rules, calls)
+    visitNode(body, rules, calls)
   }
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
   return { rules, calls }
+}
+
+/**
+ * A function's parameter list, less its parameters' decorators: a default runs on every call
+ * that omits its argument, so it is the function's (LP20d). A decorator runs where it is applied,
+ * which is when the class is defined, so it stays with the class.
+ */
+function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCandidate[]): void {
+  for (const parameter of parameters.namedChildren) {
+    if (parameter === null) continue
+    for (const part of parameter.namedChildren) {
+      if (part !== null && part.type !== "decorator") visitNode(part, rules, calls)
+    }
+  }
 }
 
 /**
@@ -46,13 +65,11 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
  * member whose body another Symbol records does not — and which members those are is
  * `memberSymbolSegment`'s one answer, shared with extraction.
  *
- * Only the *body* is skipped, never the member. A member's `bodyNode` is whatever its `body`
- * field holds — a `statement_block` for a method, the expression itself for an
- * expression-bodied arrow — so a parameter default (`m(x = f())`) is outside it either way and
- * would be lost with nothing to say so. That is LP20d, and the reason this reaches for the
- * `body` field rather than for the member. A field holding a function is skipped the same way
- * and for the same reason: constructing the class creates the closure, and only entering it
- * runs the body (LP20f).
+ * Only what the member's Symbol walks is skipped, never the member: its body and its parameter
+ * list (LP20d). Its decorators stay, a method's beside the member and a parameter's inside the
+ * list, because a decorator's arguments run when the class is defined. A field holding a
+ * function is skipped the same way and for the same reason: constructing the class creates the
+ * closure, and only entering it runs the body (LP20f).
  *
  * And only for the Symbol's own bodies: a class written inside a function or a method is not
  * extracted, so every call in it belongs to the Symbol whose body encloses it (LP20e).
@@ -65,26 +82,38 @@ function visitOwnClassBody(
 ): void {
   for (const member of body.namedChildren) {
     if (member === null) continue
-    const memberBody = memberBodySkippedHere(classNode, member)
-    if (memberBody === null) visitNode(member, rules, calls)
-    else visitExcluding(member, memberBody, rules, calls)
+    const walked = memberFunctionWalkedElsewhere(classNode, member)
+    const memberBody = walked?.childForFieldName("body")
+    // No body, no walk on the member's side either (an abstract method, an overload), so the
+    // class keeps its parameters too.
+    if (walked === null || !memberBody) {
+      visitNode(member, rules, calls)
+      continue
+    }
+    const parameters = walked.childForFieldName("parameters")
+    visitExcluding(member, parameters ? [memberBody, parameters] : [memberBody], rules, calls)
+    if (parameters) visitParameterDecorators(parameters, rules, calls)
   }
 }
 
 /**
- * Everything under `node` except the subtree at `skipped`.
+ * Everything under `node` except the subtrees in `skipped`.
  *
- * A method's body is a direct child of the member. A field's is a child of the function the
- * field holds, one level further down — so the walk follows the path to it rather than
- * filtering direct children, which covers both depths with one rule and keeps whatever
- * surrounds the body on the class: a parameter default (LP20d), a field's decorator, its type
- * annotation.
+ * A method's body and parameters are direct children of the member. A field's are children of
+ * the function the field holds, one level further down — so the walk follows the path to them
+ * rather than filtering direct children, which covers both depths with one rule and keeps
+ * whatever surrounds them on the class: a field's decorator, its type annotation.
  *
  * Descending an ancestor instead of visiting it reports nothing for the ancestor itself, which
  * is what is wanted: the only nodes on the path are the member and the function it holds, and
  * `visitNode` has no arm for either.
  */
-function visitExcluding(node: Node, skipped: Node, rules: Rule[], calls: CallCandidate[]): void {
+function visitExcluding(
+  node: Node,
+  skipped: readonly Node[],
+  rules: Rule[],
+  calls: CallCandidate[],
+): void {
   for (const part of node.namedChildren) {
     // By `id`, not by reference: a field read and a children read of the same node hand back
     // different JS wrappers, so `===` never matches. `Node.equals()` answers the same question
@@ -92,9 +121,18 @@ function visitExcluding(node: Node, skipped: Node, rules: Rule[], calls: CallCan
     // (`lang-plugin.md`). Not by type: a `method_definition` has exactly one
     // `statement_block` today, but a member shape carrying a second would start dropping it
     // without a word.
-    if (part === null || part.id === skipped.id) continue
-    if (isAncestorOf(part, skipped)) visitExcluding(part, skipped, rules, calls)
+    if (part === null || skipped.some((s) => s.id === part.id)) continue
+    if (skipped.some((s) => isAncestorOf(part, s))) visitExcluding(part, skipped, rules, calls)
     else visitNode(part, rules, calls)
+  }
+}
+
+/** The decorators on a parameter list's parameters, which the function's own walk leaves out. */
+function visitParameterDecorators(parameters: Node, rules: Rule[], calls: CallCandidate[]): void {
+  for (const parameter of parameters.namedChildren) {
+    for (const part of parameter?.namedChildren ?? []) {
+      if (part?.type === "decorator") visitNode(part, rules, calls)
+    }
   }
 }
 
@@ -105,14 +143,17 @@ function isAncestorOf(node: Node, descendant: Node): boolean {
   return false
 }
 
-/** The member's body when this class does not walk it, or null when the class still owns it. */
-function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
+/**
+ * The function whose body and parameters the member's own Symbol walks, so this class does not,
+ * or null when the class still owns all of the member.
+ */
+function memberFunctionWalkedElsewhere(classNode: Node, member: Node): Node | null {
   if (memberSymbolSegment(classNode, member) === null) return null
-  // The constructor's body is recorded on `#C.constructor` too, and stays here anyway: `new
-  // C()` runs it and resolves to this Symbol (LP20b).
+  // The constructor is recorded on `#C.constructor` too, and stays here anyway: `new C()` runs
+  // it and resolves to this Symbol (LP20b).
   if (isConstructorMember(member)) return null
-  // A field's body belongs to the function it holds; a method's, to the method itself.
-  return (functionValuedField(member) ?? member).childForFieldName("body")
+  // A field's function is the one it holds; a method is its own.
+  return functionValuedField(member) ?? member
 }
 
 function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
