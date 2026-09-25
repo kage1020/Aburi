@@ -11,4 +11,5 @@ a method, a field holding a function, an inline handler — now walks its parame
 of its body, and the class skips a member's parameter list as it skips the member's body, so
 nothing is reported twice. A constructor's defaults stay on the class too, as its body does.
 Decorators, a parameter's included, stay on the class, because they run when the class is
-defined. `fingerprint.logic` moves on a Symbol whose defaults hold a rule or an effect.
+defined. `fingerprint.logic` moves on a Symbol whose defaults hold a rule or an effect, and on a
+class that carried one of its members'.

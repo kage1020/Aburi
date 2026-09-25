@@ -153,15 +153,13 @@ describe("walkBody — rules (LP16-LP20)", () => {
   })
 })
 
-// The `dynamic` diagnostic bucket of call-resolution.md cannot be recovered
-// from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
-// spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
-// the distinction alive across the AST boundary.
 describe("walkBody — parameter defaults (LP20d)", () => {
   async function targetsOf(source: string): Promise<string[]> {
     return (await walkFirstSymbol(source)).calls.map((c) => c.target)
   }
 
+  // Everything on one line, so the line sort keeps the order the walk visited in and a default
+  // ahead of the body is observable.
   it.each([
     ["a function", "export function f(x = g()) { h() }", ["g", "h"]],
     ["an arrow", "export const a = (y = k()) => l()", ["k", "l"]],
@@ -172,15 +170,31 @@ describe("walkBody — parameter defaults (LP20d)", () => {
     expect(await targetsOf(source)).toEqual(expected)
   })
 
-  it("puts a default written on an earlier line first", async () => {
+  it("gives a default's call the default's own line", async () => {
     const { calls } = await walkFirstSymbol("export function f(\n  x = g(),\n) {\n  h()\n}")
     expect(calls.map((c) => [c.target, c.line])).toEqual([
       ["g", 2],
       ["h", 4],
     ])
   })
+
+  it("takes a parameter default's rules as well as its calls", async () => {
+    const { rules, calls } = await walkFirstSymbol(
+      "export function f(cb = () => { throw new E() }) { h() }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["throw"])
+    expect(calls.map((c) => c.target)).toEqual(["E", "h"])
+  })
+
+  it("walks an arrow whose parameter has no parentheses", async () => {
+    expect(await targetsOf("export const f = x => g(x)")).toEqual(["g"])
+  })
 })
 
+// The `dynamic` diagnostic bucket of call-resolution.md cannot be recovered
+// from `target` alone: `getRepo().save()` normalizes to "getRepo.save", which is
+// spelled exactly like a genuine `Class.method` qname. `dynamicReceiver` keeps
+// the distinction alive across the AST boundary.
 describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", () => {
   it("flags a call-expression receiver", async () => {
     const { calls } = await walkFirstSymbol("export function f() { getRepo().save(x) }")

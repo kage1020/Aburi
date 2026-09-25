@@ -36,8 +36,8 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
       visitOwnClassBody(owner, body, rules, calls)
       continue
     }
-    const parameters = body.parent?.childForFieldName("parameters")
-    if (parameters) visitParameterDefaults(parameters, rules, calls)
+    const parameters = body.parent?.childForFieldName("parameters") ?? null
+    if (parameters !== null) visitParameterDefaults(parameters, rules, calls)
     visitNode(body, rules, calls)
   }
   rules.sort((a, b) => a.line - b.line)
@@ -47,8 +47,9 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
 
 /**
  * A function's parameter list, less its parameters' decorators: a default runs on every call
- * that omits its argument, so it is the function's (LP20d). A decorator runs where it is applied,
- * which is when the class is defined, so it stays with the class.
+ * that omits its argument, so it is the function's (LP20d). A decorator's arguments run where
+ * the decorator is applied, when the class is defined, so they are left for the class's walk
+ * (`visitParameterDecorators`); a function outside a class has none to leave.
  */
 function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCandidate[]): void {
   for (const parameter of parameters.namedChildren) {
@@ -66,8 +67,9 @@ function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCand
  * `memberSymbolSegment`'s one answer, shared with extraction.
  *
  * Only what the member's Symbol walks is skipped, never the member: its body and its parameter
- * list (LP20d). Its decorators stay, a method's beside the member and a parameter's inside the
- * list, because a decorator's arguments run when the class is defined. A field holding a
+ * list (LP20d). The member's decorators stay, and the parameter decorators the skipped list
+ * carries are walked back in afterwards (`visitParameterDecorators`), because a decorator's
+ * arguments run when the class is defined, not when the member is called. A field holding a
  * function is skipped the same way and for the same reason: constructing the class creates the
  * closure, and only entering it runs the body (LP20f).
  *
@@ -87,10 +89,15 @@ function visitOwnClassBody(
       visitNode(member, rules, calls)
       continue
     }
-    // The parameters sit beside the body in the same function, which walks them (LP20d).
-    const parameters = memberBody.parent?.childForFieldName("parameters")
-    visitExcluding(member, parameters ? [memberBody, parameters] : [memberBody], rules, calls)
-    if (parameters) visitParameterDecorators(parameters, rules, calls)
+    // The parameters sit beside the body in the same function, and the member's own walk covers
+    // both (LP20d).
+    const parameters = memberBody.parent?.childForFieldName("parameters") ?? null
+    if (parameters === null) {
+      visitExcluding(member, [memberBody], rules, calls)
+      continue
+    }
+    visitExcluding(member, [memberBody, parameters], rules, calls)
+    visitParameterDecorators(parameters, rules, calls)
   }
 }
 
@@ -100,7 +107,8 @@ function visitOwnClassBody(
  * A method's body and parameters are direct children of the member. A field's are children of
  * the function the field holds, one level further down — so the walk follows the path to them
  * rather than filtering direct children, which covers both depths with one rule and keeps
- * whatever surrounds them on the class: a field's decorator, its type annotation.
+ * whatever surrounds them on the class: a field's decorator and the field's type annotation, a
+ * method's return type.
  *
  * Descending an ancestor instead of visiting it reports nothing for the ancestor itself, which
  * is what is wanted: the only nodes on the path are the member and the function it holds, and
@@ -128,8 +136,9 @@ function visitExcluding(
 /** The decorators on a parameter list's parameters, which the function's own walk leaves out. */
 function visitParameterDecorators(parameters: Node, rules: Rule[], calls: CallCandidate[]): void {
   for (const parameter of parameters.namedChildren) {
-    for (const part of parameter?.namedChildren ?? []) {
-      if (part?.type === "decorator") visitNode(part, rules, calls)
+    if (parameter === null) continue
+    for (const part of parameter.namedChildren) {
+      if (part !== null && part.type === "decorator") visitNode(part, rules, calls)
     }
   }
 }
