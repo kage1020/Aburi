@@ -129,9 +129,10 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .description("Generate IR from the current workspace")
     .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
     // No commander default: `deriveFormat` has to tell a typed `--format both` from nothing.
+    // `diff` keeps its default, having no `--no-*` flags to weigh it against.
     .option("--format <format>", "json | md | both (default: both)", parseFormat)
-    .option("--no-md", "shortcut for --format json")
-    .option("--no-json", "shortcut for --format md")
+    .option("--no-md", "drop the Markdown output (conflicts with --format both/md)")
+    .option("--no-json", "drop the IR JSON output (conflicts with --format both/json)")
     .option("--ignore <glob>", "additional ignore glob (repeatable)", collect, [])
     // Declared as a pair, like `--lsp` / `--no-lsp` below. A lone `--no-x` makes commander
     // materialise `true` for every run that did not pass it, and the option object then cannot
@@ -447,27 +448,42 @@ function collect(value: string, accumulator: string[]): string[] {
 }
 
 /**
- * The outputs `scan` writes. `--no-md` and `--no-json` each take one away, from what `--format`
- * names or from both. Taking away what `--format` asked for by name, or everything, is refused
- * rather than settled by which flag wins.
+ * The outputs `scan` writes. With no `--format`, each `--no-*` drops one output. With `--format`
+ * typed, a `--no-*` that would change the set is refused rather than settled by which flag wins;
+ * one that would not (`--format json --no-md`) is merely redundant. Dropping everything is
+ * refused too.
  */
 function deriveFormat(cmdOptions: {
   format?: "json" | "md" | "both"
   md?: boolean
   json?: boolean
 }): "json" | "md" | "both" {
-  const named = cmdOptions.format ?? "both"
-  const md = named !== "json" && cmdOptions.md !== false
-  const json = named !== "md" && cmdOptions.json !== false
-  const flags = [
-    ...(cmdOptions.format === undefined ? [] : [`--format ${cmdOptions.format}`]),
+  const dropped = [
     ...(cmdOptions.md === false ? ["--no-md"] : []),
     ...(cmdOptions.json === false ? ["--no-json"] : []),
-  ].join(" and ")
-  const typedAway = (named !== "json" && !md) || (named !== "md" && !json)
-  if (cmdOptions.format !== undefined && typedAway) {
-    throw new CliError(`${flags} contradict each other: drop one`, "input-error")
+  ]
+  if (cmdOptions.format !== undefined) {
+    const format = `--format ${cmdOptions.format}`
+    // The output `--format` already leaves out: dropping it again changes nothing.
+    const redundant =
+      cmdOptions.format === "json" ? "--no-md" : cmdOptions.format === "md" ? "--no-json" : null
+    const conflicting = dropped.filter((flag) => flag !== redundant)
+    if (conflicting.length === 1) {
+      throw new CliError(
+        `${format} and ${conflicting[0]} contradict each other: drop one`,
+        "input-error",
+      )
+    }
+    if (conflicting.length === 2) {
+      throw new CliError(
+        `${format} contradicts both --no-md and --no-json: drop ${format}, or both of them`,
+        "input-error",
+      )
+    }
+    return cmdOptions.format
   }
-  if (!md && !json) throw new CliError(`${flags} leave scan nothing to write`, "input-error")
-  return md && json ? "both" : md ? "md" : "json"
+  if (dropped.length === 2) {
+    throw new CliError("--no-md and --no-json leave scan nothing to write", "input-error")
+  }
+  return cmdOptions.md === false ? "json" : cmdOptions.json === false ? "md" : "both"
 }

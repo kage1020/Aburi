@@ -5,9 +5,13 @@ import { MemStream } from "./fixtures"
 describe("parseFailOn — empty-value rejection (fail-open guard)", () => {
   it.each([
     ["an empty string", ""],
+    ["a single comma", ","],
     ["a comma-only value", ",,"],
-  ])("throws FailOnParseError on %s", (_, spec) => {
+  ])("throws FailOnParseError on %s, as a value with no clause", (_, spec) => {
     expect(() => parseFailOn(spec)).toThrow(FailOnParseError)
+    expect(() => parseFailOn(spec)).toThrow(
+      `--fail-on value "${spec}" is invalid: expected at least one clause; an empty --fail-on value would silently disable the CI gate.`,
+    )
   })
 })
 
@@ -23,6 +27,6 @@ describe("FailOnParseError → EXIT.INPUT_ERROR (not RUNTIME)", () => {
       cwd: process.cwd(),
     })
     expect(code).toBe(EXIT.INPUT_ERROR)
-    expect(stderr.text()).toMatch(/empty --fail-on value|--fail-on value/)
+    expect(stderr.text()).toContain('--fail-on value "" is invalid: expected at least one clause')
   })
 })

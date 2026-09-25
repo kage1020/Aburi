@@ -141,8 +141,8 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | `--output-dir <path>` | Output directory (default: `config.output.dir`, then `out`). Resolved against the working directory, as the config value is |
 | `--format <json\|md\|both>` | Output format (default: `both`) |
-| `--no-md` | Shortcut for `--format json`. With `--no-json`, or with a `--format` that names `md`, exit 2 |
-| `--no-json` | Shortcut for `--format md`. With `--no-md`, or with a `--format` that names `json`, exit 2 |
+| `--no-md` | Drops the Markdown output. Alone, equivalent to `--format json`. With `--no-json`, or with any `--format` that would have written Markdown (`md`, `both`), exit 2 |
+| `--no-json` | Drops the IR JSON output. Alone, equivalent to `--format md`. With `--no-md`, or with any `--format` that would have written JSON (`json`, `both`), exit 2 |
 | `--strict` / `--no-strict` | Override `config.strict` |
 | `--discover` | `--no-strict` + record undeclared vocab to `out/aburi-vocab-discovered.json` |
 | `--quiet` | Suppress progress output; stdout carries the final summary only |
@@ -166,7 +166,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | 0 | Extraction succeeded |
 | 1 | Extraction error — a file the scan could not read. A source file that stopped being one by the time the scan reached it is skipped rather than fatal — a concurrent build can do that, and a rerun is the fix — but a permission, descriptor or IO failure still ends the run, because absorbing it would let the same commit produce a different Document on a different day. Two calls open files, discovery's `stat` and the read before extraction, and one predicate decides both: which of them a failure lands on is an accident of timing and must not change the outcome. A file the language plugin *could* read and refused to parse is not this: it is withdrawn and the code stays `0` (lang-plugin.md §7.1) — unless it took every file the scan found, or crossed `minParsedFileRatio`, which is a coverage gate rather than a read failure (§5.7) |
-| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
+| 2 | Config error (schema violation, resolution failure, a `--config` path that names nothing), format flags that contradict each other or leave nothing to write (§5.2), or an `--output-dir` that cannot hold the outputs because a file stands where the directory would go. A config that exists and cannot be read is `1` — see §9; so is an output directory the process may not write to, since no edit to what was typed changes that |
 | 3 | Gate — the run finished and produced something the caller must not accept silently: a plugin load failure or manifest violation, a file withdrawn during extraction, undeclared vocab detected in strict mode, a scan whose coverage collapsed (§5.7), or a file the Document has no way to name (§5.8). Named by outcome rather than by cause because an empty scan caused by an `ignore` glob is not a plugin fault |
 
 ### 5.5 stdout Example
@@ -666,7 +666,7 @@ aburi diff main..HEAD --fail-on changed,removed
 | Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` |
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
 
-Multiple values may be given, comma-separated.
+Multiple values may be given, comma-separated. Every segment must be a clause: an empty one (`added,`, `added,,removed`) exits 2, as a value with no clause at all does.
 
 #### Uses of Direction-Specific fail-on
 
@@ -1052,6 +1052,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL30 | `aburi diff main..HEAD` outside any git repository | exit 2, "is not inside a git repository", git's own report appended, no `git fetch` advice. Inside a repository git refuses to open, exit 1 with that report instead |
 | CL31 | `aburi diff HEAD~1..HEAD` in a repository with no commits | exit 2, "has no commits yet", no `git fetch` advice |
 | CL32 | `aburi diff nope..HEAD` in a full clone | exit 2, "no such revision", "Check the spelling", no `--deepen` advice |
+| CL33 | `aburi scan --format both --no-md`, or `aburi scan --no-md --no-json` | exit 2, naming the flags, and no output directory is created |
+| CL34 | `aburi diff … --fail-on 'added,'` | exit 2, "clause 2 of 2 is empty", before any output is written |
 
 ## 18. Design Decisions
 
