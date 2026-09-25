@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path"
+import { isAbsolute, resolve, win32 } from "node:path"
 import { pathToFileURL } from "node:url"
 import { VocabRegistry } from "@aburi/plugin-registry"
 import type {
@@ -57,7 +57,10 @@ export interface LoadPluginsOptions {
  * - npm package (`@aburi/lang-typescript`) — resolved verbatim.
  * - relative path (`./plugins/x.mjs`) — resolved from `pluginRefRoot`, which is the
  *   workspace root unless the caller says otherwise.
- * - absolute path — converted to a file URL independently of `pluginRefRoot`.
+ * - absolute path (`/opt/plugins/x.mjs`, `C:/plugins/x.mjs`, `C:\\plugins\\x.mjs`) — converted to
+ *   a file URL as written. On Windows a path with no drive (`/opt/x.mjs`, `\\plugins\\x.mjs`)
+ *   counts as absolute to Node but would take its drive from `pluginRefRoot`, so it is
+ *   refused rather than resolved.
  *
  * Once imported, the loader accepts the following export shapes, first hit wins:
  *   1. `default` export whose value has a `manifest` field
@@ -83,11 +86,26 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
 }
 
 function resolveSpecifier(ref: string, pluginRefRoot: string): string {
+  if (process.platform === "win32" && isDriveRelative(ref)) {
+    throw new CliError(
+      `Plugin "${ref}" names no drive, so it would take the drive of the workspace root. Write it with its drive letter (for example "C:${ref.replaceAll("\\", "/")}").`,
+      "config-error",
+    )
+  }
   if (isAbsolute(ref) || ref.startsWith("./") || ref.startsWith("../")) {
     return pathToFileURL(resolve(pluginRefRoot, ref)).href
   }
   if (ref.startsWith("@") || ref.includes("/")) return ref
   return `@aburi/${ref}`
+}
+
+/**
+ * A Windows path rooted at a separator with no drive or UNC share in front (`/opt/x.mjs`,
+ * `\\plugins\\x.mjs`). Node calls it absolute, and `resolve` fills in the drive of the base.
+ */
+export function isDriveRelative(ref: string): boolean {
+  const { root } = win32.parse(ref)
+  return root === "/" || root === "\\"
 }
 
 async function tryImport(

@@ -131,8 +131,12 @@ Each array element is a **plugin manifest name** (the `name` field).
 For a string `<id>`, Aburi resolves to exactly one specifier — there is no fallback chain:
 
 1. `<id>` is an absolute filesystem path, or starts with `./` or `../` → converted to a
-   `file:` URL. Relative paths resolve against the workspace root; absolute paths retain
-   their location. Windows absolute paths accept either forward or backslashes.
+   `file:` URL. Relative paths resolve against the workspace root; absolute paths point where
+   they say. A Windows absolute path may use forward slashes or backslashes (`C:/x.mjs`,
+   `C:\\x.mjs` in JSON). On Windows a path with no drive (`/opt/x.mjs`, `\\x.mjs`) is a
+   config error: it would take its drive from the workspace root, so it is refused rather
+   than resolved. A relative path still has to start with `./` or `../`; `.\\x.mjs` falls
+   through to rule 3
 2. `<id>` is scoped or contains `/` (`@myorg/pkg`, `some-pkg/subpath`) → used verbatim
 3. Otherwise → prefixed, becoming `@aburi/<id>`
 
@@ -432,6 +436,8 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C12 | `minParsedFileRatio: 0.9`, and a scan that parsed half the files it found | Exit 3, naming both counts and the floor |
 | C13 | `minParsedFileRatio` equal to the ratio the scan achieved | Exit 0 |
 | C14 | `minParsedFileRatio: 0` | Config validation error |
+| C15 | `languages: ["<absolute path to a plugin file>"]`, on any platform, with spaces, `#` or `%` in the file name | Loads that file, wherever the workspace root is |
+| C16 | On Windows, `languages: ["/opt/plugins/x.mjs"]` (no drive) | Exit 2, asking for the drive letter; nothing is imported |
 
 ## 14.1 Config Schema Compatibility Policy
 

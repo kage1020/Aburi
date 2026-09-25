@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 import type {
   Config,
@@ -13,6 +13,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CliError, loadPlugins } from "../src"
+import { isDriveRelative } from "../src/plugin-loader"
 import { STUB_PLUGIN } from "./stub-language"
 
 const langManifest: LangManifest = {
@@ -182,9 +183,8 @@ describe("loadPlugins — module resolution and bucketing", () => {
   })
 
   const absolutePath = resolve(tmpdir(), "aburi plugins", "local #100%.mjs")
-  it.each([
-    ...new Set([absolutePath, absolutePath.replaceAll("\\", "/")]),
-  ])("resolves the absolute ref %s as a file URL independently of the plugin root", async (ref) => {
+
+  async function specifierFor(ref: string): Promise<string> {
     let seen = ""
     await loadPlugins({
       config: { languages: [ref] },
@@ -195,7 +195,54 @@ describe("loadPlugins — module resolution and bucketing", () => {
         return { plugin: fakeLangPlugin }
       },
     })
-    expect(seen).toBe(pathToFileURL(absolutePath).href)
+    return seen
+  }
+
+  it("resolves an absolute ref to its own location, not under the plugin ref root", async () => {
+    expect(await specifierFor(absolutePath)).toBe(pathToFileURL(absolutePath).href)
+  })
+
+  // `C:/plugins/x.mjs` is what people write in JSON to avoid escaping backslashes. On POSIX
+  // `absolutePath` has no backslash, so this case would be the one above.
+  it.runIf(process.platform === "win32")(
+    "resolves a Windows absolute ref written with forward slashes",
+    async () => {
+      expect(await specifierFor(absolutePath.replaceAll("\\", "/"))).toBe(
+        pathToFileURL(absolutePath).href,
+      )
+    },
+  )
+
+  it.runIf(process.platform === "win32").each(["/opt/plugins/x.mjs", "\\plugins\\x.mjs"])(
+    "refuses the Windows ref %s, which names no drive",
+    async (ref) => {
+      let imported = false
+      const error = await loadPlugins({
+        config: { languages: [ref] },
+        workspaceRoot: tmpdir(),
+        importModule: async () => {
+          imported = true
+          return { plugin: fakeLangPlugin }
+        },
+      }).catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(CliError)
+      expect((error as CliError).code).toBe("config-error")
+      expect((error as CliError).message).toMatch(/names no drive/)
+      expect(imported).toBe(false)
+    },
+  )
+
+  it.each([
+    ["/opt/plugins/x.mjs", true],
+    ["\\plugins\\x.mjs", true],
+    ["C:/plugins/x.mjs", false],
+    ["C:\\plugins\\x.mjs", false],
+    ["//server/share/x.mjs", false],
+    ["\\\\server\\share\\x.mjs", false],
+    ["./plugins/x.mjs", false],
+    ["@aburi/lang-typescript", false],
+  ])("reads %s as drive-relative on Windows: %s", (ref, expected) => {
+    expect(isDriveRelative(ref)).toBe(expected)
   })
 
   it("keeps explicit file URLs unchanged", async () => {
@@ -212,6 +259,7 @@ describe("loadPlugins — module resolution and bucketing", () => {
     expect(seen).toBe(ref)
   })
 
+  const RESULT = "aburi-test-result:"
   it("imports an absolute plugin path containing spaces and URL-special characters", async () => {
     const scratch = await mkdtemp(resolve(tmpdir(), "aburi-plugin-path-"))
     try {
@@ -219,19 +267,27 @@ describe("loadPlugins — module resolution and bucketing", () => {
       await writeFile(pluginPath, STUB_PLUGIN, "utf8")
       // Use Node's ESM loader directly: Vitest's module runner treats URL fragments differently.
       const loaderUrl = new URL("../src/plugin-loader.ts", import.meta.url).href
-      const { stdout } = await promisify(execFile)(process.execPath, [
-        "--import",
-        "tsx",
-        "--input-type=module",
-        "-e",
-        `import { loadPlugins } from ${JSON.stringify(loaderUrl)};
-        const loaded = await loadPlugins(${JSON.stringify({
-          config: { languages: [pluginPath] },
-          workspaceRoot: resolve(scratch, "workspace"),
-        })});
-        console.log(JSON.stringify(loaded.languages.map(plugin => plugin.manifest.name)));`,
-      ])
-      expect(JSON.parse(stdout)).toEqual(["lang-stub"])
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `import { loadPlugins } from ${JSON.stringify(loaderUrl)};
+          const loaded = await loadPlugins(${JSON.stringify({
+            config: { languages: [pluginPath] },
+            workspaceRoot: resolve(scratch, "workspace"),
+          })});
+          console.log(${JSON.stringify(RESULT)} + JSON.stringify(loaded.languages.map(plugin => plugin.manifest.name)));`,
+        ],
+        // The package directory, so `tsx` and the loader's own imports resolve from this
+        // package whatever directory the test runner was started in.
+        { cwd: fileURLToPath(new URL("..", import.meta.url)), timeout: 20_000 },
+      )
+      // Anything tsx or Node prints besides the result is noise, not a loader failure.
+      const line = stdout.split("\n").find((l) => l.startsWith(RESULT))
+      expect(line && JSON.parse(line.slice(RESULT.length))).toEqual(["lang-stub"])
     } finally {
       await rm(scratch, { recursive: true, force: true })
     }
