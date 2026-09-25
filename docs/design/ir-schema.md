@@ -191,6 +191,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | class | `InvoiceService` |
 | instance method | `InvoiceService.createInvoice` |
 | static method | `InvoiceService::fromJson` |
+| export of a namespace merged into a class (`class C {}` beside `namespace C { export function m() {} }`) | `C::m`, the static member TypeScript resolves it as; `C.m` is the instance member's name. What the namespace does not export is local to it and keeps the dot, and everything under an exported declaration sits under its segment (`C::Inner.g`) |
 | nested namespace / class | `Billing.Invoice.create` |
 | interface / type alias | `Invoice` |
 | default export (including anonymous functions/classes) | `<default>` |

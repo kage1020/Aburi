@@ -717,21 +717,96 @@ function addNamespaceAndBody(
   const body = node.childForFieldName("body") ?? findChild(node, "statement_block")
   const declaredName = declaredNamespaceName(node, body)
   if (declaredName === null || body === null) return
-  const path = [...namespacePath]
-  for (const segment of declaredName.split(".")) {
+  const [head, ...rest] = declaredName.split(".")
+  if (head === undefined) return
+  const path = [...namespacePath, head]
+  const namespaceCandidate = () =>
+    makeBodylessCandidate(node, ctx, nestedQname(path), "namespace", "namespace-declaration", null)
+  out.add(namespaceCandidate())
+  const members = mergesWithClass(node, head)
+    ? staticMemberSink(out, nestedQname(path), ctx.file.path)
+    : out
+  for (const segment of rest) {
     path.push(segment)
-    out.add(
-      makeBodylessCandidate(
-        node,
-        ctx,
-        nestedQname(path),
-        "namespace",
-        "namespace-declaration",
-        null,
-      ),
-    )
+    members.add(namespaceCandidate())
   }
-  visitModuleLevel(body, ctx, path, out, callState)
+  // Past the head, the whole body is a member: `namespace C.D {}` exports `D` from `C`, and an
+  // ambient namespace exports what it declares whether or not the keyword is written (LP36).
+  const everyStatementExported = rest.length > 0 || inAmbientContext(node)
+  for (const stmt of body.namedChildren) {
+    if (stmt === null) continue
+    const exported = everyStatementExported || stmt.type === "export_statement"
+    visitStatement(stmt, ctx, path, exported ? members : out, callState)
+  }
+}
+
+/**
+ * Whether a class of the same name is declared beside this namespace, so that the namespace's
+ * exports are the class's static members. Read off the statement list rather than the sink: the
+ * class may be written after the namespace (TS2434), and a class already in the sink may carry a
+ * respelled name.
+ */
+function mergesWithClass(namespaceNode: Node, name: string): boolean {
+  let statement = namespaceNode
+  while (statement.parent !== null && STATEMENT_WRAPPERS.has(statement.parent.type)) {
+    statement = statement.parent
+  }
+  const scope = statement.parent
+  if (scope === null) return false
+  return scope.namedChildren.some((sibling) => {
+    const declaration = sibling === null ? null : unwrappedDeclaration(sibling)
+    return (
+      declaration !== null &&
+      CLASS_DECLARATION_TYPES.has(declaration.type) &&
+      nameFieldText(declaration) === name
+    )
+  })
+}
+
+const STATEMENT_WRAPPERS: ReadonlySet<string> = new Set([
+  "export_statement",
+  "expression_statement",
+  AMBIENT_DECLARATION_TYPE,
+])
+
+const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
+  "class_declaration",
+  "abstract_class_declaration",
+])
+
+function unwrappedDeclaration(statement: Node): Node | null {
+  if (statement.type === "export_statement") {
+    const declaration = statement.childForFieldName("declaration")
+    return declaration === null ? null : unwrappedDeclaration(declaration)
+  }
+  if (statement.type === AMBIENT_DECLARATION_TYPE) {
+    const declaration = ambientDeclaration(statement)
+    return declaration === null ? null : unwrappedDeclaration(declaration)
+  }
+  return statement
+}
+
+/**
+ * `out`, with every candidate reaching it respelled as a static member of `owner`: `C.m`
+ * becomes `C::m`. A namespace merged into a class adds to the class itself, so its exports are
+ * what `static` declares and are spelled that way; `C.m` is an instance member's name.
+ * Respelled here rather than by each builder because the builders only append a segment to a
+ * path, and everything the exported statement declares in turn, a nested namespace's body
+ * included, sits under the same segment.
+ */
+function staticMemberSink(out: CandidateSink, owner: string, file: string): CandidateSink {
+  const instancePrefix = `${owner}.`
+  return {
+    add(candidate) {
+      if (!candidate.name.startsWith(instancePrefix)) {
+        out.add(candidate)
+        return
+      }
+      const name = `${owner}::${candidate.name.slice(instancePrefix.length)}`
+      out.add({ ...candidate, id: makeTsSymbolId(file, name), name })
+    },
+    list: () => out.list(),
+  }
 }
 
 /**

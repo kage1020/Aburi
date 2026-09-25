@@ -95,7 +95,7 @@ describe("scan — a workspace whose entities are declared more than once", () =
     // written inside it disappears.
     expect(ids).toContain("ts:src/merged.ts#N.a")
     expect(ids).toContain("ts:src/merged.ts#N.b")
-    expect(ids).toContain("ts:src/merged.ts#C.c")
+    expect(ids).toContain("ts:src/merged.ts#C::c")
   })
 
   it("records the setter's call on the property the getter named", async () => {
