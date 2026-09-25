@@ -128,7 +128,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .command("scan")
     .description("Generate IR from the current workspace")
     .option("--output-dir <path>", "output directory (default: config.output.dir, or out)")
-    .option("--format <format>", "json | md | both", parseFormat, "both")
+    // No commander default: `deriveFormat` has to tell a typed `--format both` from nothing.
+    .option("--format <format>", "json | md | both (default: both)", parseFormat)
     .option("--no-md", "shortcut for --format json")
     .option("--no-json", "shortcut for --format md")
     .option("--ignore <glob>", "additional ignore glob (repeatable)", collect, [])
@@ -445,12 +446,28 @@ function collect(value: string, accumulator: string[]): string[] {
   return [...accumulator, value]
 }
 
+/**
+ * The outputs `scan` writes. `--no-md` and `--no-json` each take one away, from what `--format`
+ * names or from both. Taking away what `--format` asked for by name, or everything, is refused
+ * rather than settled by which flag wins.
+ */
 function deriveFormat(cmdOptions: {
   format?: "json" | "md" | "both"
   md?: boolean
   json?: boolean
 }): "json" | "md" | "both" {
-  if (cmdOptions.md === false) return "json"
-  if (cmdOptions.json === false) return "md"
-  return cmdOptions.format ?? "both"
+  const named = cmdOptions.format ?? "both"
+  const md = named !== "json" && cmdOptions.md !== false
+  const json = named !== "md" && cmdOptions.json !== false
+  const flags = [
+    ...(cmdOptions.format === undefined ? [] : [`--format ${cmdOptions.format}`]),
+    ...(cmdOptions.md === false ? ["--no-md"] : []),
+    ...(cmdOptions.json === false ? ["--no-json"] : []),
+  ].join(" and ")
+  const typedAway = (named !== "json" && !md) || (named !== "md" && !json)
+  if (cmdOptions.format !== undefined && typedAway) {
+    throw new CliError(`${flags} contradict each other: drop one`, "input-error")
+  }
+  if (!md && !json) throw new CliError(`${flags} leave scan nothing to write`, "input-error")
+  return md && json ? "both" : md ? "md" : "json"
 }

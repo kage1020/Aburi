@@ -141,8 +141,8 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 |---|---|
 | `--output-dir <path>` | Output directory (default: `config.output.dir`, then `out`). Resolved against the working directory, as the config value is |
 | `--format <json\|md\|both>` | Output format (default: `both`) |
-| `--no-md` | Shortcut for `--format json` |
-| `--no-json` | Shortcut for `--format md` |
+| `--no-md` | Shortcut for `--format json`. With `--no-json`, or with a `--format` that names `md`, exit 2 |
+| `--no-json` | Shortcut for `--format md`. With `--no-md`, or with a `--format` that names `json`, exit 2 |
 | `--strict` / `--no-strict` | Override `config.strict` |
 | `--discover` | `--no-strict` + record undeclared vocab to `out/aburi-vocab-discovered.json` |
 | `--quiet` | Suppress progress output; stdout carries the final summary only |

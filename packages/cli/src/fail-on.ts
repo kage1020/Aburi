@@ -66,26 +66,27 @@ export class FailOnParseError extends Error {
 
 /**
  * Parse the raw `--fail-on` argument (comma-separated). Returns one clause per token.
- * Empty intra-list segments (`--fail-on changed,,removed`) are tolerated so users can
- * build the list programmatically without stripping trailing commas — but a value that
- * yields zero clauses in total is rejected with `FailOnParseError`. The CLI treats
- * `--fail-on ""` (from an unset shell variable, for example) as a configuration mistake
- * rather than "gate disabled": a silently-empty gate would let regressions through with
- * a green exit code, which is the opposite of what a fail-on gate exists to prevent.
+ * Every segment has to be a clause: an empty one (`changed,,removed`, a trailing comma) is
+ * refused, since it is as likely a clause that went missing as a stray comma. A value with no
+ * clause at all — `--fail-on ""`, from an unset shell variable for example — gets its own
+ * message, because a silently-empty gate would let regressions through with a green exit code.
  */
 export function parseFailOn(value: string): FailOnClause[] {
-  const clauses = value
-    .split(",")
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0)
-    .map((segment) => parseSingle(segment))
-  if (clauses.length === 0) {
+  const segments = value.split(",").map((segment) => segment.trim())
+  if (segments.every((segment) => segment.length === 0)) {
     throw new FailOnParseError(
       value,
       "expected at least one clause; an empty --fail-on value would silently disable the CI gate.",
     )
   }
-  return clauses
+  const empty = segments.findIndex((segment) => segment.length === 0)
+  if (empty !== -1) {
+    throw new FailOnParseError(
+      value,
+      `clause ${empty + 1} of ${segments.length} is empty; remove the extra comma or write the clause.`,
+    )
+  }
+  return segments.map((segment) => parseSingle(segment))
 }
 
 function parseSingle(segment: string): FailOnClause {

@@ -5,7 +5,7 @@ import Ajv2020, {
   type SchemaObject,
   type ValidateFunction,
 } from "ajv/dist/2020.js"
-import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
+import { type ParseError, parse, printParseErrorCode, visit } from "jsonc-parser"
 import configSchema from "../../../schema/aburi.config.v1.json" with { type: "json" }
 import { ConfigError, MISSING_FILE_ERRNOS } from "./errors"
 
@@ -31,7 +31,8 @@ function getErrno(value: unknown): string {
 /**
  * Parse + ajv-validate + duplicate-key-check a JSONC config string. The "Pure" qualifier
  * means no I/O — not "no semantic work": this returns only when every rule the schema
- * cannot express (duplicate component ids, duplicate hint names) also passes.
+ * cannot express (a key named twice in one object, duplicate component ids, duplicate hint
+ * names) also passes.
  */
 export function parseConfig(text: string, sourcePath: string): Config {
   const errors: ParseError[] = []
@@ -51,6 +52,8 @@ export function parseConfig(text: string, sourcePath: string): Config {
       { cause: errors },
     )
   }
+
+  rejectRepeatedKeys(text, sourcePath)
 
   if (!validate(parsed)) {
     const ajvErrors = validate.errors ?? []
@@ -92,6 +95,43 @@ export async function readConfigFile(path: string): Promise<Config> {
     )
   }
   return parseConfig(text, path)
+}
+
+/**
+ * Refuse an object that names one key twice, at any depth. JSONC parsing keeps the last and says
+ * nothing, so `{ "ignore": ["a/**"], "ignore": ["b/**"] }` would drop `a/**` with no sign the file
+ * asked for it.
+ */
+function rejectRepeatedKeys(text: string, sourcePath: string): void {
+  const open: Set<string>[] = []
+  let repeat: string | null = null
+  visit(
+    text,
+    {
+      onObjectBegin: () => {
+        open.push(new Set())
+      },
+      onObjectEnd: () => {
+        open.pop()
+      },
+      onObjectProperty: (key, _offset, _length, line, column, pathOf) => {
+        const keys = open.at(-1)
+        if (repeat !== null || keys === undefined) return
+        if (keys.has(key)) {
+          const path = pathOf()
+          const owner = path.length === 0 ? "the top-level object" : `/${path.join("/")}`
+          repeat = `"${key}" twice in ${owner} (again at line ${line + 1}, column ${column + 1})`
+        }
+        keys.add(key)
+      },
+    },
+    { allowTrailingComma: true, disallowComments: false },
+  )
+  if (repeat !== null) {
+    throw new ConfigError(`Config at ${sourcePath} names ${repeat}`, {
+      code: "config-invalid",
+    })
+  }
 }
 
 function enforceDuplicateRules(config: Config, sourcePath: string): void {

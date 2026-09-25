@@ -446,6 +446,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C16 | On Windows, `languages: ["./ok.mjs"], effects: ["/opt/plugins/x.mjs"]` (no drive) | Exit 2, naming the drive to add; `./ok.mjs` is not imported either |
 | C17 | On Windows, `languages: ["C:plugins/x.mjs"]` (drive, no root) | Exit 2, suggesting `C:/plugins/x.mjs` |
 | C18 | On POSIX, `languages: ["C:/plugins/x.mjs"]` | Exit 2, saying the platform has no drive C: |
+| C19 | One object naming a key twice, at any depth — `{ "ignore": ["a/**"], "ignore": ["b/**"] }` | Config validation error naming the key, the object and the line of the second |
 
 ## 14.1 Config Schema Compatibility Policy
 

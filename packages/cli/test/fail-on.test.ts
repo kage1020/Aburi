@@ -65,11 +65,13 @@ describe("parseFailOn — grammar", () => {
     ])
   })
 
-  it("skips empty segments (trailing comma resilience)", () => {
-    expect(parseFailOn("changed,,removed,")).toEqual([
-      { token: "changed", threshold: null },
-      { token: "removed", threshold: null },
-    ])
+  it.each([
+    ["a trailing comma", "added,", "clause 2 of 2 is empty"],
+    ["a leading comma", ",added", "clause 1 of 2 is empty"],
+    ["two commas in a row", "added:>1,,removed", "clause 2 of 3 is empty"],
+    ["a blank clause", "added, ,removed", "clause 2 of 3 is empty"],
+  ])("rejects %s, naming the empty clause", (_, spec, reason) => {
+    expect(() => parseFailOn(spec)).toThrow(`--fail-on value "${spec}" is invalid: ${reason}`)
   })
 
   it.each([

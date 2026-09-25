@@ -146,6 +146,30 @@ describe("parseConfig", () => {
   })
 })
 
+describe("C19 — a key named twice in one object", () => {
+  it.each([
+    [
+      "at the top level",
+      `{ "ignore": ["a/**"], "ignore": ["b/**"] }`,
+      'names "ignore" twice in the top-level object (again at line 1, column 23)',
+    ],
+    [
+      "inside an array element",
+      `{\n  "components": [{ "id": "a", "roots": ["x"], "id": "b" }]\n}`,
+      'names "id" twice in /components/0 (again at line 2, column 47)',
+    ],
+  ])("refuses the config %s", async (_label, text, message) => {
+    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    expect(caught.code).toBe("config-invalid")
+    expect(caught.message).toBe(`Config at inline ${message}`)
+  })
+
+  it("lets two objects use the same key", () => {
+    const text = `{ "components": [{ "id": "a", "roots": ["x"] }, { "id": "b", "roots": ["y"] }] }`
+    expect(parseConfig(text, "inline").components).toHaveLength(2)
+  })
+})
+
 describe("readConfigFile", () => {
   let tmp: string
   beforeAll(async () => {
