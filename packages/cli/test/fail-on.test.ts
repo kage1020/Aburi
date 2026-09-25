@@ -65,20 +65,55 @@ describe("parseFailOn — grammar", () => {
     ])
   })
 
-  it("skips empty segments (trailing comma resilience)", () => {
-    expect(parseFailOn("changed,,removed,")).toEqual([
-      { token: "changed", threshold: null },
-      { token: "removed", threshold: null },
-    ])
+  it.each([
+    ["a trailing comma", "added,", "clause 2 of 2 is empty"],
+    ["a leading comma", ",added", "clause 1 of 2 is empty"],
+    ["two commas in a row", "added:>1,,removed", "clause 2 of 3 is empty"],
+    ["a blank clause", "added, ,removed", "clause 2 of 3 is empty"],
+  ])("rejects %s, naming the empty clause", (_, spec, reason) => {
+    expect(() => parseFailOn(spec)).toThrow(`--fail-on value "${spec}" is invalid: ${reason}`)
   })
 
   it.each([
-    ["an unknown token", "bogus"],
-    ["an unsupported comparator", "changed:>=10"],
-    ["a non-integer threshold", "changed:>abc"],
-    ["a negative threshold", "changed:>-1"],
-  ])("rejects %s", (_, spec) => {
-    expect(() => parseFailOn(spec)).toThrow(FailOnParseError)
+    ["an unknown token", "bogus", 'unknown token "bogus"'],
+    [
+      "an unsupported comparator",
+      "changed:>=10",
+      'threshold must use ">N" form (e.g. changed:>10); got ">=10"',
+    ],
+    [
+      "a non-integer threshold",
+      "changed:>abc",
+      'threshold must be a non-negative integer; got "abc"',
+    ],
+    ["a negative threshold", "changed:>-1", 'threshold must be a non-negative integer; got "-1"'],
+    [
+      "a threshold with no comparator",
+      "changed:5",
+      'threshold must use ">N" form (e.g. changed:>10); got "5"',
+    ],
+    [
+      "a less-than threshold",
+      "changed:<5",
+      'threshold must use ">N" form (e.g. changed:>10); got "<5"',
+    ],
+    ["a misspelt subtype", "dropped-toggled:to-kep", 'unknown token "dropped-toggled:to-kep"'],
+  ])("rejects %s", (_, spec, reason) => {
+    expect(() => parseFailOn(spec)).toThrow(`--fail-on value "${spec}" is invalid: ${reason}`)
+  })
+
+  it("names the whole value and the clause when there is more than one", () => {
+    let caught: unknown
+    try {
+      parseFailOn("added,bogus,removed")
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(FailOnParseError)
+    expect((caught as FailOnParseError).value).toBe("added,bogus,removed")
+    expect((caught as FailOnParseError).message).toBe(
+      '--fail-on value "added,bogus,removed" is invalid: clause 2 of 3: unknown token "bogus"',
+    )
   })
 })
 

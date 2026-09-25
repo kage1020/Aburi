@@ -13,7 +13,11 @@ export type ContextFreeConfigErrorCode =
   | "config-not-found"
   /** Config file is not valid JSONC. */
   | "config-parse-failed"
-  /** Config does not conform to aburi.config.v1.json or contains non-JSON values. */
+  /**
+   * Config does not conform to aburi.config.v1.json, contains non-JSON values, or names one
+   * key twice in an object (or `__proto__` at all), where `cause` is the key, the JSON path of
+   * its object, and the line and column.
+   */
   | "config-invalid"
 
 /** Failures attributable to a specific user-written string: `value` is required. */

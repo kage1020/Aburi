@@ -76,7 +76,7 @@ aburi init --with-suggestions --output config/aburi.jsonc
 ## `aburi scan`
 
 ```
-aburi scan [--output-dir <dir>] [--format json|md|both]
+aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
            [--ignore <glob>]... [--respect-gitignore | --no-respect-gitignore]
            [--compact] [--no-timestamp] [--config <path>]
 ```
@@ -87,7 +87,7 @@ Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
 | Flag | Effect |
 |---|---|
 | `--output-dir <dir>` | Where to write. Falls back to `output.dir` in the config, then `out`. Created if missing; a path a file already stands on exits `2` and names it. |
-| `--format <fmt>` | `json`, `md`, or `both` (default). `--no-md` and `--no-json` are shorthands. |
+| `--format <fmt>` | `json`, `md`, or `both` (default). Without `--format`, `--no-md` and `--no-json` each drop one output. With it, a `--no-*` that would drop an output `--format` includes exits `2`, and so does dropping both. |
 | `--ignore <glob>` | An extra exclusion for this run. Repeatable. |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override the config for this run. |
 | `--compact` | JSON without indentation. |
@@ -236,9 +236,10 @@ Evaluation stops at the first clause that fires, which keeps CI logs short.
 `--fail-on changed:>5`.
 :::
 
-Unknown tokens, comparators other than `>`, non-integer thresholds, and an empty
-value all exit `2`. Aburi treats an empty gate as a mistake rather than as "no
-gate", because it would turn a regression into a green pipeline.
+Unknown tokens, comparators other than `>`, non-integer thresholds, an empty
+clause (`added,`, `added,,removed`), and an empty value all exit `2`. Aburi
+treats an empty gate as a mistake rather than as "no gate", because it would
+turn a regression into a green pipeline.
 
 ---
 

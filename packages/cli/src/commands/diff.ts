@@ -142,8 +142,8 @@ export type DiffSide = "base" | "head"
  *
  * `--fail-on` is parsed once and evaluated post-diff; the first triggered clause maps to
  * `EXIT.GATE` with a stable diagnostic phrasing. An empty `--fail-on` value
- * (from an unset shell variable, for example) is rejected by the parser rather than
- * silently disabling the CI gate.
+ * (from an unset shell variable, for example) or an empty clause is rejected by the parser
+ * rather than silently disabling the CI gate.
  */
 export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   const cwd = options.cwd ?? process.cwd()

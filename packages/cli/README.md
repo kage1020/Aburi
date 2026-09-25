@@ -48,7 +48,8 @@ changed the report the uncapped Markdown is written beside it as `diff.full.md`.
 ## `--fail-on` grammar
 
 Comma-separated clauses. Every clause supports an optional `:>N` count
-threshold. Empty `--fail-on ""` is rejected (silent gate = green pipeline = bug).
+threshold. Empty `--fail-on ""` is rejected (silent gate = green pipeline = bug), and so is
+an empty clause (`added,`, `added,,removed`).
 
 - Status tokens: `added`, `removed`, `changed`, `moved`, `moved+changed`, `dropped-toggled`.
 - Directional subtypes: `dropped-toggled:to-dropped`, `dropped-toggled:to-kept`.
