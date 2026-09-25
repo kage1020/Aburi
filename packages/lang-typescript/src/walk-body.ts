@@ -1,4 +1,3 @@
-import { isQnameSegment } from "@aburi/core"
 import {
   type BodyExtraction,
   type CallCandidate,
@@ -9,7 +8,12 @@ import {
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { bodyNodesOf, findChild, hasErrorChild, thrownValue, walkDescendants } from "./ast-helpers"
-import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import {
+  functionValuedField,
+  isConstructorMember,
+  keySegment,
+  memberSymbolSegment,
+} from "./class-members"
 import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
@@ -463,7 +467,7 @@ function subscriptSegment(node: Node): string | null {
   if (index === null) return null
   if (index.type !== "string" && index.type !== "template_string") return null
   const { value, whole } = decodeStringLiteral(index)
-  return whole && isQnameSegment(value) ? value : null
+  return whole ? keySegment(value) : null
 }
 
 function extractLiteral(node: Node): string | null {

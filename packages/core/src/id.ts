@@ -41,7 +41,8 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
  * Identifier-like segment that may appear in a qualified name (no separators, no spaces).
  *
  * ECMAScript's IdentifierName, less the `\u` escape forms no source has to use: a start
- * character is `ID_Start`, `$` or `_`, and a part character is `ID_Continue` or `$`.
+ * character is `ID_Start`, `$` or `_`, and a part character is `ID_Continue` or `$`. A leading
+ * `#` makes it a PrivateIdentifier, `#v`, which is a member of its own beside a `v`.
  *
  * Only `$` and `_` are spelled out, and each for its own measured reason. `$` is in neither
  * property, so it is named in both classes. `_` is in `ID_Continue` and not in `ID_Start`, so
@@ -64,7 +65,7 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
  * computed member's brackets. Those are the plugin's to stop sending, not this pattern's to
  * accommodate.
  */
-const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
+const QNAME_SEGMENT_PATTERN = /^#?[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 /**
  * Prefixes that make a path absolute rather than workspace-relative. The Windows drive
@@ -644,6 +645,8 @@ export function isQualifiedName(value: string): boolean {
  * `isQualifiedName` is the wrong predicate for that question and would fail quietly: it
  * answers about a *finished* name, so it admits `.` and `::`. A caller vetting one member
  * name with it would accept `"a.b"` and mint the nested qname `C.a.b` out of a single member.
+ * This one admits `#v`, so a caller vetting a *string* key refuses that itself: `"#v"` is a
+ * public property, and the segment `#v` names the private one.
  */
 export function isQnameSegment(value: string): boolean {
   return QNAME_SEGMENT_PATTERN.test(value)

@@ -155,7 +155,7 @@ describe("a getter and a setter declare one member", () => {
 
   it("keeps a private-name pair private", async () => {
     const source = "export class P { get #v() { return 1 } set #v(n) {} }"
-    expect((await symbolOf(source, "ts:src/a.ts#P.v")).visibility).toBe("private")
+    expect((await symbolOf(source, "ts:src/a.ts#P.#v")).visibility).toBe("private")
   })
 
   it("does not call a plain method an accessor", async () => {
@@ -194,30 +194,31 @@ describe("a getter and a setter declare one member", () => {
     expect(symbol.decorators.map((d) => d.name)).toEqual(["Memo", "Validate"])
   })
 
-  it("folds a private-name member into the public one of the same name", async () => {
-    // `v` and `#v` are two members and `tsc` accepts both, but `#` is not a qualified-name
-    // segment character, so the id builder is handed `Q.v` for each. The convention predates
-    // this change; what changed is the consequence — a duplicate id used to end the run, and
-    // now the two fold. The IR says one member where the source has two.
+  it("keeps a private-name member apart from the public one of the same name", async () => {
+    // `v` and `#v` are two members and `tsc` accepts both. Spelled `Q.v` both, they folded into
+    // one Symbol that reported both bodies' calls.
     const source = "export class Q { v() { a() } #v() { b() } }"
     const symbol = await symbolOf(source, "ts:src/a.ts#Q.v")
 
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#Q", "ts:src/a.ts#Q.v"])
-    expect(symbol.derivedBy).toContain("declaration-merged")
-    expect((await walkOf(source, "ts:src/a.ts#Q.v")).calls.map((c) => c.target)).toEqual(["a", "b"])
-    expect(symbol.visibility).toBe("public")
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#Q", "ts:src/a.ts#Q.#v", "ts:src/a.ts#Q.v"])
+    expect(symbol.derivedBy).not.toContain("declaration-merged")
+    expect((await walkOf(source, "ts:src/a.ts#Q.v")).calls.map((c) => c.target)).toEqual(["a"])
+    expect((await walkOf(source, "ts:src/a.ts#Q.#v")).calls.map((c) => c.target)).toEqual(["b"])
   })
 
-  it("reports the private one when the private one is written first", async () => {
-    // The scalars come from the leading declaration, so reordering the two members changes
-    // what the folded Symbol says it is: the public method is the one that disappears, and
-    // the survivor reports itself private. That is a property of the fold being wrong here
-    // rather than of the rule, so it is pinned where the fold is instead of smoothed over.
+  it("reports each one's own visibility and signature, whichever is written first", async () => {
     const source = "export class Q { #v(a: number) {} v(c: string) {} }"
-    const symbol = await symbolOf(source, "ts:src/a.ts#Q.v")
+    const priv = await symbolOf(source, "ts:src/a.ts#Q.#v")
+    const pub = await symbolOf(source, "ts:src/a.ts#Q.v")
 
-    expect(symbol.visibility).toBe("private")
-    expect(symbol.signature?.inputs).toEqual([{ name: "a", type: "number" }])
+    expect([priv.visibility, priv.signature?.inputs]).toEqual([
+      "private",
+      [{ name: "a", type: "number" }],
+    ])
+    expect([pub.visibility, pub.signature?.inputs]).toEqual([
+      "public",
+      [{ name: "c", type: "string" }],
+    ])
   })
 
   it("still says nothing about a computed accessor", async () => {

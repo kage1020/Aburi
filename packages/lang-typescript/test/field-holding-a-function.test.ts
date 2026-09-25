@@ -41,10 +41,7 @@ describe("a field holding a function is a member Symbol", () => {
   })
 
   it("reads a hash-private field as private", async () => {
-    // The `#` is stripped from the qname segment, the way a `#`-private method's is: the
-    // qualified-name grammar has no character for it. Which folds `#v` onto a `v` written
-    // beside it, exactly as it does for two methods — the same defect, reached from a field.
-    const symbol = await symbolOf(classOf("  #priv = () => { pv() }"), "ts:src/a.ts#C.priv")
+    const symbol = await symbolOf(classOf("  #priv = () => { pv() }"), "ts:src/a.ts#C.#priv")
 
     expect(symbol.visibility).toBe("private")
   })
@@ -196,8 +193,12 @@ describe("a field that is not a function stays a field", () => {
       "  #constructor = () => { c2() }",
     )
 
-    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.constructor"])
-    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["real", "c1", "c2"])
+    expect(await idsOf(source)).toEqual([
+      "ts:src/a.ts#C",
+      "ts:src/a.ts#C.#constructor",
+      "ts:src/a.ts#C.constructor",
+    ])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["real", "c1"])
     expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["real"])
   })
 })

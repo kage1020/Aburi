@@ -33,19 +33,26 @@ const CONSTRUCTION_SEGMENT = "constructor"
  * — see `hasErrorChild` for why the member's own children are read rather than `hasError`.
  *
  * A `number` has no segment at all (`1() {}` is `C[1]`, and the grammar's first character
- * class excludes digits). `#` is not a character the grammar admits either, so a `#`-private
- * member is spelled without it — which maps `#v` and a `v` written beside it onto one id, a
- * defect of its own; the strip is here so a field reaches it the same way a method does.
+ * class excludes digits). A `#`-private member keeps its `#`, so `#v` and a `v` written beside
+ * it are two members.
  */
 export function memberNameSegment(member: Node): string | null {
   if (hasErrorChild(member)) return null
   const name = member.childForFieldName("name")
   if (name === null) return null
   if (name.type === "property_identifier") return admitSegment(name.text)
-  if (name.type === "private_property_identifier") return admitSegment(name.text.replace(/^#/, ""))
+  if (name.type === "private_property_identifier") return admitSegment(name.text)
   if (name.type !== "string") return null
   const { value, whole } = decodeStringLiteral(name)
-  return whole ? admitSegment(value) : null
+  return whole ? keySegment(value) : null
+}
+
+/**
+ * The segment a property key decoded from a string spells, or null. Never a private name:
+ * `"#v"` is a public property, and the segment `#v` names the private one.
+ */
+export function keySegment(value: string): string | null {
+  return value.startsWith("#") ? null : admitSegment(value)
 }
 
 function admitSegment(candidate: string): string | null {
@@ -121,23 +128,18 @@ export function functionValuedField(member: Node): Node | null {
  * walk for whether the body stays on the class — one decision seen from two sides, as
  * `memberSymbolSegment` is.
  *
- * The **segment** is compared, not the source text, so `"constructor"() {}` is one too. Two
- * spellings that carry the segment are refused because neither is a property name on the
- * construction path: `static` (legal JavaScript, which this plugin also parses) and a
- * `#`-private name (TS18012, and the `#` the segment drops is what makes it a
- * `PrivateIdentifier`). Reading either as the constructor puts its body on the class and
- * gives it the instance qname, where it collides with the real constructor's.
+ * The **segment** is compared, not the source text, so `"constructor"() {}` is one too. A
+ * `static` member carries the segment and is refused: it is legal JavaScript, which this
+ * plugin also parses, and not on the construction path. Reading it as the constructor puts its
+ * body on the class and gives it the instance qname, where it collides with the real
+ * constructor's. `#constructor` (TS18012) has a segment of its own.
  */
 export function isConstructorMember(member: Node): boolean {
   if (hasChildOfType(member, "static")) return false
-  if (hasPrivateName(member)) return false
   return memberNameSegment(member) === CONSTRUCTION_SEGMENT
 }
 
-/**
- * How a member's name declares its visibility, from the shape it is written in. The node type
- * and not the text, because the segment no longer carries the answer: `#v` is spelled `v`.
- */
+/** How a member's name declares its visibility, from the shape it is written in. */
 export function hasPrivateName(member: Node): boolean {
   return member.childForFieldName("name")?.type === "private_property_identifier"
 }

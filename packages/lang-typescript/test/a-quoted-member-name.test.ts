@@ -93,12 +93,20 @@ describe("a quoted name that spells an identifier is that member", () => {
   })
 
   it("reports the quoted spelling as public, and the private one as private", async () => {
-    // `"#v"` decodes to `#v`, which is not a segment, so the two spellings never meet: a
-    // quoted name is a public property whatever characters it holds.
-    const source = classOf('  "v"() { a() }', "  #w() { b() }")
+    const source = classOf('  "v"() { a() }', "  #v() { b() }")
 
     expect((await symbolOf(source, "ts:src/a.ts#C.v")).visibility).toBe("public")
-    expect((await symbolOf(source, "ts:src/a.ts#C.w")).visibility).toBe("private")
+    expect((await symbolOf(source, "ts:src/a.ts#C.#v")).visibility).toBe("private")
+  })
+
+  it("never reads a quoted `#` as the private name", async () => {
+    // `"#v"` decodes to the characters the segment `#v` is spelled with, and names the public
+    // property with those characters, not the private member.
+    const source = classOf('  "#v"() { a() }', "  #v() { b() }")
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.#v"])
+    expect(await callsOf(source, "ts:src/a.ts#C.#v")).toEqual(["b"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["a"])
   })
 })
 
@@ -113,9 +121,8 @@ describe("a name that is not an identifier has no Symbol, and the file keeps the
     ["a decimal", "  1.5() { s() }"],
     ["nothing", '  ""() { s() }'],
     ["the instance separator", '  "a.b"() { s() }'],
-    // A quoted `"#v"` is a public property whose characters begin with a `#`, and it decodes
-    // to `#v`, which the grammar has no segment for. That it never earns a Symbol is what
-    // keeps a member's *spelling* the only thing visibility has to read.
+    // A quoted `"#v"` is a public property whose characters begin with a `#`. The segment
+    // `#v` names the private member, so the string has none.
     ["a private-looking string", '  "#v"() { s() }'],
     ["a hyphenated field", '  "a-b" = () => { s() }'],
     ["a numeric field", "  1 = () => { s() }"],
@@ -241,16 +248,15 @@ describe("the construction path is spelled two ways", () => {
   })
 
   it("leaves a `#`-private `constructor` off the path", async () => {
-    // The segment drops the `#`, and the `#` is exactly what makes `#constructor` a
-    // `PrivateIdentifier` rather than a property name — `tsc` reports TS18012, a reserved
-    // word. Reading it as the constructor kept its body on the class as code `new C()` runs,
-    // which it is not.
+    // `#constructor` is a `PrivateIdentifier` rather than a property name — `tsc` reports
+    // TS18012, a reserved word. Reading it as the constructor kept its body on the class as
+    // code `new C()` runs, which it is not.
     const source = classOf("  #constructor() { s() }")
-    const symbol = await symbolOf(source, "ts:src/a.ts#C.constructor")
+    const symbol = await symbolOf(source, "ts:src/a.ts#C.#constructor")
 
     expect(symbol.kind).toBe("method")
     expect(await callsOf(source, "ts:src/a.ts#C")).toEqual([])
-    expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["s"])
+    expect(await callsOf(source, "ts:src/a.ts#C.#constructor")).toEqual(["s"])
   })
 })
 

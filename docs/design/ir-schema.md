@@ -181,7 +181,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 
 - `<language>`: identifier declared by the language plugin (`ts`, `tsx`, `js`, `py`, `go`, `rs`, ...)
 - `<file-path>`: POSIX path relative to the workspace root (forward slashes enforced). §14 invariant #10 states the rule every path in the Document obeys; a file path adds two restrictions of its own, because it is part of an id: it holds neither `:` nor `#` (the id is split on the first of each), and it is never the bare `.` (that names the workspace root, and a directory holds no Symbol)
-- `<qualified-name>`: name unique within the file. `.` and `::` are separators that join two named constructs, so every segment they delimit is a non-empty identifier: `A.`, `.A`, `A..B` and `::` are not qualified names. `<default>` (§3.3) is the one reserved exception to the identifier rule. "Identifier" is ECMAScript's IdentifierName — `ID_Start`/`ID_Continue` plus `$`, `_`, ZWNJ and ZWJ — so `ユーザー取得` and `café` are qualified names, and a destructuring pattern's text or a computed member's brackets are not. `Symbol.name` (§5) carries a qualified name too and obeys the same grammar — it is what `apiFingerprint` reduces to a short name, and nothing in the Document ties it to the qualified name inside the id, so §14 invariant #17 checks both
+- `<qualified-name>`: name unique within the file. `.` and `::` are separators that join two named constructs, so every segment they delimit is a non-empty identifier: `A.`, `.A`, `A..B` and `::` are not qualified names. `<default>` (§3.3) is the one reserved exception to the identifier rule. "Identifier" is ECMAScript's IdentifierName — `ID_Start`/`ID_Continue` plus `$`, `_`, ZWNJ and ZWJ — so `ユーザー取得` and `café` are qualified names, and a destructuring pattern's text or a computed member's brackets are not. A segment may also open with one `#`, which makes it a PrivateIdentifier (`Q.#v`); the id's own `#` is the first one after the language, so it stays unambiguous. `Symbol.name` (§5) carries a qualified name too and obeys the same grammar — it is what `apiFingerprint` reduces to a short name, and nothing in the Document ties it to the qualified name inside the id, so §14 invariant #17 checks both
 
 ### 3.2 Building the qualified name
 
@@ -191,6 +191,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | class | `InvoiceService` |
 | instance method | `InvoiceService.createInvoice` |
 | static method | `InvoiceService::fromJson` |
+| `#`-private member (`#v() {}`) | `InvoiceService.#v`, with the `#`: `#v` and a `v` written beside it are two members. A quoted `"#v"` is the public property with those characters and has no segment, as below |
 | nested namespace / class | `Billing.Invoice.create` |
 | interface / type alias | `Invoice` |
 | default export (including anonymous functions/classes) | `<default>` |

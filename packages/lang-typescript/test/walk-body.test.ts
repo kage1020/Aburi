@@ -376,10 +376,18 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
   })
 
   it("refuses a literal that spells a whole qualified name rather than one segment", async () => {
-    // The predicate is `isQnameSegment`, not `isQualifiedName`: `obj["a.b"]` addresses one
+    // The predicate is a segment's, not `isQualifiedName`'s: `obj["a.b"]` addresses one
     // property whose name contains a dot, and folding it would mint the two segments
     // `obj.a.b` out of it — a receiver `a` the source never wrote.
     const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["a.b"].m() }')
+    const call = calls.find((c) => c.target.endsWith(".m"))
+    expect(call?.target).toBe("obj.<computed>.m")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
+  it("refuses a literal that spells a private name", async () => {
+    // `obj["#v"]` is the public property with those characters; `obj.#v` is another member.
+    const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["#v"].m() }')
     const call = calls.find((c) => c.target.endsWith(".m"))
     expect(call?.target).toBe("obj.<computed>.m")
     expect(call?.dynamicReceiver).toBe(true)

@@ -145,6 +145,7 @@ describe("a producer can ask whether a name is a segment before it builds one", 
     ["a digit after the first character", "ok1"],
     ["a non-ASCII identifier", "ユーザー取得"],
     ["an accented identifier", "café"],
+    ["a private name", "#v"],
   ])("accepts %s", (_label, segment) => {
     expect(isQnameSegment(segment)).toBe(true)
   })
@@ -156,7 +157,9 @@ describe("a producer can ask whether a name is a segment before it builds one", 
     ["a number", "1"],
     ["a decimal", "1.5"],
     ["nothing", ""],
-    ["a private name", "#v"],
+    ["a bare `#`", "#"],
+    ["a `#` after the first character", "a#b"],
+    ["two `#`", "##v"],
     ["a space", "a b"],
     ["the default sentinel", DEFAULT_EXPORT_QNAME],
   ])("refuses %s", (_label, segment) => {
