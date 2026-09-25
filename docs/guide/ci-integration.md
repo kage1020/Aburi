@@ -70,8 +70,8 @@ By default the action fetches the CLI with `pnpm dlx`, which needs no install st
 from its own location, so a config naming a plugin **by package** —
 `languages: ["lang-typescript"]`, which is what `aburi init` writes — fails there with
 `Cannot find package '@aburi/lang-typescript'`, no matter what your project has installed.
-A plugin named by relative path (`./plugins/x.mjs`) resolves against your workspace root and
-is fine either way.
+A plugin named by relative path (`./plugins/x.mjs`) resolves against your workspace root, and
+one named by absolute path loads that file, so both are fine either way.
 
 Set `cli: workspace` and the action runs the `@aburi/cli` in your own `node_modules`
 instead, plugins beside it — the install [Getting started](./getting-started.md) walks

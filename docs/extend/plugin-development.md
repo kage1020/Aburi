@@ -362,6 +362,9 @@ Each entry resolves to one specifier. There is no fallback chain:
 | `framework-mytool` | `@aburi/framework-mytool` |
 | `@myorg/mypkg` | `@myorg/mypkg`, verbatim |
 | `./plugins/mytool.mjs` | That path, relative to the workspace root |
+| `/opt/plugins/mytool.mjs` on POSIX | That file |
+| `C:/plugins/mytool.mjs` on Windows | That file |
+| A Windows path without a drive (`/opt/…`), or a drive letter on POSIX | A config error (exit 2), before any plugin is loaded |
 
 No bucket prefix is inferred: `frameworks: ["mytool"]` resolves to
 `@aburi/mytool`, not `@aburi/framework-mytool`. Publish under a scope and write

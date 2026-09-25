@@ -128,16 +128,30 @@ Each array element is a **plugin manifest name** (the `name` field).
 
 ### 5.2 Resolution Order
 
-For a string `<id>`, Aburi resolves to exactly one specifier — there is no fallback chain:
+For a string `<id>`, Aburi resolves to exactly one specifier — there is no fallback chain.
+Paths below are written as the string's value; in `aburi.json` each backslash is doubled.
 
-1. `<id>` starts with `./` or `../` → resolved against the workspace root as a `file:` URL
-2. `<id>` is scoped or contains `/` (`@myorg/pkg`, `some-pkg/subpath`) → used verbatim
+0. `<id>` names a Windows drive in a way the platform cannot load → config error (exit 2),
+   raised before any plugin is imported. On Windows that is a path rooted with no drive
+   (`/opt/x.mjs`, `\x.mjs`), which would take the workspace root's drive, or a drive with no
+   root (`C:x.mjs`), which would resolve against whatever directory is current on that drive.
+   On any other platform it is any ref naming a drive (`C:/x.mjs`, `C:\x.mjs`)
+1. `<id>` is an absolute filesystem path, or starts with `./` or `../` → normalized and
+   converted to a `file:` URL. Relative paths resolve against the workspace root; absolute
+   paths do not depend on it. On Windows an absolute path is drive-qualified (`C:/x.mjs` or
+   `C:\x.mjs`) or a UNC share (`\\server\share\x.mjs`). A relative path has to start with
+   `./` or `../`; `.\x.mjs` falls through to rule 3
+2. `<id>` is scoped or contains `/` (`@myorg/pkg`, `some-pkg/subpath`, a `file:` URL) → used
+   verbatim
 3. Otherwise → prefixed, becoming `@aburi/<id>`
 
 Examples:
 - `"effects-prisma"` → `@aburi/effects-prisma`
 - `"@myorg/aburi-effects"` → `@myorg/aburi-effects`
 - `"./aburi-plugins/internal-framework.mjs"` → direct relative path
+- `"C:/aburi-plugins/internal-framework.mjs"` → absolute path on Windows
+- `"/opt/aburi-plugins/internal-framework.mjs"` → absolute path on POSIX; refused on Windows
+- `"file:///opt/aburi-plugins/internal-framework.mjs"` → that URL
 
 A bare name is therefore *only* resolvable under the `@aburi` scope. Third-party plugins
 must be listed by their full package name.
@@ -428,6 +442,10 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C12 | `minParsedFileRatio: 0.9`, and a scan that parsed half the files it found | Exit 3, naming both counts and the floor |
 | C13 | `minParsedFileRatio` equal to the ratio the scan achieved | Exit 0 |
 | C14 | `minParsedFileRatio: 0` | Config validation error |
+| C15 | `languages: ["<absolute path to a plugin file>"]`, on any platform, with spaces, `#` or `%` in the file name | Loads that file, wherever the workspace root is |
+| C16 | On Windows, `languages: ["./ok.mjs"], effects: ["/opt/plugins/x.mjs"]` (no drive) | Exit 2, naming the drive to add; `./ok.mjs` is not imported either |
+| C17 | On Windows, `languages: ["C:plugins/x.mjs"]` (drive, no root) | Exit 2, suggesting `C:/plugins/x.mjs` |
+| C18 | On POSIX, `languages: ["C:/plugins/x.mjs"]` | Exit 2, saying the platform has no drive C: |
 
 ## 14.1 Config Schema Compatibility Policy
 

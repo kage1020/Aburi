@@ -2,7 +2,7 @@
 // Source: schema/aburi.config.v1.json
 // Run `pnpm --filter @aburi/types codegen` to regenerate.
 /**
- * Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative path ('./aburi-plugins/x.mjs').
+ * Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative/absolute filesystem path ('./aburi-plugins/x.mjs', '/opt/aburi-plugins/x.mjs', 'C:/aburi-plugins/x.mjs').
  */
 export type PluginRef = string
 export type RelativePath = string
@@ -21,7 +21,7 @@ ignore?: string[]
  */
 respectGitignore?: boolean
 /**
- * Enabled language plugins (manifest names or relative paths).
+ * Enabled language plugins (manifest names, npm package ids, or relative/absolute paths).
  */
 languages?: PluginRef[]
 /**

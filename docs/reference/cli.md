@@ -147,10 +147,12 @@ touched no source.
 
 The paths *inside* that config still resolve per scan: `ignore` and
 `components[].roots` are matched against each revision's own workspace root, so
-for the base that is the temporary worktree. A relative plugin ref
-(`./plugins/x.mjs`) is the exception — it belongs to the plugin set, which
+for the base that is the temporary worktree. Plugin refs are the
+exception. A relative one (`./plugins/x.mjs`) belongs to the plugin set, which
 [comes from the head](https://aburi.kage1020.com/extend/architecture) along with
-`node_modules`, so it is loaded from your working tree for both scans.
+`node_modules`, so it is loaded from your working tree for both scans. An
+absolute one (`/opt/plugins/x.mjs`) names the same file for both scans,
+whichever workspace root each has.
 
 **File mode** compares two `aburi.ir.json` files you already have. No git, no
 scanning.
