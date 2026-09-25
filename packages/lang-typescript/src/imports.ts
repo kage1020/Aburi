@@ -2,6 +2,7 @@ import { compareCodeUnit } from "@aburi/core"
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild, walkDescendants } from "./ast-helpers"
+import { maskedImportSpecifier } from "./import-type-reparse"
 import { decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
@@ -220,10 +221,15 @@ function readReExport(node: Node, errors: ParseError[]): ImportEdge | null {
 
 /**
  * Dynamic imports use the `import(...)` grammar (a call expression whose callee is the
- * `import` keyword). Walk the tree and emit an edge for every one we find.
+ * `import` keyword). Walk the tree and emit an edge for every one we find, and for every
+ * `import("…")` type the reparse stood a name in for, which a clean parse would have read as one.
  */
 function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseError[]): void {
   for (const node of walkDescendants(root)) {
+    const masked = node.type === "identifier" ? maskedImportSpecifier(node) : undefined
+    if (masked !== undefined) {
+      edges.push({ source: masked, symbols: "*", line: node.startPosition.row + 1, dynamic: true })
+    }
     if (node.type !== "call_expression") continue
     const callee = node.childForFieldName("function")
     if (callee === null || callee.type !== "import") continue
