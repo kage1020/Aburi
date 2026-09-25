@@ -303,6 +303,10 @@ Grouped by file; within a file, ascending by source.startLine:
 <sub>api=`9ee77913af43` logic=`7ecf8c1cebe7` syntax=`a3f2e1d0c9b8`</sub>
 ```
 
+A blank line follows each list section that something comes after. Without it, the next label
+or the `<sub>` line is a lazy continuation of the last bullet's paragraph and renders inside that
+bullet, except after a fenced rule row, which a paragraph cannot continue (MP14).
+
 ### 5.3 Section omission conventions
 
 If a symbol's field is empty, the corresponding section is not emitted:
@@ -489,11 +493,12 @@ Full symbol rendering (same as §5.2):
 ### `InvoiceService.refundInvoice` *(method)*
 **File**: `apps/billing/src/InvoiceService.ts:101`
 **Boundary**: `@Post('/refund')`
-**Effects**:
-- db.write: `prisma.invoice.update` (L120)
 **Rules**:
 - guard: `!invoice.canRefund` (L110)
 - throw: `new RefundNotAllowed()` (L111)
+
+**Effects**:
+- db.write: `prisma.invoice.update` (L120)
 ```
 
 #### ❔ Unknown
@@ -846,6 +851,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
+| MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
 
 ## 12. Design decisions
 

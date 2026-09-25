@@ -65,11 +65,12 @@ renders the whole thing:
 ### `refundOrder` *(function)*
 **File**: `src/app/orders/actions.ts:64`
 **Boundary**: `"use server"`
-**Effects**:
-- db.write: `prisma.order.update` (L72)
 **Rules**:
 - guard: `!order.canRefund` (L67)
 - throw: `new RefundNotAllowed()` (L68)
+
+**Effects**:
+- db.write: `prisma.order.update` (L72)
 ```
 
 Three field groups carry most of the meaning.
@@ -135,6 +136,7 @@ grouped by file, with its boundaries, signature, rules, effects, and calls.
 **Rules**:
 - guard: `cart.items.length === 0` (L21)
 - throw: `new EmptyCart()` (L22)
+
 **Effects**:
 - db.write: `prisma.order.create` (L34)
 ```
