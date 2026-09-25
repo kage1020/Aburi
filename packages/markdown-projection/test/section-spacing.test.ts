@@ -1,15 +1,9 @@
-/**
- * MP14 — a list section in a Symbol block ends at a blank line (markdown-projection.md §5.2).
- *
- * CommonMark lets a paragraph line continue the paragraph of the list item above it, so a
- * `**Effects**:` label written straight after a `- guard: …` row renders inside that bullet.
- * After a fenced rule row it does not — a paragraph cannot continue a fence — so without the
- * blank line the same label landed in or out of the list by the length of a condition.
- */
+/** MP14 — a list section in a Symbol block ends at a blank line (markdown-projection.md §5.2). */
 
 import { call, component, effect, fp, makeSymbol, rule, zeroFp } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
-import { projectComponent, renderSymbolBlock } from "../src"
+import { projectComponent, projectDiff, renderSymbolBlock } from "../src"
+import { makeDiff } from "./fixtures"
 
 const LONG_CONDITION =
   "user.role === 'admin' && flags.enabled && !session.expired && ctx.tenant === wantedTenantName"
@@ -61,19 +55,40 @@ describe("MP14 — each list section is followed by a blank line", () => {
     expect(block.at(-1)).toBe("- `svc.save` (L20)")
   })
 
-  it("leaves a component file with no run of three newlines", () => {
+  it("never emits two blank lines in a row", () => {
+    const block = renderSymbolBlock(
+      handle({
+        rules: [rule({ type: "guard", condition: LONG_CONDITION, line: 3 })],
+        effects: [EFFECT],
+        calls: [CALL],
+        fingerprint: fp("v1"),
+      }),
+    )
+    expect(block.filter((row, i) => row === "" && block[i + 1] === "")).toEqual([])
+  })
+
+  it("ends a fenced rule's list in a component file", () => {
     const md = projectComponent({
       component: component({ id: "core", name: "core" }),
       symbols: [
         handle({
           rules: [rule({ type: "guard", condition: LONG_CONDITION, line: 3 })],
           effects: [EFFECT],
-          calls: [CALL],
         }),
       ],
       dependencies: [],
     })
     expect(md).toContain("```\n\n**Effects**:\n")
-    expect(md).not.toMatch(/\n{3,}/)
+  })
+
+  it("separates the sections of an Added symbol in diff.md", () => {
+    const symbol = handle({
+      rules: [rule({ type: "guard", condition: "x > 0", line: 3 })],
+      effects: [EFFECT],
+      fingerprint: fp("v1"),
+    })
+    const md = projectDiff(makeDiff({ symbols: [{ status: "added", symbol }] }))
+    expect(md).toContain("- guard: `x > 0` (L3)\n\n**Effects**:\n")
+    expect(md).toMatch(/\(L7\) \[effects-prisma\]\n\n<sub>api=/)
   })
 })

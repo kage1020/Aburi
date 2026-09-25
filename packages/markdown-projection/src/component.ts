@@ -168,11 +168,7 @@ function renderSymbolsGroupedByFile(symbols: readonly IRSymbol[]): string[] {
  * markdown-projection.md — one Symbol block, with its omit rules: empty `decorators` → no row,
  * `signature: null` → no row, empty `rules` / `effects` / `calls` → no section, dropped
  * fingerprint → no `<sub>` line.
- *
- * A blank line follows each list section that something comes after. Without it the next label
- * or the `<sub>` line is a lazy continuation of the last bullet's paragraph, so CommonMark
- * renders it inside that bullet — unless the bullet ends in a fence, which a paragraph cannot
- * continue, so the same label would land in or out of the list by the length of a condition.
+ * A blank line follows each list section that something comes after (§5.2, MP14).
  */
 export function renderSymbolBlock(symbol: IRSymbol): string[] {
   const rows: string[] = []

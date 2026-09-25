@@ -493,11 +493,12 @@ Full symbol rendering (same as §5.2):
 ### `InvoiceService.refundInvoice` *(method)*
 **File**: `apps/billing/src/InvoiceService.ts:101`
 **Boundary**: `@Post('/refund')`
-**Effects**:
-- db.write: `prisma.invoice.update` (L120)
 **Rules**:
 - guard: `!invoice.canRefund` (L110)
 - throw: `new RefundNotAllowed()` (L111)
+
+**Effects**:
+- db.write: `prisma.invoice.update` (L120)
 ```
 
 #### ❔ Unknown
