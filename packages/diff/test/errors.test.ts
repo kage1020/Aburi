@@ -13,7 +13,7 @@ describe("DiffError — invalid-line-fuzz", () => {
 
   it("throws when lineFuzz is below the minimum", () => {
     expect(() => computeSymbolDelta(base, head, { lineFuzz: -1 })).toThrow(
-      /within \[0, 10\]; got -1/,
+      /^lineFuzz must be within \[0, 10\]; got -1/,
     )
     try {
       computeSymbolDelta(base, head, { lineFuzz: -1 })
@@ -32,7 +32,7 @@ describe("DiffError — invalid-line-fuzz", () => {
 
   it("throws on NaN / Infinity — silent normalisation would hide upstream bugs", () => {
     expect(() => computeSymbolDelta(base, head, { lineFuzz: Number.NaN })).toThrow(
-      /must be an integer/,
+      /^lineFuzz must be an integer/,
     )
     expect(() => computeSymbolDelta(base, head, { lineFuzz: Number.POSITIVE_INFINITY })).toThrow(
       DiffError,
@@ -40,17 +40,14 @@ describe("DiffError — invalid-line-fuzz", () => {
   })
 
   it("throws on fractional values (contract says integer)", () => {
-    expect(() => computeSymbolDelta(base, head, { lineFuzz: 1.5 })).toThrow(/must be an integer/)
+    expect(() => computeSymbolDelta(base, head, { lineFuzz: 1.5 })).toThrow(
+      /^lineFuzz must be an integer/,
+    )
   })
 
   it("accepts the min and max boundary values", () => {
     expect(() => computeSymbolDelta(base, head, { lineFuzz: MIN_LINE_FUZZ })).not.toThrow()
     expect(() => computeSymbolDelta(base, head, { lineFuzz: MAX_LINE_FUZZ })).not.toThrow()
-  })
-
-  it("names the option, not a config key, since aburi.json has no key for it", () => {
-    expect(() => computeSymbolDelta(base, head, { lineFuzz: 11 })).toThrow(/^lineFuzz must be/)
-    expect(() => computeSymbolDelta(base, head, { lineFuzz: 0.5 })).toThrow(/^lineFuzz must be/)
   })
 
   it("propagates through buildDiff when delta.lineFuzz is invalid", () => {
@@ -64,7 +61,7 @@ describe("DiffError — invalid-line-fuzz", () => {
         head: IR_REF,
         delta: { lineFuzz: 999 },
       }),
-    ).toThrow(DiffError)
+    ).toThrow(/^lineFuzz must be within/)
   })
 })
 

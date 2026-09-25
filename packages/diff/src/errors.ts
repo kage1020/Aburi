@@ -8,7 +8,10 @@ import type { IntegrityViolation } from "@aburi/core"
 export type DiffErrorCode =
   /** `base.$schema` and `head.$schema` disagree (diff-algorithm.md). */
   | "schema-mismatch"
-  /** `DeltaOptions.lineFuzz` was outside the documented [0, 10] range (diff-algorithm.md). */
+  /**
+   * `DeltaOptions.lineFuzz` was not an integer in the documented [0, 10] range
+   * (diff-algorithm.md).
+   */
   | "invalid-line-fuzz"
   /**
    * `baseIR` or `headIR` is not a Document of the shape `aburi.ir.v1` requires (invariant #20,

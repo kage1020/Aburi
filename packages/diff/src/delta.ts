@@ -56,7 +56,7 @@ export function computeSymbolDelta(
 /**
  * Line-fuzz range check (diff-algorithm.md). Loud rather than clamping so a caller's typo
  * (`lineFuzz: 999`) or an upstream `NaN` surfaces at the diff boundary instead of rounding
- * into the wrong deltas. The message names the option, not a config key: `aburi.json` has none.
+ * into the wrong deltas.
  */
 function validateLineFuzz(value: number): number {
   if (!Number.isFinite(value) || !Number.isInteger(value)) {

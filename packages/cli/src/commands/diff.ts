@@ -34,9 +34,10 @@ export type { WarnFn }
  * Map a `DiffError` onto the CLI exit-code table (docs/design/cli-spec.md).
  *
  * Most codes describe something the reader can fix — IR schemas that disagree, a malformed
- * IR, a repeated id — so they surface as `config-error` (exit 2). `invalid-line-fuzz` joins
- * them for completeness: this command leaves `lineFuzz` at its default, and `aburi.json` has
- * no key for it. `slice-invariant-violated` cannot: it fires only when Aburi produced a Slice
+ * IR, a repeated id — so they surface as `config-error` (exit 2). `invalid-line-fuzz` cannot
+ * reach a reader of this command — it calls `buildDiff` without `delta`, and `aburi.json` has no
+ * key to get wrong. It stays in the `config-error` arm for callers of the exported
+ * `classifyDiffError`, who pass `lineFuzz` themselves. `slice-invariant-violated` cannot: it fires only when Aburi produced a Slice
  * breaking its own derivation rule (slice-view.md), and reporting that as a config error
  * would send a reader through `aburi.json` for a bug that is not there.
  */
