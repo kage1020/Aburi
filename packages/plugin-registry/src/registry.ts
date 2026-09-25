@@ -87,11 +87,9 @@ function raise(
 }
 
 /**
- * Concrete VocabRegistry. Each `register` call validates the manifest in isolation
- * (type-namespace rules, reserved-namespace, xPrefix consistency), then validates
- * against the current registry state (id / prefix / framework conflicts, prefix
- * shadowing, prefix-prefix overlap). All checks pass before any mutation so a
- * failing register leaves the registry untouched.
+ * Concrete VocabRegistry. Each `register` call validates the manifest on its own, then against
+ * the current registry state; each `#validate*` method says what it checks. All checks pass
+ * before any mutation, so a failing register leaves the registry untouched.
  */
 export class VocabRegistry implements VocabRegistryContract {
   readonly #pluginsByName = new Map<string, PluginManifest>()
@@ -129,6 +127,7 @@ export class VocabRegistry implements VocabRegistryContract {
     this.#validateReserved(manifest)
     this.#validateTypeNamespaces(manifest)
     this.#validateXPrefix(manifest)
+    this.#validateOwnDuplicates(manifest)
     this.#validateConflicts(manifest)
 
     // Commit.
@@ -185,7 +184,8 @@ export class VocabRegistry implements VocabRegistryContract {
     ] as const
     const provides = m.provides as unknown as Record<string, unknown>
     for (const key of required) {
-      const value = provides[key]
+      // Own keys only, as for `type`: an inherited array would walk past this gate.
+      const value = Object.hasOwn(provides, key) ? provides[key] : undefined
       if (!Array.isArray(value)) {
         raise(
           `Plugin "${m.name}" provides.${key} must be an array (got ${typeof value}).`,
@@ -197,10 +197,11 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   #validateTypeNamespaces(m: PluginManifest): void {
-    const rules = TYPE_NAMESPACE_RULES[m.type as PluginType]
-    if (!rules) {
+    // Own keys only: a hand-built manifest's `type: "toString"` would find the prototype's.
+    if (!Object.hasOwn(TYPE_NAMESPACE_RULES, m.type)) {
       raise(`Plugin "${m.name}" has unknown type "${m.type}"`, "manifest-invalid", [m.name])
     }
+    const rules = TYPE_NAMESPACE_RULES[m.type as PluginType]
     // Effects.
     if (
       !rules.canOwnEffects &&
@@ -247,6 +248,30 @@ export class VocabRegistry implements VocabRegistryContract {
     }
     for (const ek of m.provides.extKinds) checkRoot(ek.id, "extKind id")
     for (const p of m.provides.extKindPrefixes) checkRoot(p, "extKind prefix")
+  }
+
+  /**
+   * Refuse an id `m` declares twice. The commit is a `Map.set` per entry, so the later declaration
+   * would replace the earlier whatever the two said, and `#validateConflicts` compares a manifest
+   * only with the plugins already registered.
+   */
+  #validateOwnDuplicates(m: PluginManifest): void {
+    const checkOnce = (kind: string, entries: readonly { id: string }[]): void => {
+      const seen = new Set<string>()
+      for (const { id } of entries) {
+        if (seen.has(id)) {
+          raise(
+            `${kind} "${id}" is declared twice by plugin "${m.name}".`,
+            "duplicate-id",
+            [m.name],
+            id,
+          )
+        }
+        seen.add(id)
+      }
+    }
+    checkOnce("Effect id", m.provides.effects)
+    checkOnce("extKind id", m.provides.extKinds)
   }
 
   #validateXPrefix(m: PluginManifest): void {

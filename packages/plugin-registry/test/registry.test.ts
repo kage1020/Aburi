@@ -187,6 +187,46 @@ describe("VocabRegistry.register (AC5 exact duplicate id / prefix, V2/V3)", () =
   })
 })
 
+describe("VocabRegistry.register (V3a one manifest declaring an id twice)", () => {
+  it("rejects an effect id declared twice with different descriptions", () => {
+    const reg = new VocabRegistry()
+    const m = effectsManifest({ name: "effects-demo", xPrefix: "demo" })
+    // Not adjacent, so a check against the previous entry alone would miss it.
+    m.provides.effects.push(
+      { id: "x-demo:read", description: "reads a row" },
+      { id: "x-demo:write", description: "writes a row" },
+      { id: "x-demo:read", description: "something else" },
+    )
+    const err = expectRegistryError(() => reg.register(m), "duplicate-id")
+    expect([err.value, err.plugins]).toEqual(["x-demo:read", ["effects-demo"]])
+    expect(err.message).toBe('Effect id "x-demo:read" is declared twice by plugin "effects-demo".')
+    expect(reg.listEffects()).toEqual([])
+    expect(reg.listPlugins()).toEqual([])
+  })
+
+  it("rejects an extKind id declared twice with different entries", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest({ name: "lang-demo" })
+    m.provides.extKinds.push(
+      { id: "fp:pipe", baseKind: "function", description: "a" },
+      { id: "fp:pipe", baseKind: "class", description: "b" },
+    )
+    const err = expectRegistryError(() => reg.register(m), "duplicate-id")
+    expect([err.value, err.plugins]).toEqual(["fp:pipe", ["lang-demo"]])
+    expect(err.message).toBe('extKind id "fp:pipe" is declared twice by plugin "lang-demo".')
+    expect(reg.listExtKinds()).toEqual([])
+    expect(reg.listPlugins()).toEqual([])
+  })
+
+  it("rejects the same entry written twice", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest({ name: "lang-demo" })
+    const entry = { id: "fp:pipe", baseKind: "function", description: "a" } as const
+    m.provides.extKinds.push(entry, { ...entry })
+    expectRegistryError(() => reg.register(m), "duplicate-id")
+  })
+})
+
 describe("VocabRegistry.register (AC6 prefix vs existing id shadow)", () => {
   it("rejects new id that falls under existing prefix (effect)", () => {
     const reg = new VocabRegistry()
@@ -463,6 +503,25 @@ describe("VocabRegistry.register (stableStringify hardening — C1)", () => {
     const m = langManifest()
     const withMap = { ...m, weird: new Map() } as unknown as typeof m
     expectRegistryError(() => reg.register(withMap), "manifest-invalid")
+  })
+})
+
+describe("VocabRegistry.register (plugin type lookup)", () => {
+  it.each([
+    "toString",
+    "constructor",
+    "__proto__",
+  ])("rejects type %s as manifest-invalid rather than reading Object.prototype", (type) => {
+    const base = langManifest({ name: "lang-demo" })
+    const m = { ...base, type } as unknown as typeof base
+    expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+  })
+
+  it("rejects a provides whose arrays are inherited rather than its own", () => {
+    const base = langManifest({ name: "lang-demo" })
+    const m = { ...base, provides: Object.create(base.provides) } as typeof base
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.plugins).toEqual(["lang-demo"])
   })
 })
 

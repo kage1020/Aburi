@@ -7,7 +7,8 @@
  * `plugins[]` carries 0, 1, or 2 names:
  *   - 0: failure occurred before the manifest could be identified (file read, JSON
  *        parse before any structure was recovered).
- *   - 1: single-plugin failure (reserved namespace, xPrefix mismatch, etc.).
+ *   - 1: single-plugin failure (reserved namespace, xPrefix mismatch, an id one manifest
+ *        declares twice, etc.).
  *   - 2: cross-plugin conflict (duplicate id, prefix overlap, etc.). The first
  *        entry is the existing owner; the second is the manifest that triggered
  *        the conflict.
@@ -26,7 +27,10 @@ export type RegistryErrorCode =
   | "xprefix-mismatch"
   /** Plugin declares vocab outside the namespaces allowed for its `type`. */
   | "namespace-type-mismatch"
-  /** Two plugins declare the same id (effect / extKind) or framework name. */
+  /**
+   * Two plugins declare the same id (effect / extKind) or framework name, or one plugin declares
+   * the same id twice. The second case names one plugin, since the manifest is its own conflict.
+   */
   | "duplicate-id"
   /** Two plugins declare the same prefix (effect / extKind). */
   | "duplicate-prefix"
@@ -45,8 +49,8 @@ export interface RegistryErrorDetail {
   code: RegistryErrorCode
   /**
    * Plugin name(s) at fault. May be empty (pre-identification failures),
-   * length 1 (single-plugin failures), or length 2 (cross-plugin conflicts:
-   * [existing-owner, new-arrival]).
+   * length 1 (single-plugin failures, a `duplicate-id` within one manifest included), or length
+   * 2 (cross-plugin conflicts: [existing-owner, new-arrival]).
    */
   plugins: readonly string[]
   /** Offending value (id, prefix, framework name) when applicable. */
