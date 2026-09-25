@@ -54,20 +54,20 @@ export function computeSymbolDelta(
 }
 
 /**
- * Line-fuzz range check (diff-algorithm.md). Loud rather than clamping so a config typo
+ * Line-fuzz range check (diff-algorithm.md). Loud rather than clamping so a caller's typo
  * (`lineFuzz: 999`) or an upstream `NaN` surfaces at the diff boundary instead of rounding
  * into the wrong deltas.
  */
 function validateLineFuzz(value: number): number {
   if (!Number.isFinite(value) || !Number.isInteger(value)) {
     throw new DiffError(
-      `config.diff.lineFuzz must be an integer in [${MIN_LINE_FUZZ}, ${MAX_LINE_FUZZ}]; got ${String(value)}.`,
+      `lineFuzz must be an integer in [${MIN_LINE_FUZZ}, ${MAX_LINE_FUZZ}]; got ${String(value)}.`,
       { code: "invalid-line-fuzz", value: String(value) },
     )
   }
   if (value < MIN_LINE_FUZZ || value > MAX_LINE_FUZZ) {
     throw new DiffError(
-      `config.diff.lineFuzz must be within [${MIN_LINE_FUZZ}, ${MAX_LINE_FUZZ}]; got ${value}.`,
+      `lineFuzz must be within [${MIN_LINE_FUZZ}, ${MAX_LINE_FUZZ}]; got ${value}.`,
       { code: "invalid-line-fuzz", value: String(value) },
     )
   }

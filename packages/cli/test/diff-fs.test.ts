@@ -479,7 +479,7 @@ describe("CL9 — argv routing for --fail-on", () => {
 })
 
 describe("classifyDiffError — DiffError to exit-code mapping (cli-spec.md)", () => {
-  it("maps user-fixable diff failures to config-error", () => {
+  it("maps diff failures the caller's input can fix to config-error", () => {
     const codes = [
       "schema-mismatch",
       "invalid-line-fuzz",
