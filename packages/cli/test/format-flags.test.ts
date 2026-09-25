@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { resolve } from "node:path"
+import { resolve, sep } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runCli } from "../src"
 import { MemStream, writeTypeScriptWorkspace } from "./fixtures"
@@ -31,8 +31,10 @@ async function scan(
     env: {},
     cwd: scratch,
   })
-  const wrote = existsSync(out) ? await readdir(out, { recursive: true }) : null
-  return { code, stderr: stderr.text(), wrote: wrote === null ? null : wrote.sort() }
+  if (!existsSync(out)) return { code, stderr: stderr.text(), wrote: null }
+  // `readdir` joins nested entries with the platform separator.
+  const wrote = (await readdir(out, { recursive: true })).map((entry) => entry.replaceAll(sep, "/"))
+  return { code, stderr: stderr.text(), wrote: wrote.sort() }
 }
 
 const IR = ["aburi.ir.json"]
