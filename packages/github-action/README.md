@@ -100,7 +100,8 @@ uses the alias.
 `pnpm dlx` puts `@aburi/cli` in the pnpm store, and the CLI resolves plugin refs from its
 own location — so `languages: ["lang-typescript"]` fails there with `Cannot find package
 '@aburi/lang-typescript'`, whatever your project has installed. A ref written as a relative
-path (`./plugins/x.mjs`) resolves against your workspace root and works fine.
+path (`./plugins/x.mjs`) resolves against your workspace root, and an absolute path loads that
+file, so both work fine.
 
 `workspace` runs the `@aburi/cli` your project installed, resolved from `working-directory`,
 with its plugins beside it — the install the [quick start](../../README.md#quick-start)

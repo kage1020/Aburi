@@ -57,10 +57,14 @@ export interface LoadPluginsOptions {
  * - npm package (`@aburi/lang-typescript`) — resolved verbatim.
  * - relative path (`./plugins/x.mjs`) — resolved from `pluginRefRoot`, which is the
  *   workspace root unless the caller says otherwise.
- * - absolute path (`/opt/plugins/x.mjs`, `C:/plugins/x.mjs`, `C:\\plugins\\x.mjs`) — converted to
- *   a file URL as written. On Windows a path with no drive (`/opt/x.mjs`, `\\plugins\\x.mjs`)
- *   counts as absolute to Node but would take its drive from `pluginRefRoot`, so it is
- *   refused rather than resolved.
+ * - absolute path (on POSIX `/opt/plugins/x.mjs`; on Windows `C:/plugins/x.mjs`,
+ *   `C:\plugins\x.mjs` or a UNC share `\\server\share\x.mjs`) — normalized, then converted to a
+ *   file URL. Unlike a relative ref, where it points does not depend on `pluginRefRoot`.
+ * - `file:` URL — contains `/`, so it is used verbatim, as a package subpath would be.
+ *
+ * A ref whose target would depend on Windows' per-drive state, or that names a Windows drive
+ * where there are none, is a config error (`windowsDriveRefusal`). Every ref is resolved before
+ * the first import, so a refused ref stops the run before any plugin code has run.
  *
  * Once imported, the loader accepts the following export shapes, first hit wins:
  *   1. `default` export whose value has a `manifest` field
@@ -73,25 +77,26 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
 
   const loaded: LoadedPlugins = { languages: [], frameworks: [], effects: [], registry }
   const importFn = options.importModule ?? defaultImport
-  for (const field of Object.keys(PLUGIN_FIELDS) as PluginField[]) {
-    for (const ref of options.config[field] ?? []) {
-      const specifier = resolveSpecifier(ref, options.pluginRefRoot ?? options.workspaceRoot)
-      const module = await tryImport(importFn, specifier, ref)
-      const plugin = pickPlugin(module, ref)
-      registry.register(plugin.manifest)
-      routePlugin(plugin, field, loaded, ref)
-    }
+  const pluginRefRoot = options.pluginRefRoot ?? options.workspaceRoot
+  const refs = (Object.keys(PLUGIN_FIELDS) as PluginField[]).flatMap((field) =>
+    (options.config[field] ?? []).map((ref) => ({
+      field,
+      ref,
+      specifier: resolveSpecifier(ref, pluginRefRoot),
+    })),
+  )
+  for (const { field, ref, specifier } of refs) {
+    const module = await tryImport(importFn, specifier, ref)
+    const plugin = pickPlugin(module, ref)
+    registry.register(plugin.manifest)
+    routePlugin(plugin, field, loaded, ref)
   }
   return loaded
 }
 
 function resolveSpecifier(ref: string, pluginRefRoot: string): string {
-  if (process.platform === "win32" && isDriveRelative(ref)) {
-    throw new CliError(
-      `Plugin "${ref}" names no drive, so it would take the drive of the workspace root. Write it with its drive letter (for example "C:${ref.replaceAll("\\", "/")}").`,
-      "config-error",
-    )
-  }
+  const refusal = windowsDriveRefusal(ref, process.platform, pluginRefRoot)
+  if (refusal !== null) throw new CliError(refusal, "config-error")
   if (isAbsolute(ref) || ref.startsWith("./") || ref.startsWith("../")) {
     return pathToFileURL(resolve(pluginRefRoot, ref)).href
   }
@@ -100,12 +105,36 @@ function resolveSpecifier(ref: string, pluginRefRoot: string): string {
 }
 
 /**
- * A Windows path rooted at a separator with no drive or UNC share in front (`/opt/x.mjs`,
- * `\\plugins\\x.mjs`). Node calls it absolute, and `resolve` fills in the drive of the base.
+ * Why `ref` is refused as a Windows path, or `null` when it is not. The ref is read with
+ * Windows path rules on every platform, so `platform` decides only which forms are refused:
+ *
+ * - On Windows, a path rooted with no drive (`/opt/x.mjs`, `\x.mjs`) counts as absolute but
+ *   takes the drive of `pluginRefRoot`, and a drive with no root (`C:x.mjs`) resolves against
+ *   whatever directory is current on that drive. Either names a different file depending on
+ *   where Aburi runs.
+ * - Anywhere else, a ref naming a drive (`C:/x.mjs`, `C:\x.mjs`) cannot be loaded at all, and
+ *   would otherwise reach the ESM resolver as a URL scheme or an `@aburi/` package name.
  */
-export function isDriveRelative(ref: string): boolean {
+export function windowsDriveRefusal(
+  ref: string,
+  platform: NodeJS.Platform,
+  pluginRefRoot: string,
+): string | null {
   const { root } = win32.parse(ref)
-  return root === "/" || root === "\\"
+  const drive = /^[A-Za-z]:/.exec(root)?.[0]
+  const rest = ref.slice(root.length).replaceAll("\\", "/").replace(/^\/+/, "")
+  if (platform !== "win32") {
+    if (drive === undefined) return null
+    return `Plugin "${ref}" names the Windows drive ${drive}, which this platform does not have. Write a path that exists here, or one relative to the workspace root starting with "./".`
+  }
+  if (root === "/" || root === "\\") {
+    const base = win32.parse(win32.resolve(pluginRefRoot)).root.replaceAll("\\", "/")
+    return `Plugin "${ref}" names no drive, so it would take the drive of the workspace root. Write the drive in: "${base}${rest}".`
+  }
+  if (drive !== undefined && root === drive) {
+    return `Plugin "${ref}" names drive ${drive} but does not start at its root, so it would resolve against whatever directory is current on that drive. Start it at the root: "${drive}/${rest}".`
+  }
+  return null
 }
 
 async function tryImport(

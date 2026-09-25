@@ -13,7 +13,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CliError, loadPlugins } from "../src"
-import { isDriveRelative } from "../src/plugin-loader"
+import { windowsDriveRefusal } from "../src/plugin-loader"
 import { STUB_PLUGIN } from "./stub-language"
 
 const langManifest: LangManifest = {
@@ -198,6 +198,8 @@ describe("loadPlugins — module resolution and bucketing", () => {
     return seen
   }
 
+  // On POSIX `absolutePath` is `/tmp/…`, rooted with no drive, which Windows refuses: this case
+  // also fails if the Windows-only refusal ever stops checking the platform.
   it("resolves an absolute ref to its own location, not under the plugin ref root", async () => {
     expect(await specifierFor(absolutePath)).toBe(pathToFileURL(absolutePath).href)
   })
@@ -213,39 +215,88 @@ describe("loadPlugins — module resolution and bucketing", () => {
     },
   )
 
-  it.runIf(process.platform === "win32").each(["/opt/plugins/x.mjs", "\\plugins\\x.mjs"])(
-    "refuses the Windows ref %s, which names no drive",
+  it.runIf(process.platform === "win32").each(["//server/share/x.mjs", "\\\\server\\share\\x.mjs"])(
+    "resolves the UNC ref %s to a file URL on the share",
     async (ref) => {
-      let imported = false
-      const error = await loadPlugins({
-        config: { languages: [ref] },
-        workspaceRoot: tmpdir(),
-        importModule: async () => {
-          imported = true
-          return { plugin: fakeLangPlugin }
-        },
-      }).catch((e: unknown) => e)
-      expect(error).toBeInstanceOf(CliError)
-      expect((error as CliError).code).toBe("config-error")
-      expect((error as CliError).message).toMatch(/names no drive/)
-      expect(imported).toBe(false)
+      expect(await specifierFor(ref)).toBe("file://server/share/x.mjs")
     },
   )
 
-  it.each([
-    ["/opt/plugins/x.mjs", true],
-    ["\\plugins\\x.mjs", true],
-    ["C:/plugins/x.mjs", false],
-    ["C:\\plugins\\x.mjs", false],
-    ["//server/share/x.mjs", false],
-    ["\\\\server\\share\\x.mjs", false],
-    ["./plugins/x.mjs", false],
-    ["@aburi/lang-typescript", false],
-  ])("reads %s as drive-relative on Windows: %s", (ref, expected) => {
-    expect(isDriveRelative(ref)).toBe(expected)
+  it("resolves a backslash relative ref as a package name, since only ./ and ../ mark a path", async () => {
+    expect(await specifierFor(".\\plugins\\x.mjs")).toBe("@aburi/.\\plugins\\x.mjs")
   })
 
-  it("keeps explicit file URLs unchanged", async () => {
+  it("refuses a Windows-drive ref before importing any plugin, even one listed earlier", async () => {
+    // A ref each platform refuses: driveless on Windows, a drive letter anywhere else.
+    const refused = process.platform === "win32" ? "/opt/plugins/x.mjs" : "C:/plugins/x.mjs"
+    const imported: string[] = []
+    const error = await loadPlugins({
+      config: { languages: ["./plugins/ok.mjs"], effects: [refused] },
+      workspaceRoot: tmpdir(),
+      importModule: async (specifier) => {
+        imported.push(specifier)
+        return { plugin: fakeLangPlugin }
+      },
+    }).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CliError)
+    expect((error as CliError).code).toBe("config-error")
+    expect((error as CliError).message).toContain(`Plugin "${refused}"`)
+    expect(imported).toEqual([])
+  })
+
+  describe("windowsDriveRefusal", () => {
+    const root = "D:\\ws"
+    it.each([
+      [
+        "/opt/plugins/x.mjs",
+        'take the drive of the workspace root. Write the drive in: "D:/opt/plugins/x.mjs"',
+      ],
+      ["\\plugins\\x.mjs", 'Write the drive in: "D:/plugins/x.mjs"'],
+      ["\\\\x.mjs", 'Write the drive in: "D:/x.mjs"'],
+      ["C:plugins/x.mjs", 'current on that drive. Start it at the root: "C:/plugins/x.mjs"'],
+      ["C:plugins\\x.mjs", 'Start it at the root: "C:/plugins/x.mjs"'],
+    ])("refuses %s on Windows", (ref, message) => {
+      expect(windowsDriveRefusal(ref, "win32", root)).toContain(message)
+    })
+
+    it("suggests the UNC share of a workspace on one", () => {
+      expect(windowsDriveRefusal("/x.mjs", "win32", "\\\\srv\\share\\ws")).toContain(
+        '"//srv/share/x.mjs"',
+      )
+    })
+
+    it.each([
+      "C:/plugins/x.mjs",
+      "C:\\plugins\\x.mjs",
+      "//server/share/x.mjs",
+      "\\\\server\\share\\x.mjs",
+      "./plugins/x.mjs",
+      ".\\plugins\\x.mjs",
+      "@aburi/lang-typescript",
+      "file:///C:/plugins/x.mjs",
+    ])("accepts %s on Windows", (ref) => {
+      expect(windowsDriveRefusal(ref, "win32", root)).toBeNull()
+    })
+
+    it.each([
+      "C:/plugins/x.mjs",
+      "C:\\plugins\\x.mjs",
+      "C:plugins/x.mjs",
+    ])("refuses %s on POSIX, which has no drives", (ref) => {
+      expect(windowsDriveRefusal(ref, "linux", "/ws")).toContain("names the Windows drive C:")
+    })
+
+    it.each([
+      "/opt/plugins/x.mjs",
+      "./plugins/x.mjs",
+      "lang-typescript",
+      "file:///opt/x.mjs",
+    ])("accepts %s on POSIX", (ref) => {
+      expect(windowsDriveRefusal(ref, "linux", "/ws")).toBeNull()
+    })
+  })
+
+  it("uses a file: URL ref verbatim, as rule 2 does for any ref containing a slash", async () => {
     const ref = pathToFileURL(absolutePath).href
     let seen = ""
     await loadPlugins({
@@ -265,9 +316,10 @@ describe("loadPlugins — module resolution and bucketing", () => {
     try {
       const pluginPath = resolve(scratch, "local #100%.mjs")
       await writeFile(pluginPath, STUB_PLUGIN, "utf8")
-      // Use Node's ESM loader directly: Vitest's module runner treats URL fragments differently.
+      // Use Node's ESM loader directly: Vitest's module runner does not decode the file URL, and
+      // reports `Cannot find module 'file:///…/local%20%23100%25.mjs'` for a file Node loads.
       const loaderUrl = new URL("../src/plugin-loader.ts", import.meta.url).href
-      const { stdout } = await promisify(execFile)(
+      const { stdout, stderr } = await promisify(execFile)(
         process.execPath,
         [
           "--import",
@@ -287,7 +339,8 @@ describe("loadPlugins — module resolution and bucketing", () => {
       )
       // Anything tsx or Node prints besides the result is noise, not a loader failure.
       const line = stdout.split("\n").find((l) => l.startsWith(RESULT))
-      expect(line && JSON.parse(line.slice(RESULT.length))).toEqual(["lang-stub"])
+      expect(line, `no result line.\nstdout:\n${stdout}\nstderr:\n${stderr}`).toBeDefined()
+      expect(JSON.parse((line as string).slice(RESULT.length))).toEqual(["lang-stub"])
     } finally {
       await rm(scratch, { recursive: true, force: true })
     }

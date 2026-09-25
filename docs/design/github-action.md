@@ -80,7 +80,8 @@ Cannot find package '@aburi/lang-typescript' imported from
 ```
 
 A ref written as a **relative path** (`./plugins/x.mjs`) resolves against the workspace root
-instead (`resolveSpecifier`), so it loads here perfectly well. The limit is exactly: plugins named
+instead (`resolveSpecifier`), and an **absolute path** names its file directly, so either loads
+here perfectly well. The limit is exactly: plugins named
 by package.
 
 ### 3.2 `workspace`
