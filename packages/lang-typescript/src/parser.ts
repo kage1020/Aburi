@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import type { ParseError, ParseResult, SourceFile } from "@aburi/types"
 import { Language, type Node, Parser, type Tree } from "web-tree-sitter"
 import { walkDescendants } from "./ast-helpers"
+import { reparseImportTypes } from "./import-type-reparse"
 import { extractImports } from "./imports"
 
 const nodeRequire = createRequire(import.meta.url)
@@ -155,10 +156,11 @@ async function loadLanguage(wasmPath: string): Promise<Language> {
  * web-tree-sitter manages stays flat across long scans. The tree outlives this function and
  * is the caller's to free, through the plugin's `releaseTree`.
  *
- * Downstream post-parse work (error collection, import extraction) is wrapped in its own
- * try/catch that calls `tree.delete()` on failure. That is the one path where the tree is
- * still ours: the caller only receives the handle if we return successfully, so an exception
- * on the way out would strand it in the WASM heap with nobody able to reach it.
+ * Until this function returns, every tree it holds is its own to release: the caller only
+ * receives the handle if we return successfully, so an exception on the way out would strand it
+ * in the WASM heap with nobody able to reach it. `repairedOrFirst` releases the tree it replaces,
+ * and the post-parse work (error collection, import extraction) is wrapped in its own try/catch
+ * that calls `tree.delete()` on failure.
  *
  * When the parser returns null (a genuinely unrecoverable case — typically an OOM),
  * `tree` is null on the result too and `errors[]` carries a `recoverable: false` entry.
@@ -173,7 +175,11 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
   const parser = new Parser()
   try {
     parser.setLanguage(language)
-    const tree = parser.parse(file.content)
+    const { tree, errors: repairErrors } = repairedOrFirst(
+      parser,
+      parser.parse(file.content),
+      file.content,
+    )
     if (tree === null) {
       return {
         tree: null,
@@ -193,7 +199,7 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
       // An import site the reader refused reports through the same channel a syntax error
       // does: both leave a usable tree and both are the author's to fix.
       const { edges, errors: importErrors } = extractImports(tree, file.content)
-      return { tree, errors: [...syntaxErrors, ...importErrors], imports: edges }
+      return { tree, errors: [...repairErrors, ...syntaxErrors, ...importErrors], imports: edges }
     } catch (postParseError) {
       // Release the tree before propagating; otherwise the WASM handle leaks because the
       // caller never receives it.
@@ -203,6 +209,30 @@ export async function parseTypescriptFile(file: SourceFile): Promise<ParseResult
   } finally {
     parser.delete()
   }
+}
+
+/**
+ * `first`, or the tree `reparseImportTypes` gives in its place; `first` is released when it is
+ * replaced. The reparse only improves a tree that is already usable, so when the attempt throws
+ * `first` is kept and the failure reported beside its errors rather than costing the file.
+ */
+function repairedOrFirst(
+  parser: Parser,
+  first: Tree | null,
+  source: string,
+): { tree: Tree | null; errors: ParseError[] } {
+  if (first === null || !first.rootNode.hasError) return { tree: first, errors: [] }
+  let repaired: Tree | null
+  try {
+    repaired = reparseImportTypes(parser, first, source, (t) => collectParseErrors(t).length)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    const message = `import() type reparse failed, keeping the first parse: ${reason}`
+    return { tree: first, errors: [{ message, line: 1, column: 1, recoverable: true }] }
+  }
+  if (repaired === null) return { tree: first, errors: [] }
+  first.delete()
+  return { tree: repaired, errors: [] }
 }
 
 /**
