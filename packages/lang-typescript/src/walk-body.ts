@@ -82,15 +82,13 @@ function visitOwnClassBody(
 ): void {
   for (const member of body.namedChildren) {
     if (member === null) continue
-    const walked = memberFunctionWalkedElsewhere(classNode, member)
-    const memberBody = walked?.childForFieldName("body")
-    // No body, no walk on the member's side either (an abstract method, an overload), so the
-    // class keeps its parameters too.
-    if (walked === null || !memberBody) {
+    const memberBody = memberBodySkippedHere(classNode, member)
+    if (memberBody === null) {
       visitNode(member, rules, calls)
       continue
     }
-    const parameters = walked.childForFieldName("parameters")
+    // The parameters sit beside the body in the same function, which walks them (LP20d).
+    const parameters = memberBody.parent?.childForFieldName("parameters")
     visitExcluding(member, parameters ? [memberBody, parameters] : [memberBody], rules, calls)
     if (parameters) visitParameterDecorators(parameters, rules, calls)
   }
@@ -143,17 +141,14 @@ function isAncestorOf(node: Node, descendant: Node): boolean {
   return false
 }
 
-/**
- * The function whose body and parameters the member's own Symbol walks, so this class does not,
- * or null when the class still owns all of the member.
- */
-function memberFunctionWalkedElsewhere(classNode: Node, member: Node): Node | null {
+/** The member's body when this class does not walk it, or null when the class still owns it. */
+function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
   if (memberSymbolSegment(classNode, member) === null) return null
   // The constructor is recorded on `#C.constructor` too, and stays here anyway: `new C()` runs
   // it and resolves to this Symbol (LP20b).
   if (isConstructorMember(member)) return null
-  // A field's function is the one it holds; a method is its own.
-  return functionValuedField(member) ?? member
+  // A field's body belongs to the function it holds; a method's, to the method itself.
+  return (functionValuedField(member) ?? member).childForFieldName("body")
 }
 
 function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
