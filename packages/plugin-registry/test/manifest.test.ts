@@ -72,31 +72,6 @@ describe("parsePluginManifest", () => {
     })
     expect(() => parsePluginManifest(text, "inline")).toThrowError(RegistryError)
   })
-
-  it("throws on schema violation (the same extKind entry twice)", () => {
-    const withExtKinds = (count: number) =>
-      JSON.stringify({
-        $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-        name: "lang-foo",
-        version: "1.0.0",
-        type: "lang",
-        engines: { aburi: "^1.0.0" },
-        provides: {
-          effects: [],
-          effectPrefixes: [],
-          extKinds: Array.from({ length: count }, () => ({
-            id: "fp:pipe",
-            baseKind: "function",
-            description: "a",
-          })),
-          extKindPrefixes: [],
-          derivedByPrefixes: [],
-          frameworks: [],
-        },
-      })
-    expect(parsePluginManifest(withExtKinds(1), "inline").provides.extKinds).toHaveLength(1)
-    expect(() => parsePluginManifest(withExtKinds(2), "inline")).toThrowError(RegistryError)
-  })
 })
 
 describe("loadPluginManifest", () => {

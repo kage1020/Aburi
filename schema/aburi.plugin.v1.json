@@ -150,8 +150,7 @@
         },
         "extKinds": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ExtKindVocab" },
-          "uniqueItems": true
+          "items": { "$ref": "#/$defs/ExtKindVocab" }
         },
         "extKindPrefixes": {
           "type": "array",

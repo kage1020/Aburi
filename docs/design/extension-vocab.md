@@ -171,6 +171,7 @@ The same applies to `fp:` / `oop:` / `meta:`: each sub-namespace is owned by exa
 |---|---|
 | Two plugins declare the same `effects[].id` | **startup error** |
 | Two plugins declare the same `extKinds[].id` | **startup error** |
+| One plugin declares the same `effects[].id` or `extKinds[].id` twice | **startup error** |
 | Two plugins declare the same `effectPrefixes[]` | **startup error** |
 | Two plugins declare the same `extKindPrefixes[]` | **startup error** |
 | Two plugins declare the same `frameworks[]` name | **startup error** |
@@ -244,7 +245,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | V1 | Load a single plugin's manifest | All vocab registered in the registry |
 | V2 | Two plugins declare the same effect id | startup error |
 | V3 | Two plugins declare the same extKind | startup error |
-| V3a | One plugin declares the same effect id or extKind twice, whatever the two descriptions say | startup error |
+| V3a | One plugin declares the same effect id or extKind id twice, whatever the two entries say | startup error |
 | V4 | Declaring a central reservation (`core:foo`) | startup error |
 | V5 | `type: effects` declares `framework:foo:bar` | startup error |
 | V6 | Plugin extraction returns an undeclared effect id (strict mode) | extraction error |
