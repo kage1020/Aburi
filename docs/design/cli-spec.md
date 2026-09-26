@@ -143,8 +143,8 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 | `--format <json\|md\|both>` | Output format (default: `both`) |
 | `--no-md` | Drops the Markdown output. Alone, equivalent to `--format json`. With `--no-json`, or with any `--format` that would have written Markdown (`md`, `both`), exit 2 |
 | `--no-json` | Drops the IR JSON output. Alone, equivalent to `--format md`. With `--no-md`, or with any `--format` that would have written JSON (`json`, `both`), exit 2 |
-| `--strict` / `--no-strict` | Override `config.strict` |
-| `--discover` | `--no-strict` + record undeclared vocab to `out/aburi-vocab-discovered.json` |
+| `--strict` / `--no-strict` | Override `config.strict` ([`config.md`](./config.md) §10). Strict stops at the first undeclared value with exit 3 and writes nothing; off, the scan keeps every such value and writes `aburi-vocab-discovered.json` into the output directory ([`extension-vocab.md`](./extension-vocab.md) §11.5.1), an empty list included, so a record from an earlier run does not outlive the values it named |
+| `--discover` | The same as `--no-strict`, named for the workflow it serves. With `--strict`, exit 2 |
 | `--quiet` | Suppress progress output; stdout carries the final summary only |
 | `--compact` | Compact the JSON to a single line |
 | `--concurrency <n>` | Parser concurrency (default: CPU - 1) |
@@ -1029,6 +1029,8 @@ Each command's `--help` follows the same three-section structure: "Usage / Optio
 | CL6 | `aburi scan` (no config) | Runs via autodetect, exit 0 |
 | CL7 | `aburi scan --discover` | Records undeclared vocab, exit 0 |
 | CL8 | `aburi scan` strict + undeclared vocab | exit 3 |
+| CL8a | `aburi scan --strict --discover` | exit 2 |
+| CL8b | `aburi diff` with `strict: false` + undeclared vocab | Listed in each scan's incident report; no `aburi-vocab-discovered.json`, since both scans share one output directory |
 | CL9 | `aburi diff main..HEAD --fail-on changed` with changes | exit 3 |
 | CL10 | `aburi diff` with missing arguments | exit 2 |
 | CL11 | `aburi explain <ambiguous>` | exit 2, candidate list on stdout |

@@ -60,3 +60,8 @@ export {
 export { readIR } from "./ir-io"
 export { type LoadedPlugins, type LoadPluginsOptions, loadPlugins } from "./plugin-loader"
 export { type RunCliOptions, runCli } from "./run"
+export {
+  type DiscoveredVocabItem,
+  summarizeUndeclaredVocab,
+  VOCAB_DISCOVERED_FILENAME,
+} from "./vocab-discovered"

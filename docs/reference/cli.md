@@ -78,6 +78,7 @@ aburi init --with-suggestions --output config/aburi.jsonc
 ```
 aburi scan [--output-dir <dir>] [--format json|md|both] [--no-md|--no-json]
            [--ignore <glob>]... [--respect-gitignore | --no-respect-gitignore]
+           [--strict | --no-strict | --discover]
            [--compact] [--no-timestamp] [--config <path>]
 ```
 
@@ -90,6 +91,8 @@ Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
 | `--format <fmt>` | `json`, `md`, or `both` (default). Without `--format`, `--no-md` and `--no-json` each drop one output. With it, a `--no-*` that would drop an output `--format` includes exits `2`, and so does dropping both. |
 | `--ignore <glob>` | An extra exclusion for this run. Repeatable. |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override the config for this run. |
+| `--strict` / `--no-strict` | Override `strict` for this run. Strict stops at a value a plugin emits without its manifest declaring it; off, the scan keeps it and records it in `aburi-vocab-discovered.json`. |
+| `--discover` | The same as `--no-strict`. With `--strict`, exits `2`. |
 | `--compact` | JSON without indentation. |
 | `--no-timestamp` | Omit `generatedAt`. Implicit when `CI` is set. |
 | `--config <path>` | Use a different config file. |
@@ -112,6 +115,9 @@ unparseable file tells you something about your source, not about the scan.
   extension present. The output is still written.
 - **Coverage fell below `minParsedFileRatio`**, if you set one.
 - **A plugin threw** on a file, as opposed to declining it.
+- **A plugin emitted a value its manifest does not declare**, in a strict run
+  (the default). No output is written. Declare the value, or run with
+  `--discover` to keep it and see the full list.
 - **A filename cannot be written down.** The analysis has no representation for
   a path containing a backslash, and filenames differing in Unicode composition
   alone collapse to one. The scan names both kinds on stderr. Rename them, or

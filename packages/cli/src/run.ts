@@ -10,6 +10,7 @@ import { EXIT, type ExitCode } from "./exit-codes"
 import { FailOnParseError } from "./fail-on"
 import { readGeneratorInfo } from "./generator-info"
 import { describeUnresolvedDeclarations } from "./unresolved-report"
+import { VOCAB_DISCOVERED_FILENAME } from "./vocab-discovered"
 
 export interface RunCliOptions {
   argv: readonly string[]
@@ -147,6 +148,13 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
     .option("--config <path>", "config file path")
     .option("--lsp", "enable optional LSP enrichment (overrides config lsp.enabled=true)")
     .option("--no-lsp", "disable LSP enrichment (overrides config lsp.enabled=false)")
+    // A pair for the reason `--respect-gitignore` is one: absent until typed.
+    .option("--strict", "stop at a value no plugin manifest declares (overrides config strict)")
+    .option("--no-strict", "keep and record such values instead (overrides config strict)")
+    .option(
+      "--discover",
+      `same as --no-strict: record undeclared values in ${VOCAB_DISCOVERED_FILENAME}`,
+    )
     .action(
       (cmdOptions: {
         outputDir?: string
@@ -159,6 +167,8 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
         timestamp?: boolean
         config?: string
         lsp?: boolean
+        strict?: boolean
+        discover?: boolean
       }) =>
         runCommand(async () => {
           const report = await runScan({
@@ -174,6 +184,7 @@ export async function runCli(options: RunCliOptions): Promise<ExitCode> {
               compact: cmdOptions.compact,
               suppressTimestamp: cmdOptions.timestamp === false || env.ci ? true : undefined,
               lsp: cmdOptions.lsp,
+              strict: deriveStrict(cmdOptions),
               logLevel: env.logLevel ?? undefined,
               configPath: resolveConfigPath(cmdOptions.config, env),
             }),
@@ -445,6 +456,15 @@ function parseMaxBytes(value: string): number {
 
 function collect(value: string, accumulator: string[]): string[] {
   return [...accumulator, value]
+}
+
+/** `--strict` / `--no-strict` / `--discover` to `ScanOptions.strict`; absent when none was typed. */
+function deriveStrict(cmdOptions: { strict?: boolean; discover?: boolean }): boolean | undefined {
+  if (cmdOptions.discover !== true) return cmdOptions.strict
+  if (cmdOptions.strict === true) {
+    throw new CliError("--strict and --discover contradict each other: drop one", "input-error")
+  }
+  return false
 }
 
 /**

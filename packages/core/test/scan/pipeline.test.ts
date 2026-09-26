@@ -81,7 +81,9 @@ async function runPipelineWithStubs(overrides: {
     frameworks: overrides.frameworks ?? [],
     effects: overrides.effects ?? [],
     registry: noopRegistry,
-    config: {},
+    // These fixtures are about dispatch, and `noopRegistry` owns nothing, so a strict run
+    // would stop at the first extKind. Vocabulary ownership is `vocab.test.ts`'s.
+    config: { strict: false },
     dropCFilter: buildDropCFilter(),
     component: null,
     treeReleaseFailures: [],

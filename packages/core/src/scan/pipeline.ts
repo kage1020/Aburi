@@ -43,6 +43,7 @@ import {
   type ParseTimeoutEvent,
   startParseDeadline,
 } from "./timeout"
+import { VocabCheck } from "./vocab"
 
 /**
  * What the pipeline knows about a file whatever became of it: which file, and what its
@@ -169,6 +170,12 @@ export interface FilePipelineInput {
    * plugin broken in both places is exactly the run that needs both facts.
    */
   treeReleaseFailures: TreeReleaseFailure[]
+  /**
+   * Where every effect id and extKind a plugin emits for this file is checked (`vocab.ts`).
+   * Absent, the check is built from `registry` and `config.strict` and whatever a non-strict
+   * run records is discarded; `scan()` passes its own so the record reaches `ScanResult`.
+   */
+  vocab?: VocabCheck
 }
 
 /**
@@ -222,6 +229,7 @@ export interface TreeReleaseFailure {
 export async function runFilePipeline(input: FilePipelineInput): Promise<FilePipelineResult> {
   const { file, language, frameworks, effects, registry, config, dropCFilter, component, log } =
     input
+  const vocab = input.vocab ?? new VocabCheck(registry, config.strict !== false, [])
 
   const deadline = startParseDeadline(config.parseTimeoutMs)
   // An abandoned file contributes nothing but its errors, for the reason `ParseTimeoutFile`
@@ -282,11 +290,21 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
     for (const raw of candidates) {
       if (deadline.expired()) return abandonedFile()
 
-      const { candidate, confidence } = mergeFrameworkClassification(
+      const { candidate, confidence, extKindBy } = mergeFrameworkClassification(
         normalizeCandidateStrings(raw),
         frameworks,
         frameworkCtx,
+        language.manifest.name,
       )
+      if (candidate.extKind !== null && extKindBy !== null) {
+        vocab.extKind({
+          value: candidate.extKind,
+          plugin: extKindBy,
+          file: file.path,
+          line: null,
+          symbol: candidate.id,
+        })
+      }
       const dropReason = decideDropReason(candidate, language, extractCtx)
 
       if (dropReason !== null) {
@@ -317,6 +335,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
         imports,
         dropCFilter,
         timeoutEvents,
+        vocab,
       }
       if (config.classifyTimeoutMs !== undefined)
         classifyCallsInput.classifyTimeoutMs = config.classifyTimeoutMs
@@ -417,6 +436,8 @@ interface FrameworkMergeResult {
    * omitted `confidence` (or no classifier matched at all) collapses to "high" here so
    * downstream code only ever sees a single encoding. */
   confidence: Confidence
+  /** Manifest name of the plugin that set `candidate.extKind`, or `null` when none is set. */
+  extKindBy: string | null
 }
 
 /**
@@ -439,7 +460,9 @@ function mergeFrameworkClassification(
   candidate: SymbolCandidate<OpaqueAstNode>,
   frameworks: readonly FrameworkPlugin[],
   ctx: FrameworkClassifyContext,
+  languagePlugin: string,
 ): FrameworkMergeResult {
+  const extractedBy = candidate.extKind === null ? null : languagePlugin
   for (const framework of frameworks) {
     const result = framework.classifySymbol(candidate, ctx) as SymbolClassification | null
     if (result === null) continue
@@ -455,9 +478,13 @@ function mergeFrameworkClassification(
         derivedBy: mergeDerivedBy(candidate.derivedBy, result.derivedBy),
       },
       confidence: result.confidence ?? "high",
+      extKindBy:
+        result.extKind === undefined || result.extKind === null
+          ? extractedBy
+          : framework.manifest.name,
     }
   }
-  return { candidate, confidence: "high" }
+  return { candidate, confidence: "high", extKindBy: extractedBy }
 }
 
 function mergeDerivedBy(current: readonly string[], addition: string): string[] {
@@ -493,6 +520,7 @@ interface ClassifyCallsInput {
   imports: readonly ImportEdge[]
   dropCFilter: DropCFilter
   timeoutEvents: ClassifyTimeoutEvent[]
+  vocab: VocabCheck
   classifyTimeoutMs?: number
 }
 
@@ -695,6 +723,13 @@ function classifyCalls(input: ClassifyCallsInput): {
         timeoutOptions,
       )
       if (result === null) continue
+      input.vocab.effect({
+        value: result.effectId,
+        plugin: effect.manifest.name,
+        file: input.file.path,
+        line: call.line,
+        symbol: input.candidate.id,
+      })
       classifiedEffects.push({
         id: result.effectId,
         target: call.target,

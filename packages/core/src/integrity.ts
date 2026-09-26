@@ -44,6 +44,11 @@ const CORE_EFFECT_VOCAB: ReadonlySet<string> = new Set([
   "process.signal",
 ])
 
+/** Whether `id` is one of the core effect ids, which no plugin owns and any may emit. */
+export function isCoreEffectId(id: string): boolean {
+  return CORE_EFFECT_VOCAB.has(id)
+}
+
 /** Symbol.kind core enumeration (ir-schema.md). */
 const CORE_KIND_ENUM: ReadonlySet<string> = new Set([
   "function",

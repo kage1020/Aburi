@@ -19,7 +19,8 @@ defined in [`docs/design/cli-spec.md`](../../docs/design/cli-spec.md).
   emit IR JSON + workspace / component Markdown. `--format json|md|both`,
   `--ignore <glob>` (repeatable),
   `--respect-gitignore` / `--no-respect-gitignore`, `--compact`,
-  `--no-timestamp`.
+  `--no-timestamp`, `--strict` / `--no-strict` / `--discover` (undeclared plugin
+  vocabulary: exit 3, or keep it and write `aburi-vocab-discovered.json`).
 - **`aburi diff`** — two dispatch paths:
   - `<base>..<head>` — `git rev-parse --verify` on both refs, shallow-repo
     guard, `git worktree add --detach` to materialise base, scan both sides,

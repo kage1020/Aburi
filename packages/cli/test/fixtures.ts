@@ -115,6 +115,8 @@ export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
     workspaceRoot: "/repo",
     coverageFault: null,
     unrepresentableFiles: [],
+    undeclaredVocab: [],
+    vocabDiscoveredPath: null,
     unresolvedDeclarations: [],
     treeReleaseFailures: [],
     fellBackToSingleComponent: false,
