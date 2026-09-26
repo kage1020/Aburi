@@ -95,14 +95,14 @@ Only the **last segment** goes into the api fingerprint:
 
 ```
 lastSegment(name):
-  if name contains "::"  → return part after last "::"
-  if name contains "."   → return part after last "."
-  else                    → return name as-is
+  tail ← part after the last "::" (the whole name if there is none)
+  return part of tail after its last "." (the whole tail if there is none)
 ```
 
 Examples:
 - `InvoiceService.createInvoice` → `createInvoice`
 - `Class::staticMethod` → `staticMethod`
+- `C::Inner.g` → `g`
 - `A.B.C.method` → `method`
 - `topLevelFunc` → `topLevelFunc`
 

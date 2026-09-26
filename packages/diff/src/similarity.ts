@@ -191,12 +191,12 @@ export function jaccardTokens(a: string, b: string): number {
   return jaccard(tokenizeName(a), tokenizeName(b))
 }
 
-/** A qualified name split at its last `.` or its `::`; a top-level name has an empty owner. */
+/** A qualified name split at its last separator, `.` or `::`; a top-level name has an empty owner. */
 function splitQualifiedName(qname: string): { owner: string; member: string } {
-  const staticIdx = qname.indexOf("::")
-  if (staticIdx >= 0)
-    return { owner: qname.slice(0, staticIdx), member: qname.slice(staticIdx + 2) }
+  const lastStatic = qname.lastIndexOf("::")
   const lastDot = qname.lastIndexOf(".")
+  if (lastStatic > lastDot)
+    return { owner: qname.slice(0, lastStatic), member: qname.slice(lastStatic + 2) }
   if (lastDot >= 0) return { owner: qname.slice(0, lastDot), member: qname.slice(lastDot + 1) }
   return { owner: "", member: qname }
 }
