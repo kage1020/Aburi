@@ -162,6 +162,49 @@ describe("MP5 / MP6 — confidence badge visibility", () => {
   })
 })
 
+describe("MP6a / MP6b — a Symbol's confidence on every heading that names it", () => {
+  const symbolAt = (confidence: "high" | "medium" | "low", i = 0) =>
+    makeSymbol({ id: `ts:src/a.ts#Foo${i}`, name: `Foo${i}`, confidence })
+
+  /** Every heading and names-only row a view writes for the Symbol. */
+  function titles(confidence: "high" | "medium" | "low"): string[] {
+    const s = symbolAt(confidence)
+    const page = projectComponent({
+      component: component({ id: "core", name: "core" }),
+      symbols: [s],
+      dependencies: [],
+    })
+    const added = Array.from({ length: 20 }, (_, i) => symbolAt(confidence, i))
+    const diff = makeDiff({
+      summary: { ...emptySummary(), added: added.length },
+      symbols: added.map((symbol) => ({ status: "added" as const, symbol })),
+    })
+    const full = projectDiff(diff)
+    const short = projectDiff(diff, { maxBytes: Buffer.byteLength(full, "utf8") - 1 })
+    const dropped = projectSymbolExplain({ ...s, dropped: true, dropReason: "DTO" })
+    const lines = [page, full, short, projectSymbolExplain(s), dropped].flatMap((md) =>
+      md.split("\n"),
+    )
+    const named = lines.filter((line) => /^(#+ |- )`Foo0`/.test(line))
+    // Component page, diff entry, names-only row, explain, dropped explain.
+    expect(named).toHaveLength(5)
+    expect(named.filter((line) => line.startsWith("- "))).toHaveLength(1)
+    return named
+  }
+
+  it("MP6a: medium and low carry the badge after the kind", () => {
+    for (const confidence of ["medium", "low"] as const) {
+      for (const line of titles(confidence)) {
+        expect(line).toContain(`\`Foo0\` *(function)* ⚠ ${confidence}`)
+      }
+    }
+  })
+
+  it("MP6b: high carries none", () => {
+    for (const line of titles("high")) expect(line).not.toContain("⚠")
+  })
+})
+
 // -----------------------------------------------------------------------------
 // MP8: aburi explain on dropped Symbol
 // -----------------------------------------------------------------------------
@@ -238,6 +281,36 @@ describe("MP10 — syntax-only changes end up in the Syntax-only fold-out", () =
     const md = projectDiff(diff)
     expect(md).toContain("## 🎨 Syntax-only changes")
     expect(md).not.toContain("## ⚠ API changes")
+  })
+})
+
+describe("MP10a — a confidence-only change gets its own section", () => {
+  it("routes delta.confidenceChanged with neither API nor logic to Confidence changes", () => {
+    const before = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", confidence: "high" })
+    const after = { ...before, confidence: "low" as const }
+    const md = projectDiff(
+      makeDiff({
+        summary: { ...emptySummary(), changed: 1 },
+        symbols: [
+          {
+            status: "changed",
+            before,
+            after,
+            delta: {
+              apiChanged: false,
+              logicChanged: false,
+              syntaxChanged: true,
+              componentChanged: false,
+              visibilityChanged: false,
+              confidenceChanged: true,
+            },
+          },
+        ],
+      }),
+    )
+    expect(md).toContain("## 🎚 Confidence changes")
+    expect(md).toContain("- confidence: `high` → `low`")
+    expect(md).not.toContain("## 🎨 Syntax-only changes")
   })
 })
 

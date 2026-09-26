@@ -193,11 +193,18 @@ describe("empty-body note", () => {
     expect(md).toContain("API fingerprint changed")
   })
 
-  it("adds no note when the delta rendered something", () => {
+  it("adds no note when a field-level row explains the fingerprint", () => {
+    const md = render(changed({ apiChanged: true, logicChanged: false, visibilityChanged: true }))
+
+    expect(md).toContain("- visibility: changed")
+    expect(md).not.toContain("no field-level detail")
+  })
+
+  it("keeps the note beside a component row, which no fingerprint reads", () => {
     const md = render(changed({ componentChanged: true }))
 
     expect(md).toContain("- component: changed")
-    expect(md).not.toContain("no field-level detail")
+    expect(md).toContain("logic fingerprint changed; no field-level detail was recorded")
   })
 
   it("prefers API when both the API and logic flags are set", () => {

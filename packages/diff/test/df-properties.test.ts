@@ -417,3 +417,49 @@ describe("DF18 — syntax-only change", () => {
     expect(c.delta.logicChanged).toBe(false)
   })
 })
+
+describe("DF18a–c — confidence-only change", () => {
+  it("DF18a: reports a confidence move with equal fingerprints as changed, on that axis alone", () => {
+    const b = makeSymbol({ id: "ts:src/a.ts#Foo", name: "Foo", confidence: "high" })
+    const h = makeSymbol({ ...b, confidence: "medium" })
+    const result = diff(makeIR({ symbols: [b] }), makeIR({ symbols: [h] }))
+    expect(result.summary.changed).toBe(1)
+    const c = findChange(result.symbols, (x) => x.status === "changed")
+    if (c.status !== "changed") throw new Error("unreachable")
+    expect(c.delta).toMatchObject({
+      apiChanged: false,
+      logicChanged: false,
+      syntaxChanged: false,
+      confidenceChanged: true,
+    })
+  })
+
+  it("DF18b: the same on a Symbol that also moved file is moved+changed", () => {
+    const b = makeSymbol({ id: "ts:src/old.ts#Foo", name: "Foo", confidence: "high" })
+    const h = makeSymbol({
+      id: "ts:src/new.ts#Foo",
+      name: "Foo",
+      source: { ...b.source, file: "src/new.ts" },
+      confidence: "medium",
+    })
+    const result = diff(makeIR({ symbols: [b] }), makeIR({ symbols: [h] }), {
+      gitRenames: new Map([["src/old.ts", "src/new.ts"]]),
+    })
+    expect(result.summary.movedChanged).toBe(1)
+  })
+
+  it("DF18c: the same on a pair dropped on both sides is unchanged, as DF13", () => {
+    const b = makeSymbol({
+      id: "ts:src/a.ts#Dto",
+      name: "Dto",
+      kind: "class",
+      dropped: true,
+      dropReason: "DTO",
+      fingerprint: zeroFp(),
+      confidence: "high",
+    })
+    const h = { ...b, confidence: "low" as const }
+    const result = diff(makeIR({ symbols: [b] }), makeIR({ symbols: [h] }))
+    expect(result.summary.unchanged).toBe(1)
+  })
+})

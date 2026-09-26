@@ -24,6 +24,7 @@ import {
   propagatedFromSuffix,
   renderDocument,
   requireDropReason,
+  symbolTitle,
 } from "./format"
 
 /** Options for {@link projectDiff}. */
@@ -124,6 +125,12 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     "## 💧 Dropped changes",
     renderDroppedToggled(buckets.droppedToggled),
     buckets.droppedToggled.length,
+  )
+  appendSection(
+    sections,
+    "## 🎚 Confidence changes",
+    renderChangedList(buckets.confidenceOnly),
+    indexConfidence(buckets.confidenceOnly),
   )
   appendFolded(
     sections,
@@ -342,6 +349,7 @@ interface Buckets {
   movedChanged: SymbolMovedChanged[]
   moved: SymbolMoved[]
   droppedToggled: SymbolDroppedToggled[]
+  confidenceOnly: (SymbolChanged | SymbolMovedChanged)[]
   syntaxOnly: (SymbolChanged | SymbolMovedChanged)[]
   unknown: SymbolUnknown[]
 }
@@ -349,7 +357,9 @@ interface Buckets {
 /**
  * Section routing (markdown-projection.md). The delta flags overlap, so `routeChanged`
  * applies a priority: `apiChanged` → API changes, else `logicChanged` → Logic changes, else
- * `syntaxChanged` → Syntax-only. The other buckets are routed by the `status` tag alone.
+ * `confidenceChanged` → Confidence changes, else `syntaxChanged` → Syntax-only. Confidence
+ * outranks syntax because the Syntax-only section is one folded line per entry, where the
+ * before and after would not show. The other buckets are routed by the `status` tag alone.
  */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
@@ -360,6 +370,7 @@ function partition(changes: readonly SymbolChange[]): Buckets {
     movedChanged: [],
     moved: [],
     droppedToggled: [],
+    confidenceOnly: [],
     syntaxOnly: [],
     unknown: [],
   }
@@ -407,6 +418,7 @@ function routeChanged(
 ): void {
   if (delta.apiChanged) out.apiChanged.push(change)
   else if (delta.logicChanged) out.logicOnly.push(change)
+  else if (delta.confidenceChanged === true) out.confidenceOnly.push(change)
   else if (delta.syntaxChanged) out.syntaxOnly.push(change)
 }
 
@@ -482,36 +494,44 @@ function renderChangedList(items: readonly (SymbolChanged | SymbolMovedChanged)[
   const rows: string[] = []
   for (const item of sortByAfterId(items)) {
     const sym = item.after
-    rows.push(`### ${inlineCode(sym.name)} *(${sym.kind})*`)
+    rows.push(`### ${symbolTitle(sym)}`)
     rows.push(`**File**: ${inlineCode(`${sym.source.file}:${sym.source.startLine}`)}`)
     rows.push("")
-    rows.push(...renderDeltaBody(item.delta))
+    rows.push(...renderDeltaBody(item))
     rows.push("")
   }
   return rows
 }
 
-function renderDeltaBody(delta: SymbolDelta): string[] {
+function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
+  const { delta } = change
   const rows: string[] = []
   appendSignatureDelta(rows, delta.signature ?? null)
   appendDecoratorDelta(rows, delta.decorators)
   appendRuleDelta(rows, delta.rules)
   appendEffectDelta(rows, delta.effects)
   appendCallDelta(rows, delta.calls)
+  const explained = rows.length > 0 || delta.visibilityChanged
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
-  appendUnexplainedChangeNote(delta, rows)
+  if (delta.confidenceChanged === true) {
+    rows.push(
+      `- confidence: ${inlineCode(change.before.confidence)} → ${inlineCode(change.after.confidence)}`,
+    )
+  }
+  if (!explained) appendUnexplainedChangeNote(delta, rows)
   return rows
 }
 
 /**
- * Never leave a heading with an empty body: it would read as "no reason was found". A note
- * rather than a thrown invariant, because the fingerprints cover inputs the structured delta
- * does not model, so a real document can set a flag with every `ArrayDelta` empty. All three
- * flags are covered because `renderMovedChanged` reaches here with syntax-only moves too.
+ * Never let a fingerprint flag go unexplained: a heading with no reason under it reads as "no
+ * reason was found". A note rather than a thrown invariant, because the fingerprints cover
+ * inputs the structured delta does not model, so a real document can set a flag with every
+ * `ArrayDelta` empty. All three flags are covered because `renderMovedChanged` reaches here
+ * with syntax-only moves too. The component and confidence rows do not count as an
+ * explanation, since neither is a fingerprint input; the visibility row does, as an API one.
  */
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
-  if (rows.length > 0) return
   const which = delta.apiChanged
     ? "API"
     : delta.logicChanged
@@ -805,7 +825,7 @@ function renderUnknown(items: readonly SymbolUnknown[]): string[] {
 /** A `###` entry for one whole Symbol: heading, file line, `extraRows`, then the L2 block. */
 function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
   return [
-    `### ${inlineCode(symbol.name)} *(${symbol.kind})*`,
+    `### ${symbolTitle(symbol)}`,
     `**File**: ${inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)}`,
     ...extraRows,
     ...renderSymbolBlock(symbol).slice(1),
@@ -843,12 +863,12 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   if (items.length === 0) return []
   const rows: string[] = []
   for (const item of sortByAfterId(items)) {
-    rows.push(`### ${inlineCode(item.after.name)} *(${item.after.kind})*`)
+    rows.push(`### ${symbolTitle(item.after)}`)
     rows.push(
       `**Moved**: ${inlineCode(item.before.source.file)} → ${inlineCode(item.after.source.file)} (${inlineCode(item.rationale)})`,
     )
     rows.push("**Delta**:")
-    rows.push(...renderDeltaBody(item.delta))
+    rows.push(...renderDeltaBody(item))
     rows.push("")
   }
   return rows
@@ -857,7 +877,7 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 /** One names-only list item, `- ` then `name` *(kind)* — `file:line`, with `suffix` after it when given. */
 function indexRow(symbol: IRSymbol, suffix = ""): string {
   const location = inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)
-  return `- ${inlineCode(symbol.name)} *(${symbol.kind})* — ${location}${suffix}`
+  return `- ${symbolTitle(symbol)} — ${location}${suffix}`
 }
 
 function indexSymbols(symbols: readonly IRSymbol[]): string[] {
@@ -866,6 +886,15 @@ function indexSymbols(symbols: readonly IRSymbol[]): string[] {
 
 function indexChanged(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
   return sortByAfterId(items).map((item) => indexRow(item.after))
+}
+
+function indexConfidence(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
+  return sortByAfterId(items).map((item) =>
+    indexRow(
+      item.after,
+      ` (${inlineCode(item.before.confidence)} → ${inlineCode(item.after.confidence)})`,
+    ),
+  )
 }
 
 function indexUnknown(items: readonly SymbolUnknown[]): string[] {
@@ -1120,6 +1149,7 @@ function deltaAxisSummary(delta: SymbolDelta): string {
   if (delta.syntaxChanged) axes.push("delta.syntaxChanged")
   if (delta.componentChanged) axes.push("delta.componentChanged")
   if (delta.visibilityChanged) axes.push("delta.visibilityChanged")
+  if (delta.confidenceChanged === true) axes.push("delta.confidenceChanged")
   return axes.length === 0 ? "no delta axes" : axes.join(", ")
 }
 

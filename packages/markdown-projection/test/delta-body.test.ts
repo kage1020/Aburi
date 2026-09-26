@@ -279,7 +279,25 @@ describe("renderDeltaBody — rules/effects/calls added/removed", () => {
   })
 })
 
-describe("renderDeltaBody — component / visibility", () => {
+describe("renderDeltaBody — component / visibility / confidence", () => {
+  it("writes the confidence row after the component and visibility rows", () => {
+    const entry = wrap({
+      ...baseDelta(),
+      componentChanged: true,
+      visibilityChanged: true,
+      confidenceChanged: true,
+    })
+    const md = projectDiff(
+      makeDiff({
+        summary: { ...emptySummary(), changed: 1 },
+        symbols: [{ ...entry, after: { ...entry.after, confidence: "low" } }],
+      }),
+    )
+    expect(md).toContain(
+      "- component: changed\n- visibility: changed\n- confidence: `high` → `low`\n",
+    )
+  })
+
   it("emits component changed", () => {
     const md = renderWith({ ...baseDelta(), componentChanged: true })
     expect(md).toContain("- component: changed")

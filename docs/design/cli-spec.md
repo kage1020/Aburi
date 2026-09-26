@@ -662,7 +662,7 @@ aburi diff main..HEAD --fail-on changed,removed
 | Kind | Values |
 |---|---|
 | Status granularity | `added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled` / `unknown` |
-| Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` |
+| Delta granularity | `api-changed` / `logic-changed` / `syntax-changed` / `confidence-changed` |
 | Direction granularity | `dropped-toggled:to-dropped` / `dropped-toggled:to-kept` |
 | Count threshold | `<value>:><N>` (e.g. `dropped-toggled:>10` fires when the count exceeds 10) |
 
@@ -680,7 +680,7 @@ In cases where a drop-rule change legitimately fires `dropped-toggled` in bulk (
 #### Evaluation Rules
 
 - Status granularity (`changed`, etc.): fires if even one Symbol has the given status
-- Delta granularity (`api-changed`, etc.): fires if even one Symbol has status `changed` or `moved+changed` with the corresponding `delta.<axis>Changed: true`
+- Delta granularity (`api-changed`, etc.): fires if even one Symbol has status `changed` or `moved+changed` with the corresponding `delta.<axis>Changed: true`. A diff written before `delta.confidenceChanged` existed carries no key, and `confidence-changed` counts nothing in it
 
 Examples:
 
@@ -694,6 +694,8 @@ aburi diff main..HEAD --fail-on api-changed,removed,dropped-toggled
 ```
 
 This allows fine-grained CI gates, making operational policies such as "only API changes require approval, logic changes are warnings" possible today.
+
+A Symbol whose extraction confidence moved is `changed` even when no fingerprint did ([`diff-algorithm.md`](./diff-algorithm.md) §4), so `--fail-on changed` fires on it. A plugin can decide confidence from a file-level signal (the Express plugin reads whether the file imports `express`), so one edit can move every Symbol in a file at once. A gate that should not fire on that writes the axes it cares about (`--fail-on api-changed,logic-changed`, which a confidence-only change does not trip) and, where a mass shift should still be noticed, a threshold on the confidence axis (`confidence-changed:>20`).
 
 ## 7. `aburi explain`
 

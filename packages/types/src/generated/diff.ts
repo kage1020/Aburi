@@ -98,6 +98,7 @@ logicChanged: boolean
 syntaxChanged: boolean
 componentChanged: boolean
 visibilityChanged: boolean
+confidenceChanged?: boolean
 rules?: ArrayDelta
 effects?: ArrayDelta
 calls?: ArrayDelta

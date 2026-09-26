@@ -60,6 +60,7 @@ function delta(overrides: Partial<SymbolDelta> = {}): SymbolDelta {
     syntaxChanged: overrides.syntaxChanged ?? false,
     componentChanged: false,
     visibilityChanged: false,
+    confidenceChanged: overrides.confidenceChanged ?? false,
     rules: { added: [], removed: [], modified: [] },
     effects: { added: [], removed: [], modified: [] },
     calls: { added: [], removed: [], modified: [] },
@@ -75,6 +76,17 @@ function changed(name: string, flags: Partial<SymbolDelta>): SymbolChanged {
     before,
     after: { ...before, fingerprint: fp(`${name}-v2`) },
     delta: delta(flags),
+  }
+}
+
+/** The machine grew less sure of the Symbol and nothing it fingerprints moved. */
+function lessSure(name: string): SymbolChanged {
+  const before = symbolOf(name)
+  return {
+    status: "changed",
+    before,
+    after: { ...before, confidence: "medium" },
+    delta: delta({ confidenceChanged: true }),
   }
 }
 
@@ -105,6 +117,7 @@ function crowdedDiff(addedCount: number): ReturnType<typeof makeDiff> {
     changed("ApiOne", { apiChanged: true }),
     changed("LogicOne", { logicChanged: true }),
     changed("SyntaxOne", { syntaxChanged: true }),
+    lessSure("ConfidenceOne"),
     moved("MovedOne"),
     droppedToggled("ToggledOne"),
   ]
@@ -112,7 +125,7 @@ function crowdedDiff(addedCount: number): ReturnType<typeof makeDiff> {
     summary: {
       ...emptySummary(),
       added: addedCount,
-      changed: 3,
+      changed: 4,
       moved: 1,
       droppedToggled: 1,
     },
@@ -170,6 +183,7 @@ describe("projectDiff — maxBytes", () => {
       "## 🔧 Logic changes",
       "## 🔀 Moved",
       "## 💧 Dropped changes",
+      "## 🎚 Confidence changes",
       "## 🎨 Syntax-only changes",
     ])
     expect(noteOf(md)).toBe(
@@ -200,7 +214,7 @@ describe("projectDiff — maxBytes", () => {
   it("names what it dropped, in the order the document would have shown them", () => {
     const md = projectDiff(crowdedDiff(400), { maxBytes: 1 })
     expect(noteOf(md)).toContain(
-      ": ⚠ API changes, 🔧 Logic changes, ➕ Added, 🔀 Moved, 💧 Dropped changes, 🎨 Syntax-only changes.",
+      ": ⚠ API changes, 🔧 Logic changes, ➕ Added, 🔀 Moved, 💧 Dropped changes, 🎚 Confidence changes, 🎨 Syntax-only changes.",
     )
   })
 
@@ -221,7 +235,7 @@ describe("projectDiff — maxBytes", () => {
     const md = projectDiff(crowdedDiff(400), { maxBytes: 1 })
     expect(md).toContain("# Aburi diff: main..HEAD")
     expect(md).toContain("**Summary**: +400 added")
-    expect(md).toContain("**6 sections were omitted**")
+    expect(md).toContain("**7 sections were omitted**")
     expect(md).not.toContain("## ⚠ API changes")
   })
 
@@ -402,9 +416,24 @@ describe("projectDiff — maxBytes degrades a section before dropping it", () =>
     )
   })
 
+  it("shortens the confidence section to names that keep the badge and both values", () => {
+    const diff = makeDiff({
+      summary: { ...emptySummary(), changed: 60 },
+      symbols: Array.from({ length: 60 }, (_, i) =>
+        lessSure(`Unsure${String(i).padStart(4, "0")}`),
+      ),
+    })
+    const full = projectDiff(diff)
+    const md = projectDiff(diff, { maxBytes: bytes(full) - 1 })
+    expect(noteOf(md)).toContain("**1 section lists names only**")
+    expect(md).toContain(
+      "- `Unsure0000` *(function)* ⚠ medium — `src/Unsure0000.ts:1` (`high` → `medium`)",
+    )
+  })
+
   it('says only "omitted" once every section is gone', () => {
     const md = projectDiff(crowdedDiff(0), { maxBytes: 1 })
-    expect(md).toContain("**5 sections were omitted**")
+    expect(md).toContain("**6 sections were omitted**")
     expect(md).not.toContain("names only")
   })
 })

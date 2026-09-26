@@ -234,6 +234,7 @@
         "syntaxChanged":      { "type": "boolean" },
         "componentChanged":   { "type": "boolean" },
         "visibilityChanged":  { "type": "boolean" },
+        "confidenceChanged":  { "type": "boolean" },
         "rules":      { "$ref": "#/$defs/ArrayDelta" },
         "effects":    { "$ref": "#/$defs/ArrayDelta" },
         "calls":      { "$ref": "#/$defs/ArrayDelta" },

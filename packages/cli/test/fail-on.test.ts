@@ -179,6 +179,56 @@ describe("evaluateClause — delta axis", () => {
   })
 })
 
+describe("evaluateClause — confidence-changed", () => {
+  const delta = {
+    apiChanged: false,
+    logicChanged: false,
+    syntaxChanged: false,
+    componentChanged: false,
+    visibilityChanged: false,
+  }
+  const diff = makeDiff({
+    symbols: [
+      {
+        status: "changed",
+        before: { id: "ts:a.ts#Foo" } as never,
+        after: { id: "ts:a.ts#Foo" } as never,
+        delta: { ...delta, confidenceChanged: true },
+      },
+      {
+        status: "moved+changed",
+        before: { id: "ts:a.ts#Bar" } as never,
+        after: { id: "ts:b.ts#Bar" } as never,
+        rationale: "git-rename",
+        delta: { ...delta, confidenceChanged: true },
+      },
+      {
+        status: "changed",
+        before: { id: "ts:a.ts#Baz" } as never,
+        after: { id: "ts:a.ts#Baz" } as never,
+        delta: { ...delta, syntaxChanged: true },
+      },
+    ],
+  })
+
+  it("counts changed and moved+changed entries whose confidence moved, not older ones without the key", () => {
+    const clause = parseFailOn("confidence-changed")[0]
+    if (clause === undefined) throw new Error("expected clause")
+    expect(evaluateClause(clause, diff).observed).toBe(2)
+  })
+
+  it("leaves the api and logic gates quiet for a confidence-only change", () => {
+    expect(evaluateFailOn(parseFailOn("api-changed,logic-changed"), diff).firstTriggered).toBeNull()
+  })
+
+  it("takes a threshold", () => {
+    expect(evaluateFailOn(parseFailOn("confidence-changed:>2"), diff).firstTriggered).toBeNull()
+    expect(
+      evaluateFailOn(parseFailOn("confidence-changed:>1"), diff).firstTriggered?.observed,
+    ).toBe(2)
+  })
+})
+
 describe("evaluateClause — dropped-toggled subtype", () => {
   it("counts direction-specific entries", () => {
     const diff = makeDiff({

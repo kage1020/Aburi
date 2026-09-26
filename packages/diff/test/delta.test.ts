@@ -31,6 +31,60 @@ describe("a Symbol whose component moved under it", () => {
 })
 
 // -----------------------------------------------------------------------------
+// Confidence — the same code classified less surely is a change a reviewer sees
+// -----------------------------------------------------------------------------
+
+describe("a Symbol whose confidence moved under it", () => {
+  const sure = makeSymbol({ id: "ts:src/a.ts#C", name: "C", kind: "class", confidence: "high" })
+  const unsure = makeSymbol({ ...sure, confidence: "medium" })
+
+  it("is changed although no fingerprint moved", () => {
+    // Unlike `component`, which a config re-roots under unchanged code, confidence is the
+    // plugins' reading of the code itself, and `unchanged` is never reported.
+    expect(classifyStatus(sure, unsure)).toBe("changed")
+    expect(classifyStatus(unsure, sure)).toBe("changed")
+  })
+
+  it("is moved+changed when the Symbol also moved file", () => {
+    const moved = makeSymbol({
+      ...unsure,
+      id: "ts:src/b.ts#C",
+      source: { ...unsure.source, file: "src/b.ts" },
+    })
+    expect(classifyStatus(sure, moved)).toBe("moved+changed")
+  })
+
+  it("leaves a dropped pair unchanged", () => {
+    const dropped = { dropped: true, dropReason: "pure DTO", fingerprint: zeroFp() }
+    expect(classifyStatus({ ...sure, ...dropped }, { ...unsure, ...dropped })).toBe("unchanged")
+  })
+
+  it("records the flag on the delta, false included", () => {
+    expect(computeSymbolDelta(sure, unsure).confidenceChanged).toBe(true)
+    expect(computeSymbolDelta(sure, sure).confidenceChanged).toBe(false)
+  })
+
+  it("reports the pair through buildDiff with only the confidence axis set", () => {
+    const diff = buildDiff({
+      baseIR: makeIR({ symbols: [sure] }),
+      headIR: makeIR({ symbols: [unsure] }),
+      base: IR_REF,
+      head: IR_REF,
+    })
+    const [change] = diff.symbols
+    expect(diff.summary.changed).toBe(1)
+    expect(change?.status).toBe("changed")
+    if (change?.status !== "changed") return
+    expect(change.delta).toMatchObject({
+      apiChanged: false,
+      logicChanged: false,
+      syntaxChanged: false,
+      confidenceChanged: true,
+    })
+  })
+})
+
+// -----------------------------------------------------------------------------
 // C2 — dropped-toggled coverage (rationale + both directions + summary)
 // -----------------------------------------------------------------------------
 

@@ -32,6 +32,8 @@ export interface DeltaOptions {
  * The full per-Symbol delta between two paired Symbols (diff-algorithm.md). The axis booleans
  * come from fingerprint comparison; the array deltas from identity-preserving pairing, with line
  * fuzz deciding only how far an edited element may sit from the one it replaced.
+ * `confidenceChanged` is always written, `false` included, so a reader can tell it from a diff
+ * that predates the field.
  */
 export function computeSymbolDelta(
   base: IRSymbol,
@@ -45,6 +47,7 @@ export function computeSymbolDelta(
     syntaxChanged: base.fingerprint.syntax !== head.fingerprint.syntax,
     componentChanged: (base.component ?? null) !== (head.component ?? null),
     visibilityChanged: base.visibility !== head.visibility,
+    confidenceChanged: base.confidence !== head.confidence,
     rules: diffRules(base.rules, head.rules, fuzz),
     effects: diffEffects(base.effects, head.effects),
     calls: diffCalls(base.calls, head.calls, fuzz),

@@ -138,6 +138,30 @@ describe("computeSlices — Node selection (SV1–SV5)", () => {
     expect(slices).toEqual([{ id: `slice:${A}`, members: [A] }])
   })
 
+  it("SV5a: a Symbol changed only in confidence is a Node and clusters with its callee", () => {
+    const A = "ts:src/a.ts#A"
+    const B = "ts:src/b.ts#B"
+    const unsure: SymbolChange = {
+      status: "changed",
+      before: makeSymbol({ id: A, name: A }),
+      after: makeSymbol({ id: A, name: A, confidence: "medium" }),
+      delta: {
+        apiChanged: false,
+        logicChanged: false,
+        syntaxChanged: false,
+        componentChanged: false,
+        visibilityChanged: false,
+        confidenceChanged: true,
+      },
+    }
+    const slices = computeSlices({
+      changes: [unsure, changed(B)],
+      baseCallEdges: [],
+      headCallEdges: [edge(A, B)],
+    })
+    expect(slices).toEqual([{ id: `slice:${A}`, members: [A, B] }])
+  })
+
   it("SV5: propagated-only changed callers (status: changed) are Nodes and cluster with their downstream callee", () => {
     // The Boundary controller's body is byte-identical between base
     // and head; the *only* semantic change is that effect propagation has

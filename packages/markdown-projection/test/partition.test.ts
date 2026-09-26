@@ -6,8 +6,9 @@ import { emptySummary, makeDiff } from "./fixtures"
 
 /**
  * markdown-projection.md — `partition` routes overlapping delta flags by priority:
- *   apiChanged > logicChanged > syntaxChanged
- * A single `changed` entry lands in exactly one of API changes / Logic changes / Syntax-only.
+ *   apiChanged > logicChanged > confidenceChanged > syntaxChanged
+ * A single `changed` entry lands in exactly one of API changes / Logic changes / Confidence
+ * changes / Syntax-only.
  */
 
 function makeDelta(overrides: Partial<SymbolDelta> = {}): SymbolDelta {
@@ -17,6 +18,10 @@ function makeDelta(overrides: Partial<SymbolDelta> = {}): SymbolDelta {
     syntaxChanged: overrides.syntaxChanged ?? false,
     componentChanged: overrides.componentChanged ?? false,
     visibilityChanged: overrides.visibilityChanged ?? false,
+    // Left out unless given, which is what a document written before the key existed carries.
+    ...(overrides.confidenceChanged === undefined
+      ? {}
+      : { confidenceChanged: overrides.confidenceChanged }),
     rules: { added: [], removed: [], modified: [] },
     effects: { added: [], removed: [], modified: [] },
     calls: { added: [], removed: [], modified: [] },
@@ -38,6 +43,7 @@ function makeChangedEntry(delta: SymbolDelta): SymbolChanged {
 const SECTIONS = {
   api: "## ⚠ API changes",
   logic: "## 🔧 Logic changes",
+  confidence: "## 🎚 Confidence changes",
   syntax: "## 🎨 Syntax-only changes",
 } as const
 
@@ -47,6 +53,17 @@ describe("partition — delta-priority routing (C4)", () => {
     ["api+syntax", { apiChanged: true, syntaxChanged: true }, "api"],
     ["logic+syntax", { logicChanged: true, syntaxChanged: true }, "logic"],
     ["api+logic+syntax", { apiChanged: true, logicChanged: true, syntaxChanged: true }, "api"],
+    ["api+confidence", { apiChanged: true, confidenceChanged: true }, "api"],
+    ["logic+confidence", { logicChanged: true, confidenceChanged: true }, "logic"],
+    ["confidence+syntax", { confidenceChanged: true, syntaxChanged: true }, "confidence"],
+    ["confidence alone", { confidenceChanged: true }, "confidence"],
+    [
+      "syntax, confidence written false",
+      { syntaxChanged: true, confidenceChanged: false },
+      "syntax",
+    ],
+    // An older document has no key at all; only an explicit `true` may route on it.
+    ["syntax, confidence key absent", { syntaxChanged: true }, "syntax"],
     // Every axis false should be `unchanged` upstream; if it slips through, no section may fire.
     ["no axis", {}, null],
   ])("routes %s to exactly one section", (_, flags, expected) => {

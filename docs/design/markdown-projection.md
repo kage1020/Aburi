@@ -138,7 +138,7 @@ depends on which column the value landed in is one schema change away from being
 | `medium` | `⚠ medium` |
 | `low` | `⚠ low` |
 
-Low-confidence symbols/effects explicitly signal "the machine is not confident" to reviewers.
+Low-confidence symbols/effects explicitly signal "the machine is not confident" to reviewers. An effect carries the badge at the end of its row (§5.7). A Symbol carries it after its name and kind on every heading that names it — the component page (§5.2), every `diff.md` entry that renders the Symbol under its own heading (§6.2), the `explain` title (§7), dropped or not — and on the names-only row that stands in for such a heading when the size cap shortens a section (§6.4), so no Symbol a view gives its own heading or row loses the badge. Rows that list a Symbol among other facts (Moved, Dropped changes, the Slice View members) do not carry it.
 
 ### 3.6 dropped display
 
@@ -303,6 +303,9 @@ Grouped by file; within a file, ascending by source.startLine:
 <sub>api=`9ee77913af43` logic=`7ecf8c1cebe7` syntax=`a3f2e1d0c9b8`</sub>
 ```
 
+A Symbol whose `confidence` is not `high` carries the badge (§3.5) at the end of its heading, as
+`#### \`XController\` *(class)* ⚠ medium`.
+
 A blank line follows each list section that something comes after. Without it, the next label
 or the `<sub>` line is a lazy continuation of the last bullet's paragraph and renders inside that
 bullet, except after a fenced rule row, which a paragraph cannot continue (MP14).
@@ -436,6 +439,7 @@ The output of `aburi diff`. Its primary use case is pasting into PR comments.
 ## 🧱 Component changes
 ## 🔗 Dependency changes
 ## 💧 Dropped changes
+## 🎚 Confidence changes
 ## 🎨 Syntax-only changes
 ```
 
@@ -445,7 +449,8 @@ projection is a size cap that drops the wrong thing.
 
 Three sections — **Moved**, **Dropped changes** and **Syntax-only changes** — are folded in
 `<details>`. They are not contiguous: Component changes and Dependency changes sit between Moved
-and Dropped changes, unfolded. Moved + Changed is not folded either, because it carries semantic
+and Dropped changes, unfolded, and Confidence changes between Dropped changes and Syntax-only
+changes. Moved + Changed is not folded either, because it carries semantic
 change worth reading.
 
 The `· ?N unknown` suffix on the Summary line appears only when `summary.unknown` is non-zero, so the line a reviewer skims on every PR does not carry a permanent `?0`. It qualifies the counts beside it: added and removed are both smaller than the truth by that much.
@@ -468,6 +473,8 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 ```
 
 `added` and `removed` print the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4). `modified` prints `qualifier.name`: the arguments are dropped because they may be the change, and the receiver is kept because it may be. Both fall back to `qualifier.name` when `raw` is absent. A modified row shows the head side only, so a receiver lost (`@nest.Post` → `@Post`) reads `@Post`, the same as an argument edit.
+
+A change whose `delta.confidenceChanged` is also true adds a row such as ``- confidence: `high` → `medium` ``, base side first, in whichever section the entry lands. This holds for every section that renders a delta body, Moved + Changed included. A fingerprint flag with no field-level row to explain it gets `- <axis> fingerprint changed; no field-level detail was recorded`; the component and confidence rows do not count as that explanation, since no fingerprint reads either, so a syntax change moved into Confidence changes still says it happened.
 
 #### 🔧 Logic changes
 
@@ -611,9 +618,20 @@ The Unknown group is not split by level the way the added and removed groups are
 </details>
 ```
 
+#### 🎚 Confidence changes
+
+`delta.confidenceChanged: true` and `apiChanged: false` and `logicChanged: false`. The fingerprints do not read `confidence`, so the same code classified less surely has no other section to land in ([`diff-algorithm.md`](./diff-algorithm.md) §4). It ranks above Syntax-only, which also takes a change with `syntaxChanged` set, because that section is one folded line per entry and the before and after would not show. Unfolded, with the same entry shape as API changes:
+
+```md
+### `XController` *(class)* ⚠ medium
+**File**: `apps/billing/src/x.controller.ts:12`
+
+- confidence: `high` → `medium`
+```
+
 #### 🎨 Syntax-only changes (folded)
 
-`delta.syntaxChanged: true` and `apiChanged: false` and `logicChanged: false`:
+`delta.syntaxChanged: true` and `apiChanged: false` and `logicChanged: false` and `confidenceChanged` not true:
 
 ```md
 <details>
@@ -651,14 +669,15 @@ an open fence swallowing the rest of the report. Sections give way in ascending 
 importance, which is the §6.1 order read from the bottom: Syntax-only first, API changes last.
 
 A section can give way in two steps. The sections whose entries are whole Symbols — API changes,
-Logic changes, Added, Removed, Unknown, Moved + Changed — have a **names-only form**: the same
+Logic changes, Added, Removed, Unknown, Moved + Changed, Confidence changes — have a **names-only form**: the same
 heading, a line saying the entries are short, and one row per Symbol,
 
 ```md
 - `handleInvoice` *(function)* — `src/billing/invoice.ts:42`
 ```
 
-(Unknown adds the side and the skip reason, Moved + Changed the file it moved from). The row
+(the confidence badge follows the kind as on the heading; Unknown adds the side and the skip reason,
+Moved + Changed the file it moved from, Confidence changes the two values, `` (`high` → `medium`) ``). The row
 above is 62 bytes, so a few hundred of them take 18–25 KB, where the full entries of one large
 section can take forty. The other sections are already lists, or are views (Slice View, Component
 and Dependency changes) with nothing shorter to say, and have only their full form. A section is
@@ -781,6 +800,8 @@ async
 - syntax: `a3f2e1d0c9b8`
 ````
 
+The title carries the confidence badge when the Symbol's `confidence` is not `high` (§3.5), as every Symbol heading does.
+
 The default output of `aburi explain` is stdout; `--output <path>` writes to a file.
 
 When a dropped symbol is explained:
@@ -843,10 +864,13 @@ All Markdown projection output is **English, with fixed wording**.
 | MP4 | Dropped symbols present in the workspace | Dropped section shown folded |
 | MP5 | Effect with confidence=medium | Gets the `⚠ medium` badge |
 | MP6 | Effect with confidence=high | No badge |
+| MP6a | Symbol with confidence=medium or low, on the component page, in a `diff.md` entry or its names-only row, and in `explain` (kept or dropped) | Every heading and names-only row naming it carries the badge after the kind |
+| MP6b | Symbol with confidence=high | No badge on any heading or names-only row |
 | MP7 | mermaid nodes > 100 | Falls back to the text bullet list |
 | MP8 | `aburi explain <dropped-symbol>` | Drop reason shown, no detail sections |
 | MP9 | Symbol id containing slashes/colons | Written under a sanitized file name |
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
+| MP10a | diff where `delta.confidenceChanged` is true and neither `apiChanged` nor `logicChanged` is | Classified into the Confidence changes section, with a `- confidence: <base> → <head>` row |
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |

@@ -16,7 +16,7 @@ Each one lands in a single bucket:
 |---|---|
 | `added` | Did not exist in the base revision. |
 | `removed` | Existed in the base revision and is gone. |
-| `changed` | Same symbol, different behaviour. |
+| `changed` | Same symbol, different behaviour, or Aburi grew more or less sure of it. |
 | `moved` | Same behaviour, different file or name. |
 | `moved+changed` | Both. |
 | `unknown` | Aburi could not read one side. See [Gaps](#gaps-in-the-report). |
@@ -27,7 +27,7 @@ added and removed counts beside it as lower bounds.
 ## The sections
 
 Sections appear in a fixed order, most important first. Aburi drops the empty
-ones and folds the last three behind a `<details>`.
+ones and folds Moved, Dropped changes and Syntax-only changes behind a `<details>`.
 
 | Section | What it tells you | Your next move |
 |---|---|---|
@@ -42,6 +42,7 @@ ones and folds the last three behind a `<details>`.
 | 🧱 Component changes | A component appeared, vanished, or changed — roots, public API, frameworks, name, languages, or description. | Architectural. Worth a look. |
 | 🔗 Dependency changes | A new or dropped edge between components or symbols. | Watch for layering violations. |
 | 💧 Dropped changes | Boilerplate that came or went. | Usually nothing. |
+| 🎚 Confidence changes | Aburi is more or less sure of a symbol, and nothing it fingerprints changed. | Check the new badge (see [Confidence](#confidence)). |
 | 🎨 Syntax-only changes | Bodies reformatted, behaviour identical. | Nothing. |
 
 Learn the split between **API changes** and **Logic changes** first. An API
@@ -87,7 +88,9 @@ branches. A removed `guard` line means somebody removed a condition.
 
 ## Confidence
 
-Aburi flags anything it is less sure about.
+Aburi flags anything it is less sure about. A symbol carries the badge on its
+heading; an effect, at the end of its row. When the badge on a symbol moves, the
+entry says so with a `confidence: before → after` line.
 
 | Marker | Meaning |
 |---|---|
