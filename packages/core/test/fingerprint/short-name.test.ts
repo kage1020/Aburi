@@ -20,6 +20,11 @@ describe("lastQnameSegment", () => {
     expect(lastQnameSegment("A.B::method")).toBe("method")
   })
 
+  it("keeps a private member's `#`, which tells it apart from a public one", () => {
+    expect(lastQnameSegment("C.#v")).toBe("#v")
+    expect(lastQnameSegment("C::#v")).toBe("#v")
+  })
+
   it("keeps the <default> sentinel intact", () => {
     expect(lastQnameSegment("<default>")).toBe("<default>")
   })

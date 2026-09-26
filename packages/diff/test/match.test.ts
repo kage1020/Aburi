@@ -31,6 +31,14 @@ describe("matchStageGitRename", () => {
     expect(result.remainingHead).toEqual([])
   })
 
+  it("moves a private member, whose qualified name carries a `#` of its own", () => {
+    const b = makeSymbol({ id: "ts:src/old.ts#C.#v", name: "C.#v" })
+    const h = makeSymbol({ id: "ts:src/new.ts#C.#v", name: "C.#v" })
+    const result = matchStageGitRename([b], [h], new Map([["src/old.ts", "src/new.ts"]]))
+    expect(result.matched).toHaveLength(1)
+    expect(result.matched[0]?.rationale).toBe("git-rename")
+  })
+
   it("skips when rename map is null", () => {
     const b = makeSymbol({ id: "ts:src/old.ts#Foo", name: "Foo" })
     const h = makeSymbol({ id: "ts:src/new.ts#Foo", name: "Foo" })

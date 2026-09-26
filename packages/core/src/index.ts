@@ -52,6 +52,7 @@ export {
   makeTopLevelQname,
   posixWorkspaceRelativeViolation,
   RESERVED_LANGUAGE_IDS,
+  type SegmentOptions,
   type SymbolIdParts,
   symbolIdFile,
   symbolIdSeparatorSite,

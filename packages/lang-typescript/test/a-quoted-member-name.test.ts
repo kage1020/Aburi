@@ -11,7 +11,9 @@ import { BACKSLASH, callsOf, classOf, hintOf, idsOf, importsOf, symbolOf } from 
  * calls the pair TS2393, a duplicate *implementation* — so the quoted spelling maps onto the
  * `ok` segment and the two fold, the way a field and a method of the same name already do.
  * What is not an identifier once decoded has no segment, and so no Symbol: its body stays on
- * the class, which is the answer `ir-schema.md` already gives a computed name.
+ * the class, which is the answer `ir-schema.md` already gives a computed name. `"#v"` is the
+ * one decoded key the grammar has a segment for and still no Symbol, because that segment
+ * names the `#`-private member.
  */
 
 async function errorsOf(source: string): Promise<number> {
@@ -249,8 +251,9 @@ describe("the construction path is spelled two ways", () => {
 
   it("leaves a `#`-private `constructor` off the path", async () => {
     // `#constructor` is a `PrivateIdentifier` rather than a property name — `tsc` reports
-    // TS18012, a reserved word. Reading it as the constructor kept its body on the class as
-    // code `new C()` runs, which it is not.
+    // TS18012, a reserved word — and its segment is `#constructor`, which is not the
+    // construction segment. So it is an ordinary method, and its body is not code `new C()`
+    // runs.
     const source = classOf("  #constructor() { s() }")
     const symbol = await symbolOf(source, "ts:src/a.ts#C.#constructor")
 

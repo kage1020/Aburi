@@ -187,18 +187,26 @@ describe("a field that is not a function stays a field", () => {
     // A class field named `constructor` is a SyntaxError in an engine and parses here, and
     // its qname segment is the one reserved for what `new C()` runs. Admitting it would put a
     // field on `#C.constructor`, or fold it into a real constructor written beside it.
-    const source = classOf(
-      "  constructor() { real() }",
-      "  constructor = () => { c1() }",
-      "  #constructor = () => { c2() }",
-    )
+    const source = classOf("  constructor() { real() }", "  constructor = () => { c1() }")
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.constructor"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["real", "c1"])
+    expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["real"])
+  })
+
+  it("admits a `#constructor` field, whose segment is not the construction one", async () => {
+    // TS18012 either way. Its segment keeps the `#`, so it cannot reach `#C.constructor` or
+    // fold into the real constructor, and it is a member like any other field holding a
+    // function. The shape this replaces refused it with the public spelling.
+    const source = classOf("  constructor() { real() }", "  #constructor = () => { c2() }")
 
     expect(await idsOf(source)).toEqual([
       "ts:src/a.ts#C",
       "ts:src/a.ts#C.#constructor",
       "ts:src/a.ts#C.constructor",
     ])
-    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["real", "c1"])
+    expect(await callsOf(source, "ts:src/a.ts#C.#constructor")).toEqual(["c2"])
+    expect(await callsOf(source, "ts:src/a.ts#C")).toEqual(["real"])
     expect(await callsOf(source, "ts:src/a.ts#C.constructor")).toEqual(["real"])
   })
 })

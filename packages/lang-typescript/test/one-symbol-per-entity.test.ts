@@ -195,8 +195,9 @@ describe("a getter and a setter declare one member", () => {
   })
 
   it("keeps a private-name member apart from the public one of the same name", async () => {
-    // `v` and `#v` are two members and `tsc` accepts both. Spelled `Q.v` both, they folded into
-    // one Symbol that reported both bodies' calls.
+    // `v` and `#v` are two members and `tsc` accepts both. The shape this replaces: the `#`
+    // was dropped, both were spelled `Q.v`, and they folded into one Symbol that reported both
+    // bodies' calls.
     const source = "export class Q { v() { a() } #v() { b() } }"
     const symbol = await symbolOf(source, "ts:src/a.ts#Q.v")
 
@@ -211,14 +212,18 @@ describe("a getter and a setter declare one member", () => {
     const priv = await symbolOf(source, "ts:src/a.ts#Q.#v")
     const pub = await symbolOf(source, "ts:src/a.ts#Q.v")
 
-    expect([priv.visibility, priv.signature?.inputs]).toEqual([
-      "private",
-      [{ name: "a", type: "number" }],
-    ])
-    expect([pub.visibility, pub.signature?.inputs]).toEqual([
-      "public",
-      [{ name: "c", type: "string" }],
-    ])
+    expect(priv.visibility).toBe("private")
+    expect(priv.signature?.inputs).toEqual([{ name: "a", type: "number" }])
+    expect(pub.visibility).toBe("public")
+    expect(pub.signature?.inputs).toEqual([{ name: "c", type: "string" }])
+  })
+
+  it("keeps a static private member's `#` after the static separator", async () => {
+    const source = "export class Q { static #v() { a() } static v() { b() } }"
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#Q", "ts:src/a.ts#Q::#v", "ts:src/a.ts#Q::v"])
+    expect((await symbolOf(source, "ts:src/a.ts#Q::#v")).visibility).toBe("private")
+    expect((await walkOf(source, "ts:src/a.ts#Q::#v")).calls.map((c) => c.target)).toEqual(["a"])
   })
 
   it("still says nothing about a computed accessor", async () => {

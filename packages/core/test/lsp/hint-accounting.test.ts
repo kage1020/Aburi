@@ -32,6 +32,23 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(noRejections())
   })
 
+  it("writes a hint for a `#`-private member, which keeps its `#` in the Symbol table", async () => {
+    // tsserver names the member `C.#v` in its hover, and `C.#v` is the Symbol's qualified name.
+    const enrichment = await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: [
+          makeClassSymbol("src/a.ts", "C", 1),
+          makeMethodSymbol("src/a.ts", "C", "#v", 2),
+          makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.#v", line: 4 }]),
+        ],
+        fileContents: { "src/a.ts": "class C {\n  #v() {}\n  bar() {\n    this.#v()\n  }\n}" },
+        serverFactory: hoverFactory(() => ({ contents: "(method) C.#v(): void" })),
+      }),
+    )
+    expect(enrichment.receiverHints.size).toBe(1)
+    expect(statsOf(enrichment).hintsRejected).toEqual(noRejections())
+  })
+
   // LE25
   it("counts a hover that answers nothing as an unparseable hover, not as a healthy request", async () => {
     const enrichment = await enrichThisFoo(() => null)
