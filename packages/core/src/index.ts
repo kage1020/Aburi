@@ -61,7 +61,7 @@ export {
   trySymbolId,
 } from "./id"
 export { type ImportBinding, splitAliasedImportName } from "./import-edge"
-export { assertIRIntegrity, checkIRIntegrity } from "./integrity"
+export { assertIRIntegrity, checkIRIntegrity, isCoreEffectId } from "./integrity"
 export { checkDocumentShape, DOCUMENT_SUBJECT } from "./integrity-shape"
 export {
   type EnrichmentInput,
@@ -140,6 +140,7 @@ export {
   type ParseTimeoutEvent,
   startParseDeadline,
 } from "./scan/timeout"
+export { type UndeclaredVocabOccurrence, VocabCheck } from "./scan/vocab"
 export {
   anyCallCalleeMatches,
   asSyntaxNode,

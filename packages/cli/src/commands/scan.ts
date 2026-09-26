@@ -51,6 +51,12 @@ import { createLogger } from "../logger"
 import { createOutputDir, type OutputCommand, writeOutputFile } from "../output-file"
 import { loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
+import {
+  type DiscoveredVocabItem,
+  renderVocabDiscovered,
+  summarizeUndeclaredVocab,
+  VOCAB_DISCOVERED_FILENAME,
+} from "../vocab-discovered"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
@@ -204,6 +210,13 @@ export interface ScanReport {
    * artifact mentions them, so this list is the run's only account and moves the exit code.
    */
   unrepresentableFiles: readonly UnrepresentableFile[]
+  /**
+   * Values plugins emitted without their manifest claiming them, one per (kind, value). Empty in
+   * a strict run, which ends at the first one instead.
+   */
+  undeclaredVocab: readonly DiscoveredVocabItem[]
+  /** Where the record of `undeclaredVocab` was written, or `null` when none was. */
+  vocabDiscoveredPath: string | null
   /** Managers whose manifest declared package patterns and resolved none of them. Not a fault. */
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
   /** Whether the whole repository was described as one Component because detection found no package. */
@@ -259,7 +272,17 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   const command = options.command ?? "scan"
   const outputDir = resolveOutputDir(cwd, options.outputDir, config.output?.dir)
   await createOutputDir(command, outputDir)
-  const scanResult = await scan(scanInput)
+  let scanResult: Awaited<ReturnType<typeof scan>>
+  try {
+    scanResult = await scan(scanInput)
+  } catch (error) {
+    // A strict run's refusal of a value no manifest claims: the plugin set is wrong, which is
+    // the gate's exit code (`cli-spec.md`), not a machine fault.
+    if (error instanceof CoreError && error.code === "vocab-undeclared") {
+      throw new CliError(error.message, "plugin-error", { cause: error })
+    }
+    throw error
+  }
 
   const format = options.format ?? "both"
 
@@ -291,6 +314,21 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
       )
     }
     await writeOutputFile({ command, artefact: "the IR", path: irPath }, serialized)
+  }
+
+  const undeclaredVocab = summarizeUndeclaredVocab(scanResult.undeclaredVocab)
+  // Only `scan` writes the record: `diff` runs two scans into one directory, and the list is
+  // on its incident report either way.
+  let vocabDiscoveredPath: string | null = null
+  if (config.strict === false && command === "scan") {
+    vocabDiscoveredPath = resolve(outputDir, VOCAB_DISCOVERED_FILENAME)
+    await writeOutputFile(
+      { command, artefact: "the discovered-vocabulary record", path: vocabDiscoveredPath },
+      renderVocabDiscovered(
+        undeclaredVocab,
+        options.suppressTimestamp === true ? null : new Date().toISOString(),
+      ),
+    )
   }
 
   // A withdrawn file's parse errors are still reported — they are the account of why it was
@@ -341,6 +379,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     workspaceRoot,
     coverageFault,
     unrepresentableFiles: scanResult.unrepresentableFiles.map((file) => ({ ...file })),
+    undeclaredVocab,
+    vocabDiscoveredPath,
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
     // Three gates (`cli-spec.md`: exit codes, coverage, unnameable files), none of which
@@ -455,6 +495,7 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   // whatever is last is what a closed pipe loses.
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
+  reportUndeclaredVocab(report.undeclaredVocab, report.vocabDiscoveredPath, sayIncident, warn)
   reportParseErrors(report.parseErrorFiles, sayIncident, warn)
   reportConfigOutsideWorkspaceRoot(report, sayIncident)
   if (report.parseFailureCount > 0) {
@@ -557,6 +598,23 @@ function reportTreeReleaseFailures(
     const first = group[0]
     if (first === undefined) continue
     writeDetail(`    ${plugin} (${group.length}) — ${first.file}: ${first.detail}`)
+  }
+}
+
+function reportUndeclaredVocab(
+  items: ScanReport["undeclaredVocab"],
+  recordPath: string | null,
+  sayIncident: SayIncident,
+  writeDetail: WarnFn,
+): void {
+  if (items.length === 0) return
+  const record = recordPath === null ? "" : ` Recorded in ${recordPath}.`
+  sayIncident(
+    `${items.length} value(s) were emitted that no plugin manifest declares; strict is off, so ` +
+      `the scan kept them.${record}`,
+  )
+  for (const item of items) {
+    writeDetail(`    ${item.kind} ${item.value} — ${item.firstSeenBy} (${item.occurrences})`)
   }
 }
 

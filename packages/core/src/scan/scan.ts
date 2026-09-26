@@ -46,6 +46,7 @@ import { describeThrown, errorCode, isVanishedFile } from "./faults"
 import { runFilePipeline, type TreeReleaseFailure } from "./pipeline"
 import { buildLanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
+import { type UndeclaredVocabOccurrence, VocabCheck } from "./vocab"
 
 export interface ScanInput {
   /** Absolute workspace root. Every relative path in the IR is measured against this. */
@@ -150,6 +151,12 @@ export interface ScanResult {
    * them the cause. This list is the only thing that names the plugin before that happens.
    */
   treeReleaseFailures: readonly TreeReleaseFailure[]
+  /**
+   * Every effect id and extKind a plugin emitted without its manifest claiming it, in scan
+   * order, from files whose Symbols reached the IR. Always empty in a strict run
+   * (`config.strict`, default `true`), which ends at the first one with `vocab-undeclared`.
+   */
+  undeclaredVocab: readonly UndeclaredVocabOccurrence[]
   /**
    * One record per candidate file the Document has no way to name, in path order.
    *
@@ -259,6 +266,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const parseTimeouts: ParseTimeoutEvent[] = []
   const extractionFailures: ExtractionFailure[] = []
   const treeReleaseFailures: TreeReleaseFailure[] = []
+  const undeclaredVocab: UndeclaredVocabOccurrence[] = []
+  // `strict` defaults to true (config.md), so only an explicit `false` records instead.
+  const strictVocab = input.config.strict !== false
   // One warning per plugin, at the file it first went wrong on. The record below keeps
   // every occurrence; a line per file would be one per file for the rest of the run.
   const warnedReleaseFailure = new Set<string>()
@@ -307,6 +317,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     // pipeline that ran to completion has.
     let result: Awaited<ReturnType<typeof runFilePipeline>>
     const releasesRecordedBefore = treeReleaseFailures.length
+    // Per file, and kept only for a file whose Symbols reach the IR: a value recorded from a
+    // file that is then withdrawn names a Symbol the Document does not hold.
+    const fileVocab: UndeclaredVocabOccurrence[] = []
     try {
       result = await runFilePipeline({
         file: sourceFile,
@@ -319,6 +332,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         component: attribute(sourceFile.path),
         log: logger,
         treeReleaseFailures,
+        vocab: new VocabCheck(input.registry, strictVocab, fileVocab),
       })
     } catch (error) {
       if (isPluginSetFault(error)) throw error
@@ -431,6 +445,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
           importsByFile.set(discoveredFile.path, result.imports)
           break
         }
+
+        undeclaredVocab.push(...fileVocab)
 
         // Held for LSP enrichment, and only for files that reached the IR. Nothing would
         // currently read a refused file's text if it were held — the pass builds one document
@@ -573,6 +589,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     extractionFailures,
     treeReleaseFailures,
     unrepresentableFiles: discovered.unrepresentableFiles,
+    undeclaredVocab,
   }
 }
 

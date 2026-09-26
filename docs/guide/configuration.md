@@ -184,7 +184,7 @@ setting in CI.
 | `keep` | `[]` | Exceptions to `suppress` and to the built-in drop rules. |
 | `frameworkHints` | `[]` | Decorator and class-name rules for an in-house framework. |
 | `output.dir` | `out` | Where Aburi writes artifacts and reads them back. |
-| `strict` | `true` | Abort when a plugin emits vocabulary it never declared. |
+| `strict` | `true` | Abort when a plugin emits vocabulary it never declared. `false` keeps it and lists it in `aburi-vocab-discovered.json`. |
 | `maxFileSizeBytes` | `2097152` | Aburi skips files above this size. |
 | `parseTimeoutMs` | `5000` | Per-file budget for parse, extract, and walk. |
 | `classifyTimeoutMs` | `50` | Per-call budget for an effects plugin. |
