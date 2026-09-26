@@ -116,6 +116,28 @@ describe("Slice View Markdown projection", () => {
     expect(md).toContain("`Repo.save`")
   })
 
+  it("names a confidence change on the member's follow-up line", () => {
+    const ctlId = "ts:src/ctl.ts#Ctl.route"
+    const svcId = "ts:src/svc.ts#Svc.op"
+    const unsure = changedSym(ctlId, "Ctl.route", "src/ctl.ts", 42)
+    if (unsure.status !== "changed") throw new Error("expected a changed entry")
+    const md = projectDiff(
+      makeDiff({
+        symbols: [
+          {
+            ...unsure,
+            after: { ...unsure.after, confidence: "medium" },
+            delta: { ...unsure.delta, logicChanged: false, confidenceChanged: true },
+          },
+          changedSym(svcId, "Svc.op", "src/svc.ts", 88),
+        ],
+        slices: [slice(`slice:${ctlId}`, [ctlId, svcId])],
+      }),
+    )
+    expect(md).toContain("  ↳ delta.confidenceChanged\n")
+    expect(md).toContain("  ↳ delta.logicChanged\n")
+  })
+
   it("Slices are separated by a --- thematic break", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"

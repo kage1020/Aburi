@@ -10,7 +10,7 @@ import { assertNever } from "./errors"
  *   dropped-toggled:to-dropped / dropped-toggled:to-kept
  *
  * Delta axis family (subtype of `status: "changed" | "moved+changed"`):
- *   api-changed / logic-changed / syntax-changed
+ *   api-changed / logic-changed / syntax-changed / confidence-changed
  *
  * Every value may carry a count threshold: `<value>:><N>` triggers only when observed
  * count exceeds N (strict greater-than). The design lists `>` as the only comparator in
@@ -27,7 +27,11 @@ export type FailOnStatusToken =
   | "dropped-toggled:to-kept"
   | "unknown"
 
-export type FailOnDeltaAxis = "api-changed" | "logic-changed" | "syntax-changed"
+export type FailOnDeltaAxis =
+  | "api-changed"
+  | "logic-changed"
+  | "syntax-changed"
+  | "confidence-changed"
 
 export type FailOnToken = FailOnStatusToken | FailOnDeltaAxis
 
@@ -53,6 +57,7 @@ const DELTA_TOKENS: ReadonlySet<FailOnDeltaAxis> = new Set([
   "api-changed",
   "logic-changed",
   "syntax-changed",
+  "confidence-changed",
 ])
 
 export class FailOnParseError extends Error {
@@ -221,6 +226,8 @@ function countMatches(token: FailOnToken, diff: DiffResult): number {
       return countDeltaAxis(diff.symbols, "logicChanged")
     case "syntax-changed":
       return countDeltaAxis(diff.symbols, "syntaxChanged")
+    case "confidence-changed":
+      return countDeltaAxis(diff.symbols, "confidenceChanged")
     default:
       return assertNever(token, "FailOnToken")
   }
@@ -228,7 +235,7 @@ function countMatches(token: FailOnToken, diff: DiffResult): number {
 
 function countDeltaAxis(
   changes: readonly SymbolChange[],
-  axis: "apiChanged" | "logicChanged" | "syntaxChanged",
+  axis: "apiChanged" | "logicChanged" | "syntaxChanged" | "confidenceChanged",
 ): number {
   let count = 0
   for (const c of changes) {

@@ -76,8 +76,8 @@ A Symbol is a Node in the clustering graph iff its diff `status` is one of:
 |---|---|---|
 | `added` | yes | new code the reviewer must inspect |
 | `removed` | yes | disappearing code the reviewer must inspect |
-| `changed` | yes | semantic change; `delta.apiChanged` / `logicChanged` / `syntaxChanged` may distinguish severity in the projection but do not gate Node inclusion |
-| `moved+changed` | yes | both a rename and a semantic change |
+| `changed` | yes | a semantic change, or a change in the extraction confidence of an otherwise equal Symbol ([`diff-algorithm.md`](./diff-algorithm.md) §4); `delta.apiChanged` / `logicChanged` / `syntaxChanged` / `confidenceChanged` may distinguish severity in the projection but do not gate Node inclusion |
+| `moved+changed` | yes | both a rename and a change, as `changed` |
 | `dropped-toggled` | yes | drop-list or plugin-configuration change; the Symbol crossed the visibility boundary of the IR |
 | `unknown` | yes | one document never analysed the Symbol's file ([`diff-algorithm.md`](./diff-algorithm.md) §3.5.1), so whether it changed is an open question — and an open question is most useful read beside the callers that still reference it |
 | `moved` (pure) | **no** | pure moves carry no semantic change ([`diff-algorithm.md`](./diff-algorithm.md) §4 — `moved` has no fingerprint delta), so surfacing them in the vertical-slice view would be noise. They remain in the flat "Moved (no semantic change)" fold of §7.2 |
@@ -95,7 +95,7 @@ As a result, a `dropped-toggled` Symbol that was **kept in base, dropped in head
 
 ### 4.3 Pure `moved` symbols are excluded even from bridging
 
-A `moved` Symbol is not a Node **and** it is not treated as an intermediate connector in §5. Rationale: even though a moved Symbol's file path changed, its semantic surface is unchanged; a reviewer's need to see it clustered with related changes is zero. Excluding it also keeps the "no bridging via unchanged Symbols" rule of §5.2 uniform — the Node set is exactly the set of Symbols with a semantic change.
+A `moved` Symbol is not a Node **and** it is not treated as an intermediate connector in §5. Rationale: even though a moved Symbol's file path changed, its semantic surface is unchanged; a reviewer's need to see it clustered with related changes is zero. Excluding it also keeps the "no bridging via unchanged Symbols" rule of §5.2 uniform — the Node set is exactly the set of Symbols whose status says something about them changed (§4.1).
 
 ### 4.4 Propagated-only-changed callers ARE Nodes
 
@@ -325,11 +325,14 @@ A new section `## 🧵 Slice View` is added to `out/diff.md`, positioned between
 ## 🧵 Slice View                    ← NEW
 ## ➕ Added
 ## ➖ Removed
+## ❔ Unknown
+## 🚫 Not compared
 ## 🔀 Moved + Changed
 ## 🔀 Moved
 ## 🧱 Component changes
 ## 🔗 Dependency changes
 ## 💧 Dropped changes
+## 🎚 Confidence changes
 ## 🎨 Syntax-only changes
 ```
 
@@ -359,7 +362,7 @@ Each Slice becomes a `###` subsection under `## 🧵 Slice View`:
 - Each member is a bullet with: Symbol short-form (last-segment qname), the status in italics, file:line, and a `↳` follow-up line summarising which delta axes tripped or, for `added` / `removed`, the entry's boundary/effect surface.
 - Members appear in ascending Symbol id order per §8.2. A projection variant that arranges members in call-order (anchor first, then callees) is left for a future iteration — the JSON side stays as specified.
 - Slices are separated by a `---` thematic break for visual boundary marking.
-- Column choices reuse existing [`markdown-projection.md`](./markdown-projection.md) §3 conventions: file paths POSIX and backtick-wrapped (§3.3), confidence badges per §3.5, no emoji for the default status.
+- Column choices reuse existing [`markdown-projection.md`](./markdown-projection.md) §3 conventions: file paths POSIX and backtick-wrapped (§3.3), no emoji for the default status. A member row carries no confidence badge (§3.5 keeps it to headings and names-only rows); a member whose confidence moved says so on its `↳` line.
 
 ### 12.3 Singletons folded
 
@@ -432,6 +435,7 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV3 | Symbols `A` and `B` are both changed; a `CallEdge` runs `A → M → B` where `M` is `unchanged` | Two singleton Slices — no bridging (§5.2) |
 | SV4 | A `moved` Symbol (pure move, no fingerprint delta) with a `CallEdge` to a `changed` Symbol | The `changed` Symbol is a singleton; the `moved` Symbol is not in `slices[]` at all (§4.3) |
 | SV5 | A `changed` Symbol whose only delta is a `propagated: true` `Effect` (own body unchanged) with a `CallEdge` to its downstream callee (also `changed`) | Both cluster into one Slice (§4.4) |
+| SV5a | A `changed` Symbol whose only delta is `confidenceChanged`, with a `CallEdge` to another `changed` Symbol | Both cluster into one Slice (§4.1) |
 
 ### 13.2 Base-vs-head edge union
 

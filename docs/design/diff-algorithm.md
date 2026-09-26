@@ -545,7 +545,7 @@ else:
 
 unchanged is not included in the default output (only counted in the summary).
 
-`confidence` is compared on its own because no fingerprint reads it. The same code classified less surely — a framework role matched on the identifier alone where an import used to prove it — is something a reviewer has to see, and an `unchanged` pair is never reported, so a confidence change that moved no fingerprint would otherwise vanish. It counts toward `summary.changed` and `--fail-on changed` like any other change. A pair dropped on both sides is exempt and stays `unchanged` (DF13): a dropped Symbol is outside what the diff asks a reviewer to read. `component` is the contrast: it comes from `Component.roots[]` rather than from the code, so a re-rooted package changes it under every Symbol without anyone editing them, and it is recorded on the delta only.
+`confidence` is compared on its own because no fingerprint reads it. The same code classified less surely — a framework role matched on the identifier alone where an import used to prove it — is something a reviewer has to see, and an `unchanged` pair is never reported, so a confidence change that moved no fingerprint would otherwise vanish. It counts like any other change of its status: toward `summary.changed` and `--fail-on changed` when the Symbol stayed put, toward `summary.movedChanged` and `--fail-on moved+changed` when it also moved. The blast radius can be wide. A plugin may decide confidence from a file-level signal (the Express plugin asks whether the file imports `express`), so deleting one import moves every Symbol that plugin classified in that file at once; and when the two IRs were read off disk rather than scanned in one run, they may come from different plugin versions, whose confidence rules differ for code nobody touched. `--fail-on confidence-changed` gates on this axis alone and takes a threshold (`confidence-changed:>20`); a gate that should ignore it writes the fingerprint axes (`api-changed,logic-changed`) instead of `changed` ([`cli-spec.md`](./cli-spec.md) §6.7). A pair dropped on both sides is exempt and stays `unchanged` (DF13): a dropped Symbol is outside what the diff asks a reviewer to read. `component` is the contrast: it comes from `Component.roots[]` rather than from the code, so a re-rooted package changes it under every Symbol without anyone editing them, and it is recorded on the delta only.
 
 ### 4.1 Why the `dropped-toggled` status exists
 
@@ -984,18 +984,22 @@ A format intended for pasting into PR comments:
 - `billing` → `payments` (via: import)
 ```
 
-Section order is **high importance → low**:
+Section order is **high importance → low**. [`markdown-projection.md`](./markdown-projection.md) §6.1 is the list the renderer and the size cap follow; this copy must match it:
 
 1. API changes (warning)
 2. Logic changes
-3. Added (new)
-4. Removed (deleted)
-5. Moved+Changed (moved and changed)
-6. Moved (no semantic change — collapsed)
-7. Component changes
-8. Dependency changes
-9. Dropped changes (collapsed)
-10. Syntax-only changes (collapsed)
+3. Slice View
+4. Added (new)
+5. Removed (deleted)
+6. Unknown
+7. Not compared
+8. Moved+Changed (moved and changed)
+9. Moved (no semantic change — collapsed)
+10. Component changes
+11. Dependency changes
+12. Dropped changes (collapsed)
+13. Confidence changes
+14. Syntax-only changes (collapsed)
 
 Collapsed sections are visible at **zero review cost**.
 

@@ -193,7 +193,7 @@ function collectCallers(symbol: IRSymbol, dependencies: readonly Dependency[]): 
  */
 function renderDroppedExplain(symbol: IRSymbol): string {
   const lines: string[] = []
-  lines.push(`# ${inlineCode(symbol.name)} *(${symbol.kind})* — dropped`)
+  lines.push(`# ${symbolTitle(symbol)} — dropped`)
   lines.push("")
   if (symbol.component !== null && symbol.component !== undefined) {
     lines.push(`**Component**: ${symbol.component}`)

@@ -1,5 +1,10 @@
 import { makeSymbol } from "@aburi/test-support"
-import type { Symbol as IRSymbol, SymbolChanged, SymbolDelta } from "@aburi/types"
+import type {
+  Symbol as IRSymbol,
+  SymbolChanged,
+  SymbolDelta,
+  SymbolMovedChanged,
+} from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { renderSymbolBlock } from "../src/component"
 import { projectDiff } from "../src/diff"
@@ -60,6 +65,13 @@ describe("a Symbol heading carries its confidence", () => {
     expect(projectSymbolExplain(unsure).split("\n")[0]).toBe("# `XController` *(class)* ⚠ medium")
   })
 
+  it("badges the explain title of a dropped Symbol", () => {
+    const dropped = { ...unsure, dropped: true, dropReason: "pure DTO" }
+    expect(projectSymbolExplain(dropped).split("\n")[0]).toBe(
+      "# `XController` *(class)* ⚠ medium — dropped",
+    )
+  })
+
   it("badges a Symbol listed whole in diff.md", () => {
     const md = projectDiff(
       makeDiff({
@@ -97,13 +109,41 @@ describe("diff.md reports a confidence change", () => {
 
     expect(md).toContain("## 🎚 Confidence changes")
     expect(md).not.toContain("## 🎨 Syntax-only changes")
+    // The confidence row explains no fingerprint, so the syntax change keeps its own line.
+    expect(md).toContain("- syntax fingerprint changed; no field-level detail was recorded")
+  })
+
+  it("shows the row, and no badge, when the machine became sure", () => {
+    const md = render(changed(unsure, sure, {}))
+
+    expect(md).toContain("### `XController` *(class)*\n")
+    expect(md).toContain("- confidence: `medium` → `high`")
+  })
+
+  it("lists a moved Symbol whose only change is confidence under both of its sections", () => {
+    const after = { ...unsure, source: { ...unsure.source, file: "src/moved/x.controller.ts" } }
+    const entry: SymbolMovedChanged = {
+      ...changed(sure, after, {}),
+      status: "moved+changed",
+      rationale: "id-match",
+    }
+    const md = projectDiff(
+      makeDiff({ symbols: [entry], summary: { ...emptySummary(), movedChanged: 1 } }),
+    )
+
+    expect(md).toContain("## 🔀 Moved + Changed")
+    expect(md).toContain("### `XController` *(class)* ⚠ medium")
+    expect(md).toContain("- confidence: `high` → `medium`")
+    // Routed by its axis as well, as a moved+changed API or logic change is.
+    expect(md).toContain("## 🎚 Confidence changes")
+    expect(md).not.toContain("no field-level detail")
   })
 
   it("says nothing about confidence for a diff written before the field existed", () => {
     const { confidenceChanged: _, ...older } = changed(sure, sure, { logicChanged: true }).delta
     const md = render({ status: "changed", before: sure, after: sure, delta: older })
 
-    expect(md).not.toContain("confidence")
+    expect(md.toLowerCase()).not.toContain("confidence")
     expect(md).toContain("## 🔧 Logic changes")
   })
 })

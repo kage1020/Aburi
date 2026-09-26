@@ -159,8 +159,8 @@ review that loses its comment would be the large one.
 The action renders the report to fit instead: it passes `--max-bytes 65507` (the limit, less the
 29-byte marker it prepends). The projection meets the budget from the least important section
 up — Syntax-only before Dropped changes, API changes last. A section whose entries are whole
-symbols (API and Logic changes, Added, Removed, Unknown, Moved + Changed) is first cut down to one
-line per symbol, name and location, and any section is dropped only if it cannot fit even beside
+symbols (API and Logic changes, Added, Removed, Unknown, Moved + Changed, Confidence changes) is
+first cut down to one line per symbol, name and location, and any section is dropped only if it cannot fit even beside
 every more important one cut that far. The report says at
 the top which sections are short and which went:
 

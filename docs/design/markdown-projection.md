@@ -138,7 +138,7 @@ depends on which column the value landed in is one schema change away from being
 | `medium` | `⚠ medium` |
 | `low` | `⚠ low` |
 
-Low-confidence symbols/effects explicitly signal "the machine is not confident" to reviewers. An effect carries the badge at the end of its row (§5.7). A Symbol carries it at the end of every heading that names it — the component page (§5.2), every `diff.md` entry that renders the Symbol under its own heading (§6.2) and the `explain` title (§7) — so no view shows a Symbol without saying how sure the machine is of it.
+Low-confidence symbols/effects explicitly signal "the machine is not confident" to reviewers. An effect carries the badge at the end of its row (§5.7). A Symbol carries it after its name and kind on every heading that names it — the component page (§5.2), every `diff.md` entry that renders the Symbol under its own heading (§6.2), the `explain` title (§7), dropped or not — and on the names-only row that stands in for such a heading when the size cap shortens a section (§6.4), so no Symbol a view gives its own heading or row loses the badge. Rows that list a Symbol among other facts (Moved, Dropped changes, the Slice View members) do not carry it.
 
 ### 3.6 dropped display
 
@@ -474,7 +474,7 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 
 `added` and `removed` print the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4). `modified` prints `qualifier.name`: the arguments are dropped because they may be the change, and the receiver is kept because it may be. Both fall back to `qualifier.name` when `raw` is absent. A modified row shows the head side only, so a receiver lost (`@nest.Post` → `@Post`) reads `@Post`, the same as an argument edit.
 
-A change whose `delta.confidenceChanged` is also true adds a row `- confidence: \`high\` → \`medium\``, base side first, in whichever section the entry lands. This holds for every section that renders a delta body, Moved + Changed included.
+A change whose `delta.confidenceChanged` is also true adds a row such as ``- confidence: `high` → `medium` ``, base side first, in whichever section the entry lands. This holds for every section that renders a delta body, Moved + Changed included. A fingerprint flag with no field-level row to explain it gets `- <axis> fingerprint changed; no field-level detail was recorded`; the component and confidence rows do not count as that explanation, since no fingerprint reads either, so a syntax change moved into Confidence changes still says it happened.
 
 #### 🔧 Logic changes
 
@@ -676,7 +676,8 @@ heading, a line saying the entries are short, and one row per Symbol,
 - `handleInvoice` *(function)* — `src/billing/invoice.ts:42`
 ```
 
-(Unknown adds the side and the skip reason, Moved + Changed the file it moved from). The row
+(the confidence badge follows the kind as on the heading; Unknown adds the side and the skip reason,
+Moved + Changed the file it moved from, Confidence changes the two values, `` (`high` → `medium`) ``). The row
 above is 62 bytes, so a few hundred of them take 18–25 KB, where the full entries of one large
 section can take forty. The other sections are already lists, or are views (Slice View, Component
 and Dependency changes) with nothing shorter to say, and have only their full form. A section is
@@ -863,8 +864,8 @@ All Markdown projection output is **English, with fixed wording**.
 | MP4 | Dropped symbols present in the workspace | Dropped section shown folded |
 | MP5 | Effect with confidence=medium | Gets the `⚠ medium` badge |
 | MP6 | Effect with confidence=high | No badge |
-| MP6a | Symbol with confidence=medium or low, on the component page, in a `diff.md` entry and in `explain` | Every heading naming it ends in the badge |
-| MP6b | Symbol with confidence=high | No badge on any heading |
+| MP6a | Symbol with confidence=medium or low, on the component page, in a `diff.md` entry or its names-only row, and in `explain` (kept or dropped) | Every heading and names-only row naming it carries the badge after the kind |
+| MP6b | Symbol with confidence=high | No badge on any heading or names-only row |
 | MP7 | mermaid nodes > 100 | Falls back to the text bullet list |
 | MP8 | `aburi explain <dropped-symbol>` | Drop reason shown, no detail sections |
 | MP9 | Symbol id containing slashes/colons | Written under a sanitized file name |

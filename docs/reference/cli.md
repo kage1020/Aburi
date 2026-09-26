@@ -227,7 +227,7 @@ threshold, one occurrence trips the gate.
 |---|---|
 | `added` `removed` `changed` `moved` `moved+changed` `dropped-toggled` | Symbols with that status. |
 | `dropped-toggled:to-dropped` `dropped-toggled:to-kept` | One direction of a boilerplate toggle. |
-| `api-changed` `logic-changed` `syntax-changed` | Symbols whose change touched that axis. |
+| `api-changed` `logic-changed` `syntax-changed` `confidence-changed` | Symbols whose change touched that axis. |
 
 Evaluation stops at the first clause that fires, which keeps CI logs short.
 

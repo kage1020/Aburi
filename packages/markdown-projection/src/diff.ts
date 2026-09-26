@@ -130,7 +130,7 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     sections,
     "## 🎚 Confidence changes",
     renderChangedList(buckets.confidenceOnly),
-    indexChanged(buckets.confidenceOnly),
+    indexConfidence(buckets.confidenceOnly),
   )
   appendFolded(
     sections,
@@ -511,6 +511,7 @@ function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
   appendRuleDelta(rows, delta.rules)
   appendEffectDelta(rows, delta.effects)
   appendCallDelta(rows, delta.calls)
+  const explained = rows.length > 0 || delta.visibilityChanged
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
   if (delta.confidenceChanged === true) {
@@ -518,18 +519,19 @@ function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
       `- confidence: ${inlineCode(change.before.confidence)} → ${inlineCode(change.after.confidence)}`,
     )
   }
-  appendUnexplainedChangeNote(delta, rows)
+  if (!explained) appendUnexplainedChangeNote(delta, rows)
   return rows
 }
 
 /**
- * Never leave a heading with an empty body: it would read as "no reason was found". A note
- * rather than a thrown invariant, because the fingerprints cover inputs the structured delta
- * does not model, so a real document can set a flag with every `ArrayDelta` empty. All three
- * flags are covered because `renderMovedChanged` reaches here with syntax-only moves too.
+ * Never let a fingerprint flag go unexplained: a heading with no reason under it reads as "no
+ * reason was found". A note rather than a thrown invariant, because the fingerprints cover
+ * inputs the structured delta does not model, so a real document can set a flag with every
+ * `ArrayDelta` empty. All three flags are covered because `renderMovedChanged` reaches here
+ * with syntax-only moves too. The component and confidence rows do not count as an
+ * explanation, since neither is a fingerprint input; the visibility row does, as an API one.
  */
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
-  if (rows.length > 0) return
   const which = delta.apiChanged
     ? "API"
     : delta.logicChanged
@@ -875,7 +877,7 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 /** One names-only list item, `- ` then `name` *(kind)* — `file:line`, with `suffix` after it when given. */
 function indexRow(symbol: IRSymbol, suffix = ""): string {
   const location = inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)
-  return `- ${inlineCode(symbol.name)} *(${symbol.kind})* — ${location}${suffix}`
+  return `- ${symbolTitle(symbol)} — ${location}${suffix}`
 }
 
 function indexSymbols(symbols: readonly IRSymbol[]): string[] {
@@ -884,6 +886,15 @@ function indexSymbols(symbols: readonly IRSymbol[]): string[] {
 
 function indexChanged(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
   return sortByAfterId(items).map((item) => indexRow(item.after))
+}
+
+function indexConfidence(items: readonly (SymbolChanged | SymbolMovedChanged)[]): string[] {
+  return sortByAfterId(items).map((item) =>
+    indexRow(
+      item.after,
+      ` (${inlineCode(item.before.confidence)} → ${inlineCode(item.after.confidence)})`,
+    ),
+  )
 }
 
 function indexUnknown(items: readonly SymbolUnknown[]): string[] {
