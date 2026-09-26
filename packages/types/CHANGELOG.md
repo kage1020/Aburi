@@ -1,5 +1,168 @@
 # @aburi/types
 
+## 0.5.0
+
+### Minor Changes
+
+- c28f20c: Carry the receiver a decorator was written through, and read it against the file's imports
+
+  `@nest.Controller()` and `@tsed.Controller()` were indistinguishable by the time a framework
+  plugin saw them. `readDecorator` reduced a qualified decorator to its leaf identifier, so
+  `Decorator` said `Controller` and nothing said which module it came from — and
+  `readImportedNames` skipped `symbols: "*"` edges outright, so even a recorded
+  `namespaceBinding` was never indexed. Both halves had to be wrong for the bug to hold, and
+  both were.
+
+  The consequence was the provenance table in `lang-plugin.md` §5.2.2 being out of order in its
+  last row. A decorator written through a module object landed in "no edge binds it" and came
+  back `high`, while the _named_ import of the same decorator from the same library came back
+  `medium`. The file that disclosed more was trusted less.
+
+  `Decorator` now carries `qualifier`: the receiver verbatim, `nest` for `@nest.Controller()`
+  and `a.b` for `@a.b.C()`. It is Class B per `ir-schema.md` §1.1 — a bare decorator omits the
+  key entirely — so a document written before this change reads exactly as it did, and `raw`
+  still quotes the whole written form. `@aburi/framework-nestjs` resolves a qualified decorator
+  through the receiver's first segment, which is the only part that can name something in
+  scope, and looks that segment up in **both** binding indexes: `import * as nest` binds the
+  module object under `namespaceBinding`, `import nest from` binds it as a named symbol, and a
+  decorator written through either has disclosed the same thing.
+
+  A qualified decorator deliberately does **not** resolve its _leaf_ through the named-import
+  index. The leaf is a property of a module object, not an identifier in the file's scope, so a
+  file that imports `Controller` by name from NestJS while writing `@tsed.Controller()` no
+  longer reports the second as though it were the first.
+
+  **What changes for a caller**
+
+  - A NestJS Symbol classified from a module object of a competing library now reports
+    `confidence: "medium"` where it reported `high`, whether the module was bound by
+    `import * as` or by a default import.
+  - `SymbolClassification.decoratorBoundaries` is keyed on the decorator as the source **wrote**
+    it, receiver included: `nest.Controller`, not `Controller`. The contract always said
+    "written name"; before `qualifier` existed the leaf _was_ that name. The leaf alone is not a
+    usable key, because two decorators on one Symbol can share it while resolving to different
+    vocabulary, and a shared key flags both — putting `boundary: true` on a decorator that was
+    never classified, which `drop-b` then reads.
+  - `@aburi/framework-nestjs` renames the exported `ImportedNames` to `ImportedBindings`, now an
+    interface of two maps rather than one map, and `resolveDecoratorName` takes the decorator
+    (`Pick<Decorator, "name" | "qualifier">`) instead of a bare name. Both are in the published
+    types.
+  - `@aburi/plugin-registry` adds `assertNamespaceBinding`, the namespace-edge counterpart to
+    `assertImportBinding`: a `namespaceBinding` that is present but empty is an upstream fault
+    rather than an edge to skip.
+
+  Most `api` fingerprints do not move: `canonicalizeDecorators` names the fields it takes and
+  `qualifier` is not among them, while `raw` already carried the receiver. The exception is a
+  decorator whose classification changes, since `ApiInput` includes `extKind` and
+  `decorators[].boundary` — a decorator that used to resolve its leaf through a named import and
+  now resolves its receiver can stop matching the vocabulary, and its Symbol's api hash moves
+  with it. That movement is the fix working.
+
+- 664e993: Effect plugins see the receiver a decorator was written through
+
+  `ClassifyContext.owner.decorators` carried only each decorator's `name` and `boundary`, so an
+  effect plugin could not tell `@tsed.Post()` from a `@Post()` imported from another library — the
+  receiver that framework plugins already resolve against the file's imports never reached it. Each
+  entry now carries `qualifier` when the decorator had one (`tsed` here), and omits the key for a
+  bare decorator, as `Decorator` does. The field is optional, so existing plugins and code building an
+  `OwnerSummary` compile unchanged. The element type is exported as `OwnerDecorator`, for helpers
+  that take one decorator.
+
+- 41a75a0: A decorator written in parentheses is named after what it encloses
+
+  `@(Controller)` is legal TypeScript, and the extractor named it after its text, `(Controller)`. That
+  name matched no framework's vocabulary, so a class decorated that way stayed unclassified even when
+  the file imported `Controller` from `@nestjs/common`. `@(nest\n  .Controller)` also put a line break
+  into `Decorator.name`. A name, a member path or a call in parentheses is now read through them:
+  `Controller`, `Controller` with qualifier `nest`, and so on, also when only an argument inside
+  them is malformed. `raw` still quotes the parentheses.
+
+  TypeScript accepts any expression there, but the grammar does not. `@(x as any)`, `@(x!)` and
+  `@(a[b])` reach the extractor only through error recovery, and there is no name to read from them.
+  They keep their place in the list under the reserved name `<expression>`, exported as
+  `UNNAMED_DECORATOR`, with the text in `raw`. `Decorator.name` is now always an identifier or that
+  marker.
+
+- 3dd0dd0: A Symbol's confidence shows on its heading, and the diff reports a change to it
+
+  `Symbol.confidence` was written and validated but never rendered or compared, so a Symbol the
+  machine was unsure of looked like any other outside the raw IR. Now:
+
+  - Every Markdown heading that names a Symbol (component pages, `diff.md` entries, `explain`,
+    kept or dropped), and the names-only row that replaces one under the size cap, carries
+    `⚠ medium` or `⚠ low` after the kind when its confidence is not `high`.
+  - `aburi diff` treats a confidence change as a change even when no fingerprint moved: the pair
+    is `changed`, and counts toward `--fail-on changed`, or `moved+changed` when it also moved. A
+    pair dropped on both sides stays `unchanged`. One edit can move every Symbol in a file, since
+    a plugin may read a file-level signal such as an import.
+  - `--fail-on confidence-changed` gates on that axis alone and takes a threshold;
+    `--fail-on api-changed,logic-changed` ignores it.
+  - `SymbolDelta` gains `confidenceChanged`, an optional boolean in `aburi.diff.v1.json` that the
+    writer always emits.
+  - `diff.md` adds a `- confidence: <base> → <head>` row to the entry, and a new
+    "🎚 Confidence changes" section, above Syntax-only changes, holds entries whose API and logic
+    did not change. The "no field-level detail" note no longer disappears beside a component or
+    confidence row, since neither explains a fingerprint.
+  - `symbolTitle` is exported from `@aburi/markdown-projection`.
+
+### Patch Changes
+
+- 5a9ebda: Load a plugin named by absolute path on every platform
+
+  Only refs starting with `./` or `../` became `file:` URLs; everything else went to the ESM
+  resolver as a package specifier. On POSIX an absolute path contains `/`, so it passed through
+  verbatim and happened to import. On Windows it did not: `C:/plugins/x.mjs` failed with `Received
+protocol 'c:'`, and `C:\plugins\x.mjs`, which contains no `/`, was prefixed into
+  `@aburi/C:\plugins\x.mjs`. The same `aburi.json` therefore loaded on one platform and exited 3 on
+  the other. An absolute path is now normalized and converted to a `file:` URL as well, and points
+  at that file whatever the workspace root is; on Windows it may be written with forward slashes or
+  backslashes, or name a UNC share.
+
+  The conversion also fixes plugin file names containing `#` or `%` on every platform, POSIX
+  included: passed through verbatim, `#` began a URL fragment and `%` a percent-escape, so the file
+  was not found. Spaces were already fine.
+
+  Refs that name a Windows drive in a way the platform cannot honour are now a config error, exit 2,
+  where they used to reach the ESM resolver and fail as a plugin load at exit 3:
+
+  - On Windows, a path rooted with no drive (`/opt/plugins/x.mjs`, `\plugins\x.mjs`) counts as
+    absolute to Node but borrows a drive from elsewhere, and a drive with no root
+    (`C:plugins\x.mjs`) resolves against whatever directory is current on that drive. Either could
+    name a different file depending on where Aburi runs. The message spells the ref out with the
+    workspace root's drive, or from the drive's root.
+  - On any other platform, a ref naming a drive (`C:/plugins/x.mjs`, `C:\plugins\x.mjs`) — a
+    Windows-authored config read in WSL, a container or CI — is reported as naming a drive this
+    platform does not have, instead of as an unknown URL scheme or `@aburi/` package.
+
+  Every ref is resolved before the first plugin is imported, so a refused ref stops the run before
+  any plugin code has run, including plugins listed ahead of it.
+
+  Relative paths are unchanged: they still have to start with `./` or `../`, and `.\plugins\x.mjs`
+  still resolves as a package name. The `@aburi/types` patch carries the regenerated `PluginRef`
+  description, which now names absolute paths.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
 ## 0.4.0
 
 ### Minor Changes

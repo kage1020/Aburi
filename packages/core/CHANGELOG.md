@@ -1,5 +1,230 @@
 # @aburi/core
 
+## 0.5.0
+
+### Minor Changes
+
+- 2b85a00: An export of a namespace merged into a class is named as the class's static member, and a call through the class name reaches it
+
+  `class C { m() {} }` beside `namespace C { export function m() {} }` produced one Symbol, `C.m`,
+  carrying the method's range and both bodies' calls. The export is now `C::m`, the static member
+  TypeScript resolves it as, and the method keeps `C.m`. Ids of every such export change from `C.x`
+  to `C::x`, and so do the ids of everything declared under one (`C::Inner.g`). What the namespace
+  does not export keeps the dot (`C.local`).
+
+  Other effects visible in a Document or a diff against an older one:
+
+  - The instance member no longer folds with the export, so it loses `declaration-merged` and its
+    `mergedDeclarations`. Its syntax fingerprint changes, and a diff against an older Document
+    reports it as modified though nobody touched it.
+  - A namespace holding only types may be written before the class. There its `export type m`
+    used to lead the fold, so the Symbol was a dropped `type` and the method's calls and effects
+    went nowhere. They now appear on `C.m`, with `C::m` the dropped type.
+  - A `static m()` beside `export function m()` in the namespace is now one Symbol, `C::m`,
+    where it was two (`C::m` and `C.m`). A `static m()` beside `export type m` folds the same
+    way, as a value and a type of one name do elsewhere.
+  - In `@aburi/core`, file and import scope resolve `C.m()` to `C::m` when it exists: a class-name
+    receiver reads the static side. A call to a real static method, which resolved to nothing,
+    now gets an edge, and a call to a namespace export gets one again. Component and workspace
+    scope still compare the target with `Symbol.name` verbatim. LSP enrichment now finds a
+    static member's document symbol, which it looked up by the text after the last `.`.
+  - In `@aburi/diff`, rename matching reads the member after the last separator of either kind,
+    so `C::Inner.g` is matched on `g` rather than `Inner.g`.
+
+- c28f20c: Carry the receiver a decorator was written through, and read it against the file's imports
+
+  `@nest.Controller()` and `@tsed.Controller()` were indistinguishable by the time a framework
+  plugin saw them. `readDecorator` reduced a qualified decorator to its leaf identifier, so
+  `Decorator` said `Controller` and nothing said which module it came from — and
+  `readImportedNames` skipped `symbols: "*"` edges outright, so even a recorded
+  `namespaceBinding` was never indexed. Both halves had to be wrong for the bug to hold, and
+  both were.
+
+  The consequence was the provenance table in `lang-plugin.md` §5.2.2 being out of order in its
+  last row. A decorator written through a module object landed in "no edge binds it" and came
+  back `high`, while the _named_ import of the same decorator from the same library came back
+  `medium`. The file that disclosed more was trusted less.
+
+  `Decorator` now carries `qualifier`: the receiver verbatim, `nest` for `@nest.Controller()`
+  and `a.b` for `@a.b.C()`. It is Class B per `ir-schema.md` §1.1 — a bare decorator omits the
+  key entirely — so a document written before this change reads exactly as it did, and `raw`
+  still quotes the whole written form. `@aburi/framework-nestjs` resolves a qualified decorator
+  through the receiver's first segment, which is the only part that can name something in
+  scope, and looks that segment up in **both** binding indexes: `import * as nest` binds the
+  module object under `namespaceBinding`, `import nest from` binds it as a named symbol, and a
+  decorator written through either has disclosed the same thing.
+
+  A qualified decorator deliberately does **not** resolve its _leaf_ through the named-import
+  index. The leaf is a property of a module object, not an identifier in the file's scope, so a
+  file that imports `Controller` by name from NestJS while writing `@tsed.Controller()` no
+  longer reports the second as though it were the first.
+
+  **What changes for a caller**
+
+  - A NestJS Symbol classified from a module object of a competing library now reports
+    `confidence: "medium"` where it reported `high`, whether the module was bound by
+    `import * as` or by a default import.
+  - `SymbolClassification.decoratorBoundaries` is keyed on the decorator as the source **wrote**
+    it, receiver included: `nest.Controller`, not `Controller`. The contract always said
+    "written name"; before `qualifier` existed the leaf _was_ that name. The leaf alone is not a
+    usable key, because two decorators on one Symbol can share it while resolving to different
+    vocabulary, and a shared key flags both — putting `boundary: true` on a decorator that was
+    never classified, which `drop-b` then reads.
+  - `@aburi/framework-nestjs` renames the exported `ImportedNames` to `ImportedBindings`, now an
+    interface of two maps rather than one map, and `resolveDecoratorName` takes the decorator
+    (`Pick<Decorator, "name" | "qualifier">`) instead of a bare name. Both are in the published
+    types.
+  - `@aburi/plugin-registry` adds `assertNamespaceBinding`, the namespace-edge counterpart to
+    `assertImportBinding`: a `namespaceBinding` that is present but empty is an upstream fault
+    rather than an edge to skip.
+
+  Most `api` fingerprints do not move: `canonicalizeDecorators` names the fields it takes and
+  `qualifier` is not among them, while `raw` already carried the receiver. The exception is a
+  decorator whose classification changes, since `ApiInput` includes `extKind` and
+  `decorators[].boundary` — a decorator that used to resolve its leaf through a named import and
+  now resolves its receiver can stop matching the vocabulary, and its Symbol's api hash moves
+  with it. That movement is the fix working.
+
+- 1d09de8: Derive a component id from the package's own name and path, not from where it sits in the list
+
+  `toIdFromNpmName` threw the npm scope away, so every `utils` in a workspace was the same id and
+  the collision passes had to tell them apart. In the layout nearly every monorepo has — each
+  package directly under `packages/` — they cannot: the parent-directory suffix is `-packages` for
+  all of them, and the tie-break fell through to a positional `-2`, `-3`, … counter handed out in
+  root order. Adding `@alpha/utils` at `packages/a-utils` therefore renamed its neighbours:
+  `utils-packages` became `utils-packages-2`, and `utils-packages-2` became `utils-packages-3`.
+  Component id is the key for `Symbol.component`, for both `Dependency` endpoints and for
+  cross-revision comparison, so one new package read downstream as every component having been
+  replaced.
+
+  The scope is folded into the id instead of discarded: `@alpha/utils` is `alpha-utils`. It is the
+  part of a published name that already distinguishes two same-named packages, and it is on the
+  package rather than on the workspace around it. An unscoped name is unchanged, and `@scope/`
+  still yields no id, so the next manifest is asked for one (`component-detect.md` §4.1 is a
+  priority over sources). The fold is over the bare name's id rather than the raw string, so
+  `@acme/---` still aborts with `invalid-component-id` naming the package instead of quietly
+  becoming `acme`.
+
+  What is left after that is a genuine collision, and it is now resolved from the component's own
+  `roots[0]`. The suffix takes the parent directory as before, then one more step up the path for
+  every id still shared, until each is unique or its root has no ancestors left:
+  `team1/shared/pkg` and `team2/shared/pkg` are `pkg-shared-team1` and `pkg-shared-team2` rather
+  than `pkg-shared` and `pkg-shared-2`. What the path cannot separate takes a short digest of
+  `roots[0]` appended to the id it reached (`utils-packages-b9b98f98`), and every member of that
+  group takes one: leaving the bare id with whichever component sorted first is the positional
+  input this change exists to remove. Because that separates by digest rather than by
+  construction, uniqueness is checked once on exit and a surviving duplicate aborts with the new
+  `component-id-collision-unresolved` — `aburi init` writes `components[]` without building an IR,
+  so the ir-schema.md §14 #2 invariant is not the one that would catch it.
+
+  The promise is that an id never depends on a component's position among the others, not that an
+  id never moves. A package arriving with an id already in use still moves whoever holds it — add
+  `packages/x` named `shared-libs` and `team/libs/shared` becomes `shared-libs-team`. What has
+  changed is the reach: before, any package under the same parent renumbered its neighbours; now
+  only a package contending for the same id moves anything.
+
+  **Migration.** Ids derived from a scoped name change: `@acme/billing-api` at `apps/billing` was
+  `billing-api` and is `acme-billing-api`. Folding also erases the namespace boundary, so
+  `@foo/bar-baz`, `@foo-bar/baz` and an unscoped `foo-bar-baz` now derive one id where the first
+  two were distinct — which means a scoped package can newly collide with an _unscoped_ neighbour
+  that was never involved before, and both come out of that collision with suffixed or hashed ids.
+  A workspace that pinned any old spelling — `components[].id` in `aburi.json`, a slice, or a
+  stored IR compared against a new scan — should either declare the component explicitly, which
+  has always won over the derivation (`config.md` §6.1), or take the rename once.
+
+- 664e993: Effect plugins see the receiver a decorator was written through
+
+  `ClassifyContext.owner.decorators` carried only each decorator's `name` and `boundary`, so an
+  effect plugin could not tell `@tsed.Post()` from a `@Post()` imported from another library — the
+  receiver that framework plugins already resolve against the file's imports never reached it. Each
+  entry now carries `qualifier` when the decorator had one (`tsed` here), and omits the key for a
+  bare decorator, as `Decorator` does. The field is optional, so existing plugins and code building an
+  `OwnerSummary` compile unchanged. The element type is exported as `OwnerDecorator`, for helpers
+  that take one decorator.
+
+- 07d0962: A `#`-private member keeps its `#` in its qualified name
+
+  `v() {}` beside `#v() {}` produced one Symbol, `Q.v`, carrying both bodies and the visibility of
+  whichever was written first. A qualified-name segment after a separator may now open with one
+  `#`, and the private member is `Q.#v` (`Q::#v` when static). What changes for existing IR:
+
+  - Ids and `Symbol.name` of every `#`-private member change from `Q.v` to `Q.#v`, and the api
+    fingerprint's `shortName` from `v` to `#v`. Comparing IR built before this change with IR built
+    after it reports those members as changed.
+  - The LSP tier now resolves a call such as `this.#v()`: tsserver's hover names `C.#v`, which is
+    now a Symbol, so the call gets an edge where it used to count as `memberNotFound`. Private
+    members also get columns from document symbols.
+  - A qualified name may not open with `#`, and `isQnameSegment` admits `#v` only when called with
+    `{ privateName: true }`. A quoted `"#v"() {}` and an index `obj["#v"]` are still the public
+    property with those characters: the first has no Symbol, the second a `<computed>` segment.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+### Patch Changes
+
+- d6de3b0: Let a duplicate Symbol id cost its file, the way every other plugin fault does
+
+  `lang-plugin.md` §7.2 has said since before there was a `try` in the scan that one file's bug
+  does not halt IR generation: a qualified name the grammar refuses costs its file and is named in
+  `skipped`. Invariant #1 was the exception. `assertIRIntegrity` runs once, over the assembled
+  document, outside the per-file boundary — so two Symbols under one id were found after every file
+  had already been extracted, and the run threw and produced no document at all. A workspace of
+  healthy files yielded nothing because one file confused one plugin: no artifact on disk rather
+  than a thinner IR.
+
+  The check now runs per file, in `scan()`'s `extracted` branch, ahead of every accumulator — so a
+  refusal leaves nothing half-written, the same property the exception boundary beside it gets from
+  `runFilePipeline` returning its result at once. The offending file is withdrawn on the existing
+  terms: `ScanResult.skipped` with `reason: "extraction-failed"`, a `ScanResult.extractionFailures`
+  entry carrying the new `duplicate-symbol-id` code, a warning naming the file, and exit `3`, so a
+  run that hit this is still not green. Every other file reaches the document.
+
+  Two shapes are answered, both read off the file being extracted so that the message names the
+  plugin that is actually wrong. Two of one file's own Symbols under one id is the shape that
+  happens, because an id carries the file it came from, and the message names the id and both
+  declarations' lines — the id names the qualified name they share and nothing else tells them
+  apart. An id whose path is not this file's is the other, which `lang-plugin.md` §4.3 now states
+  outright as a rule; the file that _wrote_ the id is the one withdrawn, whichever of the two
+  discovery reached first, since withdrawing the file the id merely names would take a healthy file
+  for another's fault. Answering both here is what leaves the document-wide check as a backstop
+  rather than the first line of defence.
+
+  Which of two Symbols to keep is not the core's to decide — they are the plugin's output and it
+  reported nothing that separates them — so the file goes whole rather than one of the pair being
+  picked silently.
+
+  `@aburi/cli` only follows the wording: the `extraction-failed` skip-reason advice now says "a
+  plugin threw while extracting, or its Symbols could not enter the Document", since a throw is no
+  longer the only way into that group.
+
+- Updated dependencies [5a9ebda]
+- Updated dependencies [c28f20c]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [3dd0dd0]
+  - @aburi/types@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes

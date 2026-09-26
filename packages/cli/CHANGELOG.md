@@ -1,5 +1,340 @@
 # @aburi/cli
 
+## 0.5.0
+
+### Minor Changes
+
+- bc816a6: Say which command and which output failed to write, and why a ref did not resolve
+
+  Two gaps in error surfacing, both in `aburi diff` and one shared with `aburi scan`.
+
+  **Output writes.** Config and IR reads were wrapped, but the write path was not: `aburi scan
+--output-dir notadir` where `notadir` is a file answered `EEXIST: file already exists, mkdir
+'…/notadir'` at exit 1, and a read-only output directory answered a bare `EPERM … open
+'…/workspace.md'`. Nothing said which command was running or which of its outputs did not land.
+  Every artefact `init`, `scan`, `diff` and `explain` write — the output directory, the IR, the
+  workspace and per-component Markdown, the diff JSON and Markdown, the config, the explain
+  Markdown — now goes through one path that reports `aburi <command> could not write <artefact> to
+<path>: …`, and the command named is the one the reader typed: the two scans `aburi diff` runs
+  report as `aburi diff`, and the rescan `aburi explain` runs as `aburi explain`. The exit code
+  follows who has to act: a path that cannot hold the output (a file where the directory would go,
+  a directory where the file would go) is exit 2 with the flag to point elsewhere named —
+  `--output-dir` or the config's `output.dir` for the two directory-writing commands, `--output` for
+  the other two — and the errno kept after the sentence; a permission, a read-only mount or a full
+  disk stays exit 1, now with the command and artefact in front of Node's message rather than
+  instead of it. `aburi init` and `aburi explain` previously rethrew that second kind raw; they now
+  report it the same way. Both directory-writing commands create the directory before they scan or
+  compare, so an unusable destination is refused before anything is computed for it. A refusal by
+  the serializer itself (a document with two keys differing only in Unicode composition) is still
+  exit 2 and now says `serialize` rather than `write`, since the disk was never asked — for the
+  diff JSON as well, which previously escaped as a bare exception at exit 1.
+
+  **Ref resolution.** `aburi diff main..HEAD` in a directory that is not a git repository, and
+  `HEAD~1..HEAD` in a repository with no commits, both answered `Base ref 'main' could not be
+resolved. If this is a CI shallow clone, run: git fetch --deepen=50 origin main` — advice that
+  cannot help either — at exit 1, which `cli-spec.md` reserves for the machine's failures. Git's own
+  stderr does not distinguish the cases (`Needed a single revision` for both a mistyped ref and an
+  empty repository), so once a ref fails the command asks git two more questions and says which it
+  was: `<cwd> is not inside a git repository` (with `--base/--head` as the way to compare without
+  one), `the repository at <cwd> has no commits yet`, or `no such revision in this repository.
+Check the spelling, or fetch the branch first`. All three are exit 2: what was typed, or where it
+  was typed, is the reader's to fix. Every message ends with what git itself reported. The
+  `--deepen` advice is gone rather than kept for shallow clones, because the shallow check that
+  follows refuses the clone it would produce.
+
+  Only an answer becomes a diagnosis. A question git refuses — dubious ownership of the repository
+  is the everyday case — ends the run at exit 1 with git's own report, which carries the
+  `safe.directory` remedy that no guess of ours could; "not inside a git repository" is claimed only
+  when nothing git would open stands at the directory or above it. The probes run only after a ref
+  has failed, so a run whose refs resolve makes no extra git calls. A missing `git` executable is
+  still exit 1 with its own message.
+
+  Minor rather than patch: a documented exit code moves from 1 to 2 for a ref that does not
+  resolve, and `ScanOptions` gains `command`.
+
+- 56b6538: Make the recoverable-parse-error warning worth reading: stop counting the tsx grammar's `&`, and name the files
+
+  Two halves of one complaint. The warning that says a scan read files it could not fully parse
+  reported a bare count, and on a React codebase most of that count was the grammar rather than the
+  workspace.
+
+  **The grammar's `&`.** `@vscode/tree-sitter-wasm`'s tsx grammar reads `&` inside JSX as the
+  opening of an HTML character reference and raises an ERROR when no `;` closes it. So
+  `<CardTitle>Subscription & Billing</CardTitle>` and `href="/x?utm_source=a&utm_medium=b"` —
+  ordinary prose and a tracking URL — were parse errors, while `&amp;`, `&nbsp;`, an attribute whose
+  `&` stands alone and `{"a & b"}` were not. Measured on `shadcn-ui`, 110 of 3,912 `.tsx` files
+  carried a recoverable parse error and every one of them was this. No published grammar has fixed
+  it as of 2026-09, and the dependency is a `^0.3.1` range, so a fix would arrive on its own if one
+  ever shipped.
+
+  Nothing was lost by it and nothing is lost by dropping it: the same component written with `&` and
+  with `&amp;` extracts the same Symbols, the same signature and the same `calls[]`, including a call
+  written below the ampersand. What it cost was the signal — a warning that fires on 3% of files as a
+  matter of course stops being read — so `collectParseErrors` no longer reports that one shape
+  (`lang-plugin.md` LP27a).
+
+  The shape is narrow so a file that really was truncated is not dropped with it. The run the grammar
+  could not place has to open with an ampersand-led token, sit among a JSX element's children or
+  inside a JSX attribute's string value, and — among children — hold none of `{`, `}`, `<`, `>`,
+  which JSX text cannot contain. That last rule matters because tree-sitter merges an adjacent
+  unparseable stretch into one ERROR node: without it, an `&` earlier in the same children swallowed
+  everything after it, and `<div>a & } b</div>` went quiet. The four characters are ordinary inside
+  an attribute's string, so the rule does not reach there.
+
+  A truncation whose ERROR sits outside both positions still reports, including in a file that
+  carries one of each: `export const U = () => <div><p>a & b</p>` reports the unterminated `<div>`
+  and nothing else.
+
+  **The files behind the count.** `⚠ N file(s) had recoverable parse errors.` was the whole warning,
+  and mostly these files are in the IR, so `stats.skippedFiles[]` does not hold them and no per-file
+  log line is written for them either — there was nowhere to look up which files they were. `aburi
+scan` now lists them under that line, each with the first error reported for it and a count when
+  there was more than one.
+
+  The listing is **uncapped**, unlike the skip census below it, and sits up with the other sections
+  whose entries exist nowhere else. Capping the only account of something is the loss rather than
+  the shape of it. `aburi diff` is unchanged here on purpose: it runs both scans, each report names
+  its own files with the side in the header, so the diff-level line stays a count and a consequence
+  rather than a third printing of every doubtful path.
+
+  Minor for `@aburi/cli` rather than patch: `ScanReport` gains a required `parseErrorFiles`.
+  `parseErrorCount` is kept, set from that list's length where the report is built.
+
+- a17994c: A capped diff report lists a section's names before it drops the section
+
+  `projectDiff`'s `maxBytes` used to drop whole sections from the bottom, so the largest pull
+  requests got the emptiest reports: #290's kept only API changes and named none of its 302 removed
+  symbols. Sections are now kept most important first at their smallest — a section whose entries
+  are whole Symbols as one `name` _(kind)_ — `file:line` row per Symbol — and one is dropped only
+  when it cannot fit even beside every more important one cut that far; the lists then get their
+  full entries back from the top as the budget allows. A section too large to fit even as names no
+  longer takes the smaller ones below it with it. The note tells the short sections apart from the
+  omitted ones, and says a budget was missed even when there was no section to drop.
+
+  `projectDiff` takes a `fullReportLocation` option naming where the uncapped report is; a line
+  break in it throws `RangeError`, and `maxBytes` is now checked before anything is rendered.
+  `aburi diff --max-bytes` writes that report as `diff.full.md`, before `diff.md`, whenever the cap
+  changed anything, and every other run — whatever its `--format` — removes one an earlier run left.
+  A path there that cannot be removed fails like one that cannot be written, with the artefact
+  named. `runDiff`'s report gains `diffFullMdPath`.
+
+- fd0aced: A config key named twice, contradictory `scan` format flags, and an empty `--fail-on` clause are refused
+
+  Existing configs and CI arguments that relied on any of these now exit 2. Each was settled rather
+  than reported. `{ "ignore": ["a/**"], "ignore": ["b/**"] }` kept the second list and dropped
+  `a/**`; it is now `config-invalid`, naming the key, the object and the line of the second, and so
+  is a `__proto__` key, which the schema could not see. `aburi scan --no-md --no-json` wrote the IR
+  anyway, and `--format md --no-md` wrote JSON. A combination that drops everything, or drops an
+  output `--format` includes, now exits 2 and writes nothing. `--fail-on 'added,'` and
+  `'added,,removed'` skipped the empty clause; they now exit 2 like an empty value does. A
+  `--fail-on` error names the whole value as typed and which clause failed.
+
+- 82b66e5: Render the report to the size a comment can hold, instead of learning it from a 422
+
+  `projectDiff` emitted whatever the diff was worth, and the document it produces exists to be
+  posted as a pull request comment — where GitHub's limit is 65536 bytes, enforced by rejecting
+  the whole body with a 422 and posting nothing. A minimal symbol renders at roughly 210 bytes, so
+  a branch adding about 310 symbols crossed it. The run that lost its report was the large refactor,
+  which is the one the report was for, and the failure named a status code rather than a size.
+
+  `projectDiff(diff, { maxBytes })` caps the document. It is met section by section, never by
+  cutting the string: the sections are `<details>` blocks and fenced code, and a cut inside either
+  renders as an unclosed element swallowing the rest — a report that looks broken rather than
+  shortened, and says nothing about what is missing. Sections give way in ascending order of
+  importance, which is the emission order read from the bottom (Syntax-only, then Dropped changes,
+  then Dependency changes, …), so an API change is never lost while an implementation refactor
+  stays; a section of whole symbols is cut to its names and locations before it goes. The title and
+  the Summary line are never dropped. A capped document says so directly under the Summary, naming
+  the sections in the order the reader looked for them:
+
+  ```md
+  > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
+  ```
+
+  One budget cannot be met — smaller than the title, the Summary line and that note together — and
+  the document that comes back over it says so in as many words rather than claiming a size it does
+  not have. `aburi diff` warns on stderr in the same case, and again when `--format json` leaves the
+  flag nothing to cap.
+
+  `aburi diff --max-bytes <n>` is the CLI spelling, and it caps `diff.md` alone — `diff.json` is
+  unabridged, so nothing is lost from the artefact a tool reads.
+
+  The action passes `--max-bytes 65507` by default: the 65536-byte ceiling less the 29-byte marker
+  line the upsert prepends, kept in step with `ABURI_COMMENT_MARKER` by a test rather than spelled
+  twice. The decision is `scripts/resolve-max-bytes.mjs`, a committed script beside the CLI resolver
+  and for the same reason — a `run:` block is never executed by a test, so a guard dropped from one
+  leaves CI green and breaks every run. Four things it settles. The cap applies under
+  `comment: false` as well, because that is the mode a fork's pull request runs in, where the
+  Markdown travels as an artefact for the `workflow_run` companion to post; a cap keyed on `comment`
+  would simply move the 422 onto the one pull request whose author cannot see the companion's log.
+  The flag is probed for with `aburi diff --help` rather than assumed, because `version` pins the CLI
+  while the action is referenced by ref: against an older CLI it warns — naming both upgrade routes,
+  since `version` means nothing under `cli: workspace` — and renders uncapped, which is what that CLI
+  did anyway. A probe that could not run at all is reported as itself rather than as a missing flag,
+  because a registry outage read as "this CLI has no `--max-bytes`" is a green job publishing an
+  oversized artefact with a log that explains it wrongly. And `format: json` caps nothing, since that
+  run writes no `diff.md`.
+
+  Both ends of the upsert now measure before they write — `scripts/upsert-comment.mjs` exits 2 with a
+  one-line annotation, `upsertPullRequestComment` throws — and say which file is how large and which
+  flag renders a smaller one. Neither can re-render a finished document, but neither relays a 422
+  that never mentions size. `GITHUB_COMMENT_MAX_BYTES` and `ABURI_COMMENT_BODY_MAX_BYTES` are
+  exported for callers posting Aburi reports themselves.
+
+  A section is the smallest unit the cap drops, so a branch that adds two thousand symbols gets
+  their names rather than their first few hundred entries, or the note alone when even the names do
+  not fit. The full report is in `diff.json`, and `aburi diff` writes the uncapped Markdown as
+  `diff.full.md` beside the capped one.
+
+  **Compatibility.** `projectDiff` takes the budget as a second argument and is unchanged without
+  one; every existing caller keeps the whole document. A workflow using the action does get a capped
+  `diff.md` where it previously got an uncapped one — that is the fix — and `max-bytes: 0` restores
+  the old behaviour for a run that wants the file whole.
+
+- 3dd0dd0: A Symbol's confidence shows on its heading, and the diff reports a change to it
+
+  `Symbol.confidence` was written and validated but never rendered or compared, so a Symbol the
+  machine was unsure of looked like any other outside the raw IR. Now:
+
+  - Every Markdown heading that names a Symbol (component pages, `diff.md` entries, `explain`,
+    kept or dropped), and the names-only row that replaces one under the size cap, carries
+    `⚠ medium` or `⚠ low` after the kind when its confidence is not `high`.
+  - `aburi diff` treats a confidence change as a change even when no fingerprint moved: the pair
+    is `changed`, and counts toward `--fail-on changed`, or `moved+changed` when it also moved. A
+    pair dropped on both sides stays `unchanged`. One edit can move every Symbol in a file, since
+    a plugin may read a file-level signal such as an import.
+  - `--fail-on confidence-changed` gates on that axis alone and takes a threshold;
+    `--fail-on api-changed,logic-changed` ignores it.
+  - `SymbolDelta` gains `confidenceChanged`, an optional boolean in `aburi.diff.v1.json` that the
+    writer always emits.
+  - `diff.md` adds a `- confidence: <base> → <head>` row to the entry, and a new
+    "🎚 Confidence changes" section, above Syntax-only changes, holds entries whose API and logic
+    did not change. The "no field-level detail" note no longer disappears beside a component or
+    confidence row, since neither explains a fingerprint.
+  - `symbolTitle` is exported from `@aburi/markdown-projection`.
+
+### Patch Changes
+
+- 5a9ebda: Load a plugin named by absolute path on every platform
+
+  Only refs starting with `./` or `../` became `file:` URLs; everything else went to the ESM
+  resolver as a package specifier. On POSIX an absolute path contains `/`, so it passed through
+  verbatim and happened to import. On Windows it did not: `C:/plugins/x.mjs` failed with `Received
+protocol 'c:'`, and `C:\plugins\x.mjs`, which contains no `/`, was prefixed into
+  `@aburi/C:\plugins\x.mjs`. The same `aburi.json` therefore loaded on one platform and exited 3 on
+  the other. An absolute path is now normalized and converted to a `file:` URL as well, and points
+  at that file whatever the workspace root is; on Windows it may be written with forward slashes or
+  backslashes, or name a UNC share.
+
+  The conversion also fixes plugin file names containing `#` or `%` on every platform, POSIX
+  included: passed through verbatim, `#` began a URL fragment and `%` a percent-escape, so the file
+  was not found. Spaces were already fine.
+
+  Refs that name a Windows drive in a way the platform cannot honour are now a config error, exit 2,
+  where they used to reach the ESM resolver and fail as a plugin load at exit 3:
+
+  - On Windows, a path rooted with no drive (`/opt/plugins/x.mjs`, `\plugins\x.mjs`) counts as
+    absolute to Node but borrows a drive from elsewhere, and a drive with no root
+    (`C:plugins\x.mjs`) resolves against whatever directory is current on that drive. Either could
+    name a different file depending on where Aburi runs. The message spells the ref out with the
+    workspace root's drive, or from the drive's root.
+  - On any other platform, a ref naming a drive (`C:/plugins/x.mjs`, `C:\plugins\x.mjs`) — a
+    Windows-authored config read in WSL, a container or CI — is reported as naming a drive this
+    platform does not have, instead of as an unknown URL scheme or `@aburi/` package.
+
+  Every ref is resolved before the first plugin is imported, so a refused ref stops the run before
+  any plugin code has run, including plugins listed ahead of it.
+
+  Relative paths are unchanged: they still have to start with `./` or `../`, and `.\plugins\x.mjs`
+  still resolves as a package name. The `@aburi/types` patch carries the regenerated `PluginRef`
+  description, which now names absolute paths.
+
+- d6de3b0: Let a duplicate Symbol id cost its file, the way every other plugin fault does
+
+  `lang-plugin.md` §7.2 has said since before there was a `try` in the scan that one file's bug
+  does not halt IR generation: a qualified name the grammar refuses costs its file and is named in
+  `skipped`. Invariant #1 was the exception. `assertIRIntegrity` runs once, over the assembled
+  document, outside the per-file boundary — so two Symbols under one id were found after every file
+  had already been extracted, and the run threw and produced no document at all. A workspace of
+  healthy files yielded nothing because one file confused one plugin: no artifact on disk rather
+  than a thinner IR.
+
+  The check now runs per file, in `scan()`'s `extracted` branch, ahead of every accumulator — so a
+  refusal leaves nothing half-written, the same property the exception boundary beside it gets from
+  `runFilePipeline` returning its result at once. The offending file is withdrawn on the existing
+  terms: `ScanResult.skipped` with `reason: "extraction-failed"`, a `ScanResult.extractionFailures`
+  entry carrying the new `duplicate-symbol-id` code, a warning naming the file, and exit `3`, so a
+  run that hit this is still not green. Every other file reaches the document.
+
+  Two shapes are answered, both read off the file being extracted so that the message names the
+  plugin that is actually wrong. Two of one file's own Symbols under one id is the shape that
+  happens, because an id carries the file it came from, and the message names the id and both
+  declarations' lines — the id names the qualified name they share and nothing else tells them
+  apart. An id whose path is not this file's is the other, which `lang-plugin.md` §4.3 now states
+  outright as a rule; the file that _wrote_ the id is the one withdrawn, whichever of the two
+  discovery reached first, since withdrawing the file the id merely names would take a healthy file
+  for another's fault. Answering both here is what leaves the document-wide check as a backstop
+  rather than the first line of defence.
+
+  Which of two Symbols to keep is not the core's to decide — they are the plugin's output and it
+  reported nothing that separates them — so the file goes whole rather than one of the pair being
+  picked silently.
+
+  `@aburi/cli` only follows the wording: the `extraction-failed` skip-reason advice now says "a
+  plugin threw while extracting, or its Symbols could not enter the Document", since a throw is no
+  longer the only way into that group.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+- Updated dependencies [5a9ebda]
+- Updated dependencies [ffb08d4]
+- Updated dependencies [f9f9d76]
+- Updated dependencies [fe66668]
+- Updated dependencies [9c1f498]
+- Updated dependencies [d6de3b0]
+- Updated dependencies [9495e26]
+- Updated dependencies [bf2e0f5]
+- Updated dependencies [a17994c]
+- Updated dependencies [2b85a00]
+- Updated dependencies [c28f20c]
+- Updated dependencies [1d09de8]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [07d0962]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [fd0aced]
+- Updated dependencies [6b2b2f9]
+- Updated dependencies [05ced63]
+- Updated dependencies [82b66e5]
+- Updated dependencies [3dd0dd0]
+- Updated dependencies [57c1d54]
+  - @aburi/types@0.5.0
+  - @aburi/diff@0.5.0
+  - @aburi/markdown-projection@0.4.0
+  - @aburi/core@0.5.0
+  - @aburi/plugin-registry@0.5.0
+  - @aburi/config@0.4.0
+
 ## 0.4.0
 
 ### Minor Changes
