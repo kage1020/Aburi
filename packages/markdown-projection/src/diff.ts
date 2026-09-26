@@ -24,6 +24,7 @@ import {
   propagatedFromSuffix,
   renderDocument,
   requireDropReason,
+  symbolTitle,
 } from "./format"
 
 /** Options for {@link projectDiff}. */
@@ -124,6 +125,12 @@ export function projectDiff(diff: DiffResult, options: ProjectDiffOptions = {}):
     "## 💧 Dropped changes",
     renderDroppedToggled(buckets.droppedToggled),
     buckets.droppedToggled.length,
+  )
+  appendSection(
+    sections,
+    "## 🎚 Confidence changes",
+    renderChangedList(buckets.confidenceOnly),
+    indexChanged(buckets.confidenceOnly),
   )
   appendFolded(
     sections,
@@ -342,6 +349,7 @@ interface Buckets {
   movedChanged: SymbolMovedChanged[]
   moved: SymbolMoved[]
   droppedToggled: SymbolDroppedToggled[]
+  confidenceOnly: (SymbolChanged | SymbolMovedChanged)[]
   syntaxOnly: (SymbolChanged | SymbolMovedChanged)[]
   unknown: SymbolUnknown[]
 }
@@ -349,7 +357,9 @@ interface Buckets {
 /**
  * Section routing (markdown-projection.md). The delta flags overlap, so `routeChanged`
  * applies a priority: `apiChanged` → API changes, else `logicChanged` → Logic changes, else
- * `syntaxChanged` → Syntax-only. The other buckets are routed by the `status` tag alone.
+ * `confidenceChanged` → Confidence changes, else `syntaxChanged` → Syntax-only. Confidence
+ * outranks syntax because the Syntax-only section is one folded line per entry, where the
+ * before and after would not show. The other buckets are routed by the `status` tag alone.
  */
 function partition(changes: readonly SymbolChange[]): Buckets {
   const out: Buckets = {
@@ -360,6 +370,7 @@ function partition(changes: readonly SymbolChange[]): Buckets {
     movedChanged: [],
     moved: [],
     droppedToggled: [],
+    confidenceOnly: [],
     syntaxOnly: [],
     unknown: [],
   }
@@ -407,6 +418,7 @@ function routeChanged(
 ): void {
   if (delta.apiChanged) out.apiChanged.push(change)
   else if (delta.logicChanged) out.logicOnly.push(change)
+  else if (delta.confidenceChanged === true) out.confidenceOnly.push(change)
   else if (delta.syntaxChanged) out.syntaxOnly.push(change)
 }
 
@@ -482,16 +494,17 @@ function renderChangedList(items: readonly (SymbolChanged | SymbolMovedChanged)[
   const rows: string[] = []
   for (const item of sortByAfterId(items)) {
     const sym = item.after
-    rows.push(`### ${inlineCode(sym.name)} *(${sym.kind})*`)
+    rows.push(`### ${symbolTitle(sym)}`)
     rows.push(`**File**: ${inlineCode(`${sym.source.file}:${sym.source.startLine}`)}`)
     rows.push("")
-    rows.push(...renderDeltaBody(item.delta))
+    rows.push(...renderDeltaBody(item))
     rows.push("")
   }
   return rows
 }
 
-function renderDeltaBody(delta: SymbolDelta): string[] {
+function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
+  const { delta } = change
   const rows: string[] = []
   appendSignatureDelta(rows, delta.signature ?? null)
   appendDecoratorDelta(rows, delta.decorators)
@@ -500,6 +513,11 @@ function renderDeltaBody(delta: SymbolDelta): string[] {
   appendCallDelta(rows, delta.calls)
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
+  if (delta.confidenceChanged === true) {
+    rows.push(
+      `- confidence: ${inlineCode(change.before.confidence)} → ${inlineCode(change.after.confidence)}`,
+    )
+  }
   appendUnexplainedChangeNote(delta, rows)
   return rows
 }
@@ -805,7 +823,7 @@ function renderUnknown(items: readonly SymbolUnknown[]): string[] {
 /** A `###` entry for one whole Symbol: heading, file line, `extraRows`, then the L2 block. */
 function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
   return [
-    `### ${inlineCode(symbol.name)} *(${symbol.kind})*`,
+    `### ${symbolTitle(symbol)}`,
     `**File**: ${inlineCode(`${symbol.source.file}:${symbol.source.startLine}`)}`,
     ...extraRows,
     ...renderSymbolBlock(symbol).slice(1),
@@ -843,12 +861,12 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   if (items.length === 0) return []
   const rows: string[] = []
   for (const item of sortByAfterId(items)) {
-    rows.push(`### ${inlineCode(item.after.name)} *(${item.after.kind})*`)
+    rows.push(`### ${symbolTitle(item.after)}`)
     rows.push(
       `**Moved**: ${inlineCode(item.before.source.file)} → ${inlineCode(item.after.source.file)} (${inlineCode(item.rationale)})`,
     )
     rows.push("**Delta**:")
-    rows.push(...renderDeltaBody(item.delta))
+    rows.push(...renderDeltaBody(item))
     rows.push("")
   }
   return rows
@@ -1120,6 +1138,7 @@ function deltaAxisSummary(delta: SymbolDelta): string {
   if (delta.syntaxChanged) axes.push("delta.syntaxChanged")
   if (delta.componentChanged) axes.push("delta.componentChanged")
   if (delta.visibilityChanged) axes.push("delta.visibilityChanged")
+  if (delta.confidenceChanged === true) axes.push("delta.confidenceChanged")
   return axes.length === 0 ? "no delta axes" : axes.join(", ")
 }
 

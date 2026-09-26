@@ -10,6 +10,7 @@ import {
   ruleRow,
   signatureLine,
   splitDecorators,
+  symbolTitle,
   tableHeader,
   tableRow,
 } from "./format"
@@ -45,7 +46,7 @@ export function projectSymbolExplain(
 
 function renderKeptExplain(symbol: IRSymbol, context: ProjectSymbolExplainContext): string {
   const lines: string[] = []
-  lines.push(`# ${inlineCode(symbol.name)} *(${symbol.kind})*`)
+  lines.push(`# ${symbolTitle(symbol)}`)
   lines.push("")
   if (symbol.component !== null && symbol.component !== undefined) {
     lines.push(`**Component**: ${symbol.component}`)

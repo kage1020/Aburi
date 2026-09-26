@@ -149,6 +149,23 @@ describe("aburi.diff.v1.json — runtime schema validation (SV22)", () => {
     expect(ok).toBe(true)
   })
 
+  it("validates a Symbol whose only change is its confidence, and one written before the flag", () => {
+    const sure = makeSymbol({ id: "ts:src/x.ts#X", name: "X", confidence: "high" })
+    const diff = buildDiff({
+      baseIR: makeIR({ symbols: [sure] }),
+      headIR: makeIR({ symbols: [{ ...sure, confidence: "low" }] }),
+      base: { ref: "b", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+      head: { ref: "h", irSchema: "https://aburi.kage1020.com/schema/aburi.ir.v1.json" },
+    })
+    const [change] = diff.symbols
+    if (change?.status !== "changed") throw new Error("expected a changed entry")
+    expect(change.delta.confidenceChanged).toBe(true)
+    expect(validate(diff)).toBe(true)
+
+    const { confidenceChanged: _, ...older } = change.delta
+    expect(validate({ ...diff, symbols: [{ ...change, delta: older }] })).toBe(true)
+  })
+
   it("rejects a slices[] entry that omits the required `slice:` prefix", () => {
     const diff = buildDiff({
       baseIR: baseIR(),

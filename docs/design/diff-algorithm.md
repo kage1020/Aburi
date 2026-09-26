@@ -527,21 +527,25 @@ apiChanged     = base.fingerprint.api    != head.fingerprint.api
 logicChanged   = base.fingerprint.logic  != head.fingerprint.logic
 syntaxChanged  = base.fingerprint.syntax != head.fingerprint.syntax
 
-fingerprintChanged = apiChanged || logicChanged || syntaxChanged
+confidenceChanged = !head.dropped && base.confidence != head.confidence
+
+contentChanged = apiChanged || logicChanged || syntaxChanged || confidenceChanged
 
 if droppedToggled:
   status = "dropped-toggled"                       // takes precedence over all others
-elif pathChanged && fingerprintChanged:
+elif pathChanged && contentChanged:
   status = "moved+changed"
 elif pathChanged:
   status = "moved"
-elif fingerprintChanged:
+elif contentChanged:
   status = "changed"
 else:
   status = "unchanged"
 ```
 
 unchanged is not included in the default output (only counted in the summary).
+
+`confidence` is compared on its own because no fingerprint reads it. The same code classified less surely — a framework role matched on the identifier alone where an import used to prove it — is something a reviewer has to see, and an `unchanged` pair is never reported, so a confidence change that moved no fingerprint would otherwise vanish. It counts toward `summary.changed` and `--fail-on changed` like any other change. A pair dropped on both sides is exempt and stays `unchanged` (DF13): a dropped Symbol is outside what the diff asks a reviewer to read. `component` is the contrast: it comes from `Component.roots[]` rather than from the code, so a re-rooted package changes it under every Symbol without anyone editing them, and it is recorded on the delta only.
 
 ### 4.1 Why the `dropped-toggled` status exists
 
@@ -747,12 +751,15 @@ delta.signature = {
 
 If both signatures are null → delta.signature = null.
 
-### 5.4 component / visibility delta
+### 5.4 component / visibility / confidence delta
 
 ```
 delta.componentChanged = base.component != head.component
 delta.visibilityChanged = base.visibility != head.visibility
+delta.confidenceChanged = base.confidence != head.confidence
 ```
+
+`confidenceChanged` is optional in the schema only so a diff written before it existed stays valid. A current writer always emits it, `false` included, so a reader can tell "unchanged" from "this writer could not say" (§10.1). The values themselves are on `before` and `after`.
 
 A Component change means "responsibility relocation", so the diff report emphasizes it.
 
@@ -1082,6 +1089,9 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF17a | Same-condition rule with a large line difference (>2) — a body that moved | no delta.rules entry; the exact pass has no window (§5.2.0) |
 | DF17b | Two same-type rules where one moved past the other by more than the window | the one that crossed as added + removed; the other unchanged — non-crossing takes the nearer exact pairing, and the window then refuses the one it displaced. A crossing within the window is repaired by the second pass and reports nothing |
 | DF18 | Only syntax changed (logic/api unchanged) | changed, only delta.syntaxChanged true → in Markdown: "syntax-only, collapsed" |
+| DF18a | Only `confidence` changed (`high` → `medium`), fingerprints equal | changed: 1, only delta.confidenceChanged true → in Markdown: the Confidence changes section |
+| DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
+| DF18c | DF18a on a pair dropped on both sides | unchanged, as DF13 |
 | DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
 | DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` floors an unsegmentable run to the words it must hold (§3.4.1) |
@@ -1097,6 +1107,7 @@ In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 - Adding a `MatchRationale` enum value is **breaking** (consumers' `--fail-on` settings depend on fixed values)
 - Adding a status enum value (`added` / `removed` / `changed` / `moved` / `moved+changed` / `dropped-toggled`) is **breaking**
 - Adding a `summary` field is non-breaking
+- Adding an optional `SymbolDelta` boolean is non-breaking, and the producer emits it unconditionally, `false` included, for the reason the next row gives
 - Adding an optional array is non-breaking on the same terms — to `componentDiff` / `dependencyDiff` or to the document itself — and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed. This is where the diff parts company with the IR, whose Class B fields (ir-schema.md §1.1) are omitted when empty: an IR reader can fall back on `totalFiles - parsedFiles`, and a diff reader has nothing to fall back on.
 
 ## 11. Design decisions

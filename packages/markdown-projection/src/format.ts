@@ -368,7 +368,16 @@ const ZERO_FINGERPRINT = "000000000000"
 
 /** Symbol heading: name + kind is enough for a reader scanning the file. */
 export function symbolHeading(symbol: IRSymbol): string {
-  return `#### ${inlineCode(symbol.name)} *(${symbol.kind})*`
+  return `#### ${symbolTitle(symbol)}`
+}
+
+/**
+ * markdown-projection.md — the text every Symbol heading carries: name, kind, then the
+ * confidence badge. One spelling, so the component page, `diff.md` and `explain` cannot
+ * disagree about whether a Symbol the machine is unsure of says so.
+ */
+export function symbolTitle(symbol: IRSymbol): string {
+  return `${inlineCode(symbol.name)} *(${symbol.kind})*${confidenceBadge(symbol.confidence)}`
 }
 
 /** markdown-projection.md — canonical Symbol order within a file: `startLine`, then `id`. */

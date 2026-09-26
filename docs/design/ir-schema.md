@@ -338,7 +338,7 @@ Criteria:
 | `medium` | Identifier match (inferring `db.write` from `prisma.invoice.create`), or determination from naming conventions (`*Service`, `*Controller`) |
 | `low` | Heuristic (symbol connectivity or file location is the only evidence) |
 
-Symbols with `low` confidence get a badge in the Markdown projection so reviewers clearly know the machine is not confident.
+Symbols with `medium` or `low` confidence get a badge on every Markdown heading that names them ([`markdown-projection.md`](./markdown-projection.md) §3.5), so reviewers clearly know the machine is not confident. No fingerprint reads `confidence`, so `aburi diff` compares it on its own: a Symbol whose confidence moved is `changed` with `delta.confidenceChanged` ([`diff-algorithm.md`](./diff-algorithm.md) §4, §5.4).
 
 ### 5.5 `derivedBy` (evidence)
 

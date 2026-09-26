@@ -47,6 +47,7 @@ export {
   signatureLine,
   splitDecorators,
   symbolHeading,
+  symbolTitle,
   tableCell,
   tableHeader,
   tableRow,
