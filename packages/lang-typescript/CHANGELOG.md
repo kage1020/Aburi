@@ -1,5 +1,228 @@
 # @aburi/lang-typescript
 
+## 0.5.0
+
+### Minor Changes
+
+- 2b85a00: An export of a namespace merged into a class is named as the class's static member, and a call through the class name reaches it
+
+  `class C { m() {} }` beside `namespace C { export function m() {} }` produced one Symbol, `C.m`,
+  carrying the method's range and both bodies' calls. The export is now `C::m`, the static member
+  TypeScript resolves it as, and the method keeps `C.m`. Ids of every such export change from `C.x`
+  to `C::x`, and so do the ids of everything declared under one (`C::Inner.g`). What the namespace
+  does not export keeps the dot (`C.local`).
+
+  Other effects visible in a Document or a diff against an older one:
+
+  - The instance member no longer folds with the export, so it loses `declaration-merged` and its
+    `mergedDeclarations`. Its syntax fingerprint changes, and a diff against an older Document
+    reports it as modified though nobody touched it.
+  - A namespace holding only types may be written before the class. There its `export type m`
+    used to lead the fold, so the Symbol was a dropped `type` and the method's calls and effects
+    went nowhere. They now appear on `C.m`, with `C::m` the dropped type.
+  - A `static m()` beside `export function m()` in the namespace is now one Symbol, `C::m`,
+    where it was two (`C::m` and `C.m`). A `static m()` beside `export type m` folds the same
+    way, as a value and a type of one name do elsewhere.
+  - In `@aburi/core`, file and import scope resolve `C.m()` to `C::m` when it exists: a class-name
+    receiver reads the static side. A call to a real static method, which resolved to nothing,
+    now gets an edge, and a call to a namespace export gets one again. Component and workspace
+    scope still compare the target with `Symbol.name` verbatim. LSP enrichment now finds a
+    static member's document symbol, which it looked up by the text after the last `.`.
+  - In `@aburi/diff`, rename matching reads the member after the last separator of either kind,
+    so `C::Inner.g` is matched on `g` rather than `Inner.g`.
+
+- c28f20c: Carry the receiver a decorator was written through, and read it against the file's imports
+
+  `@nest.Controller()` and `@tsed.Controller()` were indistinguishable by the time a framework
+  plugin saw them. `readDecorator` reduced a qualified decorator to its leaf identifier, so
+  `Decorator` said `Controller` and nothing said which module it came from — and
+  `readImportedNames` skipped `symbols: "*"` edges outright, so even a recorded
+  `namespaceBinding` was never indexed. Both halves had to be wrong for the bug to hold, and
+  both were.
+
+  The consequence was the provenance table in `lang-plugin.md` §5.2.2 being out of order in its
+  last row. A decorator written through a module object landed in "no edge binds it" and came
+  back `high`, while the _named_ import of the same decorator from the same library came back
+  `medium`. The file that disclosed more was trusted less.
+
+  `Decorator` now carries `qualifier`: the receiver verbatim, `nest` for `@nest.Controller()`
+  and `a.b` for `@a.b.C()`. It is Class B per `ir-schema.md` §1.1 — a bare decorator omits the
+  key entirely — so a document written before this change reads exactly as it did, and `raw`
+  still quotes the whole written form. `@aburi/framework-nestjs` resolves a qualified decorator
+  through the receiver's first segment, which is the only part that can name something in
+  scope, and looks that segment up in **both** binding indexes: `import * as nest` binds the
+  module object under `namespaceBinding`, `import nest from` binds it as a named symbol, and a
+  decorator written through either has disclosed the same thing.
+
+  A qualified decorator deliberately does **not** resolve its _leaf_ through the named-import
+  index. The leaf is a property of a module object, not an identifier in the file's scope, so a
+  file that imports `Controller` by name from NestJS while writing `@tsed.Controller()` no
+  longer reports the second as though it were the first.
+
+  **What changes for a caller**
+
+  - A NestJS Symbol classified from a module object of a competing library now reports
+    `confidence: "medium"` where it reported `high`, whether the module was bound by
+    `import * as` or by a default import.
+  - `SymbolClassification.decoratorBoundaries` is keyed on the decorator as the source **wrote**
+    it, receiver included: `nest.Controller`, not `Controller`. The contract always said
+    "written name"; before `qualifier` existed the leaf _was_ that name. The leaf alone is not a
+    usable key, because two decorators on one Symbol can share it while resolving to different
+    vocabulary, and a shared key flags both — putting `boundary: true` on a decorator that was
+    never classified, which `drop-b` then reads.
+  - `@aburi/framework-nestjs` renames the exported `ImportedNames` to `ImportedBindings`, now an
+    interface of two maps rather than one map, and `resolveDecoratorName` takes the decorator
+    (`Pick<Decorator, "name" | "qualifier">`) instead of a bare name. Both are in the published
+    types.
+  - `@aburi/plugin-registry` adds `assertNamespaceBinding`, the namespace-edge counterpart to
+    `assertImportBinding`: a `namespaceBinding` that is present but empty is an upstream fault
+    rather than an edge to skip.
+
+  Most `api` fingerprints do not move: `canonicalizeDecorators` names the fields it takes and
+  `qualifier` is not among them, while `raw` already carried the receiver. The exception is a
+  decorator whose classification changes, since `ApiInput` includes `extKind` and
+  `decorators[].boundary` — a decorator that used to resolve its leaf through a named import and
+  now resolves its receiver can stop matching the vocabulary, and its Symbol's api hash moves
+  with it. That movement is the fix working.
+
+- 8f12dbd: A function's parameter defaults are walked with its body
+
+  `function f(x = g()) {}` and `const a = (y = k()) => l()` reported no call to `g` or `k` anywhere,
+  because a Symbol's walk covered its body and not its parameter list. A method's defaults were
+  kept, but on the class rather than the method. Every function-like Symbol — a function, an arrow,
+  a method, a field holding a function, an inline handler — now walks its parameter defaults ahead
+  of its body, and the class skips a member's parameter list as it skips the member's body, so
+  nothing is reported twice. A constructor's defaults stay on the class too, as its body does.
+  Decorators, a parameter's included, stay on the class, because they run when the class is
+  defined. `fingerprint.logic` moves on a Symbol whose defaults hold a rule or an effect, and on a
+  class that carried one of its members'.
+
+- 41a75a0: A decorator written in parentheses is named after what it encloses
+
+  `@(Controller)` is legal TypeScript, and the extractor named it after its text, `(Controller)`. That
+  name matched no framework's vocabulary, so a class decorated that way stayed unclassified even when
+  the file imported `Controller` from `@nestjs/common`. `@(nest\n  .Controller)` also put a line break
+  into `Decorator.name`. A name, a member path or a call in parentheses is now read through them:
+  `Controller`, `Controller` with qualifier `nest`, and so on, also when only an argument inside
+  them is malformed. `raw` still quotes the parentheses.
+
+  TypeScript accepts any expression there, but the grammar does not. `@(x as any)`, `@(x!)` and
+  `@(a[b])` reach the extractor only through error recovery, and there is no name to read from them.
+  They keep their place in the list under the reserved name `<expression>`, exported as
+  `UNNAMED_DECORATOR`, with the text in `raw`. `Decorator.name` is now always an identifier or that
+  marker.
+
+- 07d0962: A `#`-private member keeps its `#` in its qualified name
+
+  `v() {}` beside `#v() {}` produced one Symbol, `Q.v`, carrying both bodies and the visibility of
+  whichever was written first. A qualified-name segment after a separator may now open with one
+  `#`, and the private member is `Q.#v` (`Q::#v` when static). What changes for existing IR:
+
+  - Ids and `Symbol.name` of every `#`-private member change from `Q.v` to `Q.#v`, and the api
+    fingerprint's `shortName` from `v` to `#v`. Comparing IR built before this change with IR built
+    after it reports those members as changed.
+  - The LSP tier now resolves a call such as `this.#v()`: tsserver's hover names `C.#v`, which is
+    now a Symbol, so the call gets an edge where it used to count as `memberNotFound`. Private
+    members also get columns from document symbols.
+  - A qualified name may not open with `#`, and `isQnameSegment` admits `#v` only when called with
+    `{ privateName: true }`. A quoted `"#v"() {}` and an index `obj["#v"]` are still the public
+    property with those characters: the first has no Symbol, the second a `<computed>` segment.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+### Patch Changes
+
+- fa3f7a4: An `import("…")` type first in a call's type arguments or before `[]` no longer breaks the parse
+
+  The grammar reads `import("./m")` as a call, so `importActual<typeof import("./m")>()` — how
+  `vi.mock` keeps a module's originals — and `import("./m").Rule[]` were recoverable parse errors,
+  and at module level `export const b = g<typeof import("./m")>()` took the declaration after it
+  down too; four or more of those in a row lost every Symbol in the file. Such a file is now parsed
+  once more with each of those `import(…)` replaced by a name of the same length, and the tree still
+  reads the original text. Files that carried only this error leave the recoverable-parse-error
+  listing, and each such `import(…)` keeps the import edge a clean one has.
+
+- 56b6538: Make the recoverable-parse-error warning worth reading: stop counting the tsx grammar's `&`, and name the files
+
+  Two halves of one complaint. The warning that says a scan read files it could not fully parse
+  reported a bare count, and on a React codebase most of that count was the grammar rather than the
+  workspace.
+
+  **The grammar's `&`.** `@vscode/tree-sitter-wasm`'s tsx grammar reads `&` inside JSX as the
+  opening of an HTML character reference and raises an ERROR when no `;` closes it. So
+  `<CardTitle>Subscription & Billing</CardTitle>` and `href="/x?utm_source=a&utm_medium=b"` —
+  ordinary prose and a tracking URL — were parse errors, while `&amp;`, `&nbsp;`, an attribute whose
+  `&` stands alone and `{"a & b"}` were not. Measured on `shadcn-ui`, 110 of 3,912 `.tsx` files
+  carried a recoverable parse error and every one of them was this. No published grammar has fixed
+  it as of 2026-09, and the dependency is a `^0.3.1` range, so a fix would arrive on its own if one
+  ever shipped.
+
+  Nothing was lost by it and nothing is lost by dropping it: the same component written with `&` and
+  with `&amp;` extracts the same Symbols, the same signature and the same `calls[]`, including a call
+  written below the ampersand. What it cost was the signal — a warning that fires on 3% of files as a
+  matter of course stops being read — so `collectParseErrors` no longer reports that one shape
+  (`lang-plugin.md` LP27a).
+
+  The shape is narrow so a file that really was truncated is not dropped with it. The run the grammar
+  could not place has to open with an ampersand-led token, sit among a JSX element's children or
+  inside a JSX attribute's string value, and — among children — hold none of `{`, `}`, `<`, `>`,
+  which JSX text cannot contain. That last rule matters because tree-sitter merges an adjacent
+  unparseable stretch into one ERROR node: without it, an `&` earlier in the same children swallowed
+  everything after it, and `<div>a & } b</div>` went quiet. The four characters are ordinary inside
+  an attribute's string, so the rule does not reach there.
+
+  A truncation whose ERROR sits outside both positions still reports, including in a file that
+  carries one of each: `export const U = () => <div><p>a & b</p>` reports the unterminated `<div>`
+  and nothing else.
+
+  **The files behind the count.** `⚠ N file(s) had recoverable parse errors.` was the whole warning,
+  and mostly these files are in the IR, so `stats.skippedFiles[]` does not hold them and no per-file
+  log line is written for them either — there was nowhere to look up which files they were. `aburi
+scan` now lists them under that line, each with the first error reported for it and a count when
+  there was more than one.
+
+  The listing is **uncapped**, unlike the skip census below it, and sits up with the other sections
+  whose entries exist nowhere else. Capping the only account of something is the loss rather than
+  the shape of it. `aburi diff` is unchanged here on purpose: it runs both scans, each report names
+  its own files with the side in the header, so the diff-level line stays a count and a consequence
+  rather than a third printing of every doubtful path.
+
+  Minor for `@aburi/cli` rather than patch: `ScanReport` gains a required `parseErrorFiles`.
+  `parseErrorCount` is kept, set from that list's length where the report is built.
+
+- Updated dependencies [5a9ebda]
+- Updated dependencies [d6de3b0]
+- Updated dependencies [2b85a00]
+- Updated dependencies [c28f20c]
+- Updated dependencies [1d09de8]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [07d0962]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [3dd0dd0]
+  - @aburi/types@0.5.0
+  - @aburi/core@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes

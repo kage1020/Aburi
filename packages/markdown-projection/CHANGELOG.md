@@ -1,5 +1,217 @@
 # @aburi/markdown-projection
 
+## 0.4.0
+
+### Minor Changes
+
+- ffb08d4: A decorator whose receiver changed is reported as modified
+
+  `@nest.Post("/x")` → `@tsed.Post("/x")` reported the decorator list as unchanged while the
+  api fingerprint moved, because `decoratorsEqual` compared only the name and arguments. It
+  compares `qualifier` now, and the Markdown names a modified decorator with its receiver
+  (`@tsed.Post`). Two Documents written before `qualifier` existed report nothing new; a base
+  stored by such a producer and passed with `--base` against a newer head reports each qualified
+  decorator as modified, once.
+
+- 9c1f498: Keep a value inside the Markdown construct that was meant to contain it
+
+  Three places where a value out of the IR escaped its construct, none of them needing an unusual
+  input to do it.
+
+  A rule payload over 80 characters renders as a fenced block, and `ruleRow` embedded that block in
+  the middle of `- guard: … (L5)`. A fence at column 0 ends the list item it sits in, so the `(L5)`
+  became a paragraph of its own and the rules below it restarted as a second list. Such a payload
+  now takes a second row shape — `- guard (L3):` with the fence indented two spaces into the item —
+  because the line tag has to move for the block to be last. Boolean guards above the threshold are
+  routine; ir-schema.md §8.2 truncates a payload only past 120 characters.
+
+  Every code span was written as `` `${value}` ``, which a value containing a backtick closes early:
+  `` guard: `key === `x-${plugin}:write` `` left its interior in the row as Markdown, and template
+  literals are everyday TypeScript. `inlineCode` is now the single way this package opens a span. It
+  takes one more backtick than the longest run inside the value, pads a space at each end when the
+  value itself opens or closes with a backtick or a space — which separates the value from the
+  delimiter run, and is safe because CommonMark strips one space from each end again when the
+  content both begins and ends with one — and collapses newline runs to a space because a span is
+  one row. Every call site routes through it, and `codeFragment`'s block fence widens the same way,
+  so a source that contains a fence no longer closes the block early.
+
+  Table cells interpolated values whose schemas permit `|`: component roots in the workspace
+  Components table, and call targets and candidate ids in `aburi explain --debug-resolution`. GFM
+  splits cells before it parses inlines, so one pipe in a path shifted every column after it, code
+  span or not. `tableCell` escapes `|` as `\|` — doubling any backslash run in front of it, which
+  would otherwise pair with the escape and hand the pipe back to the row scanner — and maps newlines
+  to `<br>`. Cells now reach a row only through `tableRow` / `tableHeader`, which escape every one
+  of them and keep the delimiter row as wide as the header.
+
+  **What changes in the output.** For a rule payload over 80 characters or holding a newline, the
+  row takes the fenced shape above. For any value that contains a backtick, the span around it is
+  wider; for one that opens or closes with a backtick or a space, it gains padding; for one holding
+  a newline, the newline is now a space rather than a broken row. For a table cell holding a pipe or
+  a backslash before one, the cell is escaped. A value that is present but empty renders as
+  `(empty)` where the row it belongs to previously showed two literal backticks — or, in the diff's
+  `signature.throws added` family, vanished entirely along with its row. Anything else renders byte
+  for byte as before.
+
+  **API.** `inlineCode`, `fencedBlock`, `tableCell`, `tableRow`, `tableHeader`, `fitsInline` and
+  `EMPTY_VALUE` are exported. `codeFragment` takes an `indent` so the block it returns can sit
+  inside a list item. `ruleRow` returns the lines of the row (`string[]`) rather than one string,
+  because a fenced payload occupies four of them and every caller joins its array with newlines.
+  `inlineCodeValue` and `inlineCodePath` are deprecated aliases of `inlineCode`, removed in 1.0.0.
+  Minor rather than patch: new exports, one changed signature, and a user-visible change to the
+  rule row shape, with nothing removed.
+
+- a17994c: A capped diff report lists a section's names before it drops the section
+
+  `projectDiff`'s `maxBytes` used to drop whole sections from the bottom, so the largest pull
+  requests got the emptiest reports: #290's kept only API changes and named none of its 302 removed
+  symbols. Sections are now kept most important first at their smallest — a section whose entries
+  are whole Symbols as one `name` _(kind)_ — `file:line` row per Symbol — and one is dropped only
+  when it cannot fit even beside every more important one cut that far; the lists then get their
+  full entries back from the top as the budget allows. A section too large to fit even as names no
+  longer takes the smaller ones below it with it. The note tells the short sections apart from the
+  omitted ones, and says a budget was missed even when there was no section to drop.
+
+  `projectDiff` takes a `fullReportLocation` option naming where the uncapped report is; a line
+  break in it throws `RangeError`, and `maxBytes` is now checked before anything is rendered.
+  `aburi diff --max-bytes` writes that report as `diff.full.md`, before `diff.md`, whenever the cap
+  changed anything, and every other run — whatever its `--format` — removes one an earlier run left.
+  A path there that cannot be removed fails like one that cannot be written, with the artefact
+  named. `runDiff`'s report gains `diffFullMdPath`.
+
+- 82b66e5: Render the report to the size a comment can hold, instead of learning it from a 422
+
+  `projectDiff` emitted whatever the diff was worth, and the document it produces exists to be
+  posted as a pull request comment — where GitHub's limit is 65536 bytes, enforced by rejecting
+  the whole body with a 422 and posting nothing. A minimal symbol renders at roughly 210 bytes, so
+  a branch adding about 310 symbols crossed it. The run that lost its report was the large refactor,
+  which is the one the report was for, and the failure named a status code rather than a size.
+
+  `projectDiff(diff, { maxBytes })` caps the document. It is met section by section, never by
+  cutting the string: the sections are `<details>` blocks and fenced code, and a cut inside either
+  renders as an unclosed element swallowing the rest — a report that looks broken rather than
+  shortened, and says nothing about what is missing. Sections give way in ascending order of
+  importance, which is the emission order read from the bottom (Syntax-only, then Dropped changes,
+  then Dependency changes, …), so an API change is never lost while an implementation refactor
+  stays; a section of whole symbols is cut to its names and locations before it goes. The title and
+  the Summary line are never dropped. A capped document says so directly under the Summary, naming
+  the sections in the order the reader looked for them:
+
+  ```md
+  > ⚠ **2 sections were omitted** to keep this report within 65507 bytes: 💧 Dropped changes, 🎨 Syntax-only changes. The full report is the same diff rendered without a size cap.
+  ```
+
+  One budget cannot be met — smaller than the title, the Summary line and that note together — and
+  the document that comes back over it says so in as many words rather than claiming a size it does
+  not have. `aburi diff` warns on stderr in the same case, and again when `--format json` leaves the
+  flag nothing to cap.
+
+  `aburi diff --max-bytes <n>` is the CLI spelling, and it caps `diff.md` alone — `diff.json` is
+  unabridged, so nothing is lost from the artefact a tool reads.
+
+  The action passes `--max-bytes 65507` by default: the 65536-byte ceiling less the 29-byte marker
+  line the upsert prepends, kept in step with `ABURI_COMMENT_MARKER` by a test rather than spelled
+  twice. The decision is `scripts/resolve-max-bytes.mjs`, a committed script beside the CLI resolver
+  and for the same reason — a `run:` block is never executed by a test, so a guard dropped from one
+  leaves CI green and breaks every run. Four things it settles. The cap applies under
+  `comment: false` as well, because that is the mode a fork's pull request runs in, where the
+  Markdown travels as an artefact for the `workflow_run` companion to post; a cap keyed on `comment`
+  would simply move the 422 onto the one pull request whose author cannot see the companion's log.
+  The flag is probed for with `aburi diff --help` rather than assumed, because `version` pins the CLI
+  while the action is referenced by ref: against an older CLI it warns — naming both upgrade routes,
+  since `version` means nothing under `cli: workspace` — and renders uncapped, which is what that CLI
+  did anyway. A probe that could not run at all is reported as itself rather than as a missing flag,
+  because a registry outage read as "this CLI has no `--max-bytes`" is a green job publishing an
+  oversized artefact with a log that explains it wrongly. And `format: json` caps nothing, since that
+  run writes no `diff.md`.
+
+  Both ends of the upsert now measure before they write — `scripts/upsert-comment.mjs` exits 2 with a
+  one-line annotation, `upsertPullRequestComment` throws — and say which file is how large and which
+  flag renders a smaller one. Neither can re-render a finished document, but neither relays a 422
+  that never mentions size. `GITHUB_COMMENT_MAX_BYTES` and `ABURI_COMMENT_BODY_MAX_BYTES` are
+  exported for callers posting Aburi reports themselves.
+
+  A section is the smallest unit the cap drops, so a branch that adds two thousand symbols gets
+  their names rather than their first few hundred entries, or the note alone when even the names do
+  not fit. The full report is in `diff.json`, and `aburi diff` writes the uncapped Markdown as
+  `diff.full.md` beside the capped one.
+
+  **Compatibility.** `projectDiff` takes the budget as a second argument and is unchanged without
+  one; every existing caller keeps the whole document. A workflow using the action does get a capped
+  `diff.md` where it previously got an uncapped one — that is the fix — and `max-bytes: 0` restores
+  the old behaviour for a run that wants the file whole.
+
+- 3dd0dd0: A Symbol's confidence shows on its heading, and the diff reports a change to it
+
+  `Symbol.confidence` was written and validated but never rendered or compared, so a Symbol the
+  machine was unsure of looked like any other outside the raw IR. Now:
+
+  - Every Markdown heading that names a Symbol (component pages, `diff.md` entries, `explain`,
+    kept or dropped), and the names-only row that replaces one under the size cap, carries
+    `⚠ medium` or `⚠ low` after the kind when its confidence is not `high`.
+  - `aburi diff` treats a confidence change as a change even when no fingerprint moved: the pair
+    is `changed`, and counts toward `--fail-on changed`, or `moved+changed` when it also moved. A
+    pair dropped on both sides stays `unchanged`. One edit can move every Symbol in a file, since
+    a plugin may read a file-level signal such as an import.
+  - `--fail-on confidence-changed` gates on that axis alone and takes a threshold;
+    `--fail-on api-changed,logic-changed` ignores it.
+  - `SymbolDelta` gains `confidenceChanged`, an optional boolean in `aburi.diff.v1.json` that the
+    writer always emits.
+  - `diff.md` adds a `- confidence: <base> → <head>` row to the entry, and a new
+    "🎚 Confidence changes" section, above Syntax-only changes, holds entries whose API and logic
+    did not change. The "no field-level detail" note no longer disappears beside a component or
+    confidence row, since neither explains a fingerprint.
+  - `symbolTitle` is exported from `@aburi/markdown-projection`.
+
+### Patch Changes
+
+- f9f9d76: A folded summary counts the entries it folds, not the lines it renders
+
+  The Dropped changes fold prefixes each direction group with a heading and separates the groups
+  with a blank line, and those rows were counted as entries. Moved and Syntax-only render one row
+  per entry, so their output does not change.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+- 05ced63: A Symbol block's `**Effects**:`, `**Calls**:` and fingerprint lines no longer render inside the bullet above them
+
+  The block wrote each section label straight after the previous list, so CommonMark read it as a
+  continuation of the last bullet: `**Effects**:` showed up attached to the last rule. After a
+  fenced rule the same label did end the list, so where it landed depended on the length of a
+  condition. A blank line now follows each list section that something comes after, as §5.2 of the
+  design doc already showed. Every `components/<id>.md` changes by those blank lines.
+
+- 57c1d54: Report an effect as modified when its propagation flag or direct provenance changes, and render
+  propagated effect deltas with their direct sources when the containing Symbol is already routed to
+  an API or logic section. Provenance-only changes remain available in `diff.json`; fingerprint-based
+  Markdown section routing is unchanged.
+- Updated dependencies [5a9ebda]
+- Updated dependencies [c28f20c]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [3dd0dd0]
+  - @aburi/types@0.5.0
+
 ## 0.3.1
 
 ### Patch Changes

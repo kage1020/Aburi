@@ -1,5 +1,180 @@
 # @aburi/diff
 
+## 0.5.0
+
+### Minor Changes
+
+- fe66668: Measure how much a name says by its words, not by its token count
+
+  `tokenizeName` found word boundaries by comparing code points against `a`–`z`, `A`–`Z` and
+  `0`–`9`, so a name written in a script with no ASCII case boundary and no separator came back
+  whole: `ユーザー情報を取得する` and `获取用户信息` were one token each, and
+  `получитьПользователя` was one token with its camel hump unread.
+
+  Jaccard never minded — two names that tokenise whole score 1.0 against each other and 0 against
+  anything else, which is right for identical and unrelated names alike. What minded was
+  diff-algorithm.md §3.4.3's admissibility rule, the one place that reads the token _count_ as a
+  measure of how much a name says. It refused `ユーザー情報を取得する` on the same footing as
+  `main`, on the grounds that one word is not evidence of identity. That is true of `main`. It is
+  not true of a name two unrelated Symbols would never carry by coincidence.
+
+  Two changes, answering two different faults.
+
+  **The camel boundary is Unicode case.** `\p{Ll}`, `\p{Lu}`/`\p{Lt}` and `\p{Nd}` in place of the
+  ASCII ranges, so a hump is a hump in every cased script and `получитьПользователя` splits into
+  two the way `getUser` does. Titlecase counts as opening a word, for the digraphs that carry it,
+  and the previous code point is carried along rather than sliced back off the chunk, so the hump
+  registers in the cased scripts outside the BMP too. This fixes the cased scripts and nothing
+  else: Japanese and Chinese have no case to read.
+
+  **`nameEvidence` in place of the count.** A token of a script that writes its word boundaries is
+  one word however long it runs. A run of a script that writes none cannot be segmented, so it is
+  counted instead, over the longest a single word of that script runs: three characters for Han,
+  which writes a morpheme per character (`初期化`, `数据库`), and six for kana and Hangul, which
+  write a syllable per character (`ハンドラー`, `데이터베이스`). The quotient is a floor on the
+  number of words in the run, so it admits only what cannot be one word: `获取用户信息` is 2 and
+  `ユーザー情報を取得する` is 2 1/3, while `メイン`, `초기화` and `ハンドラー` — `main`,
+  `initialize` and `handler` — stay under a word alongside the English they translate. Characters
+  are counted once each, as tokens are, and the name is read in NFC so the verdict does not turn
+  on which normalisation a toolchain emitted.
+
+  Length alone is deliberately not the measure. `initialize` is ten characters and one word, and
+  two unrelated top-level `initialize(x: string)` are exactly the coincidence the rule exists for,
+  so a bar on raw length low enough to admit `获取用户信息` would admit `handler`. Nor is
+  caselessness: Arabic and Hebrew letters are letters rather than words, a run of them is one word,
+  and a multi-word identifier in those scripts writes a separator the tokeniser already splits on.
+
+  Six is the longest word assumed, not the longest there is — `アプリケーション` is one word in
+  eight and is admitted as though it were more. The constants sit where they do because a name of
+  seven syllables is more often a phrase than a loanword, and a wrong pairing costs less than the
+  band of real moves a higher divisor would refuse.
+
+  What this buys a morphemic name is narrower than the rule itself: such a name is one token, so
+  the threshold table still hands it `EXACT_MATCH_ONLY`, and what stage 4 recovers is the
+  signature-identical move rather than the whole band. The table keeps reading the plain token
+  count, which is correct there and now says so: its rows are about how coarse a Jaccard over
+  those tokens can be, and one token against a name of `n` scores 0 or `1/n`. The two rules ask
+  different questions of the same name.
+
+  `nameEvidence` is exported alongside `tokenizeName`.
+
+- 3dd0dd0: A Symbol's confidence shows on its heading, and the diff reports a change to it
+
+  `Symbol.confidence` was written and validated but never rendered or compared, so a Symbol the
+  machine was unsure of looked like any other outside the raw IR. Now:
+
+  - Every Markdown heading that names a Symbol (component pages, `diff.md` entries, `explain`,
+    kept or dropped), and the names-only row that replaces one under the size cap, carries
+    `⚠ medium` or `⚠ low` after the kind when its confidence is not `high`.
+  - `aburi diff` treats a confidence change as a change even when no fingerprint moved: the pair
+    is `changed`, and counts toward `--fail-on changed`, or `moved+changed` when it also moved. A
+    pair dropped on both sides stays `unchanged`. One edit can move every Symbol in a file, since
+    a plugin may read a file-level signal such as an import.
+  - `--fail-on confidence-changed` gates on that axis alone and takes a threshold;
+    `--fail-on api-changed,logic-changed` ignores it.
+  - `SymbolDelta` gains `confidenceChanged`, an optional boolean in `aburi.diff.v1.json` that the
+    writer always emits.
+  - `diff.md` adds a `- confidence: <base> → <head>` row to the entry, and a new
+    "🎚 Confidence changes" section, above Syntax-only changes, holds entries whose API and logic
+    did not change. The "no field-level detail" note no longer disappears beside a component or
+    confidence row, since neither explains a fingerprint.
+  - `symbolTitle` is exported from `@aburi/markdown-projection`.
+
+### Patch Changes
+
+- ffb08d4: A decorator whose receiver changed is reported as modified
+
+  `@nest.Post("/x")` → `@tsed.Post("/x")` reported the decorator list as unchanged while the
+  api fingerprint moved, because `decoratorsEqual` compared only the name and arguments. It
+  compares `qualifier` now, and the Markdown names a modified decorator with its receiver
+  (`@tsed.Post`). Two Documents written before `qualifier` existed report nothing new; a base
+  stored by such a producer and passed with `--base` against a newer head reports each qualified
+  decorator as modified, once.
+
+- 9495e26: The `lineFuzz` error no longer points at a config key that does not exist
+
+  An out-of-range `lineFuzz` said `config.diff.lineFuzz must be …`, and the design doc offered
+  that key as a setting, but `aburi.json` has no `diff` key and writing one fails validation. The
+  window stays at `2` for the CLI: since unchanged elements pair at any distance, it only decides
+  whether an edit reads as `modified` or as `added` + `removed`. The error now names the `lineFuzz`
+  option, which `computeSymbolDelta` takes directly and `buildDiff` takes as `delta.lineFuzz`, and
+  the doc stops offering the setting.
+
+- bf2e0f5: An unchanged rule, call or decorator pairs with its counterpart however far its body moved, and an effect that changed places with another is no longer reported
+
+  The pass that pairs elements whose content already agrees no longer applies the ±`lineFuzz`
+  window, so a function that moved 14 lines down its file stops listing every call as both added
+  and removed. Order is kept only among elements of one key: a call that moved below a call to a
+  different target is still the same call, and effects of different `(id, target)` that changed
+  places are no longer reported as an effect added and removed. `lineFuzz` now decides one thing:
+  how far an edited element may sit from the one it replaced and still read as `modified`.
+
+- 2b85a00: An export of a namespace merged into a class is named as the class's static member, and a call through the class name reaches it
+
+  `class C { m() {} }` beside `namespace C { export function m() {} }` produced one Symbol, `C.m`,
+  carrying the method's range and both bodies' calls. The export is now `C::m`, the static member
+  TypeScript resolves it as, and the method keeps `C.m`. Ids of every such export change from `C.x`
+  to `C::x`, and so do the ids of everything declared under one (`C::Inner.g`). What the namespace
+  does not export keeps the dot (`C.local`).
+
+  Other effects visible in a Document or a diff against an older one:
+
+  - The instance member no longer folds with the export, so it loses `declaration-merged` and its
+    `mergedDeclarations`. Its syntax fingerprint changes, and a diff against an older Document
+    reports it as modified though nobody touched it.
+  - A namespace holding only types may be written before the class. There its `export type m`
+    used to lead the fold, so the Symbol was a dropped `type` and the method's calls and effects
+    went nowhere. They now appear on `C.m`, with `C::m` the dropped type.
+  - A `static m()` beside `export function m()` in the namespace is now one Symbol, `C::m`,
+    where it was two (`C::m` and `C.m`). A `static m()` beside `export type m` folds the same
+    way, as a value and a type of one name do elsewhere.
+  - In `@aburi/core`, file and import scope resolve `C.m()` to `C::m` when it exists: a class-name
+    receiver reads the static side. A call to a real static method, which resolved to nothing,
+    now gets an edge, and a call to a namespace export gets one again. Component and workspace
+    scope still compare the target with `Symbol.name` verbatim. LSP enrichment now finds a
+    static member's document symbol, which it looked up by the text after the last `.`.
+  - In `@aburi/diff`, rename matching reads the member after the last separator of either kind,
+    so `C::Inner.g` is matched on `g` rather than `Inner.g`.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+- 57c1d54: Report an effect as modified when its propagation flag or direct provenance changes, and render
+  propagated effect deltas with their direct sources when the containing Symbol is already routed to
+  an API or logic section. Provenance-only changes remain available in `diff.json`; fingerprint-based
+  Markdown section routing is unchanged.
+- Updated dependencies [5a9ebda]
+- Updated dependencies [d6de3b0]
+- Updated dependencies [2b85a00]
+- Updated dependencies [c28f20c]
+- Updated dependencies [1d09de8]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [07d0962]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [3dd0dd0]
+  - @aburi/types@0.5.0
+  - @aburi/core@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes

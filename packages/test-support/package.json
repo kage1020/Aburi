@@ -1,6 +1,6 @@
 {
   "name": "@aburi/test-support",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "description": "Test fixtures shared across the workspace's Vitest suites: a no-op vocab registry, a silent logger, and builders for IR records, classify contexts and symbol candidates. Not published; consumed from source.",
   "type": "module",
