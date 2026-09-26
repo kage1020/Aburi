@@ -75,7 +75,9 @@ Rationale: promoting a locally-scoped identifier to a Symbol id would produce fa
 
 If `name` matches a top-level `Symbol.name` in the same file (Symbol id → `<lang>:<caller.file>#<name>`), emit `resolved = that Symbol.id` with `confidence = high`.
 
-For dotted targets (`name.method`), the file-scope match is against `name` first; if `name` resolves to a class-shaped Symbol in the same file, `resolved` is set to `<lang>:<caller.file>#<name>.method` when that method Symbol exists. If the method Symbol is absent (dynamic method, method inherited from a base class, etc.), `resolved` stays `null` (do not fabricate ids for methods that never appear in the Symbol table).
+For dotted targets (`name.method`), the file-scope match is against `name` first; if `name` resolves to a Symbol in the same file, `resolved` is set to the member the rest of the target names, when that Symbol exists. A dot in the target joins a receiver to a member, and the member's qualified name uses the separator its receiver gives it: read through a class's name, a member is on the static side, which [`ir-schema.md`](./ir-schema.md) §3.2 spells `::`. So each step takes `<receiver>::<segment>` when that Symbol is kept and `<receiver>.<segment>` otherwise: `C.m` reaches `C::m` over an instance member `C.m`, and `C.Inner.g` reaches `C::Inner.g`. If the member Symbol is absent (dynamic method, method inherited from a base class, etc.), `resolved` stays `null` (do not fabricate ids for methods that never appear in the Symbol table).
+
+Import scope (§4.4) composes a dotted tail past the imported name the same way. Component and workspace scope (§4.5, §4.6) compare the whole target with `Symbol.name` verbatim and compose nothing, so a static member is reached only through file or import scope.
 
 ### 4.4 Step 3: import scope
 
@@ -308,7 +310,7 @@ The per-call detail — which line, which bucket, which candidates — is **not*
 Explicitly out of scope:
 
 - **Renaming a resolved id after the fact** (e.g. following re-exports transitively across five files). The first matching Symbol id wins; if that Symbol re-exports another, the edge points at the re-exporter, not the origin. Rationale: transitive re-export following is stateful and hurts determinism.
-- **Adding a distinction beyond what the qname convention already carries.** [`ir-schema.md`](./ir-schema.md) §3.2 already distinguishes instance vs. static methods at the qname level (`ClassName.method` vs. `ClassName::method`), so an instance-call and a static-call resolve to different Symbol ids without further work. The resolver does not add any extra layer on top: whatever the language plugin's qname says is the identity of the callee, that is the identity used in `resolved`.
+- **Adding a distinction beyond what the qname convention already carries.** [`ir-schema.md`](./ir-schema.md) §3.2 distinguishes instance vs. static members at the qname level (`ClassName.method` vs. `ClassName::method`). A call through the class name reads the static side, which is the one step §4.3 takes to compose `::`; nothing else is layered on top: whatever the language plugin's qname says is the identity of the callee, that is the identity used in `resolved`.
 - **Confidence numbers.** Categorical only, per [`overview.md`](./overview.md) §2.
 
 ## 9. Determinism Guarantees

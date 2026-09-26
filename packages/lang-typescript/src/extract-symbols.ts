@@ -113,9 +113,15 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
  * Declarations of an id accumulate in source order and fold at the end. The **leading**
  * declaration gives the Symbol every scalar — kind, visibility, range, signature — and the
  * rest contribute what is list-shaped; here the leader is simply the first, which is what
- * source order already says. TypeScript requires the class or function to precede the
- * namespace merged into it, and requires a merge's declarations to agree on whether they are
- * exported, so the choice is between declarations legal source keeps in agreement.
+ * source order already says. TypeScript requires the class or function to precede a
+ * namespace merged into it once that namespace holds a value (TS2434), and requires a merge's
+ * declarations to agree on whether they are exported, so the choice is between declarations
+ * legal source keeps in agreement. A namespace holding only types may come first, and then it
+ * leads.
+ *
+ * A value and a type share one qualified name, so they fold too: `const X` beside `type X`, or
+ * a static `m` beside a merged namespace's `export type m`, is one Symbol led by whichever is
+ * written first.
  *
  * The rule is total rather than a list of the constructs known to need it. A collision this
  * absorbs is not a silent loss: the surviving Symbol carries every declaration's `derivedBy`
@@ -209,15 +215,8 @@ function visitStatement(
   callState: CallExtractionState,
 ): void {
   if (node.type === "export_statement") {
-    // Tree-sitter attaches decorators as `decorator:` children of the export wrapper. The
-    // actual declaration sits on the `declaration:` field; falling back to the first non-
-    // decorator, non-comment named child covers grammar shapes that omit the field.
-    const declarationNode =
-      node.childForFieldName("declaration") ??
-      node.namedChildren.find(
-        (c): c is Node => c !== null && c.type !== "comment" && c.type !== "decorator",
-      )
-    if (declarationNode === undefined || declarationNode === null) return
+    const declarationNode = exportedDeclaration(node)
+    if (declarationNode === null) return
     visitStatement(declarationNode, ctx, namespacePath, out, callState)
     return
   }
@@ -316,6 +315,22 @@ function visitStatement(
  * set is a measurement of this grammar rather than a category, so it is written as one.
  */
 const WRAPPED_DECLARATION_TYPES: ReadonlySet<string> = new Set(["internal_module"])
+
+/**
+ * The declaration an `export` statement was written on. Tree-sitter attaches decorators as
+ * `decorator:` children of the export wrapper and the declaration sits on the `declaration:`
+ * field; falling back to the first non-decorator, non-comment named child covers grammar shapes
+ * that omit the field.
+ */
+function exportedDeclaration(statement: Node): Node | null {
+  return (
+    statement.childForFieldName("declaration") ??
+    statement.namedChildren.find(
+      (c): c is Node => c !== null && c.type !== "comment" && c.type !== "decorator",
+    ) ??
+    null
+  )
+}
 
 function wrappedDeclaration(statement: Node): Node | null {
   if (statement.namedChildCount !== 1) return null
@@ -730,25 +745,32 @@ function addNamespaceAndBody(
     path.push(segment)
     members.add(namespaceCandidate())
   }
-  // Past the head, the whole body is a member: `namespace C.D {}` exports `D` from `C`, and an
-  // ambient namespace exports what it declares whether or not the keyword is written (LP36).
-  const everyStatementExported = rest.length > 0 || inAmbientContext(node)
+  // Whether a statement's ids pass the head through `members`. Under `namespace C.D {}` every
+  // one does: each sits under `D`, a member of `C` whatever the statement is (`const x` is
+  // `C::D.x`, local to `D`). An ambient namespace exports what it declares whether or not the
+  // keyword is written (LP36).
+  const everyStatementUnderMember = rest.length > 0 || inAmbientContext(node)
   for (const stmt of body.namedChildren) {
     if (stmt === null) continue
-    const exported = everyStatementExported || stmt.type === "export_statement"
-    visitStatement(stmt, ctx, path, exported ? members : out, callState)
+    const underMember = everyStatementUnderMember || stmt.type === "export_statement"
+    visitStatement(stmt, ctx, path, underMember ? members : out, callState)
   }
 }
 
 /**
  * Whether a class of the same name is declared beside this namespace, so that the namespace's
- * exports are the class's static members. Read off the statement list rather than the sink: the
- * class may be written after the namespace (TS2434), and a class already in the sink may carry a
- * respelled name.
+ * exports are the class's static members. Read off the statement list rather than the sink: a
+ * namespace holding only types may be written before the class, and a class already in the
+ * sink may carry a respelled name.
+ *
+ * Only the statement list the namespace is written in is read. A class declared in another
+ * block of a reopened outer namespace (`namespace A { export class C {} }` beside `namespace A
+ * { export namespace C {} }`) merges in TypeScript but is not seen here, so that namespace's
+ * exports keep the dot (`A.C.x`, where one block would give `A.C::x`).
  */
 function mergesWithClass(namespaceNode: Node, name: string): boolean {
   let statement = namespaceNode
-  while (statement.parent !== null && STATEMENT_WRAPPERS.has(statement.parent.type)) {
+  while (statement.parent !== null && !STATEMENT_LISTS.has(statement.parent.type)) {
     statement = statement.parent
   }
   const scope = statement.parent
@@ -763,11 +785,8 @@ function mergesWithClass(namespaceNode: Node, name: string): boolean {
   })
 }
 
-const STATEMENT_WRAPPERS: ReadonlySet<string> = new Set([
-  "export_statement",
-  "expression_statement",
-  AMBIENT_DECLARATION_TYPE,
-])
+/** The nodes whose children are statements: a module, and a namespace's body. */
+const STATEMENT_LISTS: ReadonlySet<string> = new Set(["program", "statement_block"])
 
 const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
   "class_declaration",
@@ -776,7 +795,7 @@ const CLASS_DECLARATION_TYPES: ReadonlySet<string> = new Set([
 
 function unwrappedDeclaration(statement: Node): Node | null {
   if (statement.type === "export_statement") {
-    const declaration = statement.childForFieldName("declaration")
+    const declaration = exportedDeclaration(statement)
     return declaration === null ? null : unwrappedDeclaration(declaration)
   }
   if (statement.type === AMBIENT_DECLARATION_TYPE) {
@@ -787,12 +806,14 @@ function unwrappedDeclaration(statement: Node): Node | null {
 }
 
 /**
- * `out`, with every candidate reaching it respelled as a static member of `owner`: `C.m`
- * becomes `C::m`. A namespace merged into a class adds to the class itself, so its exports are
- * what `static` declares and are spelled that way; `C.m` is an instance member's name.
+ * `out`, with every candidate named under `owner` respelled as its static member: `C.m` becomes
+ * `C::m`. A namespace merged into a class adds to the class itself, so its exports are on the
+ * static side and are spelled the way `static` spells it; `C.m` is an instance member's name.
  * Respelled here rather than by each builder because the builders only append a segment to a
  * path, and everything the exported statement declares in turn, a nested namespace's body
- * included, sits under the same segment.
+ * included, sits under the same segment. Everything the namespace's body declares is named
+ * under `owner`; a candidate that is not passes through unchanged rather than being given a
+ * name it was never under.
  */
 function staticMemberSink(out: CandidateSink, owner: string, file: string): CandidateSink {
   const instancePrefix = `${owner}.`

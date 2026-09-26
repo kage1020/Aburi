@@ -35,6 +35,7 @@ import type {
 import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languageserver-protocol"
 import { makeCallSiteKey, receiverHead } from "../call-site"
 import { groupBy } from "../collections"
+import { lastQnameSegment } from "../fingerprint/short-name"
 import { trySymbolId } from "../id"
 import { silentLogger } from "../logger"
 import { compareBy, compareCodeUnit } from "../order"
@@ -948,9 +949,9 @@ function findMemberSymbolId(
   return null
 }
 
+/** What a document symbol names a Symbol by: the segment after its last `.` or `::`. */
 function lastSegment(qualifiedName: string): string {
-  const idx = qualifiedName.lastIndexOf(".")
-  return idx < 0 ? qualifiedName : qualifiedName.slice(idx + 1)
+  return lastQnameSegment(qualifiedName)
 }
 
 async function defaultServerFactory(

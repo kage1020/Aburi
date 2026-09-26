@@ -188,6 +188,32 @@ describe("LSP enrichment", () => {
     expect(enrichment.symbols[0]?.source.startColumn).toBe(3)
   })
 
+  it("matches a static member to the document symbol of its last segment", async () => {
+    const helper = {
+      ...makeMethodSymbol("src/a.ts", "M", "helper", 3),
+      id: "ts:src/a.ts#M::helper",
+      name: "M::helper",
+    } as IRSymbol
+    const factory = mockServerFactory((_lang, client) => {
+      client.installHandler(DOC_SYMBOL_METHOD, () => [
+        {
+          name: "helper",
+          kind: 12,
+          range: { start: { line: 2, character: 2 }, end: { line: 2, character: 27 } },
+          selectionRange: { start: { line: 2, character: 9 }, end: { line: 2, character: 15 } },
+        },
+      ])
+    })
+    const enrichment = await enrichWithLsp(
+      makeEnrichmentInput({
+        symbols: [helper],
+        fileContents: { "src/a.ts": "\n\n  static helper() {\n  }" },
+        serverFactory: factory,
+      }),
+    )
+    expect(enrichment.symbols[0]?.source.startColumn).toBe(3)
+  })
+
   it("omits Signature.inferredThrows entirely when hover carries no @throws", async () => {
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const foo = makeMethodSymbol("src/a.ts", "C", "foo", 2)

@@ -1,7 +1,8 @@
 /**
  * Qualified-name builders for the tree-sitter TypeScript surface. These wrap the core
- * id / qname primitives so extractSymbols does not need to know the plugin-specific
- * separator conventions.
+ * id / qname primitives so extractSymbols does not spell a separator per builder. The one
+ * exception is a namespace merged into a class, whose `::` extractSymbols spells itself
+ * (`staticMemberSink`): it respells everything under the exported statement at once.
  */
 import {
   DEFAULT_EXPORT_QNAME,

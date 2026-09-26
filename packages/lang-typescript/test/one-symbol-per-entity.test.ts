@@ -441,10 +441,74 @@ describe("a namespace merged into a class declares static members", () => {
     expect(await idsOf(source)).toEqual(ids)
   })
 
+  it("spells an overloaded export as one static member", async () => {
+    const source =
+      "export class C {}\nexport namespace C {\n export function m(a: string): void\n export function m(a: any) {}\n}"
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C::m"])
+  })
+
+  it("merges into a default-exported class", async () => {
+    const source = "export default class C {}\nexport namespace C { export const a = 1 }"
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C::a"])
+  })
+
+  it.each([
+    ["an interface", "export interface C {}"],
+    ["an enum", "export enum C { A }"],
+    ["a function", "export function C() {}"],
+    ["a class in another namespace", "namespace X { export class C {} }"],
+  ])("keeps the dot where the namespace merges into %s", async (_label, declaration) => {
+    const ids = await idsOf(`${declaration}\nexport namespace C { export const a = 1 }`)
+    expect(ids).toContain("ts:src/a.ts#C.a")
+    expect(ids.some((id) => id.includes("::"))).toBe(false)
+  })
+
+  it("keeps the dot for a class declared inside the namespace's own body", async () => {
+    const source = "export namespace C { export class C {} export const a = 1 }"
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C.C", "ts:src/a.ts#C.a"])
+  })
+
+  it("keeps the dot when the class is in another block of a reopened outer namespace", async () => {
+    // A limit, not the intent: TypeScript merges these, and one block would give `A.C::x`.
+    const source =
+      "namespace A { export class C {} }\nnamespace A { export namespace C { export const x = 1 } }"
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#A", "ts:src/a.ts#A.C", "ts:src/a.ts#A.C.x"])
+  })
+
+  it("marks a local internal, and an export as static by its `::` alone", async () => {
+    const source = "export class C {}\nexport namespace C { const local = 1; export const a = 2 }"
+    const symbols = await symbolsOf(source)
+    const described = symbols.map((s) => [s.id, s.visibility, s.derivedBy])
+    expect(described.slice(1)).toEqual([
+      ["ts:src/a.ts#C.local", "internal", []],
+      ["ts:src/a.ts#C::a", "public", ["export-keyword"]],
+    ])
+  })
+
   it("folds a static member into the namespace export of the same name", async () => {
     // One entity written twice, which `tsc` refuses as TS2300: nothing is lost by folding it.
     const source = "export class C { static m() {} }\nexport namespace C { export function m() {} }"
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#C", "ts:src/a.ts#C::m"])
+  })
+
+  it("folds a static member and an exported type of the same name, as a value and a type fold", async () => {
+    // Legal TypeScript: a value and a type do not collide. They share a qualified name all the
+    // same, as `const X` and `type X` do at module level, so the member leads one Symbol.
+    const source =
+      "export class C { static m() { helper() } }\nexport namespace C { export type m = string }"
+    const m = await symbolOf(source, "ts:src/a.ts#C::m")
+    expect([m.kind, m.derivedBy]).toEqual([
+      "method",
+      ["static-method", "type-alias", "export-keyword", "declaration-merged"],
+    ])
+  })
+
+  it("still folds an instance member and a namespace local of the same name", async () => {
+    // Not the intent. The local is no member of `C`, so it keeps the dot and shares the
+    // method's name; the fold absorbs it.
+    const source = "export class C { m() { helper() } }\nexport namespace C { const m = 1 }"
+    const m = await symbolOf(source, "ts:src/a.ts#C.m")
+    expect([m.kind, m.derivedBy]).toEqual(["method", ["class-method", "declaration-merged"]])
   })
 })
 

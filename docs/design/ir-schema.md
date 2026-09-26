@@ -191,7 +191,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | class | `InvoiceService` |
 | instance method | `InvoiceService.createInvoice` |
 | static method | `InvoiceService::fromJson` |
-| export of a namespace merged into a class (`class C {}` beside `namespace C { export function m() {} }`) | `C::m`, the static member TypeScript resolves it as; `C.m` is the instance member's name. What the namespace does not export is local to it and keeps the dot, and everything under an exported declaration sits under its segment (`C::Inner.g`) |
+| export of a namespace merged into a class (`class C {}` beside `namespace C { export function m() {} }`) | `C::m`: the export is on the class's static side, a type (`export type m`) as much as a value, and `C.m` is the instance member's name. An ambient namespace exports what it declares without the keyword. What the namespace does not export is local to it and keeps the dot, and everything under an exported declaration sits under its segment (`C::Inner.g`, and `C::K::s` for a nested class's static member) |
 | nested namespace / class | `Billing.Invoice.create` |
 | interface / type alias | `Invoice` |
 | default export (including anonymous functions/classes) | `<default>` |

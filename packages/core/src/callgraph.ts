@@ -570,14 +570,7 @@ function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): Resol
     return null
   }
 
-  const fileHit = resolveInFileScope(
-    ctx.caller,
-    head,
-    tail,
-    ctx.keptSymbolIds,
-    ctx.topLevelByFile,
-    trace,
-  )
+  const fileHit = resolveInFileScope(ctx, head, tail, trace)
   if (fileHit !== null) return fileHit
 
   const importHit = resolveInImportScope(ctx, head, tail, trace)
@@ -602,18 +595,16 @@ function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): Resol
 /**
  * Step 2 of call-resolution.md's untyped step order: resolve `head` against the top-level
  * Symbols declared in the caller's own file. For a dotted target the head must match a
- * class-shaped top-level Symbol and the joined `head.tail` qname must itself exist as a
- * Symbol id in the same file.
+ * top-level Symbol and the member the tail names must itself exist as a Symbol in the same
+ * file (`memberId`).
  */
 function resolveInFileScope(
-  caller: IRSymbol,
+  ctx: ResolveTargetContext,
   head: string,
   tail: readonly string[],
-  keptSymbolIds: ReadonlySet<SymbolId>,
-  topLevelByFile: TopLevelIndex,
   trace: ResolutionTrace,
 ): ResolutionHit | null {
-  const perFile = topLevelByFile.get(caller.source.file)
+  const perFile = ctx.topLevelByFile.get(ctx.caller.source.file)
   if (perFile === undefined) return null
   const bucket = perFile.get(head)
   if (bucket === undefined) return null
@@ -626,15 +617,37 @@ function resolveInFileScope(
   if (tail.length === 0) {
     return { id: anchor.id, confidence: "high" }
   }
-  const compositeId = trySymbolId({
-    language: caller.language,
-    file: caller.source.file,
-    qualifiedName: `${head}.${tail.join(".")}`,
-  })
-  if (compositeId !== null && keptSymbolIds.has(compositeId)) {
-    return { id: compositeId, confidence: "high" }
+  const id = memberId(ctx, ctx.caller.source.file, head, tail)
+  return id === null ? null : { id, confidence: "high" }
+}
+
+/**
+ * The kept Symbol `first.tail[0].tail[1]…` names in `file`, or null. A dot in a call target
+ * joins a receiver to a member, and the separator in the member's qualified name depends on the
+ * receiver: through a class's name the member is on the static side, which ir-schema.md §3.2
+ * spells `::` (`C.m()` calls `C::m`, not the instance member `C.m`). So each step takes the
+ * `::` member when one is kept, and otherwise joins with `.` as a namespace's member does
+ * (`C::Inner.g`).
+ */
+function memberId(
+  ctx: ResolveTargetContext,
+  file: string,
+  first: string,
+  tail: readonly string[],
+): SymbolId | null {
+  const idOf = (qualifiedName: string) =>
+    trySymbolId({ language: ctx.caller.language, file, qualifiedName })
+  let qualifiedName = first
+  for (const segment of tail) {
+    const staticName = `${qualifiedName}::${segment}`
+    const staticId = idOf(staticName)
+    qualifiedName =
+      staticId !== null && ctx.keptSymbolIds.has(staticId)
+        ? staticName
+        : `${qualifiedName}.${segment}`
   }
-  return null
+  const id = idOf(qualifiedName)
+  return id !== null && ctx.keptSymbolIds.has(id) ? id : null
 }
 
 /**
@@ -669,26 +682,19 @@ function resolveInImportScope(
     if (targetFile === null) continue
 
     if (edge.symbols === "*") {
-      if (tail.length === 0) continue
+      const [first, ...rest] = tail
+      if (first === undefined) continue
       if (edge.namespaceBinding !== head) continue
-      const candidateId = trySymbolId({
-        language: ctx.caller.language,
-        file: targetFile,
-        qualifiedName: tail.join("."),
-      })
-      if (candidateId !== null && ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
+      const candidateId = memberId(ctx, targetFile, first, rest)
+      if (candidateId !== null) candidates.add(candidateId)
       continue
     }
 
     for (const raw of edge.symbols) {
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
-      const candidateId = trySymbolId({
-        language: ctx.caller.language,
-        file: targetFile,
-        qualifiedName: tail.length === 0 ? imported : `${imported}.${tail.join(".")}`,
-      })
-      if (candidateId !== null && ctx.keptSymbolIds.has(candidateId)) candidates.add(candidateId)
+      const candidateId = memberId(ctx, targetFile, imported, tail)
+      if (candidateId !== null) candidates.add(candidateId)
     }
   }
   if (candidates.size !== 1) {

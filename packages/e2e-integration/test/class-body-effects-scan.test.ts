@@ -109,9 +109,11 @@ describe("scan — a member beside a namespace export of the same name", () => {
     const exported = symbolById(result, "ts:src/merged.ts#C::m")
 
     expect([member.kind, member.dropped]).toEqual(["method", false])
-    expect(member.effects.map((e) => e.id)).toContain("db.write")
+    expect(member.effects.map((e) => e.id)).toEqual(["db.write"])
     expect([exported.kind, exported.dropped]).toEqual(["type", true])
     expect(owner.calls).toEqual([])
+    // The class once re-walked the member and reported the write on `#C` as well.
+    expect(result.ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toEqual(["db.write"])
   })
 })
 
