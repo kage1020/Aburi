@@ -385,6 +385,15 @@ describe("walkBody — a bracket access in a callee (LP20j / LP20k)", () => {
     expect(call?.dynamicReceiver).toBe(true)
   })
 
+  it("refuses a literal that spells a private name", async () => {
+    // `obj["#v"]` is the public property with those characters; `obj.#v` is another member.
+    // `isQnameSegment` admits `#v` only when asked, and a decoded string never asks.
+    const { calls } = await walkFirstSymbol('export function f(obj: any) { obj["#v"].m() }')
+    const call = calls.find((c) => c.target.endsWith(".m"))
+    expect(call?.target).toBe("obj.<computed>.m")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+
   it("refuses an empty literal — no segment is empty", async () => {
     const { calls } = await walkFirstSymbol('export function f(obj: any) { obj[""].m() }')
     const call = calls.find((c) => c.target.endsWith(".m"))

@@ -67,6 +67,20 @@ export const RESERVED_LANGUAGE_IDS: ReadonlySet<string> = new Set(["slice"])
 const QNAME_SEGMENT_PATTERN = /^[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
 
 /**
+ * A member segment written as ECMAScript's PrivateIdentifier: one `#`, then an identifier. `#v`
+ * and a `v` declared beside it are two members, so the `#` is part of the name.
+ *
+ * Exactly one and leading only, because that is the PrivateIdentifier production; `a#b` and
+ * `##v` are not names. It is admitted only after a separator — a private name is always a
+ * member of something — so a qualified name never opens with `#`. That keeps the id's own `#`
+ * unambiguous: `splitSymbolId` takes the first `#` after the language, and every `#` a
+ * qualified name carries comes after it (`ts:a.ts#C.#v`).
+ *
+ * Not part of `QNAME_SEGMENT_PATTERN`, because a caller has to ask for it (`SegmentOptions`).
+ */
+const PRIVATE_NAME_PATTERN = /^#[$_\p{ID_Start}][$\p{ID_Continue}]*$/u
+
+/**
  * Prefixes that make a path absolute rather than workspace-relative. The Windows drive
  * letter needs no following separator: `C:a.ts` is drive-relative, resolves against a
  * per-drive working directory the IR does not record, and so is no more portable than
@@ -247,7 +261,7 @@ export function makeMemberQname(
     )
   }
   for (const segment of ownerChain) assertQnameSegment(segment, segment)
-  assertQnameSegment(member, member)
+  assertQnameSegment(member, member, { privateName: true })
   const separator = kind === "instance" ? "." : "::"
   return `${ownerChain.join(".")}${separator}${member}`
 }
@@ -454,7 +468,8 @@ function composeSymbolId(parts: SymbolIdParts): SymbolId {
  * Inverse of `composeSymbolId`: recover the three parts from an assembled id, or `null` when
  * the string has no `:` / `#` structure at all. Neither the language token nor the file path
  * may contain `:` or `#`, so the first occurrence of each is the separator — which is why
- * `symbolIdPathViolation` rejects both characters in a path.
+ * `symbolIdPathViolation` rejects both characters in a path. The qualified name may carry a
+ * `#` (`C.#v`), but never as its first character, so it never moves the split.
  */
 function splitSymbolId(value: string): SymbolIdParts | null {
   const colon = value.indexOf(":")
@@ -644,9 +659,25 @@ export function isQualifiedName(value: string): boolean {
  * `isQualifiedName` is the wrong predicate for that question and would fail quietly: it
  * answers about a *finished* name, so it admits `.` and `::`. A caller vetting one member
  * name with it would accept `"a.b"` and mint the nested qname `C.a.b` out of a single member.
+ *
+ * A private name, `#v`, is refused unless the caller asks for it (`SegmentOptions`), so a
+ * producer that has not thought about private names fails closed.
  */
-export function isQnameSegment(value: string): boolean {
-  return QNAME_SEGMENT_PATTERN.test(value)
+export function isQnameSegment(value: string, options: SegmentOptions = {}): boolean {
+  return (
+    QNAME_SEGMENT_PATTERN.test(value) ||
+    (options.privateName === true && PRIVATE_NAME_PATTERN.test(value))
+  )
+}
+
+export interface SegmentOptions {
+  /**
+   * Admit a PrivateIdentifier, `#v`. Off unless asked, because only the language's own private
+   * name node may carry the `#`: a key decoded from a string (`"#v"() {}`, `obj["#v"]`) is a
+   * public property whose text happens to open with one, and admitting it would fold that
+   * property onto the private member's Symbol.
+   */
+  privateName?: boolean
 }
 
 function qualifiedNameViolation(qname: string): GrammarViolation | null {
@@ -665,7 +696,7 @@ function qualifiedNameViolation(qname: string): GrammarViolation | null {
       value: qname,
     }
   }
-  for (const segment of splitQnameSegments(qname)) {
+  for (const [index, segment] of splitQnameSegments(qname).entries()) {
     if (segment.length === 0) {
       return {
         code: "anonymous-symbol-id-attempted",
@@ -673,7 +704,7 @@ function qualifiedNameViolation(qname: string): GrammarViolation | null {
         value: qname,
       }
     }
-    if (!QNAME_SEGMENT_PATTERN.test(segment)) {
+    if (!isQnameSegment(segment, { privateName: index > 0 })) {
       return {
         code: "anonymous-symbol-id-attempted",
         message: `qualified name "${qname}" contains the non-identifier segment "${segment}"`,
@@ -697,8 +728,12 @@ function splitQnameSegments(qname: string): string[] {
   return qname.split(/::|\./)
 }
 
-function assertQnameSegment(segment: string, originalQname: string): void {
-  if (!QNAME_SEGMENT_PATTERN.test(segment)) {
+function assertQnameSegment(
+  segment: string,
+  originalQname: string,
+  options: SegmentOptions = {},
+): void {
+  if (!isQnameSegment(segment, options)) {
     throw new CoreError(
       `qualified name "${originalQname}" contains the non-identifier segment "${segment}"`,
       { code: "anonymous-symbol-id-attempted", value: originalQname },

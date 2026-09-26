@@ -451,7 +451,9 @@ function describeCallee(node: Node): CalleeShape | null {
  *
  * Everything else — an identifier, a number, a substituting template, a string the
  * qualified-name grammar has no segment for — is null, and the caller writes
- * `COMPUTED_TARGET_SEGMENT` in its place.
+ * `COMPUTED_TARGET_SEGMENT` in its place. `obj["#v"]` is null too: `isQnameSegment` admits
+ * `#v` only when asked, because that segment names the `#`-private member and `"#v"` is a
+ * public property.
  */
 function subscriptSegment(node: Node): string | null {
   // Both halves of the refusal `memberNameSegment` makes, and neither covers the other: a

@@ -852,6 +852,18 @@ describe("resolveCallGraph", () => {
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
   })
 
+  it("`this.#v` in untyped tier stays unresolved, although `C.#v` is now a Symbol it could name", () => {
+    // The grammar used to refuse `C.#v`, which kept this target unresolvable twice over. It is
+    // a legitimate Symbol now, so only the `this` guard keeps the untyped tier off it.
+    const caller = withCalls("ts:src/a.ts#C.bar", [{ target: "this.#v", line: 5 }], {
+      component: "billing",
+    })
+    const member = makeSymbol("ts:src/a.ts#C.#v", { kind: "method", component: "billing" })
+    const result = resolveCallGraph({ symbols: [caller, member], importsByFile: new Map() })
+    expect(result.edges).toEqual([])
+    expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+  })
+
   it("`super.method` in untyped tier stays unresolved even when a same-name Symbol exists", () => {
     // Symmetric guard to CR14 — `super` resolves through the class hierarchy,
     // which only the LSP tier can see. Without a dedicated test the `super`

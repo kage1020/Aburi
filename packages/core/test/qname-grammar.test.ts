@@ -92,6 +92,28 @@ describe("an identifier ECMAScript defines is a qualified name", () => {
   })
 })
 
+describe("a private member keeps its `#`, after a separator only", () => {
+  it.each([
+    ["an instance member", "C.#v"],
+    ["a static member", "Q::#v"],
+    ["a nested owner", "A.B.#v"],
+  ])("accepts %s", (_label, qname) => {
+    expect(build(qname)).toBe(`ts:src/a.ts#${qname}`)
+    expect(isQualifiedName(qname)).toBe(true)
+  })
+
+  it.each([
+    ["a leading `#`, which would sit beside the id's own", "#v"],
+    ["a `#` inside a segment", "Q#v"],
+    ["a bare `#` member", "Q.#"],
+    ["a bare `#` owner", "#.v"],
+    ["two `#`", "Q.##v"],
+  ])("refuses %s", (_label, qname) => {
+    expect(refusalFor(qname).code).toBe("anonymous-symbol-id-attempted")
+    expect(isQualifiedName(qname)).toBe(false)
+  })
+})
+
 describe("what is not a name is still refused, and named", () => {
   it.each([
     ["an object pattern", "{ GET, POST }"],
@@ -156,11 +178,29 @@ describe("a producer can ask whether a name is a segment before it builds one", 
     ["a number", "1"],
     ["a decimal", "1.5"],
     ["nothing", ""],
-    ["a private name", "#v"],
+    ["a private name, unless asked for", "#v"],
     ["a space", "a b"],
     ["the default sentinel", DEFAULT_EXPORT_QNAME],
   ])("refuses %s", (_label, segment) => {
     expect(isQnameSegment(segment)).toBe(false)
+  })
+
+  it("accepts a private name only when asked for one", () => {
+    // `"#v"() {}` decodes to the characters `#v`, and it is a public property. Only the private
+    // name node may carry the segment, so the default refuses it and a producer that never
+    // thought about private names cannot mint one.
+    expect(isQnameSegment("#v")).toBe(false)
+    expect(isQnameSegment("#v", { privateName: true })).toBe(true)
+    expect(isQnameSegment("#ユーザー", { privateName: true })).toBe(true)
+  })
+
+  it.each([
+    ["a bare `#`", "#"],
+    ["a `#` after the first character", "a#b"],
+    ["two `#`", "##v"],
+    ["a `#` before a digit", "#1"],
+  ])("refuses %s even when a private name is asked for", (_label, segment) => {
+    expect(isQnameSegment(segment, { privateName: true })).toBe(false)
   })
 
   it("is stricter than the whole-qname predicate, which is the reason it exists", () => {

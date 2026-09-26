@@ -110,6 +110,17 @@ describe("makeMemberQname", () => {
     )
   })
 
+  it("keeps a private member's `#`, on either side", () => {
+    expect(makeMemberQname(["C"], "#v", "instance")).toBe("C.#v")
+    expect(makeMemberQname(["C"], "#v", "static")).toBe("C::#v")
+  })
+
+  it("refuses a private name as an owner", () => {
+    expect(() => makeMemberQname(["#C"], "v", "instance")).toThrowError(
+      expect.objectContaining({ code: "anonymous-symbol-id-attempted" }),
+    )
+  })
+
   it("rejects an empty owner chain", () => {
     expect(() => makeMemberQname([], "createInvoice", "instance")).toThrowError(
       expect.objectContaining({ code: "anonymous-symbol-id-attempted" }),
@@ -455,6 +466,12 @@ describe("id guards", () => {
     expect(symbolIdFile("ts:src/a.ts#foo")).toBe("src/a.ts")
     expect(symbolIdFile("ts:src/nested/dir/a.ts#Cls.method")).toBe("src/nested/dir/a.ts")
     expect(symbolIdFile("ts:src/index.ts#<default>")).toBe("src/index.ts")
+  })
+
+  it("splits at the id's own `#` when the qualified name carries one too", () => {
+    expect(isSymbolId("ts:src/a.ts#C.#v")).toBe(true)
+    expect(symbolIdFile("ts:src/a.ts#C.#v")).toBe("src/a.ts")
+    expect(symbolIdFile("ts:src/a.ts#C::#v")).toBe("src/a.ts")
   })
 
   it("symbolIdFile names no file for anything makeSymbolId would refuse", () => {
