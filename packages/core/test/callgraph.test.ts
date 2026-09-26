@@ -82,6 +82,44 @@ describe("resolveCallGraph", () => {
     expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
   })
 
+  it("file scope: a class-name receiver reaches the static member, not the instance one", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "C.m", line: 3 }])
+    const result = resolveCallGraph({
+      symbols: [
+        caller,
+        makeSymbol("ts:src/a.ts#C", { kind: "class" }),
+        makeSymbol("ts:src/a.ts#C.m", { kind: "method" }),
+        makeSymbol("ts:src/a.ts#C::m", { kind: "function" }),
+      ],
+      importsByFile: new Map(),
+    })
+    expect(result.edges.map((edge) => [edge.to, edge.confidence])).toEqual([
+      ["ts:src/a.ts#C::m", "high"],
+    ])
+  })
+
+  it("file scope: joins with `::` only where a static member is declared", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [
+      { target: "C.Inner.g", line: 3 },
+      { target: "C.K.s", line: 4 },
+    ])
+    const result = resolveCallGraph({
+      symbols: [
+        caller,
+        makeSymbol("ts:src/a.ts#C", { kind: "class" }),
+        makeSymbol("ts:src/a.ts#C::Inner", { kind: "namespace" }),
+        makeSymbol("ts:src/a.ts#C::Inner.g", { kind: "function" }),
+        makeSymbol("ts:src/a.ts#C::K", { kind: "class" }),
+        makeSymbol("ts:src/a.ts#C::K::s", { kind: "method" }),
+      ],
+      importsByFile: new Map(),
+    })
+    expect(result.edges.map((edge) => edge.to)).toEqual([
+      "ts:src/a.ts#C::Inner.g",
+      "ts:src/a.ts#C::K::s",
+    ])
+  })
+
   it("file scope: never crosses file boundaries", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 3 }])
     const callee = makeSymbol("ts:src/b.ts#helper")
@@ -485,6 +523,35 @@ describe("resolveCallGraph", () => {
       importsByFile: imports,
     })
     expect(result.edges[0]?.to).toBe("ts:src/x.ts#Cls.method")
+  })
+
+  it("import scope: a class-name receiver reaches the static member over there", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [
+      { target: "C.m", line: 5 },
+      { target: "ns.C.m", line: 6 },
+    ])
+    const imports = new Map<string, readonly ImportEdge[]>([
+      [
+        "src/a.ts",
+        [
+          importEdge({ source: "./x", symbols: ["C"] }),
+          importEdge({ source: "./x", symbols: "*", namespaceBinding: "ns" }),
+        ],
+      ],
+    ])
+    const result = resolveCallGraph({
+      symbols: [
+        caller,
+        makeSymbol("ts:src/x.ts#C", { kind: "class" }),
+        makeSymbol("ts:src/x.ts#C.m", { kind: "method" }),
+        makeSymbol("ts:src/x.ts#C::m", { kind: "method" }),
+      ],
+      importsByFile: imports,
+    })
+    expect(result.edges.map((edge) => [edge.to, edge.line])).toEqual([
+      ["ts:src/x.ts#C::m", 5],
+      ["ts:src/x.ts#C::m", 6],
+    ])
   })
 
   it("sorts edges deterministically by (from, to, line)", () => {

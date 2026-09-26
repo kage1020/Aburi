@@ -95,7 +95,7 @@ describe("scan — a workspace whose entities are declared more than once", () =
     // written inside it disappears.
     expect(ids).toContain("ts:src/merged.ts#N.a")
     expect(ids).toContain("ts:src/merged.ts#N.b")
-    expect(ids).toContain("ts:src/merged.ts#C.c")
+    expect(ids).toContain("ts:src/merged.ts#C::c")
   })
 
   it("records the setter's call on the property the getter named", async () => {
@@ -108,5 +108,40 @@ describe("scan — a workspace whose entities are declared more than once", () =
     // The getter's body is `return this.#v` and the setter's is where the work is, so a
     // Symbol described by its leading declaration alone would be dropped.
     expect(value?.dropped).toBe(false)
+  })
+})
+
+describe("scan — a call through the name of a class a namespace merged into", () => {
+  it("reaches the namespace's export, the member TypeScript calls", async () => {
+    await workspace.writeSource(
+      "src/c.ts",
+      [
+        "export class C {",
+        "  m(n: number) {",
+        "    return n",
+        "  }",
+        "}",
+        "export namespace C {",
+        "  export function m(n: number) {",
+        "    return helper(n)",
+        "  }",
+        "}",
+        "export function f() {",
+        "  return C.m(1)",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    await workspace.writeSource(
+      "src/g.ts",
+      ["import { C } from './c'", "export function g() {", "  return C.m(2)", "}", ""].join("\n"),
+    )
+
+    const result = await scanWorkspace()
+    const resolved = (id: string) =>
+      result.ir.symbols.find((symbol) => symbol.id === id)?.calls.map((call) => call.resolved)
+
+    expect(resolved("ts:src/c.ts#f")).toEqual(["ts:src/c.ts#C::m"])
+    expect(resolved("ts:src/g.ts#g")).toEqual(["ts:src/c.ts#C::m"])
   })
 })

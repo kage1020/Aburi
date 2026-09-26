@@ -5,7 +5,7 @@ import Ajv2020, {
   type SchemaObject,
   type ValidateFunction,
 } from "ajv/dist/2020.js"
-import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
+import { type ParseError, type ParseOptions, parse, printParseErrorCode, visit } from "jsonc-parser"
 import configSchema from "../../../schema/aburi.config.v1.json" with { type: "json" }
 import { ConfigError, MISSING_FILE_ERRNOS } from "./errors"
 
@@ -16,6 +16,12 @@ const ajv = new Ajv2020({
   allowUnionTypes: false,
 })
 const validate: ValidateFunction<Config> = ajv.compile<Config>(configSchema satisfies SchemaObject)
+
+/**
+ * One set of options for both reads of the text. `parse` is `visit` with an error-collecting
+ * visitor, so the repeated-key walk sees what `parse` accepted only while the two agree.
+ */
+const CONFIG_PARSE_OPTIONS: ParseOptions = { allowTrailingComma: true, disallowComments: false }
 
 /**
  * Extract a string `code` property from any thrown value. Accepts both plain objects
@@ -29,16 +35,13 @@ function getErrno(value: unknown): string {
 }
 
 /**
- * Parse + ajv-validate + duplicate-key-check a JSONC config string. The "Pure" qualifier
- * means no I/O — not "no semantic work": this returns only when every rule the schema
- * cannot express (duplicate component ids, duplicate hint names) also passes.
+ * Parse a JSONC config string, refuse a key its text names twice, validate against the schema,
+ * then refuse duplicate component ids and hint names. The key check reads the text rather than
+ * the parsed value, which has already kept one of the two, so it runs before the schema does.
  */
 export function parseConfig(text: string, sourcePath: string): Config {
   const errors: ParseError[] = []
-  const parsed: unknown = parse(text, errors, {
-    allowTrailingComma: true,
-    disallowComments: false,
-  })
+  const parsed: unknown = parse(text, errors, CONFIG_PARSE_OPTIONS)
   if (errors.length > 0) {
     const summary = errors
       .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset} (len ${e.length})`)
@@ -51,6 +54,8 @@ export function parseConfig(text: string, sourcePath: string): Config {
       { cause: errors },
     )
   }
+
+  rejectRepeatedKeys(text, sourcePath)
 
   if (!validate(parsed)) {
     const ajvErrors = validate.errors ?? []
@@ -69,7 +74,7 @@ export function parseConfig(text: string, sourcePath: string): Config {
   return parsed
 }
 
-/** Read + parse + ajv-validate + duplicate-key-check a config file on disk. */
+/** Read a config file on disk and hand its text to `parseConfig`. */
 export async function readConfigFile(path: string): Promise<Config> {
   let text: string
   try {
@@ -92,6 +97,69 @@ export async function readConfigFile(path: string): Promise<Config> {
     )
   }
   return parseConfig(text, path)
+}
+
+/**
+ * Refuse an object that names one key twice, at any depth. JSONC parsing keeps the last and says
+ * nothing, so `{ "ignore": ["a/**"], "ignore": ["b/**"] }` would drop `a/**` with no sign the file
+ * asked for it.
+ *
+ * `__proto__` is refused once: the parser assigns it, which replaces the object's prototype
+ * rather than adding a key, so the schema never sees what it holds while a property read still
+ * finds it.
+ */
+function rejectRepeatedKeys(text: string, sourcePath: string): void {
+  const open: Set<string>[] = []
+  // Widened by the cast: the callbacks assign it, which narrowing after `visit` cannot see.
+  let found = null as { message: string; cause: RepeatedKey } | null
+  visit(
+    text,
+    {
+      // Returning `false` here would silence every callback below this object.
+      onObjectBegin: () => {
+        open.push(new Set())
+      },
+      onObjectEnd: () => {
+        open.pop()
+      },
+      onObjectProperty: (key, _offset, _length, line, column, pathOf) => {
+        const keys = open.at(-1)
+        if (found !== null || keys === undefined) return
+        const repeated = keys.has(key)
+        if (repeated || key === PROTOTYPE_KEY) {
+          const path = pathOf()
+          const owner = path.length === 0 ? "the top-level object" : `/${path.join("/")}`
+          const at = `line ${line + 1}, column ${column + 1}`
+          found = {
+            message: repeated
+              ? `names "${key}" twice in ${owner} (again at ${at})`
+              : `names "${key}" as a key in ${owner} (at ${at}); it replaces the object's ` +
+                "prototype instead of adding a key, so the schema cannot see it",
+            cause: { key, path, line: line + 1, column: column + 1 },
+          }
+        }
+        keys.add(key)
+      },
+    },
+    CONFIG_PARSE_OPTIONS,
+  )
+  if (found !== null) {
+    throw new ConfigError(
+      `Config at ${sourcePath} ${found.message}`,
+      { code: "config-invalid" },
+      { cause: found.cause },
+    )
+  }
+}
+
+const PROTOTYPE_KEY = "__proto__"
+
+/** Where `rejectRepeatedKeys` stopped: the key, its owner's JSON path, and 1-based position. */
+interface RepeatedKey {
+  key: string
+  path: readonly (string | number)[]
+  line: number
+  column: number
 }
 
 function enforceDuplicateRules(config: Config, sourcePath: string): void {

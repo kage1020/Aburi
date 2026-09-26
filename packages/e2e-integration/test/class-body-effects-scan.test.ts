@@ -83,13 +83,11 @@ describe("scan — a class whose members write to a database", () => {
   })
 })
 
-describe("scan — a member whose Symbol was folded into a droppable one", () => {
-  it("records the member's calls nowhere, because the Symbol that owns them is dropped", async () => {
-    // `namespace C { export type m }` and `class C { m() {} }` both spell `#C.m`, so they fold
-    // — a known defect of the qualified-name convention. The type alias is written first, so
-    // the folded Symbol is a `type` and the drop list removes it before anything walks it.
-    // The class used to re-walk the member and report `write` on `#C` too; now the write is
-    // reported nowhere. Pinned so the fold's fix has something to move.
+describe("scan — a member beside a namespace export of the same name", () => {
+  it("keeps the member's write on the member, apart from the dropped export", async () => {
+    // `namespace C { export type m }` is `#C::m` and the method is `#C.m`. Spelled alike they
+    // folded, the type alias written first claimed the Symbol, and the drop list removed the
+    // write along with it.
     await workspace.writeSource(
       "src/merged.ts",
       [
@@ -108,11 +106,14 @@ describe("scan — a member whose Symbol was folded into a droppable one", () =>
     const result = await scanWorkspace()
     const owner = symbolById(result, "ts:src/merged.ts#C")
     const member = symbolById(result, "ts:src/merged.ts#C.m")
+    const exported = symbolById(result, "ts:src/merged.ts#C::m")
 
-    expect(member.kind).toBe("type")
-    expect(member.dropped).toBe(true)
+    expect([member.kind, member.dropped]).toEqual(["method", false])
+    expect(member.effects.map((e) => e.id)).toEqual(["db.write"])
+    expect([exported.kind, exported.dropped]).toEqual(["type", true])
     expect(owner.calls).toEqual([])
-    expect(result.ir.symbols.flatMap((symbol) => symbol.effects)).toEqual([])
+    // The class once re-walked the member and reported the write on `#C` as well.
+    expect(result.ir.symbols.flatMap((s) => s.effects.map((e) => e.id))).toEqual(["db.write"])
   })
 })
 

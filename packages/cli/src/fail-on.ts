@@ -65,51 +65,66 @@ export class FailOnParseError extends Error {
 }
 
 /**
- * Parse the raw `--fail-on` argument (comma-separated). Returns one clause per token.
- * Empty intra-list segments (`--fail-on changed,,removed`) are tolerated so users can
- * build the list programmatically without stripping trailing commas — but a value that
- * yields zero clauses in total is rejected with `FailOnParseError`. The CLI treats
- * `--fail-on ""` (from an unset shell variable, for example) as a configuration mistake
- * rather than "gate disabled": a silently-empty gate would let regressions through with
- * a green exit code, which is the opposite of what a fail-on gate exists to prevent.
+ * Parse the raw `--fail-on` argument (comma-separated) into one clause per segment, or throw
+ * `FailOnParseError` naming the whole value as typed. A value with no clause at all (`""`, `","`,
+ * `",,"`, from an unset shell variable for example) is refused first, because a silently-empty
+ * gate would let regressions through with a green exit code. Otherwise every segment has to be a
+ * clause: an empty one (`changed,,removed`, a trailing comma) is refused, since it is as likely a
+ * clause that went missing as a stray comma.
  */
 export function parseFailOn(value: string): FailOnClause[] {
-  const clauses = value
-    .split(",")
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0)
-    .map((segment) => parseSingle(segment))
-  if (clauses.length === 0) {
+  const segments = value.split(",").map((segment) => segment.trim())
+  if (segments.every((segment) => segment.length === 0)) {
     throw new FailOnParseError(
       value,
       "expected at least one clause; an empty --fail-on value would silently disable the CI gate.",
     )
   }
-  return clauses
+  return segments.map((segment, index) => {
+    // Which clause, when there is more than one to choose from.
+    const where = segments.length === 1 ? "" : `clause ${index + 1} of ${segments.length}`
+    if (segment.length === 0) {
+      throw new FailOnParseError(
+        value,
+        `${where} is empty; remove the extra comma or write the clause.`,
+      )
+    }
+    try {
+      return parseSingle(segment)
+    } catch (err) {
+      if (!(err instanceof ClauseError)) throw err
+      throw new FailOnParseError(value, where === "" ? err.message : `${where}: ${err.message}`)
+    }
+  })
 }
+
+/** A clause's own fault, before `parseFailOn` says which clause of which value it was. */
+class ClauseError extends Error {}
 
 function parseSingle(segment: string): FailOnClause {
   const colonIdx = findThresholdColon(segment)
   if (colonIdx === -1) {
-    return { token: parseToken(segment, segment), threshold: null }
+    // `changed:5` and `changed:<5` are a known token and a threshold missing its `>`, not an
+    // unknown token. A word after the colon is left to read as a misspelt token.
+    const last = segment.lastIndexOf(":")
+    const tail = segment.slice(last + 1)
+    if (last !== -1 && /^[\d<=>!]/.test(tail) && isToken(segment.slice(0, last))) {
+      throw new ClauseError(`threshold must use ">N" form (e.g. changed:>10); got "${tail}"`)
+    }
+    return { token: parseToken(segment), threshold: null }
   }
   const tokenPart = segment.slice(0, colonIdx)
-  const rest = segment.slice(colonIdx + 1)
-  if (!rest.startsWith(">")) {
-    throw new FailOnParseError(
-      segment,
-      `threshold must use ">N" form (e.g. changed:>10); got "${rest}"`,
+  const numberPart = segment.slice(colonIdx + 2)
+  if (/^[<=>!]/.test(numberPart)) {
+    throw new ClauseError(
+      `threshold must use ">N" form (e.g. changed:>10); got "${segment.slice(colonIdx + 1)}"`,
     )
   }
-  const numberPart = rest.slice(1)
   const parsed = Number.parseInt(numberPart, 10)
   if (!Number.isFinite(parsed) || parsed < 0 || String(parsed) !== numberPart) {
-    throw new FailOnParseError(
-      segment,
-      `threshold must be a non-negative integer; got "${numberPart}"`,
-    )
+    throw new ClauseError(`threshold must be a non-negative integer; got "${numberPart}"`)
   }
-  return { token: parseToken(tokenPart, segment), threshold: parsed }
+  return { token: parseToken(tokenPart), threshold: parsed }
 }
 
 /**
@@ -125,10 +140,13 @@ function findThresholdColon(segment: string): number {
   return last
 }
 
-function parseToken(raw: string, wholeSegment: string): FailOnToken {
-  if (STATUS_TOKENS.has(raw as FailOnStatusToken)) return raw as FailOnStatusToken
-  if (DELTA_TOKENS.has(raw as FailOnDeltaAxis)) return raw as FailOnDeltaAxis
-  throw new FailOnParseError(wholeSegment, `unknown token "${raw}"`)
+function isToken(raw: string): raw is FailOnToken {
+  return STATUS_TOKENS.has(raw as FailOnStatusToken) || DELTA_TOKENS.has(raw as FailOnDeltaAxis)
+}
+
+function parseToken(raw: string): FailOnToken {
+  if (isToken(raw)) return raw
+  throw new ClauseError(`unknown token "${raw}"`)
 }
 
 /**

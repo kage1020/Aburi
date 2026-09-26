@@ -196,6 +196,11 @@ describe("lastSegment", () => {
   it("returns the whole name if no separator", () => {
     expect(lastSegment("plain")).toBe("plain")
   })
+  it("returns the segment after the last separator of either kind", () => {
+    expect(lastSegment("C::Inner.g")).toBe("g")
+    expect(lastSegment("C::K::s")).toBe("s")
+    expect(lastSegment("A.C::m")).toBe("m")
+  })
 })
 
 describe("jaccardTokens", () => {

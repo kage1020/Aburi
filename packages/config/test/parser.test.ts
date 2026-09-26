@@ -146,6 +146,53 @@ describe("parseConfig", () => {
   })
 })
 
+describe("C19 — a key named twice in one object", () => {
+  it.each([
+    [
+      "at the top level",
+      `{ "ignore": ["a/**"], "ignore": ["b/**"] }`,
+      'names "ignore" twice in the top-level object (again at line 1, column 23)',
+    ],
+    [
+      "inside an array element",
+      `{\n  "components": [{ "id": "a", "roots": ["x"], "id": "b" }]\n}`,
+      'names "id" twice in /components/0 (again at line 2, column 47)',
+    ],
+    [
+      "inside a nested object",
+      `{ "output": { "dir": "x", "dir": "y" } }`,
+      'names "dir" twice in /output (again at line 1, column 27)',
+    ],
+  ])("refuses the config %s", async (_label, text, message) => {
+    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    expect(caught.code).toBe("config-invalid")
+    expect(caught.message).toBe(`Config at inline ${message}`)
+  })
+
+  it("carries the key and where it is as the cause", async () => {
+    const text = `{ "output": { "dir": "x", "dir": "y" } }`
+    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    expect(caught.cause).toEqual({ key: "dir", path: ["output"], line: 1, column: 27 })
+  })
+
+  it("refuses __proto__, which replaces the prototype where the schema cannot see it", async () => {
+    // Parsed, `output` is reachable through the prototype while `Object.keys` is empty, so the
+    // schema's `additionalProperties` passes it.
+    const text = `{ "__proto__": { "output": { "dir": "smuggled-out" } } }`
+    const caught = await configErrorFrom(() => parseConfig(text, "inline"))
+    expect(caught.code).toBe("config-invalid")
+    expect(caught.message).toBe(
+      'Config at inline names "__proto__" as a key in the top-level object (at line 1, column 3); ' +
+        "it replaces the object's prototype instead of adding a key, so the schema cannot see it",
+    )
+  })
+
+  it("lets two objects use the same key", () => {
+    const text = `{ "components": [{ "id": "a", "roots": ["x"] }, { "id": "b", "roots": ["y"] }] }`
+    expect(parseConfig(text, "inline").components).toHaveLength(2)
+  })
+})
+
 describe("readConfigFile", () => {
   let tmp: string
   beforeAll(async () => {
