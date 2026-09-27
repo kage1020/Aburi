@@ -74,6 +74,12 @@ function stableStringify(value: unknown, path = "$"): string {
   return `{${entries.join(",")}}`
 }
 
+function describeType(value: unknown): string {
+  if (value === null) return "null"
+  if (Array.isArray(value)) return "array"
+  return typeof value
+}
+
 function raise(
   message: string,
   code: RegistryErrorCode,
@@ -161,12 +167,11 @@ export class VocabRegistry implements VocabRegistryContract {
   // ---------- Validations ----------
 
   /**
-   * Pre-flight: the schema requires every provides.* array, but `register` accepts
-   * any value typed PluginManifest at runtime (e.g. a hand-built object skipping
-   * `loadPluginManifest`). Without this check, a missing array would `TypeError`
-   * inside the commit loop after validation has already mutated nothing yet —
-   * still safe atomicity-wise, but the error message would be `Cannot read
-   * properties of undefined (reading 'length')`. Surface a coded error instead.
+   * Pre-flight: the schema requires every provides.* array and the shape of each entry, but
+   * `register` accepts any value typed PluginManifest at runtime (e.g. a hand-built object
+   * skipping `loadPluginManifest`). Without this check, a missing array or a malformed entry
+   * would `TypeError` inside a later validation, as `Cannot read properties of undefined`.
+   * Surface a coded error instead.
    */
   #assertProvidesShape(m: PluginManifest): void {
     if (!m.provides || typeof m.provides !== "object") {
@@ -188,10 +193,37 @@ export class VocabRegistry implements VocabRegistryContract {
       const value = Object.hasOwn(provides, key) ? provides[key] : undefined
       if (!Array.isArray(value)) {
         raise(
-          `Plugin "${m.name}" provides.${key} must be an array (got ${typeof value}).`,
+          `Plugin "${m.name}" provides.${key} must be an array (got ${describeType(value)}).`,
           "manifest-invalid",
           [m.name],
         )
+      }
+    }
+    // Annotated rather than inferred, so a call narrows the way a call to `raise` does.
+    const refuse: (at: string, expected: string, value: unknown) => never = (at, expected, value) =>
+      raise(
+        `Plugin "${m.name}" provides.${at} must be ${expected} (got ${describeType(value)}).`,
+        "manifest-invalid",
+        [m.name],
+      )
+    const checkEntries = (key: "effects" | "extKinds", fields: readonly string[]): void => {
+      for (const [i, entry] of (provides[key] as unknown[]).entries()) {
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+          refuse(`${key}[${i}]`, "an object", entry)
+        }
+        for (const field of fields) {
+          const value = Object.hasOwn(entry, field)
+            ? (entry as Record<string, unknown>)[field]
+            : undefined
+          if (typeof value !== "string") refuse(`${key}[${i}].${field}`, "a string", value)
+        }
+      }
+    }
+    checkEntries("effects", ["id", "description"])
+    checkEntries("extKinds", ["id", "baseKind", "description"])
+    for (const key of ["effectPrefixes", "extKindPrefixes", "frameworks", "derivedByPrefixes"]) {
+      for (const [i, value] of (provides[key] as unknown[]).entries()) {
+        if (typeof value !== "string") refuse(`${key}[${i}]`, "a string", value)
       }
     }
   }
