@@ -25,7 +25,7 @@ Schema-level validation ([`aburi.ir.v1.json`](https://github.com/kage1020/Aburi/
 | `extKind` | `Symbol.extKind` | `<ns>(:<segment>)+` |
 | Effect id (extension) | `Symbol.effects[].id` | `x-<ns>:<action>` |
 | `derivedBy` strings | `Symbol.derivedBy[]` | free-form (convention: `<ns>:<reason>`) |
-| Framework names | `Component.frameworks[]` | `[a-z][a-z0-9-]*` |
+| Framework ids | `Component.frameworks[]` | `[a-z][a-z0-9-]*` |
 
 The vocabulary is declared via the manifest described in §3 of this document.
 

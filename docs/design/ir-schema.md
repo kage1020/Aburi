@@ -267,6 +267,7 @@ A logical boundary of the monorepo. Independent of physical packages.
 - `description` is Class A per §1.1 — always written, `null` when nothing supplied it. Only the config path (`components[].description`) can supply one today; automatic detection has no source for it and always writes `null`
 - `id` is fixed to ASCII kebab-case (`^[a-z0-9]+(-[a-z0-9]+)*$`) so it can be used in URLs and CLI arguments. A segment may start with a digit: the id is derived by kebab-casing a package or directory name ([component-detect.md](./component-detect.md) §4.1), and `3d-force-graph` is an ordinary npm package name
 - Each element of `publicApi` is either a **glob** or a **symbol id**
+- Each element of `frameworks` is a framework id: one a framework plugin lists in `provides.frameworks[]`, or one the component detector records from a dependency (`nestjs`, `nextjs`, `vue`). A value declared through config (`components[].frameworks`) is carried verbatim, so a plugin's own name (`framework-nestjs`) can appear; `aburi scan` reports that on stderr rather than rewriting it, since the IR records what the config said ([config.md](./config.md) §6)
 - Physical Component boundary inference automatically reads package manager configuration (`pnpm-workspace.yaml`, `turbo.json`, `go.work`, `Cargo.toml` workspace, `pyproject.toml`/uv workspaces, etc.); see the separate document `component-detect.md` for details
 
 ## 5. Symbol

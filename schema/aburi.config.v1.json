@@ -130,7 +130,7 @@
     "PluginRef": {
       "type": "string",
       "minLength": 1,
-      "description": "Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative/absolute filesystem path ('./aburi-plugins/x.mjs', '/opt/aburi-plugins/x.mjs', 'C:/aburi-plugins/x.mjs'). A bare name resolves to '@aburi/<name>', so one with no hyphen ('ts') is refused when plugins load."
+      "description": "Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative/absolute filesystem path ('./aburi-plugins/x.mjs', '/opt/aburi-plugins/x.mjs', 'C:/aburi-plugins/x.mjs'). A bare name resolves to '@aburi/<name>', where plugins are named with their kind as a prefix ('lang-typescript'), so a bare name of lowercase letters and digits alone ('ts') is refused when plugins load."
     },
 
     "PluginManifestName": {

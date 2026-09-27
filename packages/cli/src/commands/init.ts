@@ -150,7 +150,8 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
  * Detector vocabulary → plugin manifest name. The detectors speak `LanguageId` /
  * framework ids (`ts`, `tsx`, `nestjs`); the top-level `languages` / `frameworks` fields
  * of `aburi.json` are `PluginRef`s that the plugin loader resolves as module specifiers.
- * Writing a detector id into those fields makes the loader look for `@aburi/ts`.
+ * Writing a detector id into those fields is refused by the loader, which names the plugin
+ * this table maps it to.
  *
  * Kept tiny on purpose; a large plugin catalog belongs outside the CLI so autodetect
  * stays language-agnostic. Only the plugins that ship in this monorepo are listed, and a

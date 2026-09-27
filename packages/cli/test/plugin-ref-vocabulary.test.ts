@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { IR_JSON_FILENAME } from "../src"
 import { runCli } from "../src/run"
+import { MemStream } from "./fixtures"
 
 /**
  * The two places a config can hold the wrong vocabulary and still pass the schema: a detector
@@ -38,21 +39,16 @@ async function writeConfig(config: Record<string, unknown>): Promise<void> {
 }
 
 async function scan(): Promise<{ exitCode: number; stderr: string }> {
-  const errBuffer = { text: "" }
-  const sink = (target: { text: string }) =>
-    ({
-      write(chunk: string): boolean {
-        target.text += chunk
-        return true
-      },
-    }) as unknown as NodeJS.WritableStream
+  const stdout = new MemStream()
+  const stderr = new MemStream()
   const exitCode = await runCli({
     argv: ["scan", "--no-timestamp"],
     cwd: workRoot,
-    stdout: sink({ text: "" }),
-    stderr: sink(errBuffer),
+    stdout,
+    stderr,
+    env: {},
   })
-  return { exitCode, stderr: errBuffer.text }
+  return { exitCode, stderr: `${stderr.text()}${stdout.text()}` }
 }
 
 async function componentFrameworks(): Promise<unknown> {
@@ -70,7 +66,7 @@ describe("a detector id where a plugin ref belongs", () => {
 
     const { exitCode, stderr } = await scan()
 
-    expect(exitCode).toBe(2)
+    expect(exitCode, stderr).toBe(2)
     expect(stderr).toContain(`Plugin "ts" in "languages" is not a plugin name`)
     expect(stderr).toContain(`Write "lang-typescript".`)
   })
@@ -80,7 +76,7 @@ describe("a detector id where a plugin ref belongs", () => {
 
     const { exitCode, stderr } = await scan()
 
-    expect(exitCode).toBe(2)
+    expect(exitCode, stderr).toBe(2)
     expect(stderr).toContain(`Write "framework-nestjs".`)
   })
 })
@@ -95,7 +91,7 @@ describe("a plugin name where a framework id belongs", () => {
 
     const { exitCode, stderr } = await scan()
 
-    expect(exitCode).toBe(0)
+    expect(exitCode, stderr).toBe(0)
     expect(stderr).toContain(
       `Component "app" lists "framework-nestjs" in frameworks, which names a plugin, not a framework`,
     )
@@ -106,10 +102,12 @@ describe("a plugin name where a framework id belongs", () => {
   it("knows a first-party plugin's framework id when the plugin is not loaded", async () => {
     await writeConfig({ languages: ["lang-typescript"], ...appComponent(["framework-next"]) })
 
-    const { stderr } = await scan()
+    const { exitCode, stderr } = await scan()
 
+    expect(exitCode, stderr).toBe(0)
     expect(stderr).toContain(`Component "app" lists "framework-next"`)
     expect(stderr).toContain(`Write "nextjs".`)
+    expect(await componentFrameworks()).toEqual(["framework-next"])
   })
 
   it("says nothing about framework ids, hyphenated or not provided by any plugin", async () => {
@@ -122,7 +120,7 @@ describe("a plugin name where a framework id belongs", () => {
 
     const { exitCode, stderr } = await scan()
 
-    expect(exitCode).toBe(0)
+    expect(exitCode, stderr).toBe(0)
     expect(stderr).not.toContain("names a plugin")
   })
 
@@ -161,6 +159,6 @@ describe("a plugin name where a framework id belongs", () => {
     const { exitCode, stderr } = await scan()
 
     expect(stderr).not.toContain("names a plugin")
-    expect(exitCode).toBe(0)
+    expect(exitCode, stderr).toBe(0)
   })
 })

@@ -244,7 +244,7 @@ describe("loadPlugins — module resolution and bucketing", () => {
     expect(imported).toEqual([])
   })
 
-  it("refuses a hyphenless bare ref before importing any plugin, even one listed earlier", async () => {
+  it("refuses a bare id before importing any plugin, even one listed earlier", async () => {
     const imported: string[] = []
     const error = await loadPlugins({
       config: { languages: ["lang-fake"], effects: ["prisma"] },
@@ -259,7 +259,7 @@ describe("loadPlugins — module resolution and bucketing", () => {
     expect((error as CliError).message).toContain(
       `Plugin "prisma" in "effects" is not a plugin name: a bare name resolves to "@aburi/prisma"`,
     )
-    expect((error as CliError).message).toContain("Write the plugin's manifest name")
+    expect((error as CliError).message).toContain('Write "effects-prisma".')
     expect(imported).toEqual([])
   })
 
@@ -268,8 +268,14 @@ describe("loadPlugins — module resolution and bucketing", () => {
       ["languages", "tsx", 'Write "lang-typescript".'],
       ["frameworks", "nextjs", 'Write "framework-next".'],
       ["frameworks", "vue", "Write the plugin's manifest name"],
+      ["effects", "nestjs", 'Write "effects-nestjs".'],
+      ["languages", "x", "Write the plugin's manifest name"],
     ] as const)("refuses %s: %s", (field, ref, fix) => {
       expect(detectorIdRefusal(ref, field)).toContain(fix)
+    })
+
+    it("suggests a plugin of the field's own kind", () => {
+      expect(detectorIdRefusal("nestjs", "effects")).not.toContain("framework-nestjs")
     })
 
     it.each([

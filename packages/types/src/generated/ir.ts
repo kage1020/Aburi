@@ -154,7 +154,7 @@ publicApi?: string[]
  */
 languages: LanguageId[]
 /**
- * Framework ids (a plugin's provides.frameworks, or the component detector's) recorded for this component. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as [].
+ * Framework ids (a plugin's provides.frameworks, or the component detector's) recorded for this component. A value declared through config is carried verbatim, so a plugin's own name can appear here; aburi scan reports it on stderr. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as [].
  */
 frameworks?: string[]
 /**

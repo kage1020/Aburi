@@ -137,12 +137,14 @@ Paths below are written as the string's value; in `aburi.json` each backslash is
      drive, or a drive with no root (`C:x.mjs`), which would resolve against whatever
      directory is current on that drive. On any other platform it is any ref naming a drive
      (`C:/x.mjs`, `C:\x.mjs`)
-   - has the shape of a language or framework id (`^[a-z][a-z0-9]*$`, no hyphen). Rule 3
-     would look for `@aburi/<id>`, and every plugin published there has a hyphen in its
-     name, so the ref could never load. The error names the plugin `aburi init` would have
-     written for that id (`"ts"` → `"lang-typescript"`, `"nestjs"` → `"framework-nestjs"`)
-     when there is one. The schema's `PluginRef` does not carry this rule, because
-     tightening it breaks v1 (§14.1)
+   - has the shape of a language or framework id (`^[a-z][a-z0-9]*$`). Rule 3 would look
+     for `@aburi/<id>`, and the plugins published there are named with their kind as a
+     prefix (`lang-`, `framework-`, `effects-`; a convention the manifest schema does not
+     enforce), so the ref names none of them. The error names the plugin `aburi init` would
+     have written for that id (`"ts"` → `"lang-typescript"`, `"nestjs"` →
+     `"framework-nestjs"`) when there is one, and in `effects` the name an effects plugin
+     with that `xPrefix` would have (`"prisma"` → `"effects-prisma"`). The schema's
+     `PluginRef` does not carry this rule, because tightening it breaks v1 (§14.1)
 1. `<id>` is an absolute filesystem path, or starts with `./` or `../` → normalized and
    converted to a `file:` URL. Relative paths resolve against the workspace root; absolute
    paths do not depend on it. On Windows an absolute path is drive-qualified (`C:/x.mjs` or
@@ -212,12 +214,16 @@ When not specified explicitly, the core Component autodetect infers them from `p
 }
 ```
 
-Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4.
+Each field has the same shape as [`ir-schema.md`](./ir-schema.md) §4. **However, `languages` may be omitted on the config side** (when omitted, autodetect fills it in). `name` may also be omitted on the config side, in which case the autodetect result (`package.json#name`, etc.) is used. In the schema, both are required on the IR Component; the config Component is lenient.
+
 `frameworks` holds framework ids (`nestjs`, what a plugin's `provides.frameworks[]` or the
 detector names), not plugin names. A value that is a plugin's own name (`framework-nestjs`),
-of a loaded plugin or a first-party one, is kept as written and reported on stderr with the id
-that plugin provides: the schema admits it, since a framework hint's name is an id that may
-carry a hyphen. **However, `languages` may be omitted on the config side** (when omitted, autodetect fills it in). `name` may also be omitted on the config side, in which case the autodetect result (`package.json#name`, etc.) is used. In the schema, both are required on the IR Component; the config Component is lenient.
+of a loaded plugin or a first-party one, is kept as written and reported on stderr with the
+id that plugin provides, or with the advice to remove it when that plugin provides none: the
+schema admits it, since a framework hint's name is an id that may carry a hyphen. Nothing
+else is checked. A value in neither set, such as a typo or an id no loaded plugin provides,
+passes silently into the IR, because the detector itself records ids no plugin provides
+(`vue`, `fastify`), so silence is not confirmation.
 
 ### 6.1 Merge Rules
 
@@ -463,6 +469,7 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C19 | One object naming a key twice, at any depth — `{ "ignore": ["a/**"], "ignore": ["b/**"] }` — including inside a `pluginOptions` value, where the first is lost the same way; or naming `__proto__` at all, which replaces the object's prototype where the schema cannot see it | Config validation error naming the key, the object and the line |
 | C20 | `languages: ["ts"]`, or `frameworks: ["nestjs"]` | Exit 2 before any plugin is imported, naming `lang-typescript` or `framework-nestjs` |
 | C21 | `components: [{ …, "frameworks": ["framework-nestjs"] }]` | Exit 0; stderr names the component and suggests `nestjs`; the IR carries `framework-nestjs` |
+| C21a | `components: [{ …, "frameworks": ["lang-typescript"] }]`, a plugin that provides no framework | Exit 0; stderr says to remove it or write the component's framework id |
 
 ## 14.1 Config Schema Compatibility Policy
 
@@ -475,8 +482,7 @@ Particularly important:
 
 Deferred to v2, because each tightens a pattern that v1 documents validate against today:
 
-- A `PluginRef` pattern that rejects a bare id with no hyphen (§5.2 rule 0b checks it at load
-  time instead)
+- A `PluginRef` pattern that rejects a bare id (§5.2 rule 0 checks it at load time instead)
 - A `components[].frameworks` pattern that rejects plugin names (§6 warns instead)
 - `$ref`s from `components[].languages` / `.frameworks` to branded id types, so the generated
   `Config` type stops accepting plain strings there

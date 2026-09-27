@@ -64,9 +64,9 @@ export interface LoadPluginsOptions {
  * - `file:` URL — contains `/`, so it is used verbatim, as a package subpath would be.
  *
  * A ref whose target would depend on Windows' per-drive state, or that names a Windows drive
- * where there are none, is a config error (`windowsDriveRefusal`), and so is a bare id that no
- * plugin can be named (`detectorIdRefusal`). Every ref is resolved before
- * the first import, so a refused ref stops the run before any plugin code has run.
+ * where there are none, is a config error (`windowsDriveRefusal`), and so is a bare id by which
+ * no plugin can be named (`detectorIdRefusal`). Every ref is resolved before the first import,
+ * so a refused ref stops the run before any plugin code has run.
  *
  * Once imported, the loader accepts the following export shapes, first hit wins:
  *   1. `default` export whose value has a `manifest` field
@@ -107,20 +107,34 @@ function resolveSpecifier(ref: string, field: PluginField, pluginRefRoot: string
   return `@aburi/${ref}`
 }
 
+/** The prefix the plugins published under `@aburi` carry in each field (`lang-typescript`). */
+const NAME_PREFIX = {
+  languages: "lang-",
+  frameworks: "framework-",
+  effects: "effects-",
+} as const satisfies Record<PluginField, string>
+
 /**
  * Why `ref` is refused as an id standing where a plugin belongs (`"ts"` for
- * `"lang-typescript"`), or `null` when it is not. A bare name resolves to `@aburi/<name>` and
- * every plugin published there has a hyphen in its name, so one without can never load; the
- * schema cannot say so without tightening `PluginRef`, which v1 does not.
+ * `"lang-typescript"`), or `null` when it is not. A bare name resolves to `@aburi/<name>`, and
+ * the plugins published there are named with their kind as a prefix — a convention, not
+ * something the manifest schema enforces — so a name of lowercase letters and digits alone,
+ * the shape of a language or framework id, names none of them. The schema cannot say so
+ * without tightening `PluginRef`, which v1 does not.
+ *
+ * The suggestion is what `aburi init` would write for the id. No detector emits an effects id,
+ * so that field has no table; an effects plugin's name is its `xPrefix` with `effects-` in
+ * front (`extension-vocab.md`), which is offered instead.
  */
 export function detectorIdRefusal(ref: string, field: PluginField): string | null {
   if (!/^[a-z][a-z0-9]*$/.test(ref)) return null
-  const plugin = field === "effects" ? undefined : pluginForDetectorId(field, ref)
+  const prefix = NAME_PREFIX[field]
+  const plugin = field === "effects" ? `${prefix}${ref}` : pluginForDetectorId(field, ref)
   const fix =
     plugin === undefined
       ? "Write the plugin's manifest name, its package id or a path to it."
       : `Write "${plugin}".`
-  return `Plugin "${ref}" in "${field}" is not a plugin name: a bare name resolves to "@aburi/${ref}", and every plugin there has a hyphen in its name ("lang-typescript"). ${fix}`
+  return `Plugin "${ref}" in "${field}" is not a plugin name: a bare name resolves to "@aburi/${ref}", and the plugins there are named "${prefix}<name>". ${fix}`
 }
 
 /**

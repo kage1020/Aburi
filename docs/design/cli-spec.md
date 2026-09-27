@@ -193,6 +193,7 @@ With `--quiet`, only the final line:
 ### 5.6 stderr (Warnings)
 
 ```
+⚠ Component "api" lists "framework-nestjs" in frameworks, which names a plugin, not a framework; the IR carries it as written. Write "nestjs".
 ⚠ 3 file(s) had recoverable parse errors.
     src/widget.tsx: 4 errors, first at 31:12 — syntax error
     src/panel.tsx: 12:4 — syntax error
@@ -209,6 +210,10 @@ With `--quiet`, only the final line:
 ⚠ extraction-failed (1) — a plugin threw while extracting, or its Symbols could not enter the Document. This is the reason the run does not exit clean.
     src/route.ts: qualified name "{ GET, POST }" contains the non-identifier segment "{ GET, POST }"
 ```
+
+The `frameworks` line comes ahead of the parse lines because the artifact cannot always
+reproduce it: a first-party plugin that is not loaded is absent from `plugins[]`, so nothing in
+the IR says `framework-next` was a plugin's name ([config.md](./config.md) §6).
 
 The parse-error line names its files, which nothing else does: mostly they are in the IR, so
 `stats.skippedFiles[]` does not hold them and no per-file log line is written for them either.
