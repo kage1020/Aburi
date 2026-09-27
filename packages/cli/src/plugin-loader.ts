@@ -8,8 +8,8 @@ import type {
   LanguagePlugin,
   PluginManifest,
 } from "@aburi/types"
-import { pluginForDetectorId } from "./commands/init"
 import { assertNever, CliError, errorMessage } from "./errors"
+import { pluginForDetectorId } from "./plugin-catalog"
 
 /** Every field of the config that lists plugin refs, and the manifest type each must declare. */
 const PLUGIN_FIELDS = {

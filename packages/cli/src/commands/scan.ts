@@ -57,6 +57,7 @@ import {
   removeOutputFile,
   writeOutputFile,
 } from "../output-file"
+import { frameworkIdForPlugin } from "../plugin-catalog"
 import { type LoadedPlugins, loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
 import {
@@ -67,7 +68,6 @@ import {
 } from "../vocab-discovered"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
-import { frameworkIdForPlugin } from "./init"
 
 export interface ScanOptions {
   cwd?: string
