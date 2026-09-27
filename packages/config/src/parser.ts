@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises"
-import { describeRepeatedKey, findRepeatedKey } from "@aburi/plugin-registry"
+import {
+  describeRepeatedKey,
+  JSONC_PARSE_OPTIONS,
+  scanKeys,
+} from "@aburi/plugin-registry/repeated-keys"
 import type { Config } from "@aburi/types"
 import Ajv2020, {
   type ErrorObject,
@@ -18,11 +22,8 @@ const ajv = new Ajv2020({
 })
 const validate: ValidateFunction<Config> = ajv.compile<Config>(configSchema satisfies SchemaObject)
 
-/**
- * One set of options for both reads of the text. `parse` is `visit` with an error-collecting
- * visitor, so the repeated-key walk sees what `parse` accepted only while the two agree.
- */
-const CONFIG_PARSE_OPTIONS: ParseOptions = { allowTrailingComma: true, disallowComments: false }
+/** The options `scanKeys` reads with, so the key check sees what `parse` accepted. */
+const CONFIG_PARSE_OPTIONS: ParseOptions = JSONC_PARSE_OPTIONS
 
 /**
  * Extract a string `code` property from any thrown value. Accepts both plain objects
@@ -100,14 +101,17 @@ export async function readConfigFile(path: string): Promise<Config> {
   return parseConfig(text, path)
 }
 
-/** Refuse a key the text names twice in one object, or `__proto__` at all (`findRepeatedKey`). */
+/** Refuse a key the text names twice in one object, or `__proto__` at all (`scanKeys`). */
 function rejectRepeatedKeys(text: string, sourcePath: string): void {
-  const found = findRepeatedKey(text, CONFIG_PARSE_OPTIONS)
-  if (found !== null) {
+  const scan = scanKeys(text)
+  if (scan.kind === "unreadable") {
+    throw new Error("jsonc invariant violation: parse accepted a text scanKeys could not read")
+  }
+  if (scan.kind !== "clean") {
     throw new ConfigError(
-      `Config at ${sourcePath} ${describeRepeatedKey(found)}`,
+      describeRepeatedKey(scan, `Config at ${sourcePath}`),
       { code: "config-invalid" },
-      { cause: found },
+      { cause: scan },
     )
   }
 }

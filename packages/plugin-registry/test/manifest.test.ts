@@ -74,7 +74,7 @@ describe("parsePluginManifest", () => {
   })
 })
 
-describe("parsePluginManifest — a key named twice in one object", () => {
+describe("V1a — parsePluginManifest given a key named twice in one object", () => {
   function refusalOf(text: string): RegistryError {
     try {
       parsePluginManifest(text, "inline")
@@ -85,39 +85,48 @@ describe("parsePluginManifest — a key named twice in one object", () => {
     throw new Error("expected a RegistryError")
   }
 
-  it("refuses a second name, which would otherwise register the plugin under it", () => {
-    const text = VALID_MANIFEST.replace(
-      '"name": "effects-foo",',
-      '"name": "effects-foo",\n  "name": "effects-bar",',
-    )
-    const caught = refusalOf(text)
+  it("refuses a second name, naming no plugin, before the schema runs", () => {
+    const caught = refusalOf(`{ "name": "effects-foo", "name": "effects-bar" }`)
     expect(caught.code).toBe("manifest-invalid")
     expect(caught.plugins).toEqual([])
     expect(caught.message).toBe(
-      'Plugin manifest at inline names "name" twice in the top-level object (again at line 5, column 3)',
+      'Plugin manifest at inline names "name" twice in the top-level object (again at line 1, column 26)',
     )
-    expect(caught.cause).toEqual({ key: "name", path: [], line: 5, column: 3 })
+    expect(caught.cause).toMatchObject({ kind: "repeated", key: "name", owner: [] })
+  })
+
+  it("refuses a name repeated after a nested object closes", () => {
+    const text = VALID_MANIFEST.replace(
+      '"engines": { "aburi": "^1.0.0" },',
+      '"engines": { "aburi": "^1.0.0" },\n  "name": "effects-bar",',
+    )
+    expect(refusalOf(text).cause).toMatchObject({ key: "name", owner: [] })
   })
 
   it("refuses one inside a nested array element", () => {
-    const text = VALID_MANIFEST.replace(
-      '{ "id": "x-foo:write", "description": "write something" }',
-      '{ "id": "x-foo:write", "description": "write something", "id": "x-foo:read" }',
-    )
-    expect(refusalOf(text).message).toBe(
-      'Plugin manifest at inline names "id" twice in /provides/effects/0 (again at line 11, column 64)',
-    )
+    const caught = refusalOf(`{ "provides": { "effects": [{ "id": "x-a:b", "id": "x-a:c" }] } }`)
+    expect(caught.cause).toMatchObject({ key: "id", owner: ["provides", "effects", 0] })
   })
 
-  it("refuses __proto__, which replaces the prototype where the schema cannot see it", () => {
+  it("refuses __proto__", () => {
+    const caught = refusalOf(`{ "__proto__": {} }`)
+    expect(caught.cause).toMatchObject({ kind: "prototype-key", key: "__proto__", owner: [] })
+    expect(caught.message).toMatch(/never becomes a key the schema can see$/)
+  })
+
+  it("reports the repeat, not the schema failure, when a manifest has both", () => {
     const text = VALID_MANIFEST.replace(
-      '"xPrefix": "foo",',
-      '"xPrefix": "foo",\n  "__proto__": {},',
-    )
-    expect(refusalOf(text).message).toBe(
-      'Plugin manifest at inline names "__proto__" as a key in the top-level object (at line 8, column 3); ' +
-        "it replaces the object's prototype instead of adding a key, so the schema cannot see it",
-    )
+      '"name": "effects-foo",',
+      '"name": "effects-foo",\n  "name": "effects-bar",',
+    ).replace('"type": "effects",', '"type": "bogus",')
+    const caught = refusalOf(text)
+    expect(caught.plugins).toEqual([])
+    expect(caught.cause).toMatchObject({ key: "name" })
+    expect(caught.message).not.toMatch(/does not conform/)
+  })
+
+  it("reports the syntax error, not the repeat, when a manifest has both", () => {
+    expect(refusalOf(`{ "name": "a", "name": "b", "x": }`).code).toBe("manifest-parse-failed")
   })
 
   it("lets two objects use the same key", () => {
@@ -126,6 +135,20 @@ describe("parsePluginManifest — a key named twice in one object", () => {
       '{ "id": "x-foo:write", "description": "write" }, { "id": "x-foo:read", "description": "read" }',
     )
     expect(parsePluginManifest(text, "inline").provides.effects).toHaveLength(2)
+  })
+})
+
+describe("parsePluginManifest — a schema failure", () => {
+  it("carries ajv's errors as the cause", () => {
+    const text = VALID_MANIFEST.replace('"type": "effects",', '"type": "bogus",')
+    let caught: unknown
+    try {
+      parsePluginManifest(text, "inline")
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(RegistryError)
+    expect(Array.isArray((caught as RegistryError).cause)).toBe(true)
   })
 })
 

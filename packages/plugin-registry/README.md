@@ -106,6 +106,25 @@ The subpath bounds what gets *evaluated*, not what gets *installed*: depending o
 this package still puts `ajv` and `jsonc-parser` in the dependency tree. That was
 the accepted trade for not publishing a separate package for two functions.
 
+## Key scan (`@aburi/plugin-registry/repeated-keys`)
+
+`jsonc-parser` keeps the last of two equal keys in one object and says nothing,
+and it assigns `__proto__` rather than defining it, so neither reaches a schema.
+`scanKeys` reads the text itself and returns the first such key, which
+`parsePluginManifest` and `@aburi/config`'s `aburi.json` parser both refuse:
+
+```ts
+import { describeRepeatedKey, scanKeys } from "@aburi/plugin-registry/repeated-keys"
+
+const scan = scanKeys(text) // { kind: "clean" } | { kind: "unreadable" } | RepeatedKey
+if (scan.kind === "repeated" || scan.kind === "prototype-key") {
+  throw new Error(describeRepeatedKey(scan, `Manifest at ${path}`))
+}
+```
+
+Like `/plugin-input`, it is a separate chunk that does not compile the plugin
+schema, so a caller that only parses JSONC pays nothing for the registry.
+
 ## See also
 
 - [`docs/design/extension-vocab.md`](../../docs/design/extension-vocab.md) — namespace ownership, reservation rules, conflict semantics.

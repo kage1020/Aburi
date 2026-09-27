@@ -1,7 +1,7 @@
 {
   "name": "@aburi/plugin-registry",
   "version": "0.4.0",
-  "description": "Plugin manifest validator and vocab registry: loads, validates, and tracks every @aburi/* plugin's owned extKind / effect id / framework namespaces, enforcing reservation and conflict rules, plus the shared guards that enforce the language plugin's input contract",
+  "description": "Plugin manifest validator and vocab registry: loads, validates, and tracks every @aburi/* plugin's owned extKind / effect id / framework namespaces, enforcing reservation and conflict rules, plus the shared guards that enforce the language plugin's input contract and the JSONC key scan that config and manifest parsing share",
   "license": "Apache-2.0",
   "author": "kage1020",
   "homepage": "https://github.com/kage1020/Aburi/tree/main/packages/plugin-registry#readme",
@@ -24,6 +24,10 @@
     "./plugin-input": {
       "types": "./dist/plugin-input.d.mts",
       "default": "./dist/plugin-input.mjs"
+    },
+    "./repeated-keys": {
+      "types": "./dist/repeated-keys.d.mts",
+      "default": "./dist/repeated-keys.mjs"
     },
     "./package.json": "./package.json"
   },

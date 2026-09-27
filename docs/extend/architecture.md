@@ -43,7 +43,7 @@ status and delta for each from there.
 | Package | What it owns |
 |---|---|
 | `@aburi/types` | Types generated from the JSON Schemas, plus the hand-written plugin interfaces. |
-| `@aburi/plugin-registry` | Manifest validation and vocabulary ownership: which plugin may emit which namespace. |
+| `@aburi/plugin-registry` | Manifest validation and vocabulary ownership: which plugin may emit which namespace. Also the JSONC key scan that `@aburi/config` shares. |
 | `@aburi/config` | Loading and validating `aburi.json`. |
 | `@aburi/core` | Symbol ids, canonical JSON, IR invariants, autodetect, and the scan pipeline. |
 | `@aburi/diff` | The five-stage matcher, statuses, and deltas. |
