@@ -140,7 +140,7 @@ export {
   type ParseTimeoutEvent,
   startParseDeadline,
 } from "./scan/timeout"
-export { type UndeclaredVocabOccurrence, VocabCheck } from "./scan/vocab"
+export { isStrict, type UndeclaredVocabOccurrence, VocabCheck } from "./scan/vocab"
 export {
   anyCallCalleeMatches,
   asSyntaxNode,

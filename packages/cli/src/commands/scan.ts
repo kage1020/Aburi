@@ -8,14 +8,17 @@ import {
   detectComponents,
   detectManagers,
   groupBy,
+  isStrict,
   languageFileDropPatterns,
   makeComponentId,
   makeLanguageId,
   posixWorkspaceRelativeViolation,
+  type ScanResult,
   type SkippedFile,
   scan,
   serializeCanonical,
   type TreeReleaseFailure,
+  type UndeclaredVocabOccurrence,
   type UnnameableFile,
   type UnrepresentableFile,
   type UnresolvedDeclaration,
@@ -48,7 +51,12 @@ import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { writeFullListing, writeListing } from "../listing"
 import { createLogger } from "../logger"
-import { createOutputDir, type OutputCommand, writeOutputFile } from "../output-file"
+import {
+  createOutputDir,
+  type OutputCommand,
+  removeOutputFile,
+  writeOutputFile,
+} from "../output-file"
 import { loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
 import {
@@ -276,8 +284,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
   try {
     scanResult = await scan(scanInput)
   } catch (error) {
-    // A strict run's refusal of a value no manifest claims: the plugin set is wrong, which is
-    // the gate's exit code (`cli-spec.md`), not a machine fault.
+    // A strict run's refusal of a value the emitting plugin's manifest does not claim: the
+    // plugin set is wrong, which is the gate's exit code (`cli-spec.md`), not a machine fault.
     if (error instanceof CoreError && error.code === "vocab-undeclared") {
       throw new CliError(error.message, "plugin-error", { cause: error })
     }
@@ -316,19 +324,30 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     await writeOutputFile({ command, artefact: "the IR", path: irPath }, serialized)
   }
 
-  const undeclaredVocab = summarizeUndeclaredVocab(scanResult.undeclaredVocab)
+  const undeclaredVocab = summarizeUndeclaredVocab(requireUndeclaredVocab(scanResult))
   // Only `scan` writes the record: `diff` runs two scans into one directory, and the list is
   // on its incident report either way.
   let vocabDiscoveredPath: string | null = null
-  if (config.strict === false && command === "scan") {
-    vocabDiscoveredPath = resolve(outputDir, VOCAB_DISCOVERED_FILENAME)
-    await writeOutputFile(
-      { command, artefact: "the discovered-vocabulary record", path: vocabDiscoveredPath },
-      renderVocabDiscovered(
-        undeclaredVocab,
-        options.suppressTimestamp === true ? null : new Date().toISOString(),
-      ),
-    )
+  if (command === "scan") {
+    const record = {
+      command,
+      artefact: "the discovered-vocabulary record",
+      path: resolve(outputDir, VOCAB_DISCOVERED_FILENAME),
+    }
+    if (isStrict(config)) {
+      // A strict scan that got this far met no undeclared value, so a record an earlier run
+      // left names only values that are declared now.
+      await removeOutputFile(record)
+    } else {
+      vocabDiscoveredPath = record.path
+      await writeOutputFile(
+        record,
+        renderVocabDiscovered(
+          undeclaredVocab,
+          options.suppressTimestamp === true ? null : new Date().toISOString(),
+        ),
+      )
+    }
   }
 
   // A withdrawn file's parse errors are still reported — they are the account of why it was
@@ -610,8 +629,8 @@ function reportUndeclaredVocab(
   if (items.length === 0) return
   const record = recordPath === null ? "" : ` Recorded in ${recordPath}.`
   sayIncident(
-    `${items.length} value(s) were emitted that no plugin manifest declares; strict is off, so ` +
-      `the scan kept them.${record}`,
+    `${items.length} value(s) were emitted that the emitting plugin's manifest does not declare; ` +
+      `strict is off, so the scan kept them.${record}`,
   )
   for (const item of items) {
     writeDetail(`    ${item.kind} ${item.value} — ${item.firstSeenBy} (${item.occurrences})`)
@@ -849,6 +868,21 @@ function dominantReason(
     }
   }
   return best
+}
+
+/**
+ * `ScanResult.undeclaredVocab`, which an `@aburi/core` older than this CLI does not return. Its
+ * absence is named as the skew it is rather than surfacing as a bare `TypeError` further on.
+ */
+function requireUndeclaredVocab(result: ScanResult): readonly UndeclaredVocabOccurrence[] {
+  const occurrences: readonly UndeclaredVocabOccurrence[] | undefined = result.undeclaredVocab
+  if (occurrences === undefined) {
+    throw new CliError(
+      "scan() returned no undeclaredVocab; @aburi/core is older than this @aburi/cli and does not report the vocabulary a scan with strict off kept (extension-vocab.md).",
+      "runtime-error",
+    )
+  }
+  return occurrences
 }
 
 /**

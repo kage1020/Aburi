@@ -91,7 +91,7 @@ Analyses the workspace and writes `aburi.ir.json`, `workspace.md`, and
 | `--format <fmt>` | `json`, `md`, or `both` (default). Without `--format`, `--no-md` and `--no-json` each drop one output. With it, a `--no-*` that would drop an output `--format` includes exits `2`, and so does dropping both. |
 | `--ignore <glob>` | An extra exclusion for this run. Repeatable. |
 | `--respect-gitignore` / `--no-respect-gitignore` | Override the config for this run. |
-| `--strict` / `--no-strict` | Override `strict` for this run. Strict stops at a value a plugin emits without its manifest declaring it; off, the scan keeps it and records it in `aburi-vocab-discovered.json`. |
+| `--strict` / `--no-strict` | Override `strict` for this run. Strict stops at a value a plugin emits without its manifest declaring it; off, the scan keeps it and records it in `aburi-vocab-discovered.json`, which a strict scan that completes removes again. |
 | `--discover` | The same as `--no-strict`. With `--strict`, exits `2`. |
 | `--compact` | JSON without indentation. |
 | `--no-timestamp` | Omit `generatedAt`. Implicit when `CI` is set. |

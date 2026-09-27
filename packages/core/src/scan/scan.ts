@@ -46,7 +46,7 @@ import { describeThrown, errorCode, isVanishedFile } from "./faults"
 import { runFilePipeline, type TreeReleaseFailure } from "./pipeline"
 import { buildLanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
-import { type UndeclaredVocabOccurrence, VocabCheck } from "./vocab"
+import { isStrict, type UndeclaredVocabOccurrence, VocabCheck } from "./vocab"
 
 export interface ScanInput {
   /** Absolute workspace root. Every relative path in the IR is measured against this. */
@@ -267,8 +267,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const extractionFailures: ExtractionFailure[] = []
   const treeReleaseFailures: TreeReleaseFailure[] = []
   const undeclaredVocab: UndeclaredVocabOccurrence[] = []
-  // `strict` defaults to true (config.md), so only an explicit `false` records instead.
-  const strictVocab = input.config.strict !== false
+  const strictVocab = isStrict(input.config)
   // One warning per plugin, at the file it first went wrong on. The record below keeps
   // every occurrence; a line per file would be one per file for the rest of the run.
   const warnedReleaseFailure = new Set<string>()
@@ -319,7 +318,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     const releasesRecordedBefore = treeReleaseFailures.length
     // Per file, and kept only for a file whose Symbols reach the IR: a value recorded from a
     // file that is then withdrawn names a Symbol the Document does not hold.
-    const fileVocab: UndeclaredVocabOccurrence[] = []
+    const fileVocab = new VocabCheck(input.registry, strictVocab)
     try {
       result = await runFilePipeline({
         file: sourceFile,
@@ -332,7 +331,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         component: attribute(sourceFile.path),
         log: logger,
         treeReleaseFailures,
-        vocab: new VocabCheck(input.registry, strictVocab, fileVocab),
+        vocab: fileVocab,
       })
     } catch (error) {
       if (isPluginSetFault(error)) throw error
@@ -446,7 +445,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
           break
         }
 
-        undeclaredVocab.push(...fileVocab)
+        undeclaredVocab.push(...fileVocab.occurrences)
 
         // Held for LSP enrichment, and only for files that reached the IR. Nothing would
         // currently read a refused file's text if it were held — the pass builds one document
@@ -695,10 +694,11 @@ function describeIdFault(symbols: readonly IRSymbol[], path: string): string | n
  * - `invalid-language-id` — the prefix is present but is not a legal `LanguageId`. It comes
  *   from the plugin's own `languageId`, so it is the same on every Symbol it emits.
  * - `vocab-undeclared` — an effect or extKind id the emitting plugin's manifest does not
- *   claim (`effect-plugin.md` EP1). A `RegistryError` rather than a `CoreError`, and the
- *   reason this predicate matches on the code rather than on the class: `@aburi/core` does
- *   not depend on `@aburi/plugin-registry`, and matching on the code also survives a build
- *   where a plugin resolved its own copy of either package.
+ *   claim (`effect-plugin.md` EP1). It arrives in two shapes: a `CoreError` from `VocabCheck`,
+ *   and a `RegistryError` from a plugin that calls the registry's `assert*Declared` on the
+ *   context it was given. That is the reason this predicate matches on the code rather than
+ *   on the class: `@aburi/core` does not depend on `@aburi/plugin-registry`, and matching on
+ *   the code also survives a build where a plugin resolved its own copy of either package.
  *
  * Everything else reachable from a plugin call is a property of the file:
  * `anonymous-symbol-id-attempted` and `invalid-symbol-id` from what a declaration is named,

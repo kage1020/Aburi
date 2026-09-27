@@ -62,6 +62,5 @@ export { type LoadedPlugins, type LoadPluginsOptions, loadPlugins } from "./plug
 export { type RunCliOptions, runCli } from "./run"
 export {
   type DiscoveredVocabItem,
-  summarizeUndeclaredVocab,
   VOCAB_DISCOVERED_FILENAME,
 } from "./vocab-discovered"

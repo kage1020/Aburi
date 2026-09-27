@@ -72,6 +72,16 @@ describe("aburi scan, strict by default", () => {
   })
 })
 
+describe("a strict scan after one with strict off", () => {
+  it("CL8c: removes the record the earlier run left, which names only values declared now", async () => {
+    await populate(scratch, ["ok.stub"])
+    await scanWith(["--discover", "--no-timestamp"])
+    expect(await readRecord()).toEqual({ items: [] })
+    expect((await scanWith([])).code).toBe(EXIT.SUCCESS)
+    await expect(readRecord()).rejects.toMatchObject({ code: "ENOENT" })
+  })
+})
+
 describe("aburi scan with strict off", () => {
   const expected = {
     items: [
@@ -94,7 +104,9 @@ describe("aburi scan with strict off", () => {
     const { code, stderr } = await scanWith(["--discover", "--no-timestamp"])
     expect(code).toBe(EXIT.SUCCESS)
     expect(await readRecord()).toEqual(expected)
-    expect(stderr).toContain("1 value(s) were emitted that no plugin manifest declares")
+    expect(stderr).toContain(
+      "1 value(s) were emitted that the emitting plugin's manifest does not declare",
+    )
     expect(stderr).toContain("    extKind stub:odd:thing — lang-stub (2)")
   })
 

@@ -14,7 +14,7 @@ import type {
   SymbolClassification,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDropCFilter, type ExtractedFile, runFilePipeline } from "../../src"
+import { buildDropCFilter, type ExtractedFile, runFilePipeline, VocabCheck } from "../../src"
 import { symbolId } from "../fixtures/ir"
 import {
   effectsManifest,
@@ -81,9 +81,8 @@ async function runPipelineWithStubs(overrides: {
     frameworks: overrides.frameworks ?? [],
     effects: overrides.effects ?? [],
     registry: noopRegistry,
-    // These fixtures are about dispatch, and `noopRegistry` owns nothing, so a strict run
-    // would stop at the first extKind. Vocabulary ownership is `vocab.test.ts`'s.
-    config: { strict: false },
+    vocab: new VocabCheck(noopRegistry, true),
+    config: {},
     dropCFilter: buildDropCFilter(),
     component: null,
     treeReleaseFailures: [],

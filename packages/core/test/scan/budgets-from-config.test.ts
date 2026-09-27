@@ -14,7 +14,12 @@ import type {
   ParseResult,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDropCFilter, DEFAULT_CLASSIFY_TIMEOUT_MS, runFilePipeline } from "../../src"
+import {
+  buildDropCFilter,
+  DEFAULT_CLASSIFY_TIMEOUT_MS,
+  runFilePipeline,
+  VocabCheck,
+} from "../../src"
 import { spend } from "../fixtures/clock"
 import { effectsManifest, stubCandidate, stubFile, stubLanguagePlugin } from "../fixtures/plugins"
 
@@ -61,6 +66,7 @@ function run(config: { parseTimeoutMs?: number; classifyTimeoutMs?: number }, ef
     frameworks: [],
     effects: [slowEffects(effectMs)],
     registry: noopRegistry,
+    vocab: new VocabCheck(noopRegistry, true),
     config,
     dropCFilter: buildDropCFilter(),
     component: null,
@@ -108,6 +114,7 @@ describe("the parse budget comes from the config", () => {
       frameworks: [],
       effects: [],
       registry: noopRegistry,
+      vocab: new VocabCheck(noopRegistry, true),
       config: { parseTimeoutMs: 100 },
       dropCFilter: buildDropCFilter(),
       component: null,

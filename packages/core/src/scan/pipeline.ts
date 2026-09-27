@@ -43,7 +43,7 @@ import {
   type ParseTimeoutEvent,
   startParseDeadline,
 } from "./timeout"
-import { VocabCheck } from "./vocab"
+import type { VocabCheck } from "./vocab"
 
 /**
  * What the pipeline knows about a file whatever became of it: which file, and what its
@@ -171,11 +171,10 @@ export interface FilePipelineInput {
    */
   treeReleaseFailures: TreeReleaseFailure[]
   /**
-   * Where every effect id and extKind a plugin emits for this file is checked (`vocab.ts`).
-   * Absent, the check is built from `registry` and `config.strict` and whatever a non-strict
-   * run records is discarded; `scan()` passes its own so the record reaches `ScanResult`.
+   * Where every effect id and extKind a plugin emits for this file is checked (`vocab.ts`),
+   * and where a run that is not strict finds what it recorded.
    */
-  vocab?: VocabCheck
+  vocab: VocabCheck
 }
 
 /**
@@ -227,9 +226,18 @@ export interface TreeReleaseFailure {
  * bound the work still to come, and a file found over budget at one of them is abandoned.
  */
 export async function runFilePipeline(input: FilePipelineInput): Promise<FilePipelineResult> {
-  const { file, language, frameworks, effects, registry, config, dropCFilter, component, log } =
-    input
-  const vocab = input.vocab ?? new VocabCheck(registry, config.strict !== false, [])
+  const {
+    file,
+    language,
+    frameworks,
+    effects,
+    registry,
+    config,
+    dropCFilter,
+    component,
+    log,
+    vocab,
+  } = input
 
   const deadline = startParseDeadline(config.parseTimeoutMs)
   // An abandoned file contributes nothing but its errors, for the reason `ParseTimeoutFile`

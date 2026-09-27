@@ -374,10 +374,11 @@ describe("a fault in the plugin set is not a per-file fault", () => {
   })
 
   it("re-throws a registry error about undeclared vocabulary", async () => {
-    // A `RegistryError`, not a `CoreError`, raised per file from `assertEffectDeclared` — so
-    // the predicate has to read the code rather than the class. `@aburi/core` does not
-    // depend on `@aburi/plugin-registry`, and absorbing this would replace one precise
-    // sentence about the manifest with a file count.
+    // The shape a plugin raises when it calls the registry's `assertEffectDeclared` itself: a
+    // `RegistryError`, where `VocabCheck` raises a `CoreError` with the same code. Both reach
+    // one predicate, which reads the code rather than the class because `@aburi/core` does not
+    // depend on `@aburi/plugin-registry`; absorbing this would replace one precise sentence
+    // about the manifest with a file count.
     const error = Object.assign(new Error('Effect id "x-stripe:charge" is not declared'), {
       name: "RegistryError",
       code: "vocab-undeclared",

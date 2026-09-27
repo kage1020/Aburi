@@ -1,6 +1,7 @@
-import type { VocabRegistry } from "@aburi/types"
+import type { Config, VocabRegistry } from "@aburi/types"
 import { CoreError } from "../errors"
 import { isCoreEffectId } from "../integrity"
+import { describeThrown, errorCode } from "./faults"
 
 /**
  * One value a plugin emitted that its manifest does not claim (`extension-vocab.md`). Recorded
@@ -17,45 +18,65 @@ export interface UndeclaredVocabOccurrence {
   symbol: string
 }
 
+/** Whether a run with this config refuses undeclared vocabulary: `strict` defaults to true (`config.md`). */
+export function isStrict(config: Pick<Config, "strict">): boolean {
+  return config.strict !== false
+}
+
 /**
  * The check each emitted effect id and extKind passes through. An effect id from the core
  * vocabulary is owned by no plugin, so it passes whoever emits it; anything else has to be
- * claimed by the emitting plugin itself, directly or through a prefix it owns.
+ * claimed by the emitting plugin itself, directly or through a prefix it owns, which is the
+ * registry's `assert*Declared` to decide. A run that is not strict keeps what they refuse in
+ * `occurrences` instead of ending.
  */
 export class VocabCheck {
   readonly #registry: VocabRegistry
   readonly #strict: boolean
-  readonly #sink: UndeclaredVocabOccurrence[]
+  readonly #occurrences: UndeclaredVocabOccurrence[] = []
 
-  constructor(registry: VocabRegistry, strict: boolean, sink: UndeclaredVocabOccurrence[]) {
+  constructor(registry: VocabRegistry, strict: boolean) {
     this.#registry = registry
     this.#strict = strict
-    this.#sink = sink
+  }
+
+  /** What a run that is not strict found, in emission order. Always empty in a strict one. */
+  get occurrences(): readonly UndeclaredVocabOccurrence[] {
+    return this.#occurrences
   }
 
   effect(occurrence: Omit<UndeclaredVocabOccurrence, "kind">): void {
     if (isCoreEffectId(occurrence.value)) return
-    if (this.#registry.isEffectOwnedBy(occurrence.value, occurrence.plugin)) return
-    this.#undeclared({ kind: "effect", ...occurrence })
+    this.#check({ kind: "effect", ...occurrence }, () =>
+      this.#registry.assertEffectDeclared(occurrence.value, occurrence.plugin),
+    )
   }
 
   extKind(occurrence: Omit<UndeclaredVocabOccurrence, "kind">): void {
-    if (this.#registry.isExtKindOwnedBy(occurrence.value, occurrence.plugin)) return
-    this.#undeclared({ kind: "extKind", ...occurrence })
+    this.#check({ kind: "extKind", ...occurrence }, () =>
+      this.#registry.assertExtKindDeclared(occurrence.value, occurrence.plugin),
+    )
   }
 
-  #undeclared(occurrence: UndeclaredVocabOccurrence): void {
-    if (!this.#strict) {
-      this.#sink.push(occurrence)
-      return
+  #check(occurrence: UndeclaredVocabOccurrence, assertDeclared: () => void): void {
+    try {
+      assertDeclared()
+    } catch (error) {
+      if (errorCode(error) !== "vocab-undeclared") throw error
+      if (!this.#strict) {
+        this.#occurrences.push(occurrence)
+        return
+      }
+      const where =
+        occurrence.line === null ? occurrence.file : `${occurrence.file}:${occurrence.line}`
+      throw new CoreError(
+        `Plugin "${occurrence.plugin}" emitted ${occurrence.kind} "${occurrence.value}" at ${where}, ` +
+          `which its manifest does not declare (${describeThrown(error)}). Declare it in the ` +
+          "manifest's provides, or run with strict off (`aburi scan --discover`) to record it " +
+          "instead.",
+        { code: "vocab-undeclared", value: occurrence.value },
+        { cause: error },
+      )
     }
-    const where =
-      occurrence.line === null ? occurrence.file : `${occurrence.file}:${occurrence.line}`
-    throw new CoreError(
-      `Plugin "${occurrence.plugin}" emitted ${occurrence.kind} "${occurrence.value}" at ${where}, ` +
-        "which its manifest does not declare. Declare it in the manifest's provides, or run " +
-        "with strict off (`aburi scan --discover`) to record it instead.",
-      { code: "vocab-undeclared", value: occurrence.value },
-    )
   }
 }

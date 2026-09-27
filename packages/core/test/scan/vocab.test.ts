@@ -8,7 +8,7 @@ import type {
   VocabRegistry,
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { CoreError, scan } from "../../src"
+import { CoreError, scan, VocabCheck } from "../../src"
 import {
   effectsManifest,
   frameworkManifest,
@@ -27,10 +27,19 @@ import {
 function registryOwning(owned: { effects?: [string, string][]; extKinds?: [string, string][] }) {
   const effects = new Map(owned.effects ?? [])
   const extKinds = new Map(owned.extKinds ?? [])
+  const refuse = (id: string, plugin: string): never => {
+    throw Object.assign(new Error(`"${id}" is not owned by "${plugin}"`), {
+      code: "vocab-undeclared",
+    })
+  }
   const registry: VocabRegistry = {
     ...noopRegistry,
-    isEffectOwnedBy: (id, plugin) => effects.get(id) === plugin,
-    isExtKindOwnedBy: (id, plugin) => extKinds.get(id) === plugin,
+    assertEffectDeclared: (id, plugin) => {
+      if (effects.get(id) !== plugin) refuse(id, plugin)
+    },
+    assertExtKindDeclared: (id, plugin) => {
+      if (extKinds.get(id) !== plugin) refuse(id, plugin)
+    },
   }
   return registry
 }
@@ -209,5 +218,29 @@ describe("a run with strict off", () => {
     })
     expect(result.skipped.map((s) => s.path)).toEqual(["bad.stub"])
     expect(result.undeclaredVocab.map((o) => o.file)).toEqual(["a.stub", "c.stub"])
+  })
+})
+
+describe("VocabCheck", () => {
+  it("lets a registry failure that is not about vocabulary through, strict or not", () => {
+    const registry: VocabRegistry = {
+      ...noopRegistry,
+      assertEffectDeclared: () => {
+        throw new Error("registry broke")
+      },
+    }
+    for (const strict of [true, false]) {
+      const check = new VocabCheck(registry, strict)
+      expect(() =>
+        check.effect({
+          value: "x-acme:ping",
+          plugin: "effects-acme",
+          file: "a.stub",
+          line: 4,
+          symbol: "s",
+        }),
+      ).toThrow("registry broke")
+      expect(check.occurrences).toEqual([])
+    }
   })
 })

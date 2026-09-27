@@ -16,9 +16,10 @@ import { fakeGit } from "./fixtures"
 /**
  * A file is refused outright if its path contains `bad`, keeps a recoverable error and its
  * Symbol if it contains `warn`, makes extraction throw if it contains `boom`, emits two
- * Symbols under one id if it contains `twin`, gives its Symbol an extKind the manifest does not
- * declare if it contains `odd`, and is clean otherwise — so `ok.stub` is the quiet one. Which of them exist is up to the caller, so a fixture can differ between the
- * base worktree and the working tree.
+ * Symbols under one id if it contains `twin`, gives its Symbol an extKind the manifest does
+ * not declare if it contains `odd`, and is clean otherwise — so `ok.stub` is the quiet one.
+ * Which of them exist is up to the caller, so a fixture can differ between the base worktree
+ * and the working tree.
  *
  * `twin` and `boom` are the two ways into `extraction-failed`, and only `boom` throws. The
  * CLI reports them identically on purpose (`cli-spec.md` §5.6), so a fixture that needs to
