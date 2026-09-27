@@ -172,10 +172,18 @@ describe("C19 — a key named twice in one object", () => {
   it("carries the key and where it is as the cause", async () => {
     const text = `{ "output": { "dir": "x", "dir": "y" } }`
     const caught = await configErrorFrom(() => parseConfig(text, "inline"))
-    expect(caught.cause).toEqual({ key: "dir", path: ["output"], line: 1, column: 27 })
+    expect(caught.cause).toEqual({
+      kind: "repeated",
+      key: "dir",
+      owner: ["output"],
+      line: 1,
+      column: 27,
+      offset: 26,
+      length: 5,
+    })
   })
 
-  it("refuses __proto__, which replaces the prototype where the schema cannot see it", async () => {
+  it("refuses __proto__, which never becomes a key the schema can see", async () => {
     // Parsed, `output` is reachable through the prototype while `Object.keys` is empty, so the
     // schema's `additionalProperties` passes it.
     const text = `{ "__proto__": { "output": { "dir": "smuggled-out" } } }`
@@ -183,7 +191,7 @@ describe("C19 — a key named twice in one object", () => {
     expect(caught.code).toBe("config-invalid")
     expect(caught.message).toBe(
       'Config at inline names "__proto__" as a key in the top-level object (at line 1, column 3); ' +
-        "it replaces the object's prototype instead of adding a key, so the schema cannot see it",
+        "the parser assigns it instead of defining it, so it never becomes a key the schema can see",
     )
   })
 

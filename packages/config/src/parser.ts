@@ -1,11 +1,16 @@
 import { readFile } from "node:fs/promises"
+import {
+  describeRepeatedKey,
+  JSONC_PARSE_OPTIONS,
+  scanKeys,
+} from "@aburi/plugin-registry/repeated-keys"
 import type { Config } from "@aburi/types"
 import Ajv2020, {
   type ErrorObject,
   type SchemaObject,
   type ValidateFunction,
 } from "ajv/dist/2020.js"
-import { type ParseError, type ParseOptions, parse, printParseErrorCode, visit } from "jsonc-parser"
+import { type ParseError, type ParseOptions, parse, printParseErrorCode } from "jsonc-parser"
 import configSchema from "../../../schema/aburi.config.v1.json" with { type: "json" }
 import { ConfigError, MISSING_FILE_ERRNOS } from "./errors"
 
@@ -17,11 +22,8 @@ const ajv = new Ajv2020({
 })
 const validate: ValidateFunction<Config> = ajv.compile<Config>(configSchema satisfies SchemaObject)
 
-/**
- * One set of options for both reads of the text. `parse` is `visit` with an error-collecting
- * visitor, so the repeated-key walk sees what `parse` accepted only while the two agree.
- */
-const CONFIG_PARSE_OPTIONS: ParseOptions = { allowTrailingComma: true, disallowComments: false }
+/** The options `scanKeys` reads with, so the key check sees what `parse` accepted. */
+const CONFIG_PARSE_OPTIONS: ParseOptions = JSONC_PARSE_OPTIONS
 
 /**
  * Extract a string `code` property from any thrown value. Accepts both plain objects
@@ -99,67 +101,19 @@ export async function readConfigFile(path: string): Promise<Config> {
   return parseConfig(text, path)
 }
 
-/**
- * Refuse an object that names one key twice, at any depth. JSONC parsing keeps the last and says
- * nothing, so `{ "ignore": ["a/**"], "ignore": ["b/**"] }` would drop `a/**` with no sign the file
- * asked for it.
- *
- * `__proto__` is refused once: the parser assigns it, which replaces the object's prototype
- * rather than adding a key, so the schema never sees what it holds while a property read still
- * finds it.
- */
+/** Refuse a key the text names twice in one object, or `__proto__` at all (`scanKeys`). */
 function rejectRepeatedKeys(text: string, sourcePath: string): void {
-  const open: Set<string>[] = []
-  // Widened by the cast: the callbacks assign it, which narrowing after `visit` cannot see.
-  let found = null as { message: string; cause: RepeatedKey } | null
-  visit(
-    text,
-    {
-      // Returning `false` here would silence every callback below this object.
-      onObjectBegin: () => {
-        open.push(new Set())
-      },
-      onObjectEnd: () => {
-        open.pop()
-      },
-      onObjectProperty: (key, _offset, _length, line, column, pathOf) => {
-        const keys = open.at(-1)
-        if (found !== null || keys === undefined) return
-        const repeated = keys.has(key)
-        if (repeated || key === PROTOTYPE_KEY) {
-          const path = pathOf()
-          const owner = path.length === 0 ? "the top-level object" : `/${path.join("/")}`
-          const at = `line ${line + 1}, column ${column + 1}`
-          found = {
-            message: repeated
-              ? `names "${key}" twice in ${owner} (again at ${at})`
-              : `names "${key}" as a key in ${owner} (at ${at}); it replaces the object's ` +
-                "prototype instead of adding a key, so the schema cannot see it",
-            cause: { key, path, line: line + 1, column: column + 1 },
-          }
-        }
-        keys.add(key)
-      },
-    },
-    CONFIG_PARSE_OPTIONS,
-  )
-  if (found !== null) {
+  const scan = scanKeys(text)
+  if (scan.kind === "unreadable") {
+    throw new Error("jsonc invariant violation: parse accepted a text scanKeys could not read")
+  }
+  if (scan.kind !== "clean") {
     throw new ConfigError(
-      `Config at ${sourcePath} ${found.message}`,
+      describeRepeatedKey(scan, `Config at ${sourcePath}`),
       { code: "config-invalid" },
-      { cause: found.cause },
+      { cause: scan },
     )
   }
-}
-
-const PROTOTYPE_KEY = "__proto__"
-
-/** Where `rejectRepeatedKeys` stopped: the key, its owner's JSON path, and 1-based position. */
-interface RepeatedKey {
-  key: string
-  path: readonly (string | number)[]
-  line: number
-  column: number
 }
 
 function enforceDuplicateRules(config: Config, sourcePath: string): void {

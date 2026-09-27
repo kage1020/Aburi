@@ -8,6 +8,7 @@ import Ajv2020, {
 import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
 import pluginSchema from "../../../schema/aburi.plugin.v1.json" with { type: "json" }
 import { RegistryError } from "./errors"
+import { describeRepeatedKey, JSONC_PARSE_OPTIONS, scanKeys } from "./repeated-keys"
 
 // strictTypes: false because aburi.plugin.v1.json uses if/then sub-schemas that constrain
 // already-typed array fields via `maxItems` without re-stating `"type": "array"`. ajv's
@@ -49,13 +50,14 @@ function tryGetName(parsed: unknown): string[] {
   return []
 }
 
-/** Pure JSONC → PluginManifest. Useful for in-memory manifests (tests). */
+/**
+ * Pure JSONC → PluginManifest. Useful for in-memory manifests (tests). A key the text names twice
+ * in one object, or `__proto__` at all, is refused before the schema runs, since the parsed value
+ * has already kept one.
+ */
 export function parsePluginManifest(text: string, sourcePath: string): PluginManifest {
   const errors: ParseError[] = []
-  const parsed: unknown = parse(text, errors, {
-    allowTrailingComma: true,
-    disallowComments: false,
-  })
+  const parsed: unknown = parse(text, errors, JSONC_PARSE_OPTIONS)
   if (errors.length > 0) {
     const summary = errors
       .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`)
@@ -66,11 +68,26 @@ export function parsePluginManifest(text: string, sourcePath: string): PluginMan
     })
   }
 
+  const scan = scanKeys(text)
+  if (scan.kind === "unreadable") {
+    throw new Error("jsonc invariant violation: parse accepted a text scanKeys could not read")
+  }
+  if (scan.kind !== "clean") {
+    // plugins stays empty: the scan stops at its first hit, so whether "name" also repeats is
+    // unknown, and the name `parse` kept may be the one the file did not mean.
+    throw new RegistryError(
+      describeRepeatedKey(scan, `Plugin manifest at ${sourcePath}`),
+      { code: "manifest-invalid", plugins: [] },
+      { cause: scan },
+    )
+  }
+
   if (!validate(parsed)) {
     const errorDetail = formatAjvErrors(validate.errors)
     throw new RegistryError(
       `Plugin manifest at ${sourcePath} does not conform to aburi.plugin.v1.json: ${errorDetail}`,
       { code: "manifest-invalid", plugins: tryGetName(parsed) },
+      { cause: validate.errors },
     )
   }
 

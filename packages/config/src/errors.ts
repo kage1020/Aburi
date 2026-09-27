@@ -15,8 +15,8 @@ export type ContextFreeConfigErrorCode =
   | "config-parse-failed"
   /**
    * Config does not conform to aburi.config.v1.json, contains non-JSON values, or names one
-   * key twice in an object (or `__proto__` at all), where `cause` is the key, the JSON path of
-   * its object, and the line and column.
+   * key twice in an object (or `__proto__` at all). `cause` is ajv's `ErrorObject[]` for a
+   * schema failure and a `RepeatedKey` for a key, so `Array.isArray` tells them apart.
    */
   | "config-invalid"
 
