@@ -430,7 +430,7 @@
         "frameworks": {
           "type": "array",
           "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-          "description": "Framework plugin names that claimed this component. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as []."
+          "description": "Framework ids (a plugin's provides.frameworks, or the component detector's) recorded for this component. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as []."
         },
         "description": {
           "type": ["string", "null"],

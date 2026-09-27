@@ -173,6 +173,23 @@ const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
   ["express", "framework-express"],
 ])
 
+/**
+ * The plugin `aburi init` would write for a detector id found in `field`, so a config that
+ * holds the id itself can be told what to write instead.
+ */
+export function pluginForDetectorId(
+  field: "languages" | "frameworks",
+  id: string,
+): string | undefined {
+  return (field === "languages" ? LANGUAGE_TO_PLUGIN : FRAMEWORK_TO_PLUGIN).get(id)
+}
+
+/** The framework id a first-party framework plugin's manifest name stands for. */
+export function frameworkIdForPlugin(name: string): string | undefined {
+  for (const [id, plugin] of FRAMEWORK_TO_PLUGIN) if (plugin === name) return id
+  return undefined
+}
+
 function pluginRefsFor(
   detected: ReadonlySet<string>,
   table: ReadonlyMap<string, string>,

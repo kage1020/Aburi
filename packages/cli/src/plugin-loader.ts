@@ -8,6 +8,7 @@ import type {
   LanguagePlugin,
   PluginManifest,
 } from "@aburi/types"
+import { pluginForDetectorId } from "./commands/init"
 import { assertNever, CliError, errorMessage } from "./errors"
 
 /** Every field of the config that lists plugin refs, and the manifest type each must declare. */
@@ -63,7 +64,8 @@ export interface LoadPluginsOptions {
  * - `file:` URL — contains `/`, so it is used verbatim, as a package subpath would be.
  *
  * A ref whose target would depend on Windows' per-drive state, or that names a Windows drive
- * where there are none, is a config error (`windowsDriveRefusal`). Every ref is resolved before
+ * where there are none, is a config error (`windowsDriveRefusal`), and so is a bare id that no
+ * plugin can be named (`detectorIdRefusal`). Every ref is resolved before
  * the first import, so a refused ref stops the run before any plugin code has run.
  *
  * Once imported, the loader accepts the following export shapes, first hit wins:
@@ -82,7 +84,7 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
     (options.config[field] ?? []).map((ref) => ({
       field,
       ref,
-      specifier: resolveSpecifier(ref, pluginRefRoot),
+      specifier: resolveSpecifier(ref, field, pluginRefRoot),
     })),
   )
   for (const { field, ref, specifier } of refs) {
@@ -94,14 +96,31 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
   return loaded
 }
 
-function resolveSpecifier(ref: string, pluginRefRoot: string): string {
-  const refusal = windowsDriveRefusal(ref, process.platform, pluginRefRoot)
+function resolveSpecifier(ref: string, field: PluginField, pluginRefRoot: string): string {
+  const refusal =
+    windowsDriveRefusal(ref, process.platform, pluginRefRoot) ?? detectorIdRefusal(ref, field)
   if (refusal !== null) throw new CliError(refusal, "config-error")
   if (isAbsolute(ref) || ref.startsWith("./") || ref.startsWith("../")) {
     return pathToFileURL(resolve(pluginRefRoot, ref)).href
   }
   if (ref.startsWith("@") || ref.includes("/")) return ref
   return `@aburi/${ref}`
+}
+
+/**
+ * Why `ref` is refused as an id standing where a plugin belongs (`"ts"` for
+ * `"lang-typescript"`), or `null` when it is not. A bare name resolves to `@aburi/<name>` and
+ * every plugin published there has a hyphen in its name, so one without can never load; the
+ * schema cannot say so without tightening `PluginRef`, which v1 does not.
+ */
+export function detectorIdRefusal(ref: string, field: PluginField): string | null {
+  if (!/^[a-z][a-z0-9]*$/.test(ref)) return null
+  const plugin = field === "effects" ? undefined : pluginForDetectorId(field, ref)
+  const fix =
+    plugin === undefined
+      ? "Write the plugin's manifest name, its package id or a path to it."
+      : `Write "${plugin}".`
+  return `Plugin "${ref}" in "${field}" is not a plugin name: a bare name resolves to "@aburi/${ref}", and every plugin there has a hyphen in its name ("lang-typescript"). ${fix}`
 }
 
 /**

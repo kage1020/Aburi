@@ -54,6 +54,9 @@ Three lists, one per plugin kind:
 A bare name resolves under the `@aburi` scope, so `"effects-drizzle"` means
 `@aburi/effects-drizzle`. Third-party plugins need their full package name
 (`"@myorg/aburi-effects"`), and a path starting with `./` loads a local file.
+Every plugin under `@aburi` has a hyphen in its name, so a bare name without one,
+such as the language id `"ts"`, stops the scan with exit 2 and names the plugin to
+write instead.
 
 Order matters in `effects` alone. The first plugin to recognise a call wins, so
 put your project-specific plugins first. Options for an individual plugin go

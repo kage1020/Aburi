@@ -49,10 +49,11 @@ import { readGeneratorInfo } from "../generator-info"
 import { writeFullListing, writeListing } from "../listing"
 import { createLogger } from "../logger"
 import { createOutputDir, type OutputCommand, writeOutputFile } from "../output-file"
-import { loadPlugins } from "../plugin-loader"
+import { type LoadedPlugins, loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
+import { frameworkIdForPlugin } from "./init"
 
 export interface ScanOptions {
   cwd?: string
@@ -208,7 +209,17 @@ export interface ScanReport {
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
   /** Whether the whole repository was described as one Component because detection found no package. */
   fellBackToSingleComponent: boolean
+  /** `components[].frameworks` values that name a plugin rather than a framework. Kept as written. */
+  pluginNamedFrameworks: readonly PluginNamedFramework[]
   exitCode: ExitCode
+}
+
+export interface PluginNamedFramework {
+  /** The declaring component's id. */
+  component: string
+  value: string
+  /** The framework ids that plugin provides, which is what the value should have been. */
+  frameworkIds: readonly string[]
 }
 
 /**
@@ -343,6 +354,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     unrepresentableFiles: scanResult.unrepresentableFiles.map((file) => ({ ...file })),
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
+    pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
     // Three gates (`cli-spec.md`: exit codes, coverage, unnameable files), none of which
     // withholds the artifact: an extraction fault says the run is broken, a coverage fault says
     // it described nothing (or too little, under `minParsedFileRatio`), and an unnameable file
@@ -457,6 +469,15 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
   reportParseErrors(report.parseErrorFiles, sayIncident, warn)
   reportConfigOutsideWorkspaceRoot(report, sayIncident)
+  for (const { component, value, frameworkIds } of report.pluginNamedFrameworks) {
+    const fix =
+      frameworkIds.length === 0
+        ? "That plugin provides no framework."
+        : `Write ${frameworkIds.map((id) => `"${id}"`).join(" or ")}.`
+    sayIncident(
+      `Component "${component}" lists "${value}" in frameworks, which names a plugin, not a framework; the IR carries it as written. ${fix}`,
+    )
+  }
   if (report.parseFailureCount > 0) {
     // Apart from the line above: those files are in the IR with warnings, these are not in it.
     sayIncident(
@@ -857,6 +878,36 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
  * The components the config declares, or undefined when it leaves them to detection. Read by
  * `resolveComponents` and by `fellBackToSingleComponent`, which must agree.
  */
+/**
+ * The `components[].frameworks` values that name a plugin (`"framework-nestjs"` for
+ * `"nestjs"`). The schema cannot tell them apart, since a framework hint's name is a framework
+ * id and may carry a hyphen, so the plugins are asked: a value some plugin provides is a
+ * framework, and one that is a plugin's own name, loaded or first-party, is not.
+ */
+function pluginNamedFrameworks(
+  config: Partial<Config>,
+  registry: LoadedPlugins["registry"],
+): PluginNamedFramework[] {
+  const found: PluginNamedFramework[] = []
+  for (const component of declaredComponents(config) ?? []) {
+    for (const value of component.frameworks ?? []) {
+      if (registry.findFramework(value) !== null) continue
+      const manifest = registry.listPlugins().find((plugin) => plugin.name === value)
+      const firstParty = frameworkIdForPlugin(value)
+      if (manifest !== undefined) {
+        found.push({
+          component: component.id,
+          value,
+          frameworkIds: [...manifest.provides.frameworks],
+        })
+      } else if (firstParty !== undefined) {
+        found.push({ component: component.id, value, frameworkIds: [firstParty] })
+      }
+    }
+  }
+  return found
+}
+
 function declaredComponents(config: Partial<Config>): Config["components"] | undefined {
   const declared = config.components
   return declared !== undefined && declared.length > 0 ? declared : undefined

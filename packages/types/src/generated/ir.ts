@@ -154,7 +154,7 @@ publicApi?: string[]
  */
 languages: LanguageId[]
 /**
- * Framework plugin names that claimed this component. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as [].
+ * Framework ids (a plugin's provides.frameworks, or the component detector's) recorded for this component. Class B per ir-schema.md: writers MUST omit the key when no framework matched, never emit as [].
  */
 frameworks?: string[]
 /**
