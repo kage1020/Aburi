@@ -365,10 +365,12 @@ Each entry resolves to one specifier. There is no fallback chain:
 | `/opt/plugins/mytool.mjs` on POSIX | That file |
 | `C:/plugins/mytool.mjs` on Windows | That file |
 | A Windows path without a drive (`/opt/…`), or a drive letter on POSIX | A config error (exit 2), before any plugin is loaded |
+| A bare name of lowercase letters and digits only (`mytool`, `ts`) | A config error (exit 2), before any plugin is loaded |
 
-No bucket prefix is inferred: `frameworks: ["mytool"]` resolves to
-`@aburi/mytool`, not `@aburi/framework-mytool`. Publish under a scope and write
-the full package name.
+No bucket prefix is inferred, and a bare name shaped like a language or framework id is
+refused rather than resolved: `frameworks: ["mytool"]` stops the run instead of looking for
+`@aburi/mytool` or `@aburi/framework-mytool`. Publish under a scope and write the full
+package name.
 
 The list a plugin appears in must match its manifest `type`, or the loader fails
 the run.

@@ -215,6 +215,27 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
     ])
   })
 
+  it("names the framework ids a plugin-named frameworks value stands for, ahead of the tree leaks", () => {
+    // A first-party plugin that is not loaded is absent from the IR's `plugins[]`, so this line
+    // is the only place its misused name is pointed out; it goes where a closed pipe keeps it.
+    const lines = incidentLinesFrom(
+      scanReportWith({
+        treeReleaseFailures: [{ plugin: "lang-stub", file: "a.ts", detail: "gone" }],
+        pluginNamedFrameworks: [
+          { component: "app", value: "acme-kit", frameworkIds: ["acme-rpc", "acme-web"] },
+          { component: "web", value: "lang-typescript", frameworkIds: [] },
+        ],
+      }),
+      "head",
+    )
+
+    expect(lines.slice(0, 2)).toEqual([
+      '⚠ head: Component "app" lists "acme-kit" in frameworks, which names a plugin, not a framework; the IR carries it as written. Write "acme-rpc" or "acme-web".',
+      '⚠ head: Component "web" lists "lang-typescript" in frameworks, which names a plugin, not a framework; the IR carries it as written. That plugin provides no framework: remove it, or write the framework id the component is built on.',
+    ])
+    expect(lines[2]).toContain("parse tree(s) were not released")
+  })
+
   it("says nothing about parse trees when every plugin freed its own", () => {
     expect(incidentLinesFrom(scanReportWith({ treeReleaseFailures: [] }), null)).toEqual([])
   })

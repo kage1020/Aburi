@@ -120,6 +120,7 @@ export function scanReportWith(overrides: Partial<ScanReport>): ScanReport {
     unresolvedDeclarations: [],
     treeReleaseFailures: [],
     fellBackToSingleComponent: false,
+    pluginNamedFrameworks: [],
     exitCode: EXIT.SUCCESS,
     ...overrides,
   }

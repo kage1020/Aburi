@@ -31,6 +31,7 @@ export {
 } from "./commands/init"
 export {
   type CoverageFault,
+  type PluginNamedFramework,
   reportScanIncidents,
   runScan,
   type ScanOptions,

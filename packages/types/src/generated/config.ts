@@ -2,7 +2,7 @@
 // Source: schema/aburi.config.v1.json
 // Run `pnpm --filter @aburi/types codegen` to regenerate.
 /**
- * Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative/absolute filesystem path ('./aburi-plugins/x.mjs', '/opt/aburi-plugins/x.mjs', 'C:/aburi-plugins/x.mjs').
+ * Manifest name (e.g., 'effects-prisma'), npm package id ('@scope/pkg'), or relative/absolute filesystem path ('./aburi-plugins/x.mjs', '/opt/aburi-plugins/x.mjs', 'C:/aburi-plugins/x.mjs'). A bare name resolves to '@aburi/<name>', where plugins are named with their kind as a prefix ('lang-typescript'), so a bare name of lowercase letters and digits alone ('ts') is refused when plugins load.
  */
 export type PluginRef = string
 export type RelativePath = string
@@ -99,6 +99,9 @@ name?: string
 roots: RelativePath[]
 publicApi?: string[]
 languages?: string[]
+/**
+ * Framework ids ('nestjs'), as plugins provide them, not plugin names ('framework-nestjs').
+ */
 frameworks?: string[]
 description?: (string | null)
 }

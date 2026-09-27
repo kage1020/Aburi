@@ -57,7 +57,8 @@ import {
   removeOutputFile,
   writeOutputFile,
 } from "../output-file"
-import { loadPlugins } from "../plugin-loader"
+import { frameworkIdForPlugin } from "../plugin-catalog"
+import { type LoadedPlugins, loadPlugins } from "../plugin-loader"
 import { describeUnresolvedDeclarations } from "../unresolved-report"
 import {
   type DiscoveredVocabItem,
@@ -229,7 +230,23 @@ export interface ScanReport {
   unresolvedDeclarations: readonly UnresolvedDeclaration[]
   /** Whether the whole repository was described as one Component because detection found no package. */
   fellBackToSingleComponent: boolean
+  /**
+   * `components[].frameworks` values that name a plugin rather than a framework. Kept as written;
+   * a value that is neither goes unchecked, since the detector records ids no plugin provides.
+   */
+  pluginNamedFrameworks: readonly PluginNamedFramework[]
   exitCode: ExitCode
+}
+
+export interface PluginNamedFramework {
+  component: string
+  /** As written in `components[].frameworks`. */
+  value: string
+  /**
+   * The framework ids that plugin provides, which is what the value should have been. Empty
+   * when it provides none — a language or effects plugin's name.
+   */
+  frameworkIds: readonly string[]
 }
 
 /**
@@ -402,6 +419,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     vocabDiscoveredPath,
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
+    pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
     // Three gates (`cli-spec.md`: exit codes, coverage, unnameable files), none of which
     // withholds the artifact: an extraction fault says the run is broken, a coverage fault says
     // it described nothing (or too little, under `minParsedFileRatio`), and an unnameable file
@@ -511,14 +529,17 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
   reportCoverageFault(report.coverageFault, sayIncident)
   // The accounts that exist nowhere else come directly under the coverage line, ahead of
   // everything recoverable from the artifact: the sink's failure is swallowed further up, so
-  // whatever is last is what a closed pipe loses.
+  // whatever is last is what a closed pipe loses. A plugin-named framework is one when the
+  // plugin is first-party and not loaded, since the IR's `plugins[]` then does not carry it.
+  reportPluginNamedFrameworks(report.pluginNamedFrameworks, sayIncident)
   reportUnrepresentable(report.unrepresentableFiles, sayIncident, warn)
   reportTreeReleaseFailures(report.treeReleaseFailures, sayIncident, warn)
   reportUndeclaredVocab(report.undeclaredVocab, report.vocabDiscoveredPath, sayIncident, warn)
   reportParseErrors(report.parseErrorFiles, sayIncident, warn)
   reportConfigOutsideWorkspaceRoot(report, sayIncident)
   if (report.parseFailureCount > 0) {
-    // Apart from the line above: those files are in the IR with warnings, these are not in it.
+    // Apart from the recoverable parse-error line: those files are in the IR with warnings,
+    // these are not in it.
     sayIncident(
       `${report.parseFailureCount} file(s) could not be parsed and were left out of the IR.`,
     )
@@ -667,6 +688,21 @@ function reportCoverageFault(fault: CoverageFault | null, sayIncident: SayIncide
       `minParsedFileRatio floor of ${Math.ceil(fault.floor * 100)}%. ` +
       "Raise the coverage, or lower the floor if this is what the workspace looks like now.",
   )
+}
+
+function reportPluginNamedFrameworks(
+  found: ScanReport["pluginNamedFrameworks"],
+  sayIncident: SayIncident,
+): void {
+  for (const { component, value, frameworkIds } of found) {
+    const fix =
+      frameworkIds.length === 0
+        ? "That plugin provides no framework: remove it, or write the framework id the component is built on."
+        : `Write ${frameworkIds.map((id) => `"${id}"`).join(" or ")}.`
+    sayIncident(
+      `Component "${component}" lists "${value}" in frameworks, which names a plugin, not a framework; the IR carries it as written. ${fix}`,
+    )
+  }
 }
 
 /**
@@ -946,8 +982,39 @@ function assertWorkspaceRelative(root: string, componentId: string): string {
 }
 
 /**
+ * The `components[].frameworks` values that name a plugin (`"framework-nestjs"` for
+ * `"nestjs"`). The schema cannot tell them apart, since a framework hint's name is a framework
+ * id and may carry a hyphen, so the plugins are asked: a value some plugin provides is a
+ * framework, and one that is a plugin's own name, loaded or first-party, is not.
+ */
+function pluginNamedFrameworks(
+  config: Partial<Config>,
+  registry: LoadedPlugins["registry"],
+): PluginNamedFramework[] {
+  const found: PluginNamedFramework[] = []
+  for (const component of declaredComponents(config) ?? []) {
+    for (const value of component.frameworks ?? []) {
+      if (registry.findFramework(value) !== null) continue
+      const manifest = registry.listPlugins().find((plugin) => plugin.name === value)
+      const firstParty = frameworkIdForPlugin(value)
+      if (manifest !== undefined) {
+        found.push({
+          component: component.id,
+          value,
+          frameworkIds: [...manifest.provides.frameworks],
+        })
+      } else if (firstParty !== undefined) {
+        found.push({ component: component.id, value, frameworkIds: [firstParty] })
+      }
+    }
+  }
+  return found
+}
+
+/**
  * The components the config declares, or undefined when it leaves them to detection. Read by
- * `resolveComponents` and by `fellBackToSingleComponent`, which must agree.
+ * `resolveComponents`, by `fellBackToSingleComponent`, which must agree with it, and by
+ * `pluginNamedFrameworks`.
  */
 function declaredComponents(config: Partial<Config>): Config["components"] | undefined {
   const declared = config.components

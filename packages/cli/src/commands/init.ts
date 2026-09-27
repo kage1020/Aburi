@@ -10,6 +10,7 @@ import { CliError, errorMessage } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { pathKind } from "../fs-probe"
 import { outputIsADirectory, writeOutputFile } from "../output-file"
+import { FRAMEWORK_TO_PLUGIN, LANGUAGE_TO_PLUGIN } from "../plugin-catalog"
 import { resolveWorkspaceRoot } from "../workspace-root"
 
 /** What this command's one artefact is called when a write of it fails. */
@@ -145,33 +146,6 @@ export async function runInit(options: InitOptions = {}): Promise<InitReport> {
     exitCode: EXIT.SUCCESS,
   }
 }
-
-/**
- * Detector vocabulary → plugin manifest name. The detectors speak `LanguageId` /
- * framework ids (`ts`, `tsx`, `nestjs`); the top-level `languages` / `frameworks` fields
- * of `aburi.json` are `PluginRef`s that the plugin loader resolves as module specifiers.
- * Writing a detector id into those fields makes the loader look for `@aburi/ts`.
- *
- * Kept tiny on purpose; a large plugin catalog belongs outside the CLI so autodetect
- * stays language-agnostic. Only the plugins that ship in this monorepo are listed, and a
- * detected id with no entry is omitted rather than guessed at — an unresolvable ref would
- * fail the very next `aburi scan`.
- */
-const LANGUAGE_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
-  ["ts", "lang-typescript"],
-  ["tsx", "lang-typescript"],
-  ["js", "lang-typescript"],
-  ["jsx", "lang-typescript"],
-])
-
-const FRAMEWORK_TO_PLUGIN: ReadonlyMap<string, string> = new Map([
-  ["nestjs", "framework-nestjs"],
-  // `nextjs`, not `next`: the npm dependency `next` is normalised to the framework id
-  // `nextjs` by the detector, and this table's left column is the detector's vocabulary.
-  ["nextjs", "framework-next"],
-  ["react", "framework-react"],
-  ["express", "framework-express"],
-])
 
 function pluginRefsFor(
   detected: ReadonlySet<string>,

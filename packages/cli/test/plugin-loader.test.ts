@@ -13,7 +13,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CliError, loadPlugins } from "../src"
-import { windowsDriveRefusal } from "../src/plugin-loader"
+import { detectorIdRefusal, windowsDriveRefusal } from "../src/plugin-loader"
 import { STUB_PLUGIN } from "./stub-language"
 
 const langManifest: LangManifest = {
@@ -242,6 +242,51 @@ describe("loadPlugins — module resolution and bucketing", () => {
     expect((error as CliError).code).toBe("config-error")
     expect((error as CliError).message).toContain(`Plugin "${refused}"`)
     expect(imported).toEqual([])
+  })
+
+  it("refuses a bare id before importing any plugin, even one listed earlier", async () => {
+    const imported: string[] = []
+    const error = await loadPlugins({
+      config: { languages: ["lang-fake"], effects: ["prisma"] },
+      workspaceRoot: tmpdir(),
+      importModule: async (specifier) => {
+        imported.push(specifier)
+        return { plugin: fakeLangPlugin }
+      },
+    }).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CliError)
+    expect((error as CliError).code).toBe("config-error")
+    expect((error as CliError).message).toContain(
+      `Plugin "prisma" in "effects" is not a plugin name: a bare name resolves to "@aburi/prisma"`,
+    )
+    expect((error as CliError).message).toContain('Write "effects-prisma".')
+    expect(imported).toEqual([])
+  })
+
+  describe("detectorIdRefusal", () => {
+    it.each([
+      ["languages", "tsx", 'Write "lang-typescript".'],
+      ["frameworks", "nextjs", 'Write "framework-next".'],
+      ["frameworks", "vue", "Write the plugin's manifest name"],
+      ["effects", "nestjs", 'Write "effects-nestjs".'],
+      ["languages", "x", "Write the plugin's manifest name"],
+    ] as const)("refuses %s: %s", (field, ref, fix) => {
+      expect(detectorIdRefusal(ref, field)).toContain(fix)
+    })
+
+    it("suggests a plugin of the field's own kind", () => {
+      expect(detectorIdRefusal("nestjs", "effects")).not.toContain("framework-nestjs")
+    })
+
+    it.each([
+      "lang-typescript",
+      "@aburi/lang-typescript",
+      "./x.mjs",
+      "x.mjs",
+      "Ts",
+    ])("leaves %s to the loader", (ref) => {
+      expect(detectorIdRefusal(ref, "languages")).toBeNull()
+    })
   })
 
   describe("windowsDriveRefusal", () => {

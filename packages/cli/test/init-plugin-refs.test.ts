@@ -12,7 +12,7 @@ import { runInit } from "../src"
  * - `components[].languages` holds **language ids** (`LanguageId`, `^[a-z][a-z0-9]*$`),
  *   which cannot express a hyphenated manifest name.
  *
- * A detector id in the top-level array sends the loader looking for `@aburi/ts`, and a
+ * A detector id in the top-level array is refused by the loader (exit 2), and a
  * manifest name inside `components[]` fails the `LanguageId` pattern, so neither field
  * tolerates the other's vocabulary. These tests pin the split at both ends.
  */
