@@ -193,11 +193,11 @@ Any declaration that includes a centrally reserved namespace from §5.1, at eith
 
 ### 6.3 Undeclared values at extraction time
 
-If a plugin's extraction logic generates an extKind / effect.id not declared in the registry → the entire extraction **exits with an error**.
+If a plugin's extraction logic generates an extKind / effect.id that the emitting plugin itself does not declare (individually or through an owned prefix) → the entire extraction **exits with an error** (`vocab-undeclared`, exit 3). A core effect id is owned by no plugin and passes. The check runs when the value is emitted: an effect as each call is classified, an extKind once the framework plugins have classified the Symbol, charged to the framework plugin that assigned it, or to the language plugin when none replaced its own.
 
 This is a fail-safe against "a plugin silently starts using new vocabulary and breaks time-series comparison".
 
-Exception: only under the `aburi scan --discover` flag is this downgraded to a warning and recorded (§11.5).
+Exception: with strict off (`config.strict: false`, `--no-strict` or `aburi scan --discover`) this is downgraded to a warning and recorded (§11.5). A value from a file whose Symbols do not reach the IR (withdrawn, or abandoned at its time budget) is not recorded, since the record names Symbols the Document would not hold.
 
 ## 7. Registry API (consumer side)
 
@@ -388,17 +388,16 @@ aburi scan --discover
 
 ```jsonc
 {
-  "$schema": "https://aburi.kage1020.com/schema/aburi.vocab-discovered.v1.json",   // does not exist yet; formalization is planned
-  "discoveredAt": "2026-06-21T15:30:00Z",
+  "discoveredAt": "2026-06-21T15:30:00Z",     // absent under --no-timestamp
   "items": [
     {
-      "kind": "effect",                       // "effect" | "extKind" | "framework"
+      "kind": "effect",                       // "effect" | "extKind"
       "value": "x-prisma:bulk-delete",
       "firstSeenBy": "effects-prisma",        // the plugin that first generated this value
       "alsoSeenBy": [],                       // other plugins that generated the same value in the same run (rare)
-      "occurrences": 3,                       // occurrence count within the run (after dedupe)
+      "occurrences": 3,                       // how many times the run emitted it
       "samples": [                            // the first 3 occurrences
-        { "file": "apps/billing/src/x.ts", "line": 42, "symbol": "ts:apps/billing/src/x.ts#foo" }
+        { "file": "apps/billing/src/x.ts", "line": 42, "symbol": "ts:apps/billing/src/x.ts#foo" }   // no line for an extKind
       ]
     }
   ]
@@ -407,7 +406,9 @@ aburi scan --discover
 
 - `firstSeenBy`: when multiple plugins generate the same undeclared value in one run, the first plugin owns it
 - `alsoSeenBy`: subsequent plugins are downgraded to warnings and appended to the record
-- `occurrences`: duplicates of the same (value, plugin) pair within a run are deduped with count++
+- `occurrences`: every emission of the value in the run, whichever plugin emitted it
+- Items are in the order the scan first met them, which is path order, so the same workspace gives the same record
+- There is no `$schema` key until the schema for this file exists, and no `framework` kind: a framework name is not checked against the manifests
 
 This makes it mechanically decidable at promote time which plugin's manifest an entry should be added to.
 

@@ -16,7 +16,7 @@ import type {
   WalkContext,
 } from "@aburi/types"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { scan } from "../../src"
+import { scan, VocabCheck } from "../../src"
 import { buildDropCFilter } from "../../src/scan/drop-c"
 import { runFilePipeline } from "../../src/scan/pipeline"
 import { stubCandidate, stubLanguagePlugin } from "../fixtures/plugins"
@@ -112,6 +112,7 @@ describe("runFilePipeline — a non-recoverable parse error withdraws the file",
       frameworks: [],
       effects: [],
       registry: noopRegistry,
+      vocab: new VocabCheck(noopRegistry, true),
       config: {},
       dropCFilter: buildDropCFilter({ pluginDropCallees: [] }),
       component: null,

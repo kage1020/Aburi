@@ -19,6 +19,7 @@ import {
   type FilePipelineResult,
   runFilePipeline,
   type TreeReleaseFailure,
+  VocabCheck,
 } from "../../src"
 import { spend } from "../fixtures/clock"
 import { langManifest, NO_CAPABILITIES, stubCandidate, stubFile } from "../fixtures/plugins"
@@ -158,6 +159,7 @@ function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
     frameworks: [],
     effects: [],
     registry: noopRegistry,
+    vocab: new VocabCheck(noopRegistry, true),
     // The budget travels on the config, which is where the pipeline reads it from.
     config: extras.parseTimeoutMs === undefined ? {} : { parseTimeoutMs: extras.parseTimeoutMs },
     dropCFilter: buildDropCFilter(),
