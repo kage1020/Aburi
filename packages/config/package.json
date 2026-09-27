@@ -37,6 +37,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aburi/plugin-registry": "workspace:*",
     "@aburi/types": "workspace:*",
     "ajv": "^8.20.0",
     "jsonc-parser": "^3.3.1"

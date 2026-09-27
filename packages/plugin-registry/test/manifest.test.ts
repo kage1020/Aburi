@@ -74,6 +74,61 @@ describe("parsePluginManifest", () => {
   })
 })
 
+describe("parsePluginManifest — a key named twice in one object", () => {
+  function refusalOf(text: string): RegistryError {
+    try {
+      parsePluginManifest(text, "inline")
+    } catch (error) {
+      if (error instanceof RegistryError) return error
+      throw error
+    }
+    throw new Error("expected a RegistryError")
+  }
+
+  it("refuses a second name, which would otherwise register the plugin under it", () => {
+    const text = VALID_MANIFEST.replace(
+      '"name": "effects-foo",',
+      '"name": "effects-foo",\n  "name": "effects-bar",',
+    )
+    const caught = refusalOf(text)
+    expect(caught.code).toBe("manifest-invalid")
+    expect(caught.plugins).toEqual([])
+    expect(caught.message).toBe(
+      'Plugin manifest at inline names "name" twice in the top-level object (again at line 5, column 3)',
+    )
+    expect(caught.cause).toEqual({ key: "name", path: [], line: 5, column: 3 })
+  })
+
+  it("refuses one inside a nested array element", () => {
+    const text = VALID_MANIFEST.replace(
+      '{ "id": "x-foo:write", "description": "write something" }',
+      '{ "id": "x-foo:write", "description": "write something", "id": "x-foo:read" }',
+    )
+    expect(refusalOf(text).message).toBe(
+      'Plugin manifest at inline names "id" twice in /provides/effects/0 (again at line 11, column 64)',
+    )
+  })
+
+  it("refuses __proto__, which replaces the prototype where the schema cannot see it", () => {
+    const text = VALID_MANIFEST.replace(
+      '"xPrefix": "foo",',
+      '"xPrefix": "foo",\n  "__proto__": {},',
+    )
+    expect(refusalOf(text).message).toBe(
+      'Plugin manifest at inline names "__proto__" as a key in the top-level object (at line 8, column 3); ' +
+        "it replaces the object's prototype instead of adding a key, so the schema cannot see it",
+    )
+  })
+
+  it("lets two objects use the same key", () => {
+    const text = VALID_MANIFEST.replace(
+      '{ "id": "x-foo:write", "description": "write something" }',
+      '{ "id": "x-foo:write", "description": "write" }, { "id": "x-foo:read", "description": "read" }',
+    )
+    expect(parsePluginManifest(text, "inline").provides.effects).toHaveLength(2)
+  })
+})
+
 describe("loadPluginManifest", () => {
   let tmpDir: string
   beforeAll(async () => {

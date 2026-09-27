@@ -243,6 +243,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | ID | Input | Expected |
 |---|---|---|
 | V1 | Load a single plugin's manifest | All vocab registered in the registry |
+| V1a | A manifest naming one key twice in an object, at any depth, or naming `__proto__` at all | manifest validation error naming the key, its object and the line |
 | V2 | Two plugins declare the same effect id | startup error |
 | V3 | Two plugins declare the same extKind | startup error |
 | V3a | One plugin declares the same effect id or extKind id twice, whatever the two entries say | startup error |

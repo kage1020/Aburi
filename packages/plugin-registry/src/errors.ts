@@ -6,7 +6,7 @@
  *
  * `plugins[]` carries 0, 1, or 2 names:
  *   - 0: failure occurred before the manifest could be identified (file read, JSON
- *        parse before any structure was recovered).
+ *        parse before any structure was recovered, a key named twice).
  *   - 1: single-plugin failure (reserved namespace, xPrefix mismatch, an id one manifest
  *        declares twice, etc.).
  *   - 2: cross-plugin conflict (duplicate id, prefix overlap, etc.). The first
@@ -19,7 +19,11 @@ export type RegistryErrorCode =
   | "manifest-read-failed"
   /** Manifest file is not valid JSONC (lexical error). */
   | "manifest-parse-failed"
-  /** Manifest does not conform to aburi.plugin.v1.json or contains non-JSON values. */
+  /**
+   * Manifest does not conform to aburi.plugin.v1.json, contains non-JSON values, or names one key
+   * twice in an object (or `__proto__` at all), where `cause` is the key, the JSON path of its
+   * object, and the line and column.
+   */
   | "manifest-invalid"
   /** Manifest references a reserved namespace (core / aburi / _ / framework:hint). */
   | "reserved-namespace"

@@ -5,9 +5,10 @@ import Ajv2020, {
   type SchemaObject,
   type ValidateFunction,
 } from "ajv/dist/2020.js"
-import { type ParseError, parse, printParseErrorCode } from "jsonc-parser"
+import { type ParseError, type ParseOptions, parse, printParseErrorCode } from "jsonc-parser"
 import pluginSchema from "../../../schema/aburi.plugin.v1.json" with { type: "json" }
 import { RegistryError } from "./errors"
+import { describeRepeatedKey, findRepeatedKey } from "./repeated-keys"
 
 // strictTypes: false because aburi.plugin.v1.json uses if/then sub-schemas that constrain
 // already-typed array fields via `maxItems` without re-stating `"type": "array"`. ajv's
@@ -49,13 +50,16 @@ function tryGetName(parsed: unknown): string[] {
   return []
 }
 
-/** Pure JSONC → PluginManifest. Useful for in-memory manifests (tests). */
+/** One set of options for both reads of the text, so `findRepeatedKey` sees what `parse` did. */
+const MANIFEST_PARSE_OPTIONS: ParseOptions = { allowTrailingComma: true, disallowComments: false }
+
+/**
+ * Pure JSONC → PluginManifest. Useful for in-memory manifests (tests). A key the text names twice
+ * in one object is refused before the schema runs, since the parsed value has already kept one.
+ */
 export function parsePluginManifest(text: string, sourcePath: string): PluginManifest {
   const errors: ParseError[] = []
-  const parsed: unknown = parse(text, errors, {
-    allowTrailingComma: true,
-    disallowComments: false,
-  })
+  const parsed: unknown = parse(text, errors, MANIFEST_PARSE_OPTIONS)
   if (errors.length > 0) {
     const summary = errors
       .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`)
@@ -64,6 +68,16 @@ export function parsePluginManifest(text: string, sourcePath: string): PluginMan
       code: "manifest-parse-failed",
       plugins: [],
     })
+  }
+
+  const repeated = findRepeatedKey(text, MANIFEST_PARSE_OPTIONS)
+  if (repeated !== null) {
+    // No plugin named: the name is not settled while the text may give two of them.
+    throw new RegistryError(
+      `Plugin manifest at ${sourcePath} ${describeRepeatedKey(repeated)}`,
+      { code: "manifest-invalid", plugins: [] },
+      { cause: repeated },
+    )
   }
 
   if (!validate(parsed)) {
