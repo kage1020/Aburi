@@ -73,6 +73,12 @@ export type CoreErrorCode =
    * `assertReceiverHintKeys`.
    */
   | "receiver-hint-key-malformed"
+  /**
+   * A plugin emitted an effect id or extKind its manifest does not claim, in a strict run
+   * (`extension-vocab.md`). Re-thrown by the per-file boundary for the reason
+   * `scan-plugin-misconfigured` is: the plugin is wrong, not the file.
+   */
+  | "vocab-undeclared"
 
 export interface IntegrityViolation {
   /** Stable invariant id corresponding to the ir-schema.md numbering, which is the single source of the list. */

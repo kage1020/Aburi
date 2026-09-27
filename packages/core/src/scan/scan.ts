@@ -46,6 +46,7 @@ import { describeThrown, errorCode, isVanishedFile } from "./faults"
 import { runFilePipeline, type TreeReleaseFailure } from "./pipeline"
 import { buildLanguageRouter } from "./route"
 import type { ClassifyTimeoutEvent, ParseTimeoutEvent } from "./timeout"
+import { isStrict, type UndeclaredVocabOccurrence, VocabCheck } from "./vocab"
 
 export interface ScanInput {
   /** Absolute workspace root. Every relative path in the IR is measured against this. */
@@ -150,6 +151,12 @@ export interface ScanResult {
    * them the cause. This list is the only thing that names the plugin before that happens.
    */
   treeReleaseFailures: readonly TreeReleaseFailure[]
+  /**
+   * Every effect id and extKind a plugin emitted without its manifest claiming it, in scan
+   * order, from files whose Symbols reached the IR. Always empty in a strict run
+   * (`config.strict`, default `true`), which ends at the first one with `vocab-undeclared`.
+   */
+  undeclaredVocab: readonly UndeclaredVocabOccurrence[]
   /**
    * One record per candidate file the Document has no way to name, in path order.
    *
@@ -259,6 +266,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
   const parseTimeouts: ParseTimeoutEvent[] = []
   const extractionFailures: ExtractionFailure[] = []
   const treeReleaseFailures: TreeReleaseFailure[] = []
+  const undeclaredVocab: UndeclaredVocabOccurrence[] = []
+  const strictVocab = isStrict(input.config)
   // One warning per plugin, at the file it first went wrong on. The record below keeps
   // every occurrence; a line per file would be one per file for the rest of the run.
   const warnedReleaseFailure = new Set<string>()
@@ -307,6 +316,9 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     // pipeline that ran to completion has.
     let result: Awaited<ReturnType<typeof runFilePipeline>>
     const releasesRecordedBefore = treeReleaseFailures.length
+    // Per file, and kept only for a file whose Symbols reach the IR: a value recorded from a
+    // file that is then withdrawn names a Symbol the Document does not hold.
+    const fileVocab = new VocabCheck(input.registry, strictVocab)
     try {
       result = await runFilePipeline({
         file: sourceFile,
@@ -319,6 +331,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
         component: attribute(sourceFile.path),
         log: logger,
         treeReleaseFailures,
+        vocab: fileVocab,
       })
     } catch (error) {
       if (isPluginSetFault(error)) throw error
@@ -431,6 +444,8 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
           importsByFile.set(discoveredFile.path, result.imports)
           break
         }
+
+        undeclaredVocab.push(...fileVocab.occurrences)
 
         // Held for LSP enrichment, and only for files that reached the IR. Nothing would
         // currently read a refused file's text if it were held — the pass builds one document
@@ -573,6 +588,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     extractionFailures,
     treeReleaseFailures,
     unrepresentableFiles: discovered.unrepresentableFiles,
+    undeclaredVocab,
   }
 }
 
@@ -678,10 +694,11 @@ function describeIdFault(symbols: readonly IRSymbol[], path: string): string | n
  * - `invalid-language-id` — the prefix is present but is not a legal `LanguageId`. It comes
  *   from the plugin's own `languageId`, so it is the same on every Symbol it emits.
  * - `vocab-undeclared` — an effect or extKind id the emitting plugin's manifest does not
- *   claim (`effect-plugin.md` EP1). A `RegistryError` rather than a `CoreError`, and the
- *   reason this predicate matches on the code rather than on the class: `@aburi/core` does
- *   not depend on `@aburi/plugin-registry`, and matching on the code also survives a build
- *   where a plugin resolved its own copy of either package.
+ *   claim (`effect-plugin.md` EP1). It arrives in two shapes: a `CoreError` from `VocabCheck`,
+ *   and a `RegistryError` from a plugin that calls the registry's `assert*Declared` on the
+ *   context it was given. That is the reason this predicate matches on the code rather than
+ *   on the class: `@aburi/core` does not depend on `@aburi/plugin-registry`, and matching on
+ *   the code also survives a build where a plugin resolved its own copy of either package.
  *
  * Everything else reachable from a plugin call is a property of the file:
  * `anonymous-symbol-id-attempted` and `invalid-symbol-id` from what a declaration is named,

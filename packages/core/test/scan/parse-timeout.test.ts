@@ -16,6 +16,7 @@ import {
   PARSE_TIMEOUT_MIN_MS,
   runFilePipeline,
   startParseDeadline,
+  VocabCheck,
 } from "../../src"
 import { spend } from "../fixtures/clock"
 import { stubCandidate, stubFile, stubLanguagePlugin } from "../fixtures/plugins"
@@ -77,6 +78,7 @@ async function run(timing: StubTiming, parseTimeoutMs?: number) {
     frameworks: [],
     effects: [],
     registry: noopRegistry,
+    vocab: new VocabCheck(noopRegistry, true),
     // Through the config rather than beside it: the pipeline reads its budgets from the
     // same object production hands it, so a test cannot exercise a path the CLI cannot.
     config: parseTimeoutMs === undefined ? {} : { parseTimeoutMs },

@@ -341,8 +341,10 @@ Currently only `dir` is supported.
 ```
 
 - Default: `true`
-- When `true`, a plugin emitting vocab not declared in its manifest is an extraction-time error
-- When `false` (= making the equivalent of `aburi scan --discover` permanent), it is a warning only and execution continues
+- When `true`, a plugin emitting vocab not declared in its manifest is an extraction-time error: the run stops at the first one and exits 3, naming the plugin, the value and where it was emitted
+- When `false` (= making the equivalent of `aburi scan --discover` permanent), it is a warning only and execution continues; `aburi scan` writes every such value to `aburi-vocab-discovered.json` ([`extension-vocab.md`](./extension-vocab.md) §11.5.1), and `aburi diff` lists them on each scan's incident report
+
+"Declared" means claimed by the plugin that emitted it, directly or through a prefix it owns: an id another plugin owns is as undeclared as one nobody does. The core effect ids ([`ir-schema.md`](./ir-schema.md)) belong to no plugin and pass whoever emits them. An extKind is charged to the framework plugin that assigned it, or to the language plugin when no framework replaced its own.
 
 The CI default is `true`; use `false` or the CLI's `--discover` when you want discovery in local development.
 
