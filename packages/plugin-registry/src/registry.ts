@@ -3,6 +3,7 @@ import type {
   ExtKindVocab,
   FrameworkVocab,
   PluginManifest,
+  Provides,
   VocabRegistry as VocabRegistryContract,
 } from "@aburi/types"
 import {
@@ -72,6 +73,26 @@ function stableStringify(value: unknown, path = "$"): string {
   const keys = Object.keys(obj).sort()
   const entries = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k], `${path}.${k}`)}`)
   return `{${entries.join(",")}}`
+}
+
+/**
+ * What each provides.* array holds: the fields an object entry must own as strings, or "string"
+ * for an array of strings. Keyed by `Provides`, so an array the schema adds fails typecheck here
+ * until its entries are described.
+ */
+const PROVIDES_ENTRIES = {
+  effects: ["id", "description"],
+  effectPrefixes: "string",
+  extKinds: ["id", "baseKind", "description"],
+  extKindPrefixes: "string",
+  frameworks: "string",
+  derivedByPrefixes: "string",
+} as const satisfies Record<keyof Provides, readonly string[] | "string">
+
+function describeType(value: unknown): string {
+  if (value === null) return "null"
+  if (Array.isArray(value)) return "array"
+  return typeof value
 }
 
 function raise(
@@ -161,37 +182,52 @@ export class VocabRegistry implements VocabRegistryContract {
   // ---------- Validations ----------
 
   /**
-   * Pre-flight: the schema requires every provides.* array, but `register` accepts
-   * any value typed PluginManifest at runtime (e.g. a hand-built object skipping
-   * `loadPluginManifest`). Without this check, a missing array would `TypeError`
-   * inside the commit loop after validation has already mutated nothing yet —
-   * still safe atomicity-wise, but the error message would be `Cannot read
-   * properties of undefined (reading 'length')`. Surface a coded error instead.
+   * Pre-flight: the schema requires a string name, every provides.* array and the shape of each
+   * entry, but `register` accepts any value typed PluginManifest at runtime (e.g. a hand-built
+   * object skipping `loadPluginManifest`). Without this check, a malformed manifest would
+   * `TypeError` inside a later validation, as `Cannot read properties of null (reading 'id')`.
+   * Surface a coded error instead. Hand-rolled rather than the schema's `validate()`, which would
+   * also hold in-memory callers to `pattern`, `additionalProperties` and the `baseKind` enum.
    */
   #assertProvidesShape(m: PluginManifest): void {
+    if (typeof m.name !== "string") {
+      raise(
+        `Plugin manifest name must be a string (got ${describeType(m.name)}).`,
+        "manifest-invalid",
+        [],
+      )
+    }
     if (!m.provides || typeof m.provides !== "object") {
       raise(`Plugin "${m.name}" is missing the required \`provides\` object.`, "manifest-invalid", [
         m.name,
       ])
     }
-    const required = [
-      "effects",
-      "effectPrefixes",
-      "extKinds",
-      "extKindPrefixes",
-      "frameworks",
-      "derivedByPrefixes",
-    ] as const
+    // Annotated rather than inferred, so a call narrows the way a call to `raise` does.
+    const refuse: (at: string, expected: string, value: unknown) => never = (at, expected, value) =>
+      raise(
+        `Plugin "${m.name}" provides.${at} must be ${expected} (got ${describeType(value)}).`,
+        "manifest-invalid",
+        [m.name],
+      )
     const provides = m.provides as unknown as Record<string, unknown>
-    for (const key of required) {
+    for (const [key, fields] of Object.entries(PROVIDES_ENTRIES)) {
       // Own keys only, as for `type`: an inherited array would walk past this gate.
       const value = Object.hasOwn(provides, key) ? provides[key] : undefined
-      if (!Array.isArray(value)) {
-        raise(
-          `Plugin "${m.name}" provides.${key} must be an array (got ${typeof value}).`,
-          "manifest-invalid",
-          [m.name],
-        )
+      if (!Array.isArray(value)) refuse(key, "an array", value)
+      for (const [i, entry] of (value as unknown[]).entries()) {
+        if (fields === "string") {
+          if (typeof entry !== "string") refuse(`${key}[${i}]`, "a string", entry)
+          continue
+        }
+        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+          refuse(`${key}[${i}]`, "an object", entry)
+        }
+        for (const field of fields) {
+          const own = Object.hasOwn(entry, field)
+            ? (entry as Record<string, unknown>)[field]
+            : undefined
+          if (typeof own !== "string") refuse(`${key}[${i}].${field}`, "a string", own)
+        }
       }
     }
   }

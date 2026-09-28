@@ -1,3 +1,4 @@
+import type { PluginManifest } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { RegistryError, VocabRegistry } from "../src/index"
 import { effectsManifest, frameworkManifest, langManifest } from "./fixtures/manifests"
@@ -541,5 +542,96 @@ describe("VocabRegistry.register (provides shape — I4)", () => {
     const m = langManifest()
     const broken = { ...m, provides: undefined as unknown as typeof m.provides }
     expectRegistryError(() => reg.register(broken), "manifest-invalid")
+  })
+
+  it.each([
+    [5, "number"],
+    [null, "null"],
+  ])("rejects a manifest whose name is %s", (name, got) => {
+    const m = { ...effectsManifest(), name } as unknown as PluginManifest
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(`Plugin manifest name must be a string (got ${got}).`)
+    expect(err.plugins).toEqual([])
+  })
+
+  it("names what a provides array holds instead when it is not an array", () => {
+    const m = langManifest({ name: "lang-demo" })
+    const broken = { ...m, provides: { ...m.provides, frameworks: null as unknown as never[] } }
+    const err = expectRegistryError(() => new VocabRegistry().register(broken), "manifest-invalid")
+    expect(err.message).toBe('Plugin "lang-demo" provides.frameworks must be an array (got null).')
+  })
+
+  it.each([
+    ["null", null, "provides.effects[1] must be an object (got null)"],
+    ["an array", [], "provides.effects[1] must be an object (got array)"],
+    ["a string", "x-prisma:read", "provides.effects[1] must be an object (got string)"],
+  ])("rejects an effect entry that is %s", (_, entry, message) => {
+    const m = effectsManifest({ name: "effects-prisma", xPrefix: "prisma" })
+    m.provides.effects.push({ id: "x-prisma:create", description: "create" }, entry as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(`Plugin "effects-prisma" ${message}.`)
+    expect(err.plugins).toEqual(["effects-prisma"])
+  })
+
+  it("rejects an extKind entry that is not an object", () => {
+    const m = frameworkManifest()
+    m.provides.extKinds.push("framework:demo:thing" as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(
+      `Plugin "${m.name}" provides.extKinds[0] must be an object (got string).`,
+    )
+  })
+
+  it.each(["id", "description"])("rejects an effect entry without a string %s", (field) => {
+    const m = effectsManifest({ name: "effects-prisma", xPrefix: "prisma" })
+    const entry: Record<string, unknown> = { id: "x-prisma:create", description: "create" }
+    delete entry[field]
+    m.provides.effects.push(entry as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(
+      `Plugin "effects-prisma" provides.effects[0].${field} must be a string (got undefined).`,
+    )
+  })
+
+  it.each([
+    "id",
+    "baseKind",
+    "description",
+  ])("rejects an extKind entry whose %s is not a string", (field) => {
+    const m = frameworkManifest()
+    const entry: Record<string, unknown> = {
+      id: "framework:demo:thing",
+      baseKind: "class",
+      description: "x",
+    }
+    entry[field] = 1
+    m.provides.extKinds.push(entry as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(
+      `Plugin "${m.name}" provides.extKinds[0].${field} must be a string (got number).`,
+    )
+  })
+
+  it("rejects an entry whose id is inherited rather than its own", () => {
+    const m = effectsManifest({ name: "effects-prisma", xPrefix: "prisma" })
+    const entry = Object.create({ id: "x-prisma:create" }) as Record<string, unknown>
+    entry.description = "create"
+    m.provides.effects.push(entry as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(
+      'Plugin "effects-prisma" provides.effects[0].id must be a string (got undefined).',
+    )
+  })
+
+  it.each([
+    "effectPrefixes",
+    "extKindPrefixes",
+    "frameworks",
+    "derivedByPrefixes",
+  ] as const)("rejects a %s entry that is not a string", (key) => {
+    const m = langManifest({ name: "lang-demo" })
+    m.provides[key].push(null as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(`Plugin "lang-demo" provides.${key}[0] must be a string (got null).`)
   })
 })
