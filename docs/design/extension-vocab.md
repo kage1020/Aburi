@@ -255,6 +255,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | V9 | Loading the same manifest twice | idempotent |
 | V10 | Emitting `x-acme:anything` at extraction time under a declared `effectPrefixes: ["x-acme"]` | passes |
 | V11 | A declares `extKinds[].id: "framework:acme:job"`, B declares `extKindPrefixes: ["framework:acme"]` | startup error (subsumption conflict) |
+| V11a | One plugin declares two extKind prefixes or two derivedBy prefixes where one contains the other (`fp:pipe` and `fp:pipe:async`) | startup error. The same prefix written twice is accepted |
 | V12 | Emitting undeclared values under `aburi scan --discover` | warning only; recorded in `aburi-vocab-discovered.json` |
 | V13 | Treating `@Foo` as a boundary via Framework hints (§11.3) alone | OK; no plugin manifest required |
 

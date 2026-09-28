@@ -287,9 +287,12 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   /**
-   * Refuse an id `m` declares twice. The commit is a `Map.set` per entry, so the later declaration
-   * would replace the earlier whatever the two said, and `#validateConflicts` compares a manifest
-   * only with the plugins already registered.
+   * Refuse an id `m` declares twice, or two of its own prefixes where one contains the other.
+   * `#validateConflicts` compares a manifest only with the plugins already registered. For ids,
+   * the commit is a `Map.set` per entry, so the later declaration would replace the earlier
+   * whatever the two said; for prefixes, both would register and a lookup under both would find
+   * two owners. Effect prefixes cannot overlap, because `#validateXPrefix` makes each one equal
+   * `x-<xPrefix>`. A prefix written twice is left alone: it carries nothing to disagree about.
    */
   #validateOwnDuplicates(m: PluginManifest): void {
     const checkOnce = (kind: string, entries: readonly { id: string }[]): void => {
@@ -308,6 +311,28 @@ export class VocabRegistry implements VocabRegistryContract {
     }
     checkOnce("Effect id", m.provides.effects)
     checkOnce("extKind id", m.provides.extKinds)
+    const checkNesting = (
+      kind: string,
+      prefixes: readonly string[],
+      code: RegistryErrorCode,
+    ): void => {
+      for (const [i, later] of prefixes.entries()) {
+        for (const earlier of prefixes.slice(0, i)) {
+          if (earlier === later) continue
+          if (isUnderPrefix(later, earlier) || isUnderPrefix(earlier, later)) {
+            raise(
+              `${kind} "${later}" overlaps with prefix "${earlier}", both declared by plugin ` +
+                `"${m.name}".`,
+              code,
+              [m.name],
+              later,
+            )
+          }
+        }
+      }
+    }
+    checkNesting("extKind prefix", m.provides.extKindPrefixes, "prefix-prefix-overlap")
+    checkNesting("derivedBy prefix", m.provides.derivedByPrefixes, "derivedby-prefix-overlap")
   }
 
   #validateXPrefix(m: PluginManifest): void {
