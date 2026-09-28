@@ -1,3 +1,4 @@
+import type { PluginManifest } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { RegistryError, VocabRegistry } from "../src/index"
 import { effectsManifest, frameworkManifest, langManifest } from "./fixtures/manifests"
@@ -543,6 +544,16 @@ describe("VocabRegistry.register (provides shape — I4)", () => {
     expectRegistryError(() => reg.register(broken), "manifest-invalid")
   })
 
+  it.each([
+    [5, "number"],
+    [null, "null"],
+  ])("rejects a manifest whose name is %s", (name, got) => {
+    const m = { ...effectsManifest(), name } as unknown as PluginManifest
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(`Plugin manifest name must be a string (got ${got}).`)
+    expect(err.plugins).toEqual([])
+  })
+
   it("names what a provides array holds instead when it is not an array", () => {
     const m = langManifest({ name: "lang-demo" })
     const broken = { ...m, provides: { ...m.provides, frameworks: null as unknown as never[] } }
@@ -560,6 +571,15 @@ describe("VocabRegistry.register (provides shape — I4)", () => {
     const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
     expect(err.message).toBe(`Plugin "effects-prisma" ${message}.`)
     expect(err.plugins).toEqual(["effects-prisma"])
+  })
+
+  it("rejects an extKind entry that is not an object", () => {
+    const m = frameworkManifest()
+    m.provides.extKinds.push("framework:demo:thing" as never)
+    const err = expectRegistryError(() => new VocabRegistry().register(m), "manifest-invalid")
+    expect(err.message).toBe(
+      `Plugin "${m.name}" provides.extKinds[0] must be an object (got string).`,
+    )
   })
 
   it.each(["id", "description"])("rejects an effect entry without a string %s", (field) => {

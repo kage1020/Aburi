@@ -11,5 +11,6 @@ an extKind without an `id`, or a number among the prefixes, and `register` then 
 `RegistryError` with code `manifest-invalid` that names the plugin and the entry, for example
 `Plugin "effects-prisma" provides.effects[1] must be an object (got null).` Each effect needs its
 own string `id` and `description`, each extKind also a string `baseKind`, and the prefix and
-framework arrays hold strings. A non-array `provides` field now reads `(got null)` rather than
-`(got object)` when it is `null`.
+framework arrays hold strings. A manifest whose `name` is not a string, which failed the same way
+once an effects plugin derived its `xPrefix` from it, is refused too. A non-array `provides` field
+now reads `(got null)` rather than `(got object)` when it is `null`.
