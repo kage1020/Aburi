@@ -8,8 +8,8 @@
  *   - 0: failure occurred before the manifest could be identified (file read, JSON
  *        parse before any structure was recovered, a key named twice).
  *   - 1: single-plugin failure (reserved namespace, xPrefix mismatch, an id one manifest
- *        declares twice, etc.).
- *   - 2: cross-plugin conflict (duplicate id, prefix overlap, etc.). The first
+ *        declares twice, two of one manifest's prefixes nesting, etc.).
+ *   - 2: cross-plugin conflict (duplicate id, prefix overlap between two plugins, etc.). The first
  *        entry is the existing owner; the second is the manifest that triggered
  *        the conflict.
  */
@@ -36,13 +36,17 @@ export type RegistryErrorCode =
    * the same id twice. The second case names one plugin, since the manifest is its own conflict.
    */
   | "duplicate-id"
-  /** Two plugins declare the same prefix (effect / extKind). */
+  /** Two plugins declare the same prefix (effect / extKind / derivedBy). */
   | "duplicate-prefix"
   /** A prefix in one plugin shadows or is shadowed by an id in another. */
   | "prefix-shadow-id"
-  /** Two plugins' prefixes contain each other (one is a strict prefix of the other). */
+  /**
+   * Two effect or extKind prefixes nest, one under the other at a segment boundary (`fp:pipe` and
+   * `fp:pipe:async`, but not `fp:pipeline`). Declared by two plugins, or by one; the second case
+   * names one plugin, since the manifest is its own conflict.
+   */
   | "prefix-prefix-overlap"
-  /** Two plugins' derivedByPrefixes overlap. */
+  /** Two derivedByPrefixes nest, the same way and with the same one-plugin case. */
   | "derivedby-prefix-overlap"
   /** Two plugins with the same name were registered with non-identical manifests. */
   | "name-collision"
@@ -53,7 +57,8 @@ export interface RegistryErrorDetail {
   code: RegistryErrorCode
   /**
    * Plugin name(s) at fault. May be empty (pre-identification failures),
-   * length 1 (single-plugin failures, a `duplicate-id` within one manifest included), or length
+   * length 1 (single-plugin failures, a `duplicate-id` or a prefix overlap within one manifest
+   * included), or length
    * 2 (cross-plugin conflicts: [existing-owner, new-arrival]).
    */
   plugins: readonly string[]

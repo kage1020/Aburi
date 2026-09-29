@@ -176,6 +176,8 @@ The same applies to `fp:` / `oop:` / `meta:`: each sub-namespace is owned by exa
 | Two plugins declare the same `extKindPrefixes[]` | **startup error** |
 | Two plugins declare the same `frameworks[]` name | **startup error** |
 | Two plugins declare the same `derivedByPrefixes[]` | **startup error** |
+| Two plugins declare prefixes of one kind (`effectPrefixes[]`, `extKindPrefixes[]` or `derivedByPrefixes[]`) where one nests under the other (`framework:acme` and `framework:acme:jobs`) | **startup error** |
+| One plugin declares two `extKindPrefixes[]`, or two `derivedByPrefixes[]`, where one nests under the other | **startup error**. Each list is compared with itself only: the same string in both lists, as every framework plugin writes it, is accepted |
 | Plugin A declares `extKinds[].id: "framework:acme:job"` and plugin B declares `extKindPrefixes: ["framework:acme"]` | **startup error** (B's prefix subsumes A's id) |
 | A `type` other than `effects` declares `x-*` | **startup error** |
 | A `type` other than `lang` declares `fp:*` / `oop:*` / `meta:*` | **startup error** |
@@ -255,7 +257,7 @@ aburi vocab who-owns x-nest:lifecycle.on-module-init   # the plugin that owns th
 | V9 | Loading the same manifest twice | idempotent |
 | V10 | Emitting `x-acme:anything` at extraction time under a declared `effectPrefixes: ["x-acme"]` | passes |
 | V11 | A declares `extKinds[].id: "framework:acme:job"`, B declares `extKindPrefixes: ["framework:acme"]` | startup error (subsumption conflict) |
-| V11a | One plugin declares two extKind prefixes or two derivedBy prefixes where one contains the other (`fp:pipe` and `fp:pipe:async`) | startup error. The same prefix written twice is accepted |
+| V11a | One plugin declares two extKind prefixes or two derivedBy prefixes where one contains the other (`fp:pipe` and `fp:pipe:async`) | startup error. The same prefix written twice in one list is refused earlier, by the schema's `uniqueItems`; `register` itself leaves an exact repeat alone, since it cannot give a lookup two owners |
 | V12 | Emitting undeclared values under `aburi scan --discover` | warning only; recorded in `aburi-vocab-discovered.json` |
 | V13 | Treating `@Foo` as a boundary via Framework hints (§11.3) alone | OK; no plugin manifest required |
 

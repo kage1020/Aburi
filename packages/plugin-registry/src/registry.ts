@@ -287,12 +287,15 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   /**
-   * Refuse an id `m` declares twice, or two of its own prefixes where one contains the other.
+   * Refuse an id `m` declares twice, or two of its own prefixes where one nests under the other.
    * `#validateConflicts` compares a manifest only with the plugins already registered. For ids,
    * the commit is a `Map.set` per entry, so the later declaration would replace the earlier
-   * whatever the two said; for prefixes, both would register and a lookup under both would find
-   * two owners. Effect prefixes cannot overlap, because `#validateXPrefix` makes each one equal
-   * `x-<xPrefix>`. A prefix written twice is left alone: it carries nothing to disagree about.
+   * whatever the two said; for prefixes, both would register, and a lookup under both would match
+   * two prefixes and trip `#uniquePrefixOwner`'s invariant. Effect prefixes cannot nest:
+   * `#validateTypeNamespaces` refuses them for every type but `effects`, and `#validateXPrefix`
+   * makes each one there equal `x-<xPrefix>`. An exact repeat is left alone: the schema's
+   * `uniqueItems` refuses it in a manifest file, and it cannot give a lookup two owners. Each list
+   * is checked on its own, since a framework plugin writes one string in both.
    */
   #validateOwnDuplicates(m: PluginManifest): void {
     const checkOnce = (kind: string, entries: readonly { id: string }[]): void => {
@@ -545,9 +548,14 @@ export class VocabRegistry implements VocabRegistryContract {
    * Returns the single prefix in `prefixes` that owns `id`, or `null` if none does.
    * Throws an invariant error if more than one prefix matches — that would mean
    * conflict detection let an overlap slip through and the registry's view of
-   * ownership is no longer well-defined.
+   * ownership is no longer well-defined. `code` is the one `register` raises for the map's
+   * overlaps, so the error names the check that should have fired.
    */
-  #uniquePrefixOwner(id: string, prefixes: Map<string, OwnedPrefix>): OwnedPrefix | null {
+  #uniquePrefixOwner(
+    id: string,
+    prefixes: Map<string, OwnedPrefix>,
+    code: RegistryErrorCode,
+  ): OwnedPrefix | null {
     let match: OwnedPrefix | null = null
     for (const info of prefixes.values()) {
       if (!isUnderPrefix(id, info.prefix)) continue
@@ -555,8 +563,8 @@ export class VocabRegistry implements VocabRegistryContract {
         raise(
           `Internal invariant violation: id "${id}" matches both prefix "${match.prefix}" ` +
             `(plugin "${match.owner.name}") and "${info.prefix}" (plugin "${info.owner.name}"). ` +
-            `register() should have rejected the second prefix as prefix-prefix-overlap.`,
-          "prefix-prefix-overlap",
+            `register() should have rejected the second prefix as ${code}.`,
+          code,
           [match.owner.name, info.owner.name],
           id,
         )
@@ -571,7 +579,7 @@ export class VocabRegistry implements VocabRegistryContract {
     if (direct) {
       return { id: direct.id, description: direct.description, owner: direct.owner }
     }
-    const prefixOwner = this.#uniquePrefixOwner(id, this.#effectPrefixes)
+    const prefixOwner = this.#uniquePrefixOwner(id, this.#effectPrefixes, "prefix-prefix-overlap")
     if (prefixOwner) {
       return { id, description: null, owner: prefixOwner.owner }
     }
@@ -588,7 +596,7 @@ export class VocabRegistry implements VocabRegistryContract {
         owner: direct.owner,
       }
     }
-    const prefixOwner = this.#uniquePrefixOwner(id, this.#extKindPrefixes)
+    const prefixOwner = this.#uniquePrefixOwner(id, this.#extKindPrefixes, "prefix-prefix-overlap")
     if (prefixOwner) {
       return { id, baseKind: null, description: null, owner: prefixOwner.owner }
     }
@@ -600,7 +608,10 @@ export class VocabRegistry implements VocabRegistryContract {
   }
 
   findDerivedByOwner(value: string): PluginManifest | null {
-    return this.#uniquePrefixOwner(value, this.#derivedByPrefixes)?.owner ?? null
+    return (
+      this.#uniquePrefixOwner(value, this.#derivedByPrefixes, "derivedby-prefix-overlap")?.owner ??
+      null
+    )
   }
 
   isEffectOwnedBy(id: string, pluginName: string): boolean {
