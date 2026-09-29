@@ -359,7 +359,7 @@ Each Slice becomes a `###` subsection under `## 🧵 Slice View`:
 ```
 
 - The heading contains the full `sliceId` and the member count.
-- Each member is a bullet with: Symbol short-form (last-segment qname), the status in italics, file:line, and a `↳` follow-up line summarising which delta axes tripped or, for `added` / `removed`, the entry's boundary/effect surface.
+- Each member is a bullet with: Symbol short-form (last-segment qname), the status in italics, file:line, and a `↳` follow-up line summarising which delta axes tripped or, for `added` / `removed`, the entry's boundary/effect surface. A `moved+changed` member opens that line with where it moved, as [`markdown-projection.md`](./markdown-projection.md) writes a move: `↳ moved: <route>; delta.logicChanged`.
 - Members appear in ascending Symbol id order per §8.2. A projection variant that arranges members in call-order (anchor first, then callees) is left for a future iteration — the JSON side stays as specified.
 - Slices are separated by a `---` thematic break for visual boundary marking.
 - Column choices reuse existing [`markdown-projection.md`](./markdown-projection.md) §3 conventions: file paths POSIX and backtick-wrapped (§3.3), no emoji for the default status. A member row carries no confidence badge (§3.5 keeps it to headings and names-only rows); a member whose confidence moved says so on its `↳` line.

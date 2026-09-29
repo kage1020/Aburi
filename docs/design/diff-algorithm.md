@@ -522,7 +522,7 @@ For each matched pair:
 
 ```
 droppedToggled = base.dropped != head.dropped     // §4.1
-pathChanged    = base.source.file != head.source.file
+pathChanged    = base.source.file != head.source.file || base.id != head.id
 apiChanged     = base.fingerprint.api    != head.fingerprint.api
 logicChanged   = base.fingerprint.logic  != head.fingerprint.logic
 syntaxChanged  = base.fingerprint.syntax != head.fingerprint.syntax
@@ -544,6 +544,8 @@ else:
 ```
 
 unchanged is not included in the default output (only counted in the summary).
+
+`pathChanged` covers an in-file rename as well as a relocation: any id mismatch in a matched pair means the identifier moved, which DF9 ("method rename (same file, same logic) → moved") relies on. Stage 1 pairs by exact id, so only a pair a later stage matched can take the id branch; a changed id no stage pairs is a removal and an addition.
 
 `confidence` is compared on its own because no fingerprint reads it. The same code classified less surely — a framework role matched on the identifier alone where an import used to prove it — is something a reviewer has to see, and an `unchanged` pair is never reported, so a confidence change that moved no fingerprint would otherwise vanish. It counts like any other change of its status: toward `summary.changed` and `--fail-on changed` when the Symbol stayed put, toward `summary.movedChanged` and `--fail-on moved+changed` when it also moved. The blast radius can be wide. A plugin may decide confidence from a file-level signal (the Express plugin asks whether the file imports `express`), so deleting one import moves every Symbol that plugin classified in that file at once; and when the two IRs were read off disk rather than scanned in one run, they may come from different plugin versions, whose confidence rules differ for code nobody touched. `--fail-on confidence-changed` gates on this axis alone and takes a threshold (`confidence-changed:>20`); a gate that should ignore it writes the fingerprint axes (`api-changed,logic-changed`) instead of `changed` ([`cli-spec.md`](./cli-spec.md) §6.7). A pair dropped on both sides is exempt and stays `unchanged` (DF13): a dropped Symbol is outside what the diff asks a reviewer to read. `component` is the contrast: it comes from `Component.roots[]` rather than from the code, so a re-rooted package changes it under every Symbol without anyone editing them, and it is recorded on the delta only.
 

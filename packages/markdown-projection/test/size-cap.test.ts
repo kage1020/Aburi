@@ -394,7 +394,9 @@ describe("projectDiff — maxBytes degrades a section before dropping it", () =>
       summary: { ...emptySummary(), movedChanged: 40 },
       symbols: Array.from({ length: 40 }, (_, i) => inFile(i)),
     })
-    const md = projectDiff(diff, { maxBytes: bytes(projectDiff(diff)) - 1 })
+    const budget = bytes(projectDiff(diff)) - 1
+    const md = projectDiff(diff, { maxBytes: budget })
+    expect(bytes(md)).toBeLessThanOrEqual(budget)
     expect(noteOf(md)).toContain("lists names only")
     expect(md).toContain(
       "- `inFile0000Renamed` *(function)* — `packages/cli/src/commands/inFile0000.ts:40` " +

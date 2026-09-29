@@ -1,38 +1,35 @@
 import { fp, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
-import type { Symbol as IRSymbol, SymbolChange } from "@aburi/types"
+import type { Symbol as IRSymbol, SymbolChange, SymbolDelta } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src/diff"
 import { emptySummary, makeDiff } from "./fixtures"
 
 /** markdown-projection.md MP11a: a move within one file names the file once, with both names and lines. */
 
-const at = (file: string, startLine: number) => ({
-  file,
-  startLine,
-  endLine: startLine + 5,
-  startColumn: null,
-  endColumn: null,
-})
-
-const symbol = (id: string, name: string, startLine: number, logic = "same"): IRSymbol =>
-  makeSymbol({
+/** `makeSymbol` takes the file from the id; only the line is this suite's. */
+function symbol(id: string, name: string, startLine: number, edited = false): IRSymbol {
+  const base = makeSymbol({
     id,
     name,
-    source: at(id.slice(id.indexOf(":") + 1, id.indexOf("#")), startLine),
-    fingerprint: { ...fp("v1"), logic },
+    fingerprint: edited ? { ...fp("v1"), logic: fp("v2").logic } : fp("v1"),
   })
+  return { ...base, source: { ...base.source, startLine, endLine: startLine + 5 } }
+}
 
-const emptyDelta = {
-  apiChanged: false,
-  logicChanged: true,
-  syntaxChanged: false,
-  componentChanged: false,
-  visibilityChanged: false,
-  rules: { added: [], removed: [], modified: [] },
-  effects: { added: [], removed: [], modified: [] },
-  calls: { added: [], removed: [], modified: [] },
-  decorators: { added: [], removed: [], modified: [] },
-  signature: null,
+function delta(overrides: Partial<SymbolDelta> = {}): SymbolDelta {
+  return {
+    apiChanged: false,
+    logicChanged: false,
+    syntaxChanged: false,
+    componentChanged: false,
+    visibilityChanged: false,
+    rules: { added: [], removed: [], modified: [] },
+    effects: { added: [], removed: [], modified: [] },
+    calls: { added: [], removed: [], modified: [] },
+    decorators: { added: [], removed: [], modified: [] },
+    signature: null,
+    ...overrides,
+  }
 }
 
 const renamedInFile: SymbolChange = {
@@ -42,27 +39,34 @@ const renamedInFile: SymbolChange = {
   rationale: "logic-fingerprint",
 }
 
+const relocated: SymbolChange = {
+  status: "moved",
+  before: symbol("ts:src/util.ts#slug", "slug", 7),
+  after: symbol("ts:src/text/slug.ts#slug", "slug", 1),
+  rationale: "git-rename",
+}
+
 const reownedInFile: SymbolChange = {
   status: "moved+changed",
   before: symbol("ts:src/repo.ts#Repo.save", "Repo.save", 12),
-  after: symbol("ts:src/repo.ts#UserRepo.save", "UserRepo.save", 30, "edited"),
+  after: symbol("ts:src/repo.ts#UserRepo.save", "UserRepo.save", 30, true),
   rationale: "name-signature",
-  delta: emptyDelta,
+  delta: delta({ logicChanged: true }),
 }
 
 const acrossFiles: SymbolChange = {
   status: "moved+changed",
   before: symbol("ts:src/old.ts#Foo", "Foo", 5),
-  after: symbol("ts:src/new.ts#Foo", "Foo", 5, "edited"),
+  after: symbol("ts:src/new.ts#Foo", "Foo", 5, true),
   rationale: "git-rename",
-  delta: emptyDelta,
+  delta: delta({ logicChanged: true }),
 }
 
 describe("a move within one file", () => {
   const md = projectDiff(
     makeDiff({
-      summary: { ...emptySummary(), moved: 1, movedChanged: 2 },
-      symbols: [renamedInFile, reownedInFile, acrossFiles],
+      summary: { ...emptySummary(), moved: 2, movedChanged: 2 },
+      symbols: [renamedInFile, relocated, reownedInFile, acrossFiles],
     }),
   )
 
@@ -73,34 +77,62 @@ describe("a move within one file", () => {
     expect(md).not.toContain("`src/repo.ts` → `src/repo.ts`")
   })
 
-  it("names both sides and their lines in the folded Moved list", () => {
+  it("names both sides and their lines in the folded Moved list, and the head name once", () => {
     expect(md).toContain(
-      "- `outputIsADirectory`: within `src/output-file.ts`: `isADirectory` (L40) → " +
-        "`outputIsADirectory` (L60) (`logic-fingerprint`)",
+      "- within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60) " +
+        "(`logic-fingerprint`)",
     )
   })
 
-  it("keeps the two paths for a move between files", () => {
+  it("keeps the two paths, and the leading name, for a move between files", () => {
     expect(md).toContain("**Moved**: `src/old.ts` → `src/new.ts` (`git-rename`)")
+    expect(md).toContain("- `slug`: `src/util.ts` → `src/text/slug.ts` (`git-rename`)")
   })
+})
 
-  it("names both sides and their lines on a Slice member's follow-up line", () => {
-    const callerId = "ts:src/cli.ts#run"
-    const caller: SymbolChange = {
-      status: "changed",
-      before: symbol(callerId, "run", 3),
-      after: symbol(callerId, "run", 3, "edited"),
-      delta: emptyDelta,
-    }
-    const members = [callerId, "ts:src/output-file.ts#outputIsADirectory"].map(symbolId)
-    const sliced = projectDiff(
+describe("a Slice member's follow-up line", () => {
+  const callerId = "ts:src/cli.ts#run"
+  const caller: SymbolChange = {
+    status: "changed",
+    before: symbol(callerId, "run", 3),
+    after: symbol(callerId, "run", 3, true),
+    delta: delta({ logicChanged: true }),
+  }
+
+  function projectSlice(...moves: SymbolChange[]): string {
+    const members = [callerId, ...moves.map(afterIdOf)].map(symbolId)
+    return projectDiff(
       makeDiff({
-        symbols: [renamedInFile, caller],
+        symbols: [...moves, caller],
         slices: [{ id: sliceId(`slice:${callerId}`), members }],
       }),
     )
-    expect(sliced).toContain(
+  }
+
+  it("leads a moved+changed member with its route, then its axes", () => {
+    // The member a reviewer meets: `@aburi/diff` puts a moved+changed Symbol in the Node set.
+    const md = projectSlice(reownedInFile, acrossFiles)
+    expect(md).toContain(
+      "↳ moved: within `src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged",
+    )
+    expect(md).toContain("↳ moved: `src/old.ts` → `src/new.ts`; delta.logicChanged")
+  })
+
+  it("renders a pure moved member the same way, though `@aburi/diff` never lists one", () => {
+    // slice-view.md §4.1 keeps a pure `moved` out of the Node set, and `requireChangeForMember`
+    // checks only that the id is in `diff.symbols[]`. This pins the branch that renders such a
+    // document anyway, not anything the Slice View produces.
+    const md = projectSlice(renamedInFile, relocated)
+    expect(md).toContain(
       "↳ moved: within `src/output-file.ts`: `isADirectory` (L40) → `outputIsADirectory` (L60)",
     )
+    expect(md).toContain("↳ moved: `src/util.ts` → `src/text/slug.ts`")
   })
 })
+
+function afterIdOf(change: SymbolChange): string {
+  if (change.status !== "moved" && change.status !== "moved+changed") {
+    throw new Error(`not a move: ${change.status}`)
+  }
+  return change.after.id
+}

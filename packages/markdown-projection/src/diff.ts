@@ -874,8 +874,9 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 
 /**
  * Where a moved Symbol went. Between files, the two paths. Within one file the id changed while the
- * path did not, so the name did: the paths would read the same twice, and the old name is the fact
- * a reader needs to recognise the move.
+ * path did not, so the qualified name inside the id did — and the producers carry that qualified
+ * name in `Symbol.name` (ir-schema.md §3.1 does not tie the two). The paths would read the same
+ * twice, and the old name is the fact a reader needs to recognise the move.
  */
 function moveRoute(before: IRSymbol, after: IRSymbol): string {
   if (before.source.file !== after.source.file) {
@@ -887,7 +888,7 @@ function moveRoute(before: IRSymbol, after: IRSymbol): string {
   )
 }
 
-/** The base side of a moved Symbol for a names-only row, whose own `file:line` is the head's. */
+/** The base side of a moved Symbol for a names-only row, which already carries the head's `file:line`. */
 function movedFrom(before: IRSymbol, after: IRSymbol): string {
   if (before.source.file !== after.source.file) return inlineCode(before.source.file)
   return `${inlineCode(before.name)} at L${before.source.startLine}`
@@ -928,11 +929,15 @@ function indexMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
   )
 }
 
+/** One line per move, led by the head name unless the route already names it. */
 function renderMoved(items: readonly SymbolMoved[]): string[] {
-  return sortByAfterId(items).map(
-    (entry) =>
-      `- ${inlineCode(entry.after.name)}: ${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`,
-  )
+  return sortByAfterId(items).map((entry) => {
+    const lead =
+      entry.before.source.file === entry.after.source.file
+        ? ""
+        : `${inlineCode(entry.after.name)}: `
+    return `- ${lead}${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`
+  })
 }
 
 function renderDroppedToggled(items: readonly SymbolDroppedToggled[]): string[] {
@@ -1151,8 +1156,9 @@ function renderMemberFollowup(change: SymbolChange): string {
       return "removed symbol"
     case "moved":
       return `moved: ${moveRoute(change.before, change.after)}`
-    case "changed":
     case "moved+changed":
+      return `moved: ${moveRoute(change.before, change.after)}; ${deltaAxisSummary(change.delta)}`
+    case "changed":
       return deltaAxisSummary(change.delta)
     case "dropped-toggled":
       return `dropped-toggled: ${change.direction}`
