@@ -228,6 +228,72 @@ describe("VocabRegistry.register (V3a one manifest declaring an id twice)", () =
   })
 })
 
+describe("VocabRegistry.register (V11a one manifest declaring prefixes that nest)", () => {
+  it.each([
+    ["the shorter first", ["fp:pipe", "fp:pipe:async"], "fp:pipe:async", "fp:pipe"],
+    ["the longer first", ["fp:pipe:async", "fp:pipe"], "fp:pipe", "fp:pipe:async"],
+  ])("rejects extKind prefixes that nest, %s", (_, prefixes, later, earlier) => {
+    const reg = new VocabRegistry()
+    const m = langManifest({ name: "lang-demo" })
+    // Not adjacent, so a check against the previous entry alone would miss it.
+    m.provides.extKindPrefixes.push(prefixes[0] as string, "fp:map", prefixes[1] as string)
+    const err = expectRegistryError(() => reg.register(m), "prefix-prefix-overlap")
+    expect([err.value, err.plugins]).toEqual([later, ["lang-demo"]])
+    expect(err.message).toBe(
+      `extKind prefix "${later}" overlaps with prefix "${earlier}", both declared by plugin ` +
+        `"lang-demo".`,
+    )
+    expect(reg.listPlugins()).toEqual([])
+  })
+
+  it("rejects derivedBy prefixes that nest", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest({ name: "lang-demo" })
+    m.provides.derivedByPrefixes.push("acme", "acme:route")
+    const err = expectRegistryError(() => reg.register(m), "derivedby-prefix-overlap")
+    expect([err.value, err.plugins]).toEqual(["acme:route", ["lang-demo"]])
+    expect(reg.listPlugins()).toEqual([])
+    expect(err.message).toBe(
+      'derivedBy prefix "acme:route" overlaps with prefix "acme", both declared by plugin ' +
+        '"lang-demo".',
+    )
+  })
+
+  it("compares each list with itself, not the extKind and derivedBy lists with each other", () => {
+    // Every shipped framework plugin writes one string in both lists, and a prefix in one list may
+    // nest under a prefix in the other: the two maps are looked up apart.
+    const reg = new VocabRegistry()
+    const m = frameworkManifest({ name: "framework-acme" })
+    m.provides.extKindPrefixes.push("framework:acme", "framework:beta:jobs")
+    m.provides.derivedByPrefixes.push("framework:acme", "framework:beta")
+    reg.register(m)
+    expect(reg.findExtKind("framework:acme:job")?.owner.name).toBe("framework-acme")
+    expect(reg.findExtKind("framework:beta:jobs:nightly")?.owner.name).toBe("framework-acme")
+    expect(reg.findDerivedByOwner("framework:acme:route")?.name).toBe("framework-acme")
+    expect(reg.findDerivedByOwner("framework:beta:route")?.name).toBe("framework-acme")
+  })
+
+  it("accepts an extKind id under the same manifest's own extKind prefix", () => {
+    const reg = new VocabRegistry()
+    const m = frameworkManifest({ name: "framework-acme" })
+    m.provides.extKinds.push({ id: "framework:acme:module", baseKind: "class", description: "x" })
+    m.provides.extKindPrefixes.push("framework:acme")
+    reg.register(m)
+    expect(reg.findExtKind("framework:acme:module")?.baseKind).toBe("class")
+    expect(reg.findExtKind("framework:acme:other")?.baseKind).toBeNull()
+  })
+
+  it("accepts prefixes that only share a leading string, or are written twice", () => {
+    const reg = new VocabRegistry()
+    const m = langManifest({ name: "lang-demo" })
+    m.provides.extKindPrefixes.push("fp:pipe", "fp:pipeline", "fp:pipe")
+    m.provides.derivedByPrefixes.push("acme", "acmegrid")
+    reg.register(m)
+    expect(reg.findExtKind("fp:pipe:x")?.owner.name).toBe("lang-demo")
+    expect(reg.findExtKind("fp:pipeline:x")?.owner.name).toBe("lang-demo")
+  })
+})
+
 describe("VocabRegistry.register (AC6 prefix vs existing id shadow)", () => {
   it("rejects new id that falls under existing prefix (effect)", () => {
     const reg = new VocabRegistry()
