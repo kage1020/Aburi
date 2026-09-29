@@ -538,10 +538,22 @@ The section is omitted when the array is empty, and equally when the key is abse
 ```md
 ### `formatMoney` *(function)*
 **Moved**: `apps/billing/src/util.ts` → `packages/billing-domain/src/util.ts` (`git-rename`)
-**Logic changes**:
+**Delta**:
 - effects added:
   - state.mutate: `result.value += ...` (L12)
 ```
+
+A Symbol can move without leaving its file: the diff counts any change of id in a matched pair as a move ([`diff-algorithm.md`](./diff-algorithm.md) §4), so a rename or a new owner within one file is one too. Its two paths would read the same twice, so the line names the file once and gives the name it had and the name it has, each with its line:
+
+```md
+### `UserRepo.save` *(method)*
+**Moved**: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30) (`name-signature`)
+**Delta**:
+- rules modified:
+  - guard: `user.id !== null` (L31)
+```
+
+The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's follow-up line opens with the route, ``↳ moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged``, as a move between files opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files ends ``(from `<path>`)``.
 
 #### 🔀 Moved (folded)
 
@@ -872,6 +884,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP10 | diff where only `delta.syntaxChanged` is true | Classified into the Syntax-only section (folded) |
 | MP10a | diff where `delta.confidenceChanged` is true and neither `apiChanged` nor `logicChanged` is | Classified into the Confidence changes section, with a `- confidence: <base> → <head>` row |
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
+| MP11a | diff containing a moved or moved+changed Symbol whose base and head files are the same | Every place the move is written (the Moved + Changed entry and its names-only row, the folded Moved list, a Slice member's follow-up) names the file once with the base and head names and lines, never the path twice. A move between files still writes both paths |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |

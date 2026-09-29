@@ -1,4 +1,4 @@
-import { call, fp, makeSymbol, rule } from "@aburi/test-support"
+import { call, fp, makeSymbol, rule, symbolId } from "@aburi/test-support"
 import type {
   Symbol as IRSymbol,
   SymbolChange,
@@ -370,6 +370,37 @@ describe("projectDiff — maxBytes degrades a section before dropping it", () =>
     // A moved and changed Symbol's row says where it came from, which its location alone cannot.
     expect(md).toContain(
       "- `movedChanged0000` *(function)* — `src/moved/movedChanged0000.ts:1` (from `packages/cli/src/commands/movedChanged0000.ts`)",
+    )
+  })
+
+  it("names the old name and line on the row of a Symbol that moved within its file", () => {
+    // Within one file the path cannot say where it came from; only the name it had can.
+    const inFile = (i: number): SymbolMovedChanged => {
+      const before = heavySymbol(`inFile${pad(i)}`)
+      return {
+        status: "moved+changed",
+        before,
+        after: {
+          ...before,
+          id: symbolId(`${before.id}Renamed`),
+          name: `${before.name}Renamed`,
+          source: { ...before.source, startLine: 40 },
+        },
+        rationale: "name-signature",
+        delta: delta({ logicChanged: true }),
+      }
+    }
+    const diff = makeDiff({
+      summary: { ...emptySummary(), movedChanged: 40 },
+      symbols: Array.from({ length: 40 }, (_, i) => inFile(i)),
+    })
+    const budget = bytes(projectDiff(diff)) - 1
+    const md = projectDiff(diff, { maxBytes: budget })
+    expect(bytes(md)).toBeLessThanOrEqual(budget)
+    expect(noteOf(md)).toContain("lists names only")
+    expect(md).toContain(
+      "- `inFile0000Renamed` *(function)* — `packages/cli/src/commands/inFile0000.ts:40` " +
+        "(from `inFile0000` at L1)",
     )
   })
 
