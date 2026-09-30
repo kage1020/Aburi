@@ -5,6 +5,7 @@ import { resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 import { makeLanguageId } from "@aburi/core"
+import { RegistryError } from "@aburi/plugin-registry"
 import type {
   Config,
   EffectPlugin,
@@ -12,10 +13,11 @@ import type {
   LangManifest,
   LanguagePlugin,
 } from "@aburi/types"
-import { describe, expect, it } from "vitest"
-import { CliError, loadPlugins } from "../src"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { CliError, EXIT, loadPlugins, runCli } from "../src"
 import { detectorIdRefusal, windowsDriveRefusal } from "../src/plugin-loader"
-import { STUB_PLUGIN } from "./stub-language"
+import { MemStream } from "./fixtures"
+import { populate, STUB_PLUGIN } from "./stub-language"
 
 const langManifest: LangManifest = {
   $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
@@ -391,5 +393,110 @@ describe("loadPlugins — module resolution and bucketing", () => {
     } finally {
       await rm(scratch, { recursive: true, force: true })
     }
+  })
+})
+
+describe("loadPlugins — a manifest the registry refuses", () => {
+  const writesCore: EffectPlugin = {
+    ...fakeEffectsPlugin,
+    manifest: {
+      ...effectsManifest,
+      provides: { ...effectsManifest.provides, effects: [{ id: "core:write", description: "x" }] },
+    },
+  }
+
+  async function refusal(config: Config, modules: Record<string, unknown>): Promise<CliError> {
+    const error = await loadPlugins({
+      config,
+      workspaceRoot: "/tmp",
+      importModule: async (specifier) => modules[specifier] ?? {},
+    }).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CliError)
+    return error as CliError
+  }
+
+  it("reports a plugin fault, not a crash, keeping the registry's own error as the cause", async () => {
+    const error = await refusal(
+      { effects: ["effects-core"] },
+      { "@aburi/effects-core": { plugin: writesCore } },
+    )
+    expect(error.code).toBe("plugin-error")
+    expect(error.cause).toBeInstanceOf(RegistryError)
+    expect((error.cause as RegistryError).code).toBe("reserved-namespace")
+    expect(error.message).toBe((error.cause as RegistryError).message)
+  })
+
+  it("does the same for a conflict between two plugins", async () => {
+    const error = await refusal(
+      { effects: ["effects-a", "effects-b"] },
+      {
+        "@aburi/effects-a": { plugin: fakeEffectsPlugin },
+        "@aburi/effects-b": {
+          plugin: { ...fakeEffectsPlugin, manifest: { ...effectsManifest, name: "effects-other" } },
+        },
+      },
+    )
+    expect(error.code).toBe("plugin-error")
+    expect((error.cause as RegistryError).plugins).toHaveLength(2)
+  })
+})
+
+describe("aburi scan — a plugin whose manifest the registry refuses", () => {
+  let scratch = ""
+
+  beforeEach(async () => {
+    scratch = await mkdtemp(resolve(tmpdir(), "aburi-registry-refusal-"))
+    await populate(scratch, ["ok.stub"])
+    await writeFile(
+      resolve(scratch, "effects-core.mjs"),
+      `export const plugin = {
+  manifest: {
+    $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
+    name: "effects-core",
+    version: "0.0.0",
+    type: "effects",
+    engines: { aburi: "*" },
+    provides: {
+      effects: [{ id: "core:write", description: "x" }],
+      effectPrefixes: [],
+      extKinds: [],
+      extKindPrefixes: [],
+      derivedByPrefixes: [],
+      frameworks: [],
+    },
+  },
+  init: async () => {},
+  classify: () => null,
+}
+`,
+      "utf8",
+    )
+    await writeFile(
+      resolve(scratch, "aburi.json"),
+      JSON.stringify({
+        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
+        languages: ["./lang-stub.mjs"],
+        effects: ["./effects-core.mjs"],
+      }),
+      "utf8",
+    )
+  })
+
+  afterEach(async () => {
+    await rm(scratch, { recursive: true, force: true })
+  })
+
+  it("exits 3, the code for a manifest violation, with the registry's message", async () => {
+    const stdout = new MemStream()
+    const stderr = new MemStream()
+    const code = await runCli({
+      argv: ["scan", "--output-dir", resolve(scratch, "out"), "--format", "json"],
+      stdout,
+      stderr,
+      env: {},
+      cwd: scratch,
+    })
+    expect(stderr.text()).toContain('declares effect id "core:write" inside a reserved namespace')
+    expect(code).toBe(EXIT.GATE)
   })
 })

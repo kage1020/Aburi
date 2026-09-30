@@ -1,6 +1,6 @@
 import { isAbsolute, resolve, win32 } from "node:path"
 import { pathToFileURL } from "node:url"
-import { VocabRegistry } from "@aburi/plugin-registry"
+import { RegistryError, VocabRegistry } from "@aburi/plugin-registry"
 import type {
   Config,
   EffectPlugin,
@@ -90,7 +90,7 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
   for (const { field, ref, specifier } of refs) {
     const module = await tryImport(importFn, specifier, ref)
     const plugin = pickPlugin(module, ref)
-    registry.register(plugin.manifest)
+    registerManifest(registry, plugin.manifest)
     routePlugin(plugin, field, loaded, ref)
   }
   return loaded
@@ -168,6 +168,16 @@ export function windowsDriveRefusal(
     return `Plugin "${ref}" names drive ${drive} but does not start at its root, so it would resolve against whatever directory is current on that drive. Start it at the root: "${drive}/${rest}".`
   }
   return null
+}
+
+/** A manifest the registry refuses is the plugin's fault, which the CLI reports as one. */
+function registerManifest(registry: VocabRegistry, manifest: PluginManifest): void {
+  try {
+    registry.register(manifest)
+  } catch (error) {
+    if (!(error instanceof RegistryError)) throw error
+    throw new CliError(error.message, "plugin-error", { cause: error })
+  }
 }
 
 async function tryImport(
