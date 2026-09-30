@@ -237,7 +237,7 @@ function stubLanguage(): LanguagePlugin {
 
 /** Records the `owner.component` every call was classified against. */
 function recordingEffects(seen: (ComponentId | null)[]): EffectPlugin {
-  const plugin = {
+  const plugin: EffectPlugin = {
     manifest: effectsManifest(),
     init: async () => {},
     classify: (_call: CallCandidate, ctx: ClassifyContext): EffectClassification | null => {
@@ -245,7 +245,7 @@ function recordingEffects(seen: (ComponentId | null)[]): EffectPlugin {
       return null
     },
   }
-  return plugin as unknown as EffectPlugin
+  return plugin
 }
 
 let workRoot = ""

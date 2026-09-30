@@ -76,8 +76,8 @@ export const stubFile: SourceFile = { path: "test.stub", content: "" }
 
 /**
  * A `.stub` language plugin whose every stage is a no-op (an empty tree, no candidates, an
- * empty body, `"stub-ast"`), with `overrides` layered on top. Built as a whole `LanguagePlugin`
- * with no cast, so a member the contract gains fails to compile here.
+ * empty body, `"stub-ast"`), with `overrides` layered on top. The plugin is built as a real
+ * `LanguagePlugin` rather than cast to one, so a required member the contract gains surfaces here.
  */
 export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): LanguagePlugin {
   return {

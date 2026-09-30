@@ -88,7 +88,7 @@ function frameworkPlugin(name: string, extKind: string): FrameworkPlugin {
       extKind: extKind as ExtKind,
       derivedBy: `${name}:x`,
     }),
-  } as FrameworkPlugin
+  }
 }
 
 const workspace = useStubWorkspace("vocab")

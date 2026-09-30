@@ -17,11 +17,11 @@ import {
   buildDropCFilter,
   type ExtractedFile,
   type FilePipelineResult,
-  makeLanguageId,
   runFilePipeline,
   type TreeReleaseFailure,
   VocabCheck,
 } from "../../src"
+import { makeLanguageId } from "../../src/id"
 import { spend } from "../fixtures/clock"
 import { langManifest, NO_CAPABILITIES, stubCandidate, stubFile } from "../fixtures/plugins"
 

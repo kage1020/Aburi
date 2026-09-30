@@ -71,7 +71,7 @@ const fakeEffectsPlugin: EffectPlugin = {
   manifest: effectsManifest,
   init: async () => {},
   classify: () => null,
-} as EffectPlugin
+}
 
 describe("loadPlugins — module resolution and bucketing", () => {
   it("loads a language plugin from a named export and buckets it", async () => {
