@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
@@ -10,6 +11,7 @@ import type {
   Config,
   EffectPlugin,
   EffectsManifest,
+  FrameworkPlugin,
   LangManifest,
   LanguagePlugin,
 } from "@aburi/types"
@@ -397,47 +399,81 @@ describe("loadPlugins — module resolution and bucketing", () => {
 })
 
 describe("loadPlugins — a manifest the registry refuses", () => {
-  const writesCore: EffectPlugin = {
-    ...fakeEffectsPlugin,
+  const ownsCore: FrameworkPlugin = {
     manifest: {
-      ...effectsManifest,
-      provides: { ...effectsManifest.provides, effects: [{ id: "core:write", description: "x" }] },
+      ...langManifest,
+      name: "framework-core",
+      type: "framework",
+      provides: { ...langManifest.provides, frameworks: ["core"] },
     },
+    init: async () => {},
+    classifySymbol: () => null,
   }
 
-  async function refusal(config: Config, modules: Record<string, unknown>): Promise<CliError> {
-    const error = await loadPlugins({
+  async function refusal(config: Config, modules: Record<string, unknown>): Promise<unknown> {
+    return loadPlugins({
       config,
       workspaceRoot: "/tmp",
-      importModule: async (specifier) => modules[specifier] ?? {},
+      importModule: async (specifier) => {
+        const module = modules[specifier]
+        if (module === undefined)
+          throw new Error(`test asked for an unstubbed specifier: ${specifier}`)
+        return module
+      },
     }).catch((e: unknown) => e)
+  }
+
+  async function pluginFault(config: Config, modules: Record<string, unknown>): Promise<CliError> {
+    const error = await refusal(config, modules)
     expect(error).toBeInstanceOf(CliError)
+    expect((error as CliError).code).toBe("plugin-error")
+    expect((error as CliError).cause).toBeInstanceOf(RegistryError)
     return error as CliError
   }
 
   it("reports a plugin fault, not a crash, keeping the registry's own error as the cause", async () => {
-    const error = await refusal(
-      { effects: ["effects-core"] },
-      { "@aburi/effects-core": { plugin: writesCore } },
+    const error = await pluginFault(
+      { frameworks: ["framework-core"] },
+      { "@aburi/framework-core": { plugin: ownsCore } },
     )
-    expect(error.code).toBe("plugin-error")
-    expect(error.cause).toBeInstanceOf(RegistryError)
     expect((error.cause as RegistryError).code).toBe("reserved-namespace")
     expect(error.message).toBe((error.cause as RegistryError).message)
   })
 
   it("does the same for a conflict between two plugins", async () => {
-    const error = await refusal(
+    const error = await pluginFault(
       { effects: ["effects-a", "effects-b"] },
       {
         "@aburi/effects-a": { plugin: fakeEffectsPlugin },
         "@aburi/effects-b": {
-          plugin: { ...fakeEffectsPlugin, manifest: { ...effectsManifest, name: "effects-other" } },
+          plugin: {
+            ...fakeEffectsPlugin,
+            manifest: {
+              ...effectsManifest,
+              name: "effects-other",
+              provides: { ...effectsManifest.provides, derivedByPrefixes: ["effects-plugin:fake"] },
+            },
+          },
         },
       },
     )
-    expect(error.code).toBe("plugin-error")
+    expect((error.cause as RegistryError).code).toBe("duplicate-prefix")
     expect((error.cause as RegistryError).plugins).toHaveLength(2)
+  })
+
+  it("lets a failure the registry did not code through unchanged", async () => {
+    const boom = new TypeError("serialization exploded")
+    const manifest = {
+      ...effectsManifest,
+      get version(): string {
+        throw boom
+      },
+    }
+    const error = await refusal(
+      { effects: ["effects-fake"] },
+      { "@aburi/effects-fake": { plugin: { ...fakeEffectsPlugin, manifest } } },
+    )
+    expect(error).toBe(boom)
   })
 })
 
@@ -446,38 +482,29 @@ describe("aburi scan — a plugin whose manifest the registry refuses", () => {
 
   beforeEach(async () => {
     scratch = await mkdtemp(resolve(tmpdir(), "aburi-registry-refusal-"))
-    await populate(scratch, ["ok.stub"])
+    await populate(scratch, [], { frameworks: ["./framework-core.mjs"] })
     await writeFile(
-      resolve(scratch, "effects-core.mjs"),
+      resolve(scratch, "framework-core.mjs"),
       `export const plugin = {
   manifest: {
     $schema: "https://aburi.kage1020.com/schema/aburi.plugin.v1.json",
-    name: "effects-core",
+    name: "framework-core",
     version: "0.0.0",
-    type: "effects",
+    type: "framework",
     engines: { aburi: "*" },
     provides: {
-      effects: [{ id: "core:write", description: "x" }],
+      effects: [],
       effectPrefixes: [],
       extKinds: [],
       extKindPrefixes: [],
       derivedByPrefixes: [],
-      frameworks: [],
+      frameworks: ["core"],
     },
   },
   init: async () => {},
-  classify: () => null,
+  classifySymbol: () => null,
 }
 `,
-      "utf8",
-    )
-    await writeFile(
-      resolve(scratch, "aburi.json"),
-      JSON.stringify({
-        $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
-        languages: ["./lang-stub.mjs"],
-        effects: ["./effects-core.mjs"],
-      }),
       "utf8",
     )
   })
@@ -496,7 +523,9 @@ describe("aburi scan — a plugin whose manifest the registry refuses", () => {
       env: {},
       cwd: scratch,
     })
-    expect(stderr.text()).toContain('declares effect id "core:write" inside a reserved namespace')
-    expect(code).toBe(EXIT.GATE)
+    expect(code, stderr.text()).toBe(EXIT.GATE)
+    expect(stderr.text()).toContain('declares framework name "core" inside a reserved namespace')
+    expect(stdout.text()).toBe("")
+    expect(existsSync(resolve(scratch, "out"))).toBe(false)
   })
 })

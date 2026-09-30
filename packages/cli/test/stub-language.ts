@@ -127,7 +127,11 @@ export const plugin = {
 }
 `
 
-export async function populate(dir: string, files: readonly string[]): Promise<void> {
+export async function populate(
+  dir: string,
+  files: readonly string[],
+  config: Record<string, unknown> = {},
+): Promise<void> {
   await mkdir(dir, { recursive: true })
   await writeFile(
     resolve(dir, "package.json"),
@@ -139,6 +143,7 @@ export async function populate(dir: string, files: readonly string[]): Promise<v
     JSON.stringify({
       $schema: "https://aburi.kage1020.com/schema/aburi.config.v1.json",
       languages: ["./lang-stub.mjs"],
+      ...config,
     }),
     "utf8",
   )

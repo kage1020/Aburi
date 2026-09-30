@@ -75,6 +75,8 @@ export interface LoadPluginsOptions {
  */
 export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPlugins> {
   const registry = new VocabRegistry()
+  // Not `registerManifest`: these come from the reader's `frameworkHints`, so a refusal here is
+  // a config error for the config parser to report, not a plugin's fault.
   for (const manifest of options.syntheticPlugins ?? []) registry.register(manifest)
 
   const loaded: LoadedPlugins = { languages: [], frameworks: [], effects: [], registry }
