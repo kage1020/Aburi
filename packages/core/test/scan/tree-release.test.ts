@@ -17,6 +17,7 @@ import {
   buildDropCFilter,
   type ExtractedFile,
   type FilePipelineResult,
+  makeLanguageId,
   runFilePipeline,
   type TreeReleaseFailure,
   VocabCheck,
@@ -62,9 +63,9 @@ interface StubOptions {
  * called it detached from the plugin it would throw rather than record, so every assertion
  * about the recorded trees is also an assertion that the receiver survived the call.
  */
-class StubLanguagePlugin {
+class StubLanguagePlugin implements LanguagePlugin {
   readonly manifest = langManifest(PLUGIN_NAME)
-  readonly languageId = "stub"
+  readonly languageId = makeLanguageId("stub")
   readonly fileExtensions = [".stub"]
   readonly capabilities = NO_CAPABILITIES
   readonly released: ParsedTree[] = []
@@ -155,7 +156,7 @@ function run(plugin: StubLanguagePlugin, extras: RunExtras = {}) {
   const failures = extras.failures ?? []
   const input: Parameters<typeof runFilePipeline>[0] = {
     file: stubFile,
-    language: plugin as unknown as LanguagePlugin,
+    language: plugin,
     frameworks: [],
     effects: [],
     registry: noopRegistry,

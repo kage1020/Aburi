@@ -321,13 +321,13 @@ describe("scan — a withdrawn file is named, warned about, and subtracted once"
       { on: "bad.stub", errors: [nonRecoverable("refused")] },
       noReach(),
     )
-    const throwing = {
+    const throwing: LanguagePlugin = {
       ...language,
       parseFile: async (file: SourceFile) => {
         if (file.path === "boom.stub") throw new Error("stub parseFile exploded")
         return language.parseFile(file)
       },
-    } as unknown as LanguagePlugin
+    }
 
     const result = await scan({
       workspaceRoot: workRoot,

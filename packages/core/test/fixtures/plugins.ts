@@ -16,6 +16,7 @@ import type {
   SymbolCandidate,
 } from "@aburi/types"
 import { afterEach, beforeEach } from "vitest"
+import { makeLanguageId } from "../../src/id"
 import { symbolId } from "./ir"
 
 const PLUGIN_SCHEMA = "https://aburi.kage1020.com/schema/aburi.plugin.v1.json"
@@ -75,15 +76,13 @@ export const stubFile: SourceFile = { path: "test.stub", content: "" }
 
 /**
  * A `.stub` language plugin whose every stage is a no-op (an empty tree, no candidates, an
- * empty body, `"stub-ast"`), with `overrides` layered on top. `languageId` is widened so a
- * case can write the literal `"stub"`; production plugins go through `makeLanguageId`.
+ * empty body, `"stub-ast"`), with `overrides` layered on top. Built as a whole `LanguagePlugin`
+ * with no cast, so a member the contract gains fails to compile here.
  */
-export function stubLanguagePlugin(
-  overrides: Omit<Partial<LanguagePlugin>, "languageId"> & { languageId?: string } = {},
-): LanguagePlugin {
-  const plugin = {
+export function stubLanguagePlugin(overrides: Partial<LanguagePlugin> = {}): LanguagePlugin {
+  return {
     manifest: langManifest(),
-    languageId: "stub",
+    languageId: makeLanguageId("stub"),
     fileExtensions: [".stub"],
     capabilities: NO_CAPABILITIES,
     init: async () => {},
@@ -97,7 +96,6 @@ export function stubLanguagePlugin(
     normalizeAst: () => "stub-ast",
     ...overrides,
   }
-  return plugin as unknown as LanguagePlugin
 }
 
 /**
