@@ -779,8 +779,26 @@ function splitTargetSegments(target: string): string[] {
 }
 
 function isRelativeSpecifier(specifier: string): boolean {
-  return specifier.startsWith("./") || specifier.startsWith("../")
+  return (
+    specifier === "." ||
+    specifier === ".." ||
+    specifier.startsWith("./") ||
+    specifier.startsWith("../")
+  )
 }
+
+/**
+ * The source extensions TypeScript tries, in its order, for a relative specifier written with
+ * an emitted-JavaScript extension. Under `node16`/`nodenext` a relative import of `repo.ts`
+ * has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` ahead of a `repo.js`
+ * beside it: the written file is the last resort, not the first probe.
+ */
+const EMITTED_EXTENSION_SOURCES: ReadonlyMap<string, readonly string[]> = new Map([
+  ["js", ["ts", "tsx", "js", "jsx"]],
+  ["jsx", ["tsx", "jsx"]],
+  ["mjs", ["mts", "mjs"]],
+  ["cjs", ["cts", "cjs"]],
+])
 
 interface ResolveSpecifierInput {
   callerFile: string
@@ -795,6 +813,11 @@ interface ResolveSpecifierInput {
  * candidate extensions until one lands on a file that actually declares any
  * Symbol. Directory targets probe `<path>/index.<ext>` per call-resolution.md
  * import specifier resolution, step 3.
+ *
+ * A specifier that names a directory outright — `.`, `..`, or one ending in `/` — probes the
+ * directory's index only, as TypeScript does: `./` must not reach a sibling `src.ts`. One
+ * written with an emitted extension (`./repo.js`) probes the sources that compile to it
+ * first, in `EMITTED_EXTENSION_SOURCES` order.
  */
 function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   const known = input.filesByLanguage.get(input.language)
@@ -804,16 +827,38 @@ function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   const joined = joinPosix(callerDir, input.specifier)
   if (joined === null) return null
 
-  if (known.has(joined)) return joined
-  for (const ext of input.extensions) {
-    const candidate = `${joined}.${ext}`
-    if (known.has(candidate)) return candidate
+  const lastSegment = input.specifier.slice(input.specifier.lastIndexOf("/") + 1)
+  const namesDirectory = lastSegment === "" || lastSegment === "." || lastSegment === ".."
+  if (!namesDirectory) {
+    for (const candidate of emittedExtensionSources(joined, input.extensions)) {
+      if (known.has(candidate)) return candidate
+    }
+    if (known.has(joined)) return joined
+    for (const ext of input.extensions) {
+      const candidate = `${joined}.${ext}`
+      if (known.has(candidate)) return candidate
+    }
   }
+  const indexStem = joined === "" ? "index" : `${joined}/index`
   for (const ext of input.extensions) {
-    const candidate = `${joined}/index.${ext}`
+    const candidate = `${indexStem}.${ext}`
     if (known.has(candidate)) return candidate
   }
   return null
+}
+
+/**
+ * `src/repo.js` → `src/repo.ts`, `src/repo.tsx`, `src/repo.js`, `src/repo.jsx`: the files a
+ * specifier with an emitted extension can name, limited to the extensions the language
+ * declares. Empty for any other extension, so `./repo` and `./repo.ts` probe as before.
+ */
+function emittedExtensionSources(joined: string, extensions: readonly string[]): string[] {
+  const dot = joined.lastIndexOf(".")
+  if (dot <= joined.lastIndexOf("/") + 1) return []
+  const sources = EMITTED_EXTENSION_SOURCES.get(joined.slice(dot + 1))
+  if (sources === undefined) return []
+  const stem = joined.slice(0, dot)
+  return sources.filter((ext) => extensions.includes(ext)).map((ext) => `${stem}.${ext}`)
 }
 
 function dirname(posixPath: string): string {

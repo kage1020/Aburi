@@ -101,7 +101,9 @@ Resolving `./y` to a Symbol file requires the file-path normalizer defined in §
 
 For a specifier `'./y'` (or `'../y'`, `'@workspace-alias/foo'`) in file `apps/billing/src/svc/InvoiceService.ts`:
 
-1. **Relative** (`.`/`..` prefix) — resolve against the caller's file directory.
+1. **Relative** (`.`/`..` prefix, or exactly `.` or `..`) — resolve against the caller's file directory.
+   - A specifier that names a directory outright — `.`, `..`, or one ending in `/` — probes only that directory's `index.<ext>` (step 3's directory form), never `<dir>.<ext>`, as TypeScript does
+   - A specifier written with an emitted-JavaScript extension first probes the sources that compile to it, in TypeScript's order: `.js` → `.ts`, `.tsx`, `.js`, `.jsx`; `.jsx` → `.tsx`, `.jsx`; `.mjs` → `.mts`, `.mjs`; `.cjs` → `.cts`, `.cjs`. Under `node16`/`nodenext` a relative import of `repo.ts` has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` even when a `repo.js` sits beside it. Only extensions the language plugin declares are probed
 2. **Path alias** — apply the mapping table read from the language plugin's config at startup:
    - For TypeScript: the `paths` field of the caller's nearest `tsconfig.json` (Node16/NodeNext resolution semantics), plus each workspace package name declared in `pnpm-workspace.yaml` / `workspaces` / `turbo.json`.
    - For other languages: the equivalent lookup surface the plugin declares (out of scope here).
@@ -333,6 +335,8 @@ Every implementation of the resolver must pass the following.
 |---|---|---|
 | CR1 | same-file top-level function call (`foo()`) | `resolved` = same-file Symbol id, confidence `high` |
 | CR2 | named-import call (`import { X } from './y'; X()`) | `resolved` = `<lang>:./y#X`, confidence `high` |
+| CR2a | named-import call through an emitted extension (`import { X } from './y.js'`, `'./y.mjs'`, `'./y/index.js'`) with `y.ts` / `y.mts` / `y/index.ts` in the workspace | `resolved` = the TypeScript source's Symbol id, confidence `high`; a `y.ts` beside a `y.js` wins |
+| CR2b | named-import call through a directory specifier (`'.'`, `'..'`, `'./'`) | `resolved` = that directory's `index.<ext>` Symbol id, confidence `high`; a sibling `<dir>.<ext>` is never probed, and a miss is bucketed `no-match`, not `external` |
 | CR3 | aliased named-import (`import { X as A } from './y'; A()`) | `resolved` = `<lang>:./y#X`, confidence `high` |
 | CR4 | namespace import (`import * as N from './y'; N.foo()`) | `resolved` = `<lang>:./y#foo`, confidence `high` |
 | CR5 | default import (`import D from './y'; D()`) | `resolved` = `<lang>:./y#<default>`, confidence `high` |

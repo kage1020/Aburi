@@ -221,6 +221,66 @@ describe("resolveCallGraph", () => {
     expect(result.edges[0]?.to).toBe("ts:src/util/index.ts#helper")
   })
 
+  /**
+   * CR2 in the spellings an ESM TypeScript project writes (CR2a, CR2b). Under `node16`/`nodenext` a relative
+   * import of `repo.ts` is written `./repo.js`, and `.` / `..` name a directory's index.
+   */
+  describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
+    function resolveFrom(callerFile: string, specifier: string, calleeFiles: readonly string[]) {
+      const caller = withCalls(`ts:${callerFile}#caller`, [{ target: "helper", line: 4 }])
+      const callees = calleeFiles.map((file) => makeSymbol(`ts:${file}#helper`))
+      const imports = new Map<string, readonly ImportEdge[]>([
+        [callerFile, [importEdge({ source: specifier, symbols: ["helper"] })]],
+      ])
+      const result = resolveCallGraph({ symbols: [caller, ...callees], importsByFile: imports })
+      return result.symbols.find((symbol) => symbol.id === `ts:${callerFile}#caller`)?.calls[0]
+    }
+
+    it.each([
+      ["./repo.js", "src/repo.ts"],
+      ["./repo.js", "src/repo.tsx"],
+      ["./repo.jsx", "src/repo.tsx"],
+      ["./repo.mjs", "src/repo.mts"],
+      ["./repo.cjs", "src/repo.cts"],
+      ["./repo/index.js", "src/repo/index.ts"],
+      ["../repo.js", "repo.ts"],
+      ["./repo.js", "src/repo.js"],
+      [".", "src/index.ts"],
+      ["./", "src/index.ts"],
+      ["..", "index.ts"],
+    ])("%s from src/a.ts resolves to %s", (specifier, file) => {
+      expect(resolveFrom("src/a.ts", specifier, [file])?.resolved).toBe(`ts:${file}#helper`)
+    })
+
+    it("`.` from a file at the workspace root reaches the root index", () => {
+      expect(resolveFrom("a.ts", ".", ["index.ts"])?.resolved).toBe("ts:index.ts#helper")
+    })
+
+    it("prefers the TypeScript source over the emitted file beside it, as TypeScript does", () => {
+      const call = resolveFrom("src/a.ts", "./repo.js", ["src/repo.js", "src/repo.ts"])
+      expect(call?.resolved).toBe("ts:src/repo.ts#helper")
+    })
+
+    it("does not read `./repo.mjs` as `repo.ts`: only the `.js` spelling maps to `.ts`", () => {
+      expect(resolveFrom("src/a.ts", "./repo.mjs", ["src/repo.ts"])?.resolved).toBeNull()
+    })
+
+    it("probes only the directory's index for `.` and `./`, never a sibling file", () => {
+      // `src.ts` beside `src/` is what `<dir>.<ext>` would probe for `./` from `src/a.ts`.
+      expect(resolveFrom("src/a.ts", "./", ["src.ts"])?.resolved).toBeNull()
+      expect(resolveFrom("src/a.ts", ".", ["src.ts"])?.resolved).toBeNull()
+    })
+
+    it("buckets an unresolved `.` import as a relative miss, not `external`", () => {
+      const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 4 }])
+      const imports = new Map<string, readonly ImportEdge[]>([
+        ["src/a.ts", [importEdge({ source: ".", symbols: ["helper"] })]],
+      ])
+      const result = resolveCallGraph({ symbols: [caller], importsByFile: imports })
+      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+    })
+  })
+
   it("file scope wins over import scope when both bindings exist", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 4 }])
     const inFile = makeSymbol("ts:src/a.ts#helper")
