@@ -6,6 +6,12 @@ function makeStreams(): { stdout: MemStream; stderr: MemStream } {
   return { stdout: new MemStream(), stderr: new MemStream() }
 }
 
+describe("exit code table", () => {
+  it("keeps the numbers cli-spec.md gives each class", () => {
+    expect(EXIT).toEqual({ SUCCESS: 0, RUNTIME: 1, INPUT_ERROR: 2, GATE: 3 })
+  })
+})
+
 /** CL1 — `aburi --version` prints a single line, exit 0. */
 describe("CL1 — --version", () => {
   it("prints a version string and returns EXIT.SUCCESS", async () => {
