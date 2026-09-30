@@ -45,7 +45,7 @@ The roadmap target is measured against a specific benchmark corpus so CI can reg
 
 The corpus itself is stored under `benchmarks/perf-1k/` (added in a follow-up PR that also adds the CI job). The corpus is generated deterministically from templates so its structure is reproducible without vendoring 1,200 files.
 
-The corpus is deliberately many small files, which is the shape the pool exists for — and it is therefore blind to the opposite shape. A single generated file holding thousands of declarations sits inside `maxFileSizeBytes` and belongs to one shard, so no amount of concurrency touches it: its cost is whatever the language plugin charges per file in the number of declarations ([lang-plugin.md](./lang-plugin.md) §8.2), and the run is not finished until that one worker is. A wall-time regression on the corpus and a wall-time regression on one large file are separate measurements, and passing PF1 says nothing about the second.
+The corpus is deliberately many small files, which is the shape the pool exists for — and it is therefore blind to the opposite shape. A single generated file holding thousands of declarations sits inside `maxFileSizeBytes` and belongs to one shard, so no amount of concurrency touches it: its cost is whatever the language plugin charges per file in the number of declarations ([lang-plugin.md](./lang-plugin.md) §8.2), and the run is not finished until that one worker is. A wall-time regression on the corpus and a wall-time regression on one large file are separate measurements, and passing PT1 says nothing about the second.
 
 ### 2.1 What the same SLAs measure on real repositories
 
@@ -53,7 +53,7 @@ The corpus above does not exist yet. Nine public repositories at pinned commits 
 
 That does not retire this document, but it prices it. The pool would buy roughly 4× on a workload that already finishes well inside both SLAs, so §1's premise — that a 1,000-file scan makes Aburi uncomfortable to keep in the pull request loop — is not what the measurement says. The scan worth being impatient with is `aburi diff`'s, which runs two of them at a measured 1.7–2.2× a single scan; those two are *independent* scans, which is a cheaper parallelism than sharding one, and it needs none of §4 through §7.
 
-Rule PF-11 (§7.1) has its single-threaded half confirmed on the way: three consecutive `aburi scan --no-timestamp` runs over an unchanged tree produced byte-identical IR on all nine repositories. What remains unmeasured is the equality *across* `--concurrency` values, which is the half only the pool can exercise, and which §13 tests as PF2. The rule and the §13 row numbered PF11 are different properties that share a spelling; this section means the rule.
+Rule PF-11 (§7.1) has its single-threaded half confirmed on the way: three consecutive `aburi scan --no-timestamp` runs over an unchanged tree produced byte-identical IR on all nine repositories. What remains unmeasured is the equality *across* `--concurrency` values, which is the half only the pool can exercise, and which §13 tests as PT2.
 
 ## 3. Worker model — decision
 
@@ -118,7 +118,7 @@ Rule PF-8: `Symbol.calls[].resolved` is left as string-form callee references on
 
 ### 6.1 Concurrency default
 
-Unchanged from [cli-spec.md](./cli-spec.md) §14: default `--concurrency = max(1, CPU_count - 1)`. Clamped by the memory rule (PF-2).
+Unchanged from [cli-spec.md](./cli-spec.md) §14: default `--concurrency = max(1, CPU_count - 1)`. Clamped by the memory rule (Rule PF-2).
 
 ### 6.2 WASM heap cap per worker
 
@@ -227,26 +227,28 @@ Rule PF-19: `--concurrency 1` output MUST be identical to a hypothetical `--conc
 
 Reserved for the future via `capabilities.preferNative` in the language plugin manifest ([lang-plugin.md](./lang-plugin.md) §8.1). When a plugin declares native support and the runtime detects a compatible platform, that plugin's workers MAY use a native tree-sitter binding instead of the WASM one. The choice is per-plugin per-run; it does not change the worker pool's shape, serialization boundary, or determinism rules — only the parser instance behind each worker.
 
-Rule PF-20: when a native binding is in use, `capabilities.wasmHeapPerWorkerMB` still bounds pool sizing (the memory rule PF-2), because pool sizing needs a conservative upper bound regardless of which parser variant is active.
+Rule PF-20: when a native binding is in use, `capabilities.wasmHeapPerWorkerMB` still bounds pool sizing (the memory rule, Rule PF-2), because pool sizing needs a conservative upper bound regardless of which parser variant is active.
 
 ## 13. Verifiable Properties
 
+Rows are prefixed `PT` (performance test) to avoid collision with the rules above (`Rule PF-<n>`), so a citation of either names one property. A row that tests a numbered rule names it in the Expected column.
+
 | ID | Input | Expected |
 | --- | --- | --- |
-| PF1 | Reference corpus (§2), `--concurrency 4`, cold cache, 4-core runner | Wall time ≤ 30 s; peak RSS ≤ 2 GiB. **Pending corpus PR** — verifiable once `benchmarks/perf-1k/` lands (§2). |
-| PF2 | Reference corpus, `--concurrency N` for N ∈ {1, 2, 4, 8} | SHA-256 of IR JSON identical across all N |
-| PF3 | Any input, worker returns a `ParseResponse` containing a `bodyNode` | Structured-clone throws (or a test lint fails); pool aborts with diagnostic |
-| PF4 | Worker throws while parsing one file | That file marked skipped; other workers unaffected; main thread respawns worker |
-| PF5 | 3 successive crashes on the same worker slot | Scan aborts with exit code 2; last 3 failed files listed in error |
-| PF6 | `--concurrency 1` and `--concurrency 4` on same input | `parseFile` code path exercised is identical (single-thread mode does not diverge) |
-| PF7 | Pool size clamped by available memory | On a runner reporting 4 GiB `availableMemoryMB` with 512 MiB `wasmHeapPerWorkerMB` declared, and `--concurrency 8` requested → pool size = `min(8, floor(4096 / 512)) = 8`. On 2 GiB available → `min(8, floor(2048 / 512)) = 4`. Note: `availableMemoryMB` is the free memory reported by the runtime (already net of OS overhead), not the runner's nominal RAM. |
-| PF8 | Enumerator produces 1,200 files, pool size = 4 | Queue depth never exceeds 8 (2 × pool_size) at any moment |
-| PF9 | `Date.now()` referenced inside worker parse loop or main-thread merge | Lint failure at CI |
-| PF10 | `Math.random()` referenced inside pool code | Lint failure at CI |
-| PF11 | LSP enabled | Parse phase completes fully before LSP phase starts; no worker calls LSP |
-| PF12 | Two lang plugins declare `wasmHeapPerWorkerMB` = 256 and 512 | Pool sizing uses 512 as the denominator |
-| PF13 | A node handle outlives the tree it came from — the plugin kept one past `parseFile()`, or the worker kept one past the file's pipeline run (a bug, not a runtime failure) | Plugin conformance tests SHOULD detect this via lang-plugin's own test harness (see [lang-plugin.md](./lang-plugin.md) §9); the pool itself makes no additional check. Listed here for completeness — this is an invariant of the plugin contract. |
-| PF14 | Under `CI=true` | Progress animation silenced; final summary still prints |
+| PT1 | Reference corpus (§2), `--concurrency 4`, cold cache, 4-core runner | Wall time ≤ 30 s; peak RSS ≤ 2 GiB. **Pending corpus PR** — verifiable once `benchmarks/perf-1k/` lands (§2). |
+| PT2 | Reference corpus, `--concurrency N` for N ∈ {1, 2, 4, 8} | SHA-256 of IR JSON identical across all N (Rule PF-11; this is the test Rule PF-13 requires) |
+| PT3 | Any input, worker returns a `ParseResponse` containing a `bodyNode` | Structured-clone throws (or a test lint fails); pool aborts with diagnostic (Rule PF-7) |
+| PT4 | Worker throws while parsing one file | That file marked skipped; other workers unaffected; main thread respawns worker (Rule PF-14) |
+| PT5 | 3 successive crashes on the same worker slot | Scan aborts with exit code 2; last 3 failed files listed in error (Rule PF-15) |
+| PT6 | `--concurrency 1` and `--concurrency 4` on same input | `parseFile` code path exercised is identical (single-thread mode does not diverge) (Rule PF-19) |
+| PT7 | Pool size clamped by available memory | On a runner reporting 4 GiB `availableMemoryMB` with 512 MiB `wasmHeapPerWorkerMB` declared, and `--concurrency 8` requested → pool size = `min(8, floor(4096 / 512)) = 8`. On 2 GiB available → `min(8, floor(2048 / 512)) = 4`. Note: `availableMemoryMB` is the free memory reported by the runtime (already net of OS overhead), not the runner's nominal RAM. (Rule PF-2) |
+| PT8 | Enumerator produces 1,200 files, pool size = 4 | Queue depth never exceeds 8 (2 × pool_size) at any moment |
+| PT9 | `Date.now()` referenced inside worker parse loop or main-thread merge | Lint failure at CI (Rule PF-13, §7.3) |
+| PT10 | `Math.random()` referenced inside pool code | Lint failure at CI (Rule PF-13, §7.3) |
+| PT11 | LSP enabled | Parse phase completes fully before LSP phase starts; no worker calls LSP (§10; Rule PF-17) |
+| PT12 | Two lang plugins declare `wasmHeapPerWorkerMB` = 256 and 512 | Pool sizing uses 512 as the denominator (Rule PF-2) |
+| PT13 | A node handle outlives the tree it came from — the plugin kept one past `parseFile()`, or the worker kept one past the file's pipeline run (a bug, not a runtime failure) | Plugin conformance tests SHOULD detect this via lang-plugin's own test harness (see [lang-plugin.md](./lang-plugin.md) §9); the pool itself makes no additional check. Listed here for completeness — this is an invariant of the plugin contract. |
+| PT14 | Under `CI=true` | Progress animation silenced; final summary still prints |
 
 ## 14. Design Decisions
 
@@ -256,7 +258,7 @@ Structured-clone `postMessage` is faster than piped stdout for the ~50 KB `Symbo
 
 ### 14.2 Why file-level shards instead of component-level
 
-Component sizes skew heavily in real monorepos. A component-level shard leaves N-1 workers idle for the tail of the largest component. File-level shards give each worker a stream of similarly-sized work units, and the deterministic hash assignment (PF-4) plus the merge algorithm (§7.2) preserve byte-identical output.
+Component sizes skew heavily in real monorepos. A component-level shard leaves N-1 workers idle for the tail of the largest component. File-level shards give each worker a stream of similarly-sized work units, and the deterministic hash assignment (Rule PF-4) plus the merge algorithm (§7.2) preserve byte-identical output.
 
 ### 14.3 Why parser reuse is deferred, not adopted here
 
