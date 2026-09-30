@@ -231,22 +231,22 @@ Rule PF-20: when a native binding is in use, `capabilities.wasmHeapPerWorkerMB` 
 
 ## 13. Verifiable Properties
 
-The rows are numbered `PT<n>`, apart from the rules above (`Rule PF-<n>`), so a citation of either names one property. A row that tests a rule names it.
+Rows are prefixed `PT` (performance test) to avoid collision with the rules above (`Rule PF-<n>`), so a citation of either names one property. A row that tests a numbered rule names it in the Expected column.
 
 | ID | Input | Expected |
 | --- | --- | --- |
 | PT1 | Reference corpus (§2), `--concurrency 4`, cold cache, 4-core runner | Wall time ≤ 30 s; peak RSS ≤ 2 GiB. **Pending corpus PR** — verifiable once `benchmarks/perf-1k/` lands (§2). |
-| PT2 | Reference corpus, `--concurrency N` for N ∈ {1, 2, 4, 8} | SHA-256 of IR JSON identical across all N (Rule PF-11, and the test Rule PF-13 requires) |
-| PT3 | Any input, worker returns a `ParseResponse` containing a `bodyNode` | Structured-clone throws (or a test lint fails); pool aborts with diagnostic |
-| PT4 | Worker throws while parsing one file | That file marked skipped; other workers unaffected; main thread respawns worker |
-| PT5 | 3 successive crashes on the same worker slot | Scan aborts with exit code 2; last 3 failed files listed in error |
-| PT6 | `--concurrency 1` and `--concurrency 4` on same input | `parseFile` code path exercised is identical (single-thread mode does not diverge) |
-| PT7 | Pool size clamped by available memory | On a runner reporting 4 GiB `availableMemoryMB` with 512 MiB `wasmHeapPerWorkerMB` declared, and `--concurrency 8` requested → pool size = `min(8, floor(4096 / 512)) = 8`. On 2 GiB available → `min(8, floor(2048 / 512)) = 4`. Note: `availableMemoryMB` is the free memory reported by the runtime (already net of OS overhead), not the runner's nominal RAM. |
+| PT2 | Reference corpus, `--concurrency N` for N ∈ {1, 2, 4, 8} | SHA-256 of IR JSON identical across all N (Rule PF-11; this is the test Rule PF-13 requires) |
+| PT3 | Any input, worker returns a `ParseResponse` containing a `bodyNode` | Structured-clone throws (or a test lint fails); pool aborts with diagnostic (Rule PF-7) |
+| PT4 | Worker throws while parsing one file | That file marked skipped; other workers unaffected; main thread respawns worker (Rule PF-14) |
+| PT5 | 3 successive crashes on the same worker slot | Scan aborts with exit code 2; last 3 failed files listed in error (Rule PF-15) |
+| PT6 | `--concurrency 1` and `--concurrency 4` on same input | `parseFile` code path exercised is identical (single-thread mode does not diverge) (Rule PF-19) |
+| PT7 | Pool size clamped by available memory | On a runner reporting 4 GiB `availableMemoryMB` with 512 MiB `wasmHeapPerWorkerMB` declared, and `--concurrency 8` requested → pool size = `min(8, floor(4096 / 512)) = 8`. On 2 GiB available → `min(8, floor(2048 / 512)) = 4`. Note: `availableMemoryMB` is the free memory reported by the runtime (already net of OS overhead), not the runner's nominal RAM. (Rule PF-2) |
 | PT8 | Enumerator produces 1,200 files, pool size = 4 | Queue depth never exceeds 8 (2 × pool_size) at any moment |
-| PT9 | `Date.now()` referenced inside worker parse loop or main-thread merge | Lint failure at CI |
-| PT10 | `Math.random()` referenced inside pool code | Lint failure at CI |
-| PT11 | LSP enabled | Parse phase completes fully before LSP phase starts; no worker calls LSP (Rule PF-17) |
-| PT12 | Two lang plugins declare `wasmHeapPerWorkerMB` = 256 and 512 | Pool sizing uses 512 as the denominator |
+| PT9 | `Date.now()` referenced inside worker parse loop or main-thread merge | Lint failure at CI (Rule PF-13, §7.3) |
+| PT10 | `Math.random()` referenced inside pool code | Lint failure at CI (Rule PF-13, §7.3) |
+| PT11 | LSP enabled | Parse phase completes fully before LSP phase starts; no worker calls LSP (§10; Rule PF-17) |
+| PT12 | Two lang plugins declare `wasmHeapPerWorkerMB` = 256 and 512 | Pool sizing uses 512 as the denominator (Rule PF-2) |
 | PT13 | A node handle outlives the tree it came from — the plugin kept one past `parseFile()`, or the worker kept one past the file's pipeline run (a bug, not a runtime failure) | Plugin conformance tests SHOULD detect this via lang-plugin's own test harness (see [lang-plugin.md](./lang-plugin.md) §9); the pool itself makes no additional check. Listed here for completeness — this is an invariant of the plugin contract. |
 | PT14 | Under `CI=true` | Progress animation silenced; final summary still prints |
 
