@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { promisify } from "node:util"
+import { makeLanguageId } from "@aburi/core"
 import type {
   Config,
   EffectPlugin,
@@ -44,6 +45,7 @@ const effectsManifest: EffectsManifest = {
 
 const fakeLangPlugin: LanguagePlugin = {
   manifest: langManifest,
+  languageId: makeLanguageId("fake"),
   fileExtensions: [".fake"],
   capabilities: {
     hasDecorators: false,
@@ -63,13 +65,13 @@ const fakeLangPlugin: LanguagePlugin = {
   extractSymbols: () => [],
   walkBody: () => ({ rules: [], calls: [] }),
   normalizeAst: () => "",
-} as unknown as LanguagePlugin
+}
 
 const fakeEffectsPlugin: EffectPlugin = {
   manifest: effectsManifest,
   init: async () => {},
   classify: () => null,
-} as EffectPlugin
+}
 
 describe("loadPlugins — module resolution and bucketing", () => {
   it("loads a language plugin from a named export and buckets it", async () => {

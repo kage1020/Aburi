@@ -237,7 +237,7 @@ function stubLanguage(): LanguagePlugin {
 
 /** Records the `owner.component` every call was classified against. */
 function recordingEffects(seen: (ComponentId | null)[]): EffectPlugin {
-  const plugin = {
+  const plugin: EffectPlugin = {
     manifest: effectsManifest(),
     init: async () => {},
     classify: (_call: CallCandidate, ctx: ClassifyContext): EffectClassification | null => {
@@ -245,7 +245,7 @@ function recordingEffects(seen: (ComponentId | null)[]): EffectPlugin {
       return null
     },
   }
-  return plugin as unknown as EffectPlugin
+  return plugin
 }
 
 let workRoot = ""
@@ -344,8 +344,8 @@ describe("a scan of a two-component workspace", () => {
  */
 function pricingLanguage(): LanguagePlugin {
   const isCallee = (file: string): boolean => file.endsWith("pricing.stub")
-  const plugin = {
-    ...(stubLanguage() as unknown as Record<string, unknown>),
+  const plugin: LanguagePlugin = {
+    ...stubLanguage(),
     extractSymbols: (_tree: OpaqueAstNode, ctx: ExtractionContext) => {
       const file = ctx.file.path
       const shared = {
@@ -389,7 +389,7 @@ function pricingLanguage(): LanguagePlugin {
           ],
     }),
   }
-  return plugin as unknown as LanguagePlugin
+  return plugin
 }
 
 describe("call resolution over an attributed workspace", () => {

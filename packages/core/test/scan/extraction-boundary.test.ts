@@ -115,7 +115,7 @@ function stubLanguage(spec?: ThrowSpec): LanguagePlugin {
 }
 
 function throwingFramework(on: string, error: unknown): FrameworkPlugin {
-  const plugin = {
+  const plugin: FrameworkPlugin = {
     manifest: frameworkManifest(),
     init: async () => {},
     classifySymbol: (
@@ -126,11 +126,11 @@ function throwingFramework(on: string, error: unknown): FrameworkPlugin {
       return null
     },
   }
-  return plugin as unknown as FrameworkPlugin
+  return plugin
 }
 
 function throwingEffects(on: string, error: unknown): EffectPlugin {
-  const plugin = {
+  const plugin: EffectPlugin = {
     manifest: effectsManifest(),
     init: async () => {},
     classify: (_call: CallCandidate, ctx: ClassifyContext): EffectClassification | null => {
@@ -138,7 +138,7 @@ function throwingEffects(on: string, error: unknown): EffectPlugin {
       return null
     },
   }
-  return plugin as unknown as EffectPlugin
+  return plugin
 }
 
 const workspace = useStubWorkspace("extraction-boundary")
@@ -233,13 +233,14 @@ describe("what the caller is told", () => {
 
   it("records two failures in discovery order when two files throw", async () => {
     await writeFile(join(workspace.root, "b.stub"), "b", "utf8")
-    const language = stubLanguage()
-    const failing: LanguagePlugin = Object.create(language)
-    failing.extractSymbols = (_tree, ctx) => {
-      if (ctx.file.path === "a.stub" || ctx.file.path === "c.stub") {
-        throw new Error(`no ${ctx.file.path}`)
-      }
-      return [candidate(ctx.file.path)]
+    const failing: LanguagePlugin = {
+      ...stubLanguage(),
+      extractSymbols: (_tree, ctx) => {
+        if (ctx.file.path === "a.stub" || ctx.file.path === "c.stub") {
+          throw new Error(`no ${ctx.file.path}`)
+        }
+        return [candidate(ctx.file.path)]
+      },
     }
     const { result } = await run({ language: failing })
     expect(result.extractionFailures.map((f) => f.file)).toEqual(["a.stub", "c.stub"])
@@ -280,10 +281,12 @@ describe("what the caller is told", () => {
 describe("a file the read cannot reach", () => {
   /** A plugin whose `parseFile` removes `victim` from disk while the scan is running. */
   function deleting(victim: string): LanguagePlugin {
-    const language: LanguagePlugin = Object.create(stubLanguage())
-    language.parseFile = async (file: SourceFile) => {
-      if (file.path === "a.stub") await rm(join(workspace.root, victim))
-      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+    const language: LanguagePlugin = {
+      ...stubLanguage(),
+      parseFile: async (file: SourceFile) => {
+        if (file.path === "a.stub") await rm(join(workspace.root, victim))
+        return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+      },
     }
     return language
   }
@@ -316,13 +319,15 @@ describe("a file the read cannot reach", () => {
     // two different outcomes by platform.
     await mkdir(join(workspace.root, "sub"))
     await writeFile(join(workspace.root, "sub", "d.stub"), "d", "utf8")
-    const language: LanguagePlugin = Object.create(stubLanguage())
-    language.parseFile = async (file: SourceFile) => {
-      if (file.path === "a.stub") {
-        await rm(join(workspace.root, "sub"), { recursive: true })
-        await writeFile(join(workspace.root, "sub"), "no longer a directory", "utf8")
-      }
-      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+    const language: LanguagePlugin = {
+      ...stubLanguage(),
+      parseFile: async (file: SourceFile) => {
+        if (file.path === "a.stub") {
+          await rm(join(workspace.root, "sub"), { recursive: true })
+          await writeFile(join(workspace.root, "sub"), "no longer a directory", "utf8")
+        }
+        return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+      },
     }
 
     const { result, warned } = await run({ language })
@@ -349,14 +354,16 @@ describe("a file the read cannot reach", () => {
     // `EACCES`, `EMFILE`, `EIO`: whether they happen depends on how loaded or how
     // badly-checked-out the machine is, so absorbing them would let one commit produce a
     // different Document on a different day and still exit 0.
-    const language: LanguagePlugin = Object.create(stubLanguage())
-    language.parseFile = async (file: SourceFile) => {
-      if (file.path === "a.stub") {
-        // Replace `bad.stub` with a directory: reading it fails with EISDIR, not ENOENT.
-        await rm(join(workspace.root, "bad.stub"))
-        await mkdir(join(workspace.root, "bad.stub"))
-      }
-      return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+    const language: LanguagePlugin = {
+      ...stubLanguage(),
+      parseFile: async (file: SourceFile) => {
+        if (file.path === "a.stub") {
+          // Replace `bad.stub` with a directory: reading it fails with EISDIR, not ENOENT.
+          await rm(join(workspace.root, "bad.stub"))
+          await mkdir(join(workspace.root, "bad.stub"))
+        }
+        return { tree: {} as OpaqueAstNode, errors: [], imports: [] }
+      },
     }
     await expect(run({ language })).rejects.toThrow(/EISDIR|EPERM|EACCES/)
   })
