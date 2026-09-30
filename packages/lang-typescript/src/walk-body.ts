@@ -8,7 +8,14 @@ import {
   type WalkContext,
 } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { bodyNodesOf, findChild, hasErrorChild, thrownValue, walkDescendants } from "./ast-helpers"
+import {
+  bodyNodesOf,
+  findChild,
+  firstNonCommentChild,
+  hasErrorChild,
+  thrownValue,
+  walkDescendants,
+} from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
 
@@ -368,13 +375,59 @@ interface CalleeShape {
    */
   dynamic: boolean
   /**
-   * The node was not a shape this normalizer models, so its source text was
+   * The node is a type-level wrapper around a name, and its source text was
    * taken verbatim (`svc!`, `x as Foo`). Opaque is deliberately NOT treated as
    * dynamic on its own: a non-null assertion still names a binding. It only
    * becomes evidence of an expression receiver when it sits inside explicit
    * parentheses, which is how expression receivers have to be written.
    */
   opaque: boolean
+}
+
+/**
+ * The wrappers whose source text stands in for the name they wrap. Each asserts something
+ * about a value without replacing it, so `svc!` still names `svc`.
+ */
+const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
+  "non_null_expression",
+  "as_expression",
+  "satisfies_expression",
+  "type_assertion",
+])
+
+/**
+ * What an unmodelled expression contributes: the reserved segment, never its source text.
+ * `[...names].sort()` would otherwise put `[...names]` in the target, whose `...` is two empty
+ * segments (`lang-plugin.md`, "Normalized-callee contract"), and an IIFE would put its whole
+ * body there, indentation included. No name spells such a receiver, which is what
+ * `COMPUTED_TARGET_SEGMENT` stands for, and a call on it can only be reached by evaluating it.
+ */
+const UNMODELLED_EXPRESSION: CalleeShape = {
+  target: COMPUTED_TARGET_SEGMENT,
+  dynamic: true,
+  opaque: false,
+}
+
+const META_PROPERTIES: ReadonlySet<string> = new Set(["import.meta", "new.target"])
+
+/**
+ * A type wrapper answers with its own text only around a name. Around anything else it
+ * answers what the wrapped expression does, so `([...a] as T).m()` cannot bring the literal's
+ * text back and `getRepo()!.save()` is the dynamic call `getRepo().save()` is. Text that would
+ * still break the segment rule — a type such as `[...T]`, or `a["x.."]` — is refused too.
+ */
+function describeTypeWrapper(node: Node): CalleeShape | null {
+  // The old-style `<T>x` puts the type first; the other three put the value first.
+  const innerNode =
+    node.type === "type_assertion"
+      ? (node.namedChildren.at(-1) ?? null)
+      : firstNonCommentChild(node)
+  if (innerNode === null) return null
+  const inner = describeCallee(innerNode)
+  if (inner === null) return null
+  if (inner.dynamic) return { target: inner.target, dynamic: true, opaque: false }
+  if (node.text.split(".").some((segment) => segment.length === 0)) return UNMODELLED_EXPRESSION
+  return { target: node.text, dynamic: false, opaque: true }
 }
 
 function describeCallee(node: Node): CalleeShape | null {
@@ -386,6 +439,14 @@ function describeCallee(node: Node): CalleeShape | null {
       return { target: "this", dynamic: false, opaque: false }
     case "super":
       return { target: "super", dynamic: false, opaque: false }
+    // The callee of a dynamic `import("./m")`, a keyword rather than an expression.
+    case "import":
+      return { target: "import", dynamic: false, opaque: false }
+    // `import.meta` and `new.target` are fixed spellings that name a value, not expressions.
+    case "meta_property":
+      return META_PROPERTIES.has(node.text)
+        ? { target: node.text, dynamic: false, opaque: false }
+        : UNMODELLED_EXPRESSION
     case "member_expression": {
       const object = node.childForFieldName("object")
       const property = node.childForFieldName("property")
@@ -432,7 +493,8 @@ function describeCallee(node: Node): CalleeShape | null {
       return { target: inner.target, dynamic: true, opaque: false }
     }
     default:
-      return node.text.length > 0 ? { target: node.text, dynamic: false, opaque: true } : null
+      if (TYPE_WRAPPER_TYPES.has(node.type)) return describeTypeWrapper(node)
+      return node.text.length > 0 ? UNMODELLED_EXPRESSION : null
   }
 }
 
