@@ -357,8 +357,33 @@ const VARIANCE_OWNERS: ReadonlySet<string> = new Set([
   "type_alias_declaration",
 ])
 
-/** What may stand before a type parameter's name: `in`, `out`, or both in that order. */
+/** Of the owners above, the ones that also admit `const` on a type parameter (TS1277). */
+const CONST_OWNERS: ReadonlySet<string> = new Set([
+  "class_declaration",
+  "abstract_class_declaration",
+  "class",
+])
+
+/**
+ * The variance modifiers that may stand before a type parameter's name: `in`, `out`, or both in
+ * that order. A `const` may stand among them too, and is taken out before they are compared.
+ */
 const VARIANCE_MODIFIERS: ReadonlySet<string> = new Set(["in", "out", "in out"])
+
+/**
+ * Words `tsc` refuses as a type parameter's name: the reserved words (TS1359), the strict-mode
+ * ones a module is under (TS1214), `await` (TS1262), and the predefined type names (TS2368).
+ */
+const UNNAMEABLE: ReadonlySet<string> = new Set([
+  ...["break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete"],
+  ...["do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if"],
+  ...["import", "in", "instanceof", "new", "null", "return", "super", "switch", "this", "throw"],
+  ...["true", "try", "typeof", "var", "void", "while", "with"],
+  ...["implements", "interface", "let", "package", "private", "protected", "public", "static"],
+  ...["yield", "await"],
+  ...["any", "unknown", "never", "string", "number", "boolean", "symbol", "object", "undefined"],
+  "bigint",
+])
 
 /**
  * Whether this ERROR is the typescript grammar's reading of a variance modifier rather than
@@ -370,12 +395,17 @@ const VARIANCE_MODIFIERS: ReadonlySet<string> = new Set(["in", "out", "in out"])
  * inside the parameter, straight after the name it took from the modifier; and in some longer
  * lists the modifier is the ERROR, standing before a parameter that parsed clean (`ERROR "out"`,
  * `type_parameter "Output = unknown"`). Which one a list gets depends on what else is in it, so
- * the rule reads the words back across all three rather than matching a silhouette. 0.3.1 is the
- * newest release, so this is not waiting on a version bump either.
+ * the rule reads the words back across all three rather than matching a silhouette. No published
+ * grammar has fixed it as of 2026-09; the canary in `test/variance-modifier-artifact.test.ts` is
+ * what will say when one does.
  *
- * Nothing is lost: the same declarations written with and without their modifiers extract the
- * same Symbols, because a class, an interface and a type alias carry no `Signature` for the
- * misread name to reach, and a method's own type parameters come from its own list.
+ * The Symbols are the same with and without the modifiers, because a class, an interface and a
+ * type alias carry no `Signature` for the misread name to reach, and a method's own type
+ * parameters come from its own list. `normalizeAst` is the exception, for a type alias only: it
+ * serialises the whole declaration, reads the modifier as the name and skips the ERROR holding the
+ * real one, so renaming an annotated alias's parameter does not move its fingerprint. That is
+ * the grammar's, and was so before this rule; what the rule adds is that the file no longer says
+ * it is doubtful.
  *
  * What keeps a broken file reporting is that every word has to fit:
  *
@@ -383,26 +413,35 @@ const VARIANCE_MODIFIERS: ReadonlySet<string> = new Set(["in", "out", "in out"])
  *     admits a modifier, so `m<in T>()` still reports.
  *   - The ERROR is among the words before the parameter's constraint and default, and holds
  *     nothing but identifiers. One after a constraint, as in `<out extends X T>`, still reports.
- *   - Those words, less one `const`, are `in`, `out` or `in out` and then one name. `<out out T>`,
- *     `<out in T>` and `<out T U>` are errors in `tsc` too, and all still report.
+ *   - Those words, less a `const` where the owner is a class, are `in`, `out` or `in out` and then
+ *     one name `tsc` would accept for a type parameter. `<out out T>`, `<out in T>`, `<out T U>`,
+ *     `<out in>` and `interface A<const out T>` are errors in `tsc` too, and all still report.
+ *
+ * It does not read an alias's right-hand side, so `type A<out T> = T` is dropped although the
+ * checker refuses it (TS2637: a modifier needs an object, function, constructor or mapped type
+ * there). `tsc`'s parser accepts it, and the ERROR is the grammar's alone.
  */
 function isVarianceModifierArtifact(node: Node): boolean {
   const list = node.parent?.type === "type_parameter" ? node.parent.parent : node.parent
-  if (list?.type !== "type_parameters" || !VARIANCE_OWNERS.has(list.parent?.type ?? "")) {
-    return false
-  }
+  const owner = list?.parent?.type ?? ""
+  if (list?.type !== "type_parameters" || !VARIANCE_OWNERS.has(owner)) return false
   const words = parameterHead(list, node)
   if (words === null) return false
   const constAt = words.indexOf("const")
-  if (constAt !== -1) words.splice(constAt, 1)
+  if (constAt !== -1) {
+    if (!CONST_OWNERS.has(owner)) return false
+    words.splice(constAt, 1)
+  }
   const name = words.pop()
-  return name !== undefined && VARIANCE_MODIFIERS.has(words.join(" "))
+  if (name === undefined || UNNAMEABLE.has(name)) return false
+  return VARIANCE_MODIFIERS.has(words.join(" "))
 }
 
 /**
  * The words before the constraint and default of the parameter `error` sits in, however recovery
  * split them between that parameter and the ERRORs beside it; null when `error` is not one of
- * them, or one of them holds anything but identifiers.
+ * them, when one of them holds anything but identifiers, or when an ERROR follows a parameter
+ * its constraint or default already closed (`<out extends X T>`).
  */
 function parameterHead(list: Node, error: Node): string[] | null {
   const pieces: Node[] = []
@@ -410,7 +449,7 @@ function parameterHead(list: Node, error: Node): string[] | null {
   for (let i = 0; i < list.childCount; i++) {
     const child = list.child(i)
     if (child === null) continue
-    if (child.type === "," || child.type === ">") {
+    if (child.type === ",") {
       if (found) break
       pieces.length = 0
       continue
