@@ -1088,6 +1088,34 @@ function irRef(refName: string, ir: IR): IRRef {
 }
 
 /**
+ * The variables of `git rev-parse --local-env-vars` that describe the caller's own working
+ * tree rather than the repository: its index, where the tree is, and the caller's directory in
+ * it. A commit hook exports `GIT_INDEX_FILE`, naming the index of the commit being made, and
+ * `GIT_PREFIX`. `git worktree add` checks the base out through whatever index
+ * `GIT_INDEX_FILE` names, so inherited from a pre-commit hook it overwrites the index git is
+ * about to commit (an absolute path, from `commit -a` or `commit <paths>`) or fails on the
+ * new worktree's `.git` file (the relative `.git/index` a plain `commit` exports). No git
+ * call here reads the caller's index or working tree, so none of them is given these.
+ *
+ * The rest of `git rev-parse --local-env-vars` is kept: `GIT_DIR`, `GIT_COMMON_DIR` and the
+ * object directories name the repository, which is the one both scans are about (a hook in a
+ * linked worktree exports `GIT_DIR`, and `gitRepositoryAbove` takes it at its word), and
+ * `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT` carry the caller's `-c` settings.
+ */
+const CALLER_WORK_TREE_ENV = [
+  "GIT_INDEX_FILE",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_PREFIX",
+]
+
+function gitChildEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  for (const name of CALLER_WORK_TREE_ENV) delete env[name]
+  return env
+}
+
+/**
  * Chunks are joined as bytes and decoded once: a stream splits wherever it splits, so decoding
  * each chunk on its own turns a multi-byte character that straddles two of them into U+FFFD.
  */
@@ -1097,7 +1125,7 @@ const defaultGitRunner: GitRunner = {
     options?: { cwd?: string },
   ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolvePromise, rejectPromise) => {
-      const child = spawn("git", args, { cwd: options?.cwd })
+      const child = spawn("git", args, { cwd: options?.cwd, env: gitChildEnv() })
       const stdoutChunks: Buffer[] = []
       const stderrChunks: Buffer[] = []
       child.stdout?.on("data", (chunk: Buffer) => {
