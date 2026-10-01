@@ -97,14 +97,16 @@ measured run compares nothing, and the report says `n/a` rather than a tick.
 
 `report.mjs` holds every decision this makes without touching the disk — what a
 run is allowed to claim, and how a sweep renders — and `test/` checks it, including
-that the committed samples still render to the committed report.
+that every committed sample in `results/` still renders to its committed report.
 
 ## The pinned commits
 
 `repos.json` pins `head` for every repo and `base` at `head~50`, which gives
 `aburi diff` a real change set to project rather than a handful of commits.
 Numbers are only comparable within one pin — changing an entry is a documented
-event, and the results file records the commit each run measured.
+event, and the results file records the commit each run measured. It also
+records the Aburi commit the sweep was built from (`commit`), and `dirty` when the
+working tree differed from it, since the package version spans many commits.
 
 ## Running it on a schedule
 
