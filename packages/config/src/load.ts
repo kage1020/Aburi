@@ -1,6 +1,6 @@
-import type { Config, PluginManifest } from "@aburi/types"
+import type { Config, FrameworkPlugin } from "@aburi/types"
 import { type FindConfigOptions, findConfig } from "./discovery"
-import { normalizeFrameworkHints } from "./framework-hints"
+import { frameworkHintPlugins } from "./framework-hints"
 import { readConfigFile } from "./parser"
 
 /**
@@ -18,7 +18,8 @@ export type LoadedConfig =
       found: true
       source: string
       config: Config
-      syntheticPlugins: readonly PluginManifest[]
+      /** One framework plugin per `frameworkHints` entry, in config order. */
+      syntheticPlugins: readonly FrameworkPlugin[]
     }
 
 const AUTODETECT_FALLBACK: LoadedConfig = {
@@ -60,7 +61,7 @@ export async function loadConfigFrom(source: ConfigSource): Promise<LoadedConfig
     found: true,
     source: source.path,
     config,
-    syntheticPlugins: normalizeFrameworkHints(config),
+    syntheticPlugins: frameworkHintPlugins(config),
   }
 }
 

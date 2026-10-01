@@ -24,7 +24,7 @@ const loaded = await loadConfig({ cwd: process.cwd() })
 if (loaded.found) {
   loaded.source           // absolute path to the config file
   loaded.config           // validated Config
-  loaded.syntheticPlugins // manifests derived from frameworkHints
+  loaded.syntheticPlugins // one framework plugin per frameworkHints entry
 } else {
   // No aburi.json / aburi.jsonc on disk. `loaded.config` is `{}` and
   // `loaded.syntheticPlugins` is `[]`; the caller runs autodetect.
@@ -57,6 +57,12 @@ at position 2 to reserve the namespace for user-declared vocab, so a hint can
 never collide with a real plugin's `framework:<vendor>:*` claim. Writing the
 `hint:` segment directly in your config throws with a "remove the `hint:`
 segment and let the loader add it" error.
+
+Each entry becomes a framework plugin (`frameworkHintPlugins(config)`, or
+`loaded.syntheticPlugins`) that applies the entry's decorator and class-name
+rules. Register its manifest with `VocabRegistry.registerHint`, which is the one
+path into the reserved `framework:hint` namespace, and run it after the
+framework plugins the config lists.
 
 ## See also
 

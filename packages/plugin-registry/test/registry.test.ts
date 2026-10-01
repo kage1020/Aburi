@@ -78,6 +78,39 @@ describe("VocabRegistry.register (AC2 reserved namespace)", () => {
     expect(reg.listPlugins()).toHaveLength(1)
   })
 
+  it("lets a frameworkHints manifest hold a namespace under framework:hint", () => {
+    // The reservation exists so that a hint can own `framework:hint:acme`; `registerHint` is
+    // the one path that grants it, and the same manifest through `register` is still refused.
+    const reg = new VocabRegistry()
+    const hint = frameworkManifest({ name: "hint-acme" })
+    hint.provides.extKindPrefixes.push("framework:hint:acme")
+    expectRegistryError(() => reg.register(hint), "reserved-namespace")
+
+    reg.registerHint(hint)
+    expect(reg.findExtKind("framework:hint:acme:controller")?.owner.name).toBe("hint-acme")
+  })
+
+  it("still refuses a frameworkHints manifest framework:hint itself and every other reserved root", () => {
+    const reg = new VocabRegistry()
+    const bare = frameworkManifest({ name: "hint-bare" })
+    bare.provides.extKindPrefixes.push("framework:hint")
+    expectRegistryError(() => reg.registerHint(bare), "reserved-namespace")
+
+    const core = frameworkManifest({ name: "hint-core" })
+    core.provides.derivedByPrefixes.push("core:x")
+    expectRegistryError(() => reg.registerHint(core), "reserved-namespace")
+  })
+
+  it("refuses two frameworkHints manifests the same namespace under framework:hint", () => {
+    const reg = new VocabRegistry()
+    const a = frameworkManifest({ name: "hint-a" })
+    a.provides.extKindPrefixes.push("framework:hint:acme")
+    const b = frameworkManifest({ name: "hint-b" })
+    b.provides.extKindPrefixes.push("framework:hint:acme")
+    reg.registerHint(a)
+    expect(() => reg.registerHint(b)).toThrow(RegistryError)
+  })
+
   it("rejects derivedBy prefix under reserved _:* namespace (T1)", () => {
     // _ is reserved for tests / private use; covered alongside core / aburi /
     // framework:hint, but had no dedicated test until reviewer T1 surfaced the gap.

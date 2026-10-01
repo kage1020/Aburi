@@ -282,11 +282,13 @@ The concrete form of the Tier 3 plugin of extension-vocab §11.3.
 ### 8.1 `decorators`
 
 Keys are decorator names (the `AcmeController` part of the decorator `@AcmeController`).
+A key matches the decorator's leaf name, so `@acme.AcmeController()` meets `AcmeController` too; imports are not read, so a decorator renamed on import is not recognized.
+A rule applies to any Symbol carrying the decorator, a method as well as a class.
 Fields of each value:
 
 | Field | Effect |
 |---|---|
-| `boundary` | Overrides `Decorator.boundary` with this value |
+| `boundary` | Overrides `Decorator.boundary` with this value, on the decorator the rule matched |
 | `extKind` | Sets `Symbol.extKind` for Symbols carrying this decorator |
 | `derivedBy` | Appended to `Symbol.derivedBy[]` |
 | `drop` | Category-B drop of Symbols carrying this decorator |
@@ -295,7 +297,8 @@ All are optional.
 
 ### 8.2 `classNamePatterns`
 
-Keys are class-name globs (`*Handler`, `*Service`, `Abstract*`).
+Keys are class-name globs (`*Handler`, `*Service`, `Abstract*`): `*` matches any run of characters, `?` exactly one, and every other character itself.
+A pattern is matched against the whole of a class's own name (`Outer.OrderHandler` is matched as `OrderHandler`), and against classes only.
 Values take the same fields as decorators (`extKind`/`derivedBy`/`drop`; `boundary` is decorator-only).
 
 ### 8.3 Automatic Ad-hoc Plugin Conversion
@@ -306,9 +309,11 @@ Each `frameworkHints` entry is internally registered as a single ad-hoc plugin:
 name: hint-<name>
 type: framework
 provides.extKindPrefixes:  each extKind value's namespace with "hint:" prepended
-provides.derivedByPrefixes: likewise
+provides.derivedByPrefixes: each derivedBy value's namespace, as written
 provides.frameworks: [<name>]
 ```
+
+The registry reserves `framework:hint` (extension-vocab §5.1), and admits a namespace under it only through the path that registers these manifests; a plugin listed in `frameworks` still cannot declare one.
 
 #### 8.3.1 Namespace Isolation via Automatic `hint:` Prefixing
 
@@ -324,11 +329,25 @@ Example: `extKind: "framework:acme:controller"` → internally `framework:hint:a
 
 Users never need to think about prefix declarations.
 
+#### 8.3.2 Where the rules run
+
+Each ad-hoc plugin is a framework plugin like any other, placed after every plugin listed in `frameworks`, in `frameworkHints` order.
+Since the first framework plugin to classify a Symbol wins (lang-plugin.md §5.2.1), a Symbol that a configured plugin recognizes keeps that plugin's classification, boundary flags included, and the hint applies to the rest.
+
+Within one entry, decorator rules come first, in the order the decorators are written on the Symbol, then `classNamePatterns` in config order.
+The first `extKind` among the rules that apply is the Symbol's, every `derivedBy` is appended, and each `boundary` overrides the decorator it was written for.
+
+`drop` is not a classification, so it does not depend on who won.
+Every framework plugin is asked for a drop after the core's shape rules and before the language plugin's (drop-list §6.3), and a Symbol a `drop: true` rule applies to is dropped with the `dropReason` `frameworkHints "<name>": @<decorator>` or `frameworkHints "<name>": class <pattern>`.
+A Symbol with a boundary decorator is kept, as it is from every Category-B rule.
+
 ### 8.4 Collisions
 
 - Multiple entries with the same `name` → config validation error
-- Another entry claims the same `extKindPrefixes` (auto-inferred result) → the registry errors at startup (extension-vocab §6.1)
-- An existing plugin owns the same namespace → startup error
+- Two entries whose extKinds name the same vendor (`framework:acme:*`) derive the same `framework:hint:acme` → the registry refuses the later one at startup (extension-vocab §6.1)
+- A plugin listed in `frameworks` already owns a namespace an entry derives (a `derivedBy` prefix) → the registry refuses the entry at startup
+
+A refused entry is a config error (exit 2) naming the entry, since the entry is what the reader has to change.
 
 ## 9. `output`
 
@@ -455,6 +474,10 @@ Autodetect alone is enough to run, but for stability it is recommended to write 
 | C5 | The same callee in both `keep` and `suppress` | keep wins (drop-list §7) |
 | C6 | Two `frameworkHints` entries with the same name | Config validation error |
 | C7 | Prefixes auto-inferred from `frameworkHints` extKind values | Registered in the registry |
+| C7a | The §8 example on a class decorated `@AcmeController()` and a class named `OrderHandler` | `extKind` `framework:hint:acme:controller` with `boundary: true` on the decorator, and `framework:hint:acme:handler` |
+| C7b | `"AcmeInternal": { "drop": true }` on a class decorated `@AcmeInternal()` | `dropped: true`, `dropReason` `frameworkHints "acme-framework": @AcmeInternal` |
+| C7c | `frameworks: ["framework-nestjs"]` and `"*Handler"` on a NestJS `@Controller()` class named `UsersHandler` | NestJS's classification; the hint applies only to classes no configured plugin recognized |
+| C7d | Two entries writing `framework:acme:a` and `framework:acme:b` | Exit 2 naming the second entry |
 | C8 | Extracting undeclared vocab with `strict: false` | Warning only; recorded in `out/aburi-vocab-discovered.json` |
 | C9 | Passing CLI `--strict` | Overrides config `strict: false` |
 | C10 | Specifying an unregistered plugin in `pluginOptions` | Warning (ignored because the plugin is disabled) |

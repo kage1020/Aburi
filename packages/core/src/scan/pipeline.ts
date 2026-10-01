@@ -209,8 +209,9 @@ export interface TreeReleaseFailure {
  *      so downstream effect classifiers can key on `owner.extKind`. The classifiers see
  *      the file's import edges alongside the Candidate, which is what lets a decorator
  *      renamed on import still be recognized and one from a foreign package be doubted.
- *   4. shape drop check (Cat B / language `symbolDropHint`) — a Symbol that ends up
- *      dropped keeps its identity in the IR but skips walkBody / fingerprint work.
+ *   4. shape drop check (Cat B: core rules, then every framework's and the language's
+ *      `symbolDropHint`) — a Symbol that ends up dropped keeps its identity in the IR but
+ *      skips walkBody / fingerprint work.
  *   5. `walkBody` — rules + CallCandidate[]. Category C `keep`/`suppress` filtering
  *      runs on the resulting calls.
  *   6. effect `classify` — first non-null classification wins; surviving calls stay in
@@ -313,7 +314,7 @@ export async function runFilePipeline(input: FilePipelineInput): Promise<FilePip
           symbol: candidate.id,
         })
       }
-      const dropReason = decideDropReason(candidate, language, extractCtx)
+      const dropReason = decideDropReason(candidate, language, frameworks, frameworkCtx)
 
       if (dropReason !== null) {
         symbols.push(
@@ -505,13 +506,24 @@ function mergeDerivedBy(current: readonly string[], addition: string): string[] 
   return merged
 }
 
+/**
+ * Core shape rules first, then each framework plugin in list order, then the language plugin.
+ * The frameworks are asked regardless of which one `classifySymbol` let win: a drop is not a
+ * classification, and an earlier plugin that classified the Symbol must not silence a later
+ * one's `drop: true`.
+ */
 function decideDropReason(
   candidate: SymbolCandidate<OpaqueAstNode>,
   language: LanguagePlugin,
-  ctx: ExtractionContext,
+  frameworks: readonly FrameworkPlugin[],
+  ctx: FrameworkClassifyContext,
 ): string | null {
   const core = decideSymbolDrop(candidate)
   if (core !== null) return core
+  for (const framework of frameworks) {
+    const hint: DropHint | null = framework.symbolDropHint?.(candidate, ctx) ?? null
+    if (hint !== null) return hint.reason
+  }
   const hint: DropHint | null = language.symbolDropHint?.(candidate, ctx) ?? null
   return hint?.reason ?? null
 }

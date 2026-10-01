@@ -255,7 +255,10 @@ From the Framework hints in [`extension-vocab.md`](./extension-vocab.md) §11.3:
 }
 ```
 
-Symbols decorated with `@AcmeInternal` are added to Category B.
+Symbols decorated with `@AcmeInternal` are added to Category B, with the `dropReason` `frameworkHints "acme-framework": @AcmeInternal`.
+A `classNamePatterns` rule with `drop: true` does the same for the classes it matches.
+
+The hint reaches the pipeline as the framework plugin's `symbolDropHint`. Every framework plugin is asked, whichever of them classified the Symbol, after the core rules (§4.1) and before the language plugin's hint, and the first answer is the drop. A Symbol with a boundary decorator is kept, as it is from every other Category-B rule.
 
 ## 7. Evaluation order
 
@@ -320,6 +323,8 @@ Properties the extraction pipeline must satisfy.
 | D1 | `myLogger.info(x)` with `config.suppress: ["myLogger"]` | Excluded from extraction |
 | D2 | `console.log(x)` with `config.keep: ["console.log"]` | Remains in calls |
 | D3 | The same callee in both `config.keep` and `config.suppress` | keep wins |
+| D4 | A class decorated `@AcmeInternal()` with the §6.3 hint | `dropped: true`, `dropReason: "frameworkHints \"acme-framework\": @AcmeInternal"` |
+| D5 | The same class also carrying a boundary decorator | `dropped: false` |
 
 ### 8.5 Unit tests for the triviality determination
 

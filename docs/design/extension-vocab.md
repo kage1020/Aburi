@@ -366,7 +366,7 @@ It may freely emit `framework:acme:controller` / `framework:acme:job` / `framewo
 }
 ```
 
-Aburi core treats this internally as an **ad-hoc plugin** and auto-registers the `framework:acme:*` vocab. No code extraction logic is required.
+Aburi core treats this internally as an **ad-hoc plugin** and auto-registers the `framework:hint:acme:*` vocab. No code extraction logic is required. The reservation in §5.1 is what keeps that namespace for hints: the registry admits a namespace under `framework:hint` only from the manifests it synthesizes, and a hint still cannot claim `framework:hint` itself or any other reserved root. The ad-hoc plugin runs after every plugin in `frameworks` ([`config.md`](./config.md) §8.3.2).
 
 ### 11.4 Choosing a tier
 

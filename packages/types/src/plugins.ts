@@ -491,6 +491,18 @@ export interface FrameworkPlugin<TNode = OpaqueAstNode> {
     symbol: SymbolCandidate<TNode>,
     ctx: FrameworkClassifyContext,
   ): SymbolClassification | null
+
+  /**
+   * A Category-B drop only the framework knows about, such as a `frameworkHints` decorator
+   * rule with `drop: true` (`drop-list.md` §6.3).
+   *
+   * Asked of every framework plugin in list order, whichever of them `classifySymbol` let win,
+   * after the core's shape rules and before the language plugin's `symbolDropHint`; the first
+   * non-null answer drops the Symbol. The Symbol it sees already carries the winning
+   * classification, boundary flags included, and a plugin should leave a Symbol with a
+   * boundary decorator alone, as every other Category-B rule does.
+   */
+  symbolDropHint?(symbol: SymbolCandidate<TNode>, ctx: FrameworkClassifyContext): DropHint | null
 }
 
 // --- Vocab registry (implemented by @aburi/plugin-registry, consumed by plugins) ---

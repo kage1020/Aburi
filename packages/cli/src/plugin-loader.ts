@@ -41,11 +41,11 @@ export interface LoadPluginsOptions {
   /** Dynamic import hook for testing (default: real ESM import). */
   importModule?: (specifier: string) => Promise<unknown>
   /**
-   * Synthetic manifests from `@aburi/config`'s `frameworkHints` normalisation. Loaded
-   * straight into the registry so hint-declared vocab is available without a real plugin
-   * package on disk.
+   * The framework plugins `@aburi/config` builds from `frameworkHints`, one per entry. Each
+   * manifest goes into the registry through `registerHint`, the one door to the reserved
+   * `framework:hint` namespace, and each plugin runs after every configured framework.
    */
-  syntheticPlugins?: readonly PluginManifest[]
+  syntheticPlugins?: readonly FrameworkPlugin[]
 }
 
 /**
@@ -75,10 +75,6 @@ export interface LoadPluginsOptions {
  */
 export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPlugins> {
   const registry = new VocabRegistry()
-  // Not `registerManifest`: these come from the reader's `frameworkHints`, so a refusal here is
-  // a config error for the config parser to report, not a plugin's fault.
-  for (const manifest of options.syntheticPlugins ?? []) registry.register(manifest)
-
   const loaded: LoadedPlugins = { languages: [], frameworks: [], effects: [], registry }
   const importFn = options.importModule ?? defaultImport
   const pluginRefRoot = options.pluginRefRoot ?? options.workspaceRoot
@@ -94,6 +90,14 @@ export async function loadPlugins(options: LoadPluginsOptions): Promise<LoadedPl
     const plugin = pickPlugin(module, ref)
     registerManifest(registry, plugin.manifest)
     routePlugin(plugin, field, loaded, ref)
+  }
+  // After the imported plugins, so that a namespace both claim is refused on the hint's side,
+  // the one the reader wrote and can change. Last in the framework stage for the same reason:
+  // a configured plugin that recognizes a Symbol keeps its classification, boundary flags
+  // included, where a hint ahead of it would take the turn and drop them.
+  for (const plugin of options.syntheticPlugins ?? []) {
+    registerHint(registry, plugin.manifest)
+    loaded.frameworks.push(plugin)
   }
   return loaded
 }
@@ -170,6 +174,24 @@ export function windowsDriveRefusal(
     return `Plugin "${ref}" names drive ${drive} but does not start at its root, so it would resolve against whatever directory is current on that drive. Start it at the root: "${drive}/${rest}".`
   }
   return null
+}
+
+/**
+ * A refusal here is the config's: the manifest is what `@aburi/config` derived from one
+ * `frameworkHints` entry, so the message names the entry the reader has to change.
+ */
+function registerHint(registry: VocabRegistry, manifest: PluginManifest): void {
+  try {
+    registry.registerHint(manifest)
+  } catch (error) {
+    if (!(error instanceof RegistryError)) throw error
+    const [entry] = manifest.provides.frameworks
+    throw new CliError(
+      `frameworkHints entry "${entry}" cannot be registered: ${error.message}`,
+      "config-error",
+      { cause: error },
+    )
+  }
 }
 
 /** A manifest the registry refuses is the plugin's fault, which the CLI reports as one. */

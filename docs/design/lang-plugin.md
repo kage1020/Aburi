@@ -402,7 +402,7 @@ When multiple framework plugins are enabled in the config, **first-match-wins in
 - The result of the first plugin to return non-null is adopted (extKind / boundary adjustments, etc.)
 - Subsequent plugins are skipped
 
-This avoids ambiguous states such as "the same class is recognized as both a NestJS Controller and a Custom Framework Controller". If a project has conflicts, priority is controlled via config order.
+This avoids ambiguous states such as "the same class is recognized as both a NestJS Controller and a Custom Framework Controller". If a project has conflicts, priority is controlled via config order. The ad-hoc plugins `frameworkHints` stands for come after every plugin in `frameworks` ([`config.md`](./config.md) §8.3.2).
 
 A framework plugin receives the following inputs:
 - the `SymbolCandidate` (including decorators)
@@ -413,6 +413,7 @@ Against these it may:
 - override `decorator.boundary`
 - fill in `Symbol.extKind` (e.g. `framework:nestjs:controller`)
 - provide a Category B drop exclusion hint (e.g. a class carrying only `@Module` must not be treated as a pure DTO)
+- drop the Symbol through `symbolDropHint` (`drop-list.md` §6.3). Unlike `classifySymbol`, every framework plugin is asked, whichever of them won, and the first non-null answer is the drop
 
 The detailed interface is deferred to a future `framework-plugin.md` (this document only reserves the contract surface).
 

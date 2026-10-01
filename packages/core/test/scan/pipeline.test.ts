@@ -232,6 +232,63 @@ describe("runFilePipeline — framework classifySymbol dispatch", () => {
   })
 })
 
+describe("runFilePipeline — framework symbolDropHint", () => {
+  it("asks a framework that did not classify the Symbol, and shows it the winning classification", async () => {
+    const classifier: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-classifier"),
+      init: async () => {},
+      classifySymbol: (): SymbolClassification => ({
+        extKind: "framework:first:role",
+        derivedBy: "framework-first:hit",
+      }),
+    }
+    const seen: (string | null)[] = []
+    const dropper: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-dropper"),
+      init: async () => {},
+      classifySymbol: () => null,
+      symbolDropHint: (symbol) => {
+        seen.push(symbol.extKind)
+        return { reason: "dropper says so", category: "B" }
+      },
+    }
+
+    const result = await runPipelineWithStubs({ frameworks: [classifier, dropper] })
+
+    expect(seen).toEqual(["framework:first:role"])
+    expect(result.symbols[0]?.dropped).toBe(true)
+    expect(result.symbols[0]?.dropReason).toBe("dropper says so")
+  })
+
+  it("takes the first framework's drop reason, in list order", async () => {
+    const dropping = (name: string): FrameworkPlugin => ({
+      manifest: frameworkManifest(name),
+      init: async () => {},
+      classifySymbol: () => null,
+      symbolDropHint: () => ({ reason: name, category: "B" }),
+    })
+
+    const result = await runPipelineWithStubs({
+      frameworks: [dropping("framework-a"), dropping("framework-b")],
+    })
+
+    expect(result.symbols[0]?.dropReason).toBe("framework-a")
+  })
+
+  it("keeps the Symbol when every framework's hint is null", async () => {
+    const fw: FrameworkPlugin = {
+      manifest: frameworkManifest("framework-keeps"),
+      init: async () => {},
+      classifySymbol: () => null,
+      symbolDropHint: () => null,
+    }
+
+    const result = await runPipelineWithStubs({ frameworks: [fw] })
+
+    expect(result.symbols[0]?.dropped).toBe(false)
+  })
+})
+
 describe("runFilePipeline — effect classify dispatch", () => {
   it("stops at the first effect that classifies the call (first-non-null-wins)", async () => {
     const secondCalls: string[] = []
