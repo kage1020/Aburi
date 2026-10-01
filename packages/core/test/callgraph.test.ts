@@ -17,8 +17,9 @@ function withCalls(
   })
 }
 
+/** The default `source` is bare, so an edge that does not set one resolves nothing in the workspace. */
 function importEdge(over: Partial<ImportEdge>): ImportEdge {
-  return { source: ".", symbols: [], line: 1, dynamic: false, ...over }
+  return { source: "unset-module", symbols: [], line: 1, dynamic: false, ...over }
 }
 
 describe("resolveCallGraph", () => {
@@ -219,6 +220,158 @@ describe("resolveCallGraph", () => {
     ])
     const result = resolveCallGraph({ symbols: [caller, callee], importsByFile: imports })
     expect(result.edges[0]?.to).toBe("ts:src/util/index.ts#helper")
+  })
+
+  /**
+   * CR2 in two further spellings, from two resolution modes. CR2a: under `node16`/`nodenext` a
+   * relative import of `repo.ts` has to be written `./repo.js`. CR2b: `.` and `..` name a
+   * directory's index, which `node` and `bundler` resolution accept and Node ESM, needing a
+   * complete file specifier, does not.
+   */
+  describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
+    /** The caller's one call, after checking that its edge agrees with it (CR2: confidence `high`). */
+    function resolveFrom(
+      callerFile: string,
+      specifier: string,
+      calleeFiles: readonly string[],
+      fileExtensions?: readonly string[],
+    ) {
+      const callerId = `ts:${callerFile}#caller`
+      const caller = withCalls(callerId, [{ target: "helper", line: 4 }])
+      const callees = calleeFiles.map((file) => makeSymbol(`ts:${file}#helper`))
+      const imports = new Map<string, readonly ImportEdge[]>([
+        [callerFile, [importEdge({ source: specifier, symbols: ["helper"] })]],
+      ])
+      const result = resolveCallGraph({
+        symbols: [caller, ...callees],
+        importsByFile: imports,
+        ...(fileExtensions === undefined ? {} : { fileExtensions }),
+      })
+      const call = result.symbols.find((symbol) => symbol.id === callerId)?.calls[0]
+      expect(result.edges).toEqual(
+        call?.resolved
+          ? [{ from: callerId, to: call.resolved, via: "call", confidence: "high", line: 4 }]
+          : [],
+      )
+      return call
+    }
+
+    it.each([
+      ["./repo.js", "src/repo.ts"],
+      ["./repo.js", "src/repo.tsx"],
+      ["./repo.jsx", "src/repo.tsx"],
+      ["./repo.mjs", "src/repo.mts"],
+      ["./repo.cjs", "src/repo.cts"],
+      ["./repo/index.js", "src/repo/index.ts"],
+      ["../repo.js", "repo.ts"],
+      ["./repo.js", "src/repo.js"],
+      [".", "src/index.ts"],
+      ["./", "src/index.ts"],
+      ["..", "index.ts"],
+      ["../", "index.ts"],
+      ["./repo/..", "src/index.ts"],
+      ["./repo.ts", "src/repo.ts"],
+    ])("%s from src/a.ts resolves to %s", (specifier, file) => {
+      expect(resolveFrom("src/a.ts", specifier, [file])?.resolved).toBe(`ts:${file}#helper`)
+    })
+
+    it("`.` from a file at the workspace root reaches the root index", () => {
+      expect(resolveFrom("a.ts", ".", ["index.ts"])?.resolved).toBe("ts:index.ts#helper")
+    })
+
+    it("prefers the TypeScript source over the emitted file beside it, as TypeScript does", () => {
+      const call = resolveFrom("src/a.ts", "./repo.js", ["src/repo.js", "src/repo.ts"])
+      expect(call?.resolved).toBe("ts:src/repo.ts#helper")
+    })
+
+    // Both files present, so each row holds one step of the order rather than only the set.
+    it.each([
+      ["./repo.js", ["src/repo.tsx", "src/repo.ts"], "src/repo.ts"],
+      ["./repo.js", ["src/repo.jsx", "src/repo.js"], "src/repo.js"],
+      ["./repo.js", ["src/repo.js", "src/repo.tsx"], "src/repo.tsx"],
+      ["./repo.jsx", ["src/repo.ts", "src/repo.tsx"], "src/repo.tsx"],
+      ["./repo.jsx", ["src/repo.jsx", "src/repo.ts"], "src/repo.ts"],
+      ["./repo.jsx", ["src/repo.js", "src/repo.jsx"], "src/repo.jsx"],
+      ["./repo.mjs", ["src/repo.mjs", "src/repo.mts"], "src/repo.mts"],
+      ["./repo.cjs", ["src/repo.cjs", "src/repo.cts"], "src/repo.cts"],
+    ])("%s with %j present resolves to %s", (specifier, files, expected) => {
+      expect(resolveFrom("src/a.ts", specifier, files)?.resolved).toBe(`ts:${expected}#helper`)
+    })
+
+    it("reaches `.ts` and `.js` from `./repo.jsx`, as TypeScript's `.jsx` arm does", () => {
+      expect(resolveFrom("src/a.ts", "./repo.jsx", ["src/repo.ts"])?.resolved).toBe(
+        "ts:src/repo.ts#helper",
+      )
+      expect(resolveFrom("src/a.ts", "./repo.jsx", ["src/repo.js"])?.resolved).toBe(
+        "ts:src/repo.js#helper",
+      )
+    })
+
+    it("falls back to a directory's index for a specifier with an extension, as TypeScript does outside ESM mode", () => {
+      expect(resolveFrom("src/a.ts", "./repo.js", ["src/repo.js/index.ts"])?.resolved).toBe(
+        "ts:src/repo.js/index.ts#helper",
+      )
+    })
+
+    it("does not clamp a `..` that climbs above the workspace root to the root index", () => {
+      expect(resolveFrom("a.ts", "..", ["index.ts"])?.resolved).toBeNull()
+    })
+
+    it("does not read `./repo.mjs` as `repo.ts`: only the `.js` spelling maps to `.ts`", () => {
+      expect(resolveFrom("src/a.ts", "./repo.mjs", ["src/repo.ts"])?.resolved).toBeNull()
+    })
+
+    it("probes only the directory's index for a last segment that is empty, `.` or `..`, never a sibling file", () => {
+      // `src.ts` beside `src/` is what `<dir>.<ext>` would probe for `./` from `src/a.ts`.
+      expect(resolveFrom("src/a.ts", "./", ["src.ts"])?.resolved).toBeNull()
+      expect(resolveFrom("src/a.ts", ".", ["src.ts"])?.resolved).toBeNull()
+      expect(resolveFrom("src/a.ts", "./repo/..", ["src.ts"])?.resolved).toBeNull()
+    })
+
+    it("takes a path written with a non-emitted extension as written, ahead of any other candidate", () => {
+      const files = ["src/repo.tsx", "src/repo.ts.ts", "src/repo.ts"]
+      const call = resolveFrom("src/a.ts", "./repo.ts", files)
+      expect(call?.resolved).toBe("ts:src/repo.ts#helper")
+    })
+
+    it("probes the file as written whatever the probe list holds, and filters only the other sources", () => {
+      expect(resolveFrom("src/a.ts", "./repo.js", ["src/repo.js"], ["ts"])?.resolved).toBe(
+        "ts:src/repo.js#helper",
+      )
+      expect(
+        resolveFrom("src/a.ts", "./repo.js", ["src/repo.tsx"], ["ts", "js"])?.resolved,
+      ).toBeNull()
+    })
+  })
+
+  it("import scope: answers each caller from its own directory and language when they share a specifier", () => {
+    // Relative specifiers are resolved once per (language, directory, specifier) per run; a key
+    // missing either part would hand the second asker the first one's file.
+    const py = { language: makeLanguageId("py") }
+    const symbols = [
+      withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 4 }]),
+      withCalls("ts:lib/a.ts#caller", [{ target: "helper", line: 4 }]),
+      withCalls("py:src/a.py#caller", [{ target: "helper", line: 4 }], py),
+      makeSymbol("ts:src/repo.ts#helper"),
+      makeSymbol("ts:lib/repo.ts#helper"),
+      makeSymbol("py:src/repo.py#helper", py),
+    ]
+    const imports = new Map<string, readonly ImportEdge[]>(
+      ["src/a.ts", "lib/a.ts", "src/a.py"].map((file) => [
+        file,
+        [importEdge({ source: "./repo", symbols: ["helper"] })],
+      ]),
+    )
+    const result = resolveCallGraph({
+      symbols,
+      importsByFile: imports,
+      fileExtensions: ["ts", "py"],
+    })
+    expect(result.edges.map((edge) => [edge.from, edge.to])).toEqual([
+      ["py:src/a.py#caller", "py:src/repo.py#helper"],
+      ["ts:lib/a.ts#caller", "ts:lib/repo.ts#helper"],
+      ["ts:src/a.ts#caller", "ts:src/repo.ts#helper"],
+    ])
   })
 
   it("file scope wins over import scope when both bindings exist", () => {

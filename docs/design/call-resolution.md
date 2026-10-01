@@ -101,14 +101,16 @@ Resolving `./y` to a Symbol file requires the file-path normalizer defined in §
 
 For a specifier `'./y'` (or `'../y'`, `'@workspace-alias/foo'`) in file `apps/billing/src/svc/InvoiceService.ts`:
 
-1. **Relative** (`.`/`..` prefix) — resolve against the caller's file directory.
+1. **Relative** (`./` or `../` prefix, or exactly `.` or `..`) — resolve against the caller's file directory.
+   - A specifier that names a directory outright — one whose last segment is empty, `.` or `..` (`.`, `..`, `./`, `../`, `./y/..`) — probes only that directory's `index.<ext>` (step 3's directory form), never `<dir>.<ext>`. TypeScript resolves these to the index outside ESM mode and not at all inside it; the resolver carries no per-file module mode, so it always takes the former. A directory's `package.json#main`, which TypeScript consults before `index`, is not read: the resolver reads no filesystem state
+   - A specifier written with an emitted-JavaScript extension first probes the sources that compile to it, in TypeScript's order less its declaration files: `.js` → `.ts`, `.tsx`, `.js`, `.jsx`; `.jsx` → `.tsx`, `.ts`, `.jsx`, `.js`; `.mjs` → `.mts`, `.mjs`; `.cjs` → `.cts`, `.cjs`. Under `node16`/`nodenext` a relative import of `repo.ts` has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` even when a `repo.js` sits beside it. The written extension is always probed, in its place in the row; the others only when they are in the resolver's probe list (step 3). When none of them names a file, step 3 carries on from `<path>.<ext>`
 2. **Path alias** — apply the mapping table read from the language plugin's config at startup:
    - For TypeScript: the `paths` field of the caller's nearest `tsconfig.json` (Node16/NodeNext resolution semantics), plus each workspace package name declared in `pnpm-workspace.yaml` / `workspaces` / `turbo.json`.
    - For other languages: the equivalent lookup surface the plugin declares (out of scope here).
-3. **Extension probing** — try extensions in the order declared by the language plugin (`fileExtensions`, [`lang-plugin.md`](./lang-plugin.md) §4.1). For a directory target, append `/index.<ext>` and probe again.
+3. **Extension probing** — the probe list is `ResolveCallGraphInput.fileExtensions`: dot-less extensions (`ts`, where a language plugin's `fileExtensions` in [`lang-plugin.md`](./lang-plugin.md) §4.1 writes `.ts`), the standard TypeScript / JavaScript set unless a caller sets it. Try the path as written, then `<path>.<ext>` in the list's order, then `<path>/index.<ext>` in the same order. A specifier that names a directory (step 1) skips straight to `<path>/index.<ext>`; a specifier with an emitted extension has step 1's sources tried in place of the path as written, ahead of the other two. The path as written is tried whatever the probe list holds.
 4. **Symbol table hit** — confirm the resolved absolute path (workspace-relativized to POSIX) exists as a Symbol id prefix in `symbolTable`. If not, `resolved` stays `null`, `confidence` = `high` (a definite miss).
 
-The mapping table is built once per `aburi scan` invocation from the config already loaded by [`config.md`](./config.md) and the workspace-manager information already produced by [`component-detect.md`](./component-detect.md) §3; the resolver reads it, never re-parses `tsconfig.json` or workspace manifests. Determinism follows: no filesystem race can influence which candidate wins because the candidate order is fixed by the language plugin's `fileExtensions` list and the mapping table is deterministic input.
+The mapping table is built once per `aburi scan` invocation from the config already loaded by [`config.md`](./config.md) and the workspace-manager information already produced by [`component-detect.md`](./component-detect.md) §3; the resolver reads it, never re-parses `tsconfig.json` or workspace manifests. Determinism follows: no filesystem race can influence which candidate wins because the candidate order is fixed by step 1's table and the probe list, no candidate is checked against the filesystem (only against `symbolTable`), and the mapping table is deterministic input.
 
 ### 4.5 Step 4: component scope
 
@@ -302,7 +304,7 @@ The per-call detail — which line, which bucket, which candidates — is **not*
 ### 8.2 Determinism under partial failures
 
 - LSP timeout on a specific call → that call falls back to the untyped tier's answer. It does not degrade any other call site's confidence.
-- Missing `symbolTable` entry for an imported file (e.g. `.d.ts` intentionally not scanned) → treated as external. Confidence `high` on the negative result.
+- Missing `symbolTable` entry for an imported file (e.g. `.d.ts` intentionally not scanned) → for a relative specifier, `resolved` stays `null` and the call is bucketed `no-match`; a bare specifier is external. Confidence `high` on the negative result.
 - Cycle in imports → does not affect resolution (resolution is per-call, not transitive).
 
 ### 8.3 Non-goals
@@ -333,6 +335,8 @@ Every implementation of the resolver must pass the following.
 |---|---|---|
 | CR1 | same-file top-level function call (`foo()`) | `resolved` = same-file Symbol id, confidence `high` |
 | CR2 | named-import call (`import { X } from './y'; X()`) | `resolved` = `<lang>:./y#X`, confidence `high` |
+| CR2a | named-import call through an emitted extension (`import { X } from './y.js'`, `'./y.mjs'`, `'./y/index.js'`) with `y.ts` / `y.mts` / `y/index.ts` in the workspace | `resolved` = the TypeScript source's Symbol id, confidence `high`; a `y.ts` beside a `y.js` wins |
+| CR2b | named-import call through a directory specifier (`'.'`, `'..'`, or any whose last segment is empty, `.` or `..`, such as `'./'`, `'../'`, `'./y/..'`) | `resolved` = that directory's `index.<ext>` Symbol id, confidence `high`; a sibling `<dir>.<ext>` is never probed, nor the directory's `package.json#main`, which TypeScript consults before `index` (§4.4.1); a `..` that climbs above the workspace root resolves to nothing rather than to the root index, and a miss is bucketed `no-match`, not `external`, as for any relative specifier |
 | CR3 | aliased named-import (`import { X as A } from './y'; A()`) | `resolved` = `<lang>:./y#X`, confidence `high` |
 | CR4 | namespace import (`import * as N from './y'; N.foo()`) | `resolved` = `<lang>:./y#foo`, confidence `high` |
 | CR5 | default import (`import D from './y'; D()`) | `resolved` = `<lang>:./y#<default>`, confidence `high` |

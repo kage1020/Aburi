@@ -18,8 +18,9 @@ function withCalls(
   })
 }
 
+/** The default `source` is bare, so an edge that does not set one resolves nothing in the workspace. */
 function importEdge(over: Partial<ImportEdge>): ImportEdge {
-  return { source: ".", symbols: [], line: 1, dynamic: false, ...over }
+  return { source: "unset-module", symbols: [], line: 1, dynamic: false, ...over }
 }
 
 function sig(...names: string[]): Signature {
@@ -146,6 +147,25 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
     const result = resolveCallGraph({
       symbols: [caller],
       importsByFile: new Map([["src/a.ts", [importEdge({ source: "./b", symbols: ["helper"] })]]]),
+    })
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+  })
+
+  it("CR2b: a `.` import that misses is bucketed `no-match`, not `external`", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 2 }])
+    const result = resolveCallGraph({
+      symbols: [caller],
+      importsByFile: new Map([["src/a.ts", [importEdge({ source: ".", symbols: ["helper"] })]]]),
+    })
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
+  })
+
+  it("CR2b: a `..` above the workspace root is a relative miss, not a clamp to the root index", () => {
+    const caller = withCalls("ts:a.ts#caller", [{ target: "helper", line: 2 }])
+    const rootIndex = makeSymbol("ts:index.ts#helper")
+    const result = resolveCallGraph({
+      symbols: [caller, rootIndex],
+      importsByFile: new Map([["a.ts", [importEdge({ source: "..", symbols: ["helper"] })]]]),
     })
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
   })
