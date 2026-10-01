@@ -17,8 +17,9 @@ function withCalls(
   })
 }
 
+/** The default `source` is bare, so an edge that does not set one resolves nothing in the workspace. */
 function importEdge(over: Partial<ImportEdge>): ImportEdge {
-  return { source: ".", symbols: [], line: 1, dynamic: false, ...over }
+  return { source: "unset-module", symbols: [], line: 1, dynamic: false, ...over }
 }
 
 describe("resolveCallGraph", () => {
@@ -222,8 +223,10 @@ describe("resolveCallGraph", () => {
   })
 
   /**
-   * CR2 in the spellings an ESM TypeScript project writes (CR2a, CR2b). Under `node16`/`nodenext` a relative
-   * import of `repo.ts` is written `./repo.js`, and `.` / `..` name a directory's index.
+   * CR2 in two further spellings, from two resolution modes. CR2a: under `node16`/`nodenext` a
+   * relative import of `repo.ts` has to be written `./repo.js`. CR2b: `.` and `..` name a
+   * directory's index, which `node` and `bundler` resolution accept and Node ESM, needing a
+   * complete file specifier, does not.
    */
   describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
     function resolveFrom(callerFile: string, specifier: string, calleeFiles: readonly string[]) {
@@ -261,6 +264,39 @@ describe("resolveCallGraph", () => {
       expect(call?.resolved).toBe("ts:src/repo.ts#helper")
     })
 
+    // Both files present, so each row holds one step of the order rather than only the set.
+    it.each([
+      ["./repo.js", ["src/repo.tsx", "src/repo.ts"], "src/repo.ts"],
+      ["./repo.js", ["src/repo.jsx", "src/repo.js"], "src/repo.js"],
+      ["./repo.js", ["src/repo.js", "src/repo.tsx"], "src/repo.tsx"],
+      ["./repo.jsx", ["src/repo.ts", "src/repo.tsx"], "src/repo.tsx"],
+      ["./repo.jsx", ["src/repo.jsx", "src/repo.ts"], "src/repo.ts"],
+      ["./repo.jsx", ["src/repo.js", "src/repo.jsx"], "src/repo.jsx"],
+      ["./repo.mjs", ["src/repo.mjs", "src/repo.mts"], "src/repo.mts"],
+      ["./repo.cjs", ["src/repo.cjs", "src/repo.cts"], "src/repo.cts"],
+    ])("%s with %j present resolves to %s", (specifier, files, expected) => {
+      expect(resolveFrom("src/a.ts", specifier, files)?.resolved).toBe(`ts:${expected}#helper`)
+    })
+
+    it("reaches `.ts` and `.js` from `./repo.jsx`, as TypeScript's `.jsx` arm does", () => {
+      expect(resolveFrom("src/a.ts", "./repo.jsx", ["src/repo.ts"])?.resolved).toBe(
+        "ts:src/repo.ts#helper",
+      )
+      expect(resolveFrom("src/a.ts", "./repo.jsx", ["src/repo.js"])?.resolved).toBe(
+        "ts:src/repo.js#helper",
+      )
+    })
+
+    it("falls back to a directory's index for a specifier with an extension, as TypeScript does outside ESM mode", () => {
+      expect(resolveFrom("src/a.ts", "./repo.js", ["src/repo.js/index.ts"])?.resolved).toBe(
+        "ts:src/repo.js/index.ts#helper",
+      )
+    })
+
+    it("does not clamp a `..` that climbs above the workspace root to the root index", () => {
+      expect(resolveFrom("a.ts", "..", ["index.ts"])?.resolved).toBeNull()
+    })
+
     it("does not read `./repo.mjs` as `repo.ts`: only the `.js` spelling maps to `.ts`", () => {
       expect(resolveFrom("src/a.ts", "./repo.mjs", ["src/repo.ts"])?.resolved).toBeNull()
     })
@@ -269,15 +305,6 @@ describe("resolveCallGraph", () => {
       // `src.ts` beside `src/` is what `<dir>.<ext>` would probe for `./` from `src/a.ts`.
       expect(resolveFrom("src/a.ts", "./", ["src.ts"])?.resolved).toBeNull()
       expect(resolveFrom("src/a.ts", ".", ["src.ts"])?.resolved).toBeNull()
-    })
-
-    it("buckets an unresolved `.` import as a relative miss, not `external`", () => {
-      const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 4 }])
-      const imports = new Map<string, readonly ImportEdge[]>([
-        ["src/a.ts", [importEdge({ source: ".", symbols: ["helper"] })]],
-      ])
-      const result = resolveCallGraph({ symbols: [caller], importsByFile: imports })
-      expect(result.diagnostics.map((d) => d.bucket)).toEqual(["no-match"])
     })
   })
 

@@ -40,10 +40,13 @@ export interface ResolveCallGraphInput {
    */
   importsByFile: ReadonlyMap<string, readonly ImportEdge[]>
   /**
-   * Extension probe order for relative import resolution. Defaults to
+   * The extensions relative import resolution probes, dot-less (`"ts"`, where a language
+   * plugin's `fileExtensions` writes `".ts"`). Defaults to
    * `["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"]` — the standard
-   * TypeScript / JavaScript set. The order matters: the first extension whose
-   * candidate file appears in `symbols[]` wins.
+   * TypeScript / JavaScript set — and `scan` does not set it. For a specifier written without
+   * an extension the order matters: the first extension whose candidate file appears in
+   * `symbols[]` wins. For one written with an emitted extension (`./repo.js`) the order is
+   * `EMITTED_EXTENSION_SOURCES`'s, and this list only filters it.
    */
   fileExtensions?: readonly string[]
   /**
@@ -791,11 +794,17 @@ function isRelativeSpecifier(specifier: string): boolean {
  * The source extensions TypeScript tries, in its order, for a relative specifier written with
  * an emitted-JavaScript extension. Under `node16`/`nodenext` a relative import of `repo.ts`
  * has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` ahead of a `repo.js`
- * beside it: the written file is the last resort, not the first probe.
+ * beside it: the written extension is probed only after the sources that compile to it.
+ * TypeScript's declaration probes (`.d.ts` and kin) are left out, since a declaration file
+ * declares no Symbol a call could resolve to.
+ *
+ * Kept here beside `DEFAULT_EXTENSIONS`, the other TypeScript / JavaScript knowledge the
+ * resolver holds, because the language plugin contract has no surface for resolution rules:
+ * its `fileExtensions` decides which plugin parses a file, not how a specifier reaches one.
  */
 const EMITTED_EXTENSION_SOURCES: ReadonlyMap<string, readonly string[]> = new Map([
   ["js", ["ts", "tsx", "js", "jsx"]],
-  ["jsx", ["tsx", "jsx"]],
+  ["jsx", ["tsx", "ts", "jsx", "js"]],
   ["mjs", ["mts", "mjs"]],
   ["cjs", ["cts", "cjs"]],
 ])
@@ -817,7 +826,9 @@ interface ResolveSpecifierInput {
  * A specifier that names a directory outright — `.`, `..`, or one ending in `/` — probes the
  * directory's index only, as TypeScript does: `./` must not reach a sibling `src.ts`. One
  * written with an emitted extension (`./repo.js`) probes the sources that compile to it
- * first, in `EMITTED_EXTENSION_SOURCES` order.
+ * first, in `EMITTED_EXTENSION_SOURCES` order, and still reaches a directory's index when no
+ * file matches (`repo.js/index.ts`): TypeScript falls back to the directory for every relative
+ * specifier outside ESM mode, which is the mode `./util` → `util/index.ts` already follows.
  */
 function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   const known = input.filesByLanguage.get(input.language)
@@ -849,8 +860,9 @@ function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
 
 /**
  * `src/repo.js` → `src/repo.ts`, `src/repo.tsx`, `src/repo.js`, `src/repo.jsx`: the files a
- * specifier with an emitted extension can name, limited to the extensions the language
- * declares. Empty for any other extension, so `./repo` and `./repo.ts` probe as before.
+ * specifier with an emitted extension can name, limited to the resolver's probe list
+ * (`ResolveCallGraphInput.fileExtensions`, dot-less). Empty for any other extension, so
+ * `./repo` and `./repo.ts` probe as before.
  */
 function emittedExtensionSources(joined: string, extensions: readonly string[]): string[] {
   const dot = joined.lastIndexOf(".")
