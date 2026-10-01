@@ -1,0 +1,787 @@
+{
+  "startedAt": "2026-10-01T03:11:48.049Z",
+  "options": {
+    "runs": 3,
+    "warmup": 1,
+    "diff": true
+  },
+  "generator": "0.4.0",
+  "environment": {
+    "node": "v24.21.0",
+    "platform": "linux-x64",
+    "cpus": 4,
+    "cpuModel": "AMD EPYC 7763 64-Core Processor",
+    "totalMemGiB": 16
+  },
+  "results": [
+    {
+      "id": "zustand",
+      "url": "https://github.com/pmndrs/zustand.git",
+      "head": "b57db4f86ef179285da216eeb291266da82c361c",
+      "base": "5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc",
+      "note": "Small single-package React state library — the floor of the size ladder.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 41.145639,
+        "maxRssKb": 85744,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          344.865077,
+          344.275851,
+          346.757209
+        ],
+        "wallMsMedian": 344.865077,
+        "wallMsMin": 344.275851,
+        "wallMsMax": 346.757209,
+        "peakRssKb": 137984,
+        "filesPerSecond": 142.08455209861683,
+        "irHash": "5121809d0e4e0804e7205128704934fecaf52ee3490e56ae5277ca0abc2571e1",
+        "deterministic": true,
+        "warnings": "⚠ 4 file(s) had recoverable parse errors.\n    src/middleware/subscribeWithSelector.ts: 2 errors, first at 30:77 — syntax error\n    src/react.ts: 2 errors, first at 40:7 — syntax error\n    src/traditional.ts: 2 errors, first at 48:7 — syntax error\n    src/vanilla.ts: 46:6 — syntax error\n"
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 49,
+        "parsedFiles": 49,
+        "keptSymbols": 91,
+        "droppedSymbols": 81,
+        "symbols": 172,
+        "dependencies": 39,
+        "totalCalls": 360,
+        "resolvedCalls": 57,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 21,
+          "external": 53,
+          "localScope": 30,
+          "noMatch": 199
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 235081
+      },
+      "diff": {
+        "wallMs": 1269.277074,
+        "peakRssKb": 142468,
+        "exitCode": 0,
+        "summary": {
+          "added": 3,
+          "changed": 3,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 1,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 0,
+          "unchanged": 165,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"5561e9bc2555b6e98ac2c6292219f3f9cd7e9bcc\": 4 file(s) had recoverable parse errors.\n    src/middleware/subscribeWithSelector.ts: 2 errors, first at 30:77 — syntax error\n    src/react.ts: 2 errors, first at 40:7 — syntax error\n    src/traditional.ts: 2 errors, first at 48:7 — syntax error\n    src/vanilla.ts: 46:6 — syntax error\n⚠ head (working tree): 4 file(s) had recoverable parse errors.\n    src/middleware/subscribeWithSelector.ts: 2 errors, first at 30:77 — syntax error\n    src/react.ts: 2 errors, first at 40:7 — syntax error\n    src/traditional.ts: 2 errors, first at 48:7 — syntax error\n    src/vanilla.ts: 46:6 — syntax error\n⚠ Files with recoverable parse errors (base 4, head 4) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 5521
+    },
+    {
+      "id": "express",
+      "url": "https://github.com/expressjs/express.git",
+      "head": "023767fe9872e029271df1418f73401bff20ff40",
+      "base": "bc7d155f53ef6457140dc2070b0b959869dd36da",
+      "note": "Plain JavaScript, no TypeScript — exercises the JS side of lang-typescript.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 38.289777,
+        "maxRssKb": 86444,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          492.316937,
+          495.707842,
+          508.131114
+        ],
+        "wallMsMedian": 495.707842,
+        "wallMsMin": 492.316937,
+        "wallMsMax": 508.131114,
+        "peakRssKb": 128044,
+        "filesPerSecond": 284.4417377605255,
+        "irHash": "85b995621a5a4cd098e66b46aceb78c4975e7d1c7e671406e9a52a64e8cd938e",
+        "deterministic": true,
+        "warnings": ""
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 141,
+        "parsedFiles": 141,
+        "keptSymbols": 662,
+        "droppedSymbols": 0,
+        "symbols": 662,
+        "dependencies": 29,
+        "totalCalls": 412,
+        "resolvedCalls": 43,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 40,
+          "external": 0,
+          "localScope": 57,
+          "noMatch": 272
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 578026
+      },
+      "diff": {
+        "wallMs": 1034.319826,
+        "peakRssKb": 150072,
+        "exitCode": 0,
+        "summary": {
+          "added": 4,
+          "changed": 1,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 0,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 6,
+          "unchanged": 657,
+          "unknown": 0
+        },
+        "warnings": ""
+      },
+      "elapsedMs": 5033
+    },
+    {
+      "id": "hono",
+      "url": "https://github.com/honojs/hono.git",
+      "head": "e2740d5a1bd0b4254e517e3af8b60789284bc7bd",
+      "base": "b0c2d90eb07fefa6c06dc556c97ed8ecffc8b2c0",
+      "note": "Mid-size server framework, heavy on generics and re-exports.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 63.08968,
+        "maxRssKb": 86424,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          1908.631795,
+          1882.152821,
+          1882.303776
+        ],
+        "wallMsMedian": 1882.303776,
+        "wallMsMin": 1882.152821,
+        "wallMsMax": 1908.631795,
+        "peakRssKb": 207996,
+        "filesPerSecond": 204.0053284151729,
+        "irHash": "47be80d95f7cb54196b27a6c34bfec8d0d0c1d485839451d707e32483b28a9e0",
+        "deterministic": true,
+        "warnings": "⚠ 8 file(s) had recoverable parse errors.\n    src/context.ts: 11 errors, first at 96:68 — missing token\n    src/helper/factory/index.ts: 23 errors, first at 25:16 — missing token\n    src/helper/ssg/middleware.ts: 2 errors, first at 32:26 — missing token\n    src/jsx/dom/index.ts: 169:8 — syntax error\n    src/jsx/hooks/index.ts: 179:37 — syntax error\n    src/jsx/index.ts: 112:8 — syntax error\n    src/types.ts: 848 errors, first at 1:1 — syntax error\n    src/utils/body.ts: 2 errors, first at 94:16 — missing token\n"
+      },
+      "metrics": {
+        "components": 1,
+        "totalFiles": 384,
+        "parsedFiles": 384,
+        "keptSymbols": 1098,
+        "droppedSymbols": 560,
+        "symbols": 1658,
+        "dependencies": 603,
+        "totalCalls": 4847,
+        "resolvedCalls": 769,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 806,
+          "external": 64,
+          "localScope": 483,
+          "noMatch": 2725
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 2572362
+      },
+      "diff": {
+        "wallMs": 3945.556633,
+        "peakRssKb": 287284,
+        "exitCode": 0,
+        "summary": {
+          "added": 13,
+          "changed": 63,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 18,
+          "depsRemoved": 5,
+          "depsUnknown": 0,
+          "droppedAdded": 0,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 1,
+          "removed": 3,
+          "unchanged": 1581,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"b0c2d90eb07fefa6c06dc556c97ed8ecffc8b2c0\": 8 file(s) had recoverable parse errors.\n    src/context.ts: 11 errors, first at 96:68 — missing token\n    src/helper/factory/index.ts: 23 errors, first at 25:16 — missing token\n    src/helper/ssg/middleware.ts: 2 errors, first at 32:26 — missing token\n    src/jsx/dom/index.ts: 169:8 — syntax error\n    src/jsx/hooks/index.ts: 179:37 — syntax error\n    src/jsx/index.ts: 112:8 — syntax error\n    src/types.ts: 848 errors, first at 1:1 — syntax error\n    src/utils/body.ts: 2 errors, first at 91:16 — missing token\n⚠ head (working tree): 8 file(s) had recoverable parse errors.\n    src/context.ts: 11 errors, first at 96:68 — missing token\n    src/helper/factory/index.ts: 23 errors, first at 25:16 — missing token\n    src/helper/ssg/middleware.ts: 2 errors, first at 32:26 — missing token\n    src/jsx/dom/index.ts: 169:8 — syntax error\n    src/jsx/hooks/index.ts: 179:37 — syntax error\n    src/jsx/index.ts: 112:8 — syntax error\n    src/types.ts: 848 errors, first at 1:1 — syntax error\n    src/utils/body.ts: 2 errors, first at 94:16 — missing token\n⚠ Files with recoverable parse errors (base 8, head 8) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 13757
+    },
+    {
+      "id": "zod",
+      "url": "https://github.com/colinhacks/zod.git",
+      "head": "cafbee4772ef481611fef6f5fb9ed9a1b9597069",
+      "base": "e8e206fa33ac5fe7ce20a2beb12d57b1cb3df653",
+      "note": "pnpm workspace, type-heavy library plus a Next.js docs app.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 70.487036,
+        "maxRssKb": 86676,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          2645.911638,
+          2641.129479,
+          2714.569162
+        ],
+        "wallMsMedian": 2645.911638,
+        "wallMsMin": 2641.129479,
+        "wallMsMax": 2714.569162,
+        "peakRssKb": 317016,
+        "filesPerSecond": 192.3722594095185,
+        "irHash": "669620fcf2bddb347c6946700f49b7fa0ec42ef65c0825233b23db794860aa85",
+        "deterministic": true,
+        "warnings": ""
+      },
+      "metrics": {
+        "components": 8,
+        "totalFiles": 509,
+        "parsedFiles": 509,
+        "keptSymbols": 2783,
+        "droppedSymbols": 1204,
+        "symbols": 3987,
+        "dependencies": 866,
+        "totalCalls": 6193,
+        "resolvedCalls": 1251,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 555,
+          "external": 287,
+          "localScope": 730,
+          "noMatch": 3370
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 5695939
+      },
+      "diff": {
+        "wallMs": 5634.247049,
+        "peakRssKb": 343956,
+        "exitCode": 0,
+        "summary": {
+          "added": 71,
+          "changed": 84,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 70,
+          "depsRemoved": 26,
+          "depsUnknown": 0,
+          "droppedAdded": 16,
+          "droppedRemoved": 2,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 3,
+          "removed": 46,
+          "unchanged": 3813,
+          "unknown": 0
+        },
+        "warnings": ""
+      },
+      "elapsedMs": 18842
+    },
+    {
+      "id": "trpc",
+      "url": "https://github.com/trpc/trpc.git",
+      "head": "4f5315219f947589c9ef0f67b7aa551243312d61",
+      "base": "b682e395881d3b6a49cf68338e58d5f714bc2e51",
+      "note": "Many small packages and example apps — the component detector's stress case.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-express",
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 136.199987,
+        "maxRssKb": 88888,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          2061.367893,
+          2078.742827,
+          2116.377219
+        ],
+        "wallMsMedian": 2078.742827,
+        "wallMsMin": 2061.367893,
+        "wallMsMax": 2116.377219,
+        "peakRssKb": 225920,
+        "filesPerSecond": 360.7949912122535,
+        "irHash": "782c3833ff0e9acbe60c3e0cbe2e62cfcc01bb51fb9c25792e5d6ef182d0d9bd",
+        "deterministic": true,
+        "warnings": "⚠ 1 file(s) had recoverable parse errors.\n    packages/tanstack-react-query/src/index.ts: 26:8 — syntax error\n"
+      },
+      "metrics": {
+        "components": 50,
+        "totalFiles": 750,
+        "parsedFiles": 750,
+        "keptSymbols": 1524,
+        "droppedSymbols": 908,
+        "symbols": 2432,
+        "dependencies": 567,
+        "totalCalls": 5210,
+        "resolvedCalls": 747,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 464,
+          "external": 876,
+          "localScope": 442,
+          "noMatch": 2681
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 3552261
+      },
+      "diff": {
+        "wallMs": 4394.963526,
+        "peakRssKb": 325404,
+        "exitCode": 0,
+        "summary": {
+          "added": 72,
+          "changed": 66,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 65,
+          "depsRemoved": 2,
+          "depsUnknown": 0,
+          "droppedAdded": 56,
+          "droppedRemoved": 2,
+          "droppedToggled": 0,
+          "moved": 41,
+          "movedChanged": 3,
+          "removed": 6,
+          "unchanged": 2194,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"b682e395881d3b6a49cf68338e58d5f714bc2e51\": 1 file(s) had recoverable parse errors.\n    packages/tanstack-react-query/src/index.ts: 26:8 — syntax error\n⚠ head (working tree): 1 file(s) had recoverable parse errors.\n    packages/tanstack-react-query/src/index.ts: 26:8 — syntax error\n⚠ Files with recoverable parse errors (base 1, head 1) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 15655
+    },
+    {
+      "id": "tanstack-query",
+      "url": "https://github.com/TanStack/query.git",
+      "head": "a85d4f16c9b44b5f9107e42cd2146739e2020788",
+      "base": "80fbf73e77892d702c107e14a84c219a8ed825dc",
+      "note": "Multi-framework monorepo — React, Solid, Svelte and Vue adapters over one core.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 282.776958,
+        "maxRssKb": 93784,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          3322.734719,
+          3386.051161,
+          3406.376696
+        ],
+        "wallMsMedian": 3386.051161,
+        "wallMsMin": 3322.734719,
+        "wallMsMax": 3406.376696,
+        "peakRssKb": 246644,
+        "filesPerSecond": 319.2509352637038,
+        "irHash": "1092dfa33fb41dfe5227c79dc6091642a97394de5a9aef88f08c4dd03cab0859",
+        "deterministic": true,
+        "warnings": "⚠ 1 file(s) had recoverable parse errors.\n    packages/react-query/src/index.ts: 7:8 — syntax error\n"
+      },
+      "metrics": {
+        "components": 101,
+        "totalFiles": 1081,
+        "parsedFiles": 1081,
+        "keptSymbols": 2234,
+        "droppedSymbols": 745,
+        "symbols": 2979,
+        "dependencies": 628,
+        "totalCalls": 8483,
+        "resolvedCalls": 779,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 1466,
+          "external": 1758,
+          "localScope": 409,
+          "noMatch": 4071
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 4789134
+      },
+      "diff": {
+        "wallMs": 8052.872239,
+        "peakRssKb": 365164,
+        "exitCode": 0,
+        "summary": {
+          "added": 4,
+          "changed": 50,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 20,
+          "depsRemoved": 21,
+          "depsUnknown": 0,
+          "droppedAdded": 0,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 7,
+          "movedChanged": 0,
+          "removed": 6,
+          "unchanged": 2918,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"80fbf73e77892d702c107e14a84c219a8ed825dc\": 1 file(s) had recoverable parse errors.\n    packages/react-query/src/index.ts: 7:8 — syntax error\n⚠ head (working tree): 1 file(s) had recoverable parse errors.\n    packages/react-query/src/index.ts: 7:8 — syntax error\n⚠ Files with recoverable parse errors (base 1, head 1) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 26179
+    },
+    {
+      "id": "shadcn-ui",
+      "url": "https://github.com/shadcn-ui/ui.git",
+      "head": "63c1308d112b6b1205d86244a156cca1abef5087",
+      "base": "43b8fb0f5250d52ab3a87fb38706b276ceeb3e40",
+      "note": "Next.js App Router site plus a large .tsx component registry.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 153.321772,
+        "maxRssKb": 90164,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          10372.967042,
+          10452.002586,
+          10358.971292
+        ],
+        "wallMsMedian": 10372.967042,
+        "wallMsMin": 10358.971292,
+        "wallMsMax": 10452.002586,
+        "peakRssKb": 512056,
+        "filesPerSecond": 377.1341395533569,
+        "irHash": "f5ae216b77140d2250bd6f48817559cc14ffbe4c6b74f0290f888a5510a02192",
+        "deterministic": true,
+        "warnings": ""
+      },
+      "metrics": {
+        "components": 5,
+        "totalFiles": 3912,
+        "parsedFiles": 3912,
+        "keptSymbols": 10090,
+        "droppedSymbols": 578,
+        "symbols": 10668,
+        "dependencies": 1535,
+        "totalCalls": 20571,
+        "resolvedCalls": 1945,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 1191,
+          "external": 6797,
+          "localScope": 1068,
+          "noMatch": 9570
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 20327983
+      },
+      "diff": {
+        "wallMs": 21457.605526,
+        "peakRssKb": 690604,
+        "exitCode": 0,
+        "summary": {
+          "added": 248,
+          "changed": 87,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 143,
+          "depsRemoved": 1,
+          "depsUnknown": 0,
+          "droppedAdded": 41,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 0,
+          "removed": 5,
+          "unchanged": 10292,
+          "unknown": 0
+        },
+        "warnings": ""
+      },
+      "elapsedMs": 66664
+    },
+    {
+      "id": "nest",
+      "url": "https://github.com/nestjs/nest.git",
+      "head": "39fbddae51281ca56bf2fed9123d98e61509066c",
+      "base": "55425779a1e2a1523b062a7dff872826641834d8",
+      "note": "NestJS itself: decorators everywhere, and past the 1,000-file roadmap target.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-express",
+          "framework-nestjs"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 191.698868,
+        "maxRssKb": 89852,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          3669.496727,
+          3684.838838,
+          3653.388596
+        ],
+        "wallMsMedian": 3669.496727,
+        "wallMsMin": 3653.388596,
+        "wallMsMax": 3684.838838,
+        "peakRssKb": 304064,
+        "filesPerSecond": 521.59741305037,
+        "irHash": "d2e483c444e2632d8456a28767b4aaf245820b270ca23ca6054bea5a1bcec847",
+        "deterministic": true,
+        "warnings": "⚠ 2 file(s) had recoverable parse errors.\n    packages/microservices/test/decorators/event-pattern.decorator.spec.ts: 5 errors, first at 76:8 — syntax error\n    packages/microservices/test/decorators/message-pattern.decorator.spec.ts: 5 errors, first at 58:8 — syntax error\n"
+      },
+      "metrics": {
+        "components": 9,
+        "totalFiles": 1914,
+        "parsedFiles": 1914,
+        "keptSymbols": 4581,
+        "droppedSymbols": 816,
+        "symbols": 5397,
+        "dependencies": 159,
+        "totalCalls": 9767,
+        "resolvedCalls": 212,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 3590,
+          "external": 2058,
+          "localScope": 870,
+          "noMatch": 3037
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 7591020
+      },
+      "diff": {
+        "wallMs": 7690.640022,
+        "peakRssKb": 369248,
+        "exitCode": 0,
+        "summary": {
+          "added": 27,
+          "changed": 85,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 0,
+          "depsRemoved": 0,
+          "depsUnknown": 0,
+          "droppedAdded": 3,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 1,
+          "movedChanged": 1,
+          "removed": 0,
+          "unchanged": 5280,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"55425779a1e2a1523b062a7dff872826641834d8\": 2 file(s) had recoverable parse errors.\n    packages/microservices/test/decorators/event-pattern.decorator.spec.ts: 5 errors, first at 76:8 — syntax error\n    packages/microservices/test/decorators/message-pattern.decorator.spec.ts: 5 errors, first at 58:8 — syntax error\n⚠ head (working tree): 2 file(s) had recoverable parse errors.\n    packages/microservices/test/decorators/event-pattern.decorator.spec.ts: 5 errors, first at 76:8 — syntax error\n    packages/microservices/test/decorators/message-pattern.decorator.spec.ts: 5 errors, first at 58:8 — syntax error\n⚠ Files with recoverable parse errors (base 2, head 2) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 26246
+    },
+    {
+      "id": "cal-com",
+      "url": "https://github.com/calcom/cal.com.git",
+      "head": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+      "base": "46eb533dbd20b74686efa520684e662c0f21051c",
+      "note": "Large production Next.js + tRPC + Prisma monorepo — the top of the ladder.",
+      "detected": {
+        "languages": [
+          "lang-typescript"
+        ],
+        "frameworks": [
+          "framework-nestjs",
+          "framework-next",
+          "framework-react"
+        ],
+        "effects": []
+      },
+      "init": {
+        "wallMs": 511.661171,
+        "maxRssKb": 94504,
+        "exitCode": 0
+      },
+      "scan": {
+        "runs": 3,
+        "exitCode": 0,
+        "wallMsSamples": [
+          13476.214529,
+          13499.233195,
+          13290.316461
+        ],
+        "wallMsMedian": 13476.214529,
+        "wallMsMin": 13290.316461,
+        "wallMsMax": 13499.233195,
+        "peakRssKb": 573716,
+        "filesPerSecond": 371.17248239377597,
+        "irHash": "e56bd094e68abd4e5f50d5e8925373cd9b3873cdc06843c44be5ab971db819a7",
+        "deterministic": true,
+        "warnings": "⚠ 8 file(s) had recoverable parse errors.\n    packages/emails/src/components/BaseEmailHtml.tsx: 6 errors, first at 1:1 — syntax error\n    packages/emails/src/components/EmailCommonDivider.tsx: 1:1 — syntax error\n    packages/emails/src/components/EmailHead.tsx: 12 errors, first at 5:10 — syntax error\n    packages/emails/src/components/V2BaseEmailHtml.tsx: 5 errors, first at 1:1 — syntax error\n    packages/features/eventtypes/lib/getEventTypesPublic.ts: 33:60 — missing token\n    packages/features/webhooks/lib/repository/WebhookRepository.ts: 134:70 — missing token\n    packages/trpc/server/routers/viewer/availability/team/listTeamAvailability.handler.ts: 179:4 — missing token\n    packages/trpc/server/routers/viewer/bookings/get.handler.ts: 882:58 — missing token\n"
+      },
+      "metrics": {
+        "components": 113,
+        "totalFiles": 5002,
+        "parsedFiles": 5002,
+        "keptSymbols": 13460,
+        "droppedSymbols": 3695,
+        "symbols": 17155,
+        "dependencies": 2923,
+        "totalCalls": 51567,
+        "resolvedCalls": 3439,
+        "unresolved": {
+          "ambiguous": 0,
+          "dynamic": 8281,
+          "external": 14289,
+          "localScope": 3287,
+          "noMatch": 22271
+        },
+        "skippedFiles": 0,
+        "skippedByReason": {},
+        "skippedSample": [],
+        "irBytes": 30127017
+      },
+      "diff": {
+        "wallMs": 27651.892345,
+        "peakRssKb": 987920,
+        "exitCode": 0,
+        "summary": {
+          "added": 21,
+          "changed": 90,
+          "componentsAdded": 0,
+          "componentsChanged": 0,
+          "componentsRemoved": 0,
+          "depsAdded": 10,
+          "depsRemoved": 8,
+          "depsUnknown": 0,
+          "droppedAdded": 1,
+          "droppedRemoved": 0,
+          "droppedToggled": 0,
+          "moved": 0,
+          "movedChanged": 1,
+          "removed": 0,
+          "unchanged": 17042,
+          "unknown": 0
+        },
+        "warnings": "⚠ base ref \"46eb533dbd20b74686efa520684e662c0f21051c\": 8 file(s) had recoverable parse errors.\n    packages/emails/src/components/BaseEmailHtml.tsx: 6 errors, first at 1:1 — syntax error\n    packages/emails/src/components/EmailCommonDivider.tsx: 1:1 — syntax error\n    packages/emails/src/components/EmailHead.tsx: 12 errors, first at 5:10 — syntax error\n    packages/emails/src/components/V2BaseEmailHtml.tsx: 5 errors, first at 1:1 — syntax error\n    packages/features/eventtypes/lib/getEventTypesPublic.ts: 33:60 — missing token\n    packages/features/webhooks/lib/repository/WebhookRepository.ts: 134:70 — missing token\n    packages/trpc/server/routers/viewer/availability/team/listTeamAvailability.handler.ts: 179:4 — missing token\n    packages/trpc/server/routers/viewer/bookings/get.handler.ts: 882:58 — missing token\n⚠ head (working tree): 8 file(s) had recoverable parse errors.\n    packages/emails/src/components/BaseEmailHtml.tsx: 6 errors, first at 1:1 — syntax error\n    packages/emails/src/components/EmailCommonDivider.tsx: 1:1 — syntax error\n    packages/emails/src/components/EmailHead.tsx: 12 errors, first at 5:10 — syntax error\n    packages/emails/src/components/V2BaseEmailHtml.tsx: 5 errors, first at 1:1 — syntax error\n    packages/features/eventtypes/lib/getEventTypesPublic.ts: 33:60 — missing token\n    packages/features/webhooks/lib/repository/WebhookRepository.ts: 134:70 — missing token\n    packages/trpc/server/routers/viewer/availability/team/listTeamAvailability.handler.ts: 179:4 — missing token\n    packages/trpc/server/routers/viewer/bookings/get.handler.ts: 882:58 — missing token\n⚠ Files with recoverable parse errors (base 8, head 8) reached the IR rather than stats.skippedFiles, so nothing marks them as doubtful. Their Symbol sets can be short, which moves added / removed without a file having been skipped.\n"
+      },
+      "elapsedMs": 89602
+    }
+  ]
+}
