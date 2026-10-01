@@ -1,11 +1,11 @@
 import {
   component,
-  decorator,
   effect,
   makeIR,
   makeSymbol,
   sliceId,
   symbolId,
+  zeroFp,
 } from "@aburi/test-support"
 import type { SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
@@ -36,11 +36,20 @@ describe("projections of workspace-sized lists", () => {
   })
 
   it("renders a boundary effect surface of 130,000 Symbols", () => {
-    const symbols = Array.from({ length: 130_000 }, (_, i) => ({
-      ...symbolAt(i),
-      decorators: [decorator({ name: "Get", boundary: true })],
-      effects: [effect({ id: "db.read", target: "db.user.find", plugin: "effects-prisma" })],
-    }))
+    // The surface takes one line per boundary Symbol, and each of them renders in the Symbols
+    // section too, so that block is kept short: one file, a framework extKind rather than a
+    // decorator row, and a zero fingerprint (no `<sub>` line). With a file and a decorator per
+    // Symbol the page took more than twice as long, and over 30 s on a loaded macOS runner.
+    const reads = [effect({ id: "db.read", target: "db.user.find", plugin: "effects-prisma" })]
+    const symbols = Array.from({ length: 130_000 }, (_, i) =>
+      makeSymbol({
+        id: `ts:src/routes.ts#f${i}`,
+        name: `f${i}`,
+        extKind: "framework:acme:route",
+        effects: reads,
+        fingerprint: zeroFp(),
+      }),
+    )
     const md = projectComponent({
       component: component({ id: "app", name: "App" }),
       symbols,
