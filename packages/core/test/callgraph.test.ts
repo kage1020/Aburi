@@ -229,14 +229,31 @@ describe("resolveCallGraph", () => {
    * complete file specifier, does not.
    */
   describe("import scope: relative specifier spellings (CR2a, CR2b)", () => {
-    function resolveFrom(callerFile: string, specifier: string, calleeFiles: readonly string[]) {
-      const caller = withCalls(`ts:${callerFile}#caller`, [{ target: "helper", line: 4 }])
+    /** The caller's one call, after checking that its edge agrees with it (CR2: confidence `high`). */
+    function resolveFrom(
+      callerFile: string,
+      specifier: string,
+      calleeFiles: readonly string[],
+      fileExtensions?: readonly string[],
+    ) {
+      const callerId = `ts:${callerFile}#caller`
+      const caller = withCalls(callerId, [{ target: "helper", line: 4 }])
       const callees = calleeFiles.map((file) => makeSymbol(`ts:${file}#helper`))
       const imports = new Map<string, readonly ImportEdge[]>([
         [callerFile, [importEdge({ source: specifier, symbols: ["helper"] })]],
       ])
-      const result = resolveCallGraph({ symbols: [caller, ...callees], importsByFile: imports })
-      return result.symbols.find((symbol) => symbol.id === `ts:${callerFile}#caller`)?.calls[0]
+      const result = resolveCallGraph({
+        symbols: [caller, ...callees],
+        importsByFile: imports,
+        ...(fileExtensions === undefined ? {} : { fileExtensions }),
+      })
+      const call = result.symbols.find((symbol) => symbol.id === callerId)?.calls[0]
+      expect(result.edges).toEqual(
+        call?.resolved
+          ? [{ from: callerId, to: call.resolved, via: "call", confidence: "high", line: 4 }]
+          : [],
+      )
+      return call
     }
 
     it.each([
@@ -251,6 +268,9 @@ describe("resolveCallGraph", () => {
       [".", "src/index.ts"],
       ["./", "src/index.ts"],
       ["..", "index.ts"],
+      ["../", "index.ts"],
+      ["./repo/..", "src/index.ts"],
+      ["./repo.ts", "src/repo.ts"],
     ])("%s from src/a.ts resolves to %s", (specifier, file) => {
       expect(resolveFrom("src/a.ts", specifier, [file])?.resolved).toBe(`ts:${file}#helper`)
     })
@@ -301,11 +321,57 @@ describe("resolveCallGraph", () => {
       expect(resolveFrom("src/a.ts", "./repo.mjs", ["src/repo.ts"])?.resolved).toBeNull()
     })
 
-    it("probes only the directory's index for `.` and `./`, never a sibling file", () => {
+    it("probes only the directory's index for a last segment that is empty, `.` or `..`, never a sibling file", () => {
       // `src.ts` beside `src/` is what `<dir>.<ext>` would probe for `./` from `src/a.ts`.
       expect(resolveFrom("src/a.ts", "./", ["src.ts"])?.resolved).toBeNull()
       expect(resolveFrom("src/a.ts", ".", ["src.ts"])?.resolved).toBeNull()
+      expect(resolveFrom("src/a.ts", "./repo/..", ["src.ts"])?.resolved).toBeNull()
     })
+
+    it("takes a path written with a non-emitted extension as written, ahead of any other candidate", () => {
+      const files = ["src/repo.tsx", "src/repo.ts.ts", "src/repo.ts"]
+      const call = resolveFrom("src/a.ts", "./repo.ts", files)
+      expect(call?.resolved).toBe("ts:src/repo.ts#helper")
+    })
+
+    it("probes the file as written whatever the probe list holds, and filters only the other sources", () => {
+      expect(resolveFrom("src/a.ts", "./repo.js", ["src/repo.js"], ["ts"])?.resolved).toBe(
+        "ts:src/repo.js#helper",
+      )
+      expect(
+        resolveFrom("src/a.ts", "./repo.js", ["src/repo.tsx"], ["ts", "js"])?.resolved,
+      ).toBeNull()
+    })
+  })
+
+  it("import scope: answers each caller from its own directory and language when they share a specifier", () => {
+    // Relative specifiers are resolved once per (language, directory, specifier) per run; a key
+    // missing either part would hand the second asker the first one's file.
+    const py = { language: makeLanguageId("py") }
+    const symbols = [
+      withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 4 }]),
+      withCalls("ts:lib/a.ts#caller", [{ target: "helper", line: 4 }]),
+      withCalls("py:src/a.py#caller", [{ target: "helper", line: 4 }], py),
+      makeSymbol("ts:src/repo.ts#helper"),
+      makeSymbol("ts:lib/repo.ts#helper"),
+      makeSymbol("py:src/repo.py#helper", py),
+    ]
+    const imports = new Map<string, readonly ImportEdge[]>(
+      ["src/a.ts", "lib/a.ts", "src/a.py"].map((file) => [
+        file,
+        [importEdge({ source: "./repo", symbols: ["helper"] })],
+      ]),
+    )
+    const result = resolveCallGraph({
+      symbols,
+      importsByFile: imports,
+      fileExtensions: ["ts", "py"],
+    })
+    expect(result.edges.map((edge) => [edge.from, edge.to])).toEqual([
+      ["py:src/a.py#caller", "py:src/repo.py#helper"],
+      ["ts:lib/a.ts#caller", "ts:lib/repo.ts#helper"],
+      ["ts:src/a.ts#caller", "ts:src/repo.ts#helper"],
+    ])
   })
 
   it("file scope wins over import scope when both bindings exist", () => {

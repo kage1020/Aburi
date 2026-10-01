@@ -46,7 +46,9 @@ export interface ResolveCallGraphInput {
    * TypeScript / JavaScript set — and `scan` does not set it. For a specifier written without
    * an extension the order matters: the first extension whose candidate file appears in
    * `symbols[]` wins. For one written with an emitted extension (`./repo.js`) the order is
-   * `EMITTED_EXTENSION_SOURCES`'s, and this list only filters it.
+   * `EMITTED_EXTENSION_SOURCES`'s, and this list only filters it. The file a specifier names
+   * as written (`./repo.js` → `repo.js`, `./repo.ts` → `repo.ts`) is probed whatever this list
+   * says.
    */
   fileExtensions?: readonly string[]
   /**
@@ -146,6 +148,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
   const filesByLanguage = indexFilesByLanguage(input.symbols)
   const componentIndex = indexByComponent(input.symbols)
   const workspaceIndex = indexByWorkspace(input.symbols)
+  const relativeTargets = new Map<string, string | null>()
 
   const nextSymbols: IRSymbol[] = []
   const edges: CallEdge[] = []
@@ -181,6 +184,7 @@ export function resolveCallGraph(input: ResolveCallGraphInput): ResolveCallGraph
           workspaceIndex,
           extensions,
           parameterNames,
+          relativeTargets,
         },
         trace,
       )
@@ -542,6 +546,8 @@ interface ResolveTargetContext {
   workspaceIndex: WorkspaceIndex
   extensions: readonly string[]
   parameterNames: ReadonlySet<string>
+  /** `resolveRelativeSpecifier`'s answers for this run, filled by `resolveRelativeSpecifierOnce`. */
+  relativeTargets: Map<string, string | null>
 }
 
 function resolveTarget(ctx: ResolveTargetContext, trace: ResolutionTrace): ResolutionHit | null {
@@ -675,13 +681,7 @@ function resolveInImportScope(
   for (const edge of ctx.imports) {
     if (edge.dynamic) continue
     if (!isRelativeSpecifier(edge.source)) continue
-    const targetFile = resolveRelativeSpecifier({
-      callerFile: ctx.caller.source.file,
-      specifier: edge.source,
-      language: ctx.caller.language,
-      extensions: ctx.extensions,
-      filesByLanguage: ctx.filesByLanguage,
-    })
+    const targetFile = resolveRelativeSpecifierOnce(ctx, edge.source)
     if (targetFile === null) continue
 
     if (edge.symbols === "*") {
@@ -707,6 +707,30 @@ function resolveInImportScope(
   const [only] = candidates
   if (only === undefined) return null
   return { id: only, confidence: "high" }
+}
+
+/**
+ * `resolveRelativeSpecifier` for the caller's file, answered once per run. Import scope asks
+ * it for every import edge of every unresolved call, but the answer depends only on the
+ * language, the caller's directory and the specifier (the probe list and the Symbol files are
+ * fixed for the run), so a file with C unresolved calls and I imports asks it I times, not
+ * C × I. Neither a language id nor a path can hold NUL and the specifier comes last, so the
+ * key splits one way only, even for a specifier that decoded a `\0` (lang-plugin.md LP26k).
+ */
+function resolveRelativeSpecifierOnce(ctx: ResolveTargetContext, specifier: string): string | null {
+  const callerFile = ctx.caller.source.file
+  const key = `${ctx.caller.language}\0${dirname(callerFile)}\0${specifier}`
+  const cached = ctx.relativeTargets.get(key)
+  if (cached !== undefined) return cached
+  const resolved = resolveRelativeSpecifier({
+    callerFile,
+    specifier,
+    language: ctx.caller.language,
+    extensions: ctx.extensions,
+    filesByLanguage: ctx.filesByLanguage,
+  })
+  ctx.relativeTargets.set(key, resolved)
+  return resolved
 }
 
 /**
@@ -795,8 +819,9 @@ function isRelativeSpecifier(specifier: string): boolean {
  * an emitted-JavaScript extension. Under `node16`/`nodenext` a relative import of `repo.ts`
  * has to be written `./repo.js`, and TypeScript resolves it to `repo.ts` ahead of a `repo.js`
  * beside it: the written extension is probed only after the sources that compile to it.
- * TypeScript's declaration probes (`.d.ts` and kin) are left out, since a declaration file
- * declares no Symbol a call could resolve to.
+ * The declaration extensions TypeScript probes between the source and the emitted file
+ * (`.d.ts`, `.d.mts`, `.d.cts`) are left out on purpose: drop-list.md removes those files
+ * before extraction, so none of them can be in the Symbol table.
  *
  * Kept here beside `DEFAULT_EXTENSIONS`, the other TypeScript / JavaScript knowledge the
  * resolver holds, because the language plugin contract has no surface for resolution rules:
@@ -823,12 +848,15 @@ interface ResolveSpecifierInput {
  * Symbol. Directory targets probe `<path>/index.<ext>` per call-resolution.md
  * import specifier resolution, step 3.
  *
- * A specifier that names a directory outright — `.`, `..`, or one ending in `/` — probes the
- * directory's index only, as TypeScript does: `./` must not reach a sibling `src.ts`. One
- * written with an emitted extension (`./repo.js`) probes the sources that compile to it
- * first, in `EMITTED_EXTENSION_SOURCES` order, and still reaches a directory's index when no
- * file matches (`repo.js/index.ts`): TypeScript falls back to the directory for every relative
- * specifier outside ESM mode, which is the mode `./util` → `util/index.ts` already follows.
+ * A specifier that names a directory outright — one whose last segment is empty, `.` or `..`
+ * (`.`, `..`, `./`, `../`, `./repo/..`) — probes the directory's index only, never
+ * `<dir>.<ext>`: `./` must not reach a sibling `src.ts`. One written with an emitted extension
+ * (`./repo.js`) probes the sources that compile to it, in `EMITTED_EXTENSION_SOURCES` order,
+ * in place of the path as written, and still reaches a directory's index when no file matches
+ * (`repo.js/index.ts`). TypeScript resolves a directory to its index only outside ESM mode (in
+ * ESM mode none of these resolve, nor does `./util`); the resolver carries no per-file module
+ * mode, so it always takes the answer outside ESM mode, which `./util` → `util/index.ts`
+ * already follows.
  */
 function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   const known = input.filesByLanguage.get(input.language)
@@ -841,10 +869,9 @@ function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
   const lastSegment = input.specifier.slice(input.specifier.lastIndexOf("/") + 1)
   const namesDirectory = lastSegment === "" || lastSegment === "." || lastSegment === ".."
   if (!namesDirectory) {
-    for (const candidate of emittedExtensionSources(joined, input.extensions)) {
+    for (const candidate of emittedExtensionSources(joined, input.extensions) ?? [joined]) {
       if (known.has(candidate)) return candidate
     }
-    if (known.has(joined)) return joined
     for (const ext of input.extensions) {
       const candidate = `${joined}.${ext}`
       if (known.has(candidate)) return candidate
@@ -860,17 +887,23 @@ function resolveRelativeSpecifier(input: ResolveSpecifierInput): string | null {
 
 /**
  * `src/repo.js` → `src/repo.ts`, `src/repo.tsx`, `src/repo.js`, `src/repo.jsx`: the files a
- * specifier with an emitted extension can name, limited to the resolver's probe list
- * (`ResolveCallGraphInput.fileExtensions`, dot-less). Empty for any other extension, so
- * `./repo` and `./repo.ts` probe as before.
+ * specifier with an emitted extension can name, in order. Every row holds the written
+ * extension itself, so the file as written is reached in its row's place and only after the
+ * sources that compile to it. The other extensions are limited to the resolver's probe list
+ * (`ResolveCallGraphInput.fileExtensions`, dot-less); the written one is kept whatever the
+ * list says, as a path probed as written always was. Null for any other spelling, so `./repo`
+ * and `./repo.ts` are probed as written.
  */
-function emittedExtensionSources(joined: string, extensions: readonly string[]): string[] {
+function emittedExtensionSources(joined: string, extensions: readonly string[]): string[] | null {
   const dot = joined.lastIndexOf(".")
-  if (dot <= joined.lastIndexOf("/") + 1) return []
-  const sources = EMITTED_EXTENSION_SOURCES.get(joined.slice(dot + 1))
-  if (sources === undefined) return []
+  if (dot <= joined.lastIndexOf("/") + 1) return null
+  const written = joined.slice(dot + 1)
+  const sources = EMITTED_EXTENSION_SOURCES.get(written)
+  if (sources === undefined) return null
   const stem = joined.slice(0, dot)
-  return sources.filter((ext) => extensions.includes(ext)).map((ext) => `${stem}.${ext}`)
+  return sources
+    .filter((ext) => ext === written || extensions.includes(ext))
+    .map((ext) => `${stem}.${ext}`)
 }
 
 function dirname(posixPath: string): string {

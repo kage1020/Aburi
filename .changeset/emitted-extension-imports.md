@@ -12,5 +12,6 @@ rescue it. A specifier with an emitted extension now probes the sources that com
 first, in TypeScript's order (`.js` → `.ts`, `.tsx`, `.js`, `.jsx`; `.jsx` → `.tsx`, `.ts`,
 `.jsx`, `.js`; `.mjs` → `.mts`, `.mjs`; `.cjs` → `.cts`, `.cjs`).
 The specifiers `.` and `..` are now read as relative (they were bucketed `external`), and a
-specifier that names a directory (`.`, `..`, or one ending in `/`) probes only that directory's
-index, so `./` no longer reaches a sibling `src.ts`.
+specifier that names a directory (`.`, `..`, or one whose last segment is empty, `.` or `..`,
+such as `./` or `./y/..`) probes only that directory's index, so `./` no longer reaches a
+sibling `src.ts`.
