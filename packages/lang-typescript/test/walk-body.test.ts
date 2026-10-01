@@ -1,6 +1,6 @@
 import type { Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { BACKSLASH, walkFirstSymbol } from "./fixtures/ctx"
+import { BACKSLASH, walkFirstSymbol, walkOf } from "./fixtures/ctx"
 
 function typesOf(rules: Rule[]): string[] {
   return rules.map((r) => r.type)
@@ -149,6 +149,83 @@ describe("walkBody — rules (LP16-LP20)", () => {
     expect(calls.map((c) => c.literalArgs)).toEqual([
       [`${BACKSLASH}u12b/a`],
       [`${BACKSLASH}u12b/b`],
+    ])
+  })
+})
+
+/**
+ * An arrow written with an expression body returns that expression. Reading it as anything
+ * other than `return <expr>` makes one function report differently by spelling: the block
+ * twin gets a `return` rule, and an edit to the concise one moves no `logic` fingerprint.
+ */
+describe("walkBody — a concise arrow body (LP19a)", () => {
+  const rulesOf = async (source: string) => (await walkFirstSymbol(source)).rules
+
+  it.each([
+    ["a comparison", 'u.role === "admin"'],
+    ["a ternary, in the parentheses a formatter adds", "(a > b ? a : b)"],
+    ["an object literal, in the parentheses the grammar requires", '({ ...a, status: "ok" })'],
+    ["a call combined with something else", "f(a) + 1"],
+    ["an awaited call", "await f(a)"],
+  ])("reads %s as the block spelling's `return`", async (_label, expr) => {
+    const params = "(a: any, b: any, u: any)"
+    const concise = await rulesOf(`export const f = ${params} => ${expr}`)
+    const block = await rulesOf(
+      `export function f${params} { return ${expr.replace(/^\((.*)\)$/, "$1")} }`,
+    )
+
+    expect(concise).toHaveLength(1)
+    expect(concise).toEqual(block)
+  })
+
+  it.each([
+    ["one call", "(id: string) => fetchUser(id)", ["fetchUser"]],
+    ["one `new`", "(id: string) => new User(id)", ["User"]],
+    ["a member chain", "(u: any) => u.role", []],
+    ["a literal", '() => "admin"', []],
+    ["a negated name", "(x: boolean) => !x", []],
+  ])("adds no rule for %s, as `return` would not", async (_label, arrow, targets) => {
+    const { rules, calls } = await walkFirstSymbol(`export const f = ${arrow}`)
+
+    expect(rules).toEqual([])
+    expect(calls.map((c) => c.target)).toEqual(targets)
+  })
+
+  it("still records the calls inside a returned expression", async () => {
+    const { rules, calls } = await walkFirstSymbol("export const f = (a: number) => g(a) > h(a)")
+
+    expect(rules.map((r) => r.expr)).toEqual(["g(a) > h(a)"])
+    expect(calls.map((c) => c.target)).toEqual(["g", "h"])
+  })
+
+  it("puts the rule on the expression's line", async () => {
+    const { rules } = await walkFirstSymbol(
+      ["export const f = (a: number, b: number) =>", "  a + b"].join("\n"),
+    )
+
+    expect(rules.map((r) => [r.type, r.line])).toEqual([["return", 2]])
+  })
+
+  it("covers a class field holding an arrow, and leaves the class without the rule", async () => {
+    const source = 'export class C {\n  isAdmin = (u: any) => u.role === "admin"\n}'
+
+    expect((await walkOf(source, "ts:src/a.ts#C")).rules).toEqual([])
+    expect((await walkOf(source, "ts:src/a.ts#C.isAdmin")).rules.map((r) => r.expr)).toEqual([
+      'u.role === "admin"',
+    ])
+  })
+
+  it("covers a registered handler", async () => {
+    const source = 'app.get("/x", (req: any, res: any) => req.user ?? res.anon)'
+
+    expect((await walkOf(source, "ts:src/a.ts#app__get__$x__d0")).rules.map((r) => r.expr)).toEqual(
+      ["req.user ?? res.anon"],
+    )
+  })
+
+  it("covers a default-exported arrow", async () => {
+    expect((await rulesOf("export default (x: number) => x + 1")).map((r) => r.expr)).toEqual([
+      "x + 1",
     ])
   })
 })

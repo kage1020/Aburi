@@ -175,6 +175,8 @@ A `return` statement is **not turned into a rule** when its returned expression 
 - template literals with interpolation (`` return `hello ${name}` ``)
 - new expressions composed with something else (`return new Foo() ?? bar`)
 
+An arrow's expression body is its returned value, so it goes through the same determination as `return <expr>`: `(u) => u.role === "admin"` gets the `return` rule `function f(u) { return u.role === "admin" }` gets, `(id) => fetchUser(id)` gets none and records the call (§5.4), and `(u) => u.role` gets none (§5.5). One pair of parentheses around the body is not part of `expr` — the grammar requires them around an object literal (`() => ({ a: 1 })`), and the block spelling `return { a: 1 }` has nothing to match them. The rule's `line` is the expression's.
+
 ### 5.4 When the return is a single call_expression only
 
 When the returned expression is **a single call**, as in `return foo()` / `return this.bar()`:
@@ -312,6 +314,7 @@ Properties the extraction pipeline must satisfy.
 | C3 | method containing only `return this.foo()` | No return in rules; `this.foo` in calls |
 | C4 | method with `return a + b` | rules contain a return (expr: "a + b") |
 | C5 | method with `return { ...x, status: 'ok' }` | rules contain a return |
+| C6 | an arrow with an expression body — `(a, b) => a + b`, `() => ({ ...x, status: 'ok' })`, `(id) => fetchUser(id)` | what C4 / C5 / C3 give the block spelling: a return (expr: "a + b"), a return (expr: "{ ...x, status: 'ok' }"), no return and `fetchUser` in calls |
 
 ### 8.4 Config/Plugin (Category D)
 
