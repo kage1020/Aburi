@@ -135,11 +135,11 @@ group both sides by (sym.kind, sym.fingerprint.logic) (excluding dropped)
   → a group is {bases, heads} that can only pair with each other
 
 for each group:
-  if group.logic == EMPTY_LOGIC:
-    # shared by every Symbol with no rules and no effects: no evidence of identity
+  if the group's logic names nothing:
+    # a value unrelated bodies share (fingerprint.md §4.8): no evidence of identity
     drop every base and head with nameEvidence(name) <= 1      # §3.4.3, inadmissible
   while bases and heads remain:
-    if len(bases) == 1 and group.logic != EMPTY_LOGIC:
+    if len(bases) == 1 and the group's logic names something:
       # identical logic is proof enough on its own; no similarity test
       pair with the head of highest nameSimilarity, ties to the lower head id
       rationale: 'logic-fingerprint'
@@ -156,11 +156,17 @@ for each group:
 
 Matching logic fingerprint = same meaning. This catches a good share of "file move without rename" and "file move with a minor refactor".
 
-**Except for the empty one.** The logic axis hashes `rules[]` and `effects[]` only ([`fingerprint.md`](./fingerprint.md) §4.1), so every Symbol with neither — a class, an enum, a constructor, a body that only calls something or returns a literal — carries one value, `EMPTY_LOGIC` (exported as `EMPTY_LOGIC_FINGERPRINT`). Sharing it says nothing about what a Symbol does, as sharing the dropped sentinel says nothing. Its group therefore has no lone-candidate branch: every pair in it must reach the 0.85 name bar, and both names must say more than one word, the admissibility rule §3.4.3 applies to stage 4 for the same reason. Without that, a deleted function paired with whatever empty-logic head was closest by name — an unrelated class added anywhere in the workspace — and `--fail-on removed` never saw the deletion. Whether a pair forms also no longer depends on how many other empty-logic Symbols were deleted in the same change. A class that moved file without git rename information still pairs when its name says two words or more (`InvoiceRenderer`); one of one word (`Invoice`) is reported as added + removed, as stage 4 would.
+**Except where the logic names nothing.** A rule's `type` and `loopKind` say what shape a body has, not what it does ([`fingerprint.md`](./fingerprint.md) §4.8), so a Symbol with no effect and no rule carrying more — a class, an enum, a constructor, a body that only calls something or returns a literal, a body that is one `for` loop over calls, one `try` — shares its logic value with every unrelated body of that shape. That two Symbols share the hash is still true, and the group is keyed on it, but agreement on an axis that says nothing is no evidence that they are one Symbol, as sharing the dropped sentinel is none. Such a group therefore has no lone-candidate branch: every pair in it must reach the 0.85 name bar, and both names must say more than one word. That is the name half of what §3.4.3 skips in stage 4, for the same reason — the name is all there is to go on. The other half, `h.signature === null`, is not taken: every class carries a null signature, so it would refuse every class this group exists to pair. Without this, a deleted function paired with whatever head of its group was closest by name — an unrelated function, or, before the kind joined the key, an unrelated class added anywhere in the workspace — and `--fail-on removed` never saw the deletion.
 
-The kind is part of the group key for the reason it is part of stage 4's bucket key (§3.4.0): a function and a class are never one Symbol, whatever their bodies hash to.
+A pair below the bar is now refused whether or not its base was the last one left in the group, where the lone branch used to take it. Which of several bases above the bar takes a shared head is still §3.8's call, so group membership still decides that much.
 
-Every head symbol that **could not be paired in stage 3 falls through to stage 4**. Even when stage 3 found a best candidate below the threshold, it is re-evaluated in stage 4 without exception.
+**What this gives up.** In such a group a move is settled by its name alone. A class that moved file without git rename information pairs when its name barely changed (similarity ≥ 0.85) and says two words or more: `InvoiceRenderer` that moved is a move, while `Invoice` that moved and `InvoiceRenderer` renamed to `InvoicePrinter` (similarity 1/3) are each added + removed. No later stage takes these back. Stage 4 skips a head with a null signature (§3.4.3), and every class, interface, type alias and enum carries one, as does a `const` that does not hold a function — `DEFAULT_TIMEOUT` → `REQUEST_TIMEOUT` goes the same way as the class rename. Stage 4.5 takes only dropped Symbols. A function or method has a signature and gets stage 4 under its own rules, which refuse `Cls.getUser` → `Cls.fetchUser` too (member similarity 1/3, under the 0.95 row): with a body that only calls something, that rename was one `moved+changed` through the lone branch and is added + removed now.
+
+An owner and its members are paired independently. `class Invoice { render() }` moved file is added + removed while `Invoice.render`, whose name says two words, is moved. A renamed class whose methods pair through §3.4.6's gate was already reported the same way; nothing reconciles an owner with its members.
+
+The kind is part of the group key for the reason it is part of stage 4's bucket key (§3.4.0): a function and a class are never one Symbol, whatever their bodies hash to. It also stops a Symbol whose kind changes while it moves file, on any logic fingerprint, non-empty included: a method extracted into a top-level function, or an `enum` rewritten as an `as const` object in another file, is added + removed, because stage 4's bucket carries the kind as well. Within one file the id survives the kind change and stage 1 pairs the two.
+
+Every Symbol stage 3 does not pair is handed to stage 4, a group that missed the bar included. What stage 4 can do with it is stage 4's rule: it skips a head with a null signature, and a Symbol on either side whose name says one word (§3.4.3), so for those Symbols stage 3 was the last stage to read them.
 
 Dropped symbols all share the fingerprint `"000000000000"`, so they would collide massively under the same hash. Dropped-to-dropped matching is excluded from stages 3/4 and handled by a dedicated weak matcher (§3.4.5).
 
@@ -268,13 +274,13 @@ The rule reads **both sides**, because the property belongs to a pairing rather 
 
 It once read the head alone, on an arithmetic licence: a one-token name on either side capped the score at `0.5 * 0.5 + 0.3 + 0.2 = 0.75`, under the table's lowest row, so a one-token base was unreachable without a check of its own. That held while the name axis was a Jaccard over the whole qualified name. §3.4.6's gate moved the axis to the last segment, and the ceiling went with it: `Main.main` is one deduped token, it clears the gate against `Mains.main` by inflection, and their member names are identical, so the pair scores 1.0. Reading both sides costs one test per Symbol and needs no licence.
 
-**What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged. What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
+**What this gives up.** A one-token name that moved file *and* changed body is now `added` + `removed` where it was one `moved+changed`. That band is narrow: stage 1 takes it if the id survives, stage 2 if git recorded the rename, stage 3 if the logic fingerprint is unchanged and names something (§3.3). What is left is a cross-file move git did not record, with an edited body — and for a name of one word, that pairing was never better than a guess.
 
 The band was once much wider on codebases with non-Latin identifiers, because the rule read the distinct-token count and §3.4.1's tokeniser reads `ユーザー情報を取得する` as one token however much it says. That refused it on the same footing as `main`, where the proxy is simply wrong: two unrelated Symbols do not carry that name by coincidence. `nameEvidence` is what closed that, and it closes it for the reason rather than for the script — a name of one word is still refused whatever wrote it. `главная` and `مستخدم` alongside `main`; and, since the measure is a floor on words rather than a count of characters, `メイン` and `초기화` and `ハンドラー` alongside the same three.
 
 What a morphemic name gets back is narrower than the rule's own band, and the reason is the threshold table rather than this rule. Such a name is one token, so `thresholdFor` hands it `EXACT_MATCH_ONLY` and only an identical signature past a compatible owner reaches 1.0: `ユーザー情報を取得する` moved file with an edited body is a pair, and the same move with one added input is not, where `getUserInformation` — two tokens in its last segment — has the 0.95 row to fall back on. Admissibility opens the door; the row still decides who comes through.
 
-Stage 3 is untouched by all of this: an identical logic fingerprint is proof on its own and does not ask the name to carry anything, so a `main` that moved file unchanged is still a move.
+Stage 3 asks the same of a name only where the logic names nothing (§3.3). An identical logic fingerprint that names something — a guard, a returned expression, an effect — is proof on its own and does not ask the name to carry anything, so a `main` with such a body that moved file unchanged is still a move. A `main` whose body only calls something is added + removed: its fingerprint is shared with every other such body, and its name says one word.
 
 #### 3.4.4 Tuning via configuration
 
@@ -978,7 +984,7 @@ A format intended for pasting into PR comments:
 <summary>2 items (collapsed)</summary>
 
 - `apps/billing/old.ts#X` → `apps/billing/new.ts#X` (git rename)
-- `packages/util/a.ts#Y` → `packages/util/b.ts#Y` (logic fingerprint match)
+- `packages/util/a.ts#formatAmount` → `packages/util/b.ts#formatAmount` (logic fingerprint match)
 </details>
 
 ## 🧱 Component changes
@@ -1020,7 +1026,7 @@ Collapsed sections are visible at **zero review cost**.
 |---|---|
 | Stage 1 (ID match) | O(N) hash map lookup |
 | Stage 2 (git rename) | O(R) where R = renamed files |
-| Stage 3 (logic fingerprint) | O(N) hash map lookup |
+| Stage 3 (logic fingerprint) | O(N) grouping, then per group of B bases and H heads O(H) for the lone branch and O(B x H) per scored round; a group whose logic names nothing always scores (§3.3) |
 | Stage 4 (name+signature) | O(K x C) where K = remaining unmatched and C = bases sharing a member token (§3.4.0); O(K^2) when one token is shared by everything |
 
 K is usually < 100 (most symbols are settled in stage 1). Effectively O(N), i.e. linear.
@@ -1088,7 +1094,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF5 | signature outputs changed | changed: 1, delta.apiChanged: true |
 | DF6 | File rename (git rename detectable) | moved: 1, rationale: "git-rename" |
 | DF7 | File rename + rule added | moved+changed: 1, rationale: "git-rename" |
-| DF8 | File rename (no git) with matching logic fp | moved: 1, rationale: "logic-fingerprint" |
+| DF8 | File rename (no git) with a matching logic fp that names something | moved: 1, rationale: "logic-fingerprint" |
 | DF9 | Method rename (same file, same logic) | moved: 1, rationale: "name-signature" (same logic fp but different ID) |
 | DF10 | Multiple Symbols in base/head share the same logic fp | Disambiguated by name similarity, paired correctly |
 | DF11 | Component added | 1 entry in components.added |
@@ -1105,14 +1111,15 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF18a | Only `confidence` changed (`high` → `medium`), fingerprints equal | changed: 1, only delta.confidenceChanged true → in Markdown: the Confidence changes section |
 | DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
 | DF18c | DF18a on a pair dropped on both sides | unchanged, as DF13 |
-| DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word, and §3.3 does not pair two bodies whose logic axis is empty |
-| DF19f | A function whose body only calls something is deleted, and an unrelated class is added elsewhere | removed: 1, the class added — §3.3 never pairs across kinds, and an empty logic axis is no evidence of identity |
-| DF19g | A class with no rules and no effects moved file, without git rename information | moved: 1 when its name says two words or more; added: 1, removed: 1 when it says one |
+| DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word, and §3.3 applies the same rule where the logic names nothing |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
 | DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` floors an unsegmentable run to the words it must hold (§3.4.1) |
 | DF19c | `получитьПользователя` moved file with an edited body | as DF19b, on its token count alone: the camel boundary is Unicode case, so the hump splits |
 | DF19d | A name of one word written without word boundaries — `メイン`, `초기화`, `ハンドラー`, `取得` | as DF19; the floor puts each under a word, as `main` and `handler` are |
 | DF19e | `ユーザー情報を取得する` moved file with an edited body **and** an added input | added: 1, removed: 1 — one token in its last segment, so §3.4.3's first threshold row asks the full 1.0 |
+| DF19f | A function whose body only calls something is deleted, and an unrelated class with one method is added elsewhere | removed: 1, added: 2 (the class and its method) — §3.3 never pairs across kinds |
+| DF19g | A class with one method moved file, without git rename information, and neither body names anything on the logic axis | moved: 2 when the class name says two words or more; when it says one, the class is added: 1, removed: 1 and the method moved: 1 — §3.3 pairs an owner and its members independently |
+| DF19h | A function whose body only calls something, or is one `for` loop over calls, is deleted, and an unrelated function of the same shape is added elsewhere; both names say two words or more | removed: 1, added: 1 — §3.3 has no lone-candidate branch where the logic names nothing |
 
 ## 10.1 Diff schema compatibility policy
 

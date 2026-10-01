@@ -1,6 +1,6 @@
-import type { Symbol as IRSymbol } from "@aburi/types"
+import type { Symbol as IRSymbol, Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { logicFingerprint } from "../../src/index"
+import { logicFingerprint, logicNamesNothing } from "../../src/index"
 import { makeSymbol } from "../fixtures/ir"
 
 function base(): IRSymbol {
@@ -334,5 +334,55 @@ describe("logicFingerprint — change conditions", () => {
       ],
     })
     expect(logicFingerprint(a)).not.toBe(logicFingerprint(b))
+  })
+})
+
+/**
+ * Whether the logic axis is evidence of identity. A rule's `type` and `loopKind` are the shape of
+ * a body, which unrelated bodies share; anything else it carries, and any effect, names something.
+ */
+describe("logicNamesNothing", () => {
+  const shaped = (over: Partial<Rule> & Pick<Rule, "type">): Rule => ({
+    line: 3,
+    condition: null,
+    what: null,
+    expr: null,
+    loopKind: null,
+    ...over,
+  })
+  const withRules = (...rules: Rule[]) => makeSymbol("ts:src/a.ts#foo", { rules, effects: [] })
+
+  it("holds for a body with no rules and no effects", () => {
+    expect(logicNamesNothing(withRules())).toBe(true)
+  })
+
+  it("holds for bodies that are only shape: a loop, a try, a guard or throw it could not read", () => {
+    expect(logicNamesNothing(withRules(shaped({ type: "loop", loopKind: "for" })))).toBe(true)
+    expect(logicNamesNothing(withRules(shaped({ type: "try" })))).toBe(true)
+    expect(logicNamesNothing(withRules(shaped({ type: "guard" }), shaped({ type: "throw" })))).toBe(
+      true,
+    )
+  })
+
+  it("fails as soon as one rule carries a condition, a thrown value or an expression", () => {
+    const loop = shaped({ type: "loop", loopKind: "for" })
+    expect(logicNamesNothing(withRules(loop, shaped({ type: "guard", condition: "!id" })))).toBe(
+      false,
+    )
+    expect(logicNamesNothing(withRules(loop, shaped({ type: "throw", what: "Error" })))).toBe(false)
+    expect(logicNamesNothing(withRules(loop, shaped({ type: "return", expr: "a + b" })))).toBe(
+      false,
+    )
+  })
+
+  it("fails on any effect, the rules notwithstanding", () => {
+    const { effects } = base()
+    expect(logicNamesNothing(makeSymbol(base().id, { rules: [], effects }))).toBe(false)
+  })
+
+  it("does not read what the hash does not: a rule's line", () => {
+    const at = (line: number) => withRules(shaped({ type: "try", line }))
+    expect(logicFingerprint(at(3))).toBe(logicFingerprint(at(40)))
+    expect(logicNamesNothing(at(40))).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { fp, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
+import { fp, guardedBody, makeIR, makeSymbol, sig, zeroFp } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
@@ -63,6 +63,7 @@ function withLogic(file: string, name: string, logic: string): IRSymbol {
     name,
     kind: "method",
     fingerprint: { api: "aaaaaaaaaaaa", logic, syntax: "bbbbbbbbbbbb" },
+    rules: guardedBody(logic),
     signature: sig(),
   })
 }
@@ -268,6 +269,7 @@ describe("the thresholds moved into the candidate filter still hold", () => {
         name,
         kind: "class",
         fingerprint: { api: "aaaaaaaaaaaa", logic: "222222222222", syntax: "bbbbbbbbbbbb" },
+        rules: guardedBody("222222222222"),
       })
     expect(
       changes([body("src/a.ts", "Alpha"), body("src/b.ts", "Beta")], [body("src/c.ts", "Gamma")]),

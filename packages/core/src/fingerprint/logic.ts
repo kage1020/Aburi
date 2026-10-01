@@ -34,16 +34,34 @@ export function logicFingerprint(symbol: IRSymbol): string {
   return hashCanonicalObject(buildLogicInput(symbol))
 }
 
+/** The rule fields that classify a rule rather than say anything about the body it is in. */
+const SHAPE_ONLY_RULE_FIELDS: ReadonlySet<string> = new Set([
+  "type",
+  "loopKind",
+] satisfies (keyof LogicInput["rules"][number])[])
+
 /**
- * The logic axis of every Symbol with no rules and no effects: a class, an enum, a body that
- * only calls something. It is shared by everything that says nothing on this axis, so two
- * Symbols carrying it are not evidence of one meaning — the diff's logic-fingerprint stage
- * reads it as it reads `ZERO_FINGERPRINT`, as no evidence at all.
+ * Whether a Symbol's logic axis names nothing: no effect, and no rule carrying anything but its
+ * `type` and `loopKind`. Those two say what shape a body has, not what it does, and unrelated
+ * bodies share them — every class and every body that only calls something hash to one value,
+ * every body that is one `for` loop over calls to another. So two Symbols agreeing on such an
+ * axis have not shown they are one, and the diff's logic-fingerprint stage asks their names to
+ * (diff-algorithm.md §3.3).
+ *
+ * Read off the same input the hash is, field by field, so a field this axis gains later counts
+ * as naming something until it is added to `SHAPE_ONLY_RULE_FIELDS`.
  */
-export const EMPTY_LOGIC_FINGERPRINT: string = hashCanonicalObject({
-  effects: [],
-  rules: [],
-} satisfies LogicInput)
+export function logicNamesNothing(symbol: IRSymbol): boolean {
+  const input = buildLogicInput(symbol)
+  return (
+    input.effects.length === 0 &&
+    input.rules.every((rule) =>
+      Object.entries(rule).every(
+        ([field, value]) => SHAPE_ONLY_RULE_FIELDS.has(field) || value === null,
+      ),
+    )
+  )
+}
 
 function buildLogicInput(symbol: IRSymbol): LogicInput {
   return {

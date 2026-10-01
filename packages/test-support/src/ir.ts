@@ -126,6 +126,16 @@ export function rule(overrides: Partial<Rule> & { type: Rule["type"] }): Rule {
   }
 }
 
+/**
+ * A body that names something on the logic axis: one guard on `condition`. `fp(seed)` gives a
+ * fixture a logic hash with no body behind it, and the diff's stage 3 decides whether a shared
+ * hash is evidence from the body itself (`logicNamesNothing`), so a fixture meaning "these two
+ * share a real body" gives both this as well as the hash.
+ */
+export function guardedBody(condition: string): Rule[] {
+  return [rule({ type: "guard", condition })]
+}
+
 /** `raw` carries no leading `@`, as the IR spells it; the Markdown projection adds one. */
 export function decorator(overrides: Partial<Decorator> & { name: string }): Decorator {
   return {

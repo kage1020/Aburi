@@ -1,4 +1,4 @@
-import { fp, makeIR, makeSymbol } from "@aburi/test-support"
+import { fp, guardedBody, makeIR, makeSymbol } from "@aburi/test-support"
 import type { IR, Symbol as IRSymbol, SkippedFile, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff } from "../src"
@@ -39,7 +39,7 @@ function diffOf(baseIR: IR, headIR: IR) {
   return buildDiff({ baseIR, headIR, base: IR_REF, head: IR_REF })
 }
 
-const foo = makeSymbol({ id: "ts:src/gone.ts#foo", name: "foo" })
+const foo = makeSymbol({ id: "ts:src/gone.ts#foo", name: "foo", rules: guardedBody("ready") })
 const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
 
 describe("buildDiff — a Symbol in a file the other side never analysed", () => {
@@ -92,7 +92,11 @@ describe("buildDiff — a Symbol in a file the other side never analysed", () =>
     // The classification runs on the matcher's leftovers, never on the base list. A Symbol
     // that survived into a file head *does* have was matched by fingerprint, and head holds
     // real evidence for it — calling that unknown would throw away an answer.
-    const moved: IRSymbol = makeSymbol({ id: "ts:src/here.ts#foo", name: "foo" })
+    const moved: IRSymbol = makeSymbol({
+      id: "ts:src/here.ts#foo",
+      name: "foo",
+      rules: guardedBody("ready"),
+    })
     const base = makeIR({ symbols: [foo] })
     const head = withSkipped(makeIR({ symbols: [moved] }), [lost("src/gone.ts")], 2)
     const result = diffOf(base, head)

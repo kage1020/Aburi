@@ -1,19 +1,34 @@
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
+import type { IR, SymbolChange } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { diffIRs, scanFixture } from "../src/scan-helper"
+import { diffIRs, scanWith, warningCollector } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
 /**
- * A body with no rules and no effects — a class, or a function that only calls something —
- * has the same logic fingerprint as every other one, so sharing it is no evidence that two
- * Symbols are one. Stage 3 used to pair a lone deleted one with whichever such head was
- * closest by name: a deleted function became a move into an unrelated class, and
+ * A body whose logic axis names nothing — a class, a function that only calls something, one
+ * that is a single loop over calls — hashes alike across unrelated Symbols, so sharing it is no
+ * evidence that two are one. Stage 3 used to pair a lone deleted one with whichever such head
+ * was closest by name: a deleted function became a move into an unrelated class, and
  * `--fail-on removed` never saw the deletion. This runs the real pipeline, without git, so no
- * rename map can pair anything.
+ * rename map can pair anything, and every scan has to be silent, so an extraction failure
+ * cannot pass for a matcher outcome.
  */
 
 const workspace = useScratchWorkspace("empty-logic-pairing")
+
+async function scanSilently(): Promise<IR> {
+  const { logger, warnings } = warningCollector()
+  const { ir } = await scanWith(
+    workspace.root,
+    { languages: [langTypescriptPlugin] },
+    {},
+    { logger },
+  )
+  expect(warnings).toEqual([])
+  return ir
+}
 
 /** Scan with `before` on disk, replace it with `after`, scan again, diff the two. */
 async function diffOfChange(
@@ -21,23 +36,33 @@ async function diffOfChange(
   after: Record<string, string>,
 ): Promise<ReturnType<typeof diffIRs>> {
   for (const [file, text] of Object.entries(before)) await workspace.writeSource(file, text)
-  const baseIR = (await scanFixture(workspace.root)).ir
+  const baseIR = await scanSilently()
   for (const file of Object.keys(before)) await rm(join(workspace.root, file))
   for (const [file, text] of Object.entries(after)) await workspace.writeSource(file, text)
-  const headIR = (await scanFixture(workspace.root)).ir
+  const headIR = await scanSilently()
   return diffIRs(baseIR, headIR)
 }
 
-describe("e2e diff — Symbols whose logic axis is empty", () => {
-  it("reports a deleted function as removed, not as moved into an unrelated class", async () => {
+/** Every change, as status, names and the stage that paired it, in a stable order. */
+function outcome(diff: ReturnType<typeof diffIRs>): string[] {
+  return diff.symbols.map(describeChange).sort()
+}
+
+function describeChange(change: SymbolChange): string {
+  if ("symbol" in change) return `${change.status} ${change.symbol.name}`
+  const pairing = `${change.status} ${change.before.name} -> ${change.after.name}`
+  return "rationale" in change ? `${pairing} (${change.rationale})` : pairing
+}
+
+/** The four counts these cases decide, all zero; each case raises the ones it expects. */
+const NONE = { removed: 0, added: 0, moved: 0, movedChanged: 0 }
+
+describe("e2e diff — Symbols whose logic axis names nothing", () => {
+  it("DF19f: reports a deleted function as removed, not as moved into an unrelated class", async () => {
     const diff = await diffOfChange(
       {
-        "src/mail.ts": [
-          "export function sendWelcomeEmail(to: string): void {",
-          "  mailer.send(to)",
-          "}",
-          "",
-        ].join("\n"),
+        "src/mail.ts":
+          "export function sendWelcomeEmail(to: string): void {\n  mailer.send(to)\n}\n",
       },
       {
         "src/invoice.ts": [
@@ -50,9 +75,42 @@ describe("e2e diff — Symbols whose logic axis is empty", () => {
         ].join("\n"),
       },
     )
-    expect(diff.summary).toMatchObject({ removed: 1, added: 2, moved: 0, movedChanged: 0 })
-    const removed = diff.symbols.find((c) => c.status === "removed")
-    expect(removed?.status === "removed" ? removed.symbol.name : null).toBe("sendWelcomeEmail")
+    expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 2 })
+    expect(outcome(diff)).toEqual([
+      "added InvoiceRenderer",
+      "added InvoiceRenderer.render",
+      "removed sendWelcomeEmail",
+    ])
+  })
+
+  it("DF19h: reports an unrelated function of the same kind as removed + added (no lone-base shortcut)", async () => {
+    // Both names say more than one word and the kinds agree, so only the missing shortcut keeps
+    // these apart. No `return`, or the logic axis would carry the returned expression.
+    const diff = await diffOfChange(
+      {
+        "src/mail.ts":
+          "export function sendWelcomeEmail(to: string): void {\n  mailer.send(to)\n}\n",
+      },
+      {
+        "src/invoice.ts":
+          "export function renderInvoiceTotal(total: number): void {\n  logger.log(total)\n}\n",
+      },
+    )
+    expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
+  })
+
+  it("DF19h: does the same for a body that is one `for` loop over calls", async () => {
+    const diff = await diffOfChange(
+      {
+        "src/mail.ts":
+          "export function sendAllEmails(xs: string[]): void {\n  for (const x of xs) mailer.send(x)\n}\n",
+      },
+      {
+        "src/invoice.ts":
+          "export function renderInvoiceRows(rows: number[]): void {\n  for (const r of rows) logger.log(r)\n}\n",
+      },
+    )
+    expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
   })
 
   it("DF19: reports two unrelated top-level `main`s as one removed and one added", async () => {
@@ -63,12 +121,35 @@ describe("e2e diff — Symbols whose logic axis is empty", () => {
           "export function main(x: string): void {\n  const cfg = loadConfig(x)\n  runB(cfg)\n}\n",
       },
     )
-    expect(diff.summary).toMatchObject({ removed: 1, added: 1, moved: 0, movedChanged: 0 })
+    expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
   })
 
-  it("still reports a class that moved file as moved", async () => {
-    const source = "export class InvoiceRenderer {\n  label = 'invoice'\n}\n"
+  it("DF19g: still reports a class whose name says two words as moved, with its method", async () => {
+    const source = [
+      "export class InvoiceRenderer {",
+      "  render(total: number): string {",
+      "    return total.toFixed(2)",
+      "  }",
+      "}",
+      "",
+    ].join("\n")
     const diff = await diffOfChange({ "src/old.ts": source }, { "src/new.ts": source })
-    expect(diff.summary).toMatchObject({ removed: 0, added: 0, moved: 1 })
+    expect(outcome(diff)).toEqual([
+      "moved InvoiceRenderer -> InvoiceRenderer (logic-fingerprint+name-disambiguation)",
+      "moved InvoiceRenderer.render -> InvoiceRenderer.render (logic-fingerprint+name-disambiguation)",
+    ])
+  })
+
+  it("DF19g: reports a class whose name says one word as removed + added, while its method moves", async () => {
+    // The owner and its member pair independently, as a renamed class and its methods already
+    // did; nothing reconciles the two.
+    const source =
+      "export class Invoice {\n  render(t: number) {\n    return t.toFixed(2)\n  }\n}\n"
+    const diff = await diffOfChange({ "src/old.ts": source }, { "src/new.ts": source })
+    expect(outcome(diff)).toEqual([
+      "added Invoice",
+      "moved Invoice.render -> Invoice.render (logic-fingerprint+name-disambiguation)",
+      "removed Invoice",
+    ])
   })
 })

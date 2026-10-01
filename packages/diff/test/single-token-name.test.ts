@@ -1,4 +1,4 @@
-import { fp, makeIR, makeSymbol, sig } from "@aburi/test-support"
+import { fp, guardedBody, makeIR, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageNameSignature } from "../src"
@@ -351,12 +351,15 @@ describe("the rule is scoped to a pairing, and to stage 4", () => {
     ).toEqual([])
   })
 
-  it("leaves stage 3 to pair a one-token name on its fingerprint", () => {
-    // An identical logic fingerprint is proof of its own, and it does not depend on the name
-    // carrying anything. A `main` that moved file without changing is still a move.
-    expect(pairs([fn("src/a.ts", "main", "same")], [fn("src/b.ts", "main", "same")])).toEqual([
-      "ts:src/a.ts#main -> ts:src/b.ts#main",
-    ])
+  it("leaves stage 3 to pair a one-token name on a logic fingerprint that names something", () => {
+    // An identical logic fingerprint over a body that names something is proof of its own, and
+    // it does not depend on the name carrying anything. Such a `main` that moved file without
+    // changing is still a move. One whose body names nothing is not: stage 3 asks the name there.
+    const body = { rules: guardedBody("argv.length === 0") }
+    expect(
+      pairs([fn("src/a.ts", "main", "same", body)], [fn("src/b.ts", "main", "same", body)]),
+    ).toEqual(["ts:src/a.ts#main -> ts:src/b.ts#main"])
+    expect(pairs([fn("src/a.ts", "main", "same")], [fn("src/b.ts", "main", "same")])).toEqual([])
   })
 
   it("leaves the rest of the table where it was", () => {

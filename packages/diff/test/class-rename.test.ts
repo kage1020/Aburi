@@ -1,4 +1,4 @@
-import { fp, makeIR, makeSymbol, sig } from "@aburi/test-support"
+import { fp, guardedBody, makeIR, makeSymbol, sig } from "@aburi/test-support"
 import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, matchStageLogicFingerprint } from "../src"
@@ -308,6 +308,7 @@ describe("what the gate does not change", () => {
       name: "UserRepo.getUser",
       kind: "method",
       fingerprint: shared,
+      rules: guardedBody("id"),
       signature: GET_BY_ID,
     })
     const head = makeSymbol({
@@ -315,6 +316,7 @@ describe("what the gate does not change", () => {
       name: "UsersRepository.getUser",
       kind: "method",
       fingerprint: shared,
+      rules: guardedBody("id"),
       signature: GET_BY_ID,
     })
     const result = matchStageLogicFingerprint([base], [head])

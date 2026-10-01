@@ -208,6 +208,12 @@ By design, the order of effects can carry meaning (transaction boundaries, idemp
 
 As a trade-off, "unintended reordering" also shows up in the diff, but a miss was judged more costly than noise.
 
+### 4.8 A value that names nothing
+
+Of the input fields, `rules[].type` and `rules[].loopKind` classify a construct without saying anything about it; every other field — `condition`, `what`, `expr`, `effects[].target` — carries text from the body. A Symbol with no effect and no rule carrying any of those hashes to a value it shares with every body of the same shape: one value for every class, enum and body that only calls something (the empty input), another for every body that is a single `for` loop over calls, another for every single `try`. Such a value is not evidence of one meaning, and the diff does not read it as such ([`diff-algorithm.md`](./diff-algorithm.md) §3.3).
+
+`logicNamesNothing` (`@aburi/core`) tells such a Symbol apart, reading the same input the hash is. A field added to the input counts as naming something until it is listed as classifying only.
+
 ## 5. `syntax` fingerprint
 
 Represents the **AST structure** of the symbol body. Changes on any structural change other than formatting.

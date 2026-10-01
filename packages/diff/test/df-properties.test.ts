@@ -2,6 +2,7 @@ import {
   component,
   dependency,
   fp,
+  guardedBody,
   makeIR,
   makeSymbol,
   rule,
@@ -164,12 +165,16 @@ describe("DF7 — file renamed + rule added", () => {
 describe("DF8 — file renamed with logic-fp match (no git)", () => {
   it("emits moved with rationale logic-fingerprint", () => {
     const shared = fp("logic-shared")
-    const b = makeSymbol({ id: "ts:src/old.ts#Foo", name: "Foo", fingerprint: shared })
-    const h = makeSymbol({
-      id: "ts:src/new.ts#Foo",
+    const b = makeSymbol({
+      id: "ts:src/old.ts#Foo",
       name: "Foo",
-      source: { ...b.source, file: "src/new.ts" },
       fingerprint: shared,
+      rules: guardedBody("ready"),
+    })
+    const h = makeSymbol({
+      ...b,
+      id: "ts:src/new.ts#Foo",
+      source: { ...b.source, file: "src/new.ts" },
     })
     const result = diff(makeIR({ symbols: [b] }), makeIR({ symbols: [h] }))
     expect(result.summary.moved).toBe(1)
@@ -187,6 +192,7 @@ describe("DF9 — method rename in same file, same logic", () => {
       name: "Cls.getUser",
       kind: "method",
       fingerprint: shared,
+      rules: guardedBody("id"),
       signature: sig({ inputs: [{ name: "id", type: "string" }] }),
     })
     const h = makeSymbol({
