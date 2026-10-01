@@ -117,7 +117,7 @@ export function visitCallStatement(
  * Ordered on `startIndex` because the spine is walked right-to-left, which is the reverse of
  * how the statement is written.
  */
-function inlineHandlers(call: Node): MergedDeclaration<Node>[] {
+export function inlineHandlers(call: Node): MergedDeclaration<Node>[] {
   const found: MergedDeclaration<Node>[] = []
   for (const step of spineCalls(call)) {
     const args = step.childForFieldName("arguments") ?? findChild(step, "arguments")

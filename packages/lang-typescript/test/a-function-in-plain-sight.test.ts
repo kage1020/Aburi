@@ -177,6 +177,94 @@ describe("a registration call's inline handler is its body", () => {
   })
 })
 
+/**
+ * A `const` initialised by a call stays a const (LP7b): nothing says the call returns what it
+ * was given. But the function it hands the call is written in that declaration and nowhere else,
+ * so it is the const's body, the way a registration's inline handler is the registration's.
+ */
+describe("a function a const hands to a call is the const's body (LP7c)", () => {
+  const POST = [
+    "export const POST = withAuth(async (id: number) => {",
+    '  if (!id) throw new Error("missing id")',
+    "  return prisma.user.delete({ where: { id } })",
+    "})",
+  ].join("\n")
+
+  it("walks the wrapped handler onto the const, and keeps the const a const", async () => {
+    const symbol = await symbolOf(POST, "ts:src/a.ts#POST")
+    const { rules, calls } = await walkOf(POST, "ts:src/a.ts#POST")
+
+    expect(symbol.kind).toBe("const")
+    expect(symbol.signature).toBeNull()
+    expect(rules.map((r) => r.type)).toEqual(["guard", "throw"])
+    // The wrapping call is not a body, so `withAuth` is not one of the const's calls.
+    expect(calls.map((c) => c.target)).toEqual(["Error", "prisma.user.delete"])
+  })
+
+  it.each([
+    ["memo", "export const Row = memo(function Row(p: any) { track(p.id) })", "Row", ["track"]],
+    [
+      "forwardRef",
+      "export const Input = forwardRef((props: any, ref: any) => { useFocus(ref) })",
+      "Input",
+      ["useFocus"],
+    ],
+    [
+      "cache",
+      "export const load = cache(async (id: string) => { await db.find(id) })",
+      "load",
+      ["db.find"],
+    ],
+  ])("walks the function handed to %s", async (_label, source, name, targets) => {
+    expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual(targets)
+  })
+
+  it("walks every function on the initializer's spine, in source order", async () => {
+    const source = [
+      "export const list = t.procedure",
+      "  .use(async ({ next }: any) => { audit(); return next() })",
+      "  .query(() => { db.read() })",
+    ].join("\n")
+    const symbol = await symbolOf(source, "ts:src/a.ts#list")
+
+    expect(symbol.mergedDeclarations).toHaveLength(1)
+    expect(await callsOf(source, "ts:src/a.ts#list")).toEqual(["audit", "next", "db.read"])
+  })
+
+  it("stops at a call inside an argument, as a registration does", async () => {
+    // `withLogging(...)` returns something by convention too; the reading is LP20g's, direct
+    // arguments only.
+    const source = "export const POST = withAuth(withLogging(async () => { q() }))"
+
+    expect((await symbolOf(source, "ts:src/a.ts#POST")).bodyNode).toBeNull()
+  })
+
+  it("leaves a const whose call is handed no function without a body", async () => {
+    expect(
+      (await symbolOf("export const client = makeClient({ retries: 3 })", "ts:src/a.ts#client"))
+        .bodyNode,
+    ).toBeNull()
+  })
+
+  it("is still described by the whole declaration, so the wrapper is visible", async () => {
+    const withAuth = await symbolOf(POST, "ts:src/a.ts#POST")
+    const withRole = await symbolOf(POST.replace("withAuth", "withRole"), "ts:src/a.ts#POST")
+
+    expect(normalizeAst(withAuth)).not.toBe(normalizeAst(withRole))
+    // The string the const had while it had no body, so no existing syntax fingerprint moves.
+    expect(normalizeAst(withAuth)).toBe(normalizeAst({ ...withAuth, bodyNode: null }))
+  })
+
+  it("does not describe a second wrapped function twice", async () => {
+    const source = "export const h = pipe(() => { a() }, () => { b() })"
+    const symbol = await symbolOf(source, "ts:src/a.ts#h")
+
+    expect(symbol.mergedDeclarations).toHaveLength(1)
+    const { mergedDeclarations: _, ...bodyless } = symbol
+    expect(normalizeAst(symbol)).toBe(normalizeAst({ ...bodyless, bodyNode: null }))
+  })
+})
+
 describe("a registration Symbol is still described by the whole registration", () => {
   const ROUTE = (middleware: string): string =>
     `app.get("/users", ${middleware}async (req, res) => { res.json(1) })`

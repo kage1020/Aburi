@@ -1,4 +1,4 @@
-import type { SymbolCandidate } from "@aburi/types"
+import type { MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 
 /**
@@ -22,7 +22,8 @@ import type { Node } from "web-tree-sitter"
  * drop the registration itself: `app.get('/x', authenticate, h)` and `app.get('/x', h)` would
  * serialize identically, and adding or removing a route's auth middleware would produce no
  * signal on any axis. The body is what the registration *runs*, which is the walk's question;
- * the whole call is what it *is*, which is this one.
+ * the whole call is what it *is*, which is this one. A `const` initialised by a call that is
+ * handed a function has the same shape and gets the same answer (`describedNode`).
  *
  * A Symbol several declarations wrote — a getter beside its setter, an interface reopened —
  * gets each of the further bodies appended, in source order. A Symbol with one declaration
@@ -33,10 +34,36 @@ import type { Node } from "web-tree-sitter"
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
   const merged = symbol.mergedDeclarations ?? []
-  const primary = serialize(symbol.bodyNode ?? symbol.fullNode)
-  if (merged.length === 0) return primary
-  const parts = [primary, ...merged.map((d) => serialize(d.bodyNode ?? d.fullNode))]
-  return parts.filter((part) => part.length > 0).join(" ")
+  const lead = describedNode(symbol)
+  if (merged.length === 0) return serialize(lead)
+  const described = [lead]
+  for (const declaration of merged) {
+    const node = describedNode(declaration)
+    // Already in the string: a further function a `const` hands its call is inside the
+    // declaration that call is part of.
+    if (described.some((outer) => encloses(outer, node))) continue
+    described.push(node)
+  }
+  return described
+    .map(serialize)
+    .filter((part) => part.length > 0)
+    .join(" ")
+}
+
+/**
+ * What describes one declaration: its body when the body is the declaration's own, and the whole
+ * declaration when the body is a function written somewhere inside it. The second is a `const`
+ * initialised by a call — `const POST = withAuth(async (req) => …)` — whose body is the function
+ * it hands the call (LP7c). Narrowing to that function drops the call, the same loss a call
+ * Symbol's registration would suffer, so `withAuth(h)` → `withRole(h)` would move no axis.
+ */
+function describedNode(declaration: Pick<MergedDeclaration<Node>, "bodyNode" | "fullNode">): Node {
+  const { bodyNode, fullNode } = declaration
+  return bodyNode !== null && bodyNode.parent?.id === fullNode.id ? bodyNode : fullNode
+}
+
+function encloses(outer: Node, inner: Node): boolean {
+  return outer.startIndex <= inner.startIndex && inner.endIndex <= outer.endIndex
 }
 
 function serialize(node: Node): string {

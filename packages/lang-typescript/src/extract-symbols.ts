@@ -22,6 +22,7 @@ import {
 } from "./ast-helpers"
 import {
   type CallExtractionState,
+  inlineHandlers,
   makeCallExtractionState,
   visitCallStatement,
 } from "./call-symbols"
@@ -887,6 +888,7 @@ function makeVariableCandidate(
       fullNode: value,
     }
   }
+  const [lead, ...rest] = wrappedFunctions(declarator)
   return {
     id,
     kind: "const",
@@ -897,9 +899,30 @@ function makeVariableCandidate(
     signature: null,
     source: makeSourceRange(statement, ctx),
     derivedBy: exportEvidence(statement),
-    bodyNode: null,
+    bodyNode: lead?.bodyNode ?? null,
     fullNode: statement,
+    // Absent, never empty — `plugins.ts` states the contract and LP8i pins it.
+    ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
   }
+}
+
+/**
+ * The functions a `const` initialised by a call hands to that call — `withAuth(async (req) =>
+ * …)`, `memo(function Row() {…})`, `t.procedure.query(() => …)` — as the bodies they
+ * contribute, in source order.
+ *
+ * LP7b keeps the const a const: nothing in the tree says the call returns the function it was
+ * given. But the function is written in this declaration and in no other, so leaving it unwalked
+ * put its calls, rules and effects on no Symbol at all. The registration statement has the same
+ * problem and the same answer (LP20g), so this is that reading: every function written as a
+ * direct argument of a call on the initializer's spine. The wrapping call itself is not a body,
+ * so `withAuth` is not recorded as one of the const's calls.
+ */
+function wrappedFunctions(declarator: Node): MergedDeclaration<Node>[] {
+  const value = declarator.childForFieldName("value")
+  if (value === null) return []
+  const call = unwrapValue(value)
+  return call.type === "call_expression" ? inlineHandlers(call) : []
 }
 
 /** The two shapes a `variable_declarator` uses in place of a name. */
