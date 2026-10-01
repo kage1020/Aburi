@@ -12,8 +12,11 @@ Symbols are paired across base / head via cascading stages:
 1. **id-match** — `<language>:<path>#<qname>` equal → same Symbol.
 2. **git-rename** — optional table (from `git diff --find-renames`) rescues moved
    files whose ids diverged only in the path segment.
-3. **logic-fingerprint** — remaining Symbols with the same `fingerprint.logic`
-   hash pair up (rename-invariant, whitespace-invariant).
+3. **logic-fingerprint** — remaining Symbols of the same kind with the same
+   `fingerprint.logic` hash pair up (rename-invariant, whitespace-invariant). Where
+   that logic names nothing (a class, a body that only calls something), unrelated
+   bodies share the hash, so a pair there also needs names of two words or more
+   with a similarity of 0.85.
 4. **name+signature** — same simple name + compatible `Signature` (input/output
    set + throws) — the fuzzy layer.
 5. **dropped-weak** — last-resort match for pairs where both sides are dropped

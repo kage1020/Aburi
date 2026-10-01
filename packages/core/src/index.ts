@@ -29,6 +29,7 @@ export {
   hashRawString,
   lastQnameSegment,
   logicFingerprint,
+  logicNamesNothing,
   normalizeFingerprintString,
   syntaxFingerprint,
   ZERO_FINGERPRINT,

@@ -1,4 +1,4 @@
-import { compareCodeUnit, groupBy, trySymbolId, ZERO_FINGERPRINT } from "@aburi/core"
+import { compareCodeUnit, logicNamesNothing, trySymbolId, ZERO_FINGERPRINT } from "@aburi/core"
 import type { Symbol as IRSymbol, MatchRationale, SymbolId } from "@aburi/types"
 import { signatureSimilarity } from "./signature"
 import {
@@ -23,7 +23,10 @@ export interface SymbolPair {
 /** Optional map returned by git for stage 2 (`old path` → `new path`). */
 export type GitRenameMap = ReadonlyMap<string, string>
 
-/** Stage 3 — the similarity a multi-candidate logic-fingerprint group must reach to pair. */
+/**
+ * Stage 3 — the name similarity a pair must reach in a logic-fingerprint group that names cannot
+ * skip: one with several base candidates, or one whose logic axis names nothing at all.
+ */
 const NAME_DISAMBIGUATION_THRESHOLD = 0.85
 
 /** One candidate pairing and the score that ranks it against the others. */
@@ -206,8 +209,8 @@ function rewriteIdFile(id: SymbolId, oldPath: string, newPath: string): SymbolId
 }
 
 /**
- * Stage 3 (diff-algorithm.md) — group both sides by `fingerprint.logic` and pair within each
- * group. Two branches:
+ * Stage 3 (diff-algorithm.md) — group both sides by kind and `fingerprint.logic` and pair
+ * within each group. Two branches:
  * - single base candidate → paired with `logic-fingerprint`, no similarity test
  * - several → `nameSimilarity` disambiguates at ≥ 0.85; a group that cannot reach it is left
  *   whole for stage 4 to re-evaluate
@@ -215,6 +218,10 @@ function rewriteIdFile(id: SymbolId, oldPath: string, newPath: string): SymbolId
  * Dropped symbols are excluded — their logic fingerprint is the sentinel
  * `"000000000000"` and would collide with every other dropped Symbol in the workspace.
  * They flow to the stage-4.5 weak matcher instead.
+ *
+ * A logic value that names nothing (`logicNamesNothing`) is shared the same way, but by
+ * Symbols that are kept: its group forms and pairs, on names alone and without the first
+ * branch. See `pairWithinLogicGroup`.
  */
 export function matchStageLogicFingerprint(
   remainingBase: readonly IRSymbol[],
@@ -228,10 +235,10 @@ export function matchStageLogicFingerprint(
   const headGroups = groupByLogic(remainingHead)
   const scorer = createNameScorer()
   const matched: SymbolPair[] = []
-  for (const [logic, heads] of headGroups) {
-    const bases = baseGroups.get(logic)
+  for (const [key, heads] of headGroups) {
+    const bases = baseGroups.get(key)
     if (bases === undefined) continue
-    matched.push(...pairWithinLogicGroup(bases, heads, scorer))
+    matched.push(...pairWithinLogicGroup(bases.symbols, heads.symbols, scorer, heads.evidenceless))
   }
   const usedBase = new Set(matched.map((pair) => pair.base.id))
   const usedHead = new Set(matched.map((pair) => pair.head.id))
@@ -242,12 +249,32 @@ export function matchStageLogicFingerprint(
   }
 }
 
-/** Symbols by logic fingerprint, skipping the ones stage 3 excludes; groups are self-contained. */
-function groupByLogic(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
-  return groupBy(
-    symbols.filter((symbol) => !symbol.dropped && symbol.fingerprint.logic !== ZERO_FINGERPRINT),
-    (symbol) => symbol.fingerprint.logic,
-  )
+/** The Symbols of one stage-3 group, and whether the logic fingerprint they share is evidence. */
+interface LogicGroup {
+  evidenceless: boolean
+  symbols: IRSymbol[]
+}
+
+/**
+ * Symbols by kind and logic fingerprint, skipping the ones stage 3 excludes; groups are
+ * self-contained. The kind is in the key for the reason it is in stage 4's bucket key: a
+ * function and a class are never one Symbol, whatever their bodies hash to. Whether the
+ * fingerprint is evidence is in the key as well, so the base and head groups that meet agree on
+ * it by construction rather than by the hash never colliding. The key is a JSON array because
+ * `kind` and `fingerprint.logic` are only checked to be strings (`checkDocumentShape`), so no
+ * separator is guaranteed absent from either.
+ */
+function groupByLogic(symbols: readonly IRSymbol[]): Map<string, LogicGroup> {
+  const groups = new Map<string, LogicGroup>()
+  for (const symbol of symbols) {
+    if (symbol.dropped || symbol.fingerprint.logic === ZERO_FINGERPRINT) continue
+    const evidenceless = logicNamesNothing(symbol)
+    const key = JSON.stringify([symbol.kind, symbol.fingerprint.logic, evidenceless])
+    const group = groups.get(key)
+    if (group === undefined) groups.set(key, { evidenceless, symbols: [symbol] })
+    else group.symbols.push(symbol)
+  }
+  return groups
 }
 
 /**
@@ -255,17 +282,27 @@ function groupByLogic(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
  * similarity test; with more than one, names disambiguate. The loop keeps the second branch
  * feeding the first: a scored round that consumes all but one base leaves that one
  * unconditional.
+ *
+ * An `evidenceless` group has no first branch. Its members do share a hash, but on an axis that
+ * names nothing, so that identity is no evidence the two are one Symbol, and a lone base would
+ * otherwise pair with whatever head of the group is closest by name, however far that is. Every
+ * pair in it has to reach the 0.85 name bar, and both names have to say more than one word
+ * (`saysEnoughToPair`), so two unrelated `main`s stay apart. A base below the bar is then
+ * refused whether or not it was the last one left in the group; which of several bases above
+ * it takes a shared head is still `acceptInScoreOrder`'s call.
  */
 function pairWithinLogicGroup(
   bases: readonly IRSymbol[],
   heads: readonly IRSymbol[],
   scorer: NameScorer,
+  evidenceless: boolean,
 ): SymbolPair[] {
-  let freeBase = [...bases]
-  let freeHead = [...heads]
+  const admissible = (symbol: IRSymbol) => !evidenceless || saysEnoughToPair(symbol.name)
+  let freeBase = bases.filter(admissible)
+  let freeHead = heads.filter(admissible)
   const matched: SymbolPair[] = []
   while (freeBase.length > 0 && freeHead.length > 0) {
-    const lone = freeBase.length === 1 ? freeBase[0] : undefined
+    const lone = !evidenceless && freeBase.length === 1 ? freeBase[0] : undefined
     if (lone !== undefined) {
       const head = closestNameTo(lone, freeHead, scorer)
       if (head === undefined) break
@@ -497,7 +534,9 @@ function thresholdFor(qname: string): number {
 }
 
 /**
- * Whether a Symbol's qualified name says enough for stage 4 to read it at all.
+ * Whether a Symbol's qualified name says enough for stage 4 to read it at all — and for stage 3
+ * to pair it in a group whose logic axis names nothing (`pairWithinLogicGroup`), where the shared
+ * hash says nothing either and the name is again all there is to go on.
  *
  * A name saying one thing — `main`, or `Main.main` after dedup — scores the full 1.0 against
  * any other with the same signature, and 1.0 is the top of the scale, so no threshold can
