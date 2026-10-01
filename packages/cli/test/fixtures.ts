@@ -1,4 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { spawn } from "node:child_process"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { Writable } from "node:stream"
 import { makeLanguageId } from "@aburi/core"
@@ -205,4 +207,77 @@ export function fakeGit(options: FakeGitOptions = {}): {
     },
   }
   return { runner, calls }
+}
+
+/**
+ * What a fixture's own git calls must not take from the environment: the repository and index
+ * it names. A test run started from a commit hook carries a `GIT_INDEX_FILE`, and a fixture
+ * repository built through it would be built in the wrong index.
+ */
+const FIXTURE_UNSET_GIT_ENV: readonly string[] = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_PREFIX",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+]
+
+/**
+ * A fixture's call to a real `git`. Whatever the developer's config or the surrounding
+ * environment says must not decide what it does, so both are pinned; `env` is applied last,
+ * for a call that means to name a repository or an index. Output is buffered and decoded once,
+ * since a multi-byte character can straddle two chunks.
+ */
+export function realGit(
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv = {},
+): Promise<string> {
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: resolve(cwd, "absent-gitconfig"),
+    GIT_CONFIG_SYSTEM: resolve(cwd, "absent-gitconfig"),
+    GIT_AUTHOR_NAME: "Aburi Test",
+    GIT_AUTHOR_EMAIL: "test@example.invalid",
+    GIT_COMMITTER_NAME: "Aburi Test",
+    GIT_COMMITTER_EMAIL: "test@example.invalid",
+  }
+  for (const name of FIXTURE_UNSET_GIT_ENV) delete childEnv[name]
+  Object.assign(childEnv, env)
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn("git", args, { cwd, env: childEnv })
+    const out: Buffer[] = []
+    const err: Buffer[] = []
+    child.stdout?.on("data", (chunk: Buffer) => out.push(chunk))
+    child.stderr?.on("data", (chunk: Buffer) => err.push(chunk))
+    child.on("error", rejectPromise)
+    child.on("close", (code) => {
+      if (code === 0) resolvePromise(Buffer.concat(out).toString("utf8"))
+      else
+        rejectPromise(
+          new Error(`git ${args.join(" ")} exited ${code}: ${Buffer.concat(err).toString("utf8")}`),
+        )
+    })
+  })
+}
+
+/**
+ * Whether a real `git` can be spawned here: `null`, or the error the attempt raised. Kept rather
+ * than reduced to a boolean, because EACCES on the binary, a spawn EPERM under a sandbox and an
+ * absent git are three different problems and "git is not on PATH" is wrong for two of them.
+ * Without the probe, a machine with no git fails inside a fixture with a raw `spawn git ENOENT`
+ * that reads like a product bug.
+ */
+export async function probeRealGit(): Promise<unknown> {
+  const probeDir = await mkdtemp(resolve(tmpdir(), "aburi-git-probe-"))
+  try {
+    await realGit(["--version"], probeDir)
+    return null
+  } catch (error) {
+    return error
+  } finally {
+    await rm(probeDir, { recursive: true, force: true })
+  }
 }

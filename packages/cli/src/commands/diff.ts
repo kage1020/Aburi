@@ -1088,6 +1088,34 @@ function irRef(refName: string, ir: IR): IRRef {
 }
 
 /**
+ * Removed from the environment of every git command `aburi diff` runs, because a commit hook
+ * exports them and they describe the commit being made rather than the repository.
+ *
+ * `GIT_INDEX_FILE` names the index of that commit, and `git worktree add` checks the base out
+ * through whatever index it names. Inherited as an absolute path, it overwrote that index and
+ * the commit recorded the base revision's tree: `commit -a` and `commit <paths>` export one in
+ * the main worktree, and every commit exports one in a linked worktree. Inherited as the
+ * relative `.git/index` a plain `commit` exports in the main worktree, the worktree step failed
+ * on the new worktree's `.git` file. `GIT_PREFIX` is the hook's directory inside the caller's
+ * tree, which no command here is about.
+ *
+ * Everything else passes through. `GIT_DIR` names the repository, which both scans are about,
+ * and a caller that points git at one discovery would not find (a bare repository driven with
+ * `GIT_WORK_TREE`) has nothing else naming it. `GIT_WORK_TREE` stays for that same caller: the
+ * pre-validation's `--is-inside-work-tree` asks about the caller's tree, and without it a
+ * mistyped ref there is diagnosed as a run from inside a git directory. The caller's `-c`
+ * settings arrive as `GIT_CONFIG_PARAMETERS` and stay theirs.
+ */
+const UNINHERITED_GIT_ENV: readonly string[] = ["GIT_INDEX_FILE", "GIT_PREFIX"]
+
+/** The environment a git command is spawned with: `env` without `UNINHERITED_GIT_ENV`. */
+export function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const child = { ...env }
+  for (const name of UNINHERITED_GIT_ENV) delete child[name]
+  return child
+}
+
+/**
  * Chunks are joined as bytes and decoded once: a stream splits wherever it splits, so decoding
  * each chunk on its own turns a multi-byte character that straddles two of them into U+FFFD.
  */
@@ -1097,7 +1125,7 @@ const defaultGitRunner: GitRunner = {
     options?: { cwd?: string },
   ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolvePromise, rejectPromise) => {
-      const child = spawn("git", args, { cwd: options?.cwd })
+      const child = spawn("git", args, { cwd: options?.cwd, env: gitChildEnv() })
       const stdoutChunks: Buffer[] = []
       const stderrChunks: Buffer[] = []
       child.stdout?.on("data", (chunk: Buffer) => {
