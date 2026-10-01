@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
@@ -30,10 +30,38 @@ function run(overrides = {}) {
   }
 }
 
+/** Every committed sweep, so each month's lands under the test without anyone adding it. */
+const SAMPLES = readdirSync(resolve(HERE, "..", "results"))
+  .filter((name) => /^\d{4}-\d{2}-\d{2}\.json$/.test(name))
+  .map((name) => name.slice(0, -".json".length))
+
 describe("renderReport", () => {
-  it("reproduces the committed report from the committed samples", () => {
+  it("has committed samples to render", () => {
+    expect(SAMPLES.length).toBeGreaterThan(0)
+  })
+
+  it.each(SAMPLES)("reproduces the committed %s report from its samples", (stamp) => {
+    const report = JSON.parse(read(`results/${stamp}.json`))
+    expect(renderReport(report)).toBe(read(`results/${stamp}.md`))
+  })
+
+  it("names the commit the sweep measured, and says when the tree differed from it", () => {
     const report = JSON.parse(read("results/2026-09-01.json"))
-    expect(renderReport(report)).toBe(read("results/2026-09-01.md"))
+    report.commit = "3b917f21fc0b2a59b787f19f41615f1b022fb5bc"
+    report.dirty = false
+    expect(renderReport(report)).toContain("aburi 0.3.0 at `3b917f21` · Node")
+    report.dirty = true
+    expect(renderReport(report)).toContain("aburi 0.3.0 at `3b917f21` + uncommitted changes · Node")
+  })
+
+  it("prints every run's exit code when the runs disagree", () => {
+    const report = JSON.parse(read("results/2026-09-01.json"))
+    report.results = report.results.slice(0, 1)
+    report.results[0].scan.exitCodes = [0, 3, 0]
+    expect(renderReport(report)).toContain("| 0/3/0 |")
+    report.results[0].scan.exitCodes = [3, 3, 3]
+    report.results[0].scan.exitCode = 3
+    expect(renderReport(report)).toContain("| 3 | ✓ |")
   })
 
   it("renders a repository that failed as a marked row rather than a data row", () => {
@@ -75,6 +103,17 @@ describe("summariseScans", () => {
     const summary = summariseScans([run({ measurement: { exitCode: 3 } })])
     expect(summary.failed).toBeUndefined()
     expect(summary.exitCode).toBe(3)
+  })
+
+  it("keeps every run's exit code and hash, not only one", () => {
+    const summary = summariseScans([
+      run({ measurement: { exitCode: 0 } }),
+      run({ measurement: { exitCode: 3 }, hash: "b" }),
+      run({ measurement: { exitCode: 0 } }),
+    ])
+    expect(summary.exitCodes).toEqual([0, 3, 0])
+    expect(summary.irHashes).toEqual(["a", "b", "a"])
+    expect(summary.deterministic).toBe(false)
   })
 
   it("leaves determinism unmeasured when a single run compared nothing", () => {

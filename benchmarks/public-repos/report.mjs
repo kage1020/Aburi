@@ -52,9 +52,17 @@ export function summariseScans(runs, options = {}) {
   const hashes = runs.map((entry) => entry.hash)
   const wallMsMedian = median(wallMsSamples)
   const { totalFiles = null, warnings = "" } = options
+  const exitCodes = runs.map((entry) => entry.measurement.exitCode)
   return {
     runs: runs.length,
-    exitCode: runs[runs.length - 1].measurement.exitCode,
+    // Still written so every month's sample has the same shape for anything diffing them;
+    // `exitCodes` is what the report reads.
+    exitCode: exitCodes[exitCodes.length - 1],
+    /**
+     * Every run's, because 0 and 3 are both a completed run and nothing above stops three runs
+     * disagreeing between them. `exitCode` alone would keep the last and lose the disagreement.
+     */
+    exitCodes,
     wallMsSamples,
     wallMsMedian,
     wallMsMin: Math.min(...wallMsSamples),
@@ -62,6 +70,8 @@ export function summariseScans(runs, options = {}) {
     peakRssKb: Math.max(...runs.map((entry) => entry.measurement.maxRssKb)),
     filesPerSecond: totalFiles == null ? null : totalFiles / (wallMsMedian / 1000),
     irHash: hashes[0],
+    // Every run's hash, so `deterministic` can be re-derived from the results file alone.
+    irHashes: hashes,
     /**
      * `--no-timestamp` removes the only intentionally varying field, so two runs over an
      * unchanged tree must serialise to the same bytes — the single-threaded half of
@@ -191,13 +201,24 @@ function dashes(count) {
   return Array.from({ length: count }, () => "—")
 }
 
+/**
+ * The scan's exit code, or every run's when they disagree. Samples written before
+ * `exitCodes` was recorded carry only the last run's.
+ */
+function formatExitCodes(scan) {
+  const codes = scan.exitCodes ?? [scan.exitCode]
+  if (codes.every((code) => code === codes[0])) return formatCount(codes[0])
+  return codes.join("/")
+}
+
 export function renderReport(report) {
   const lines = []
   const { environment, results } = report
   lines.push("# Public-repository benchmark")
   lines.push("")
   lines.push(
-    `Run ${report.startedAt} · aburi ${report.generator ?? "workspace build"} · ` +
+    `Run ${report.startedAt} · aburi ${report.generator ?? "workspace build"}` +
+      `${report.commit ? ` at \`${report.commit.slice(0, 8)}\`${report.dirty ? " + uncommitted changes" : ""}` : ""} · ` +
       `Node ${environment.node} · ${environment.cpus}× ${environment.cpuModel} · ` +
       `${environment.totalMemGiB} GiB RAM · ${report.options.runs} measured run(s) after ` +
       `${report.options.warmup} warmup.`,
@@ -239,7 +260,7 @@ export function renderReport(report) {
         scan.filesPerSecond == null ? "—" : scan.filesPerSecond.toFixed(0),
         `${formatMiB(scan.peakRssKb)} MiB`,
         metrics.irBytes == null ? "—" : `${(metrics.irBytes / 1024 / 1024).toFixed(1)} MiB`,
-        formatCount(scan.exitCode),
+        formatExitCodes(scan),
         scan.deterministic == null ? "n/a" : scan.deterministic ? "✓" : "✗",
       ]),
     )
