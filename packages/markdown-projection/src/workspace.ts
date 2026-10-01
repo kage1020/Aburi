@@ -1,5 +1,6 @@
 import type { IR } from "@aburi/types"
 import {
+  appendAll,
   compareStrings,
   inlineCode,
   isSymbolEdge,
@@ -53,7 +54,7 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
   if (skipped.length > 0) {
     lines.push("## Files not analysed")
     lines.push("")
-    lines.push(...skipped)
+    appendAll(lines, skipped)
     lines.push("")
   }
 

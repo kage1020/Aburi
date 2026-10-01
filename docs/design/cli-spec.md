@@ -157,7 +157,7 @@ aburi scan [--output-dir <path>] [--format <json|md|both>] [--no-md|--no-json]
 2. Load plugins and build the registry
 3. Walk the workspace, parsing each file in parallel
 4. Extraction pipeline: drop list → tag propagation → effect classification → fingerprint → Symbol finalization
-5. Write `<output-dir>/aburi.ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md`
+5. Write `<output-dir>/aburi.ir.json` + `<output-dir>/workspace.md` + `<output-dir>/components/*.md`, the IR first: every page is derived from it, so a page that fails to render leaves the IR on disk rather than taking it down too
 6. Print a one-line final summary to stdout
 
 ### 5.4 Exit Codes

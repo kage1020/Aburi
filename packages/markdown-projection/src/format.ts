@@ -118,6 +118,19 @@ function longestBacktickRun(text: string): number {
 }
 
 /**
+ * Append `items` to `target` one at a time.
+ *
+ * `target.push(...items)` hands every item to one call as a separate argument, and V8 overflows
+ * the stack past roughly 120,000 of them. A component page, the list of files a scan skipped
+ * and a Slice all grow with the workspace and reach that in ordinary repositories, so a list
+ * whose length the workspace decides is appended through here — a throw while rendering a page
+ * would otherwise end the command.
+ */
+export function appendAll(target: string[], items: readonly string[]): void {
+  for (const item of items) target.push(item)
+}
+
+/**
  * What a value renders as when it has nothing in it. Emitting nothing instead is
  * indistinguishable from the field being absent, and one level up it deletes the row.
  */

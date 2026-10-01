@@ -311,15 +311,9 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const format = options.format ?? "both"
 
+  // The IR first: every other artefact is derived from it, so a projection that fails cannot
+  // be allowed to cost it. Writing it last lost the document to a Markdown page that threw.
   let irPath: string | null = null
-  const workspaceMdPath = await maybeWriteWorkspaceMd(
-    command,
-    format,
-    outputDir,
-    scanResult.ir,
-    options,
-  )
-  const componentMdPaths = await maybeWriteComponentMd(command, format, outputDir, scanResult.ir)
   if (format !== "md") {
     irPath = resolve(outputDir, IR_JSON_FILENAME)
     // Serialization can refuse the document (two keys differing only in Unicode composition),
@@ -340,6 +334,14 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     }
     await writeOutputFile({ command, artefact: "the IR", path: irPath }, serialized)
   }
+  const workspaceMdPath = await maybeWriteWorkspaceMd(
+    command,
+    format,
+    outputDir,
+    scanResult.ir,
+    options,
+  )
+  const componentMdPaths = await maybeWriteComponentMd(command, format, outputDir, scanResult.ir)
 
   const undeclaredVocab = summarizeUndeclaredVocab(requireUndeclaredVocab(scanResult))
   // Only `scan` writes the record: `diff` runs two scans into one directory, and the list is
