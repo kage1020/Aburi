@@ -227,10 +227,12 @@ The language plugin generates a **normalized AST string** per Symbol and compute
 1. Contains no comment nodes
 2. Contains no position information (line, column, byte offset)
 3. Contains no whitespace tokens
-4. Is an S-expression representing only node kinds and child-node structure
+4. Is an S-expression representing node kinds and child-node structure, plus the unnamed tokens that carry meaning — operators, keywords, modifiers. Punctuation a formatter adds, drops or swaps without changing the program (string delimiters, an optional `;`, a trailing `,`, brackets the structure already implies) is left out
 5. Includes identifier and literal values (concrete values, not structure alone)
 
-Example (TypeScript): use the S-expression from tree-sitter's `node.toString()` with position annotations removed.
+Item 4 is what keeps `a + b` and `a - b` apart. Most parsers hold an operator or a `let` / `const` keyword as an unnamed token rather than a node, so a string built from node kinds alone reads either edit as no change. An operator outside a rule's text reaches neither `api` nor `logic` either, so the Symbol is reported as unchanged.
+
+Example (TypeScript): tree-sitter's `node.toString()` with position annotations removed, and the meaningful unnamed tokens quoted in place.
 
 ```
 (method_definition
@@ -238,7 +240,7 @@ Example (TypeScript): use the S-expression from tree-sitter's `node.toString()` 
   parameters: (formal_parameters ...)
   body: (statement_block
     (if_statement
-      condition: (parenthesized_expression (binary_expression ...))
+      condition: (parenthesized_expression (binary_expression ... ">" ...))
       consequence: (statement_block (throw_statement ...)))))
 ```
 
@@ -253,12 +255,14 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 
 - Whitespace / newline / indentation changes → unchanged
 - Adding / removing comments → unchanged
+- Quote style, a trailing comma, optional semicolons → unchanged
 
 ### 5.4 Guaranteed change conditions
 
 - Adding / removing statements → changes
 - Renaming an identifier → changes (`syntax` is structure-based, not meaning-based, so identifiers are treated as part of the structure)
 - Changing a literal → changes
+- Changing an operator, a declaration keyword (`let` / `const`), a modifier or a primitive type → changes
 
 ### 5.5 Uses of the syntax fingerprint
 
@@ -372,6 +376,7 @@ The reference implementation and every language plugin must pass the following t
 |---|---|---|
 | S1 | Add a comment | syntax unchanged |
 | S2 | Change whitespace formatting | syntax unchanged |
+| S7 | Change quote style, add a trailing comma, drop optional semicolons | syntax unchanged |
 
 ### 7.7 syntax change conditions
 
@@ -380,10 +385,11 @@ The reference implementation and every language plugin must pass the following t
 | S3 | Add a statement | syntax changes |
 | S4 | Rename an identifier | syntax changes |
 | S5 | Change a literal | syntax changes |
+| S6 | Change an operator, a declaration keyword, a modifier or a primitive type (`a + b` → `a - b`, `let` → `const`, `private` → `public`, `number` → `string`) | syntax changes |
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 
-S1–S5 fall under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
+S1–S7 fall under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
 
 ```js
 // must be included in the language plugin's test suite
@@ -412,6 +418,16 @@ describe('normalizeAst syntax fingerprint contract', () => {
     const a = normalizeAst(parseSnippet('function f() { return 1 }'));
     const b = normalizeAst(parseSnippet('function f() { return 2 }'));
     expect(a).not.toBe(b);
+  });
+  test('S6: changing an operator changes syntax', () => {
+    const a = normalizeAst(parseSnippet('function f() { save(a + b) }'));
+    const b = normalizeAst(parseSnippet('function f() { save(a - b) }'));
+    expect(a).not.toBe(b);
+  });
+  test('S7: quote style leaves syntax unchanged', () => {
+    const a = normalizeAst(parseSnippet("function f() { save('x') }"));
+    const b = normalizeAst(parseSnippet('function f() { save("x") }'));
+    expect(a).toBe(b);
   });
 });
 ```

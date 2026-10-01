@@ -706,6 +706,8 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | LP21 | code differing only in comments | normalizeAst yields identical strings |
 | LP22 | code differing only in whitespace | normalizeAst yields identical strings |
 | LP23 | code with different identifiers | normalizeAst yields different strings |
+| LP23a | code differing only in an operator, a declaration keyword, a modifier or a primitive type — `a + b` / `a - b`, `let` / `const`, `private` / `public`, `x as string` / `x as number` | normalizeAst yields different strings. These are unnamed tokens in most grammars, and a walk over named nodes alone drops them (fingerprint.md §5.1) |
+| LP23b | code differing only in punctuation a formatter owns — quote style, a trailing comma, optional semicolons, `;` against `,` between interface members | normalizeAst yields identical strings |
 
 ### 9.6 Import extraction
 

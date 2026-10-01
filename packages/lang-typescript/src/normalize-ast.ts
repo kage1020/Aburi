@@ -9,7 +9,8 @@ import type { Node } from "web-tree-sitter"
  *   - no comment nodes (we skip `comment` and `hash_bang_line` nodes)
  *   - no position information (byte offsets, rows, columns are all omitted)
  *   - no whitespace tokens (tree-sitter's `extra` nodes are dropped)
- *   - node kinds and child structure only
+ *   - node kinds and child structure, plus the anonymous tokens that carry meaning
+ *     (operators, keywords, modifiers — see `tokenPayload`), quoted
  *   - identifier and literal values ARE included — the syntax axis is sensitive to what
  *     the code says, not just how it is shaped
  *
@@ -44,9 +45,9 @@ function serialize(node: Node): string {
   if (SKIPPED_NODE_TYPES.has(node.type)) return ""
 
   const children: string[] = []
-  for (const child of node.namedChildren) {
+  for (const child of node.children) {
     if (child === null) continue
-    const rendered = serialize(child)
+    const rendered = child.isNamed ? serialize(child) : tokenPayload(child)
     if (rendered.length > 0) children.push(rendered)
   }
 
@@ -55,6 +56,37 @@ function serialize(node: Node): string {
   if (children.length === 0 && leafText !== null) return `(${node.type} ${leafText})`
   return `(${node.type} ${children.join(" ")})`
 }
+
+/**
+ * An anonymous token, quoted so it cannot be read as a node type, or `""` when it says
+ * nothing a formatter could not change.
+ *
+ * Operators and keywords are anonymous in tree-sitter — `a + b` and `a - b` are one
+ * `binary_expression` over two identifiers, and `let` and `const` one `lexical_declaration` —
+ * so a walk over named children alone reads both edits as no change. The tokens kept out are
+ * the ones a formatter adds, drops or swaps without changing the program: string delimiters
+ * (`'a'` and `"a"`), separators (an optional `;`, a trailing `,`), and brackets the named
+ * structure already implies. A MISSING token was never written, so it is not read either.
+ */
+function tokenPayload(token: Node): string {
+  if (token.isExtra || token.isMissing) return ""
+  if (FORMATTING_TOKENS.has(token.type)) return ""
+  return JSON.stringify(token.type)
+}
+
+const FORMATTING_TOKENS: ReadonlySet<string> = new Set([
+  ";",
+  ",",
+  '"',
+  "'",
+  "`",
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+])
 
 /** Node types that never contribute to the normalized AST. */
 const SKIPPED_NODE_TYPES: ReadonlySet<string> = new Set(["comment", "hash_bang_line"])

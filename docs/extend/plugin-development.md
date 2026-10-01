@@ -99,7 +99,8 @@ class MyLangPlugin implements LanguagePlugin {
   }
 
   normalizeAst(symbol) {
-    // Canonical AST string. Whitespace / comment insensitive. Identifiers preserved.
+    // Canonical AST string. Whitespace / comment insensitive. Identifiers, literals,
+    // operators, keywords and modifiers preserved (fingerprint.md §5.1).
     return ""
   }
 
