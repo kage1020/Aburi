@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { parseRenameRecords } from "../src/commands/diff"
+import { realGit as git, probeRealGit } from "./fixtures"
 
 /**
  * The rename reader against real `git` output, on the path shapes the mocked runner in
@@ -19,37 +19,6 @@ import { parseRenameRecords } from "../src/commands/diff"
 
 let scratch = ""
 
-/** Buffered, decoded once — a multi-byte character can straddle two chunks. */
-function git(args: readonly string[], cwd: string): Promise<string> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn("git", args, {
-      cwd,
-      env: {
-        ...process.env,
-        // Whatever the developer's ~/.gitconfig says must not decide what this test observes.
-        GIT_CONFIG_GLOBAL: resolve(cwd, "absent-gitconfig"),
-        GIT_CONFIG_SYSTEM: resolve(cwd, "absent-gitconfig"),
-        GIT_AUTHOR_NAME: "Aburi Test",
-        GIT_AUTHOR_EMAIL: "test@example.invalid",
-        GIT_COMMITTER_NAME: "Aburi Test",
-        GIT_COMMITTER_EMAIL: "test@example.invalid",
-      },
-    })
-    const out: Buffer[] = []
-    const err: Buffer[] = []
-    child.stdout?.on("data", (chunk: Buffer) => out.push(chunk))
-    child.stderr?.on("data", (chunk: Buffer) => err.push(chunk))
-    child.on("error", rejectPromise)
-    child.on("close", (code) => {
-      if (code === 0) resolvePromise(Buffer.concat(out).toString("utf8"))
-      else
-        rejectPromise(
-          new Error(`git ${args.join(" ")} exited ${code}: ${Buffer.concat(err).toString("utf8")}`),
-        )
-    })
-  })
-}
-
 /**
  * macOS stores a filename decomposed, so a path written as NFC can come back as NFD. The reader
  * normalizes to NFC, so what this asserts is that its output is in the form `source.file` is
@@ -59,22 +28,10 @@ function nfc(value: string): string {
   return value.normalize("NFC")
 }
 
-/**
- * The probe's error, kept rather than reduced to a boolean: EACCES on the binary, a spawn EPERM
- * under a sandbox and an absent git are three different problems, and "git is not on PATH" is
- * wrong for two of them.
- */
 let gitProbeError: unknown = null
 
 beforeAll(async () => {
-  const probeDir = await mkdtemp(resolve(tmpdir(), "aburi-git-probe-"))
-  try {
-    await git(["--version"], probeDir)
-  } catch (error) {
-    gitProbeError = error
-  } finally {
-    await rm(probeDir, { recursive: true, force: true })
-  }
+  gitProbeError = await probeRealGit()
 })
 
 beforeEach(async () => {

@@ -505,13 +505,12 @@ If git is unavailable, pass existing IR files via the `--base / --head` pair.
 
 ### 6.4 Behavior
 
-With refs:
+With refs (every git command these steps run gets the caller's environment as §6.4.3 describes):
 1. **Pre-validation** (§6.4.1)
 2. Create a temporary git worktree and check out the base ref
    - **Directory name**: the worktree's own directory is named after the head workspace's directory (`<temp>/base/<head-workspace-dirname>`), under a `base/` level of its own so the leaf is free to be any name the workspace has — `base-out` and `head-out` included, which as siblings would be the run's own temporary scan outputs
    - Rationale: component autodetection falls back to the directory name for a Component rooted at the workspace root ([`component-detect.md`](./component-detect.md) §4.1 — a Component under `packages/*` takes its name from its own directory and never reaches this one). A fixed name would give the base side a different Component id from the head's, so a workspace whose Component is the root itself and which declares **neither** a package name **nor** explicit `components[]` would report one Component added and one removed on every diff
    - Two leaves the rule cannot use: an empty one (only at the filesystem root) and `@` (which `git worktree add` cannot spell under `.git/worktrees/`, failing with `fatal: not a git repository`). Both fall back to `base`. That is safe because a substitution can only reinstate the defect by supplying a Component id differing from the head's, and both leaves kebab-case to nothing: where detection decides ids the scan refuses the workspace with `invalid-component-id` and names the directory that did it, and where `components[]` declares them no directory name is read on either side
-   - **Caller's working-tree variables**: the git commands `aburi diff` runs do not inherit `GIT_INDEX_FILE`, `GIT_WORK_TREE`, `GIT_IMPLICIT_WORK_TREE` or `GIT_PREFIX`. A commit hook exports `GIT_INDEX_FILE` naming the index of the commit being made, and `git worktree add` checks the base out through whatever index that names: inherited, it would overwrite that index (the commit records the base revision's tree) or fail on the new worktree's `.git` file. None of the commands reads the caller's index or working tree. `GIT_DIR`, `GIT_COMMON_DIR`, the object directories and the caller's `-c` settings are passed on, since they name the repository both scans are about
 3. Run `aburi scan` on the base and store the IR temporarily
    - **Config used**: apply the **head-side `aburi.json`** to the base scan as well (the base is interpreted through the head's view; a stale config remaining in the base is ignored)
    - Rationale: using the config as of the base ref would make "config change = the entire IR changes", breaking the diff. Fixing the view to the head automatically resolves config differences
@@ -565,6 +564,12 @@ Required setup when using `aburi diff` in CI:
 ```
 
 Nothing less: the pre-validation above refuses a shallow repository outright, so a `fetch-depth` of `50` produces a clone this command will not diff, and the default of `1` cannot be used either.
+
+#### 6.4.3 The Caller's Git Environment
+
+Every git command `aburi diff` runs, from the §6.4.1 pre-validation through the rename collection to the worktree steps, gets the caller's environment without `GIT_INDEX_FILE` and `GIT_PREFIX`. A commit hook exports both. `GIT_INDEX_FILE` names the index of the commit being made, and `git worktree add` checks the base out through whatever index it names: inherited as an absolute path, which `commit -a` and `commit <paths>` export in the main worktree and every commit exports in a linked worktree, it would overwrite that index and the commit would record the base revision's tree; inherited as the relative `.git/index` a plain `commit` exports in the main worktree, the worktree step would fail on the new worktree's `.git` file. `GIT_PREFIX` is the hook's directory inside the caller's tree.
+
+Everything else is passed on. `GIT_DIR` names the repository both scans are about, and for a bare repository driven with `GIT_WORK_TREE` it is the only thing that does. `GIT_WORK_TREE` is passed on for that same caller, because `git rev-parse --is-inside-work-tree` in §6.4.1 asks about the caller's working tree, and without it a mistyped ref would be diagnosed as a run from inside a git directory. The caller's `-c` settings (`GIT_CONFIG_PARAMETERS`) stay theirs.
 
 ### 6.5 Exit Codes
 
@@ -938,6 +943,8 @@ The `--json` flag (`aburi vocab` only) dedicates stdout to machine-readable JSON
 
 Precedence: CLI flags > environment variables > config file.
 
+git's own variables reach the git commands `aburi diff` runs, except `GIT_INDEX_FILE` and `GIT_PREFIX` (§6.4.3).
+
 ## 12. CI Mode
 
 Automatic switches when the `CI=true` env is detected:
@@ -1084,7 +1091,7 @@ A CI gate is the feature that delivers the most value at review adoption time. O
 
 ### 18.4 Why `aburi diff` Uses git worktree
 
-Checking out the base ref would require stashing the current work, risking accidental loss of uncommitted changes. With git worktree, the base can be materialized at a separate path while the head's working directory is preserved.
+Checking out the base ref would require stashing the current work, risking accidental loss of uncommitted changes. With git worktree, the base can be materialized at a separate path while the head's working directory is preserved, its index included, which is why a diff run from a commit hook does not hand `git worktree add` the index being committed (§6.4.3).
 
 ### 18.5 Partial Matching in `aburi explain`
 

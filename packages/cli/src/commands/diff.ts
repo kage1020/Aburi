@@ -1088,31 +1088,31 @@ function irRef(refName: string, ir: IR): IRRef {
 }
 
 /**
- * The variables of `git rev-parse --local-env-vars` that describe the caller's own working
- * tree rather than the repository: its index, where the tree is, and the caller's directory in
- * it. A commit hook exports `GIT_INDEX_FILE`, naming the index of the commit being made, and
- * `GIT_PREFIX`. `git worktree add` checks the base out through whatever index
- * `GIT_INDEX_FILE` names, so inherited from a pre-commit hook it overwrites the index git is
- * about to commit (an absolute path, from `commit -a` or `commit <paths>`) or fails on the
- * new worktree's `.git` file (the relative `.git/index` a plain `commit` exports). No git
- * call here reads the caller's index or working tree, so none of them is given these.
+ * Removed from the environment of every git command `aburi diff` runs, because a commit hook
+ * exports them and they describe the commit being made rather than the repository.
  *
- * The rest of `git rev-parse --local-env-vars` is kept: `GIT_DIR`, `GIT_COMMON_DIR` and the
- * object directories name the repository, which is the one both scans are about (a hook in a
- * linked worktree exports `GIT_DIR`, and `gitRepositoryAbove` takes it at its word), and
- * `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT` carry the caller's `-c` settings.
+ * `GIT_INDEX_FILE` names the index of that commit, and `git worktree add` checks the base out
+ * through whatever index it names. Inherited as an absolute path, it overwrote that index and
+ * the commit recorded the base revision's tree: `commit -a` and `commit <paths>` export one in
+ * the main worktree, and every commit exports one in a linked worktree. Inherited as the
+ * relative `.git/index` a plain `commit` exports in the main worktree, the worktree step failed
+ * on the new worktree's `.git` file. `GIT_PREFIX` is the hook's directory inside the caller's
+ * tree, which no command here is about.
+ *
+ * Everything else passes through. `GIT_DIR` names the repository, which both scans are about,
+ * and a caller that points git at one discovery would not find (a bare repository driven with
+ * `GIT_WORK_TREE`) has nothing else naming it. `GIT_WORK_TREE` stays for that same caller: the
+ * pre-validation's `--is-inside-work-tree` asks about the caller's tree, and without it a
+ * mistyped ref there is diagnosed as a run from inside a git directory. The caller's `-c`
+ * settings arrive as `GIT_CONFIG_PARAMETERS` and stay theirs.
  */
-const CALLER_WORK_TREE_ENV = [
-  "GIT_INDEX_FILE",
-  "GIT_WORK_TREE",
-  "GIT_IMPLICIT_WORK_TREE",
-  "GIT_PREFIX",
-]
+const UNINHERITED_GIT_ENV: readonly string[] = ["GIT_INDEX_FILE", "GIT_PREFIX"]
 
-function gitChildEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
-  for (const name of CALLER_WORK_TREE_ENV) delete env[name]
-  return env
+/** The environment a git command is spawned with: `env` without `UNINHERITED_GIT_ENV`. */
+export function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const child = { ...env }
+  for (const name of UNINHERITED_GIT_ENV) delete child[name]
+  return child
 }
 
 /**
