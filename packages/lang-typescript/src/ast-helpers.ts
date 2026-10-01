@@ -85,7 +85,9 @@ const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
  * The old-style assertion `<T>(expr)` is deliberately not on the list. It is a `type_assertion`
  * whose **first** named child is the type, so the rule above inverts on it, and it is
  * deprecated and unparseable by the tsx grammar — adding it would need its own reader for a
- * spelling most of this plugin's own extensions cannot use.
+ * spelling most of this plugin's own extensions cannot use. The callee normalizer in
+ * `walk-body.ts` has such a reader (`TYPE_WRAPPER_TYPES`), because a callee is named by its
+ * text and a `.ts` file can write `(<T>x).m()`; that is a separate question from this one.
  */
 export function unwrapValue(node: Node): Node {
   let cursor: Node = node

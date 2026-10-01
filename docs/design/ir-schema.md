@@ -504,10 +504,11 @@ A call that does not qualify as an effect.
 `resolved` is filled in by the call-resolution feature (separate document). `null` while unresolved.
 
 `target` is the callee as the language plugin normalized it ([`lang-plugin.md`](./lang-plugin.md)
-§4.4), and one segment of it is reserved: **`<computed>`** — exported as
+§4.4), and one segment spelling is reserved: **`<computed>`** — exported as
 `COMPUTED_TARGET_SEGMENT` — stands where the source addressed a property through brackets with
-something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. The
-segment pattern of §3.1 admits no `<`, so a call carrying it resolves against nothing rather than
+something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`, and where
+the receiver is an expression no name spells, so `[...names].sort()` is `<computed>.sort` and an
+IIFE is `<computed>` alone. The segment pattern of §3.1 admits no `<`, so a call carrying it resolves against nothing rather than
 against whatever the shortened name would have matched. `effects[].target` (§9) carries the same
 string under the same rule, and is where a call an effect plugin claimed records it — such a call
 is not in `calls[]` (§9.3) and reaches no call-resolution bucket.

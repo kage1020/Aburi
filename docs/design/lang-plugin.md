@@ -250,6 +250,24 @@ The file keeps its Symbols (a file is withdrawn when its parse returns no tree, 
 is not), the diagnostic carries a line to fix, and the guard stays a signal that something
 upstream is genuinely broken.
 
+#### A receiver that is not a name
+
+A receiver the normalizer does not model never contributes its source text to `target`. Such a
+receiver — an array, object, string, number or template literal, `new C()`, an `await`, a binary
+expression, a function or arrow expression (an IIFE) — contributes the reserved segment
+**`<computed>`** (the same `COMPUTED_TARGET_SEGMENT` a bracket access uses, below) and the call
+carries `dynamicReceiver`: `[...names].sort()` is `<computed>.sort`, and an IIFE is `<computed>`.
+Its text would break the contract above (`[...names]` holds two empty segments, `(.5)` a leading
+dot) or put a function body, indentation included, into the IR.
+
+A type-level wrapper — `svc!`, `x as Foo`, `x satisfies Foo`, `<Foo>x` — still answers with its
+own text around a name, so `svc!.save()` is `svc!.save` and is not dynamic. Around anything else it
+answers what the wrapped expression does (`([...a] as T).m()` is `<computed>.m`, `getRepo()!.save()`
+is the dynamic `getRepo.save`), and a text that would still hold an empty segment (`(x as [...T]).m()`)
+or a line break (a type literal written over several lines) answers `<computed>`: a target is
+read as a name, and reformatting must not change it. The keyword callee of a dynamic
+`import("./m")` is `import`, and `import.meta` and `new.target` are their own spellings.
+
 #### A bracket access in a callee
 
 `prisma["user"].create(data)` and `prisma.user.create(data)` are one call written two ways, and
@@ -678,6 +696,7 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | LP20j1 | `prisma["user" "audit"].create(d)`, `obj["a\u12b"].m()` | `prisma.<computed>.create` / `obj.<computed>.m` — an index the parser recovered rather than read names no segment, whether the ERROR stands beside the literal or inside it |
 | LP20k | `prisma[model].create(d)`, `items[0].save()`, `obj["a-b"].m()`, `obj["#v"].m()` | one call each, targets `prisma.<computed>.create`, `items.<computed>.save`, `obj.<computed>.m`, all `dynamicReceiver` — an index that names no segment is reported as one that names none, where dropping it would report a call the program does not contain. `"#v"` spells the private segment and still names none: `obj.#v` is another member (§4.4) |
 | LP20k1 | `handlers[name]()`, `prisma.user[verb](d)` | `handlers.<computed>` / `prisma.user.<computed>`, both `dynamicReceiver` — the terminal slot answers the same way, so a call whose *name* is computed is reported as a call rather than as a call to its receiver |
+| LP20l | `[...names].sort()`, `'a...'.trim()`, `(.5).toFixed(2)`, `new Date().getTime()`, `(async () => { … })()`, `([...a] as T).m()` | `<computed>.sort`, `<computed>.trim`, `<computed>.toFixed`, `<computed>.getTime`, `<computed>`, `<computed>.m`, all `dynamicReceiver` — an unmodelled receiver contributes the reserved segment, never its source text (§4.4). `svc!.save()` stays `svc!.save`, not dynamic, and `import("./m")` stays `import`. A wrapper whose text spans lines, `(x as {` … `}).m()`, is `<computed>.m` |
 | LP20e | an owner-shaped node the walk *meets* rather than owns — `function f() { class Inner { m() { x() } } }` | walked whole. `Inner` is not extracted, so every call in it belongs to `f`; LP20a applies to the Symbol's own body nodes and to nothing else |
 
 ### 9.5 normalizeAst

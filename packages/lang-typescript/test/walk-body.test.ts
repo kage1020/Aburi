@@ -274,6 +274,86 @@ describe("walkBody — dynamicReceiver (call-resolution.md `dynamic` bucket)", (
   })
 })
 
+/**
+ * A receiver the normalizer does not model contributes the reserved `<computed>` segment, never
+ * its source text: the text of `[...names]` holds `...`, which is two empty segments under the
+ * normalized-callee contract, and every effect plugin's guard throws on one.
+ */
+describe("walkBody — unmodelled receivers answer `<computed>`", () => {
+  it.each([
+    ["an array literal", "return [...names].sort()", "<computed>.sort"],
+    [
+      "a nested array literal",
+      "return [...new Set([...a, ...b])].forEach(g)",
+      "<computed>.forEach",
+    ],
+    ["an awaited import", "return (await import('../m')).run()", "<computed>.run"],
+    ["a string literal", "return 'Loading...'.toUpperCase()", "<computed>.toUpperCase"],
+    ["a number literal", "return (.5).toFixed(2)", "<computed>.toFixed"],
+    ["an object literal", "return ({...x}).toString()", "<computed>.toString"],
+    ["a template literal", "return `a..b`.trim()", "<computed>.trim"],
+    ["a constructed instance", "return new Date().getTime()", "<computed>.getTime"],
+    ["an IIFE", "(async () => {\n    await load()\n  })()", "<computed>"],
+    ["an array literal behind `as`", "return ([...a] as string[]).map(g)", "<computed>.map"],
+    ["an array literal behind `!`", "return [...a]!.map(g)", "<computed>.map"],
+    ["a type that spells a spread", "return (x as [...T]).map(g)", "<computed>.map"],
+    ["a type that spans lines", "return (x as {\n    a: string\n  }).m()", "<computed>.m"],
+  ])("%s", async (_label, body, target) => {
+    const { calls } = await walkFirstSymbol(
+      `export async function f(names: any, a: any, b: any, x: any) { ${body} }`,
+    )
+    const call = calls.find((c) => c.target === target)
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBe(true)
+    for (const { target: written } of calls) {
+      expect(written.split(".").every((segment) => segment.length > 0)).toBe(true)
+    }
+  })
+
+  it.each([
+    ["a dynamic import", 'return import("./m")', "import"],
+    ["`import.meta`", 'return import.meta.resolve("./m")', "import.meta.resolve"],
+    ["`new.target`", "return new.target.g()", "new.target.g"],
+  ])("still names %s", async (_label, body, target) => {
+    const { calls } = await walkFirstSymbol(`export async function f() { ${body} }`)
+    const call = calls.find((c) => c.target === target)
+    expect(call).toBeDefined()
+    expect(call?.dynamicReceiver).toBeUndefined()
+  })
+
+  it("keeps the IIFE's inner calls", async () => {
+    const { calls } = await walkFirstSymbol(
+      "export function boot() {\n  (async () => {\n    await load()\n  })()\n}",
+    )
+    expect(calls.map((c) => c.target)).toEqual(["<computed>", "load"])
+  })
+
+  it("keeps a non-null assertion's text around a name", async () => {
+    const { calls } = await walkFirstSymbol(
+      "export function f(svc?: any) { this.repo!.save(); svc!.save() }",
+    )
+    expect(calls.map((c) => c.target)).toEqual(["this.repo!.save", "svc!.save"])
+  })
+
+  // A wrapper other than `!` binds looser than `.`, so as a receiver it is always parenthesized,
+  // and a parenthesized wrapper reads as an expression receiver. `<Foo>x` keeps the value last,
+  // which is why it has its own branch; `src/a.ts` routes to the grammar that parses it.
+  it.each([
+    ["`as`", "(x as Foo).m()", "x as Foo.m"],
+    ["`satisfies`", "(x satisfies Foo).m()", "x satisfies Foo.m"],
+    ["an old-style assertion", "(<Foo>x).m()", "<Foo>x.m"],
+  ])("keeps the text of %s around a name", async (_label, body, target) => {
+    const { calls } = await walkFirstSymbol(`export function f(x: any) { ${body} }`)
+    expect(calls.map((c) => [c.target, c.dynamicReceiver])).toEqual([[target, true]])
+  })
+
+  it("reads a non-null assertion around a call as the call it wraps", async () => {
+    const { calls } = await walkFirstSymbol("export function f() { getRepo()!.save() }")
+    const call = calls.find((c) => c.target === "getRepo.save")
+    expect(call?.dynamicReceiver).toBe(true)
+  })
+})
+
 // A bracket access in a callee (`lang-plugin.md`, LP20j / LP20k). Reading only the
 // object part answered `prisma.create` for `prisma["user"].create()` — a call that is
 // nowhere in the program, spelled like an ordinary two-segment method call, and one

@@ -6,8 +6,9 @@
 
 /**
  * The segment a call target carries where the source addressed a property through brackets
- * with something that is not a name — `prisma[model].create()` is `prisma.<computed>.create`
- * (`lang-plugin.md`).
+ * with something that is not a name — `prisma[model].create()` is `prisma.<computed>.create` —
+ * and where the receiver is an expression no name spells: `[...names].sort()` is
+ * `<computed>.sort`, and an IIFE is `<computed>` alone (`lang-plugin.md`).
  *
  * Dropping the index instead does not shorten the call, it renames it: `prisma.create` is a
  * call the program does not contain, spelled like an ordinary two-segment method call, and a
