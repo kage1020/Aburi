@@ -12,7 +12,8 @@ import { describeJsonType, isVanishedFile } from "./scan/faults"
 /**
  * Filenames whose presence at any directory ancestor identifies a workspace root. The
  * outermost match wins (see detectWorkspaceRoot's contract): when both a sub-project and a
- * monorepo parent carry markers, the monorepo root is the one the IR must describe.
+ * monorepo parent carry markers, the monorepo root is the one the IR must describe. `.git` is
+ * also where the walk stops, so "outermost" never reaches past the repository.
  */
 const ROOT_MARKERS = [
   ".git",
@@ -44,13 +45,20 @@ export interface DetectWorkspaceRootOptions {
  * carries a workspace marker. Outermost wins so a sub-project's `package.json` does not
  * shadow the monorepo's `.git` / `pnpm-workspace.yaml`.
  *
+ * The walk ends at the first `.git` — a directory, or the file a linked worktree or a
+ * submodule has in its place. A repository is the tree `aburi diff` can check out a revision
+ * of, so a root above it is a tree no base scan can reproduce: a worktree kept inside the main
+ * checkout (`.worktrees/feat`) scanned the main checkout instead, and a repository nested in
+ * another rooted every id at the outer one and read as moved against its own base. Inside a
+ * monorepo nothing changes, since the monorepo's root is the directory holding its `.git`.
+ *
  * Throws CoreError "workspace-root-not-found" only when no marker exists between cwd and
  * the filesystem root — callers fall back to "treat cwd as a single-project workspace" in
  * that branch rather than aborting.
  *
- * Because the walk runs all the way to the filesystem root, it opens manifests in directories
- * that have nothing to do with this workspace: a `$HOME/package.json` left behind on a shared
- * machine, or a directory a CI container is not allowed to read. A manifest that cannot be
+ * Outside a repository the walk runs all the way to the filesystem root, so it opens manifests
+ * in directories that have nothing to do with this workspace: a `$HOME/package.json` left
+ * behind on a shared machine, or a directory a CI container is not allowed to read. A manifest that cannot be
  * read *inside* the workspace still has to be raised — the packages it was meant to declare
  * would otherwise go missing with nothing saying so — but one above the workspace root is
  * somebody else's file and aborting on it leaves the user with a path they do not recognize
@@ -80,6 +88,7 @@ export async function detectWorkspaceRoot(
     const probe = await probeDirectoryMarkers(dir)
     if (probe.hasMarker) outermost = dir
     if (failure === null && probe.failure !== null) failure = { dir, cause: probe.failure }
+    if (probe.repository) break
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
@@ -103,6 +112,8 @@ interface MarkerFailure {
 interface MarkerProbe {
   /** Whether this directory carries a marker. */
   hasMarker: boolean
+  /** Whether the marker is `.git`, which makes this directory the last one the walk visits. */
+  repository: boolean
   /** The first error a probe of this directory raised, or `null` when every probe answered. */
   failure: unknown
 }
@@ -125,7 +136,9 @@ async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
   }
   for (const name of ROOT_MARKERS) {
     try {
-      if (await pathExists(join(dir, name))) return { hasMarker: true, failure }
+      if (await pathExists(join(dir, name))) {
+        return { hasMarker: true, repository: name === ".git", failure }
+      }
     } catch (cause) {
       remember(cause)
     }
@@ -134,12 +147,14 @@ async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
     const path = join(dir, name)
     try {
       if (!(await pathExists(path))) continue
-      if (await fileSatisfiesWorkspacePredicate(name, path)) return { hasMarker: true, failure }
+      if (await fileSatisfiesWorkspacePredicate(name, path)) {
+        return { hasMarker: true, repository: false, failure }
+      }
     } catch (cause) {
       remember(cause)
     }
   }
-  return { hasMarker: false, failure }
+  return { hasMarker: false, repository: false, failure }
 }
 
 /**

@@ -23,7 +23,7 @@ This enables:
 ```
 1. Workspace root detection
    - Walk upward from the CLI execution cwd
-   - Take the outermost workspace marker as root
+   - Take the outermost workspace marker as root, stopping at the first `.git`
 
 2. Component extraction
    - Run each detector in parallel from the root
@@ -33,9 +33,9 @@ This enables:
 
 ### 2.1 Workspace root detection
 
-Walk from cwd toward parents; the workspace root is the **outermost (closest to the filesystem root)** directory in which any of the following is found:
+Walk from cwd toward parents; the workspace root is the **outermost (closest to the filesystem root)** directory in which any of the following is found, up to and including the first directory holding `.git`:
 
-- `.git/` directory
+- `.git` — a directory, or the file a linked worktree or a submodule has in its place
 - `pnpm-workspace.yaml`
 - `turbo.json`
 - `nx.json`
@@ -46,7 +46,7 @@ Walk from cwd toward parents; the workspace root is the **outermost (closest to 
 - `package.json` (containing a `workspaces` field)
 - `.aburi-workspace` (reserved for future use, Aburi-specific marker)
 
-If markers are found at multiple levels, the outer one wins (e.g., the parent holding `.git` is the true root of the monorepo).
+If markers are found at multiple levels, the outer one wins (e.g., the parent holding `.git` is the true root of the monorepo). The walk does not go past a `.git`: a repository nested under another marker is a workspace of its own (§11.1).
 
 ### 2.2 Component extraction
 
@@ -390,12 +390,15 @@ Implementation guidance:
 | CD29 | A Component at `apps/web`; a Symbol whose file is spelled `./apps/web/x.ts` | `Symbol.component` is `web` — the file side is normalized as the root side is |
 | CD30 | A Component rooted at `packages//api`; a Symbol in `packages/api/x.ts` | `Symbol.component` is `api` — an empty segment names nothing on either side |
 | CD31 | A Component rooted at `""`, at `"/"`, or at `../vendor` | It claims no file at all, the workspace root included |
+| CD32 | cwd inside a repository that sits under another marker — a linked worktree at `.worktrees/feat` in the main checkout, a repository nested in another, a submodule | The workspace root is the inner repository's top level, the directory holding its `.git` (a directory or a file), not the outer one |
 
 ## 11. Design decisions
 
 ### 11.1 Why the workspace root is the outermost marker
 
 When markers are found at multiple levels (e.g., a sub-project inside a monorepo also has a `package.json`), taking the inner one as root would miss the structure of the entire monorepo. Taking the outermost as root avoids unintended subset detection.
+
+The walk stops at the first `.git` all the same. A repository is the unit `aburi diff` checks a revision out of, so a root above it is a tree the base side cannot reproduce: a worktree kept inside the main checkout scanned the main checkout's files, a repository nested in another was rooted at the outer one on the head side and at itself on the base side, so every Symbol read as moved, and a temporary directory inside the repository pulled the base scan up to the working tree. Inside a monorepo the stop changes nothing, since the monorepo's root is the directory holding its `.git`.
 
 ### 11.2 Why framework plugins are not auto-enabled
 
