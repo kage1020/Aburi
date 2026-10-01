@@ -24,6 +24,7 @@ export {
   apiFingerprint,
   type ComputeFingerprintInput,
   computeSymbolFingerprint,
+  EMPTY_LOGIC_FINGERPRINT,
   FP_HEX_LENGTH,
   hashCanonicalObject,
   hashRawString,

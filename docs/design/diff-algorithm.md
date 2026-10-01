@@ -131,12 +131,15 @@ Two base files renamed onto one target predict the same head id, so the claimant
 For cases git rename could not catch, or when git is unavailable.
 
 ```
-group both sides by sym.fingerprint.logic (excluding dropped)
+group both sides by (sym.kind, sym.fingerprint.logic) (excluding dropped)
   → a group is {bases, heads} that can only pair with each other
 
 for each group:
+  if group.logic == EMPTY_LOGIC:
+    # shared by every Symbol with no rules and no effects: no evidence of identity
+    drop every base and head with nameEvidence(name) <= 1      # §3.4.3, inadmissible
   while bases and heads remain:
-    if len(bases) == 1:
+    if len(bases) == 1 and group.logic != EMPTY_LOGIC:
       # identical logic is proof enough on its own; no similarity test
       pair with the head of highest nameSimilarity, ties to the lower head id
       rationale: 'logic-fingerprint'
@@ -152,6 +155,10 @@ for each group:
 ```
 
 Matching logic fingerprint = same meaning. This catches a good share of "file move without rename" and "file move with a minor refactor".
+
+**Except for the empty one.** The logic axis hashes `rules[]` and `effects[]` only ([`fingerprint.md`](./fingerprint.md) §4.1), so every Symbol with neither — a class, an enum, a constructor, a body that only calls something or returns a literal — carries one value, `EMPTY_LOGIC` (exported as `EMPTY_LOGIC_FINGERPRINT`). Sharing it says nothing about what a Symbol does, as sharing the dropped sentinel says nothing. Its group therefore has no lone-candidate branch: every pair in it must reach the 0.85 name bar, and both names must say more than one word, the admissibility rule §3.4.3 applies to stage 4 for the same reason. Without that, a deleted function paired with whatever empty-logic head was closest by name — an unrelated class added anywhere in the workspace — and `--fail-on removed` never saw the deletion. Whether a pair forms also no longer depends on how many other empty-logic Symbols were deleted in the same change. A class that moved file without git rename information still pairs when its name says two words or more (`InvoiceRenderer`); one of one word (`Invoice`) is reported as added + removed, as stage 4 would.
+
+The kind is part of the group key for the reason it is part of stage 4's bucket key (§3.4.0): a function and a class are never one Symbol, whatever their bodies hash to.
 
 Every head symbol that **could not be paired in stage 3 falls through to stage 4**. Even when stage 3 found a best candidate below the threshold, it is re-evaluated in stage 4 without exception.
 
@@ -1098,7 +1105,9 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF18a | Only `confidence` changed (`high` → `medium`), fingerprints equal | changed: 1, only delta.confidenceChanged true → in Markdown: the Confidence changes section |
 | DF18b | DF18a on a Symbol that also moved file | moved+changed: 1 |
 | DF18c | DF18a on a pair dropped on both sides | unchanged, as DF13 |
-| DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word |
+| DF19 | Two unrelated top-level `main(x: string)` in different files | added: 1, removed: 1 — §3.4.3 does not read a name of one word, and §3.3 does not pair two bodies whose logic axis is empty |
+| DF19f | A function whose body only calls something is deleted, and an unrelated class is added elsewhere | removed: 1, the class added — §3.3 never pairs across kinds, and an empty logic axis is no evidence of identity |
+| DF19g | A class with no rules and no effects moved file, without git rename information | moved: 1 when its name says two words or more; added: 1, removed: 1 when it says one |
 | DF19a | A name of one word in any script — `главная`, `مستخدم`, `initialize` | as DF19; the rule is about how much the name says, not which script says it |
 | DF19b | `ユーザー情報を取得する` moved file with an edited body | moved+changed: 1, rationale: "name-signature" — `nameEvidence` floors an unsegmentable run to the words it must hold (§3.4.1) |
 | DF19c | `получитьПользователя` moved file with an edited body | as DF19b, on its token count alone: the camel boundary is Unicode case, so the hump splits |

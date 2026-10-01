@@ -1,4 +1,6 @@
+import { EMPTY_LOGIC_FINGERPRINT } from "@aburi/core"
 import { fp, makeSymbol, sig, zeroFp } from "@aburi/test-support"
+import type { Symbol as IRSymbol } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import {
   matchStageGitRename,
@@ -111,6 +113,75 @@ describe("matchStageLogicFingerprint", () => {
     expect(result.matched).toHaveLength(1)
     expect(result.matched[0]?.base.id).toBe(winner.id)
     expect(result.matched[0]?.rationale).toBe("logic-fingerprint+name-disambiguation")
+  })
+})
+
+/**
+ * Every Symbol with no rules and no effects carries one logic fingerprint, so sharing it says
+ * nothing about meaning. Its group pairs only on a name that says more than one word and
+ * reaches the 0.85 bar, and never across kinds.
+ */
+describe("matchStageLogicFingerprint — the empty logic axis", () => {
+  const emptyLogic = { ...fp("empty"), logic: EMPTY_LOGIC_FINGERPRINT }
+  const at = (file: string, name: string, kind: IRSymbol["kind"] = "function") =>
+    makeSymbol({
+      id: `ts:${file}#${name}`,
+      name,
+      kind,
+      fingerprint: emptyLogic,
+      source: { file, startLine: 1, endLine: 3, startColumn: null, endColumn: null },
+    })
+
+  it("DF19f: does not pair a lone deleted function with an unrelated class", () => {
+    const result = matchStageLogicFingerprint(
+      [at("src/mail.ts", "sendWelcomeEmail")],
+      [at("src/invoice.ts", "InvoiceRenderer", "class")],
+    )
+    expect(result.matched).toEqual([])
+  })
+
+  it("does not pair it with an unrelated function either (no lone-base shortcut)", () => {
+    const result = matchStageLogicFingerprint(
+      [at("src/mail.ts", "sendWelcomeEmail")],
+      [at("src/invoice.ts", "renderInvoiceTotal")],
+    )
+    expect(result.matched).toEqual([])
+  })
+
+  it("DF19: leaves two unrelated top-level `main`s apart", () => {
+    const result = matchStageLogicFingerprint(
+      [at("src/tool-a.ts", "main")],
+      [at("src/tool-b.ts", "main")],
+    )
+    expect(result.matched).toEqual([])
+  })
+
+  it("DF19g: pairs a class of a name that says two words when it moves file", () => {
+    const base = at("src/old.ts", "InvoiceRenderer", "class")
+    const head = at("src/new.ts", "InvoiceRenderer", "class")
+    const result = matchStageLogicFingerprint([base], [head])
+    expect(result.matched.map((pair) => [pair.base.id, pair.head.id, pair.rationale])).toEqual([
+      [base.id, head.id, "logic-fingerprint+name-disambiguation"],
+    ])
+  })
+
+  it("gives the same answer however many other empty-logic Symbols were deleted", () => {
+    const moved = at("src/a.ts", "parseAmount")
+    const renamed = at("src/b.ts", "parseAmountValue")
+    const unrelated = at("src/audit.ts", "flushAuditLog")
+    const alone = matchStageLogicFingerprint([moved], [renamed])
+    const withOther = matchStageLogicFingerprint([moved, unrelated], [renamed])
+    expect(alone.matched).toEqual([])
+    expect(withOther.matched).toEqual([])
+  })
+})
+
+describe("matchStageLogicFingerprint — kind", () => {
+  it("never pairs across kinds, even on a shared non-empty logic fingerprint", () => {
+    const shared = fp("shared")
+    const b = makeSymbol({ id: "ts:a.ts#Foo", name: "Foo", kind: "function", fingerprint: shared })
+    const h = makeSymbol({ id: "ts:b.ts#Foo", name: "Foo", kind: "class", fingerprint: shared })
+    expect(matchStageLogicFingerprint([b], [h]).matched).toEqual([])
   })
 })
 

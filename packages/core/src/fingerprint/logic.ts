@@ -34,6 +34,17 @@ export function logicFingerprint(symbol: IRSymbol): string {
   return hashCanonicalObject(buildLogicInput(symbol))
 }
 
+/**
+ * The logic axis of every Symbol with no rules and no effects: a class, an enum, a body that
+ * only calls something. It is shared by everything that says nothing on this axis, so two
+ * Symbols carrying it are not evidence of one meaning — the diff's logic-fingerprint stage
+ * reads it as it reads `ZERO_FINGERPRINT`, as no evidence at all.
+ */
+export const EMPTY_LOGIC_FINGERPRINT: string = hashCanonicalObject({
+  effects: [],
+  rules: [],
+} satisfies LogicInput)
+
 function buildLogicInput(symbol: IRSymbol): LogicInput {
   return {
     effects: canonicalizeEffects(symbol.effects),

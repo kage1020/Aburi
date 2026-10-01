@@ -7,7 +7,7 @@ import { syntaxFingerprint } from "./syntax"
 
 export { apiFingerprint } from "./api"
 export { FP_HEX_LENGTH, hashCanonicalObject, hashRawString, ZERO_FINGERPRINT } from "./hash"
-export { logicFingerprint } from "./logic"
+export { EMPTY_LOGIC_FINGERPRINT, logicFingerprint } from "./logic"
 export { lastQnameSegment } from "./short-name"
 export { normalizeFingerprintString } from "./string"
 export { syntaxFingerprint } from "./syntax"

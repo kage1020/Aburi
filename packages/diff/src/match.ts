@@ -1,4 +1,10 @@
-import { compareCodeUnit, groupBy, trySymbolId, ZERO_FINGERPRINT } from "@aburi/core"
+import {
+  compareCodeUnit,
+  EMPTY_LOGIC_FINGERPRINT,
+  groupBy,
+  trySymbolId,
+  ZERO_FINGERPRINT,
+} from "@aburi/core"
 import type { Symbol as IRSymbol, MatchRationale, SymbolId } from "@aburi/types"
 import { signatureSimilarity } from "./signature"
 import {
@@ -206,8 +212,8 @@ function rewriteIdFile(id: SymbolId, oldPath: string, newPath: string): SymbolId
 }
 
 /**
- * Stage 3 (diff-algorithm.md) — group both sides by `fingerprint.logic` and pair within each
- * group. Two branches:
+ * Stage 3 (diff-algorithm.md) — group both sides by `(kind, fingerprint.logic)` and pair
+ * within each group. Two branches:
  * - single base candidate → paired with `logic-fingerprint`, no similarity test
  * - several → `nameSimilarity` disambiguates at ≥ 0.85; a group that cannot reach it is left
  *   whole for stage 4 to re-evaluate
@@ -215,6 +221,10 @@ function rewriteIdFile(id: SymbolId, oldPath: string, newPath: string): SymbolId
  * Dropped symbols are excluded — their logic fingerprint is the sentinel
  * `"000000000000"` and would collide with every other dropped Symbol in the workspace.
  * They flow to the stage-4.5 weak matcher instead.
+ *
+ * `EMPTY_LOGIC_FINGERPRINT` is the other shared value: every Symbol with no rules and no
+ * effects carries it, so it proves nothing about meaning and its group never takes the
+ * first branch. See `pairWithinLogicGroup`.
  */
 export function matchStageLogicFingerprint(
   remainingBase: readonly IRSymbol[],
@@ -228,10 +238,11 @@ export function matchStageLogicFingerprint(
   const headGroups = groupByLogic(remainingHead)
   const scorer = createNameScorer()
   const matched: SymbolPair[] = []
-  for (const [logic, heads] of headGroups) {
-    const bases = baseGroups.get(logic)
+  for (const [key, heads] of headGroups) {
+    const bases = baseGroups.get(key)
     if (bases === undefined) continue
-    matched.push(...pairWithinLogicGroup(bases, heads, scorer))
+    const evidenceless = heads[0]?.fingerprint.logic === EMPTY_LOGIC_FINGERPRINT
+    matched.push(...pairWithinLogicGroup(bases, heads, scorer, evidenceless))
   }
   const usedBase = new Set(matched.map((pair) => pair.base.id))
   const usedHead = new Set(matched.map((pair) => pair.head.id))
@@ -242,11 +253,15 @@ export function matchStageLogicFingerprint(
   }
 }
 
-/** Symbols by logic fingerprint, skipping the ones stage 3 excludes; groups are self-contained. */
+/**
+ * Symbols by kind and logic fingerprint, skipping the ones stage 3 excludes; groups are
+ * self-contained. The kind is in the key for the reason it is in stage 4's bucket key: a
+ * function and a class are never one Symbol, whatever their bodies hash to.
+ */
 function groupByLogic(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
   return groupBy(
     symbols.filter((symbol) => !symbol.dropped && symbol.fingerprint.logic !== ZERO_FINGERPRINT),
-    (symbol) => symbol.fingerprint.logic,
+    (symbol) => `${symbol.kind}:${symbol.fingerprint.logic}`,
   )
 }
 
@@ -255,17 +270,26 @@ function groupByLogic(symbols: readonly IRSymbol[]): Map<string, IRSymbol[]> {
  * similarity test; with more than one, names disambiguate. The loop keeps the second branch
  * feeding the first: a scored round that consumes all but one base leaves that one
  * unconditional.
+ *
+ * An `evidenceless` group — `EMPTY_LOGIC_FINGERPRINT` — has no first branch: a shared empty
+ * logic axis is not "identical logic", so a lone base would otherwise pair with whatever
+ * empty-logic head is closest by name, however far that is. Every pair in it has to reach the
+ * 0.85 name bar, and both names have to say more than one word (`nameEvidence`, the
+ * admissibility rule stage 4 applies for the same reason), so two unrelated `main`s stay
+ * apart. The outcome then no longer depends on how many other such Symbols left the group.
  */
 function pairWithinLogicGroup(
   bases: readonly IRSymbol[],
   heads: readonly IRSymbol[],
   scorer: NameScorer,
+  evidenceless: boolean,
 ): SymbolPair[] {
-  let freeBase = [...bases]
-  let freeHead = [...heads]
+  const admissible = (symbol: IRSymbol) => !evidenceless || saysEnoughToPair(symbol.name)
+  let freeBase = bases.filter(admissible)
+  let freeHead = heads.filter(admissible)
   const matched: SymbolPair[] = []
   while (freeBase.length > 0 && freeHead.length > 0) {
-    const lone = freeBase.length === 1 ? freeBase[0] : undefined
+    const lone = !evidenceless && freeBase.length === 1 ? freeBase[0] : undefined
     if (lone !== undefined) {
       const head = closestNameTo(lone, freeHead, scorer)
       if (head === undefined) break
