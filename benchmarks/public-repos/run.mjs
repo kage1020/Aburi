@@ -303,22 +303,25 @@ async function measureRepo(repo, options) {
 }
 
 /**
- * The Aburi commit this sweep measures, and whether the tree it was built from differed from
- * it. `generator` is the package version, which spans many commits, and a sweep run from a
+ * The Aburi commit the sweep ran at, and whether the working tree differed from it.
+ * `generator` is the package version, which spans many commits, and a sweep run from a
  * working tree has nothing else to say which one. `results/` is left out of the dirty check:
  * the harness writes there, and an earlier sweep's uncommitted files are not the build.
+ *
+ * This is HEAD when the sweep starts, not the commit `packages/cli/dist` was built from: a
+ * build left over from another checkout records the wrong commit. CI checks out, builds and
+ * runs on one commit, so there the two agree.
+ *
+ * No fallback: git is already a hard dependency (`ensureClone`), and a results file that
+ * quietly lost its commit is the state this field exists to remove.
  */
 async function aburiCommit() {
-  try {
-    const commit = await git(["rev-parse", "HEAD"], REPO_ROOT)
-    const status = await git(
-      ["status", "--porcelain", "--", ".", ":(exclude)benchmarks/public-repos/results"],
-      REPO_ROOT,
-    )
-    return { commit, dirty: status !== "" }
-  } catch {
-    return { commit: process.env.GITHUB_SHA ?? null, dirty: null }
-  }
+  const commit = await git(["rev-parse", "HEAD"], REPO_ROOT)
+  const status = await git(
+    ["status", "--porcelain", "--", ".", ":(exclude)benchmarks/public-repos/results"],
+    REPO_ROOT,
+  )
+  return { commit, dirty: status !== "" }
 }
 
 async function main() {

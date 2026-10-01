@@ -55,6 +55,8 @@ export function summariseScans(runs, options = {}) {
   const exitCodes = runs.map((entry) => entry.measurement.exitCode)
   return {
     runs: runs.length,
+    // Still written so every month's sample has the same shape for anything diffing them;
+    // `exitCodes` is what the report reads.
     exitCode: exitCodes[exitCodes.length - 1],
     /**
      * Every run's, because 0 and 3 are both a completed run and nothing above stops three runs

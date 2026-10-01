@@ -85,7 +85,7 @@ everything around it — a clone that will not check out, an IR that will not pa
 A run counts as a measurement only if it produced a measurement line, exited 0 or
 3, and wrote an IR of its own. Exit 3 is a *completed* run whose workspace was not
 clean (`cli-spec.md`) and its numbers are real, so the report prints the exit
-code rather than a verdict. Anything else has no number to record, and reporting
+code rather than a verdict, and every run's (`0/3/0`) when the runs disagree. Anything else has no number to record, and reporting
 it as one is the failure mode the removal of the IR before each run exists to
 prevent.
 
@@ -105,8 +105,10 @@ that every committed sample in `results/` still renders to its committed report.
 `aburi diff` a real change set to project rather than a handful of commits.
 Numbers are only comparable within one pin — changing an entry is a documented
 event, and the results file records the commit each run measured. It also
-records the Aburi commit the sweep was built from (`commit`), and `dirty` when the
-working tree differed from it, since the package version spans many commits.
+records the Aburi commit the sweep ran at (`commit`), and `dirty` when the working
+tree differed from it, since the package version spans many commits. That is `HEAD`
+when the sweep starts, not the commit `packages/cli/dist` was built from, so a local
+sweep should build and run at the same checkout, as the workflow does.
 
 ## Running it on a schedule
 

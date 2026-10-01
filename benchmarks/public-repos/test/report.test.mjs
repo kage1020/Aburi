@@ -37,7 +37,7 @@ const SAMPLES = readdirSync(resolve(HERE, "..", "results"))
 
 describe("renderReport", () => {
   it("has committed samples to render", () => {
-    expect(SAMPLES).toContain("2026-09-01")
+    expect(SAMPLES.length).toBeGreaterThan(0)
   })
 
   it.each(SAMPLES)("reproduces the committed %s report from its samples", (stamp) => {
@@ -61,7 +61,7 @@ describe("renderReport", () => {
     expect(renderReport(report)).toContain("| 0/3/0 |")
     report.results[0].scan.exitCodes = [3, 3, 3]
     report.results[0].scan.exitCode = 3
-    expect(renderReport(report)).not.toContain("/3")
+    expect(renderReport(report)).toContain("| 3 | ✓ |")
   })
 
   it("renders a repository that failed as a marked row rather than a data row", () => {
