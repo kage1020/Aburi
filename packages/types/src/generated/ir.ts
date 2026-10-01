@@ -67,7 +67,7 @@ export type RuleType = ("guard" | "throw" | "return" | "loop" | "try" | "switch"
 export interface Effect {
 id: EffectId
 /**
- * Normalized callee string (lang-plugin.md). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md, so a target carrying it matches no Symbol id and no Symbol name.
+ * Normalized callee string (lang-plugin.md). One segment spelling is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`, and where the receiver is an expression no name spells, so `[...names].sort()` is `<computed>.sort` and an IIFE is `<computed>` alone. `<` is outside the qualified-name segment pattern of ir-schema.md, so a target carrying it matches no Symbol id and no Symbol name.
  */
 target: string
 /**
@@ -195,7 +195,7 @@ typeParameters: string[]
 }
 export interface Call {
 /**
- * Normalized callee string (lang-plugin.md). One segment is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`. `<` is outside the qualified-name segment pattern of ir-schema.md, so a target carrying it matches no Symbol id and no Symbol name.
+ * Normalized callee string (lang-plugin.md). One segment spelling is reserved: `<computed>` stands where the source addressed a property through brackets with something that is not a name, so `prisma[model].create()` is `prisma.<computed>.create`, and where the receiver is an expression no name spells, so `[...names].sort()` is `<computed>.sort` and an IIFE is `<computed>` alone. `<` is outside the qualified-name segment pattern of ir-schema.md, so a target carrying it matches no Symbol id and no Symbol name.
  */
 target: string
 line: number

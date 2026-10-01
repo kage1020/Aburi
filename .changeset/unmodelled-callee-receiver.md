@@ -12,5 +12,12 @@ function body into `calls[].target`. Such a receiver (a literal, `new C()`, `awa
 expression, a function expression) now contributes the reserved `<computed>` segment and marks the
 call `dynamicReceiver`: `[...names].sort()` is `<computed>.sort`, an IIFE is `<computed>`.
 `svc!.save()` and other type wrappers around a name keep their text; around anything else they
-answer what they wrap. `calls[].target` does not reach the diff's fingerprints, so an IR written
-before this release diffs clean against one written after it on an unchanged tree.
+answer what they wrap, and a text holding an empty segment or a line break answers `<computed>`.
+
+`calls[].target` does not reach the diff's fingerprints, but an effect's target is its call's
+target, and `effects[].target` does. So a Symbol with an effect classified on such a receiver
+shows `~` (logic) once after upgrading, and receivers that differed only in their text now share
+one target: `new PrismaClient().user.create(…)` and `(await getDb()).user.create(…)` are both
+`<computed>.user.create`, and their propagated effects merge into one entry where both reach a
+caller. The first one's effect also drops from `high` to `medium` confidence, since the client's
+name was only ever visible in the receiver's text.

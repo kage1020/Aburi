@@ -366,14 +366,14 @@ function containsEarlyExit(node: Node): boolean {
  * fingerprint reads `effects[].target`, so a change here moves IR bytes.
  */
 interface CalleeShape {
-  target: string
+  readonly target: string
   /**
    * The receiver was positively identified as an expression rather than a name
    * (`getRepo().save()`, `items[0].save()`, `(a ?? b).save()`). Such a call can
    * never resolve in the untyped tier, and `call-resolution.md` wants it
    * reported as `dynamic` rather than lumped in with genuine typos.
    */
-  dynamic: boolean
+  readonly dynamic: boolean
   /**
    * The node is a type-level wrapper around a name, and its source text was
    * taken verbatim (`svc!`, `x as Foo`). Opaque is deliberately NOT treated as
@@ -381,12 +381,17 @@ interface CalleeShape {
    * becomes evidence of an expression receiver when it sits inside explicit
    * parentheses, which is how expression receivers have to be written.
    */
-  opaque: boolean
+  readonly opaque: boolean
 }
 
 /**
  * The wrappers whose source text stands in for the name they wrap. Each asserts something
  * about a value without replacing it, so `svc!` still names `svc`.
+ *
+ * `ast-helpers.ts` keeps a near twin, `VALUE_WRAPPER_TYPES`, for a different question (which
+ * value a binding holds), and leaves `<T>x` off it. This set reads `<T>x` (`type_assertion`) as
+ * well, through its own branch in `describeTypeWrapper`: a callee in a `.ts` file can be
+ * written that way, since `.ts` files are parsed with the TypeScript grammar rather than tsx.
  */
 const TYPE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "non_null_expression",
@@ -410,11 +415,16 @@ const UNMODELLED_EXPRESSION: CalleeShape = {
 
 const META_PROPERTIES: ReadonlySet<string> = new Set(["import.meta", "new.target"])
 
+/** ECMAScript's line terminators: LF, CR, LINE SEPARATOR and PARAGRAPH SEPARATOR. */
+const LINE_BREAK = /[\n\r\u2028\u2029]/
+
 /**
  * A type wrapper answers with its own text only around a name. Around anything else it
  * answers what the wrapped expression does, so `([...a] as T).m()` cannot bring the literal's
  * text back and `getRepo()!.save()` is the dynamic call `getRepo().save()` is. Text that would
- * still break the segment rule — a type such as `[...T]`, or `a["x.."]` — is refused too.
+ * still break the segment rule — a type such as `[...T]`, or `a["x.."]` — is refused, and so is
+ * text holding a line break (a type literal written over several lines): a target is read as a
+ * name, and reformatting must not change it.
  */
 function describeTypeWrapper(node: Node): CalleeShape | null {
   // The old-style `<T>x` puts the type first; the other three put the value first.
@@ -426,6 +436,7 @@ function describeTypeWrapper(node: Node): CalleeShape | null {
   const inner = describeCallee(innerNode)
   if (inner === null) return null
   if (inner.dynamic) return { target: inner.target, dynamic: true, opaque: false }
+  if (LINE_BREAK.test(node.text)) return UNMODELLED_EXPRESSION
   if (node.text.split(".").some((segment) => segment.length === 0)) return UNMODELLED_EXPRESSION
   return { target: node.text, dynamic: false, opaque: true }
 }

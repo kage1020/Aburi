@@ -297,12 +297,13 @@ describe("walkBody — unmodelled receivers answer `<computed>`", () => {
     ["an array literal behind `as`", "return ([...a] as string[]).map(g)", "<computed>.map"],
     ["an array literal behind `!`", "return [...a]!.map(g)", "<computed>.map"],
     ["a type that spells a spread", "return (x as [...T]).map(g)", "<computed>.map"],
+    ["a type that spans lines", "return (x as {\n    a: string\n  }).m()", "<computed>.m"],
   ])("%s", async (_label, body, target) => {
     const { calls } = await walkFirstSymbol(
       `export async function f(names: any, a: any, b: any, x: any) { ${body} }`,
     )
     const call = calls.find((c) => c.target === target)
-    expect(calls.map((c) => c.target)).toContain(target)
+    expect(call).toBeDefined()
     expect(call?.dynamicReceiver).toBe(true)
     for (const { target: written } of calls) {
       expect(written.split(".").every((segment) => segment.length > 0)).toBe(true)
@@ -312,6 +313,7 @@ describe("walkBody — unmodelled receivers answer `<computed>`", () => {
   it.each([
     ["a dynamic import", 'return import("./m")', "import"],
     ["`import.meta`", 'return import.meta.resolve("./m")', "import.meta.resolve"],
+    ["`new.target`", "return new.target.g()", "new.target.g"],
   ])("still names %s", async (_label, body, target) => {
     const { calls } = await walkFirstSymbol(`export async function f() { ${body} }`)
     const call = calls.find((c) => c.target === target)
@@ -331,6 +333,18 @@ describe("walkBody — unmodelled receivers answer `<computed>`", () => {
       "export function f(svc?: any) { this.repo!.save(); svc!.save() }",
     )
     expect(calls.map((c) => c.target)).toEqual(["this.repo!.save", "svc!.save"])
+  })
+
+  // A wrapper other than `!` binds looser than `.`, so as a receiver it is always parenthesized,
+  // and a parenthesized wrapper reads as an expression receiver. `<Foo>x` keeps the value last,
+  // which is why it has its own branch; `src/a.ts` routes to the grammar that parses it.
+  it.each([
+    ["`as`", "(x as Foo).m()", "x as Foo.m"],
+    ["`satisfies`", "(x satisfies Foo).m()", "x satisfies Foo.m"],
+    ["an old-style assertion", "(<Foo>x).m()", "<Foo>x.m"],
+  ])("keeps the text of %s around a name", async (_label, body, target) => {
+    const { calls } = await walkFirstSymbol(`export function f(x: any) { ${body} }`)
+    expect(calls.map((c) => [c.target, c.dynamicReceiver])).toEqual([[target, true]])
   })
 
   it("reads a non-null assertion around a call as the call it wraps", async () => {
