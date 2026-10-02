@@ -22,8 +22,9 @@ import { CliError } from "./errors"
  * `pnpm-workspace.yaml`, and the rest) is a root on that evidence alone, so an ordinary
  * repository's own `package.json` is never opened here — a trailing comma in it surfaces one
  * step later, out of `detectManagers`, which raises for itself. Nor does every unreadable
- * manifest on the way up reach this function: `detectWorkspaceRoot` ignores one it met in a
- * directory *above* the root it settled on, since a file outside the workspace says nothing
+ * manifest on the way up reach this function. Above the first `.git` none is opened at all,
+ * since the walk ends there; outside a repository, `detectWorkspaceRoot` ignores one it met in
+ * a directory *above* the root it settled on, since a file outside the workspace says nothing
  * about the workspace.
  */
 export async function resolveWorkspaceRoot(cwd: string): Promise<string> {

@@ -23,7 +23,7 @@ This enables:
 ```
 1. Workspace root detection
    - Walk upward from the CLI execution cwd
-   - Take the outermost workspace marker as root
+   - Take the first `.git` as root, or the outermost workspace marker when there is none
 
 2. Component extraction
    - Run each detector in parallel from the root
@@ -33,9 +33,9 @@ This enables:
 
 ### 2.1 Workspace root detection
 
-Walk from cwd toward parents; the workspace root is the **outermost (closest to the filesystem root)** directory in which any of the following is found:
+Walk from cwd toward parents. The workspace root is the first directory holding a `.git` — a directory, or a file opening with `gitdir:`, the pointer a linked worktree or a submodule has in its place. Below it, or when the walk reaches the filesystem root without meeting one, the root is the **outermost (closest to the filesystem root)** directory in which any of the following is found:
 
-- `.git/` directory
+- `.git`, as above
 - `pnpm-workspace.yaml`
 - `turbo.json`
 - `nx.json`
@@ -46,7 +46,7 @@ Walk from cwd toward parents; the workspace root is the **outermost (closest to 
 - `package.json` (containing a `workspaces` field)
 - `.aburi-workspace` (reserved for future use, Aburi-specific marker)
 
-If markers are found at multiple levels, the outer one wins (e.g., the parent holding `.git` is the true root of the monorepo).
+If markers are found at multiple levels, the outer one wins: a sub-project's `package.json` inside a monorepo does not shrink the workspace to that sub-project. The walk does not go past a `.git`, so a repository nested under another marker is a workspace of its own (§11.1).
 
 ### 2.2 Component extraction
 
@@ -344,7 +344,7 @@ When multiple detectors generate the same id with different paths (§4.1):
 - Category A's core patterns apply too, the same list discovery uses rather than a copy of part of it: `node_modules/`, `vendor/`, `__pycache__/`, `out/`, `.venv/`, `*.d.ts` and the rest of [`drop-list.md` §3.1](./drop-list.md)
 - `config.ignore[]` and the loaded language plugins' file-drop globs apply when the caller has them. The census is one walk from the **workspace root**, bucketed by component root afterwards, because those patterns are workspace-root relative by contract and cannot be matched against a walk rooted inside a package
 - The one caller that has neither is `aburi init`, which detects components in order to write the first config. It honours `.gitignore` and the core patterns, which is everything knowable before a config exists
-- The contents of `.git/` are never read, but its presence is used as a workspace root marker
+- The contents of a `.git` directory are never read. A `.git` file is read only as far as its opening `gitdir: `, to tell a linked worktree's or a submodule's pointer from any other file of that name. Either one ends the workspace-root walk (§2.1)
 
 ## 9. Performance
 
@@ -390,12 +390,26 @@ Implementation guidance:
 | CD29 | A Component at `apps/web`; a Symbol whose file is spelled `./apps/web/x.ts` | `Symbol.component` is `web` — the file side is normalized as the root side is |
 | CD30 | A Component rooted at `packages//api`; a Symbol in `packages/api/x.ts` | `Symbol.component` is `api` — an empty segment names nothing on either side |
 | CD31 | A Component rooted at `""`, at `"/"`, or at `../vendor` | It claims no file at all, the workspace root included |
+| CD32 | cwd inside a repository that sits under another marker — a linked worktree at `.worktrees/feat` in the main checkout, a repository nested in another, a submodule | The workspace root is that checkout's own top level, the directory holding its `.git` (a directory or a `gitdir:` file), not the outer one |
+| CD33 | cwd inside a monorepo subdirectory holding a `.git` file that does not open with `gitdir:` (an empty one left behind) | The walk passes it: the workspace root is the monorepo's |
 
 ## 11. Design decisions
 
-### 11.1 Why the workspace root is the outermost marker
+### 11.1 Why the workspace root is the first `.git`, or else the outermost marker
 
 When markers are found at multiple levels (e.g., a sub-project inside a monorepo also has a `package.json`), taking the inner one as root would miss the structure of the entire monorepo. Taking the outermost as root avoids unintended subset detection.
+
+The walk stops at the first `.git` all the same, because a repository is the unit `aburi diff` checks a revision out of: a root above it is a tree the base side cannot reproduce. Three layouts put one there, and in each the two sides of a ref diff scanned different trees:
+
+- A linked worktree kept inside the main checkout (`.worktrees/feat`). The head scan climbed to the main checkout and read its files, so `main..feat` reported nothing.
+- A repository nested in another, or a submodule. The head side rooted at the outer directory and the base side at the repository, so every Symbol read as moved under the inner directory's name.
+- A `TMPDIR` inside the repository. The base worktree is created under the head's own tree, and the base scan climbed out of the worktree into it, so both sides scanned the working tree.
+
+A monorepo whose root is the directory holding its `.git` is unaffected; a submodule or a vendored repository inside one now roots at itself.
+
+The stop is a `.git` on disk, not git's own repository discovery. `GIT_DIR` and `GIT_WORK_TREE` are not consulted, so a working tree whose repository is kept elsewhere has no `.git` to stop at, and the walk climbs from it as it does outside a repository.
+
+The stop bounds the root walk only. Config discovery still climbs to the filesystem root ([`cli-spec.md`](./cli-spec.md) §13), so a worktree under `.worktrees/feat` roots at itself while still reading the main checkout's `aburi.json`, whose `ignore`, `components[].roots` and relative plugin refs then resolve against the worktree.
 
 ### 11.2 Why framework plugins are not auto-enabled
 
