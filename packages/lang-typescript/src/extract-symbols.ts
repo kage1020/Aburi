@@ -33,6 +33,7 @@ import {
   memberSymbolSegment,
 } from "./class-members"
 import { readDecorators } from "./decorators"
+import { objectEntryOf, objectLiteralOf } from "./object-members"
 import { classMemberQname, defaultExportQname, makeTsSymbolId, nestedQname } from "./qname"
 import { buildSignature } from "./signature"
 
@@ -857,40 +858,67 @@ function makeVariableCandidates(
       makeDestructuredCandidate(binding, statement, ctx, namespacePath),
     )
   }
-  const single = makeVariableCandidate(declarator, statement, ctx, namespacePath)
-  return single === null ? [] : [single]
+  return makeVariableCandidate(declarator, statement, ctx, namespacePath)
 }
 
+/**
+ * The binding a single-name declarator declares, and when it is initialised by an object
+ * literal, the members that object declares after it (`objectMemberCandidates`).
+ */
 function makeVariableCandidate(
   declarator: Node,
   statement: Node,
   ctx: ExtractionContext,
   namespacePath: readonly string[],
-): SymbolCandidate<Node> | null {
+): SymbolCandidate<Node>[] {
   const name = nameFieldText(declarator)
-  if (name === null) return null
+  if (name === null) return []
   const initializer = declarator.childForFieldName("value")
   const value = initializer === null ? null : asFunctionValue(initializer)
   const qname = nestedQname([...namespacePath, name])
   const id = makeTsSymbolId(ctx.file.path, qname)
   if (value !== null) {
     const jsDoc = readLeadingJsDoc(statement)
-    return {
-      id,
-      kind: "function",
-      extKind: null,
-      name: qname,
-      visibility: computeTopLevelVisibility(statement),
-      decorators: [],
-      signature: buildSignature(value, jsDoc),
-      source: makeSourceRange(statement, ctx),
-      derivedBy: ["variable-assigned-function", ...exportEvidence(statement)],
-      bodyNode: value.childForFieldName("body"),
-      fullNode: value,
-    }
+    return [
+      {
+        id,
+        kind: "function",
+        extKind: null,
+        name: qname,
+        visibility: computeTopLevelVisibility(statement),
+        decorators: [],
+        signature: buildSignature(value, jsDoc),
+        source: makeSourceRange(statement, ctx),
+        derivedBy: ["variable-assigned-function", ...exportEvidence(statement)],
+        bodyNode: value.childForFieldName("body"),
+        fullNode: value,
+      },
+    ]
+  }
+  const object = initializer === null ? null : objectLiteralOf(initializer)
+  if (object !== null) {
+    return [
+      {
+        id,
+        kind: "const",
+        extKind: null,
+        name: qname,
+        visibility: computeTopLevelVisibility(statement),
+        decorators: [],
+        signature: null,
+        source: makeSourceRange(statement, ctx),
+        derivedBy: [OBJECT_LITERAL_INITIALIZER, ...exportEvidence(statement)],
+        // What defining the object runs, less the members given Symbols of their own below —
+        // which `walkBody` asks `objectEntryOf` about, as it asks `memberSymbolSegment` about a
+        // class body.
+        bodyNode: object,
+        fullNode: statement,
+      },
+      ...objectMemberCandidates(object, ctx, [...namespacePath, name]),
+    ]
   }
   const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
-  return {
+  const candidate: SymbolCandidate<Node> = {
     id,
     kind: "const",
     extKind: null,
@@ -910,7 +938,96 @@ function makeVariableCandidate(
     // one of the two stretches it names.
     ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
   }
+  return [candidate]
 }
+
+/** What `derivedBy` says when a binding's body is the object literal it is initialised by. */
+const OBJECT_LITERAL_INITIALIZER = "object-literal-initializer"
+
+/**
+ * One candidate per member an object literal declares, at every depth `objectEntryOf` reads,
+ * folded per id the way a class's members are (`addClassMembers`): `get v()` beside `set v(n)`
+ * is one property, led by the getter. `ownerChain` is the binding's qualified name, segment by
+ * segment, so `const api = { v1: { get() {} } }` declares `api.v1.get`.
+ *
+ * A member's qualified name is spelled with `.`, as a namespace member's is. A namespace holding
+ * only types may be written beside the binding (`namespace api { export type get = … }`), and
+ * its `api.get` and this member are then one Symbol, led by whichever is written first, as a
+ * value and a type of one name are elsewhere (`makeCandidateSink`).
+ */
+function objectMemberCandidates(
+  object: Node,
+  ctx: ExtractionContext,
+  ownerChain: readonly string[],
+): SymbolCandidate<Node>[] {
+  const byId = new Map<string, MemberGroup>()
+  const collect = (current: Node, chain: readonly string[]): void => {
+    for (const entry of current.namedChildren) {
+      if (entry === null) continue
+      const read = objectEntryOf(entry)
+      if (read === null) continue
+      if (read.object !== null) {
+        collect(read.object, [...chain, read.segment])
+        continue
+      }
+      const candidate = makeObjectMemberCandidate(entry, read.fn, read.segment, ctx, chain)
+      const declaration: MemberDeclaration = { candidate, isGetter: hasChildOfType(entry, "get") }
+      const group = byId.get(candidate.id)
+      if (group === undefined) byId.set(candidate.id, [declaration])
+      else group.push(declaration)
+    }
+  }
+  collect(object, ownerChain)
+  return [...byId.values()].map(foldMemberGroup)
+}
+
+/**
+ * A member of an object literal, which `objectEntryOf` has already admitted: `fn` is the node
+ * holding the member's body and `segment` the name it was admitted by.
+ *
+ * `kind` is `method`, the kind a class member gets whichever way it is written. The member is
+ * reached through its owner and named by the member convention, so a reader keyed to a
+ * module-level `function` — a Next.js route verb, a React component or hook by its name — does
+ * not read `{ GET: () => … }` or `{ Button: () => <b /> }` as one. `visibility` is `public`, as
+ * a class member with no modifier is: an object literal can write none, and whoever reaches the
+ * object reaches the property. Neither can it write a decorator.
+ *
+ * The range is the entry's and the signature the function's, as a class field holding a
+ * function has them (`makeFieldFunctionCandidate`).
+ */
+function makeObjectMemberCandidate(
+  entry: Node,
+  fn: Node,
+  segment: string,
+  ctx: ExtractionContext,
+  ownerChain: readonly string[],
+): SymbolCandidate<Node> {
+  const qname = nestedQname([...ownerChain, segment])
+  const derivedBy = [OBJECT_METHOD]
+  if (entry.type === "pair") derivedBy.push(PROPERTY_ASSIGNED_FUNCTION)
+  if (hasChildOfType(entry, "get") || hasChildOfType(entry, "set")) {
+    derivedBy.push("accessor-declaration")
+  }
+  return {
+    id: makeTsSymbolId(ctx.file.path, qname),
+    kind: "method",
+    extKind: null,
+    name: qname,
+    visibility: "public",
+    decorators: [],
+    signature: buildSignature(fn, readLeadingJsDoc(entry)),
+    source: makeSourceRange(entry, ctx),
+    derivedBy,
+    bodyNode: fn.childForFieldName("body"),
+    fullNode: fn,
+  }
+}
+
+/** What `derivedBy` says when a Symbol is a member of an object literal. */
+const OBJECT_METHOD = "object-method"
+
+/** What `derivedBy` adds when that member is a property holding a function, not a method. */
+const PROPERTY_ASSIGNED_FUNCTION = "property-assigned-function"
 
 /**
  * The functions a `const` initialised by a call hands to that call, as further bodies of the

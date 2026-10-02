@@ -1,0 +1,13 @@
+---
+"@aburi/lang-typescript": minor
+---
+
+A function an object literal holds is now a Symbol of its own. `export const api = { get: async () => fetch("/x"), post() { send() } }` declares `api.get` and `api.post`, each with its own rules, calls, effects and signature, where the handlers used to be in no Symbol at all: an edit to one moved no `logic` fingerprint, a write inside one was reported nowhere, and a call such as `api.post()` resolved to nothing. A handler map, an object of validators or callbacks and a route table written this way are now reviewed handler by handler.
+
+- A member is `kind: "method"`, `visibility: "public"`, and carries `object-method` in `derivedBy`, plus `property-assigned-function` for the `get: () => …` spelling and `accessor-declaration` for `get` / `set`. Methods, accessor pairs, generator and `async` methods, and properties holding an arrow or a function expression all count, read through `as const`, `satisfies`, `as` and parentheses.
+- An object nested under a named key is read the same way, at any depth: `{ v1: { get() {} } }` declares `api.v1.get`. Only functions mint Symbols, so a configuration object of plain values declares nothing new.
+- A key with no qualified-name segment declares nothing, as for a class member: a computed key, a number, a quoted key that is not an identifier, or a `#` name. A quoted key that spells an identifier (`"get": …`) is the member `get`.
+- The binding stays a `const` with no signature. Its body is now the object literal less its members, so a value the object evaluates when it is defined (`client: makeClient()`), and a function it holds without a Symbol of its own (`h: withAuth(() => …)`, a computed key), is reported on the binding, where it used to be reported nowhere. Such a binding carries `object-literal-initializer` in `derivedBy`, which is the one change on a binding whose object holds nothing to walk.
+- No binding's `api` or `syntax` fingerprint moves: the binding is still described by its whole declaration. Its `logic` fingerprint moves only where the object evaluates something with a rule or an effect that used to be reported nowhere — a call an effect plugin classifies, or a function with a rule and no Symbol of its own. An IR scanned before this release compared with one scanned after reports each member as added.
+
+Still not read: an object that is the default export (`export default { fetch() {} }`), one assigned to `module.exports`, one handed to a call (`Object.freeze({ … })`, `useQuery({ … })`), one in an array, one a destructuring declaration reads, and one a class field holds, which stays on the class (`lang-plugin.md` LP7g).

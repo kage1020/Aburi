@@ -17,6 +17,7 @@ import {
   walkDescendants,
 } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
+import { objectEntryOf } from "./object-members"
 import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
 
 /**
@@ -41,6 +42,10 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
     const owner = body.type === "class_body" ? body.parent : null
     if (owner !== null) {
       visitOwnClassBody(owner, body, rules, calls)
+      continue
+    }
+    if (body.type === "object") {
+      visitOwnObjectBody(body, rules, calls)
       continue
     }
     const parameters = body.parent?.childForFieldName("parameters") ?? null
@@ -106,6 +111,37 @@ function visitOwnClassBody(
     }
     visitExcluding(member, [memberBody, parameters], rules, calls)
     visitParameterDecorators(parameters, rules, calls)
+  }
+}
+
+/**
+ * A binding's object literal: what **defining** the object runs, LP20a read for an object. The
+ * values it evaluates stay — `client: makeClient()`, a function the object holds where
+ * `objectEntryOf` gives it no Symbol (a computed key, `withAuth(() => …)`) — and a member's body
+ * and parameter list are skipped, since its own Symbol walks them and defining the object only
+ * creates the closure. An object nested under a named entry is the same question one level
+ * down, which is where `objectEntryOf` finds that object's members.
+ */
+function visitOwnObjectBody(object: Node, rules: Rule[], calls: CallCandidate[]): void {
+  for (const entry of object.namedChildren) {
+    if (entry === null) continue
+    const read = objectEntryOf(entry)
+    if (read === null) {
+      visitNode(entry, rules, calls)
+      continue
+    }
+    if (read.object !== null) {
+      visitExcluding(entry, [read.object], rules, calls)
+      visitOwnObjectBody(read.object, rules, calls)
+      continue
+    }
+    const skipped = [read.fn.childForFieldName("body"), read.fn.childForFieldName("parameters")]
+    visitExcluding(
+      entry,
+      skipped.filter((node): node is Node => node !== null),
+      rules,
+      calls,
+    )
   }
 }
 
