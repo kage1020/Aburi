@@ -46,7 +46,7 @@ import {
 } from "../artifact-paths"
 import { loadPinnedConfig, type PinnedConfig, pinConfig } from "../config-load"
 import type { LogLevel } from "../env"
-import { assertNever, CliError, errorMessage } from "../errors"
+import { assertNever, CliError, errorMessage, internalFault } from "../errors"
 import { EXIT, type ExitCode } from "../exit-codes"
 import { readGeneratorInfo } from "../generator-info"
 import { writeFullListing, writeListing } from "../listing"
@@ -311,8 +311,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const format = options.format ?? "both"
 
-  // The IR first: every other artefact is derived from it, so a projection that fails cannot
-  // be allowed to cost it. Writing it last lost the document to a Markdown page that threw.
+  // The IR first: every page is derived from it, so a projection that fails cannot be allowed to
+  // cost it. Writing it last lost the document to a Markdown page that threw.
   let irPath: string | null = null
   if (format !== "md") {
     irPath = resolve(outputDir, IR_JSON_FILENAME)
@@ -334,41 +334,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     }
     await writeOutputFile({ command, artefact: "the IR", path: irPath }, serialized)
   }
-  const workspaceMdPath = await maybeWriteWorkspaceMd(
-    command,
-    format,
-    outputDir,
-    scanResult.ir,
-    options,
-  )
-  const componentMdPaths = await maybeWriteComponentMd(command, format, outputDir, scanResult.ir)
-
   const undeclaredVocab = summarizeUndeclaredVocab(requireUndeclaredVocab(scanResult))
-  // Only `scan` writes the record: `diff` runs two scans into one directory, and the list is
-  // on its incident report either way.
-  let vocabDiscoveredPath: string | null = null
-  if (command === "scan") {
-    const record = {
-      command,
-      artefact: "the discovered-vocabulary record",
-      path: resolve(outputDir, VOCAB_DISCOVERED_FILENAME),
-    }
-    if (isStrict(config)) {
-      // A strict scan that got this far met no undeclared value, so a record an earlier run
-      // left names only values that are declared now.
-      await removeOutputFile(record)
-    } else {
-      vocabDiscoveredPath = record.path
-      await writeOutputFile(
-        record,
-        renderVocabDiscovered(
-          undeclaredVocab,
-          options.suppressTimestamp === true ? null : new Date().toISOString(),
-        ),
-      )
-    }
-  }
-
   // A withdrawn file's parse errors are still reported — they are the account of why it was
   // withdrawn — so the two counts below would otherwise both include it, and one of them
   // would call its errors recoverable.
@@ -389,8 +355,9 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
 
   const report: ScanReport = {
     irPath,
-    workspaceMdPath,
-    componentMdPaths,
+    // These three are filled in below, as each is written.
+    workspaceMdPath: null,
+    componentMdPaths: [],
     totalFiles: scanResult.ir.stats.totalFiles,
     parsedFiles: scanResult.ir.stats.parsedFiles,
     keptSymbols: scanResult.ir.stats.keptSymbols,
@@ -418,7 +385,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
     coverageFault,
     unrepresentableFiles: scanResult.unrepresentableFiles.map((file) => ({ ...file })),
     undeclaredVocab,
-    vocabDiscoveredPath,
+    vocabDiscoveredPath: null,
     unresolvedDeclarations: managers.unresolved,
     fellBackToSingleComponent,
     pluginNamedFrameworks: pluginNamedFrameworks(config, plugins.registry),
@@ -433,17 +400,60 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanReport> {
         ? EXIT.GATE
         : EXIT.SUCCESS,
   }
-  const incidents = options.incidents
-  if (incidents !== undefined) {
-    try {
-      reportScanIncidents(report, incidents.warn, incidents.label ?? null)
-    } catch {
-      // The report is complete and the IR is on disk, so the exit code must not depend on
-      // whether the sink survived (`aburi scan 2>&1 | head -1` closes it). The rest of the
-      // report is lost with it; there is nowhere to report the reporting channel's failure.
+  // Everything below is written after the IR, and `explain` trusts an IR it reads from disk to
+  // have had its incidents reported by the scan that wrote it. So a page or the record that
+  // fails reports them first, and only then ends the command.
+  try {
+    report.workspaceMdPath = await maybeWriteWorkspaceMd(
+      command,
+      format,
+      outputDir,
+      scanResult.ir,
+      options,
+    )
+    await maybeWriteComponentMd(command, format, outputDir, scanResult.ir, report.componentMdPaths)
+
+    // Only `scan` writes the record: `diff` runs two scans into one directory, and the list is
+    // on its incident report either way.
+    if (command === "scan") {
+      const record = {
+        command,
+        artefact: "the discovered-vocabulary record",
+        path: resolve(outputDir, VOCAB_DISCOVERED_FILENAME),
+      }
+      if (isStrict(config)) {
+        // A strict scan that got this far met no undeclared value, so a record an earlier run
+        // left names only values that are declared now.
+        await removeOutputFile(record)
+      } else {
+        await writeOutputFile(
+          record,
+          renderVocabDiscovered(
+            undeclaredVocab,
+            options.suppressTimestamp === true ? null : new Date().toISOString(),
+          ),
+        )
+        report.vocabDiscoveredPath = record.path
+      }
     }
+  } catch (error) {
+    reportIncidents(report, options.incidents)
+    throw error
   }
+  reportIncidents(report, options.incidents)
   return report
+}
+
+/** Hand the report to the incident sink, when the caller gave one. */
+function reportIncidents(report: ScanReport, incidents: ScanOptions["incidents"]): void {
+  if (incidents === undefined) return
+  try {
+    reportScanIncidents(report, incidents.warn, incidents.label ?? null)
+  } catch {
+    // The exit code must not depend on whether the sink survived (`aburi scan 2>&1 | head -1`
+    // closes it). The rest of the report is lost with it; there is nowhere to report the
+    // reporting channel's failure.
+  }
 }
 
 /**
@@ -1110,10 +1120,11 @@ async function maybeWriteWorkspaceMd(
 ): Promise<string | null> {
   if (format === "json") return null
   const path = resolve(outputDir, WORKSPACE_MD_FILENAME)
-  const md = projectWorkspace(ir, {
-    suppressTimestamp: options.suppressTimestamp ?? false,
-  })
-  await writeOutputFile({ command, artefact: "the workspace Markdown", path }, md)
+  const artefact = "the workspace Markdown"
+  const md = renderPage(artefact, () =>
+    projectWorkspace(ir, { suppressTimestamp: options.suppressTimestamp ?? false }),
+  )
+  await writeOutputFile({ command, artefact, path }, md)
   return path
 }
 
@@ -1122,22 +1133,36 @@ async function maybeWriteComponentMd(
   format: "json" | "md" | "both",
   outputDir: string,
   ir: IR,
-): Promise<string[]> {
-  if (format === "json") return []
-  const paths: string[] = []
+  written: string[],
+): Promise<void> {
+  if (format === "json") return
   for (const component of ir.components) {
     const symbolsInComponent = ir.symbols.filter((symbol) => symbol.component === component.id)
-    const md = projectComponent({
-      component,
-      symbols: symbolsInComponent,
-      dependencies: ir.dependencies,
-    })
-    const path = resolve(outputDir, COMPONENTS_DIRNAME, `${component.id}.md`)
-    await writeOutputFile(
-      { command, artefact: `the Markdown for component "${component.id}"`, path },
-      md,
+    const artefact = `the Markdown for component "${component.id}"`
+    const md = renderPage(artefact, () =>
+      projectComponent({
+        component,
+        symbols: symbolsInComponent,
+        dependencies: ir.dependencies,
+      }),
     )
-    paths.push(path)
+    const path = resolve(outputDir, COMPONENTS_DIRNAME, `${component.id}.md`)
+    await writeOutputFile({ command, artefact, path }, md)
+    written.push(path)
   }
-  return paths
+}
+
+/**
+ * Render one page, reporting a projection that throws as the bug in Aburi it is.
+ *
+ * Nothing the reader wrote makes a projection throw: it is handed an IR the scan just built. Let
+ * through, the throw printed its own message and nothing else — `Maximum call stack size
+ * exceeded`, with no command, no page and nowhere to report it (`cli-spec.md` §9).
+ */
+function renderPage(artefact: string, render: () => string): string {
+  try {
+    return render()
+  } catch (error) {
+    throw internalFault(` while rendering ${artefact}`, errorMessage(error), error)
+  }
 }

@@ -121,12 +121,15 @@ function longestBacktickRun(text: string): number {
  * Append `items` to `target` one at a time.
  *
  * `target.push(...items)` hands every item to one call as a separate argument, and V8 overflows
- * the stack past roughly 120,000 of them. A component page, the list of files a scan skipped
- * and a Slice all grow with the workspace and reach that in ordinary repositories, so a list
- * whose length the workspace decides is appended through here — a throw while rendering a page
- * would otherwise end the command.
+ * the stack past roughly 120,000 of them. So a list that can reach that on its own is appended
+ * through here: one line per Symbol of a component, per component or dependency edge of the
+ * workspace, per skipped file, per member of a Slice. A list bounded by a constant (the top-N
+ * effect surface) or by one Symbol's own contents can stay a spread.
+ *
+ * `target` and `items` must be different arrays. `for…of` walks one that keeps growing, where a
+ * spread took a snapshot, so `appendAll(lines, lines)` never ends.
  */
-export function appendAll(target: string[], items: readonly string[]): void {
+export function appendAll<T>(target: T[], items: readonly T[]): void {
   for (const item of items) target.push(item)
 }
 

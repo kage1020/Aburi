@@ -42,12 +42,12 @@ export function projectWorkspace(ir: IR, options: ProjectWorkspaceOptions = {}):
 
   lines.push("## Components")
   lines.push("")
-  lines.push(...renderComponentsTable(ir))
+  appendAll(lines, renderComponentsTable(ir))
   lines.push("")
 
   lines.push("## Component dependencies")
   lines.push("")
-  lines.push(...renderDependencies(ir))
+  appendAll(lines, renderDependencies(ir))
   lines.push("")
 
   const skipped = renderSkippedFiles(ir)

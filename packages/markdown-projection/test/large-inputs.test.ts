@@ -1,5 +1,6 @@
 import {
   component,
+  dependency,
   effect,
   makeIR,
   makeSymbol,
@@ -15,10 +16,33 @@ import { makeDiff } from "./fixtures"
 
 /**
  * Lists whose length the workspace decides, sized past the point where appending them with
- * `push(...lines)` overflows the stack (roughly 120,000 arguments). The throw ended `aburi scan`
- * on a single-component repository of about 1,500 files; nothing here caps a component, a
- * Slice or the list of skipped files, so a page has to render at any of these sizes.
+ * `push(...lines)` overflows the stack (`appendAll` says where). The throw ended `aburi scan` on
+ * a 1,500-file repository with no workspaces, so every Symbol landed in one component. Nothing
+ * here caps a component, a Slice or the list of skipped files: the mermaid limit and the top-N
+ * effect surface apply to neither, and `--max-bytes` cannot help, because `assemble` measures a
+ * page after every section's lines already exist. So a page has to render at any of these sizes.
  */
+
+/**
+ * A spread of `lines` overflows here. Each case checks its own section with this, so a Node,
+ * vitest or `--stack-size` change that lifts the limit past the fixture fails the case rather
+ * than leaving it green with nothing to guard.
+ */
+function expectPastSpreadLimit(lines: readonly string[]): void {
+  expect(() => {
+    const probe: string[] = []
+    probe.push(...lines)
+  }).toThrow(RangeError)
+}
+
+/** The lines of the section `heading` opens, up to the next `## ` heading. */
+function sectionOf(md: string, heading: string): string[] {
+  const lines = md.split("\n")
+  const start = lines.indexOf(heading)
+  if (start === -1) throw new Error(`no ${heading} section`)
+  const end = lines.findIndex((line, i) => i > start && line.startsWith("## "))
+  return lines.slice(start, end === -1 ? undefined : end)
+}
 
 const symbolAt = (i: number) =>
   makeSymbol({ id: `ts:src/d${i % 30}/m${i}.ts#f${i}`, name: `f${i}` })
@@ -33,15 +57,20 @@ describe("projections of workspace-sized lists", () => {
     })
 
     expect(md).toContain("`f39999`")
+    // No Symbol here is a boundary, so this case guards the Symbols section alone.
+    expect(md).not.toContain("## Boundary effect surface")
+    expectPastSpreadLimit(sectionOf(md, "## Symbols"))
   })
 
-  it("renders a boundary effect surface of 130,000 Symbols", () => {
+  it("renders a boundary effect surface of 200,000 Symbols", { timeout: 30_000 }, () => {
     // The surface takes one line per boundary Symbol, and each of them renders in the Symbols
     // section too, so that block is kept short: one file, a framework extKind rather than a
-    // decorator row, and a zero fingerprint (no `<sub>` line). With a file and a decorator per
-    // Symbol the page took more than twice as long, and over 30 s on a loaded macOS runner.
+    // decorator row, and a zero fingerprint. These Symbols are not dropped; a zero fingerprint is
+    // simply what `fingerprintLine` omits the `<sub>` line for. With a file and a decorator per
+    // Symbol the page took more than twice as long, past this package's 30 s `testTimeout` on a
+    // loaded macOS runner.
     const reads = [effect({ id: "db.read", target: "db.user.find", plugin: "effects-prisma" })]
-    const symbols = Array.from({ length: 130_000 }, (_, i) =>
+    const symbols = Array.from({ length: 200_000 }, (_, i) =>
       makeSymbol({
         id: `ts:src/routes.ts#f${i}`,
         name: `f${i}`,
@@ -56,40 +85,73 @@ describe("projections of workspace-sized lists", () => {
       dependencies: [],
     })
 
-    expect(md).toContain("- `f129999` — db.read(`db.user.find`)")
+    expect(md).toContain("- `f199999` — db.read(`db.user.find`)")
+    expectPastSpreadLimit(sectionOf(md, "## Boundary effect surface"))
   })
 
-  it("renders a workspace page that skipped 130,000 files", () => {
-    const skippedFiles = Array.from({ length: 130_000 }, (_, i) => ({
+  it("renders a workspace page that skipped 200,000 files", () => {
+    const skippedFiles = Array.from({ length: 200_000 }, (_, i) => ({
       path: `vendor/f${i}.ts`,
       reason: "parse-failed" as const,
     }))
     const base = makeIR()
     const md = projectWorkspace({
       ...base,
-      stats: { ...base.stats, totalFiles: 130_000, skippedFiles },
+      stats: { ...base.stats, totalFiles: 200_000, skippedFiles },
     })
 
-    expect(md).toContain("  - `vendor/f129999.ts`")
+    expect(md).toContain("  - `vendor/f199999.ts`")
+    expectPastSpreadLimit(sectionOf(md, "## Files not analysed"))
   })
 
-  it("renders a Slice of 50,000 members", () => {
+  it("renders a workspace page of 200,000 components", () => {
+    const components = Array.from({ length: 200_000 }, (_, i) =>
+      component({ id: `c${i}`, name: `C${i}` }),
+    )
+    const md = projectWorkspace(makeIR({ components }))
+
+    expect(md).toContain("| c199999 |")
+    expectPastSpreadLimit(sectionOf(md, "## Components"))
+  })
+
+  it("renders a workspace page of 200,000 component dependencies", () => {
+    // The fallback list has no cap: above the mermaid limit it is the only record of the edges.
+    // The projection trusts `assertIRIntegrity` for the endpoints, so only the hub is listed;
+    // the components table has a case of its own above.
+    const dependencies = Array.from({ length: 200_000 }, (_, i) =>
+      dependency({ from: `c${i}`, to: "hub" }),
+    )
+    const md = projectWorkspace(
+      makeIR({ components: [component({ id: "hub", name: "Hub" })], dependencies }),
+    )
+
+    expect(md).toContain("- c199999 → hub (via `import`)")
+    expectPastSpreadLimit(sectionOf(md, "## Component dependencies"))
+  })
+
+  it("renders a Slice of 50,000 members", { timeout: 30_000 }, () => {
+    // Every member is also an added Symbol, so it renders a full block in the Added section as
+    // well as its lines in the Slice View. That block is kept short the way the boundary case's
+    // is: one file and a zero fingerprint.
+    const memberAt = (i: number) =>
+      makeSymbol({ id: `ts:src/a.ts#f${i}`, name: `f${i}`, fingerprint: zeroFp() })
     const changes: SymbolChange[] = Array.from({ length: 50_000 }, (_, i) => ({
       status: "added",
-      symbol: symbolAt(i),
+      symbol: memberAt(i),
     }))
     const md = projectDiff(
       makeDiff({
         symbols: changes,
         slices: [
           {
-            id: sliceId("slice:ts:src/d0/m0.ts#f0"),
-            members: changes.map((_, i) => symbolId(`ts:src/d${i % 30}/m${i}.ts#f${i}`)),
+            id: sliceId("slice:ts:src/a.ts#f0"),
+            members: changes.map((_, i) => symbolId(`ts:src/a.ts#f${i}`)),
           },
         ],
       }),
     )
 
     expect(md).toContain("(50000 members)")
+    expectPastSpreadLimit(sectionOf(md, "## 🧵 Slice View"))
   })
 })

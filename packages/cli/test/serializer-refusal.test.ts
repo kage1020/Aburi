@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -66,6 +66,17 @@ describe("a document the serializer refuses", () => {
     expect(error.message).toContain(`Failed to serialize the IR for ${resolve(scratch, "out")}`)
     expect(error.message).toContain(REFUSAL)
     expect(error.message).not.toContain("could not write")
+  })
+
+  it("leaves no pages beside an IR it refuses, under the default format", async () => {
+    // The IR is written before the pages derived from it (`cli-spec.md` §5.3), so a refused IR
+    // means no page is written either. A directory kept between runs still holds the previous
+    // run's pages, which is why the contract says so.
+    await writeTypeScriptWorkspace(scratch, "serializer-fixture")
+
+    await failure(runScan({ cwd: scratch }))
+
+    expect(await readdir(resolve(scratch, "out"))).toEqual([])
   })
 
   it("is aburi diff's input error the same way", async () => {
