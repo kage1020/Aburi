@@ -42,7 +42,7 @@ to it.
 | Package | Detects | Reported as |
 |---|---|---|
 | `@aburi/effects-prisma` | `prisma.<model>.<verb>`, `$transaction` | `db.read`, `db.write`, `db.transaction` |
-| `@aburi/effects-drizzle` | `db.select` / `insert` / `update` / `delete`, `query.<table>.findMany`, `transaction` | `db.read`, `db.write`, `db.transaction` |
+| `@aburi/effects-drizzle` | `db.select` / `insert` / `update` / `delete`, `query.<table>.findMany`, `transaction`, `batch` | `db.read`, `db.write`, `db.transaction` |
 | `@aburi/effects-trpc` | tRPC client calls and the React Query hook surface | `network.rpc` |
 | `@aburi/effects-nest` | `EventEmitter2` / `eventBus` `.emit(...)` | `event.publish` |
 

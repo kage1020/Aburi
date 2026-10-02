@@ -58,29 +58,34 @@ describe("classifyDrizzleCall — transaction terminals", () => {
   })
 
   it.each([
-    "db.transaction",
-    "db.batch",
-    "log.transaction",
-  ])("throws for %s with argCount=0 — upstream signal, not silent null", (target) => {
-    // Both APIs require an argument, so a shape-matched zero-argument call is broken
-    // source or a malformed candidate. The contract violation outranks the receiver: an
-    // unrecognized `log` does not turn the throw into a medium effect or a silent null.
-    expect(() => classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toThrow(
-      /argCount=0/,
-    )
+    "firestore.batch",
+    "sequelize.transaction",
+    "this.transaction",
+  ])("returns null for %s with argCount=0 — no Drizzle signature takes it", (target) => {
+    // An unrecognised receiver with no argument is a shape Drizzle's API never takes, and it has
+    // owners elsewhere: Firestore's `batch()`, an unmanaged Sequelize or Knex `transaction()`, a
+    // class's own method. It stays in `calls[]` rather than withdrawing the file.
+    expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 
-  it("throw message includes the file path and target for reproducibility", () => {
-    const ctxWithPath = makeCtx({
-      imports: [makeDrizzleImport()],
-      path: "src/services/tx.ts",
-    })
-    expect(() =>
-      classifyDrizzleCall(
-        makeCall({ target: "db.transaction", argumentCount: 0, line: 42 }),
-        ctxWithPath,
-      ),
-    ).toThrow(/src\/services\/tx\.ts.*db\.transaction/s)
+  it.each([
+    "db.transaction",
+    "db.batch",
+  ])("returns null for %s with argCount=0 — the arity floor outranks the receiver", (target) => {
+    // `db` is a client word and would earn `high`, but the floor is checked first: a
+    // zero-argument call is broken source (`db.transaction(/* cb */)` parses at zero) or a
+    // miscount, not separable here, and recording a phantom transaction is the costlier mistake.
+    expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
+  })
+
+  it("still records sequelize.transaction(cb) at medium — EP11, not the floor", () => {
+    // One argument clears the floor; the receiver is outside the client vocabulary, so the
+    // effect is recorded at the tier an unplaceable receiver gets, not dropped.
+    const result = classifyDrizzleCall(
+      makeCall({ target: "sequelize.transaction", argumentCount: 1 }),
+      ctx,
+    )
+    expect(result).toMatchObject({ effectId: "db.transaction", confidence: "medium" })
   })
 
   it("classifies this.db.transaction as db.transaction", () => {
