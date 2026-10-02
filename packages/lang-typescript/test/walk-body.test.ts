@@ -159,23 +159,86 @@ describe("walkBody — rules (LP16-LP20)", () => {
  * twin gets a `return` rule, and an edit to the concise one moves no `logic` fingerprint.
  */
 describe("walkBody — a concise arrow body (LP19a)", () => {
-  const rulesOf = async (source: string) => (await walkFirstSymbol(source)).rules
+  const rulesOf = async (source: string, path?: string) =>
+    (await walkFirstSymbol(source, path)).rules
 
+  // Each row spells its block twin out rather than deriving it from the arrow, so a row whose
+  // two spellings genuinely differ fails instead of being rewritten into agreement.
   it.each([
-    ["a comparison", 'u.role === "admin"'],
-    ["a ternary, in the parentheses a formatter adds", "(a > b ? a : b)"],
-    ["an object literal, in the parentheses the grammar requires", '({ ...a, status: "ok" })'],
-    ["a call combined with something else", "f(a) + 1"],
-    ["an awaited call", "await f(a)"],
-  ])("reads %s as the block spelling's `return`", async (_label, expr) => {
-    const params = "(a: any, b: any, u: any)"
-    const concise = await rulesOf(`export const f = ${params} => ${expr}`)
-    const block = await rulesOf(
-      `export function f${params} { return ${expr.replace(/^\((.*)\)$/, "$1")} }`,
+    [
+      "a comparison",
+      'export const f = (u: any) => u.role === "admin"',
+      'export function f(u: any) { return u.role === "admin" }',
+    ],
+    [
+      "a ternary, in the parentheses a formatter adds",
+      "export const f = (a: any, b: any) => (a > b ? a : b)",
+      "export function f(a: any, b: any) { return a > b ? a : b }",
+    ],
+    [
+      "an object literal, in the parentheses the grammar requires",
+      'export const f = (a: any) => ({ ...a, status: "ok" })',
+      'export function f(a: any) { return { ...a, status: "ok" } }',
+    ],
+    [
+      "a call combined with something else",
+      "export const f = (a: any) => g(a) + 1",
+      "export function f(a: any) { return g(a) + 1 }",
+    ],
+    [
+      "an awaited call in an async arrow",
+      "export const f = async (a: any) => await g(a)",
+      "export async function f(a: any) { return await g(a) }",
+    ],
+    [
+      "an interpolated template literal",
+      `export const f = (name: string) => \`hello \${name}\``,
+      `export function f(name: string) { return \`hello \${name}\` }`,
+    ],
+    [
+      "a non-null assertion on a member chain",
+      "export const f = (u: any) => u.role!",
+      "export function f(u: any) { return u.role! }",
+    ],
+    [
+      "a curried arrow, whose returned value is the whole inner arrow",
+      "export const add = (a: number) => (b: number) => a + b",
+      "export function add(a: number) { return (b: number) => a + b }",
+    ],
+  ])("reads %s as the block spelling's `return`", async (_label, concise, block) => {
+    const rules = await rulesOf(concise)
+
+    expect(rules).toHaveLength(1)
+    expect(rules).toEqual(await rulesOf(block))
+  })
+
+  it("reads a JSX body as the block spelling's `return`, markup and all", async () => {
+    const rules = await rulesOf(
+      'export const C = ({ label }: any) => <div className="a">{label}</div>',
+      "src/a.tsx",
     )
 
-    expect(concise).toHaveLength(1)
-    expect(concise).toEqual(block)
+    expect(rules.map((r) => r.expr)).toEqual(['<div className="a">{label}</div>'])
+    expect(rules).toEqual(
+      await rulesOf(
+        'export function C({ label }: any) { return <div className="a">{label}</div> }',
+        "src/a.tsx",
+      ),
+    )
+  })
+
+  it("leaves out the parentheses a formatter wraps JSX in, and keeps their line", async () => {
+    const source = [
+      "export const C = ({ label }: any) => (",
+      '  <div className="a">',
+      "    {label}",
+      "  </div>",
+      ")",
+    ].join("\n")
+
+    expect((await rulesOf(source, "src/a.tsx")).map((r) => [r.line, r.expr])).toEqual([
+      [1, '<div className="a"> {label} </div>'],
+    ])
   })
 
   it.each([
@@ -191,6 +254,27 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     expect(calls.map((c) => c.target)).toEqual(targets)
   })
 
+  // Only a walk root's body is read as a returned value. An arrow inside another body is walked
+  // as part of it, so its expression adds nothing, even where a block-bodied callback's
+  // `return` would land on the enclosing Symbol.
+  it.each([
+    [
+      "a callback inside the body",
+      "export function f(xs: number[]) { return xs.map((x) => x * 2) }",
+      ["xs.map"],
+    ],
+    [
+      "a parameter default",
+      "export function f(cb = (x: number) => x + 1) { return cb(1) }",
+      ["cb"],
+    ],
+  ])("adds no rule for an arrow that is not a walk root: %s", async (_label, source, targets) => {
+    const { rules, calls } = await walkFirstSymbol(source)
+
+    expect(rules).toEqual([])
+    expect(calls.map((c) => c.target)).toEqual(targets)
+  })
+
   it("still records the calls inside a returned expression", async () => {
     const { rules, calls } = await walkFirstSymbol("export const f = (a: number) => g(a) > h(a)")
 
@@ -198,12 +282,58 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     expect(calls.map((c) => c.target)).toEqual(["g", "h"])
   })
 
-  it("puts the rule on the expression's line", async () => {
-    const { rules } = await walkFirstSymbol(
-      ["export const f = (a: number, b: number) =>", "  a + b"].join("\n"),
+  it("puts the rule on the body's first line, which is the opening parenthesis's", async () => {
+    const bare = ["export const f = (a: number, b: number) =>", "  a + b"].join("\n")
+    const wrapped = ["export const f = (a: number, b: number) => (", "  a + b", ")"].join("\n")
+    const block = ["export function f(a: number, b: number) { return (", "  a + b", ") }"].join(
+      "\n",
     )
 
-    expect(rules.map((r) => [r.type, r.line])).toEqual([["return", 2]])
+    expect((await rulesOf(bare)).map((r) => [r.line, r.expr])).toEqual([[2, "a + b"]])
+    expect((await rulesOf(wrapped)).map((r) => [r.line, r.expr])).toEqual([[1, "a + b"]])
+    expect((await rulesOf(block)).map((r) => r.line)).toEqual([1])
+  })
+
+  it("takes off the one pair of parentheses a block `return` keeps in `expr`", async () => {
+    const concise = await rulesOf("export const f = (a: any, b: any) => (a > b ? a : b)")
+    const block = await rulesOf("export function f(a: any, b: any) { return (a > b ? a : b) }")
+
+    expect(concise.map((r) => r.expr)).toEqual(["a > b ? a : b"])
+    expect(block.map((r) => r.expr)).toEqual(["(a > b ? a : b)"])
+  })
+
+  it("takes off one pair only", async () => {
+    expect((await rulesOf("export const f = (a: number) => ((a + 1))")).map((r) => r.expr)).toEqual(
+      ["(a + 1)"],
+    )
+  })
+
+  it("looks past a comment inside the parentheses", async () => {
+    expect(
+      (await rulesOf("export const f = () => (/* keep */ { a: 1 })")).map((r) => r.expr),
+    ).toEqual(["{ a: 1 }"])
+  })
+
+  // The two places the concise spelling answers differently from the block one, pinned as they
+  // stand. In both the block spelling is the less exact: parentheses decide whether its `return`
+  // is call-only, and a returned value it calls trivial is not walked at all.
+  it("is call-only for a parenthesized call, where the block spelling takes a rule", async () => {
+    const concise = await walkFirstSymbol("export const f = () => (g())")
+    const block = await walkFirstSymbol("export function f() { return (g()) }")
+
+    expect([concise.rules, concise.calls.map((c) => c.target)]).toEqual([[], ["g"]])
+    expect([block.rules.map((r) => r.expr), block.calls.map((c) => c.target)]).toEqual([
+      ["(g())"],
+      ["g"],
+    ])
+  })
+
+  it("records a call in a subscript's index, which the block spelling drops", async () => {
+    const concise = await walkFirstSymbol("export const f = (a: any) => a[g()]")
+    const block = await walkFirstSymbol("export function f(a: any) { return a[g()] }")
+
+    expect([concise.rules, concise.calls.map((c) => c.target)]).toEqual([[], ["g"]])
+    expect([block.rules, block.calls.map((c) => c.target)]).toEqual([[], []])
   })
 
   it("covers a class field holding an arrow, and leaves the class without the rule", async () => {

@@ -291,8 +291,15 @@ function isConciseBody(body: Node): boolean {
 /**
  * The expression inside one pair of parentheses. A concise body that returns an object literal
  * must be wrapped — `() => ({ a: 1 })` — and the block spelling `return { a: 1 }` has nothing
- * to match them, so they are not part of what is returned. Only one pair is required, so only
- * one is taken off.
+ * to match them, so they are not part of what is returned. A comment written inside the pair
+ * is not what is returned either, so a pair holding an object literal and a comment answers
+ * with the object. A pair holding anything else besides its one expression — a type annotation
+ * written inside it, `(x: T)` — answers with the parenthesis, since there is no one expression
+ * to answer with.
+ *
+ * Only one pair is required, so only one is taken off: `((a + b))` answers with `(a + b)`. A
+ * redundant second pair therefore stays in `expr`, and adding or removing one still moves the
+ * `logic` fingerprint.
  */
 function unparenthesized(node: Node): Node {
   if (node.type !== "parenthesized_expression") return node

@@ -32,6 +32,9 @@ describe("e2e diff — an edit to a concise arrow's returned expression", () => 
     const headIR = (await scanFixture(workspace.root)).ir
     const diff = diffIRs(baseIR, headIR)
 
+    // Not the guard: the literal is part of the syntax fingerprint, so `canEdit` was reported as
+    // changed before its body earned a rule too. `logicChanged: true` on it is what goes red when
+    // the arrow's body is read as a bare expression again.
     expect(diff.summary.changed).toBe(2)
     const changed = diff.symbols.flatMap((c) =>
       c.status === "changed" ? [{ name: c.after.name, logicChanged: c.delta.logicChanged }] : [],
