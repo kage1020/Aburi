@@ -73,7 +73,7 @@ export function visitCallStatement(
   state.seen.set(stem, ordinal + 1)
   const qname = nestedQname([`${stem}__d${ordinal}`])
 
-  const [lead, ...rest] = inlineHandlers(call)
+  const [lead, ...rest] = inlineHandlers(call, call)
   return {
     id: makeTsSymbolId(ctx.file.path, qname),
     kind: "call",
@@ -94,31 +94,37 @@ export function visitCallStatement(
 }
 
 /**
- * Every function written as a direct argument of the registration, as the bodies they
- * contribute, in source order.
+ * Every function written as a direct argument of a call on `call`'s spine, as the bodies it
+ * contributes to `declaration`, in source order.
  *
- * The Symbol stands for the whole statement, so the scan covers every call on the statement's
- * spine, not only the outermost: `app.route('/x').get(h1).post(h2)` registers two handlers and
- * produces one Symbol, and reading only the leaf's arguments would leave `h1` in no Symbol at
- * all.
+ * Two declarations hold such a function where no other declaration does: a registration
+ * statement (`app.post('/x', async (req) => …)`, LP20g), whose Symbol is the call itself, and a
+ * `const` initialised by a call (`const POST = withAuth(async (req) => …)`, LP7c). Either way the
+ * Symbol stands for the whole declaration, so the scan covers every call on the spine, not only
+ * the outermost: `app.route('/x').get(h1).post(h2)` registers two handlers and produces one
+ * Symbol, and reading only the leaf's arguments would leave `h1` in no Symbol at all.
+ *
+ * Each body is paired with `declaration` rather than with the function it is the body of. The
+ * bodies are further bodies of that one declaration (LP20h), and `normalizeAst` describes a
+ * declaration once however many bodies it has, which it can only do if they all name it.
  *
  * **Direct** arguments only. A function inside an argument (`app.get('/x', wrap(() => …))`) is
  * a call's return value, which is the line `asFunctionValue` draws: reading through a call
  * would be a guess about what it returns. `asFunctionValue`'s set is also the answer to what
  * counts as a function here — an arrow or a function expression, wrapped or not. A generator
  * argument (Koa's `app.use(function* (ctx, next) {…})`) is outside it at every site that reads
- * the predicate, so it registers no body.
+ * the predicate, so it contributes no body.
  *
- * A body of no width is refused. A half-written handler (`app.get('/x', async (req) =>)`) still
- * parses as an arrow whose `body` field is a zero-width error node; adopting it would describe
- * every broken handler in a workspace with the same string, and claim `inline-handler` for a
- * function that has no body to walk.
+ * A body of no width is refused. A half-written function (`withAuth(async (req) =>)`) still
+ * parses as an arrow whose `body` field is a zero-width error node. There is nothing in it to
+ * walk, and adopting it would have the Symbol's `derivedBy` say it carries a function's body —
+ * `inline-handler` on a registration, `call-argument-function` on a const — when it carries none.
  *
  * Ordered on `startIndex` because the spine is walked right-to-left, which is the reverse of
- * how the statement is written.
+ * how the declaration is written.
  */
-export function inlineHandlers(call: Node): MergedDeclaration<Node>[] {
-  const found: MergedDeclaration<Node>[] = []
+export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration<Node>[] {
+  const bodies: Node[] = []
   for (const step of spineCalls(call)) {
     const args = step.childForFieldName("arguments") ?? findChild(step, "arguments")
     if (args === null) continue
@@ -128,10 +134,12 @@ export function inlineHandlers(call: Node): MergedDeclaration<Node>[] {
       if (handler === null) continue
       const body = handler.childForFieldName("body")
       if (body === null || body.text.length === 0) continue
-      found.push({ bodyNode: body, fullNode: handler })
+      bodies.push(body)
     }
   }
-  return found.sort((a, b) => a.fullNode.startIndex - b.fullNode.startIndex)
+  return bodies
+    .sort((a, b) => a.startIndex - b.startIndex)
+    .map((body) => ({ bodyNode: body, fullNode: declaration }))
 }
 
 /**

@@ -54,8 +54,10 @@ describe("scan — a function a const hands to a wrapping call", () => {
     const baseIR = (await scanWith(workspace.root, lineup)).ir
     await workspace.writeSource("src/users.ts", users(DELETE))
     const headIR = (await scanWith(workspace.root, lineup)).ir
-    const [change] = diffIRs(baseIR, headIR).symbols
+    const changes = diffIRs(baseIR, headIR).symbols
 
+    expect(changes).toHaveLength(1)
+    const [change] = changes
     expect(change?.status).toBe("changed")
     if (change?.status !== "changed") return
     expect(change.after.name).toBe("POST")

@@ -9,9 +9,9 @@ import type {
 import type { Node, Tree } from "web-tree-sitter"
 import {
   AMBIENT_DECLARATION_TYPE,
+  asFunctionValue,
   findChild,
   firstNonCommentChild,
-  functionValueOf,
   hasChildOfType,
   hasExportModifier,
   inAmbientContext,
@@ -869,7 +869,8 @@ function makeVariableCandidate(
 ): SymbolCandidate<Node> | null {
   const name = nameFieldText(declarator)
   if (name === null) return null
-  const value = functionValueOf(declarator)
+  const initializer = declarator.childForFieldName("value")
+  const value = initializer === null ? null : asFunctionValue(initializer)
   const qname = nestedQname([...namespacePath, name])
   const id = makeTsSymbolId(ctx.file.path, qname)
   if (value !== null) {
@@ -888,7 +889,7 @@ function makeVariableCandidate(
       fullNode: value,
     }
   }
-  const [lead, ...rest] = wrappedFunctions(declarator)
+  const [lead, ...rest] = initializer === null ? [] : wrappedFunctions(initializer, statement)
   return {
     id,
     kind: "const",
@@ -898,18 +899,22 @@ function makeVariableCandidate(
     decorators: [],
     signature: null,
     source: makeSourceRange(statement, ctx),
-    derivedBy: exportEvidence(statement),
+    // Says why a const has a body at all, as `inline-handler` does for a registration.
+    derivedBy:
+      lead === undefined
+        ? exportEvidence(statement)
+        : ["call-argument-function", ...exportEvidence(statement)],
     bodyNode: lead?.bodyNode ?? null,
     fullNode: statement,
-    // Absent, never empty — `plugins.ts` states the contract and LP8i pins it.
+    // Absent, never empty — `plugins.ts` states the contract, and LP7c's further functions are
+    // one of the two stretches it names.
     ...(rest.length > 0 ? { mergedDeclarations: rest } : {}),
   }
 }
 
 /**
- * The functions a `const` initialised by a call hands to that call — `withAuth(async (req) =>
- * …)`, `memo(function Row() {…})`, `t.procedure.query(() => …)` — as the bodies they
- * contribute, in source order.
+ * The functions a `const` initialised by a call hands to that call, as further bodies of the
+ * const's declaration, in source order.
  *
  * LP7b keeps the const a const: nothing in the tree says the call returns the function it was
  * given. But the function is written in this declaration and in no other, so leaving it unwalked
@@ -917,12 +922,17 @@ function makeVariableCandidate(
  * problem and the same answer (LP20g), so this is that reading: every function written as a
  * direct argument of a call on the initializer's spine. The wrapping call itself is not a body,
  * so `withAuth` is not recorded as one of the const's calls.
+ *
+ * The reading asks nothing about the call, so it is wider than the wrappers it was written for
+ * (`withAuth(async (req) => …)`, `memo(function Row() {…})`, `t.procedure.query(() => …)`):
+ * `users.map((u) => u.name)`, `Array.from(xs, (x) => …)` and `compareBy((item) => item.id)` hand
+ * a function to a call just as well, and their consts get its body too. What it does not reach
+ * is a function the initializer holds some other way — passed to `new`, behind `await`, inside an
+ * object or a nested call — and LP7c lists those.
  */
-function wrappedFunctions(declarator: Node): MergedDeclaration<Node>[] {
-  const value = declarator.childForFieldName("value")
-  if (value === null) return []
-  const call = unwrapValue(value)
-  return call.type === "call_expression" ? inlineHandlers(call) : []
+function wrappedFunctions(initializer: Node, statement: Node): MergedDeclaration<Node>[] {
+  const call = unwrapValue(initializer)
+  return call.type === "call_expression" ? inlineHandlers(call, statement) : []
 }
 
 /** The two shapes a `variable_declarator` uses in place of a name. */

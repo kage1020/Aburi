@@ -160,9 +160,15 @@ export interface SymbolCandidate<TNode = OpaqueAstNode> {
    * holding only a body would make a reopened `enum E {}` fingerprint as though it had never
    * been written.
    *
-   * Absent, never empty, and absent means the Symbol has one declaration — the ordinary
-   * case. A consumer that reads only `bodyNode` is complete on those, and every path that
-   * was correct before the field existed still is.
+   * Absent, never empty, and absent means the Symbol has one declaration and at most one body
+   * — the ordinary case. A consumer that reads only `bodyNode` is complete on those, and every
+   * path that was correct before the field existed still is.
+   *
+   * Two producers stretch the field to carry further **bodies of one declaration** rather than
+   * further declarations: a Symbol whose declaration is a call registering several functions
+   * (`app.use(h1, h2)`), and a `const` initialised by a call handed several (`const h =
+   * pipe(() => …, () => …)`). Each entry's `fullNode` is then that one declaration. A file that
+   * declares nothing twice can carry the key for these, and only for these.
    */
   mergedDeclarations?: MergedDeclaration<TNode>[]
   fullNode: TNode
