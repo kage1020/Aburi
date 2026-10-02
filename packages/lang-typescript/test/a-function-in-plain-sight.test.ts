@@ -280,6 +280,21 @@ describe("a function a const hands to a call is the const's body (LP7c)", () => 
     expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual(targets)
   })
 
+  it("reads a concise arrow it hands its call as returning its body, as the block spelling", async () => {
+    // Each handed function is a walk root, so LP19a applies: the expression body is the arrow's
+    // return value, and the block twin's `return` gives the same rule.
+    const concise = await walkOf("export const d = xs.map((x: number) => x * 2)", "ts:src/a.ts#d")
+    const block = await walkOf(
+      "export const d = xs.map((x: number) => { return x * 2 })",
+      "ts:src/a.ts#d",
+    )
+
+    expect(concise.rules.map((r) => [r.type, r.expr])).toEqual([["return", "x * 2"]])
+    expect(concise.rules.map((r) => [r.type, r.expr])).toEqual(
+      block.rules.map((r) => [r.type, r.expr]),
+    )
+  })
+
   it("is still described by the whole declaration, so the wrapper is visible", async () => {
     const withAuth = await symbolOf(POST, "ts:src/a.ts#POST")
     const withRole = await symbolOf(POST.replace("withAuth", "withRole"), "ts:src/a.ts#POST")
