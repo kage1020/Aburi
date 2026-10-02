@@ -85,10 +85,12 @@ describe("CL28 — aburi scan with an --output-dir that cannot hold the outputs"
   })
 
   it("names the workspace Markdown when a directory stands where it would go", async () => {
+    // `--format md`, so the page is the only artefact and the case does not depend on which of
+    // the IR and the page is written first.
     await writeTypeScriptWorkspace(scratch, "write-fixture")
     await mkdir(resolve(scratch, "out", WORKSPACE_MD_FILENAME), { recursive: true })
 
-    const { exitCode, stderr } = await run(["scan"])
+    const { exitCode, stderr } = await run(["scan", "--format", "md"])
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(

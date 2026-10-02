@@ -1,5 +1,6 @@
 import type { Component, Dependency, Symbol as IRSymbol } from "@aburi/types"
 import {
+  appendAll,
   callRow,
   compareEffectIdentity,
   compareStrings,
@@ -88,12 +89,12 @@ export function projectComponent(input: ProjectComponentInput): string {
     lines.push("")
   }
 
-  lines.push(...renderBoundaryEffectSurface(keptSymbols))
+  appendAll(lines, renderBoundaryEffectSurface(keptSymbols))
 
   if (keptSymbols.length > 0) {
     lines.push("## Symbols")
     lines.push("")
-    lines.push(...renderSymbolsGroupedByFile(keptSymbols))
+    appendAll(lines, renderSymbolsGroupedByFile(keptSymbols))
   }
 
   if (droppedSymbols.length > 0) {

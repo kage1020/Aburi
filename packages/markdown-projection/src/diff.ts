@@ -18,6 +18,7 @@ import type {
 } from "@aburi/types"
 import { renderSymbolBlock } from "./component"
 import {
+  appendAll,
   compareStrings,
   inlineCode,
   isSymbolEdge,
@@ -986,7 +987,7 @@ function renderSliceView(
   const rows: string[] = []
   rows.push(...renderUnresolvedCallNote(slices, changeById))
   for (const slice of nonSingleton) {
-    rows.push(...renderSliceSection(slice, changeById))
+    appendAll(rows, renderSliceSection(slice, changeById))
     rows.push("---")
     rows.push("")
   }

@@ -118,6 +118,22 @@ function longestBacktickRun(text: string): number {
 }
 
 /**
+ * Append `items` to `target` one at a time.
+ *
+ * `target.push(...items)` hands every item to one call as a separate argument, and V8 overflows
+ * the stack past roughly 120,000 of them. So a list that can reach that on its own is appended
+ * through here: one line per Symbol of a component, per component or dependency edge of the
+ * workspace, per skipped file, per member of a Slice. A list bounded by a constant (the top-N
+ * effect surface) or by one Symbol's own contents can stay a spread.
+ *
+ * `target` and `items` must be different arrays. `for…of` walks one that keeps growing, where a
+ * spread took a snapshot, so `appendAll(lines, lines)` never ends.
+ */
+export function appendAll<T>(target: T[], items: readonly T[]): void {
+  for (const item of items) target.push(item)
+}
+
+/**
  * What a value renders as when it has nothing in it. Emitting nothing instead is
  * indistinguishable from the field being absent, and one level up it deletes the row.
  */
