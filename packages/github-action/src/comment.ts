@@ -110,6 +110,10 @@ interface StoredComment {
   readonly id: number
   readonly body: string
   readonly htmlUrl: string
+}
+
+/** A comment as the list returns it, with the author that decides whose it is. */
+interface ListedComment extends StoredComment {
   readonly author: { readonly login: string; readonly isBot: boolean }
 }
 
@@ -125,17 +129,31 @@ function commentsPath(ref: PullRequestRef): string {
   return `repos/${ref.owner}/${ref.repo}/issues/${ref.pullNumber}/comments`
 }
 
+/** The refusal an installation token gets from `GET /user` (see {@link posterLogin}). */
+const INTEGRATION_REFUSAL = "Resource not accessible by integration"
+
 /**
  * Who this token posts as: a personal token's login from `GET /user`, or `null` for an
  * installation token (the default `github.token`, or a GitHub App's), which that endpoint refuses
- * and which posts as a `[bot]` account whose name it cannot read.
+ * with a 403 that says so, and which posts as a `[bot]` account whose name it cannot read. Any
+ * other refusal — a 401 for a bad token, a secondary rate limit, a personal token an SSO has not
+ * authorised — is an error naming this request: read as "an installation token", it would give
+ * up the login match for a personal token.
  */
 async function posterLogin(api: ApiContext): Promise<string | null> {
   const response = await api.fetch(buildApiUrl(api.apiBase, "user"), {
     method: "GET",
     headers: authHeaders(api.token),
   })
-  if (response.status === 401 || response.status === 403 || response.status === 404) return null
+  if (response.status === 403) {
+    const message = (
+      (await response
+        .clone()
+        .json()
+        .catch(() => null)) as { message?: unknown } | null
+    )?.message
+    if (message === INTEGRATION_REFUSAL) return null
+  }
   if (!response.ok) throw await githubError("identify the token's user", response)
   const login = ((await response.json()) as { login?: unknown } | null)?.login
   if (typeof login !== "string" || login === "") {
@@ -145,11 +163,20 @@ async function posterLogin(api: ApiContext): Promise<string | null> {
 }
 
 /**
- * Aburi's comment is one this token wrote, opening with the marker. A comment that merely quotes
- * the marker is someone else's and is never rewritten. The token's identity is asked once, and
- * only when a comment opens with the marker.
+ * Aburi's comment is one this token wrote, opening with the marker; `self` is
+ * {@link posterLogin}'s answer. The same rule as `isOwnComment` in `scripts/upsert-comment.mjs`.
  */
-async function findMarkerComment(api: ApiContext, marker: string): Promise<StoredComment | null> {
+function isOwnComment(comment: ListedComment, marker: string, self: string | null): boolean {
+  if (!comment.body.startsWith(marker)) return false
+  return self === null ? comment.author.isBot : comment.author.login === self
+}
+
+/**
+ * Aburi's comment by {@link isOwnComment}. A comment that merely quotes the marker is someone
+ * else's and is never rewritten. The token's identity is asked once, and only when a comment
+ * opens with the marker.
+ */
+async function findMarkerComment(api: ApiContext, marker: string): Promise<ListedComment | null> {
   const perPage = 100
   let self: { readonly login: string | null } | undefined
   for (let page = 1; ; page++) {
@@ -167,11 +194,10 @@ async function findMarkerComment(api: ApiContext, marker: string): Promise<Store
       )
     }
     for (const row of rows) {
-      const parsed = parseComment(row)
+      const parsed = parseListedComment(row)
       if (!parsed?.body.startsWith(marker)) continue
       self ??= { login: await posterLogin(api) }
-      const own = self.login === null ? parsed.author.isBot : parsed.author.login === self.login
-      if (own) return parsed
+      if (isOwnComment(parsed, marker, self.login)) return parsed
     }
     if (rows.length < perPage) return null
   }
@@ -226,6 +252,18 @@ async function githubError(operation: string, response: Response): Promise<Error
   )
 }
 
+/** A comment the list endpoint returned: {@link parseComment}, plus the author it must name. */
+function parseListedComment(row: unknown): ListedComment | null {
+  const comment = parseComment(row)
+  if (comment === null) return null
+  // An unreadable author is an unreadable row, as in the script, not a stranger's comment.
+  const user = (row as { user?: unknown }).user
+  if (typeof user !== "object" || user === null) return null
+  const login = (user as { login?: unknown }).login
+  if (typeof login !== "string") return null
+  return { ...comment, author: { login, isBot: (user as { type?: unknown }).type === "Bot" } }
+}
+
 function parseComment(row: unknown): StoredComment | null {
   if (typeof row !== "object" || row === null) return null
   const id = (row as { id?: unknown }).id
@@ -234,15 +272,7 @@ function parseComment(row: unknown): StoredComment | null {
   if (typeof id !== "number") return null
   if (typeof body !== "string") return null
   if (typeof htmlUrl !== "string") return null
-  const user = (row as { user?: unknown }).user
-  const login = typeof user === "object" && user !== null ? (user as { login?: unknown }).login : ""
-  const type = typeof user === "object" && user !== null ? (user as { type?: unknown }).type : ""
-  return {
-    id,
-    body,
-    htmlUrl,
-    author: { login: typeof login === "string" ? login : "", isBot: type === "Bot" },
-  }
+  return { id, body, htmlUrl }
 }
 
 /**

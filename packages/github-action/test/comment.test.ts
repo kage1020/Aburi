@@ -21,7 +21,7 @@ interface FakeFetchOptions {
   readonly listStatus?: number
   readonly createStatus?: number
   readonly patchStatus?: number
-  /** `GET /user`. Default: refused with a 403, as it is for the default `github.token`. */
+  /** `GET /user`. Default: the 403 an installation token gets, as the default `github.token` does. */
   readonly userStatus?: number
   readonly userResponse?: unknown
 }
@@ -54,7 +54,8 @@ function makeFakeFetch(options: FakeFetchOptions): {
       })
     }
     if (method === "GET" && url.endsWith("/user")) {
-      return new Response(JSON.stringify(options.userResponse ?? { message: "forbidden" }), {
+      const refusal = { message: "Resource not accessible by integration" }
+      return new Response(JSON.stringify(options.userResponse ?? refusal), {
         status: options.userStatus ?? 403,
         headers: { "content-type": "application/json" },
       })
@@ -373,11 +374,55 @@ describe("upsertPullRequestComment", () => {
       expect(calls.find((c) => c.method === "PATCH")?.url).toContain("/issues/comments/204")
     })
 
-    it("throws when GitHub fails to say who the token is", async () => {
-      const { fetch } = makeFakeFetch({ listPages: [[ours]], userStatus: 502 })
+    it.each([
+      { userStatus: 502, userResponse: { message: "bad gateway" }, expected: /user: 502/ },
+      { userStatus: 401, userResponse: { message: "Bad credentials" }, expected: /user: 401/ },
+      { userStatus: 404, userResponse: { message: "Not Found" }, expected: /user: 404/ },
+      {
+        userStatus: 403,
+        userResponse: { message: "You have exceeded a secondary rate limit." },
+        expected: /user: 403/,
+      },
+      { userStatus: 200, userResponse: { id: 1 }, expected: /a user without a login/ },
+    ])("throws on a $userStatus from GET /user that is not the installation-token refusal", async ({
+      userStatus,
+      userResponse,
+      expected,
+    }) => {
+      // Read as "an installation token", any of these would give up the login match for a
+      // personal token: a duplicate report, or another bot's comment rewritten.
+      const { fetch, calls } = makeFakeFetch({ listPages: [[ours]], userStatus, userResponse })
       await expect(
         upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
-      ).rejects.toThrow(/identify the token's user: 502/)
+      ).rejects.toThrow(expected)
+      expect(calls.some((c) => c.method === "PATCH" || c.method === "POST")).toBe(false)
+    })
+
+    it("does not take a marker comment whose author it cannot read for its own", async () => {
+      const { user: _user, ...authorless } = ours
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[authorless]],
+        createResponse: { id: 305, body: "x", html_url: "u305" },
+      })
+      const outcome = await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(outcome).toMatchObject({ action: "created", commentId: 305 })
+      expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    })
+
+    it("asks who the token is once, across pages", async () => {
+      const filler = Array.from({ length: 99 }, (_, i) => ({
+        id: 2000 + i,
+        body: "chatter",
+        html_url: "u",
+        user: ACTIONS_BOT,
+      }))
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[planted, ...filler], [ours]],
+        patchResponse: { ...ours, body: `${ABURI_COMMENT_MARKER}\n\nnew` },
+      })
+      const outcome = await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(outcome).toMatchObject({ action: "updated", commentId: 202 })
+      expect(calls.filter((c) => c.url.endsWith("/user"))).toHaveLength(1)
     })
   })
 

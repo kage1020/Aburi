@@ -41,11 +41,23 @@ interface Reply {
  * between them and a child process — env in, exit code and `$GITHUB_OUTPUT` out — and a unit test
  * of the flow already exists next door in `comment.test.ts`, over the library form.
  */
-async function withApi(
+function withApi(
   replies: (request: RecordedRequest) => Reply,
   run: (base: string, requests: RecordedRequest[]) => Promise<void>,
-  /** `GET /user`. Default: refused, as it is for the default `github.token`. */
-  user: Reply = { status: 403, json: { message: "Resource not accessible by integration" } },
+): Promise<void> {
+  // `GET /user` as the default `github.token` gets it: the refusal an installation token gets.
+  return withApiAs(
+    { status: 403, json: { message: "Resource not accessible by integration" } },
+    replies,
+    run,
+  )
+}
+
+/** {@link withApi}, with `GET /user` answered by `user`: who the token says it is. */
+async function withApiAs(
+  user: Reply,
+  replies: (request: RecordedRequest) => Reply,
+  run: (base: string, requests: RecordedRequest[]) => Promise<void>,
 ): Promise<void> {
   const requests: RecordedRequest[] = []
   const server = await listen(async (req, res) => {
@@ -363,7 +375,8 @@ describe("upsert-comment.mjs", () => {
   it("matches a personal token's own login rather than any bot", async () => {
     const path = await markdownFile("report\n")
     const me = { login: "kage1020", type: "User" }
-    await withApi(
+    await withApiAs(
+      { json: { login: "kage1020" } },
       (request) =>
         request.method === "GET"
           ? {
@@ -381,7 +394,6 @@ describe("upsert-comment.mjs", () => {
           "/repos/kage1020/Aburi/issues/comments/301",
         )
       },
-      { json: { login: "kage1020" } },
     )
   })
 
@@ -400,17 +412,69 @@ describe("upsert-comment.mjs", () => {
     )
   })
 
-  it("is exit 1 when GitHub fails to say who the token is, writing nothing", async () => {
+  it.each([
+    ["a 502", { status: 502, json: { message: "bad gateway" } }, "identify the token's user: 502"],
+    ["a bad token's 401", { status: 401, json: { message: "Bad credentials" } }, "user: 401"],
+    [
+      "a secondary rate limit's 403",
+      { status: 403, json: { message: "You have exceeded a secondary rate limit." } },
+      "user: 403",
+    ],
+    ["a user with no login", { json: { id: 1 } }, "a user without a login"],
+  ])("is exit 1 on %s from GET /user, writing nothing", async (_case, user, named) => {
+    // Only the refusal that names an installation token reads as one. Anything else would give
+    // up the login match for a personal token: a duplicate report, or a bot's comment rewritten.
     const path = await markdownFile("report\n")
-    await withApi(
+    await withApiAs(
+      user,
       () => ({ json: [comment(9, `${ABURI_COMMENT_MARKER}\n\nold\n`)] }),
       async (base, requests) => {
         const run = await runScript(baseEnv(base, path))
         expect(run.status).toBe(1)
-        expect(run.stderr).toContain("identify the token's user: 502")
+        expect(run.stderr).toContain(named)
         expect(requests.every((r) => r.method === "GET")).toBe(true)
       },
-      { status: 502, json: { message: "bad gateway" } },
+    )
+  })
+
+  it("counts a marker comment whose author it cannot read as unreadable, and says so", async () => {
+    // Passed over as a stranger's instead, Aburi's own comment would be replaced by a second one
+    // with nothing in the log.
+    const path = await markdownFile("report\n")
+    const { user: _user, ...authorless } = comment(9, `${ABURI_COMMENT_MARKER}\n\nold\n`)
+    await withApi(
+      (request) =>
+        request.method === "GET" ? { json: [authorless] } : { status: 201, json: comment(10, "x") },
+      async (base) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        expect(run.stderr).toContain("::warning::1 comment(s)")
+        expect(run.stderr).toContain("author login")
+        expect(run.outputs.action).toBe("created")
+      },
+    )
+  })
+
+  it("asks who the token is once, across pages", async () => {
+    // A person's marker comment on page 1 asks; Aburi's on page 2 reuses the answer.
+    const path = await markdownFile("report\n")
+    const alice = { login: "alice", type: "User" }
+    const first = [
+      comment(1, `${ABURI_COMMENT_MARKER}\n\n# planted`, alice),
+      ...Array.from({ length: 99 }, (_, i) => comment(i + 2, "chatter")),
+    ]
+    await withApi(
+      (request) => {
+        if (request.method !== "GET") return { json: comment(500, "patched") }
+        return pageOf(request) === 1
+          ? { json: first }
+          : { json: [comment(500, `${ABURI_COMMENT_MARKER}\n\nold\n`)] }
+      },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.outputs).toEqual({ action: "updated", "comment-id": "500" })
+        expect(requests.filter((r) => r.path.endsWith("/user"))).toHaveLength(1)
+      },
     )
   })
 
