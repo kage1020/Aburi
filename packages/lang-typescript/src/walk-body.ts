@@ -408,10 +408,16 @@ function isTrivialExpr(node: Node): boolean {
     case "this":
     case "super":
       return true
-    case "member_expression":
-    case "subscript_expression": {
+    case "member_expression": {
       const object = node.childForFieldName("object")
       return object !== null && isTrivialExpr(object)
+    }
+    case "subscript_expression": {
+      // `items[0]` and `map[key]` read a value as `items.first` does; `cache[computeKey(k)]`
+      // computes one, and is no more trivial than `computeKey(k)` is.
+      const object = node.childForFieldName("object")
+      const index = node.childForFieldName("index")
+      return object !== null && index !== null && isTrivialExpr(object) && isTrivialExpr(index)
     }
     case "unary_expression":
     case "update_expression": {

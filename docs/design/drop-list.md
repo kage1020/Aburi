@@ -194,6 +194,8 @@ isTrivialExpr(node):
   identifier          → true
   this                → true
   member_expression   → isTrivialExpr(node.object)   # arbitrary depth
+  subscript_expression → isTrivialExpr(node.object) and isTrivialExpr(node.index)
+  subscript_expression → isTrivialExpr(node.object) and isTrivialExpr(node.index)
   unary_expression    → isTrivialExpr(node.argument)
   parenthesized       → isTrivialExpr(node.expression)
   otherwise           → false
@@ -345,6 +347,12 @@ Properties the extraction pipeline must satisfy.
 | T10 | `x ? a : b` | no |
 | T11 | `{ ...x }` | no |
 | T12 | `` `hello ${name}` `` | no |
+| T13 | `items[0]` | yes |
+| T14 | `map[key]` | yes |
+| T15 | `cache[computeKey(k)]` | no (a `return` rule; `computeKey` is recorded in calls) |
+| T13 | `items[0]` | yes |
+| T14 | `map[key]` | yes |
+| T15 | `cache[computeKey(k)]` | no (a `return` rule; `computeKey` is recorded in calls) |
 
 ## 9. Configuration examples
 

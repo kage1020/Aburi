@@ -328,12 +328,18 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     ])
   })
 
-  it("records a call in a subscript's index, which the block spelling drops", async () => {
+  it("reads a subscript with a computed index as a return in both spellings", async () => {
     const concise = await walkFirstSymbol("export const f = (a: any) => a[g()]")
     const block = await walkFirstSymbol("export function f(a: any) { return a[g()] }")
 
-    expect([concise.rules, concise.calls.map((c) => c.target)]).toEqual([[], ["g"]])
-    expect([block.rules, block.calls.map((c) => c.target)]).toEqual([[], []])
+    expect([concise.rules.map((r) => r.expr), concise.calls.map((c) => c.target)]).toEqual([
+      ["a[g()]"],
+      ["g"],
+    ])
+    expect([block.rules.map((r) => r.expr), block.calls.map((c) => c.target)]).toEqual([
+      ["a[g()]"],
+      ["g"],
+    ])
   })
 
   it("covers a class field holding an arrow, and leaves the class without the rule", async () => {
