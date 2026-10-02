@@ -3,7 +3,7 @@ import { symbolOf } from "./fixtures/ctx"
 
 /**
  * What a caller sees of a parameter's form rides in `type`, the field the api fingerprint
- * hashes: `?` for an optional or defaulted parameter, `...` for a rest one (LP11b, issue #340).
+ * hashes: `?` for an optional or defaulted parameter, `...` for a rest one (LP11b).
  */
 
 async function inputsOf(params: string) {

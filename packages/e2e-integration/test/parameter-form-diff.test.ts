@@ -7,7 +7,7 @@ import { useScratchWorkspace } from "../src/scratch"
 /**
  * Making an optional parameter required, or an array parameter a rest one, breaks callers, so
  * it is an api change. The `?` and the `...` reached no fingerprint and the diff reported no
- * change at all (lang-plugin.md LP11b, issue #340).
+ * change at all (lang-plugin.md LP11b).
  */
 
 const workspace = useScratchWorkspace("parameter-form")
