@@ -653,6 +653,7 @@ Every language plugin must pass the following tests.
 | LP11a | a function that states a parameter **without a parameter list** — TypeScript's parenthesis-free arrow, `x => x + 1` | inputs = [{name:"x",type:""}], the same the parenthesised spelling `(x) => x + 1` reports |
 | LP12 | `function f<T>()` | typeParameters = ["T"] |
 | LP13 | `function f() { throw new MyError() }` | throws = ["MyError"] |
+| LP13c | JSDoc `@throws` without braces: `@throws PaymentDeclined` / `@throws If the id is unknown.` / `@throws NotFoundError when …`; with braces: `@throws {@link NotFoundError} …` | ["PaymentDeclined"] / [] / [] / ["NotFoundError"]: a bare word is a type only when it is the tag's whole text and an upper-case identifier or dotted path; `{@link X}`, `{@linkcode X}` and `{@linkplain X}` record `X` |
 
 LP11a is where the two spellings of one parameter have to agree. `inputs` is compared
 positionally by the api fingerprint ([fingerprint.md](./fingerprint.md) §3.1), so a reader

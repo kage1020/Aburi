@@ -151,16 +151,52 @@ function extractThrownType(throwNode: Node): string | null {
   return null
 }
 
-const JSDOC_THROWS_PATTERN = /@(?:throws?|exception)\s+(?:\{([^}]+)\}\s*)?(\S*)/g
+/**
+ * One `@throws` / `@throw` / `@exception` tag: an optional `{…}` and then the tag's text, which
+ * runs to the next block tag (a `@` opening a line) or the end of its comment — the text read
+ * here can be several blocks joined (`readLeadingJsDoc`), and a tag never reads into the next.
+ */
+const JSDOC_THROWS_PATTERN =
+  /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}]+)\})?((?:(?!\n[ \t]*\*?[ \t]*@|\*\/)[\s\S])*)/g
 
+/** `{@link X}`, `{@linkcode X}`, `{@linkplain X}`, with or without a `| label` or label text. */
+const INLINE_LINK_PATTERN = /^@link(?:code|plain)?\s+([^\s|]+)/
+
+/** An identifier or dotted path starting with an upper-case letter: `E`, `NotFound`, `Errors.NotFound`. */
+const BARE_TYPE_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
+
+/**
+ * The exception types a JSDoc block declares (#330).
+ *
+ * - `{Type} …` records `Type`; `{@link Type} …` (TSDoc's form) records `Type`.
+ * - With no braces, the tag is `@throws Type` or `@throws free-text description`, and the two
+ *   cannot be told apart by syntax. A word is recorded only when it is the tag's whole text and
+ *   reads as a type name (upper-case first letter, identifier or dotted path). Anything else —
+ *   `@throws If the id is unknown.` — is prose and records nothing: a reworded description must
+ *   not move the `api` axis. `@throws {Type} description` declares a type with a description.
+ */
 function extractJsDocThrows(jsDoc: string): string[] {
   const out: string[] = []
-  const matches = jsDoc.matchAll(JSDOC_THROWS_PATTERN)
-  for (const match of matches) {
-    const typed = match[1]?.trim()
-    const bare = match[2]?.trim()
-    if (typed !== undefined && typed.length > 0) out.push(typed)
-    else if (bare !== undefined && bare.length > 0 && !bare.startsWith("*")) out.push(bare)
+  for (const match of jsDoc.matchAll(JSDOC_THROWS_PATTERN)) {
+    const braced = match[1]?.trim()
+    if (braced !== undefined) {
+      const linked = INLINE_LINK_PATTERN.exec(braced)
+      const typed = linked === null ? braced : linked[1]
+      if (typed !== undefined && typed.length > 0) out.push(typed)
+      continue
+    }
+    const text = tagText(match[2] ?? "")
+    if (BARE_TYPE_PATTERN.test(text)) out.push(text)
   }
   return out
+}
+
+/** A tag's text without the comment's line-leading `*`s, whitespace-collapsed. */
+function tagText(raw: string): string {
+  return raw
+    .split("\n")
+    .map((line) => line.replace(/^\s*\*/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
 }
