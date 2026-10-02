@@ -598,6 +598,52 @@ describe("resolveCallGraph", () => {
     expect(result.edges).toEqual([])
   })
 
+  describe("CR9: a destructuring parameter shadows the names it binds", () => {
+    it.each([
+      ["{ save }", ["save"]],
+      ["[save]", ["save"]],
+      ["{ persist: save }", ["save"]],
+      ["{ save = fallback }", ["save"]],
+      ["...save", ["save"]],
+    ])("`%s`", (pattern, bindings) => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: {
+          inputs: [{ name: pattern, type: "Deps", bindings }],
+          outputs: [],
+          throws: [],
+          async: false,
+          generator: false,
+          typeParameters: [],
+        },
+        calls: [
+          { target: "save", line: 5, resolved: null },
+          { target: "save.call", line: 6, resolved: null },
+        ],
+      })
+      const save = makeSymbol("ts:src/a.ts#save")
+      const result = resolveCallGraph({ symbols: [caller, save], importsByFile: new Map() })
+      expect(result.edges).toEqual([])
+      expect(result.symbols[0]?.calls.map((call) => call.resolved)).toEqual([null, null])
+    })
+
+    it("does not shadow a name the pattern only reads (`{ a = fallback }` reads `fallback`)", () => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: {
+          inputs: [{ name: "{ a = fallback }", type: "", bindings: ["a"] }],
+          outputs: [],
+          throws: [],
+          async: false,
+          generator: false,
+          typeParameters: [],
+        },
+        calls: [{ target: "fallback", line: 5, resolved: null }],
+      })
+      const fallback = makeSymbol("ts:src/a.ts#fallback")
+      const result = resolveCallGraph({ symbols: [caller, fallback], importsByFile: new Map() })
+      expect(result.symbols[0]?.calls[0]?.resolved).toBe("ts:src/a.ts#fallback")
+    })
+  })
+
   it("never fabricates an edge into a dropped Symbol body (file scope, direct name)", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "helper", line: 5 }])
     const dropped = makeSymbol("ts:src/a.ts#helper", {

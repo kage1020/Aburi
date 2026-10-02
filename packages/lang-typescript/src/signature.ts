@@ -2,6 +2,7 @@ import { compareCodeUnit } from "@aburi/core"
 import type { Signature } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { findChild, thrownValue, walkDescendants } from "./ast-helpers"
+import { collectPatternBindings } from "./pattern-bindings"
 
 /**
  * Build a Signature for a function-like declaration node (function_declaration,
@@ -10,6 +11,8 @@ import { findChild, thrownValue, walkDescendants } from "./ast-helpers"
  * Rules that mirror lang-plugin.md / fingerprint.md:
  * - `inputs[].name` is the parameter binding name (destructured / rest / this variants
  *   collapse to a printable form).
+ * - `inputs[].bindings` lists the names a destructuring parameter binds, and is absent for
+ *   a parameter that is a single name.
  * - `inputs[].type` and `outputs[]` are the AST-visible type text; we do not resolve
  *   types.
  * - `throws[]` is the union of explicit `throw new X()` statements inside the body plus
@@ -64,7 +67,8 @@ function readParameters(node: Node): Signature["inputs"] {
     ) {
       const name = extractParamName(child)
       const type = extractParamType(child)
-      out.push({ name, type })
+      const bindings = extractParamBindings(child)
+      out.push(bindings.length > 0 ? { name, type, bindings } : { name, type })
     }
   }
   return out
@@ -98,6 +102,27 @@ function extractParamName(param: Node): string {
   // Destructuring / rest patterns: keep the raw text as the "name". The api fingerprint
   // discards the name field anyway, and downstream renderers surface the raw form as-is.
   return pattern.text
+}
+
+/**
+ * The names a destructuring parameter binds — `{ save }`, `[save]`, `{ persist: save }`,
+ * `{ save = fallback }`, `...{ save }` all bind `save`. The `name` beside them is the
+ * pattern's text, which binds nothing by that spelling, so without this list the call
+ * resolver's parameter shadow (call-resolution.md §4.2) never sees these names and links
+ * `save()` to whatever `save` the file imports. A single-name parameter returns nothing:
+ * its `name` already is the binding, and the key stays absent (Class B).
+ */
+function extractParamBindings(param: Node): string[] {
+  const pattern = param.childForFieldName("pattern") ?? param.namedChild(0)
+  if (pattern === null) return []
+  if (
+    pattern.type !== "object_pattern" &&
+    pattern.type !== "array_pattern" &&
+    pattern.type !== "rest_pattern"
+  ) {
+    return []
+  }
+  return collectPatternBindings(pattern).map((binding) => binding.text)
 }
 
 function extractParamType(param: Node): string {

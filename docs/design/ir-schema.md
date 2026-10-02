@@ -382,7 +382,8 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
 ```jsonc
 {
   "inputs": [
-    { "name": "createInvoiceDto", "type": "CreateInvoiceDto" }
+    { "name": "createInvoiceDto", "type": "CreateInvoiceDto" },
+    { "name": "{ save, persist: write }", "type": "Deps", "bindings": ["save", "write"] }  // bindings: Class B (§1.1)
   ],
   "outputs": ["Promise<Invoice>"],
   "throws": ["CreditLimitExceeded"],
@@ -393,6 +394,7 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
 }
 ```
 
+- `name` is the parameter's name, or the source text of its pattern when it destructures. A pattern's text is not a name, so a destructuring parameter also carries `bindings`: the identifiers the pattern binds, in source order, read as §3.2 reads a destructuring declaration (`{ a: b }` binds `b`; `{ a = fallback }` binds `a`; a rest element binds what it holds). The call resolver's local-scope step treats each of them as a parameter ([call-resolution.md](./call-resolution.md) §4.2). It is **Class B** per §1.1: a parameter that is a single name omits the key, and the schema enforces `minItems: 1`
 - `type` is the string representation as read from the AST. No type resolution is performed (LSP enrichment may optionally normalize it)
 - `throws` combines explicit throw statements and JSDoc `@throws`
 - `inferredThrows` holds throws the LSP enrichment pass read off the *callees'* declared signatures ([lsp-enrichment.md](./lsp-enrichment.md) §7.1). It is a field of its own rather than an addition to `throws` precisely so that turning LSP on never perturbs the `api` fingerprint, whose input list names `throws` and not `inferredThrows` ([fingerprint.md](./fingerprint.md) §3.1)

@@ -651,6 +651,7 @@ Every language plugin must pass the following tests.
 | LP10 | `function* g()` | signature.generator = true |
 | LP11 | `f(a: number, b: string): boolean` | inputs = [{name:"a",type:"number"},{name:"b",type:"string"}], outputs = ["boolean"] |
 | LP11a | a function that states a parameter **without a parameter list** — TypeScript's parenthesis-free arrow, `x => x + 1` | inputs = [{name:"x",type:""}], the same the parenthesised spelling `(x) => x + 1` reports |
+| LP11c | a destructuring parameter — `f({ save }: D)`, `f([a, b = c])`, `f({ p: { q } })`, `f(...[x])` | `name` = the pattern text, `bindings` = the names it binds in source order (`["save"]`, `["a","b"]`, `["q"]`, `["x"]`); a single-name parameter omits `bindings` |
 | LP12 | `function f<T>()` | typeParameters = ["T"] |
 | LP13 | `function f() { throw new MyError() }` | throws = ["MyError"] |
 
