@@ -391,12 +391,14 @@ describe("merged declarations are one Symbol", () => {
     // The call statement and the wrapped const are here because each carries its further bodies
     // on the same field (LP20h, LP7c), so they are the two producers with no reason of their own
     // to keep the key absent — without them this fixture enforced the invariant everywhere else.
+    // The object's members are folded per id the way a class's are, through their own path.
     const symbols = await symbolsOf(
       [
         "export class A { m() {} }",
         "export interface I {}",
         "app.get('/x', () => {})",
         "export const w = withAuth(() => {})",
+        "export const o = { m() {}, f: () => {}, get g() { return 1 } }",
       ].join("\n"),
     )
     for (const symbol of symbols) {

@@ -39,8 +39,17 @@ const CONSTRUCTION_SEGMENT = "constructor"
  * public property, so its decoded key is held to the default and has none.
  */
 export function memberNameSegment(member: Node): string | null {
-  if (hasErrorChild(member)) return null
-  const name = member.childForFieldName("name")
+  return writtenNameSegment(member, member.childForFieldName("name"))
+}
+
+/**
+ * The segment `name` maps to, `name` being the node `owner` is named by — the rule
+ * `memberNameSegment` states, for a caller whose name sits in another field: an object
+ * literal's `pair` carries its name in `key` (`object-members.ts`). `owner` is where an ERROR
+ * beside a recovered name is looked for, which is why it is passed rather than read off `name`.
+ */
+export function writtenNameSegment(owner: Node, name: Node | null): string | null {
+  if (hasErrorChild(owner)) return null
   if (name === null) return null
   if (name.type === "property_identifier") return admitSegment(name.text)
   if (name.type === "private_property_identifier") return admitSegment(name.text, true)

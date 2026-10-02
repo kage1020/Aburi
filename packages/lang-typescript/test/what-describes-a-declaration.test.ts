@@ -74,6 +74,25 @@ describe("a declaration with a body of its own is described by the body", () => 
       "statement_block",
     ],
     ["an interface", "export interface I { a: string }", "I", "interface_body"],
+    ["an object literal's method", "export const o = { m() { a() } }", "o.m", "statement_block"],
+    [
+      "an object literal's property holding an arrow",
+      "export const o = { f: () => { a() } }",
+      "o.f",
+      "statement_block",
+    ],
+    [
+      "an object literal's property holding a concise arrow",
+      "export const o = { f: (x: number) => x + 1 }",
+      "o.f",
+      "binary_expression",
+    ],
+    [
+      "an object literal's property holding a wrapped arrow",
+      "export const o = { f: (() => { a() }) as H }",
+      "o.f",
+      "statement_block",
+    ],
   ])("%s", async (_label, source, name, head) => {
     expect(await normalizedHead(source, name)).toBe(head)
   })
@@ -95,6 +114,17 @@ describe("a declaration with no body is described whole", () => {
     ["a destructured binding", "export const { a } = obj", "a", "lexical_declaration"],
   ])("%s", async (_label, source, name, head) => {
     expect(await normalizedHead(source, name)).toBe(head)
+  })
+})
+
+describe("a binding whose body is the object literal it holds is described whole", () => {
+  it.each([
+    ["a const holding an object", "export const o = { m() { a() }, n: b() }", "o"],
+    ["a const holding a wrapped object", "export const o = { m() { a() } } satisfies O", "o"],
+  ])("%s", async (_label, source, name) => {
+    // The object is the binding's body and is not the declaration's own child, so the string is
+    // the one the binding had while it had no body, and no syntax fingerprint moves.
+    expect(await normalizedHead(source, name)).toBe("lexical_declaration")
   })
 })
 

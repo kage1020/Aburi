@@ -197,6 +197,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 | interface / type alias | `Invoice` |
 | default export (including anonymous functions/classes) | `<default>` |
 | function/class expression assigned to a variable | the variable name becomes the qname (e.g. `const handler = () => ...` → `handler`) |
+| function an object literal holds, the object initialising a binding (`const api = { get: () => …, post() {} }`) | `api.get` and `api.post`, with `.`, as a class's instance members: defining the object creates the closure, and calling the property runs it. An object nested under a named entry adds its key as a segment (`api.v1.get`), and the object in between has no Symbol. An entry whose key names no segment — computed, numeric, a quoted key that is not an identifier — has **no Symbol**, as a class member's, and its body stays on the binding. So does a `#` name, where the object diverges from a class: a class's `#v` is its private member, and outside a class body `#v` is a SyntaxError the grammar parses anyway ([`lang-plugin.md`](./lang-plugin.md) LP7d–LP7g). An object no binding holds directly, such as `export default { fetch() {} }`, declares no member: `<default>.fetch` is not a qualified name |
 | destructuring declaration | one Symbol per **binding**, each named by the binding (e.g. `const { GET, POST } = handlers` → `GET` and `POST`). The pattern's text is not a name; `{ a: b }` binds `b`, and `{ a = fallback }` binds `a` and reads `fallback` |
 | class member with a computed name (`[Symbol.iterator]() {}`) | **no Symbol**, and no diagnostic. The brackets are not a name static analysis can record, and mangling them into a segment would invent one the source does not contain. A **call target** answers the same shape differently and for the same reason ([`lang-plugin.md`](./lang-plugin.md) §4.4): a qualified name is a resolution target, so an invented segment mints an id that names nothing, while a call target is a reading of what the source calls, which a *dropped* segment falsifies — hence `<computed>` there and no Symbol here |
 | class member with a quoted name (`"createInvoice"() {}`) | the segment the literal *decodes* to, when that is an identifier (a decoded `"#v"` is not; see the `#`-private row) — a property key is a string, so `"createInvoice"` and `createInvoice` are one member and fold onto one Symbol |
@@ -208,7 +209,7 @@ Normalizing at the comparator instead would fix an ordering and leave the two sp
 
 Anonymous symbols do not become independent Symbol entries. Callbacks, immediately-invoked function expressions, and anonymous function arguments are **absorbed into the parent Symbol's `calls` / `effects` / `rules`**. Position-dependent IDs (of the `<anon@L42>` kind) must not be used (they break diff stability).
 
-The only exceptions are `<default>` and "function expressions assigned to a variable" from §3.2. These are named entry points, so they get a Symbol.
+The only exceptions are `<default>`, "function expressions assigned to a variable" and the functions held by an object literal a binding holds, from §3.2. These are named entry points, reached by the name or the path the source writes, so they get a Symbol.
 
 ### 3.4 ID stability
 
