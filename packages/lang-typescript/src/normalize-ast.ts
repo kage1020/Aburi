@@ -1,4 +1,4 @@
-import type { SymbolCandidate } from "@aburi/types"
+import type { MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 
 /**
@@ -15,30 +15,64 @@ import type { Node } from "web-tree-sitter"
  *   - identifier and literal values ARE included — the syntax axis is sensitive to what
  *     the code says, not just how it is shaped
  *
- * When the SymbolCandidate has a `bodyNode`, that node is normalized (the class /
- * function body). When it does not (`type` / `interface` / bare `const`), the full node
- * is normalized instead so type aliases and interface shapes still get a stable hash.
+ * A declaration is described by its own body when it has one — a function's or a method's
+ * `statement_block`, a class's `class_body`, an interface's `interface_body` — and by its full
+ * node when it has none (a type alias, an enum, a namespace, a bare `const`), so those still get
+ * a stable hash (`describedNode`).
  *
  * A Symbol whose declaration is a **call** is the exception, and is always described by its
  * full node. Its body is a function written inside that call, so narrowing to the body would
  * drop the registration itself: `app.get('/x', authenticate, h)` and `app.get('/x', h)` would
  * serialize identically, and adding or removing a route's auth middleware would produce no
  * signal on any axis. The body is what the registration *runs*, which is the walk's question;
- * the whole call is what it *is*, which is this one.
+ * the whole call is what it *is*, which is this one. A `const` initialised by a call that is
+ * handed a function has the same shape and gets the same answer, through `describedNode`
+ * rather than its kind, because such a const can also arrive as a merged declaration.
  *
  * A Symbol several declarations wrote — a getter beside its setter, an interface reopened —
- * gets each of the further bodies appended, in source order. A Symbol with one declaration
- * therefore serializes to exactly the string it did before that was possible, which is what
- * keeps every existing fingerprint where it was: appending is the only new behaviour, and
- * there is nothing to append.
+ * gets each further declaration's description appended, in source order. Each declaration is
+ * described once: a const that hands its call two functions has two bodies but one
+ * declaration, and both bodies name it (`inlineHandlers`).
+ *
+ * So giving a const a body moved no existing fingerprint, for three reasons that each have to
+ * keep holding: a Symbol with one declaration and its own body or none serializes exactly as it
+ * did; a const that gained a body is described by the declaration that described it while it
+ * had none; and a declaration is described once, so a second function adds no second copy.
  */
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
   const merged = symbol.mergedDeclarations ?? []
-  const primary = serialize(symbol.bodyNode ?? symbol.fullNode)
-  if (merged.length === 0) return primary
-  const parts = [primary, ...merged.map((d) => serialize(d.bodyNode ?? d.fullNode))]
-  return parts.filter((part) => part.length > 0).join(" ")
+  const lead = describedNode(symbol)
+  if (merged.length === 0) return serialize(lead)
+  const described = [lead]
+  for (const declaration of merged) {
+    const node = describedNode(declaration)
+    if (described.some((seen) => seen.id === node.id)) continue
+    described.push(node)
+  }
+  return described
+    .map(serialize)
+    .filter((part) => part.length > 0)
+    .join(" ")
+}
+
+/**
+ * What describes one declaration: its body when the body is the declaration's own, and the whole
+ * declaration when the body is a function written somewhere inside it.
+ *
+ * "Its own" is read from the tree — the body is a direct child of the declaration's node — and
+ * that rests on how every producer pairs the two. A function, method, accessor, constructor, a
+ * field or a `const` holding a function, a class and an interface each pair a body with the node
+ * it is written in, so they are described by the body. A call Symbol (LP20i) and a `const`
+ * initialised by a call (LP7c) pair the body of a function they hand a call with the whole
+ * declaration, so they are described by the declaration, and `withAuth(async (req) => …)` →
+ * `withRole(async (req) => …)` moves the `syntax` axis. A producer that widened its full node
+ * past its body's parent would move every fingerprint of that kind, which is why
+ * `what-describes-a-declaration.test.ts` pins each producer's answer.
+ */
+function describedNode(declaration: Pick<MergedDeclaration<Node>, "bodyNode" | "fullNode">): Node {
+  const { bodyNode, fullNode } = declaration
+  return bodyNode !== null && bodyNode.parent?.id === fullNode.id ? bodyNode : fullNode
 }
 
 function serialize(node: Node): string {
