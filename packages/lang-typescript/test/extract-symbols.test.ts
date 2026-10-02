@@ -287,11 +287,11 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     byId(symbols, "#app__get__$users$Zid__d0")
   })
 
-  it("CS3: no path literal ⇒ qname is receiver__method__d0", async () => {
+  it("CS3: no path literal ⇒ the names the arguments carry stand in for it", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.use(logger)\n`,
     )
-    const sym = byId(symbols, "#app__use__d0")
+    const sym = byId(symbols, "#app__use__logger__d0")
     expect(sym.derivedBy).not.toContain(
       sym.derivedBy.find((tag) => tag.startsWith("path-literal:")) ?? "",
     )
@@ -310,7 +310,7 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.route('/thing').get(handler)\n`,
     )
-    const sym = byId(symbols, "#app__get__d0")
+    const sym = byId(symbols, "#app__get__handler__d0")
     expect(sym.derivedBy).toContain("chained-call")
     expect(sym.derivedBy).toContain("call-statement:app.get")
   })
@@ -377,6 +377,67 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
 
     const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
     expect(ids).toEqual(["ts:src/a.ts#app__get___u12b$a__d0", "ts:src/a.ts#app__get___u12b$b__d0"])
+  })
+
+  it("CS11: reads a path written in backticks as the same path in quotes", async () => {
+    const backtick = await symbolsOf("app.get(`/users`, h)\n")
+    const quoted = await symbolsOf('app.get("/users", h)\n')
+
+    const ids = (symbols: typeof backtick) =>
+      symbols.filter((s) => s.kind === "call").map((s) => s.id)
+    expect(ids(backtick)).toEqual(["ts:src/a.ts#app__get__$users__d0"])
+    expect(ids(backtick)).toEqual(ids(quoted))
+    expect(byId(backtick, "#app__get__$users__d0").derivedBy).toContain("path-literal:/users")
+  })
+
+  it("CS12: a backtick path with a substitution is not a path", async () => {
+    // Its value is decided when it runs; the names the arguments carry stand in.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: TypeScript source, not a template
+    const symbols = await symbolsOf("app.get(`/users/${id}`, h)\n")
+
+    byId(symbols, "#app__get__h__d0")
+  })
+
+  it("CS13: inserting a registration with no path leaves the later ones their ids", async () => {
+    // With the bare `app__use` stem the ordinal, which is source order, was all that told
+    // these apart: inserting `compression()` first renamed every later middleware, and the
+    // diff paired each with the body its id used to hold (ir-schema.md §3.3).
+    const inline =
+      "app.use((req, res, next) => {\n  if (!req.headers.authorization) return\n  next()\n})"
+    const ids = async (lines: string[]) =>
+      (await symbolsOf(`${lines.join("\n")}\n`))
+        .filter((s) => s.kind === "call")
+        .map((s) => s.id)
+        .sort()
+
+    const before = await ids(["app.use(cors())", "app.use(helmet())", "app.use(authMw)", inline])
+    const after = await ids([
+      "app.use(compression())",
+      "app.use(cors())",
+      "app.use(helmet())",
+      "app.use(authMw)",
+      inline,
+    ])
+
+    expect(before).toEqual([
+      "ts:src/a.ts#app__use__authMw__d0",
+      "ts:src/a.ts#app__use__cors__d0",
+      "ts:src/a.ts#app__use__d0",
+      "ts:src/a.ts#app__use__helmet__d0",
+    ])
+    expect(after).toEqual(["ts:src/a.ts#app__use__compression__d0", ...before].sort())
+  })
+
+  it("CS14: names a dotted reference and a call's callee by their whole path", async () => {
+    const symbols = await symbolsOf(
+      'app.use(express.json())\napp.use(express.static("public"))\napp.use(rateLimit({ max: 5 }), audit.log)\n',
+    )
+
+    expect(symbols.filter((s) => s.kind === "call").map((s) => s.id)).toEqual([
+      "ts:src/a.ts#app__use__express_json__d0",
+      "ts:src/a.ts#app__use__express_static__d0",
+      "ts:src/a.ts#app__use__rateLimit$audit_log__d0",
+    ])
   })
 })
 

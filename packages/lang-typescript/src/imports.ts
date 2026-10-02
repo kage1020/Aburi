@@ -3,7 +3,7 @@ import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild, walkDescendants } from "./ast-helpers"
 import { maskedImportSpecifier } from "./import-type-reparse"
-import { decodeStringLiteralOrRaw } from "./string-escape"
+import { readStaticString } from "./string-escape"
 
 /**
  * The import sites a file declares, and what was wrong with the ones that could not become
@@ -313,12 +313,7 @@ type ImportSite = "import" | "re-export" | "dynamic import"
  * empty and whole, and does reach that diagnostic.
  */
 function readLiteralSpecifier(node: Node): string | null {
-  if (node.type === "template_string") {
-    if (findChild(node, "template_substitution") !== null) return null
-  } else if (node.type !== "string") {
-    return null
-  }
-  return decodeStringLiteralOrRaw(node)
+  return readStaticString(node)
 }
 
 /**

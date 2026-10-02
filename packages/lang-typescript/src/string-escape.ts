@@ -153,3 +153,22 @@ const NAMED_ESCAPES: ReadonlyMap<string, string> = new Map([
 
 /** CRLF is one continuation, not two, so the whole body is matched rather than the first char. */
 const LINE_TERMINATOR = /^(\r\n|[\n\r\u2028\u2029])$/
+
+/**
+ * A string literal, or a template literal with no substitution, decoded; null for anything else.
+ *
+ * The two are one value written with different quotes, and every reader that asks "is this a
+ * literal string?" has to answer them alike: an import specifier (LP26j), a route path
+ * (`app.get(\`/users\`, h)` names the route `/users` does) and a call's literal argument. A
+ * template with a substitution is not a literal — its value is decided when it runs.
+ */
+export function readStaticString(node: Node): string | null {
+  if (node.type === "template_string") {
+    for (const child of node.namedChildren) {
+      if (child?.type === "template_substitution") return null
+    }
+  } else if (node.type !== "string") {
+    return null
+  }
+  return decodeStringLiteralOrRaw(node)
+}

@@ -2,7 +2,7 @@ import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@abu
 import type { Node } from "web-tree-sitter"
 import { asFunctionValue, findChild, makeSourceRange, unwrapValue } from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
-import { decodeStringLiteralOrRaw } from "./string-escape"
+import { readStaticString } from "./string-escape"
 
 /**
  * Framework-level method vocabulary that promotes a module-level chained call
@@ -43,6 +43,11 @@ export function makeCallExtractionState(): CallExtractionState {
  * framework registration shapes (Express in particular), not arbitrary expression
  * statements.
  *
+ * Named `<receiver>__<method>__<discriminator>__d<N>`. The discriminator is the path slug when
+ * the first argument is a literal string (quotes or a substitution-free backtick), otherwise the
+ * names the arguments carry (`argumentNames`), and absent when neither says anything. `N` counts
+ * earlier registrations with the same stem, so it is source order only among those.
+ *
  * The `__d<N>` suffix is emitted UNCONDITIONALLY (even for the first occurrence). Skipping
  * it for `N=0` used to break Symbol.id uniqueness: `app.get('/x')` seen twice and
  * `app.get('/x__d1')` seen once would both collapse to `app__get__$x__d1`.
@@ -65,7 +70,14 @@ export function visitCallStatement(
 
   const argsNode = call.childForFieldName("arguments") ?? findChild(call, "arguments")
   const literalPath = argsNode !== null ? firstStringLiteralArg(argsNode) : null
-  const pathSlug = literalPath === null ? "" : slugifyPath(literalPath)
+  // A path names a registration. Without one, the names its arguments carry do; the ordinal
+  // below is left to separate only registrations that agree on both.
+  const pathSlug =
+    literalPath !== null
+      ? slugifyPath(literalPath)
+      : argsNode !== null
+        ? argumentNames(argsNode)
+        : ""
 
   const stem =
     pathSlug === "" ? `${receiver}__${parsed.method}` : `${receiver}__${parsed.method}__${pathSlug}`
@@ -243,11 +255,56 @@ function firstCallExpression(exprStatement: Node): Node | null {
   return null
 }
 
+/** The path a registration's first argument spells, written with any quotes, backtick included. */
 function firstStringLiteralArg(argsNode: Node): string | null {
   const first = argsNode.namedChildren[0]
   if (first === undefined || first === null) return null
-  if (first.type !== "string") return null
-  return decodeStringLiteralOrRaw(first)
+  return readStaticString(first)
+}
+
+/**
+ * What tells a registration with no path apart from the others of its method: the names its
+ * arguments carry — an identifier (`authMw`), a dotted reference (`express.json`), or the callee
+ * of a call (`cors()`, `express.static("public")`), each folded to a segment and joined by `$`.
+ * Empty when no argument names anything: an inline function, a number, an object.
+ *
+ * Content, not position, because the ordinal is source order (ir-schema.md §3.3): with only the
+ * bare `app__use` stem, inserting `app.use(compression())` above `app.use(cors())` renumbered
+ * every later middleware, and the diff paired each one with the body its id used to hold. The
+ * ordinal still separates registrations whose names agree, which is where position is all there
+ * is.
+ */
+function argumentNames(argsNode: Node): string {
+  const names: string[] = []
+  for (const argument of argsNode.namedChildren) {
+    if (argument === null) continue
+    const name = referenceName(unwrapValue(argument))
+    if (name !== null) names.push(name)
+  }
+  return names.join("$")
+}
+
+/** `a`, `a.b.c`, or the callee of `a.b()` — as a segment-safe string; null for anything else. */
+function referenceName(node: Node): string | null {
+  if (node.type === "call_expression") {
+    const callee = node.childForFieldName("function")
+    return callee === null ? null : referenceName(unwrapValue(callee))
+  }
+  if (node.type === "identifier") return node.text.length === 0 ? null : slugifyName(node.text)
+  if (node.type === "member_expression") {
+    const object = node.childForFieldName("object")
+    const property = node.childForFieldName("property")
+    if (object === null || property === null || property.text.length === 0) return null
+    const head = referenceName(unwrapValue(object))
+    return head === null ? null : `${head}_${slugifyName(property.text)}`
+  }
+  return null
+}
+
+function slugifyName(name: string): string {
+  return Array.from(name)
+    .map((ch) => foldChar(ch, SEGMENT_PART))
+    .join("")
 }
 
 /** The characters `QNAME_SEGMENT_PATTERN` admits at the head of a segment, and after it. */

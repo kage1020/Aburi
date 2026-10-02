@@ -1,0 +1,5 @@
+---
+"@aburi/lang-typescript": patch
+---
+
+A module-level registration with no quoted path (`app.use(cors())`, `app.use(authMw)`) is now named by the names its arguments carry (`app__use__cors__d0`, `app__use__authMw__d0`), and a path written in backticks with no substitution (`` app.get(`/users`, h) ``) is read as the path it spells, as one in quotes is. Both used to fall back to a source-order ordinal (`app__use__d0`, `app__use__d1`, …), so inserting one registration above others renamed every later one, and `aburi diff` paired each with the body its id used to hold: adding `app.use(compression())` was reported as removing the authorization guard of the middleware below it. A substitution-free backtick argument is also read as a literal in `calls[].literalArgs`. Registrations whose arguments name nothing (an inline function) keep the ordinal among themselves. Existing ids of such registrations change once, so a diff against an IR written before this release reports them as added and removed one time.
