@@ -24,6 +24,13 @@ const MAX_BYTES_PATH = resolve(
   "resolve-max-bytes.mjs",
 )
 
+const REPORT_PATHS_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "scripts",
+  "report-paths.mjs",
+)
+
 const UPSERT_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -310,19 +317,32 @@ describe("action.yml", () => {
   })
 
   it("reads the exact artefact filenames that @aburi/cli writes", async () => {
-    // Parity check between action.yml (which resolves diff-json-path /
-    // diff-md-path via string concatenation in bash) and the CLI's actual
-    // artifact-paths module. Without this, a rename of `diff.json` / `diff.md`
-    // on the CLI side would surface only at runtime, as the upsert script
-    // exiting 2 on a path that is not there — long after CI green.
-    const raw = await readFile(ACTION_PATH, "utf8")
-    expect(raw).toContain(`$OUTPUT_DIR/${DIFF_JSON_FILENAME}`)
-    expect(raw).toContain(`$OUTPUT_DIR/${DIFF_MD_FILENAME}`)
+    // Parity check between the script that names the artefacts for the step outputs and the
+    // CLI's actual artifact-paths module. Without this, a rename of `diff.json` / `diff.md`
+    // on the CLI side would surface only at runtime, as an empty `diff-md-path` and a comment
+    // that is never posted — long after CI green.
+    const script = await readFile(REPORT_PATHS_PATH, "utf8")
+    expect(script).toContain(`const DIFF_JSON = "${DIFF_JSON_FILENAME}"`)
+    expect(script).toContain(`const DIFF_MD = "${DIFF_MD_FILENAME}"`)
+    const action = await loadAction()
+    const diffStep = action.runs.steps.find((s) => s.id === "diff")
+    expect(diffStep?.run).toContain(
+      'node "$GITHUB_ACTION_PATH/scripts/report-paths.mjs" >> "$GITHUB_OUTPUT"',
+    )
     // Defence in depth: also assert the pre-refactor "aburi.diff.*" names are
-    // gone. A stale copy would satisfy the concat above but still break at
-    // runtime because the CLI never writes them.
+    // gone. A stale copy would still break at runtime because the CLI never writes them.
+    const raw = await readFile(ACTION_PATH, "utf8")
     expect(raw).not.toContain("aburi.diff.json")
     expect(raw).not.toContain("aburi.diff.md")
+  })
+
+  it("hands the comment step the report path as the diff step resolved it", async () => {
+    // The path is absolute already. Prefixing `working-directory` turned an absolute
+    // `output-dir` into `.//home/...`, a relative path under the repository root that was not
+    // there, and the upsert failed on a diff that had succeeded.
+    const action = await loadAction()
+    const env = action.runs.steps.find((s) => s.id === "post-comment")?.env ?? {}
+    expect(env.MARKDOWN_PATH).toBe(`${EXPRESSION_OPEN} steps.diff.outputs.diff-md-path }}`)
   })
 
   it("defaults output-dir to the directory the CLI defaults to", async () => {

@@ -74,7 +74,7 @@ uses the alias.
 | `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`. Falls back to the PR's `base.sha..head.sha` for `pull_request` / `pull_request_target` events. |
 | `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` for the grammar. Empty = report only. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.config.jsonc`. |
-| `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`, relative to `working-directory`. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
+| `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |
 | `format` | `both` | `json` / `md` / `both`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Directory to run the CLI from. |
 | `cli` | `dlx` | How the CLI is resolved: `dlx` (`pnpm dlx @aburi/cli@<version>`) or `workspace` (the `@aburi/cli` your project installed). See [Choosing `cli`](#choosing-cli). |
@@ -88,8 +88,8 @@ uses the alias.
 
 | Output | Meaning |
 |---|---|
-| `diff-json-path` | Path to `diff.json` (empty when `format=md`). |
-| `diff-md-path` | Path to `diff.md` (empty when `format=json`). |
+| `diff-json-path` | Absolute path to the `diff.json` this run wrote (empty when `format=md`, or when the CLI stopped before writing it). |
+| `diff-md-path` | Absolute path to the `diff.md` this run wrote (empty when `format=json`, or when the CLI stopped before writing it). |
 | `cli-exit-code` | `0` clean · `1` runtime error · `2` input error · `3` `--fail-on` gate or plugin error. Matches [`packages/cli/src/exit-codes.ts`](../cli/src/exit-codes.ts). Also `2` when `cli: workspace` finds no CLI to run. |
 | `comment-id` | Numeric id of the created/updated comment (empty when `comment=false`). |
 | `comment-action` | `created` / `updated` / `unchanged`. |

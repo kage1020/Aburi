@@ -147,7 +147,13 @@ so without that a 403 in the comment step would end the job on an API error and 
 gate.
 
 The comment step is skipped for exit 1 and 2, where `diff.md` is missing or partial and an ENOENT
-from the upsert would bury the real failure.
+from the upsert would bury the real failure. Exit 3 alone does not say a report exists, since a
+plugin error exits 3 before anything is written, so the step also needs a non-empty
+`diff-md-path`, and the diff step sets one only for a file that is there after the CLI returns
+([`scripts/report-paths.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/report-paths.mjs)).
+That test means "this run wrote it" because `aburi diff` removes the reports an earlier run left
+before it compares anything. Both paths are absolute, resolved from `working-directory`, so an
+absolute `output-dir` reaches the comment step as itself.
 
 ## 5. The comment
 
