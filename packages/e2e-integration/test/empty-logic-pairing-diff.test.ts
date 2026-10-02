@@ -124,6 +124,31 @@ describe("e2e diff — Symbols whose logic axis names nothing", () => {
     expect(diff.summary).toMatchObject({ ...NONE, removed: 1, added: 1 })
   })
 
+  // The counterpart: a body that returns a non-trivial expression names something, whichever way
+  // it is spelled. A concise arrow's expression is its `return` rule, so it pairs on logic alone
+  // as its block twin does; read as a bare expression it named nothing, and these two names are
+  // too far apart to pair on.
+  it.each([
+    [
+      "a concise arrow",
+      (name: string) => `export const ${name} = (u: { role: string }) => u.role === "admin"\n`,
+    ],
+    [
+      "a block-bodied function",
+      (name: string) =>
+        `export function ${name}(u: { role: string }) {\n  return u.role === "admin"\n}\n`,
+    ],
+  ])("DF19i: pairs %s moved and renamed on its logic fingerprint", async (_label, write) => {
+    const diff = await diffOfChange(
+      { "src/a.ts": write("isAdminUser") },
+      { "src/b.ts": write("canAdministerSite") },
+    )
+    expect(diff.summary).toMatchObject({ ...NONE, movedChanged: 1 })
+    expect(outcome(diff)).toEqual([
+      "moved+changed isAdminUser -> canAdministerSite (logic-fingerprint)",
+    ])
+  })
+
   it("DF19g: still reports a class whose name says two words as moved, with its method", async () => {
     const source = [
       "export class InvoiceRenderer {",
