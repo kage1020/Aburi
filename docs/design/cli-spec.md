@@ -520,7 +520,7 @@ With refs (every git command these steps run gets the caller's environment as §
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
 6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since it would be the full report of another diff; a path there that cannot be removed is refused like one that cannot be written
 7. Print a one-line summary to stdout
-8. Clean up the worktree
+8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: while the worktree exists, a listener for each removes it and the temporary directory synchronously, then raises the same signal again, so the exit status stays 128+N. `SIGKILL` cannot be caught, and leaves both behind
 
 With file inputs: skip steps 1-3 and start at step 5.
 

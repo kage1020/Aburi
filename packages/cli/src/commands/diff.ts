@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
+import { rmSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
@@ -24,6 +25,7 @@ import { readGeneratorInfo } from "../generator-info"
 import { readIR } from "../ir-io"
 import { joinCapped } from "../listing"
 import { createOutputDir, removeOutputFile, writeOutputFile } from "../output-file"
+import { cleanUpOnFatalSignal } from "../signal-cleanup"
 import type { WarnFn } from "../warn"
 import { resolveWorkspaceRoot } from "../workspace-root"
 import { runScan, type ScanReport } from "./scan"
@@ -655,6 +657,8 @@ async function resolveViaGit(
   // set to the head environment). The worktree materialises the base *sources*; it has no
   // claim on either.
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
+  // Before the temp directory exists, so nothing is left to clean up if it fails.
+  const renames = await collectRenames(git, cwd, spec, warn)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   // Under a directory of its own, so the leaf below is free to be any name the head workspace
   // has — including `base-out` or `head-out`, which as siblings would be the temp run's own
@@ -669,7 +673,21 @@ async function resolveViaGit(
   // Whether there is a worktree to clean up: a `worktree remove` after a failed `add` reports
   // a cleanup failure advising `git worktree prune` ahead of the exception that ended the run.
   let worktreeAdded = false
-  const renames = await collectRenames(git, cwd, spec, warn)
+  // A Ctrl-C or a cancelled CI job ends the process without running the `finally` below, which
+  // left a registered worktree and a full base checkout behind on every interrupted run. The
+  // same cleanup runs synchronously on the signal instead, through the real `git`: an injected
+  // runner is asynchronous, and nothing asynchronous finishes once the signal is re-raised.
+  // The remove is tried even before `worktreeAdded` is set: a signal can land while `worktree
+  // add` is still running, after git has registered the worktree, and a remove of one that is
+  // not there fails harmlessly.
+  const releaseSignals = cleanUpOnFatalSignal(() => {
+    spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
+      cwd,
+      env: gitChildEnv(),
+      stdio: "ignore",
+    })
+    rmSync(tempParent, { recursive: true, force: true })
+  })
   try {
     // git creates the leading directories of a worktree path itself, so this is belt and
     // braces for the one level this run invented rather than something git needs.
@@ -715,6 +733,7 @@ async function resolveViaGit(
     headIR = await readIR(headReport.irPath)
     scans = { base: baseReport, head: headReport }
   } finally {
+    releaseSignals()
     if (worktreeAdded) {
       try {
         await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
