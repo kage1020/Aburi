@@ -13,16 +13,18 @@ import type {
   IRRef,
   NotComparedFile,
   RelativePath,
-  SkipReason,
   Summary,
   SymbolChange,
 } from "@aburi/types"
 import {
   DEPENDENCY_IDENTITY_FIELDS,
+  type DependencySideView,
   dependencyIdentity,
   dependencySideView,
   diffComponents,
   diffDependencies,
+  lostCounterpart,
+  renameDirections,
 } from "./components"
 import { computeSymbolDelta, type DeltaOptions } from "./delta"
 import { DiffError } from "./errors"
@@ -168,20 +170,26 @@ export function buildDiff(
   // document never analysed is unexplained. The Symbol loops and `diffDependencies` read the
   // same two side views, so a Symbol reported unknown and the edges it took with it cannot
   // disagree about which file went missing.
+  // A leftover names its file as its own document does; after a git rename the other document
+  // recorded the same file under the other name, so the lookup goes through `renames` too.
   const baseSide = dependencySideView(input.baseIR)
   const headSide = dependencySideView(input.headIR)
-  const lostByHead = headSide.lostFiles
-  const lostByBase = baseSide.lostFiles
+  const renames = renameDirections(input.gitRenames)
 
   for (const headSymbol of stageDroppedWeak.remainingHead) {
     if (headSymbol.dropped) {
       summary.droppedAdded++
       continue
     }
-    const reason = lostByBase.get(headSymbol.source.file)
-    if (reason !== undefined) {
+    const lost = lostCounterpart(headSymbol.source.file, baseSide, renames.headToBase)
+    if (lost !== undefined) {
       unknown++
-      symbols.push({ status: "unknown", symbol: headSymbol, absentFrom: "base", reason })
+      symbols.push({
+        status: "unknown",
+        symbol: headSymbol,
+        absentFrom: "base",
+        reason: lost.reason,
+      })
       continue
     }
     summary.added++
@@ -192,10 +200,15 @@ export function buildDiff(
       summary.droppedRemoved++
       continue
     }
-    const reason = lostByHead.get(baseSymbol.source.file)
-    if (reason !== undefined) {
+    const lost = lostCounterpart(baseSymbol.source.file, headSide, renames.baseToHead)
+    if (lost !== undefined) {
       unknown++
-      symbols.push({ status: "unknown", symbol: baseSymbol, absentFrom: "head", reason })
+      symbols.push({
+        status: "unknown",
+        symbol: baseSymbol,
+        absentFrom: "head",
+        reason: lost.reason,
+      })
       continue
     }
     summary.removed++
@@ -210,6 +223,7 @@ export function buildDiff(
   const dependencies = diffDependencies(input.baseIR.dependencies, input.headIR.dependencies, {
     base: baseSide,
     head: headSide,
+    renames,
   })
   summary.depsAdded = dependencies.added.length
   summary.depsRemoved = dependencies.removed.length
@@ -239,7 +253,7 @@ export function buildDiff(
     components,
     dependencies,
     slices,
-    notCompared: filesNeitherSideRead(lostByBase, lostByHead),
+    notCompared: filesNeitherSideRead(baseSide, headSide, renames.baseToHead),
   }
 }
 
@@ -248,18 +262,27 @@ export function buildDiff(
  * both sides contributes Symbols to neither, so it leaves no leftover for `unknown` to
  * classify and the diff would otherwise fall silent about it — which is what a diff that
  * compared it and found it unchanged looks like. The intersection only: a one-sided loss is
- * already reported as `unknown` on the other side. Always an array, empty included
- * (docs/design/diff-algorithm.md).
+ * already reported as `unknown` on the other side. A file git renamed is one file under two
+ * names, so it is reported once, under the head path, with the base path alongside. Always an
+ * array, empty included (docs/design/diff-algorithm.md).
  */
 function filesNeitherSideRead(
-  lostByBase: ReadonlyMap<RelativePath, SkipReason>,
-  lostByHead: ReadonlyMap<RelativePath, SkipReason>,
+  baseSide: DependencySideView,
+  headSide: DependencySideView,
+  baseToHead: ReadonlyMap<RelativePath, RelativePath>,
 ): NotComparedFile[] {
   const both: NotComparedFile[] = []
-  for (const [path, baseReason] of lostByBase) {
-    const headReason = lostByHead.get(path)
-    if (headReason === undefined) continue
-    both.push({ path, baseReason, headReason })
+  const reported = new Set<RelativePath>()
+  for (const [basePath, baseReason] of baseSide.lostFiles) {
+    const lost = lostCounterpart(basePath, headSide, baseToHead)
+    if (lost === undefined || reported.has(lost.path)) continue
+    reported.add(lost.path)
+    both.push({
+      path: lost.path,
+      ...(lost.path === basePath ? {} : { basePath }),
+      baseReason,
+      headReason: lost.reason,
+    })
   }
   return both.sort(compareBy((file) => file.path))
 }

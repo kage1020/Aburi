@@ -854,7 +854,12 @@ function renderNotCompared(files: readonly NotComparedFile[]): string[] {
       file.baseReason === file.headReason
         ? `${file.baseReason} on both`
         : `${file.baseReason} at base, ${file.headReason} at head`
-    rows.push(`- ${inlineCode(file.path)} — ${reasons}`)
+    // A renamed file is one entry under two names; the base's is where its base skip record is.
+    const name =
+      file.basePath === undefined
+        ? inlineCode(file.path)
+        : `${inlineCode(file.basePath)} → ${inlineCode(file.path)}`
+    rows.push(`- ${name} — ${reasons}`)
   }
   rows.push("")
   return rows

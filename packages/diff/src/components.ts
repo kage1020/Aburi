@@ -94,6 +94,49 @@ export interface DependencySideView {
 }
 
 /**
+ * A git rename map read in both directions: `baseToHead` is the map as `git diff` gives it, and
+ * `headToBase` its inverse. A leftover Symbol, or an edge endpoint, names its file the way its
+ * own document does, while the document that may have lost it names the same file the other
+ * way, so each direction is the translation for one side's question (`diff-algorithm.md`
+ * §3.5.1).
+ */
+export interface RenameDirections {
+  baseToHead: ReadonlyMap<RelativePath, RelativePath>
+  headToBase: ReadonlyMap<RelativePath, RelativePath>
+}
+
+export const NO_RENAMES: RenameDirections = { baseToHead: new Map(), headToBase: new Map() }
+
+export function renameDirections(
+  renames: ReadonlyMap<RelativePath, RelativePath> | null | undefined,
+): RenameDirections {
+  if (renames === null || renames === undefined || renames.size === 0) return NO_RENAMES
+  const headToBase = new Map<RelativePath, RelativePath>()
+  for (const [basePath, headPath] of renames) headToBase.set(headPath, basePath)
+  return { baseToHead: renames, headToBase }
+}
+
+/**
+ * The file `absent` never analysed that holds what `path` names on the other side, with the
+ * path `absent` itself recorded it under: the same path, or — when git renamed the file between
+ * the revisions — the name `renamed` gives it on `absent`'s side. Without the second lookup a
+ * renamed file the other side skipped would leave its Symbols as confident additions or
+ * deletions, which is the silence `unknown` exists to break.
+ */
+export function lostCounterpart(
+  path: RelativePath,
+  absent: DependencySideView,
+  renamed: ReadonlyMap<RelativePath, RelativePath>,
+): DiffSkippedFile | undefined {
+  const reason = absent.lostFiles.get(path)
+  if (reason !== undefined) return { path, reason }
+  const other = renamed.get(path)
+  if (other === undefined) return undefined
+  const otherReason = absent.lostFiles.get(other)
+  return otherReason === undefined ? undefined : { path: other, reason: otherReason }
+}
+
+/**
  * Build a side view from a document. Exported because `DependencySideView` is public and
  * `diffDependencies` requires one; `buildDiff` reads `lostFiles` for its own Symbol
  * classification from this same object.
@@ -123,8 +166,9 @@ export function dependencySideView(ir: IR): DependencySideView {
 export function diffDependencies(
   base: readonly Dependency[],
   head: readonly Dependency[],
-  sides: { base: DependencySideView; head: DependencySideView },
+  sides: { base: DependencySideView; head: DependencySideView; renames?: RenameDirections },
 ): DependencyDiff & { unknown: DependencyUnknown[] } {
+  const renames = sides.renames ?? NO_RENAMES
   const baseKeys = new Map<string, Dependency>()
   for (const dependency of base) baseKeys.set(dependencyKey(dependency), dependency)
   const headKeys = new Map<string, Dependency>()
@@ -137,7 +181,7 @@ export function diffDependencies(
     if (baseDep === undefined) {
       // Held by head and not by base, so its endpoints resolve against head — the document
       // that has the Symbols — and the question is whether base could have seen them.
-      const lostFiles = endpointsLostBy(dep, sides.head, sides.base)
+      const lostFiles = endpointsLostBy(dep, sides.head, sides.base, renames.headToBase)
       if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "base", lostFiles })
       else added.push(dep)
       continue
@@ -151,7 +195,7 @@ export function diffDependencies(
   }
   for (const [key, dep] of baseKeys) {
     if (headKeys.has(key)) continue
-    const lostFiles = endpointsLostBy(dep, sides.base, sides.head)
+    const lostFiles = endpointsLostBy(dep, sides.base, sides.head, renames.baseToHead)
     if (lostFiles.length > 0) unknown.push({ dependency: dep, absentFrom: "head", lostFiles })
     else removed.push(dep)
   }
@@ -164,13 +208,15 @@ export function diffDependencies(
 /**
  * The endpoint files `absent` never analysed, read through `holder` because that is the
  * document the edge — and the Symbol behind each endpoint — comes from. Both endpoints are
- * checked: an edge dies when *either* end's file goes. Deduped and sorted by path, so an
- * intra-file edge collapses to the one file it lost.
+ * checked: an edge dies when *either* end's file goes. Each path is the one `absent` recorded,
+ * which after a rename is not the holder's (`renamed` translates). Deduped and sorted by path,
+ * so an intra-file edge collapses to the one file it lost.
  */
 function endpointsLostBy(
   dep: Dependency,
   holder: DependencySideView,
   absent: DependencySideView,
+  renamed: ReadonlyMap<RelativePath, RelativePath>,
 ): DiffSkippedFile[] {
   const byPath = new Map<RelativePath, SkipReason>()
   for (const endpoint of [dep.from, dep.to]) {
@@ -180,9 +226,9 @@ function endpointsLostBy(
     // check) lands here too and quietly reverts to the plain classification: there is no
     // diagnostics channel, and refusing would take down the legitimate case sharing the branch.
     if (file === undefined) continue
-    const reason = absent.lostFiles.get(file)
-    if (reason === undefined) continue
-    byPath.set(file, reason)
+    const lost = lostCounterpart(file, absent, renamed)
+    if (lost === undefined) continue
+    byPath.set(lost.path, lost.reason)
   }
   return [...byPath.entries()]
     .map(([path, reason]) => ({ path, reason }))

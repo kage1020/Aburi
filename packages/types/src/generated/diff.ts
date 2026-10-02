@@ -204,9 +204,13 @@ members: SymbolId[]
  */
 export interface NotComparedFile {
 /**
- * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses. Both revisions name the file in that space, which is what makes the two skip lists comparable at all.
+ * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses. Both revisions name the file in that space, which is what makes the two skip lists comparable at all. For a file git renamed between the revisions, the head's path; `basePath` then carries the base's.
  */
 path: string
+/**
+ * Present only when git renamed the file between the two revisions: the path the base skipped it under. One file under two names is one entry, not two, and without this a reader could not find the base's skip record for it. Same form as `path`.
+ */
+basePath?: string
 baseReason: SkipReason
 headReason: SkipReason
 }

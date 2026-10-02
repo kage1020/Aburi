@@ -522,7 +522,7 @@ Entries with `status: "unknown"` — a Symbol one document has and the other nev
 
 #### 🚫 Not compared
 
-`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown, and apart from it for the reason Unknown is itself apart from Removed: the next action differs. Both are gaps rather than changes, so a reader scanning for what the diff does not cover finds them together; what separates them is who can close one — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed.
+`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown, and apart from it for the reason Unknown is itself apart from Removed: the next action differs. Both are gaps rather than changes, so a reader scanning for what the diff does not cover finds them together; what separates them is who can close one — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed. Each line is the path and each revision's reason; a file git renamed between the revisions, one entry under two names, is named `` `base` → `head` `` so either revision's skip record can be found.
 
 ```md
 - `apps/web/src/route.ts` — parse-timeout at base, over-size at head

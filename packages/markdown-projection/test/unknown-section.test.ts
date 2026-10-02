@@ -72,6 +72,22 @@ describe("projectDiff — the Not compared section", () => {
     expect(md).toContain("parse-timeout at base, over-size at head")
   })
 
+  it("names a renamed file by both its paths", () => {
+    const md = projectDiff(
+      makeDiff({
+        notCompared: [
+          {
+            path: "src/billing.ts",
+            basePath: "src/big.ts",
+            baseReason: "over-size",
+            headReason: "over-size",
+          },
+        ],
+      }),
+    )
+    expect(md).toContain("- `src/big.ts` → `src/billing.ts` — over-size on both")
+  })
+
   it("says it once when both revisions gave the same reason", () => {
     const md = projectDiff(
       makeDiff({
