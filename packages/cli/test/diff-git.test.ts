@@ -210,9 +210,9 @@ describe("runDiff refspec mode — git executable missing", () => {
 
 describe("runDiff refspec mode — collectRenames failure warns", () => {
   it("does not silently return null when git diff fails", async () => {
-    // Base + head verify succeed, shallow check returns false, worktree add succeeds,
-    // but the rename collection fails. runDiff will still fail (the scan needs a real
-    // workspace), so we snapshot the warn call before the raise.
+    // Base + head verify succeed and the shallow check returns false, but the rename
+    // collection fails — before any worktree is added. runDiff will still fail (the scan needs
+    // a real workspace), so we snapshot the warn call before the raise.
     const warnCalls: string[] = []
     const { runner } = fakeGit({
       handlers: {

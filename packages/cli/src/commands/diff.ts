@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process"
-import { rmSync } from "node:fs"
+import { existsSync, rmSync, writeSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
@@ -657,7 +657,11 @@ async function resolveViaGit(
   // set to the head environment). The worktree materialises the base *sources*; it has no
   // claim on either.
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
-  // Before the temp directory exists, so nothing is left to clean up if it fails.
+  // Before the temp directory exists, so that no `await` separates `mkdtemp` resolving from the
+  // signal handler being registered below. Signals reach a listener as event-loop events, so
+  // none can land in between and find the directory unguarded; with this call in between, the
+  // directory sat unguarded for the whole of a slow `git diff --find-renames`, and outside the
+  // `try`, so a throw from it left the directory behind.
   const renames = await collectRenames(git, cwd, spec, warn)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   // Under a directory of its own, so the leaf below is free to be any name the head workspace
@@ -677,16 +681,38 @@ async function resolveViaGit(
   // left a registered worktree and a full base checkout behind on every interrupted run. The
   // same cleanup runs synchronously on the signal instead, through the real `git`: an injected
   // runner is asynchronous, and nothing asynchronous finishes once the signal is re-raised.
+  // The consequence for an embedder that injects a `GitRunner` (a wrapper, or a git outside
+  // `PATH`) is that this path still runs whatever `git` is on `PATH`: it may fail to remove the
+  // worktree, which is then reported on stderr, or remove it through a different git.
   // The remove is tried even before `worktreeAdded` is set: a signal can land while `worktree
   // add` is still running, after git has registered the worktree, and a remove of one that is
-  // not there fails harmlessly.
+  // not there fails harmlessly. That narrows the window rather than closing it: a signal sent to
+  // this process alone, not to its process group, leaves the `worktree add` child running, and
+  // it can finish registering the worktree after this cleanup has run.
   const releaseSignals = cleanUpOnFatalSignal(() => {
-    spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
+    // Taken first, so a signal that lands after the `finally` below has already removed the
+    // checkout does not report the remove of a worktree that is gone as a failure.
+    const hadCheckout = existsSync(worktreeDir)
+    const removal = spawnSync("git", ["worktree", "remove", "--force", worktreeDir], {
       cwd,
       env: gitChildEnv(),
       stdio: "ignore",
     })
-    rmSync(tempParent, { recursive: true, force: true })
+    if (hadCheckout && (removal.error !== undefined || removal.status !== 0)) {
+      const why = removal.error?.message ?? `git exited ${removal.status ?? removal.signal}`
+      // No `git worktree prune` here: it acts on the whole repository, and would also remove
+      // prunable worktrees other people or tools made.
+      reportFromSignal(
+        `⚠ git worktree cleanup failed for "${worktreeDir}"; ${why}. Consider running \`git worktree prune\`.`,
+      )
+    }
+    try {
+      rmSync(tempParent, { recursive: true, force: true })
+    } catch (error) {
+      reportFromSignal(
+        `⚠ Failed to remove the temporary directory "${tempParent}"; ${errorMessage(error)}. It can be deleted by hand.`,
+      )
+    }
   })
   try {
     // git creates the leading directories of a worktree path itself, so this is belt and
@@ -733,7 +759,6 @@ async function resolveViaGit(
     headIR = await readIR(headReport.irPath)
     scans = { base: baseReport, head: headReport }
   } finally {
-    releaseSignals()
     if (worktreeAdded) {
       try {
         await git.run(["worktree", "remove", "--force", worktreeDir], { cwd })
@@ -754,6 +779,11 @@ async function resolveViaGit(
         `⚠ Failed to remove the temporary directory "${tempParent}"; ${errorMessage(error)}. It can be deleted by hand.`,
       )
     }
+    // Last, not first: the asynchronous removal above takes as long as the checkout is large,
+    // and a signal during it would otherwise take the default action and leave both behind.
+    // Running the synchronous cleanup after part of this has finished is harmless: a `worktree
+    // remove --force` of a checkout that is gone exits 0, and `rmSync` is `force`.
+    releaseSignals()
   }
 
   return {
@@ -1136,6 +1166,20 @@ function irRef(refName: string, ir: IR): IRRef {
  * settings arrive as `GIT_CONFIG_PARAMETERS` and stay theirs.
  */
 const UNINHERITED_GIT_ENV: readonly string[] = ["GIT_INDEX_FILE", "GIT_PREFIX"]
+
+/**
+ * Write a line to stderr from a signal listener, where `warn` cannot be used: it ends in an
+ * asynchronous `stderr.write` on a pipe, which does not flush before the signal is re-raised.
+ */
+function reportFromSignal(message: string): void {
+  try {
+    writeSync(2, `${message}\n`)
+  } catch {
+    // Left empty on purpose: stderr may already be gone (a closed terminal is one of these
+    // signals), there is nowhere else to report to, and a throw out of a signal listener would
+    // end the process with exit 1 instead of the signal.
+  }
+}
 
 /** The environment a git command is spawned with: `env` without `UNINHERITED_GIT_ENV`. */
 export function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {

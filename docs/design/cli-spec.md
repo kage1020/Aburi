@@ -520,7 +520,7 @@ With refs (every git command these steps run gets the caller's environment as §
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
 6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since it would be the full report of another diff; a path there that cannot be removed is refused like one that cannot be written
 7. Print a one-line summary to stdout
-8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: while the worktree exists, a listener for each removes it and the temporary directory synchronously, then raises the same signal again, so the exit status stays 128+N. `SIGKILL` cannot be caught, and leaves both behind
+8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: from just after the temporary directory is created until this cleanup has finished, a listener for each removes the worktree and the temporary directory synchronously, then raises the same signal again, so on POSIX the exit status stays 128+N. On Windows a signal cannot be raised against the process again; the run exits with that same 128+N instead. A failed removal on this path is reported on stderr. `SIGKILL` cannot be caught, and leaves both behind; `SIGQUIT` and `SIGBREAK` are not handled either
 
 With file inputs: skip steps 1-3 and start at step 5.
 
@@ -899,7 +899,7 @@ Description: NestJS OnModuleInit hook
 | 2 | Input error (CLI arguments / config / missing / ambiguous) |
 | 3 | Plugin error / fail-on gate / strict violation |
 
-128+N is for fatal signals (Aburi itself does not use it).
+128+N is for fatal signals. Aburi does not choose it: a run stopped by a signal ends on that signal once its cleanup has run, so the status is the one the shell reports for the signal (§6.4, step 8).
 
 The line between `1` and `2` is who has to act, not which subsystem failed. `2` covers the whole
 of what the reader wrote: a config that does not parse, does not conform, or names the same
