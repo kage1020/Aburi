@@ -192,6 +192,7 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 - Even if the `effects[].id` classification of an effect plugin changes (e.g. `db.write` ↔ `x-prisma:create`), `logic` is unchanged as long as the target is the same
 - Adding / removing effect plugins or reordering the config does not break the logic stability of the IR
 - Time-series comparison against past IRs is robust to plugin configuration changes
+- This holds for propagated effects too: their segment is ordered by `(effectId, target)` in the IR ([`effect-propagation.md`](./effect-propagation.md) §8), which an id change can reorder, so the fingerprint reads it sorted by `target` alone. Locally-detected effects keep call order (§4.7)
 
 ### 4.6 Known current limitations (before LSP enrichment)
 
@@ -363,6 +364,7 @@ The reference implementation and every language plugin must pass the following t
 | L5 | Change a decorator | logic unchanged |
 | L11 | Change only the effect's `id` (same target) — plugin configuration robustness | logic unchanged |
 | L12 | Adding/removing/reordering effect plugins classifies the same target under a different id | logic unchanged |
+| L12a | L11/L12 on a caller with two propagated effects, where the id change flips the two entries' `(id, target)` order | logic unchanged on the caller as on the callee |
 
 ### 7.5 logic change conditions
 
@@ -510,7 +512,11 @@ export function apiFingerprint(sym) {
 
 export function logicFingerprint(sym) {
   return hash({
-    effects: sym.effects.map(e => ({ target: canonical(e.target) })),  // id excluded (§4.5)
+    effects: [  // id excluded (§4.5)
+      ...sym.effects.filter(e => !e.propagated).map(e => ({ target: canonical(e.target) })),  // call order (§4.7)
+      ...sym.effects.filter(e => e.propagated).map(e => ({ target: canonical(e.target) }))
+        .sort(byTarget),  // not the IR's (id, target) order, which an id change can reorder
+    ],
     rules: sym.rules.map(r => ({
       condition: r.condition !== null ? canonical(r.condition) : null,
       expr:      r.expr !== null ? canonical(r.expr) : null,

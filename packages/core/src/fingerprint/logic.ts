@@ -1,4 +1,5 @@
 import type { Effect, Symbol as IRSymbol, Rule } from "@aburi/types"
+import { compareCodeUnit } from "../order"
 import { hashCanonicalObject } from "./hash"
 import { normalizeFingerprintString } from "./string"
 
@@ -81,6 +82,24 @@ function canonicalizeRules(rules: readonly Rule[]): LogicInput["rules"] {
   }))
 }
 
+/**
+ * Local effects in call order (fingerprint.md §4.7), then the propagated ones by target.
+ *
+ * The IR sorts the propagated segment by `(id, target)` (effect-propagation.md §8), and only the
+ * target is hashed (§4.5), so reading that order as it stands lets an id change move a target:
+ * `db.write` → `x-acme:create` on one propagated entry sorts it past an `event.publish` beside it,
+ * and every transitive caller's `logic` changes while the callee's, whose local effects keep call
+ * order, does not. Sorting the segment by target here leaves the ids no say. Propagated entries
+ * have no call-site position, so nothing §4.7 protects is lost.
+ */
 function canonicalizeEffects(effects: readonly Effect[]): LogicInput["effects"] {
-  return effects.map((e) => ({ target: normalizeFingerprintString(e.target) }))
+  const local: LogicInput["effects"] = []
+  const propagated: LogicInput["effects"] = []
+  for (const e of effects) {
+    const entry = { target: normalizeFingerprintString(e.target) }
+    if (e.propagated === true) propagated.push(entry)
+    else local.push(entry)
+  }
+  propagated.sort((a, b) => compareCodeUnit(a.target, b.target))
+  return [...local, ...propagated]
 }

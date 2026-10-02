@@ -212,6 +212,8 @@ Ordering rule: within `Symbol.effects[]`, propagated entries appear **after** lo
 
 This reconciles with `fingerprint.md` §4.7: the "order is preserved" guarantee applies to entries that have an intrinsic call-site position. Propagated entries lack that position, so a fixed lexicographic order is applied only within the propagated segment; the locally-detected segment ahead of it retains call order verbatim.
 
+The `logic` fingerprint does not read the propagated segment in this order. It hashes `{ target }` only, and an `(effectId, target)` sort lets an id change move a target past another one — `db.write` → `x-acme:create` on `prisma.invoice.create` sorts it after an `event.publish` on `bus.emit` — so every transitive caller's `logic` would change for a reclassification the callee's `logic` ignores. The fingerprint therefore reads the propagated segment sorted by `target` alone ([`fingerprint.md`](./fingerprint.md) §4.5). The IR keeps `(effectId, target)`: integrity invariant #11 checks it, and a stored IR written in that order has to stay valid.
+
 Dedup (§5.1) is applied **before** the fingerprint reads the array so that no `(effectId, target)` pair appears twice.
 
 Alternative rejected — exclude propagated effects from `logic` fingerprint input: this would mean that a repository gaining a `db.write` triggers no `changed` on the controllers that invoke it, and reviewers would lose the propagated-effect signal in the diff. The purpose of the pass is to surface those changes; excluding them from the fingerprint would defeat it.
@@ -313,7 +315,7 @@ Both terminate on the same result because the join is monotone over a finite lat
 
 If the callee gains `db.write` and the caller's `logic` fingerprint does not change, the reviewer misses the propagated fact — which was the reason for building this pass. Entering `logic` is the mechanism that surfaces the change through the existing diff pipeline without any new status enum value.
 
-[`fingerprint.md`](./fingerprint.md) §4.5's plugin-configuration robustness is preserved because `target` (not Symbol id) is the merge key; renaming an effect plugin still leaves the `target` values verbatim, so `logic` still ignores the rename.
+[`fingerprint.md`](./fingerprint.md) §4.5's plugin-configuration robustness is preserved because `target` (not Symbol id) is the merge key; renaming an effect plugin still leaves the `target` values verbatim, and the fingerprint reads the propagated segment by `target` rather than in the IR's `(effectId, target)` order (§8), so `logic` still ignores the rename.
 
 ### 12.5 Why propagation does not stop at Boundary symbols
 

@@ -1,7 +1,7 @@
 import type { Symbol as IRSymbol, Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { logicFingerprint, logicNamesNothing } from "../../src/index"
-import { makeSymbol } from "../fixtures/ir"
+import { makeSymbol, symbolId } from "../fixtures/ir"
 
 function base(): IRSymbol {
   return makeSymbol("ts:src/a.ts#foo", {
@@ -135,6 +135,53 @@ describe("logicFingerprint — invariance", () => {
       ],
     })
     expect(logicFingerprint(sym)).toBe(baseFp)
+  })
+
+  it("L12a: an id change that reorders two propagated effects leaves the caller's logic alone", () => {
+    // The IR sorts the propagated segment by (id, target), so db.write → x-acme:create moves
+    // prisma.invoice.create from before bus.emit to after it. The callee, whose local effects
+    // keep call order, keeps its hash; the caller has to as well (fingerprint.md §4.5).
+    const propagated = (id: string, target: string) => ({
+      id,
+      target,
+      plugin: "effects-test",
+      confidence: "high" as const,
+      derivedBy: "convention:test",
+      propagated: true as const,
+      derivedFrom: [symbolId("ts:src/invoice.ts#saveInvoice")],
+    })
+    const caller = (effects: IRSymbol["effects"]) =>
+      makeSymbol("ts:src/invoice.ts#handleCheckout", { rules: [], effects })
+
+    const before = caller([
+      propagated("db.write", "prisma.invoice.create"),
+      propagated("event.publish", "bus.emit"),
+    ])
+    const after = caller([
+      propagated("event.publish", "bus.emit"),
+      propagated("x-acme:create", "prisma.invoice.create"),
+    ])
+
+    expect(logicFingerprint(after)).toBe(logicFingerprint(before))
+  })
+
+  it("keeps local effects in call order ahead of the propagated ones", () => {
+    // Sorting reaches the propagated segment only: swapping two local effects is still a
+    // logic change (§4.7), and so is a local effect becoming a propagated one.
+    const local = (target: string, line: number) => ({
+      id: "db.write",
+      target,
+      line,
+      plugin: "effects-test",
+      confidence: "high" as const,
+      derivedBy: "convention:test",
+    })
+    const sym = (effects: IRSymbol["effects"]) =>
+      makeSymbol("ts:src/a.ts#f", { rules: [], effects })
+
+    expect(logicFingerprint(sym([local("b.write", 1), local("a.write", 2)]))).not.toBe(
+      logicFingerprint(sym([local("a.write", 1), local("b.write", 2)])),
+    )
   })
 
   it("whitespace-only differences in rule condition strings are invariant", () => {
