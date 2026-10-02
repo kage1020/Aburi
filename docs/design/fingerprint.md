@@ -227,22 +227,24 @@ The language plugin generates a **normalized AST string** per Symbol and compute
 1. Contains no comment nodes
 2. Contains no position information (line, column, byte offset)
 3. Contains no whitespace tokens
-4. Is an S-expression representing node kinds and child-node structure, plus the unnamed tokens that carry meaning — operators, keywords, modifiers. Punctuation a formatter adds, drops or swaps without changing the program (string delimiters, an optional `;`, a trailing `,`, brackets the structure already implies) is left out
+4. Is an S-expression representing node kinds and child-node structure, plus every unnamed token except the punctuation a formatter adds, drops or swaps without changing the program: string delimiters, an optional `;`, a trailing `,`, and brackets the structure already implies. Punctuation that is the only record of something is not a formatter's, and stays in: the commas that make a hole in a JavaScript array (`[, x]` against `[x]`)
 5. Includes identifier and literal values (concrete values, not structure alone)
+6. Contains nothing the parser inserted: a MISSING node, the parser's repair of a broken file, is treated as unwritten
 
-Item 4 is what keeps `a + b` and `a - b` apart. Most parsers hold an operator or a `let` / `const` keyword as an unnamed token rather than a node, so a string built from node kinds alone reads either edit as no change. An operator outside a rule's text reaches neither `api` nor `logic` either, so the Symbol is reported as unchanged.
+Item 4 is what keeps `a + b` and `a - b` apart. Most parsers hold an operator or a `let` / `const` keyword as an unnamed token rather than a node, so a string built from node kinds alone reads either edit as no change — and because an operator outside a rule's text reaches neither `api` nor `logic`, the Symbol would be reported as unchanged on every axis.
 
-Example (TypeScript): tree-sitter's `node.toString()` with position annotations removed, and the meaningful unnamed tokens quoted in place.
+Example (TypeScript): a method as it appears in its class's normalized string. This is not tree-sitter's `node.toString()`: field names are omitted, the text of identifiers and literals is appended as a quoted atom, and every unnamed token outside the formatting punctuation appears as a quoted child in place.
 
 ```
-(method_definition
-  name: (property_identifier "createInvoice")
-  parameters: (formal_parameters ...)
-  body: (statement_block
-    (if_statement
-      condition: (parenthesized_expression (binary_expression ... ">" ...))
-      consequence: (statement_block (throw_statement ...)))))
+(method_definition (property_identifier "createInvoice")
+  (formal_parameters (required_parameter (identifier "total") (type_annotation ":" (predefined_type "number"))))
+  (statement_block
+    (if_statement "if"
+      (parenthesized_expression (binary_expression (identifier "total") ">" (number "0")))
+      (throw_statement "throw" (new_expression "new" (identifier "Error") (arguments (string (string_fragment "x"))))))))
 ```
+
+The line breaks are for reading; the string itself separates children with one space.
 
 ### 5.2 Formula
 
@@ -255,7 +257,9 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 
 - Whitespace / newline / indentation changes → unchanged
 - Adding / removing comments → unchanged
-- Quote style, a trailing comma, optional semicolons → unchanged
+- The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
+
+These are the punctuation item 4 leaves out, not formatter output in general. A formatter that quotes an object key (`{ a: 1 }` → `{ "a": 1 }`), picks the quote that needs fewer escapes (`'it\'s'` → `"it's"`), wraps a multi-line expression in parentheses, or rewrites JSX (`<Foo></Foo>` → `<Foo />`) changes the structure, and `syntax` changes with it.
 
 ### 5.4 Guaranteed change conditions
 
@@ -376,7 +380,9 @@ The reference implementation and every language plugin must pass the following t
 |---|---|---|
 | S1 | Add a comment | syntax unchanged |
 | S2 | Change whitespace formatting | syntax unchanged |
-| S7 | Change quote style, add a trailing comma, drop optional semicolons | syntax unchanged |
+| S2a | Change the quotes around a string that needs no escape either way | syntax unchanged |
+| S2b | Add a trailing comma | syntax unchanged |
+| S2c | Drop optional semicolons | syntax unchanged |
 
 ### 7.7 syntax change conditions
 
@@ -385,11 +391,11 @@ The reference implementation and every language plugin must pass the following t
 | S3 | Add a statement | syntax changes |
 | S4 | Rename an identifier | syntax changes |
 | S5 | Change a literal | syntax changes |
-| S6 | Change an operator, a declaration keyword, a modifier or a primitive type (`a + b` → `a - b`, `let` → `const`, `private` → `public`, `number` → `string`) | syntax changes |
+| S5a | Change an operator, a declaration keyword, a modifier or a primitive type (`a + b` → `a - b`, `let` → `const`, `private` → `public`, `number` → `string`) | syntax changes |
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 
-S1–S7 fall under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
+Every row of §7.6 and §7.7 falls under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
 
 ```js
 // must be included in the language plugin's test suite
@@ -402,6 +408,21 @@ describe('normalizeAst syntax fingerprint contract', () => {
   test('S2: whitespace formatting change leaves syntax unchanged', () => {
     const a = normalizeAst(parseSnippet('function f(){return 1}'));
     const b = normalizeAst(parseSnippet('function f() {\n  return 1\n}'));
+    expect(a).toBe(b);
+  });
+  test('S2a: the quotes around a string leave syntax unchanged', () => {
+    const a = normalizeAst(parseSnippet("function f() { save('x') }"));
+    const b = normalizeAst(parseSnippet('function f() { save("x") }'));
+    expect(a).toBe(b);
+  });
+  test('S2b: a trailing comma leaves syntax unchanged', () => {
+    const a = normalizeAst(parseSnippet('function f() { save(a, b) }'));
+    const b = normalizeAst(parseSnippet('function f() { save(a, b,) }'));
+    expect(a).toBe(b);
+  });
+  test('S2c: optional semicolons leave syntax unchanged', () => {
+    const a = normalizeAst(parseSnippet('function f() { save(a); save(b); }'));
+    const b = normalizeAst(parseSnippet('function f() {\n  save(a)\n  save(b)\n}'));
     expect(a).toBe(b);
   });
   test('S3: adding a statement changes syntax', () => {
@@ -419,15 +440,10 @@ describe('normalizeAst syntax fingerprint contract', () => {
     const b = normalizeAst(parseSnippet('function f() { return 2 }'));
     expect(a).not.toBe(b);
   });
-  test('S6: changing an operator changes syntax', () => {
+  test('S5a: changing an operator changes syntax', () => {
     const a = normalizeAst(parseSnippet('function f() { save(a + b) }'));
     const b = normalizeAst(parseSnippet('function f() { save(a - b) }'));
     expect(a).not.toBe(b);
-  });
-  test('S7: quote style leaves syntax unchanged', () => {
-    const a = normalizeAst(parseSnippet("function f() { save('x') }"));
-    const b = normalizeAst(parseSnippet('function f() { save("x") }'));
-    expect(a).toBe(b);
   });
 });
 ```

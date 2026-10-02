@@ -8,9 +8,10 @@ import type { Node } from "web-tree-sitter"
  * plugin contract there:
  *   - no comment nodes (we skip `comment` and `hash_bang_line` nodes)
  *   - no position information (byte offsets, rows, columns are all omitted)
- *   - no whitespace tokens (tree-sitter's `extra` nodes are dropped)
- *   - node kinds and child structure, plus the anonymous tokens that carry meaning
- *     (operators, keywords, modifiers — see `tokenPayload`), quoted
+ *   - no whitespace tokens, and nothing tree-sitter marks `extra`: comments, and the ERROR
+ *     nodes it wraps unparseable text in, so a subtree the parser gave up on is left out whole
+ *   - node kinds and child structure, plus every anonymous token, quoted, except the ones
+ *     in `FORMATTING_TOKENS` (see `tokenPayload`)
  *   - identifier and literal values ARE included — the syntax axis is sensitive to what
  *     the code says, not just how it is shaped
  *
@@ -45,10 +46,14 @@ function serialize(node: Node): string {
   if (SKIPPED_NODE_TYPES.has(node.type)) return ""
 
   const children: string[] = []
+  let previous: Node | null = null
   for (const child of node.children) {
-    if (child === null) continue
-    const rendered = child.isNamed ? serialize(child) : tokenPayload(child)
+    // A MISSING node is the parser's repair, not something written. Reading it would hash a
+    // broken body like its repaired form.
+    if (child.isMissing) continue
+    const rendered = child.isNamed ? serialize(child) : tokenPayload(child, previous, node)
     if (rendered.length > 0) children.push(rendered)
+    if (!child.isExtra) previous = child
   }
 
   const leafText = leafPayload(node)
@@ -58,22 +63,41 @@ function serialize(node: Node): string {
 }
 
 /**
- * An anonymous token, quoted so it cannot be read as a node type, or `""` when it says
- * nothing a formatter could not change.
+ * An anonymous token, quoted so it cannot be read as a node type, or `""` for a token in
+ * `FORMATTING_TOKENS`.
  *
  * Operators and keywords are anonymous in tree-sitter — `a + b` and `a - b` are one
  * `binary_expression` over two identifiers, and `let` and `const` one `lexical_declaration` —
- * so a walk over named children alone reads both edits as no change. The tokens kept out are
- * the ones a formatter adds, drops or swaps without changing the program: string delimiters
- * (`'a'` and `"a"`), separators (an optional `;`, a trailing `,`), and brackets the named
- * structure already implies. A MISSING token was never written, so it is not read either.
+ * so a walk over named children alone reads both edits as no change. Every token is kept
+ * except the ones a formatter adds, drops or swaps without changing the program.
  */
-function tokenPayload(token: Node): string {
-  if (token.isExtra || token.isMissing) return ""
+function tokenPayload(token: Node, previous: Node | null, parent: Node): string {
+  if (token.isExtra) return ""
+  if (isElision(token, previous, parent)) return JSON.stringify(token.type)
   if (FORMATTING_TOKENS.has(token.type)) return ""
   return JSON.stringify(token.type)
 }
 
+/**
+ * A comma that stands for a hole in an array or an array pattern. `[, token]` binds the second
+ * element where `[token]` binds the first, and `[1, , 3]` has three elements where `[1, 3]` has
+ * two, but the grammar has no node for a hole: the commas are all that records it. A comma
+ * right after `[` or after another comma is therefore kept. Every other comma separates
+ * elements the structure already counts, a trailing one included, and stays out.
+ */
+function isElision(token: Node, previous: Node | null, parent: Node): boolean {
+  if (token.type !== "," || !ELIDING_TYPES.has(parent.type)) return false
+  return previous?.type === "[" || previous?.type === ","
+}
+
+const ELIDING_TYPES: ReadonlySet<string> = new Set(["array", "array_pattern"])
+
+/**
+ * The tokens a formatter owns: string delimiters (`'a'` and `"a"`), separators (an optional
+ * `;`, a trailing `,`, `;` against `,` between interface members) and the brackets the named
+ * structure already implies (`arguments` always has its parentheses, `statement_block` its
+ * braces). It is this plugin's answer to what `fingerprint.md` §5.1 item 4 leaves out.
+ */
 const FORMATTING_TOKENS: ReadonlySet<string> = new Set([
   ";",
   ",",
