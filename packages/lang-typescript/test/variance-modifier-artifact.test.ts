@@ -282,10 +282,25 @@ describe("the Symbols are the same with the modifiers as without them", () => {
     expect(shape).toEqual(await shapeOf(WITHOUT_MODIFIERS))
   })
 
-  it("serialises a class and an interface the same, since only their bodies are read", async () => {
-    const withAst = (await symbolsOf(WITH_MODIFIERS)).filter((s) => s.kind !== "type")
-    const withoutAst = (await symbolsOf(WITHOUT_MODIFIERS)).filter((s) => s.kind !== "type")
+  it("serialises an interface the same, since only its body is read", async () => {
+    const withAst = (await symbolsOf(WITH_MODIFIERS)).filter((s) => s.kind === "interface")
+    const withoutAst = (await symbolsOf(WITHOUT_MODIFIERS)).filter((s) => s.kind === "interface")
     expect(withAst.map(normalizeAst)).toEqual(withoutAst.map(normalizeAst))
+  })
+
+  it("serialises a class's body the same, and its head as the grammar recovered it", async () => {
+    // A class's head reaches its string (LP8p), and a variance modifier is part of the
+    // contract, so the strings may differ — but only after the body, which is read the same.
+    const classOf = async (source: string) => {
+      const symbol = (await symbolsOf(source)).find((s) => s.id === "ts:src/a.ts#E")
+      if (symbol === undefined) throw new Error("class E missing")
+      return normalizeAst(symbol)
+    }
+    const body = (text: string) => text.split(" (type_parameters")[0]
+    const withModifiers = await classOf(WITH_MODIFIERS)
+    const withoutModifiers = await classOf(WITHOUT_MODIFIERS)
+    expect(withModifiers).toContain(" (type_parameters")
+    expect(body(withModifiers)).toBe(body(withoutModifiers))
   })
 
   it("keeps the calls inside and after the annotated declaration", async () => {

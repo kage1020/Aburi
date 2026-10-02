@@ -43,17 +43,41 @@ export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
   const merged = symbol.mergedDeclarations ?? []
   const lead = describedNode(symbol)
-  if (merged.length === 0) return serialize(lead)
+  const head = classHead(symbol.fullNode)
+  if (merged.length === 0) return head === "" ? serialize(lead) : `${serialize(lead)} ${head}`
   const described = [lead]
   for (const declaration of merged) {
     const node = describedNode(declaration)
     if (described.some((seen) => seen.id === node.id)) continue
     described.push(node)
   }
-  return described
-    .map(serialize)
+  return [serialize(described[0] as Node), head, ...described.slice(1).map(serialize)]
     .filter((part) => part.length > 0)
     .join(" ")
+}
+
+/**
+ * What a class's declaration says outside its body: `abstract`, its type parameters, and its
+ * `extends` / `implements`. The body describes a class (`describedNode`), and for a function
+ * that is safe because its head is the signature the api axis hashes — but a class has no
+ * signature, so without this nothing saw a re-parent, a dropped `abstract` or a new required
+ * type parameter, each of which breaks callers (fingerprint.md §1, lang-plugin.md LP8p).
+ * Appended after the body and only when present, so a class with no head keeps the string it
+ * had. Decorators stay out: they are on the api axis already.
+ */
+function classHead(fullNode: Node): string {
+  if (fullNode.type !== "class_declaration" && fullNode.type !== "abstract_class_declaration") {
+    return ""
+  }
+  const parts: string[] = []
+  if (fullNode.type === "abstract_class_declaration") parts.push(JSON.stringify("abstract"))
+  for (const child of fullNode.namedChildren) {
+    if (child === null) continue
+    if (child.type === "type_parameters" || child.type === "class_heritage") {
+      parts.push(serialize(child))
+    }
+  }
+  return parts.join(" ")
 }
 
 /**
