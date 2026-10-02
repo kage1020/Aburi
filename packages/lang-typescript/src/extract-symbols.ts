@@ -30,6 +30,7 @@ import {
   functionValuedField,
   hasPrivateName,
   isConstructorMember,
+  memberNameSegment,
   memberSymbolSegment,
 } from "./class-members"
 import { readDecorators } from "./decorators"
@@ -147,11 +148,37 @@ function makeCandidateSink(): CandidateSink {
       else group.push(candidate)
     },
     list() {
-      return [...byId.values()]
-        .map((group) => foldDeclarations(group, group[0]))
-        .sort(compareBy((candidate) => candidate.id))
+      const symbols: SymbolCandidate<Node>[] = []
+      for (const group of byId.values()) {
+        const lead = leadOf(group)
+        if (lead !== null) symbols.push(foldDeclarations(group, lead))
+      }
+      return symbols.sort(compareBy((candidate) => candidate.id))
     },
   }
+}
+
+/**
+ * The declaration that leads a group: the first one that is not an overload signature, or null
+ * when every one is.
+ *
+ * An overload signature (`function parse(input: string): Config;` outside a `declare`, or a
+ * `method_signature` in an ordinary class body) is written ahead of its implementation, but the
+ * implementation carries the body and the parameter types the function is actually called with,
+ * so it leads (LP8f). The overloads still fold in, as declarations with no body, so the syntax
+ * axis sees them (LP8q): dropping them made adding, removing or retyping an overload no change at
+ * all. A group of overloads and nothing else is TS2391, and stays without a Symbol, as before.
+ */
+function leadOf(group: readonly SymbolCandidate<Node>[]): SymbolCandidate<Node> | null {
+  return group.find((declaration) => !isOverloadSignature(declaration.fullNode)) ?? null
+}
+
+/** A bodyless function or method declaration an implementation can be written beside. */
+function isOverloadSignature(node: Node): boolean {
+  return (
+    (node.type === "function_signature" || node.type === "method_signature") &&
+    !inAmbientContext(node)
+  )
 }
 
 /** Rationale recorded on a Symbol more than one declaration wrote. */
@@ -238,7 +265,9 @@ function visitStatement(
       // the body. At module level it is an overload declaration and the implementation below it
       // is the Symbol; under a `declare` there are no implementations, so the signature is the
       // whole declaration and skipping it left `declare function f(): void` extracting nothing.
-      if (inAmbientContext(node)) out.add(makeFunctionCandidate(node, ctx, namespacePath))
+      // Outside one it is an overload: still added, so it folds into the implementation's Symbol
+      // as a declaration with no body (LP8q), and the sink makes the implementation lead.
+      out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
     case "arrow_function":
@@ -446,7 +475,7 @@ function addClassMembers(
   const byId = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
     if (member === null) continue
-    const segment = memberSymbolSegment(classNode, member)
+    const segment = memberSymbolSegment(classNode, member) ?? overloadSegment(classNode, member)
     if (segment === null) continue
     // Which of the two member shapes this is. A field the predicate admitted always answers
     // with the function it holds, and a `method_definition` falls out on one type test.
@@ -457,7 +486,21 @@ function addClassMembers(
         : makeFieldFunctionCandidate(member, fieldFunction, segment, ctx, ownerChain)
     groupMemberDeclaration(byId, candidate, hasChildOfType(member, "get"))
   }
-  for (const group of byId.values()) out.add(foldMemberGroup(group))
+  for (const group of byId.values()) {
+    const folded = foldMemberGroup(group)
+    if (folded !== null) out.add(folded)
+  }
+}
+
+/**
+ * The segment of a method overload signature in an ordinary class body, which
+ * `memberSymbolSegment` refuses because it is not a member of its own: it folds into the
+ * implementation beside it (LP8q), led by that implementation.
+ */
+function overloadSegment(classNode: Node, member: Node): string | null {
+  if (member.type !== "method_signature" || !isOverloadSignature(member)) return null
+  if (nameFieldText(classNode) === null) return null
+  return memberNameSegment(member)
 }
 
 /** One member declaration, with the one thing about it that decides which of a pair leads. */
@@ -480,12 +523,10 @@ function groupMemberDeclaration(
   else group.push({ candidate, isGetter })
 }
 
-function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> {
-  const lead = group.find((member) => member.isGetter) ?? group[0]
-  return foldDeclarations(
-    group.map((member) => member.candidate),
-    lead.candidate,
-  )
+function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> | null {
+  const declarations = group.map((member) => member.candidate)
+  const lead = group.find((member) => member.isGetter)?.candidate ?? leadOf(declarations)
+  return lead === null ? null : foldDeclarations(declarations, lead)
 }
 
 function makeFunctionCandidate(
@@ -983,7 +1024,10 @@ function objectMemberCandidates(
     }
   }
   collect(object, ownerChain)
-  return [...byId.values()].map(foldMemberGroup)
+  // No overload signature reaches an object literal, so every group has a lead.
+  return [...byId.values()]
+    .map(foldMemberGroup)
+    .filter((candidate): candidate is SymbolCandidate<Node> => candidate !== null)
 }
 
 /**
