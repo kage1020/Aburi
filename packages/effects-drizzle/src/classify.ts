@@ -19,7 +19,7 @@ import { classificationConfidence } from "./receivers"
 /**
  * Classify a CallCandidate against Drizzle ORM conventions.
  *
- * Three decisions this function encodes:
+ * Four decisions this function encodes:
  *
  * 1. **Chain-collapse.** Drizzle is a fluent builder, so `walkBody` emits one candidate per
  *    link of `db.select().from(u).where(w)` (`db.select`, `db.select.from`, ...). Only the
@@ -31,10 +31,13 @@ import { classificationConfidence } from "./receivers"
  *    registration outright — no Drizzle root takes one — and the receiver plus argument
  *    count decide the tier.
  * 3. **Everything short of that downgrades rather than drops** — see `receiverConfidence`.
+ * 4. **Arity has a floor for `transaction` / `batch`.** Both require an argument, so a
+ *    zero-argument call is dropped whatever the receiver, where an overflow only costs the
+ *    tier (effect-plugin.md §5.4).
  *
- * Throws only on a malformed target (`assertNonEmptySegments`), an upstream contract
- * violation rather than a classification decision. Pure with respect to plugin state
- * (effect-plugin.md).
+ * Throws only through the registry's input guards — `assertNonEmptySegments` on the target
+ * and `hasMatchingImport` on each `ImportEdge.source` — upstream contract violations rather
+ * than classification decisions. Pure with respect to plugin state (effect-plugin.md).
  */
 export function classifyDrizzleCall(
   call: CallCandidate,
@@ -90,9 +93,10 @@ export function classifyDrizzleCall(
   }
 
   if (isDrizzleTransactionMethod(method)) {
-    // `transaction(cb)` and `batch([...])` both require an argument, so a zero-argument call
-    // belongs to another library: Firestore's `batch()`, Sequelize's or Knex's unmanaged
-    // `transaction()`. Valid source, just not Drizzle, so it stays in `calls[]`.
+    // `transaction(cb)` and `batch([...])` both require an argument, so no Drizzle signature
+    // reaches a zero-argument call: a Firestore `batch()`, an unmanaged Sequelize or Knex
+    // `transaction()`, or a class's own method. Not separable from broken source here, and a
+    // withdrawn file is the costlier of the two mistakes, so it is handed on unclassified.
     if (call.argumentCount < 1) return null
     // A transaction takes a callback or a statement array, never a literal.
     if (hasLiteralFirstArgument(call)) return null

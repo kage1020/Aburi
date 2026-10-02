@@ -51,7 +51,7 @@ The import gate is not a receiver check: it answers "does this file use
 Drizzle", and an Express router file is free to answer yes — Express + Drizzle
 is one of the most common pairings there is, and `router.delete("/users/:id", h)`
 has the same 2-segment shape as `db.delete(users)`. Three further checks decide
-what is recorded:
+what is recorded, and the last of them has a floor:
 
 - **Literal first argument.** A Drizzle root takes a table reference, a
   projection object, a callback or a statement array — never a bare literal. So
@@ -69,9 +69,15 @@ what is recorded:
   `src/methods.ts` says so. More than the terminal takes is evidence against —
   but only evidence: `argumentCount` is a syntactic count, and a drop would
   erase a real query without logging anything, so an overflow costs the tier
-  instead.
+  instead. Fewer is different for `transaction` and `batch`, which both require
+  an argument: a zero-argument `firestore.batch()`, an unmanaged
+  `sequelize.transaction()` or a class's own `this.transaction()` is not
+  classified at all, whatever the receiver. Those calls have owners other than
+  Drizzle, and a call the parser counts at zero (`db.transaction(/* cb */)`) is
+  source that does not run.
 
-A match on all three gives `confidence: "high"`; anything short of that still
+A match on all three gives `confidence: "high"`; anything short of that, other
+than a literal first argument or a zero-argument `transaction` / `batch`, still
 records the effect, at `confidence: "medium"`.
 
 The `medium` tier is deliberate. Without the AST — which effect plugins never

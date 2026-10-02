@@ -58,16 +58,34 @@ describe("classifyDrizzleCall — transaction terminals", () => {
   })
 
   it.each([
-    "db.transaction",
-    "db.batch",
     "firestore.batch",
     "sequelize.transaction",
     "this.transaction",
   ])("returns null for %s with argCount=0 — no Drizzle signature takes it", (target) => {
-    // Both APIs require an argument, so a zero-argument call is another library's:
-    // Firestore's `batch()`, an unmanaged Sequelize or Knex `transaction()`. Valid source
-    // that is not Drizzle stays in `calls[]` rather than withdrawing the file.
+    // An unrecognised receiver with no argument is a shape Drizzle's API never takes, and it has
+    // owners elsewhere: Firestore's `batch()`, an unmanaged Sequelize or Knex `transaction()`, a
+    // class's own method. It stays in `calls[]` rather than withdrawing the file.
     expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
+  })
+
+  it.each([
+    "db.transaction",
+    "db.batch",
+  ])("returns null for %s with argCount=0 — the arity floor outranks the receiver", (target) => {
+    // `db` is a client word and would earn `high`, but the floor is checked first: a
+    // zero-argument call is broken source (`db.transaction(/* cb */)` parses at zero) or a
+    // miscount, not separable here, and recording a phantom transaction is the costlier mistake.
+    expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
+  })
+
+  it("still records sequelize.transaction(cb) at medium — EP11, not the floor", () => {
+    // One argument clears the floor; the receiver is outside the client vocabulary, so the
+    // effect is recorded at the tier an unplaceable receiver gets, not dropped.
+    const result = classifyDrizzleCall(
+      makeCall({ target: "sequelize.transaction", argumentCount: 1 }),
+      ctx,
+    )
+    expect(result).toMatchObject({ effectId: "db.transaction", confidence: "medium" })
   })
 
   it("classifies this.db.transaction as db.transaction", () => {
