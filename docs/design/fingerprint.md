@@ -256,6 +256,7 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 ### 5.3 Guaranteed invariance conditions
 
 - Whitespace / newline / indentation changes → unchanged
+- Line terminators (LF, CRLF, a lone CR) → unchanged: the scan reads every source file with CRLF and CR converted to LF before a plugin sees it, so a line break inside a template literal or a string that continues across lines, which the whitespace collapse cannot reach, is the same on every checkout
 - Adding / removing comments → unchanged
 - The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
 

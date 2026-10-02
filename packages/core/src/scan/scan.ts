@@ -777,6 +777,14 @@ export function languageFileDropPatterns(languages: readonly LanguagePlugin[]): 
  * by the Document's spelling misses on every filesystem that keeps what it was given. What the
  * plugin then sees is `path`, because that is what its Symbol ids are built from and what the
  * Document records — the filesystem spelling stops here.
+ *
+ * The content's line terminators stop here too: CRLF and a lone CR become LF, so the Document
+ * does not depend on the checkout (`core.autocrlf`, an editor's setting). Without it a line
+ * break inside a template literal reached the `syntax` fingerprint as `\r\n` on one checkout
+ * and `\n` on another, and every field copied from source text carried the `\r`
+ * (fingerprint.md §5.3). The program is unchanged — ECMAScript reads CRLF in a template literal
+ * as LF — and so are line numbers and columns, the CR having sat at the end of its line; a file
+ * that breaks lines with CR alone stops reading as one line.
  */
 async function loadSourceFile(
   workspaceRoot: string,
@@ -784,7 +792,12 @@ async function loadSourceFile(
 ): Promise<SourceFile> {
   const absolute = resolve(workspaceRoot, discovered.fsPath)
   const content = await readFile(absolute, "utf8")
-  return { path: discovered.path, content }
+  return { path: discovered.path, content: normalizeLineTerminators(content) }
+}
+
+/** CRLF and lone CR to LF (`loadSourceFile`). Exported for its test. */
+export function normalizeLineTerminators(content: string): string {
+  return content.includes("\r") ? content.replace(/\r\n?/g, "\n") : content
 }
 
 interface BuildStatsInput {
