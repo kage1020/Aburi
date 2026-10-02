@@ -642,6 +642,7 @@ async function resolveViaGit(
   await assertRefResolvable(git, cwd, spec.base, "base")
   await assertRefResolvable(git, cwd, spec.head, "head")
   await assertNotShallow(git, cwd)
+  await assertNotSparse(git, cwd)
 
   // Pinned before the worktree exists, and therefore against the caller's own directory.
   // `cli-spec.md` gives the base scan the *head* `aburi.json`: a config as of the base ref
@@ -655,6 +656,7 @@ async function resolveViaGit(
   // set to the head environment). The worktree materialises the base *sources*; it has no
   // claim on either.
   const headWorkspaceRoot = await resolveWorkspaceRoot(cwd)
+  const submoduleIgnore = await submodulePatterns(git, headWorkspaceRoot, warn)
   const tempParent = await mkdtemp(resolve(tmpdir(), "aburi-worktree-"))
   // Under a directory of its own, so the leaf below is free to be any name the head workspace
   // has — including `base-out` or `head-out`, which as siblings would be the temp run's own
@@ -684,6 +686,7 @@ async function resolveViaGit(
       pinnedConfig,
       headWorkspaceRoot,
       { side: "base", ref: spec.base },
+      submoduleIgnore,
     )
     // The base scan finds its own root, and lands on the checkout git made only because the
     // worktree's `.git` file ends the walk there (`component-detect.md` §2.1). A root anywhere
@@ -708,6 +711,7 @@ async function resolveViaGit(
       pinnedConfig,
       headWorkspaceRoot,
       { side: "head" },
+      submoduleIgnore,
     )
     if (headReport.irPath === null) {
       throw new CliError("scan for head ref produced no IR file.", "runtime-error")
@@ -775,7 +779,8 @@ function labelFor(target: ScanTarget): string {
 /**
  * One scan of one side, reading the config both sides share. `pinnedConfig` replaces
  * `options.configPath`: the flag is relative to the caller's directory and the base scan runs
- * in the worktree. `pluginRefRoot` is passed to both sides so they differ only in their sources.
+ * in the worktree. `pluginRefRoot` and `ignore` are passed to both sides so they differ only in
+ * their sources.
  */
 async function runScanInDir(
   cwd: string,
@@ -785,6 +790,7 @@ async function runScanInDir(
   pinnedConfig: PinnedConfig,
   pluginRefRoot: string,
   target: ScanTarget,
+  ignore: readonly string[],
 ): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
     cwd,
@@ -794,6 +800,7 @@ async function runScanInDir(
     incidents: { warn, label: labelFor(target) },
     pinnedConfig,
     pluginRefRoot,
+    ...(ignore.length === 0 ? {} : { ignore }),
     ...(options.compact === undefined ? {} : { compact: options.compact }),
   }
   return runScan(scanOptions)
@@ -956,6 +963,68 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
       "runtime-error",
     )
   }
+}
+
+/**
+ * `cli-spec.md` §6.4.1: a sparse checkout is missing files the head scan would read as removed.
+ * `--default false` because `git config` exits 1 for a key that is not set, the usual case.
+ */
+async function assertNotSparse(git: GitRunner, cwd: string): Promise<void> {
+  const { stdout } = await git.run(
+    ["config", "--bool", "--default", "false", "core.sparseCheckout"],
+    { cwd },
+  )
+  if (stdout.trim() === "true") {
+    throw new CliError(
+      "Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable",
+      "runtime-error",
+    )
+  }
+}
+
+/**
+ * Ignore patterns that leave every submodule out of both scans, after the §6.4.1 warning.
+ *
+ * `git worktree add` does not populate submodules, so the base side sees each one as an empty
+ * directory while the head side, whose submodules are checked out, walks into them as ordinary
+ * sources: every Symbol in an unchanged submodule would read as added. Leaving them out of both
+ * sides is what makes the warning describe a limitation rather than excuse a wrong report, and
+ * it needs no network access, which `git submodule update --init` in the worktree would.
+ *
+ * The submodules are the gitlinks (mode `160000`) in the index, which is the list
+ * `git submodule status` prints; `ls-files -z` is asked instead because its records survive any
+ * path, where `submodule status` quotes some and decorates every line. Run at the head workspace
+ * root, so the paths are relative to the root both scans share.
+ */
+async function submodulePatterns(
+  git: GitRunner,
+  workspaceRoot: string,
+  warn: WarnFn,
+): Promise<string[]> {
+  const { stdout } = await git.run(["ls-files", "-z", "--stage"], { cwd: workspaceRoot })
+  const paths = parseSubmodulePaths(stdout)
+  if (paths.length === 0) return []
+  warn(
+    `⚠ Submodules detected: ${paths.join(", ")}. Submodule-aware diff is not yet supported, so their files are left out of both sides.`,
+  )
+  return paths.map((path) => `${escapeGlob(path)}/**`)
+}
+
+/** The gitlink paths in `git ls-files -z --stage` output: `<mode> <sha> <stage>\t<path>\0`. */
+export function parseSubmodulePaths(stdout: string): string[] {
+  const paths = new Set<string>()
+  for (const record of stdout.split("\0")) {
+    const tab = record.indexOf("\t")
+    if (tab === -1) continue
+    if (!record.startsWith("160000 ")) continue
+    paths.add(record.slice(tab + 1))
+  }
+  return [...paths].sort()
+}
+
+/** A path as an ignore glob that matches only itself: the pattern spends `\` as an escape. */
+function escapeGlob(path: string): string {
+  return path.replace(/[\\()[\]{}*?|!+@]/g, "\\$&")
 }
 
 /**
