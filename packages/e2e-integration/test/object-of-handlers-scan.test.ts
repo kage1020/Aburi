@@ -45,6 +45,32 @@ const ROUTE = [
   "",
 ].join("\n")
 
+const VERSIONED = [
+  'import { PrismaClient } from "@prisma/client"',
+  "",
+  "const prisma = new PrismaClient()",
+  "",
+  "export const api = {",
+  "  v1: {",
+  "    users: {",
+  "      remove: (id: number) => prisma.user.delete({ where: { id } }),",
+  "    },",
+  "  },",
+  "}",
+  "",
+].join("\n")
+
+// Imported under another name, so the target names no Symbol and only the import can resolve it:
+// spelled `api.v1.users.remove`, it would also match the member's own name.
+const VERSIONED_ROUTE = [
+  'import { api as routes } from "./api"',
+  "",
+  "export async function handle(id: number) {",
+  "  return routes.v1.users.remove(id)",
+  "}",
+  "",
+].join("\n")
+
 describe("scan — a handler map", () => {
   it("puts each handler's rules and effects on the handler, and none on the map", async () => {
     await workspace.writeSource("src/users.ts", api(DELETE))
@@ -71,6 +97,21 @@ describe("scan — a handler map", () => {
 
     expect(handle.calls.map((c) => [c.target, c.resolved])).toEqual([
       ["users.remove", "ts:src/users.ts#users.remove"],
+    ])
+    expect(handle.effects.map((e) => e.id)).toContain("db.write")
+  })
+
+  it("resolves a call through nested maps, where no Symbol stands for the objects between", async () => {
+    await workspace.writeSource("src/api.ts", VERSIONED)
+    await workspace.writeSource("src/route.ts", VERSIONED_ROUTE)
+    const result = await scanWith(workspace.root, lineup)
+    const handle = symbolById(result, "ts:src/route.ts#handle")
+
+    expect(
+      result.ir.symbols.map((s) => s.id).filter((id) => id.startsWith("ts:src/api.ts#api")),
+    ).toEqual(["ts:src/api.ts#api", "ts:src/api.ts#api.v1.users.remove"])
+    expect(handle.calls.map((c) => [c.target, c.resolved])).toEqual([
+      ["routes.v1.users.remove", "ts:src/api.ts#api.v1.users.remove"],
     ])
     expect(handle.effects.map((e) => e.id)).toContain("db.write")
   })

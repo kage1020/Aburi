@@ -6,7 +6,7 @@ import { BACKSLASH, callsOf, hintOf, symbolOf, symbolsOf, walkOf } from "./fixtu
  * Defining the object creates the closure and does not enter it; the body is what calling the
  * property runs — so it belongs to a Symbol of its own, `api.get`, and the binding keeps only
  * what defining the object runs. That is LP20a and LP20f read for an object rather than a class,
- * and the name gate is the class member's.
+ * and the name gate is the class member's, but for a `#` name.
  */
 
 const API = [
@@ -83,6 +83,7 @@ describe("a function an object literal holds is a member Symbol", () => {
     ["a function expression", "  f: function (a: number) { q(a) },"],
     ["an async method", "  async f(a: number) { q(a) },"],
     ["a generator method", "  *f(a: number) { yield q(a) },"],
+    ["an async generator method", "  async *f(a: number) { yield q(a) },"],
     ["a wrapped arrow", "  f: ((a: number) => { q(a) }) as H,"],
   ])("declares one for %s", async (_label, entry) => {
     const source = ["export const api = {", entry, "}"].join("\n")
@@ -156,6 +157,7 @@ describe("the binding an object is read under", () => {
     ["`as const`", "export const api = { get: () => q() } as const"],
     ["`satisfies`", "export const api = { get: () => q() } satisfies Api"],
     ["parentheses", "export const api = ({ get: () => q() })"],
+    ["a type annotation", "export const api: Api = { get: () => q() }"],
     ["`let`", "export let api = { get: () => q() }"],
     ["`var`", "export var api = { get: () => q() }"],
   ])("reads through %s", async (_label, source) => {
@@ -184,6 +186,31 @@ describe("the binding an object is read under", () => {
     const source = "export class C {}\nexport namespace C { export const api = { get() { q() } } }"
 
     expect(await idsOf(source)).toContain("ts:src/a.ts#C::api.get")
+  })
+
+  it("gives an empty object a body with nothing in it, and no hint", async () => {
+    const source = "export const EMPTY = {}"
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#EMPTY"])
+    expect((await symbolOf(source, "ts:src/a.ts#EMPTY")).derivedBy).toContain(
+      "object-literal-initializer",
+    )
+    expect(await callsOf(source, "ts:src/a.ts#EMPTY")).toEqual([])
+    expect(await hintOf(source, "ts:src/a.ts#EMPTY")).toBeNull()
+  })
+
+  it("mints nothing for an object a function's local binding holds", async () => {
+    const source = "export function f() { const api = { get: () => q() } }"
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#f"])
+    expect(await callsOf(source, "ts:src/a.ts#f")).toEqual(["q"])
+  })
+
+  it("mints nothing for an object a member returns", async () => {
+    const source = "export const api = { make: () => ({ inner() { q() } }) }"
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#api", "ts:src/a.ts#api.make"])
+    expect(await callsOf(source, "ts:src/a.ts#api.make")).toEqual(["q"])
   })
 
   it("promotes only the binding when a separate export default names it", async () => {
@@ -238,15 +265,25 @@ describe("an object written inside the object", () => {
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#config"])
   })
 
-  it("leaves an object under a computed key to the binding, functions and all", async () => {
-    const source = "export const api = { [k]: { get: () => { q() } } }"
+  it.each([
+    ["a computed key", "[k]"],
+    ["a quoted key that is not an identifier", '"v-1"'],
+    ["a numeric key", "1"],
+  ])("leaves an object under %s to the binding, functions and all", async (_label, key) => {
+    const source = `export const api = { ${key}: { get: () => { q() } } }`
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#api"])
     expect(await callsOf(source, "ts:src/a.ts#api")).toEqual(["q"])
   })
+
+  it("reads an object under a quoted key that spells an identifier", async () => {
+    const source = 'export const api = { "v1": { get: () => q() } }'
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#api", "ts:src/a.ts#api.v1.get"])
+  })
 })
 
-describe("the name gate is a class member's", () => {
+describe("the name gate is a class member's, but for a private name", () => {
   it("decodes a quoted key that spells an identifier", async () => {
     const source = 'export const api = { "get": () => q() }'
 
@@ -258,14 +295,30 @@ describe("the name gate is a class member's", () => {
     ["a computed method", "[k]() { q() }"],
     ["a quoted key that is not an identifier", '"a-b": () => { q() }'],
     ["a numeric key", "1: () => { q() }"],
-    ["a private name, which an object literal cannot have", "#p() { q() }"],
-    ["a private name on a property", "#p: () => { q() }"],
+    ["a quoted key spelling a private name", '"#v": () => { q() }'],
     ["a key the parser recovered", `"${BACKSLASH}uZZZZ": () => { q() }`],
   ])("gives %s no Symbol and leaves its body on the binding", async (_label, entry) => {
     const source = `export const api = { ${entry} }`
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#api"])
     expect(await callsOf(source, "ts:src/a.ts#api")).toEqual(["q"])
+  })
+
+  it.each([
+    ["a private method", "#p() { q() }"],
+    ["a private name on a property", "#p: () => { q() }"],
+  ])("gives %s no Symbol, which an object literal cannot have", async (_label, entry) => {
+    const source = `export const api = { ${entry} }`
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#api"])
+    expect(await callsOf(source, "ts:src/a.ts#api")).toEqual(["q"])
+  })
+
+  it("diverges there from a class body, where the same name is a private member", async () => {
+    expect(await idsOf("export class C { #p() { q() } }")).toEqual([
+      "ts:src/a.ts#C",
+      "ts:src/a.ts#C.#p",
+    ])
   })
 })
 
@@ -282,6 +335,13 @@ describe("entries that are not members", () => {
 
     expect(await idsOf(source)).toEqual(["ts:src/a.ts#api"])
     expect(await callsOf(source, "ts:src/a.ts#api")).toEqual(calls)
+  })
+
+  it("refuses a function the parser recovered with no body, as a registration does", async () => {
+    // A half-written arrow still parses, with a zero-width placeholder for its body.
+    const source = "export const api = { get: () => , post() { send() } }"
+
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#api", "ts:src/a.ts#api.post"])
   })
 })
 
@@ -302,6 +362,19 @@ describe("one member written twice", () => {
     ])
     expect(symbol.signature?.inputs).toEqual([])
     expect(await callsOf(source, "ts:src/a.ts#o.v")).toEqual(["sv", "gv"])
+  })
+
+  it.each([
+    ["a lone getter", "get v() { return gv() }", ["gv"]],
+    ["a lone setter", "set v(n: number) { sv(n) }", ["sv"]],
+  ])("reads %s as an accessor member of its own", async (_label, entry, calls) => {
+    const source = `export const o = { ${entry} }`
+
+    expect((await symbolOf(source, "ts:src/a.ts#o.v")).derivedBy).toEqual([
+      "object-method",
+      "accessor-declaration",
+    ])
+    expect(await callsOf(source, "ts:src/a.ts#o.v")).toEqual(calls)
   })
 
   it("folds a repeated key into one Symbol", async () => {

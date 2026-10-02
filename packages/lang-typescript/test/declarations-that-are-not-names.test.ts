@@ -153,6 +153,10 @@ describe("every rationale extraction emits is one the manifest declares", () => 
     ],
     ["export abstract class A { abstract m(): void }", ["abstract-declaration"]],
     ["export declare function f(): void", ["ambient-declaration"]],
+    [
+      "export const o = { m() {}, f: () => {} }",
+      ["object-literal-initializer", "object-method", "property-assigned-function"],
+    ],
   ])("declares the rationales %s produces", async (source, expected) => {
     // `fp-extension-impl.md` FP-A3 wants at least one entry per Symbol to identify the
     // emitting plugin under a prefix it owns, and `findDerivedByOwner` resolves it from this

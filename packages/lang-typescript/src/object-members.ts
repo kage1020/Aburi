@@ -28,16 +28,25 @@ export type ObjectEntry =
  * the object creates the closure and does not enter it, so the body is what calling the
  * property runs, which is LP20f's reason for a class field.
  *
+ * A body of no width is refused, as `inlineHandlers` refuses one: a half-written `get: () =>`
+ * still parses as an arrow whose `body` is a zero-width placeholder, and a member Symbol for it
+ * would put a public method in the IR for an API that is not written. Only the `pair` can arrive
+ * that way — the grammar recovers `{ m() }` as an ERROR, never as a `method_definition`.
+ *
  * A `pair` holding another object literal is read one level further down, at any depth:
  * `api.v1.get` is the path the source calls it by. The depth costs one Symbol per **function**
  * the source writes and nothing per other value, so a deep configuration object of strings and
- * numbers mints none. The object in between declares no Symbol, as nothing is written there to
- * walk.
+ * numbers mints none. The object in between declares no Symbol, as it has no body that calling
+ * it would run: what it evaluates runs when the binding's object is defined, and is the
+ * binding's.
  *
- * The name gate is a class member's (`writtenNameSegment`): a computed key, a number, and a
- * quoted key that is not an identifier have no segment, and their entry stays on the binding
- * (LP20c). A `#`-private name has none either. It is a SyntaxError outside a class body, the
- * grammar parses it anyway, and the segment it would take is the private member's.
+ * Past the `#` check, the name gate is a class member's (`writtenNameSegment`): a computed key, a
+ * number, and a quoted key that is not an identifier have no segment, and their entry stays on
+ * the binding (LP20c). The `#` check is this reader's own and diverges from the class answer,
+ * where `#v` is the private member `C.#v` (LP8o). A `#` name is a SyntaxError outside a class
+ * body, which the grammar parses anyway, so there is no private member here for the segment to
+ * name. It is not redundant with the shared gate: that gate admits `#p`, and building the
+ * member's qualified name then throws.
  *
  * Everything else is null: a shorthand (`{ a }`) reads a binding declared elsewhere, a spread
  * copies one, a `pair` holding any other value is evaluated when the object is.
@@ -52,7 +61,10 @@ export function objectEntryOf(entry: Node): ObjectEntry | null {
   const value = entry.childForFieldName("value")
   if (value === null) return null
   const fn = asFunctionValue(value)
-  if (fn !== null) return { segment, fn, object: null }
+  if (fn !== null) {
+    const body = fn.childForFieldName("body")
+    return body === null || body.text.length === 0 ? null : { segment, fn, object: null }
+  }
   const object = objectLiteralOf(value)
   return object === null ? null : { segment, fn: null, object }
 }

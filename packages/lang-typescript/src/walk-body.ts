@@ -131,17 +131,19 @@ function visitOwnObjectBody(object: Node, rules: Rule[], calls: CallCandidate[])
       continue
     }
     if (read.object !== null) {
+      // Inert today: beside the object, a `pair` holds only its key and a wrapper's type, and
+      // neither has anything to walk. It is kept so that every admitted entry is walked less
+      // only what is read elsewhere, as `visitOwnClassBody` walks a member, and a node that
+      // becomes walkable there is not lost.
       visitExcluding(entry, [read.object], rules, calls)
       visitOwnObjectBody(read.object, rules, calls)
       continue
     }
-    const skipped = [read.fn.childForFieldName("body"), read.fn.childForFieldName("parameters")]
-    visitExcluding(
-      entry,
-      skipped.filter((node): node is Node => node !== null),
-      rules,
-      calls,
-    )
+    const skipped = [
+      read.fn.childForFieldName("body"),
+      read.fn.childForFieldName("parameters"),
+    ].filter((node): node is Node => node !== null)
+    visitExcluding(entry, skipped, rules, calls)
   }
 }
 

@@ -455,15 +455,12 @@ function addClassMembers(
       fieldFunction === null
         ? makeMethodCandidate(member, segment, ctx, ownerChain)
         : makeFieldFunctionCandidate(member, fieldFunction, segment, ctx, ownerChain)
-    const entry: MemberDeclaration = { candidate, isGetter: hasChildOfType(member, "get") }
-    const group = byId.get(candidate.id)
-    if (group === undefined) byId.set(candidate.id, [entry])
-    else group.push(entry)
+    groupMemberDeclaration(byId, candidate, hasChildOfType(member, "get"))
   }
   for (const group of byId.values()) out.add(foldMemberGroup(group))
 }
 
-/** One `method_definition`, with the one thing about it that decides which of a pair leads. */
+/** One member declaration, with the one thing about it that decides which of a pair leads. */
 interface MemberDeclaration {
   candidate: SymbolCandidate<Node>
   isGetter: boolean
@@ -471,6 +468,17 @@ interface MemberDeclaration {
 
 /** Declarations of one member, in source order. A group exists because something is in it. */
 type MemberGroup = [MemberDeclaration, ...MemberDeclaration[]]
+
+/** Starts the group this member's id has, or adds the declaration to the one already open. */
+function groupMemberDeclaration(
+  byId: Map<string, MemberGroup>,
+  candidate: SymbolCandidate<Node>,
+  isGetter: boolean,
+): void {
+  const group = byId.get(candidate.id)
+  if (group === undefined) byId.set(candidate.id, [{ candidate, isGetter }])
+  else group.push({ candidate, isGetter })
+}
 
 function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> {
   const lead = group.find((member) => member.isGetter) ?? group[0]
@@ -971,10 +979,7 @@ function objectMemberCandidates(
         continue
       }
       const candidate = makeObjectMemberCandidate(entry, read.fn, read.segment, ctx, chain)
-      const declaration: MemberDeclaration = { candidate, isGetter: hasChildOfType(entry, "get") }
-      const group = byId.get(candidate.id)
-      if (group === undefined) byId.set(candidate.id, [declaration])
-      else group.push(declaration)
+      groupMemberDeclaration(byId, candidate, hasChildOfType(entry, "get"))
     }
   }
   collect(object, ownerChain)
