@@ -419,7 +419,7 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 
 - `guard`: an `if` statement containing an early return / throw / continue
 - `throw`: a throw statement
-- `return`: any non-trivial return (trivial determination per `drop-list.md`)
+- `return`: any non-trivial return (trivial determination per `drop-list.md`), a walk-root arrow's expression body included
 - `loop`: for / while / do
 - `try`: try-catch (rules inside the catch body are not expanded into the same Symbol's rules)
 - `switch`: a switch statement
