@@ -32,9 +32,9 @@ import { classificationConfidence } from "./receivers"
  *    count decide the tier.
  * 3. **Everything short of that downgrades rather than drops** — see `receiverConfidence`.
  *
- * Throws on a malformed target (`assertNonEmptySegments`) and on a zero-argument
- * `transaction` / `batch`: both are upstream contract violations, not classification
- * decisions. Pure with respect to plugin state (effect-plugin.md).
+ * Throws only on a malformed target (`assertNonEmptySegments`), an upstream contract
+ * violation rather than a classification decision. Pure with respect to plugin state
+ * (effect-plugin.md).
  */
 export function classifyDrizzleCall(
   call: CallCandidate,
@@ -90,14 +90,10 @@ export function classifyDrizzleCall(
   }
 
   if (isDrizzleTransactionMethod(method)) {
-    // `transaction(cb)` and `batch([...])` both require an argument, so a zero-argument
-    // match is broken source or a malformed candidate: an upstream signal, thrown before
-    // anything else is weighed rather than conflated with "not a Drizzle call".
-    if (call.argumentCount < 1) {
-      throw new Error(
-        `${EFFECTS_DRIZZLE_PLUGIN_NAME} (${ctx.file.path}, line ${call.line}): "${call.target}" call has argCount=0 but Drizzle's transaction/batch API requires at least one argument (callback or statement array)`,
-      )
-    }
+    // `transaction(cb)` and `batch([...])` both require an argument, so a zero-argument call
+    // belongs to another library: Firestore's `batch()`, Sequelize's or Knex's unmanaged
+    // `transaction()`. Valid source, just not Drizzle, so it stays in `calls[]`.
+    if (call.argumentCount < 1) return null
     // A transaction takes a callback or a statement array, never a literal.
     if (hasLiteralFirstArgument(call)) return null
     return {

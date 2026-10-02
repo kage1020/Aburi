@@ -60,27 +60,14 @@ describe("classifyDrizzleCall — transaction terminals", () => {
   it.each([
     "db.transaction",
     "db.batch",
-    "log.transaction",
-  ])("throws for %s with argCount=0 — upstream signal, not silent null", (target) => {
-    // Both APIs require an argument, so a shape-matched zero-argument call is broken
-    // source or a malformed candidate. The contract violation outranks the receiver: an
-    // unrecognized `log` does not turn the throw into a medium effect or a silent null.
-    expect(() => classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toThrow(
-      /argCount=0/,
-    )
-  })
-
-  it("throw message includes the file path and target for reproducibility", () => {
-    const ctxWithPath = makeCtx({
-      imports: [makeDrizzleImport()],
-      path: "src/services/tx.ts",
-    })
-    expect(() =>
-      classifyDrizzleCall(
-        makeCall({ target: "db.transaction", argumentCount: 0, line: 42 }),
-        ctxWithPath,
-      ),
-    ).toThrow(/src\/services\/tx\.ts.*db\.transaction/s)
+    "firestore.batch",
+    "sequelize.transaction",
+    "this.transaction",
+  ])("returns null for %s with argCount=0 — no Drizzle signature takes it", (target) => {
+    // Both APIs require an argument, so a zero-argument call is another library's:
+    // Firestore's `batch()`, an unmanaged Sequelize or Knex `transaction()`. Valid source
+    // that is not Drizzle stays in `calls[]` rather than withdrawing the file.
+    expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
   })
 
   it("classifies this.db.transaction as db.transaction", () => {
