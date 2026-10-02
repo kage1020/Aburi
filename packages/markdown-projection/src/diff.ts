@@ -20,6 +20,7 @@ import { renderSymbolBlock } from "./component"
 import {
   appendAll,
   compareStrings,
+  formatInput,
   inlineCode,
   isSymbolEdge,
   propagatedFromSuffix,
@@ -777,7 +778,7 @@ function describeInputs(items: readonly unknown[]): string {
       if (!isRecord(value)) return null
       const { name, type } = value
       if (typeof name !== "string" || typeof type !== "string") return null
-      return inlineCode(`${name}: ${type}`)
+      return inlineCode(formatInput(name, type))
     })
     .filter((line): line is string => line !== null)
   return rendered.length > 0 ? rendered.join(", ") : `${items.length} item(s)`

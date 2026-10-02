@@ -62,9 +62,7 @@ function readParameters(node: Node): Signature["inputs"] {
       child.type === "optional_parameter" ||
       child.type === "rest_pattern"
     ) {
-      const name = extractParamName(child)
-      const type = extractParamType(child)
-      out.push({ name, type })
+      out.push(readParameter(child))
     }
   }
   return out
@@ -91,13 +89,26 @@ function readBareParameter(node: Node): Signature["inputs"] {
   return [{ name, type: "" }]
 }
 
-function extractParamName(param: Node): string {
+/**
+ * One parameter as `{ name, type }`, with what a caller can see of its form carried in `type`,
+ * the field the api fingerprint hashes (`name` is left out by design, fingerprint.md §3.4):
+ * `...` ahead of a rest parameter's type, `?` ahead of an optional or defaulted one's. Both
+ * change how a call is written — dropping a `?` breaks every caller that omits the argument, and
+ * `T[]` → `...T[]` every caller that passes the other form — and both used to vanish, the `?`
+ * because the type was the annotation alone and the `...` because it rode on the name. The
+ * default's value stays out: what the function does with an omitted argument is its body's
+ * business. Renderers spell the markers back where TypeScript writes them (`ids?: string`,
+ * `...ids: string[]`), so `name` holds the bare binding (LP11b).
+ */
+function readParameter(param: Node): Signature["inputs"][number] {
   const pattern = param.childForFieldName("pattern") ?? param.namedChild(0)
-  if (pattern === null) return ""
-  if (pattern.type === "identifier") return pattern.text
-  // Destructuring / rest patterns: keep the raw text as the "name". The api fingerprint
-  // discards the name field anyway, and downstream renderers surface the raw form as-is.
-  return pattern.text
+  const rest = pattern?.type === "rest_pattern"
+  const binding = rest ? (pattern?.namedChild(0) ?? null) : pattern
+  const name = binding === null ? "" : binding.text
+  const type = extractParamType(param)
+  if (rest) return { name, type: `...${type}` }
+  const optional = param.type === "optional_parameter" || param.childForFieldName("value") !== null
+  return { name, type: optional ? `?${type}` : type }
 }
 
 function extractParamType(param: Node): string {

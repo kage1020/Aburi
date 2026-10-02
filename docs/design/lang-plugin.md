@@ -651,6 +651,7 @@ Every language plugin must pass the following tests.
 | LP10 | `function* g()` | signature.generator = true |
 | LP11 | `f(a: number, b: string): boolean` | inputs = [{name:"a",type:"number"},{name:"b",type:"string"}], outputs = ["boolean"] |
 | LP11a | a function that states a parameter **without a parameter list** — TypeScript's parenthesis-free arrow, `x => x + 1` | inputs = [{name:"x",type:""}], the same the parenthesised spelling `(x) => x + 1` reports |
+| LP11b | `f(a?: string, limit = 10, ...ids: string[])` | inputs = `[{name:"a",type:"?string"},{name:"limit",type:"?"},{name:"ids",type:"...string[]"}]`. What a caller sees of a parameter's form goes at the head of `type`, the field the api fingerprint hashes — `name` is left out by design (fingerprint.md §3.4), which is why a `...` riding on the name was lost and making `a?` required read as no change. `?` marks an optional parameter and a defaulted one alike, since a caller may omit either; the default's value stays out. `name` is the bare binding, and renderers print the marker back where TypeScript writes it (`a?: string`, `...ids: string[]`) |
 | LP12 | `function f<T>()` | typeParameters = ["T"] |
 | LP13 | `function f() { throw new MyError() }` | throws = ["MyError"] |
 

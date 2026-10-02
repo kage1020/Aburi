@@ -394,6 +394,7 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
 ```
 
 - `type` is the string representation as read from the AST. No type resolution is performed (LSP enrichment may optionally normalize it)
+- An input's `type` opens with what a caller sees of the parameter's form, because `type` is what the api fingerprint hashes and `name` is not: `...` for a rest parameter (`...ids: string[]` → `{ name: "ids", type: "...string[]" }`) and `?` for an optional or defaulted one (`limit = 10` → `{ name: "limit", type: "?" }`). Renderers print them where TypeScript writes them ([lang-plugin.md](./lang-plugin.md) LP11b)
 - `throws` combines explicit throw statements and JSDoc `@throws`
 - `inferredThrows` holds throws the LSP enrichment pass read off the *callees'* declared signatures ([lsp-enrichment.md](./lsp-enrichment.md) §7.1). It is a field of its own rather than an addition to `throws` precisely so that turning LSP on never perturbs the `api` fingerprint, whose input list names `throws` and not `inferredThrows` ([fingerprint.md](./fingerprint.md) §3.1)
 - `inferredThrows` is **Class B** per §1.1: when the pass inferred nothing — because no callee declared a throw, or because it fell back — the key is omitted outright. It is never emitted as `[]`, and the schema enforces `minItems: 1` so that an empty array cannot be written by accident

@@ -118,6 +118,7 @@ Examples:
 ### 3.5 Guaranteed change conditions
 
 - `visibility` changes → changes
+- A parameter becomes optional or required, gains or loses a default, or becomes or stops being a rest parameter → changes (the marker rides in `inputs[].type`, [ir-schema.md](./ir-schema.md) §7). The default's **value** is not part of the contract: what a function does with an omitted argument is its body's business
 - Any of `signature.inputs[].type` / `outputs` / `throws` changes → changes
 - Adding / removing a decorator or changing its arguments → changes (whether boundary or non-boundary)
 - `shortName` change (= renaming the method/function itself) → changes
@@ -351,6 +352,8 @@ The reference implementation and every language plugin must pass the following t
 | A10 | Change `kind` (`function` → `method`, etc.) | api changes |
 | A11 | Change `extKind` | api changes |
 | A14 | Change `shortName` (last segment) | api changes |
+| A15 | A parameter optional ↔ required (`a?: string` ↔ `a: string`, or a default added or dropped) | api changes |
+| A16 | A parameter `T[]` ↔ `...T[]` | api changes |
 
 ### 7.4 logic invariance conditions
 

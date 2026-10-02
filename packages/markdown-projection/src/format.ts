@@ -240,7 +240,7 @@ export function renderDecoratorList(decorators: readonly Decorator[]): string {
  */
 export function signatureLine(signature: Signature | null | undefined): string | null {
   if (signature === null || signature === undefined) return null
-  const inputs = signature.inputs.map((i) => `${i.name}: ${i.type}`).join(", ")
+  const inputs = signature.inputs.map((i) => formatInput(i.name, i.type)).join(", ")
   const outputs = signature.outputs.length > 0 ? signature.outputs.join(" | ") : "void"
   const throwsPart = signature.throws.length > 0 ? ` throws ${signature.throws.join(", ")}` : ""
   const asyncBadge = signature.async ? " ⚡async" : ""
@@ -463,4 +463,22 @@ export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
 /** Whether either end of a Dependency is a Symbol, which routes it to the symbol-level sections. */
 export function isSymbolEdge(dependency: Dependency): boolean {
   return isSymbolIdEndpoint(dependency.from) || isSymbolIdEndpoint(dependency.to)
+}
+
+/**
+ * One `Signature.inputs` entry as TypeScript writes it. A plugin puts what a caller sees of a
+ * parameter's form at the head of `type`, where the api fingerprint reads it (lang-plugin.md
+ * LP11b): `...` for a rest parameter and `?` for an optional or defaulted one. Printed as
+ * `name: type` those would read `ids: ...string[]`, so they go back where the source has them.
+ */
+export function formatInput(name: string, type: string): string {
+  if (type.startsWith("...")) {
+    const rest = type.slice(3)
+    return rest === "" ? `...${name}` : `...${name}: ${rest}`
+  }
+  if (type.startsWith("?")) {
+    const rest = type.slice(1)
+    return rest === "" ? `${name}?` : `${name}?: ${rest}`
+  }
+  return `${name}: ${type}`
 }
