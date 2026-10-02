@@ -5,7 +5,7 @@ import { symbolsOf } from "./fixtures/ctx"
 /**
  * A class has no signature, so its head — `abstract`, type parameters, `extends`, `implements`
  * — reached no axis: re-parenting a class, dropping `abstract` or adding a required type
- * parameter left every fingerprint identical and the diff reported nothing (LP8p, issue #339).
+ * parameter left every fingerprint identical and the diff reported nothing (LP8p).
  */
 
 async function classString(source: string, id = "ts:src/a.ts#C"): Promise<string> {
