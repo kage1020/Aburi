@@ -41,7 +41,21 @@ interface Reply {
  * between them and a child process — env in, exit code and `$GITHUB_OUTPUT` out — and a unit test
  * of the flow already exists next door in `comment.test.ts`, over the library form.
  */
-async function withApi(
+function withApi(
+  replies: (request: RecordedRequest) => Reply,
+  run: (base: string, requests: RecordedRequest[]) => Promise<void>,
+): Promise<void> {
+  // `GET /user` as the default `github.token` gets it: the refusal an installation token gets.
+  return withApiAs(
+    { status: 403, json: { message: "Resource not accessible by integration" } },
+    replies,
+    run,
+  )
+}
+
+/** {@link withApi}, with `GET /user` answered by `user`: who the token says it is. */
+async function withApiAs(
+  user: Reply,
   replies: (request: RecordedRequest) => Reply,
   run: (base: string, requests: RecordedRequest[]) => Promise<void>,
 ): Promise<void> {
@@ -55,7 +69,7 @@ async function withApi(
       body,
     }
     requests.push(request)
-    const reply = replies(request)
+    const reply = request.path.endsWith("/user") ? user : replies(request)
     res.writeHead(reply.status ?? 200, { "content-type": "application/json" })
     res.end(reply.text ?? JSON.stringify(reply.json ?? {}))
   })
@@ -154,8 +168,11 @@ function pageOf(request: RecordedRequest): number {
   return Number(new URL(request.path, "http://localhost").searchParams.get("page") ?? "0")
 }
 
-function comment(id: number, body: string) {
-  return { id, body, html_url: `https://github.example/c/${id}` }
+/** The account the default `github.token` posts as. */
+const ACTIONS_BOT = { login: "github-actions[bot]", type: "Bot" }
+
+function comment(id: number, body: string, user: { login: string; type: string } = ACTIONS_BOT) {
+  return { id, body, html_url: `https://github.example/c/${id}`, user }
 }
 
 function baseEnv(base: string, markdownPath: string): Record<string, string> {
@@ -224,7 +241,7 @@ describe("upsert-comment.mjs", () => {
   })
 
   it("measures a report that already carries the marker as it stands", async () => {
-    // The other branch of `raw.includes(MARKER)`: nothing is prepended, so the whole 65536 is
+    // The other branch of `raw.startsWith(MARKER)`: nothing is prepended, so the whole 65536 is
     // the report's to use. Prepending a second marker would also be an in-place update that
     // never finds its own comment again.
     const body = `${ABURI_COMMENT_MARKER}\n\n${"x".repeat(GITHUB_COMMENT_MAX_BYTES - 29)}`
@@ -304,6 +321,163 @@ describe("upsert-comment.mjs", () => {
     )
   })
 
+  it("never rewrites a person's comment that quotes the marker, and updates its own", async () => {
+    // A human comment older than Aburi's, quoting the marker in a code span; and one opening
+    // with it, as a fork author could plant before the `workflow_run` companion posts.
+    const path = await markdownFile("# Aburi diff\n\n1 changed\n")
+    const alice = { login: "alice", type: "User" }
+    await withApi(
+      (request) =>
+        request.method === "GET"
+          ? {
+              json: [
+                comment(101, `Why does the bot search for \`${ABURI_COMMENT_MARKER}\`?`, alice),
+                comment(102, `${ABURI_COMMENT_MARKER}\n\n# planted`, alice),
+                comment(202, `${ABURI_COMMENT_MARKER}\n\n# old report`),
+              ],
+            }
+          : { json: comment(202, "patched") },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        expect(run.outputs).toEqual({ action: "updated", "comment-id": "202" })
+        const writes = requests.filter((r) => r.method !== "GET")
+        expect(writes.map((r) => `${r.method} ${r.path}`)).toEqual([
+          "PATCH /repos/kage1020/Aburi/issues/comments/202",
+        ])
+      },
+    )
+  })
+
+  it("creates its own comment when only a person's carries the marker", async () => {
+    const path = await markdownFile("report\n")
+    await withApi(
+      (request) =>
+        request.method === "GET"
+          ? {
+              json: [
+                comment(102, `${ABURI_COMMENT_MARKER}\n\n# planted`, {
+                  login: "alice",
+                  type: "User",
+                }),
+              ],
+            }
+          : { status: 201, json: comment(303, "x") },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        expect(run.outputs).toEqual({ action: "created", "comment-id": "303" })
+        expect(requests.some((r) => r.method === "PATCH")).toBe(false)
+      },
+    )
+  })
+
+  it("matches a personal token's own login rather than any bot", async () => {
+    const path = await markdownFile("report\n")
+    const me = { login: "kage1020", type: "User" }
+    await withApiAs(
+      { json: { login: "kage1020" } },
+      (request) =>
+        request.method === "GET"
+          ? {
+              json: [
+                comment(201, `${ABURI_COMMENT_MARKER}\n\n# a bot's`),
+                comment(301, `${ABURI_COMMENT_MARKER}\n\n# mine`, me),
+              ],
+            }
+          : { json: comment(301, "patched", me) },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        expect(run.outputs).toEqual({ action: "updated", "comment-id": "301" })
+        expect(requests.find((r) => r.method === "PATCH")?.path).toBe(
+          "/repos/kage1020/Aburi/issues/comments/301",
+        )
+      },
+    )
+  })
+
+  it("puts the marker first even when the report quotes it further down", async () => {
+    const path = await markdownFile(`report quoting \`${ABURI_COMMENT_MARKER}\`\n`)
+    await withApi(
+      (request) =>
+        request.method === "GET" ? { json: [] } : { status: 201, json: comment(12, "x") },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        const posted = JSON.parse(requests.find((r) => r.method === "POST")?.body ?? "{}")
+          .body as string
+        expect(posted.startsWith(`${ABURI_COMMENT_MARKER}\n\nreport quoting`)).toBe(true)
+      },
+    )
+  })
+
+  it.each([
+    ["a 502", { status: 502, json: { message: "bad gateway" } }, "identify the token's user: 502"],
+    ["a bad token's 401", { status: 401, json: { message: "Bad credentials" } }, "user: 401"],
+    [
+      "a secondary rate limit's 403",
+      { status: 403, json: { message: "You have exceeded a secondary rate limit." } },
+      "user: 403",
+    ],
+    ["a user with no login", { json: { id: 1 } }, "a user without a login"],
+  ])("is exit 1 on %s from GET /user, writing nothing", async (_case, user, named) => {
+    // Only the refusal that names an installation token reads as one. Anything else would give
+    // up the login match for a personal token: a duplicate report, or a bot's comment rewritten.
+    const path = await markdownFile("report\n")
+    await withApiAs(
+      user,
+      () => ({ json: [comment(9, `${ABURI_COMMENT_MARKER}\n\nold\n`)] }),
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(1)
+        expect(run.stderr).toContain(named)
+        expect(requests.every((r) => r.method === "GET")).toBe(true)
+      },
+    )
+  })
+
+  it("counts a marker comment whose author it cannot read as unreadable, and says so", async () => {
+    // Passed over as a stranger's instead, Aburi's own comment would be replaced by a second one
+    // with nothing in the log.
+    const path = await markdownFile("report\n")
+    const { user: _user, ...authorless } = comment(9, `${ABURI_COMMENT_MARKER}\n\nold\n`)
+    await withApi(
+      (request) =>
+        request.method === "GET" ? { json: [authorless] } : { status: 201, json: comment(10, "x") },
+      async (base) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.status).toBe(0)
+        expect(run.stderr).toContain("::warning::1 comment(s)")
+        expect(run.stderr).toContain("author login")
+        expect(run.outputs.action).toBe("created")
+      },
+    )
+  })
+
+  it("asks who the token is once, across pages", async () => {
+    // A person's marker comment on page 1 asks; Aburi's on page 2 reuses the answer.
+    const path = await markdownFile("report\n")
+    const alice = { login: "alice", type: "User" }
+    const first = [
+      comment(1, `${ABURI_COMMENT_MARKER}\n\n# planted`, alice),
+      ...Array.from({ length: 99 }, (_, i) => comment(i + 2, "chatter")),
+    ]
+    await withApi(
+      (request) => {
+        if (request.method !== "GET") return { json: comment(500, "patched") }
+        return pageOf(request) === 1
+          ? { json: first }
+          : { json: [comment(500, `${ABURI_COMMENT_MARKER}\n\nold\n`)] }
+      },
+      async (base, requests) => {
+        const run = await runScript(baseEnv(base, path))
+        expect(run.outputs).toEqual({ action: "updated", "comment-id": "500" })
+        expect(requests.filter((r) => r.path.endsWith("/user"))).toHaveLength(1)
+      },
+    )
+  })
+
   it("keeps paging until a short page, so a busy pull request still finds its comment", async () => {
     const path = await markdownFile("report\n")
     const full = Array.from({ length: 100 }, (_, i) => comment(i + 1, "chatter"))
@@ -318,7 +492,7 @@ describe("upsert-comment.mjs", () => {
         const run = await runScript(baseEnv(base, path))
         expect(run.status).toBe(0)
         expect(run.outputs.action).toBe("updated")
-        expect(requests.filter((r) => r.method === "GET")).toHaveLength(2)
+        expect(requests.filter((r) => r.path.includes("/comments?"))).toHaveLength(2)
       },
     )
   })

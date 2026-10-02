@@ -139,8 +139,11 @@ resolve is exit 2 with a message naming the directory it looked in —
 
 ## Behaviour
 
-- The comment is located by the hidden marker `<!-- aburi:diff-comment -->`. Subsequent
-  runs of the same workflow update the same comment instead of piling new ones on the PR.
+- The comment is located by the hidden marker `<!-- aburi:diff-comment -->` at the start of
+  its body and an author the token posts as (the `GET /user` login, or a `[bot]` account for an
+  installation token such as `github.token`). Subsequent runs of the same workflow update the
+  same comment instead of piling new ones on the PR. A person's comment that quotes the marker
+  is left alone, and Aburi posts its own comment instead.
 - When the produced Markdown matches the existing comment byte-for-byte the action reports
   `unchanged` and skips the PATCH request — this keeps notification noise low for
   no-op re-runs.

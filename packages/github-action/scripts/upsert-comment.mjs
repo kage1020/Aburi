@@ -91,12 +91,70 @@ async function githubError(operation, response) {
   )
 }
 
-function parseComment(row) {
+/**
+ * A comment row, or null when a field this script reads is missing. `listed` rows must name their
+ * author, which decides whose comment it is; the comment a write returns is ours by construction.
+ */
+function parseComment(row, { listed }) {
   if (typeof row !== "object" || row === null) return null
   if (typeof row.id !== "number") return null
   if (typeof row.body !== "string") return null
   if (typeof row.html_url !== "string") return null
-  return { id: row.id, body: row.body, htmlUrl: row.html_url }
+  const comment = { id: row.id, body: row.body, htmlUrl: row.html_url }
+  if (!listed) return comment
+  // An author that cannot be read is an unreadable row, not a stranger's comment: passed over as
+  // someone else's, Aburi's own comment would be replaced by a second one with nothing in the log.
+  if (typeof row.user !== "object" || row.user === null) return null
+  if (typeof row.user.login !== "string") return null
+  return { ...comment, author: { login: row.user.login, isBot: row.user.type === "Bot" } }
+}
+
+/**
+ * The refusal an installation token gets from `GET /user`, and only that one. A 403 also comes
+ * back for a secondary rate limit or a personal token an organisation's SSO has not authorised,
+ * and reading those as "an installation token" would give up the login match for a personal
+ * token: a duplicate report, or another bot's comment rewritten.
+ */
+const INTEGRATION_REFUSAL = "Resource not accessible by integration"
+
+async function isIntegrationRefusal(response) {
+  if (response.status !== 403) return false
+  const body = await response
+    .clone()
+    .json()
+    .catch(() => null)
+  return body?.message === INTEGRATION_REFUSAL
+}
+
+/**
+ * Who this token posts as. A personal token answers `GET /user` with its login. An installation
+ * token — the default `github.token`, or a GitHub App's — is refused there with a 403 that says so
+ * (`INTEGRATION_REFUSAL`) and posts as a `[bot]` account, so the answer is "a bot" without a name:
+ * an installation token cannot read its own app's slug. Any other refusal — a 401 for a bad token,
+ * a rate limit, an SSO block — is an error naming this request, not a guess.
+ */
+async function poster(context) {
+  const response = await fetch(apiUrl(context.apiBase, "user"), {
+    method: "GET",
+    headers: headers(context.token),
+  })
+  if (await isIntegrationRefusal(response)) return { login: null }
+  if (!response.ok) throw await githubError("identify the token's user", response)
+  const user = await response.json()
+  if (typeof user?.login !== "string" || user.login === "") {
+    throw new Error("GitHub returned a user without a login for this token.")
+  }
+  return { login: user.login }
+}
+
+/**
+ * Aburi's comment is one this token wrote, opening with the marker. A comment that merely quotes
+ * the marker — in a code span, a question about the action, or planted on a fork's pull request
+ * before the `workflow_run` companion posts — is someone else's and is never rewritten.
+ */
+function isOwnComment(comment, self) {
+  if (!comment.body.startsWith(MARKER)) return false
+  return self.login === null ? comment.author.isBot : comment.author.login === self.login
 }
 
 /**
@@ -106,6 +164,9 @@ function parseComment(row) {
  */
 async function findMarkerComment(context) {
   let skipped = 0
+  // Asked once, and only when a comment opens with the marker: a pull request with no report yet
+  // costs no extra request.
+  let self
   for (let page = 1; ; page++) {
     const url = apiUrl(
       context.apiBase,
@@ -122,12 +183,14 @@ async function findMarkerComment(context) {
       )
     }
     for (const row of rows) {
-      const parsed = parseComment(row)
+      const parsed = parseComment(row, { listed: true })
       if (parsed === null) {
         skipped += 1
         continue
       }
-      if (parsed.body.includes(MARKER)) return { comment: parsed, skipped }
+      if (!parsed.body.startsWith(MARKER)) continue
+      self ??= await poster(context)
+      if (isOwnComment(parsed, self)) return { comment: parsed, skipped }
     }
     if (rows.length < PER_PAGE) return { comment: null, skipped }
   }
@@ -142,7 +205,7 @@ async function writeComment(context, { method, path, body }) {
   if (!response.ok) {
     throw await githubError(method === "POST" ? "create PR comment" : "update PR comment", response)
   }
-  const written = parseComment(await response.json())
+  const written = parseComment(await response.json(), { listed: false })
   if (written === null)
     throw new Error("GitHub returned a comment without id/body/html_url fields.")
   return written
@@ -217,7 +280,9 @@ async function main() {
     fail(INPUT_ERROR, `${context.markdownPath} could not be read (${reasonOf(error)}).`)
     return
   }
-  const body = raw.includes(MARKER) ? raw : `${MARKER}\n\n${raw}`
+  // The marker goes first even when the report quotes it further down: only a comment that opens
+  // with it is recognised as Aburi's on the next run.
+  const body = raw.startsWith(MARKER) ? raw : `${MARKER}\n\n${raw}`
   const size = Buffer.byteLength(body, "utf8")
   if (size > MAX_BYTES) {
     fail(
@@ -232,7 +297,7 @@ async function main() {
     const { comment: existing, skipped } = await findMarkerComment(context)
     if (skipped > 0) {
       process.stderr.write(
-        `::warning::${skipped} comment(s) came back without an id, body or html_url and were skipped. If one of them was Aburi's, this run posts a second marker comment instead of rewriting the first.\n`,
+        `::warning::${skipped} comment(s) came back without an id, body, html_url or author login and were skipped. If one of them was Aburi's, this run posts a second marker comment instead of rewriting the first.\n`,
       )
     }
     if (existing !== null && existing.body === body) {
