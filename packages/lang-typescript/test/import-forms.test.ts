@@ -19,7 +19,7 @@ describe("LP26f: import-equals-require binds the module object", () => {
 
     // The whole edge, not its presence. The shape is the point: `symbols: "*"` with a
     // `namespaceBinding` is what sends `x.foo()` to `foo` in the target file, where a
-    // default binding (`symbols: ["x"]`) would send it to `x.foo`, which names nothing
+    // default binding (`symbols: ["default as x"]`) would send it to `x.foo`, which names nothing
     // there. `import x = require(...)` binds the module object, as `import * as x` does.
     expect(imports).toEqual([
       { source: "./mod", symbols: "*", line: 1, dynamic: false, namespaceBinding: "x" },

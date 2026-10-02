@@ -75,7 +75,7 @@ export interface ImportedBindings {
  * but empty is an upstream fault rather than a shape to skip, and throws.
  *
  * A **default** import binds the module object too, and lands in `names` instead: the
- * language plugin reports `import nest from "m"` as `symbols: ["nest"]` with no
+ * language plugin reports `import nest from "m"` as `symbols: ["default as nest"]` with no
  * `namespaceBinding`, which is why a receiver is looked up in both maps (`resolveDecoratorName`).
  *
  * Re-export edges count as evidence too; their aliased form arrives as the source-side name
@@ -164,7 +164,10 @@ export function resolveDecoratorName(
   }
   const origin = bindings.names.get(name)
   if (origin === undefined) return { canonical: name, confidence: "high" }
-  return { canonical: origin.imported, confidence: origin.fromNestjs ? "high" : "medium" }
+  // A default import (`import Controller from "./decorators"`) names the module's `default`,
+  // which no table lists; the name the file chose for it is the only evidence of what it is.
+  const canonical = origin.imported === "default" ? name : origin.imported
+  return { canonical, confidence: origin.fromNestjs ? "high" : "medium" }
 }
 
 /** `a.b` → `a`; `nest` → `nest`. The only segment of a receiver that can name a binding. */

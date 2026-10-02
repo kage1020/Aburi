@@ -14,7 +14,9 @@ describe("C7: default + namespace binding preservation", () => {
   it("emits both a default-binding edge and a namespace edge", async () => {
     const { imports } = await importsOf("import Foo, * as Bar from './x'")
     expect(imports.find((e) => e.symbols === "*")).toBeDefined()
-    expect(imports.find((e) => Array.isArray(e.symbols) && e.symbols.includes("Foo"))).toBeDefined()
+    expect(
+      imports.find((e) => Array.isArray(e.symbols) && e.symbols.includes("default as Foo")),
+    ).toBeDefined()
   })
 })
 

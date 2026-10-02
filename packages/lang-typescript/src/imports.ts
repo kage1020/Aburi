@@ -168,9 +168,11 @@ function readImportClauseParts(clause: Node): {
         break
       }
       case "identifier":
-        // Default import binding: `import Foo from './x'` — the identifier IS the binding
-        // name that downstream code will use, so include it verbatim.
-        names.push(child.text)
+        // Default import binding: `import Foo from './x'` binds the module's `default` export
+        // to `Foo`, so it is written as `{ default as Foo }` would be. A bare `Foo` is what
+        // `import { Foo }` produces, and a resolver reading it would look up the module's named
+        // `Foo` instead (call-resolution.md §4.4).
+        names.push(`default as ${child.text}`)
         break
       case "named_imports":
         for (const spec of child.namedChildren) {
