@@ -9,7 +9,7 @@ import { useScratchWorkspace } from "../src/scratch"
  * Inserting one registration above others is one addition. A registration with no quoted path
  * used to be named by its source-order ordinal alone, so the insertion renamed every later one
  * and the diff paired each with the body its id used to hold: adding `compression()` reported
- * the authorization guard as removed (lang-plugin.md LP20i1, issue #344).
+ * the authorization guard as removed (lang-plugin.md LP20i1).
  */
 
 const workspace = useScratchWorkspace("registration-insert")
