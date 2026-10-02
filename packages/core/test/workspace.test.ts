@@ -53,6 +53,27 @@ describe("detectWorkspaceRoot", () => {
     expect(await detectWorkspaceRoot({ cwd: join(worktree, "src") })).toBe(worktree)
   })
 
+  it("CD32: stops at a `.git` beside another marker, in any probing order", async () => {
+    // This repository's own root is the layout: `.git` beside `turbo.json`. Probed in a list,
+    // `.git` ended the walk only while it came first in it.
+    await writeFile(join(tmp, "turbo.json"), "{}", "utf8")
+    const repo = join(tmp, "repo")
+    await mkdir(join(repo, ".git"), { recursive: true })
+    await mkdir(join(repo, "src"), { recursive: true })
+    await writeFile(join(repo, "turbo.json"), "{}", "utf8")
+
+    expect(await detectWorkspaceRoot({ cwd: join(repo, "src") })).toBe(repo)
+  })
+
+  it("CD33: passes a `.git` file that is not a `gitdir:` pointer", async () => {
+    await mkdir(join(tmp, ".git"), { recursive: true })
+    const vendored = join(tmp, "vendor", "lib")
+    await mkdir(join(vendored, "src"), { recursive: true })
+    await writeFile(join(vendored, ".git"), "", "utf8")
+
+    expect(await detectWorkspaceRoot({ cwd: join(vendored, "src") })).toBe(tmp)
+  })
+
   it("recognizes package.json with workspaces field as a marker", async () => {
     await writeFile(
       join(tmp, "package.json"),
@@ -97,10 +118,12 @@ describe("detectWorkspaceRoot", () => {
     }
   })
 
-  // The walk climbs to the filesystem root, so it reads manifests that belong to nobody in
-  // this workspace. The five cases below are the whole rule: a read failure at or below the
-  // root is the workspace's own and is raised, one above it is not and is ignored, and
-  // neither may displace "workspace-root-not-found" when there is no root to be inside of.
+  // Outside a repository the walk climbs to the filesystem root, so it reads manifests that
+  // belong to nobody in this workspace. The five cases below are the whole rule: a read
+  // failure at or below the root is the workspace's own and is raised, one above it is not and
+  // is ignored, and neither may displace "workspace-root-not-found" when there is no root to be
+  // inside of. The two "above" cases root at a marker other than `.git`, which would end the
+  // walk before it reached the manifest above.
   it("raises a malformed manifest below the workspace root", async () => {
     await mkdir(join(tmp, ".git"), { recursive: true })
     const pkg = join(tmp, "apps", "billing")
@@ -137,7 +160,8 @@ describe("detectWorkspaceRoot", () => {
   it("ignores a malformed manifest above the workspace root", async () => {
     const above = join(tmp, "home")
     const root = join(above, "repo")
-    await mkdir(join(root, ".git"), { recursive: true })
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, "pnpm-workspace.yaml"), "packages: ['apps/*']", "utf8")
     await writeFile(join(above, "package.json"), "{ not json", "utf8")
 
     expect(await detectWorkspaceRoot({ cwd: root })).toBe(root)
@@ -151,7 +175,8 @@ describe("detectWorkspaceRoot", () => {
 
     const above = join(tmp, "home")
     const root = join(above, "repo")
-    await mkdir(join(root, ".git"), { recursive: true })
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, "pnpm-workspace.yaml"), "packages: ['apps/*']", "utf8")
     const denied = join(above, "package.json")
     await writeFile(denied, JSON.stringify({ name: "someone-else" }), "utf8")
     await chmod(denied, 0o000)

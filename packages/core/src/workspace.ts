@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { open, readdir, readFile, stat } from "node:fs/promises"
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path"
 import type { WorkspaceManager } from "@aburi/types"
 import { glob } from "tinyglobby"
@@ -10,13 +10,24 @@ import { compareBy, compareCodeUnit } from "./order"
 import { describeJsonType, isVanishedFile } from "./scan/faults"
 
 /**
+ * The marker that also ends the walk: a repository, the tree `aburi diff` checks a revision out
+ * of. It is probed on its own, ahead of the others, so that a directory carrying it beside
+ * another marker answers as a repository whatever order the lists below are in.
+ */
+const REPOSITORY_MARKER = ".git"
+
+/**
+ * What a `.git` file opens with when it is a repository: the pointer git writes for a linked
+ * worktree or a submodule. Any other file of that name is not one.
+ */
+const GITDIR_POINTER = "gitdir: "
+
+/**
  * Filenames whose presence at any directory ancestor identifies a workspace root. The
  * outermost match wins (see detectWorkspaceRoot's contract): when both a sub-project and a
- * monorepo parent carry markers, the monorepo root is the one the IR must describe. `.git` is
- * also where the walk stops, so "outermost" never reaches past the repository.
+ * monorepo parent carry markers, the monorepo root is the one the IR must describe.
  */
 const ROOT_MARKERS = [
-  ".git",
   "pnpm-workspace.yaml",
   "turbo.json",
   "nx.json",
@@ -31,11 +42,16 @@ const ROOT_MARKERS = [
  */
 const CONDITIONAL_ROOT_MARKERS = ["package.json", "Cargo.toml", "pyproject.toml"] as const
 
+type RootMarker =
+  | typeof REPOSITORY_MARKER
+  | (typeof ROOT_MARKERS)[number]
+  | (typeof CONDITIONAL_ROOT_MARKERS)[number]
+
 export interface DetectWorkspaceRootOptions {
   /**
-   * Starting directory. The detector walks parent directories upward and remembers the
-   * outermost marker hit. Defaults to `process.cwd()`. Relative paths are resolved against
-   * the current working directory.
+   * Starting directory. The detector walks parent directories upward, remembering the
+   * outermost marker hit, and stops at the first `.git`. Defaults to `process.cwd()`. Relative
+   * paths are resolved against the current working directory.
    */
   cwd?: string
 }
@@ -45,12 +61,9 @@ export interface DetectWorkspaceRootOptions {
  * carries a workspace marker. Outermost wins so a sub-project's `package.json` does not
  * shadow the monorepo's `.git` / `pnpm-workspace.yaml`.
  *
- * The walk ends at the first `.git` — a directory, or the file a linked worktree or a
- * submodule has in its place. A repository is the tree `aburi diff` can check out a revision
- * of, so a root above it is a tree no base scan can reproduce: a worktree kept inside the main
- * checkout (`.worktrees/feat`) scanned the main checkout instead, and a repository nested in
- * another rooted every id at the outer one and read as moved against its own base. Inside a
- * monorepo nothing changes, since the monorepo's root is the directory holding its `.git`.
+ * The walk ends at the first `.git` — a directory, or the `gitdir:` file a linked worktree or a
+ * submodule has in its place — because a root above the repository is a tree `aburi diff`
+ * cannot check a revision out of (`component-detect.md` §11.1 has the layouts that did this).
  *
  * Throws CoreError "workspace-root-not-found" only when no marker exists between cwd and
  * the filesystem root — callers fall back to "treat cwd as a single-project workspace" in
@@ -58,11 +71,11 @@ export interface DetectWorkspaceRootOptions {
  *
  * Outside a repository the walk runs all the way to the filesystem root, so it opens manifests
  * in directories that have nothing to do with this workspace: a `$HOME/package.json` left
- * behind on a shared machine, or a directory a CI container is not allowed to read. A manifest that cannot be
- * read *inside* the workspace still has to be raised — the packages it was meant to declare
- * would otherwise go missing with nothing saying so — but one above the workspace root is
- * somebody else's file and aborting on it leaves the user with a path they do not recognize
- * and no way around it.
+ * behind on a shared machine, or a directory a CI container is not allowed to read. A manifest
+ * that cannot be read *inside* the workspace still has to be raised — the packages it was meant
+ * to declare would otherwise go missing with nothing saying so — but one above the workspace
+ * root is somebody else's file and aborting on it leaves the user with a path they do not
+ * recognize and no way around it.
  *
  * Which of the two a failure is cannot be decided while the walk is still climbing, so the
  * first failure is remembered together with the directory it happened in and answered once the
@@ -86,9 +99,9 @@ export async function detectWorkspaceRoot(
   let failure: MarkerFailure | null = null
   while (true) {
     const probe = await probeDirectoryMarkers(dir)
-    if (probe.hasMarker) outermost = dir
+    if (probe.marker !== null) outermost = dir
     if (failure === null && probe.failure !== null) failure = { dir, cause: probe.failure }
-    if (probe.repository) break
+    if (probe.marker === REPOSITORY_MARKER) break
     const parent = dirname(dir)
     if (parent === dir) break
     dir = parent
@@ -110,10 +123,8 @@ interface MarkerFailure {
 }
 
 interface MarkerProbe {
-  /** Whether this directory carries a marker. */
-  hasMarker: boolean
-  /** Whether the marker is `.git`, which makes this directory the last one the walk visits. */
-  repository: boolean
+  /** The marker this directory carries, or `null` when it carries none. */
+  marker: RootMarker | null
   /** The first error a probe of this directory raised, or `null` when every probe answered. */
   failure: unknown
 }
@@ -124,7 +135,8 @@ interface MarkerProbe {
  *
  * Probing still stops at the first marker found, exactly as it did when this threw: a `.git`
  * beside an unreadable `package.json` makes the directory a root without anything ever opening
- * that manifest, so no failure is invented for a directory that already answered. A failure
+ * that manifest, so no failure is invented for a directory that already answered. `.git` is
+ * asked first, so that holds whatever order the marker lists are in. A failure
  * recorded before the hit is still reported, because a directory that both fails a probe and
  * carries a marker is the workspace root itself — a `Cargo.toml` workspace beside a malformed
  * `package.json` — and that failure is inside the workspace.
@@ -134,11 +146,16 @@ async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
   const remember = (cause: unknown): void => {
     if (failure === null) failure = cause
   }
+  try {
+    if (await isRepository(join(dir, REPOSITORY_MARKER))) {
+      return { marker: REPOSITORY_MARKER, failure }
+    }
+  } catch (cause) {
+    remember(cause)
+  }
   for (const name of ROOT_MARKERS) {
     try {
-      if (await pathExists(join(dir, name))) {
-        return { hasMarker: true, repository: name === ".git", failure }
-      }
+      if (await pathExists(join(dir, name))) return { marker: name, failure }
     } catch (cause) {
       remember(cause)
     }
@@ -147,14 +164,42 @@ async function probeDirectoryMarkers(dir: string): Promise<MarkerProbe> {
     const path = join(dir, name)
     try {
       if (!(await pathExists(path))) continue
-      if (await fileSatisfiesWorkspacePredicate(name, path)) {
-        return { hasMarker: true, repository: false, failure }
-      }
+      if (await fileSatisfiesWorkspacePredicate(name, path)) return { marker: name, failure }
     } catch (cause) {
       remember(cause)
     }
   }
-  return { hasMarker: false, repository: false, failure }
+  return { marker: null, failure }
+}
+
+/**
+ * Is the `.git` at `path` a repository: a directory, or a file opening with the `gitdir:`
+ * pointer?
+ *
+ * A file of that name is otherwise nothing git would open — an empty one left behind, a
+ * submodule's pointer copied out of a tarball without the module — and taken at its name it
+ * made the directory holding it the workspace root, with no warning and every id rooted there.
+ * Only the pointer's opening bytes are read; a directory's contents never are. `stat` rather
+ * than `lstat`, so a symlink answers for what it points at and a dangling one is absent.
+ */
+async function isRepository(path: string): Promise<boolean> {
+  let entry: Awaited<ReturnType<typeof stat>>
+  try {
+    entry = await stat(path)
+  } catch (err: unknown) {
+    if (isVanishedFile(err)) return false
+    throw err
+  }
+  if (entry.isDirectory()) return true
+  if (!entry.isFile()) return false
+  const opening = Buffer.alloc(GITDIR_POINTER.length)
+  const handle = await open(path, "r")
+  try {
+    const { bytesRead } = await handle.read(opening, 0, opening.length, 0)
+    return opening.subarray(0, bytesRead).toString("utf8") === GITDIR_POINTER
+  } finally {
+    await handle.close()
+  }
 }
 
 /**

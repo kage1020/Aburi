@@ -685,6 +685,16 @@ async function resolveViaGit(
       headWorkspaceRoot,
       { side: "base", ref: spec.base },
     )
+    // The base scan finds its own root, and lands on the checkout git made only because the
+    // worktree's `.git` file ends the walk there (`component-detect.md` §2.1). A root anywhere
+    // else would compare a different tree against the head, so it is refused, not diffed.
+    if (baseReport.workspaceRoot !== worktreeDir) {
+      throw internalFault(
+        ` while scanning base ref "${spec.base}"`,
+        `the scan rooted at ${baseReport.workspaceRoot} instead of the worktree ${worktreeDir}, so the two sides would describe different trees`,
+        null,
+      )
+    }
     if (baseReport.irPath === null) {
       throw new CliError(`scan for base ref "${spec.base}" produced no IR file.`, "runtime-error")
     }

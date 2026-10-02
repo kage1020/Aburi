@@ -1,47 +1,21 @@
-import { spawn } from "node:child_process"
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { EXIT, runDiff } from "../src"
+import { CliError } from "../src/errors"
+import { fakeGit, realGit as git, probeRealGit } from "./fixtures"
 
 /**
  * A ref diff checks the base revision out as a worktree of the repository and scans the head in
- * the caller's directory, so both sides have to root at that repository. The head used to climb
- * to the outermost workspace marker, past the repository's own `.git`, and the base scan's
- * re-detection climbed out of the temporary worktree the same way. These are the three layouts
- * where something sits above the repository, run against real git.
+ * the caller's directory, so both sides have to root at that repository. These are the layouts
+ * that rooted them apart (`component-detect.md` §11.1), run against real git.
  */
 
 let scratch = ""
 const TEMP_VARIABLES = ["TMPDIR", "TEMP", "TMP"] as const
 let savedTemp: Partial<Record<(typeof TEMP_VARIABLES)[number], string>> = {}
-
-function git(args: readonly string[], cwd: string): Promise<string> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn("git", args, {
-      cwd,
-      env: {
-        ...process.env,
-        GIT_CONFIG_GLOBAL: resolve(scratch, "absent-gitconfig"),
-        GIT_CONFIG_SYSTEM: resolve(scratch, "absent-gitconfig"),
-        GIT_AUTHOR_NAME: "Aburi Test",
-        GIT_AUTHOR_EMAIL: "test@example.invalid",
-        GIT_COMMITTER_NAME: "Aburi Test",
-        GIT_COMMITTER_EMAIL: "test@example.invalid",
-      },
-    })
-    const err: Buffer[] = []
-    const out: Buffer[] = []
-    child.stdout?.on("data", (chunk: Buffer) => out.push(chunk))
-    child.stderr?.on("data", (chunk: Buffer) => err.push(chunk))
-    child.on("error", rejectPromise)
-    child.on("close", (code) => {
-      if (code === 0) resolvePromise(Buffer.concat(out).toString("utf8"))
-      else rejectPromise(new Error(`git ${args.join(" ")} exited ${code}: ${Buffer.concat(err)}`))
-    })
-  })
-}
+let gitProbeError: unknown = null
 
 /** A one-commit repository with one function, ignoring what the layouts below put inside it. */
 async function repository(directory: string): Promise<void> {
@@ -62,11 +36,33 @@ async function addFunction(directory: string, file: string, name: string): Promi
   await git(["commit", "-q", "-m", `add ${name}`], directory)
 }
 
-function diffIn(cwd: string, refSpec: string, failOn: string): ReturnType<typeof runDiff> {
-  return runDiff({ cwd, refSpec, outputDir: resolve(cwd, "out"), failOn, warn: () => {} })
+/** Put the temporary directory, and so the base worktree, at `directory`. */
+function tempAt(directory: string): void {
+  for (const name of TEMP_VARIABLES) process.env[name] = directory
 }
 
+/**
+ * One ref diff, with its warnings kept: a worktree that would not come off, or a scan incident
+ * on either side, would otherwise leave a degraded run looking clean.
+ */
+async function diffIn(cwd: string, refSpec: string, failOn: string) {
+  const warnings: string[] = []
+  const result = await runDiff({
+    cwd,
+    refSpec,
+    outputDir: resolve(cwd, "out"),
+    failOn,
+    warn: (message) => warnings.push(message),
+  })
+  return { ...result, warnings }
+}
+
+beforeAll(async () => {
+  gitProbeError = await probeRealGit()
+})
+
 beforeEach(async () => {
+  expect(gitProbeError, `git probe failed: ${String(gitProbeError)}`).toBeNull()
   scratch = await mkdtemp(resolve(tmpdir(), "aburi-diff-root-"))
   savedTemp = {}
   for (const name of TEMP_VARIABLES) {
@@ -94,8 +90,11 @@ describe("aburi diff in a repository with something above it", () => {
 
     const result = await diffIn(feat, "main..feat", "added")
 
-    expect(result.summaryLine).toMatch(/^\+1 -0 ~0 ↔0 /)
+    expect(result.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
+    expect(result.triggered).toEqual({ clause: { token: "added", threshold: null }, observed: 1 })
+    expect(result.faultedScans).toEqual([])
     expect(result.exitCode).toBe(EXIT.GATE)
+    expect(result.warnings).toEqual([])
   })
 
   it("diffs a repository nested in another without reading every Symbol as moved", async () => {
@@ -108,8 +107,11 @@ describe("aburi diff in a repository with something above it", () => {
 
     const result = await diffIn(inner, "HEAD~1..HEAD", "moved")
 
-    expect(result.summaryLine).toMatch(/^\+1 -0 ~0 ↔0 /)
+    expect(result.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
+    expect(result.triggered).toBeNull()
+    expect(result.faultedScans).toEqual([])
     expect(result.exitCode).toBe(EXIT.SUCCESS)
+    expect(result.warnings).toEqual([])
   })
 
   it("scans the base revision when the temporary directory is inside the repository", async () => {
@@ -118,10 +120,51 @@ describe("aburi diff in a repository with something above it", () => {
     await addFunction(demo, "src/one.ts", "two")
     const inside = resolve(demo, ".tmp")
     await mkdir(inside)
-    for (const name of TEMP_VARIABLES) process.env[name] = inside
+    tempAt(inside)
 
     const result = await diffIn(demo, "HEAD~1..HEAD", "added")
 
-    expect(result.summaryLine).toMatch(/^\+1 -0 ~0 ↔0 /)
+    expect(result.summaryLine).toBe("+1 -0 ~0 ↔0 ⤴0")
+    expect(result.triggered).toEqual({ clause: { token: "added", threshold: null }, observed: 1 })
+    expect(result.faultedScans).toEqual([])
+    expect(result.exitCode).toBe(EXIT.GATE)
+    expect(result.warnings).toEqual([])
+  })
+})
+
+describe("aburi diff whose base scan roots outside its worktree", () => {
+  it("refuses the diff as a bug in Aburi, naming both directories", async () => {
+    // git always leaves the worktree a `.git` file, so the base walk cannot climb out of a real
+    // one. This worktree has none, under a temporary directory with a marker above it, which is
+    // the only way left to make the base scan root somewhere else.
+    const demo = resolve(scratch, "demo")
+    await mkdir(resolve(demo, ".git"), { recursive: true })
+    await writeFile(resolve(demo, "aburi.json"), '{"languages":["lang-typescript"]}\n')
+    const outer = resolve(scratch, "outer")
+    await mkdir(resolve(outer, "tmp"), { recursive: true })
+    await writeFile(resolve(outer, "pnpm-workspace.yaml"), "packages: []\n")
+    tempAt(resolve(outer, "tmp"))
+    const worktrees: string[] = []
+    const { runner } = fakeGit({
+      onWorktreeAdd: async (worktreeDir) => {
+        worktrees.push(worktreeDir)
+        await mkdir(resolve(worktreeDir, "src"), { recursive: true })
+        await writeFile(resolve(worktreeDir, "src/one.ts"), "export function one() { return 1 }\n")
+      },
+    })
+
+    const error = await runDiff({
+      cwd: demo,
+      refSpec: "main..HEAD",
+      git: runner,
+      outputDir: resolve(demo, "out"),
+      warn: () => {},
+    }).catch((thrown: unknown) => thrown)
+
+    expect(error).toBeInstanceOf(CliError)
+    expect((error as CliError).code).toBe("runtime-error")
+    expect((error as CliError).message).toContain(
+      `Internal error while scanning base ref "main": the scan rooted at ${outer} instead of the worktree ${worktrees[0]}`,
+    )
   })
 })
