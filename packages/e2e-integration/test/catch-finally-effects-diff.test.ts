@@ -8,7 +8,7 @@ import { useScratchWorkspace } from "../src/scratch"
 /**
  * A database write added in a `catch` or a `finally` block is a logic change. Neither block was
  * walked, so the write reached no `effects[]` and the diff filed the edit as syntax-only
- * (ir-schema.md §8.1, issue #333).
+ * (ir-schema.md §8.1).
  */
 
 const workspace = useScratchWorkspace("catch-finally-effects")
@@ -16,10 +16,13 @@ const workspace = useScratchWorkspace("catch-finally-effects")
 async function scanOf(source: string): Promise<IR> {
   await workspace.writeSource("package.json", '{"name":"demo","private":true}\n')
   await workspace.writeSource("src/transfer.ts", source)
-  const { ir } = await scanWith(workspace.root, {
-    languages: [langTypescriptPlugin],
-    effects: [prismaEffectsPlugin],
-  })
+  // The ceiling budget: each classification is timed, and the first one in a process can
+  // overrun the 50 ms default on a loaded runner and be dropped. This test pins the walk.
+  const { ir } = await scanWith(
+    workspace.root,
+    { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] },
+    { classifyTimeoutMs: 5000 },
+  )
   return ir
 }
 
