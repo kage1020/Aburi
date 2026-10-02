@@ -42,7 +42,7 @@ describe("loadConfig", () => {
     if (!result.found) throw new Error("type narrowing unreachable")
     expect(result.source).toBe(path)
     expect(result.syntheticPlugins).toHaveLength(1)
-    expect(result.syntheticPlugins[0]?.name).toBe("hint-acme")
+    expect(result.syntheticPlugins[0]?.manifest.name).toBe("hint-acme")
   })
 
   it.each([

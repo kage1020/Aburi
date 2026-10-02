@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { promisify } from "node:util"
+import { frameworkHintPlugins } from "@aburi/config"
 import { makeLanguageId } from "@aburi/core"
 import { RegistryError } from "@aburi/plugin-registry"
 import type {
@@ -128,22 +129,48 @@ describe("loadPlugins — module resolution and bucketing", () => {
     ).rejects.toThrow(/no export carrying a `manifest`/)
   })
 
-  it("routes framework hint synthetic manifests into the registry", async () => {
-    const config: Config = {}
+  it("registers a frameworkHints plugin under framework:hint and runs it after the configured frameworks", async () => {
+    const fakeFramework: FrameworkPlugin = {
+      manifest: { ...langManifest, name: "framework-fake", type: "framework" },
+      init: async () => {},
+      classifySymbol: () => null,
+    }
     const loaded = await loadPlugins({
-      config,
+      config: { frameworks: ["framework-fake"] },
+      workspaceRoot: "/tmp",
+      importModule: async () => ({ plugin: fakeFramework }),
+      syntheticPlugins: frameworkHintPlugins({
+        frameworkHints: [
+          {
+            name: "acme",
+            decorators: { AcmeController: { extKind: "framework:acme:controller" } },
+          },
+        ],
+      }),
+    })
+    expect(loaded.frameworks.map((p) => p.manifest.name)).toEqual(["framework-fake", "hint-acme"])
+    expect(loaded.registry.findExtKind("framework:hint:acme:controller")?.owner.name).toBe(
+      "hint-acme",
+    )
+  })
+
+  it("reports a frameworkHints entry the registry refuses as a config error naming the entry", async () => {
+    // Both entries write the vendor `acme`, so both derive `framework:hint:acme` (config.md §8.4).
+    const error = await loadPlugins({
+      config: {},
       workspaceRoot: "/tmp",
       importModule: async () => ({}),
-      syntheticPlugins: [
-        {
-          ...effectsManifest,
-          name: "framework-hint-fake",
-          type: "framework",
-          provides: { ...effectsManifest.provides, derivedByPrefixes: [] },
-        },
-      ],
-    })
-    expect(loaded.registry.listPlugins().map((p) => p.name)).toContain("framework-hint-fake")
+      syntheticPlugins: frameworkHintPlugins({
+        frameworkHints: [
+          { name: "acme", decorators: { A: { extKind: "framework:acme:a" } } },
+          { name: "acme-two", decorators: { B: { extKind: "framework:acme:b" } } },
+        ],
+      }),
+    }).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CliError)
+    expect((error as CliError).code).toBe("config-error")
+    expect((error as CliError).message).toContain(`frameworkHints entry "acme-two"`)
+    expect((error as CliError).cause).toBeInstanceOf(RegistryError)
   })
 
   it("resolves bare manifest names to @aburi/<name>", async () => {

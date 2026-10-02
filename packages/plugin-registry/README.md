@@ -45,6 +45,11 @@ const vocab = registry.findExtKind("framework:nestjs:controller")
 // }
 ```
 
+A manifest that `@aburi/config` synthesized from a `frameworkHints` entry goes
+through `registry.registerHint(manifest)` instead. It is checked the same way,
+except that it may own a namespace under the reserved `framework:hint`; through
+`register`, nothing may.
+
 `findExtKind` / `findEffect` / `findFramework` return an object whose `owner`
 field is the full `PluginManifest` that claimed the namespace (not just the
 plugin's name). Callers that only need the name read `owner.name`.

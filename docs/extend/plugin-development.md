@@ -231,6 +231,10 @@ Contracts:
   the [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
 - `ctx.imports` is the live array the pipeline reports as the file's imports, not a copy.
   Read it, memoize on its identity if you like, and never mutate it.
+- An optional `symbolDropHint(symbol, ctx)` drops a Symbol the way a language
+  plugin's does. Every framework plugin is asked, not only the one that
+  classified the Symbol, and the Symbol already carries the winning
+  classification. Leave a Symbol with a boundary decorator alone.
 
 Decorator-free classification (name / shape / body signals) is also supported:
 see [`packages/framework-react`](https://github.com/kage1020/Aburi/tree/main/packages/framework-react)

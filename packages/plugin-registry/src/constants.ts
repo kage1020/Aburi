@@ -10,6 +10,9 @@ export const RESERVED_NAMESPACES = ["core", "aburi", "_", "framework:hint"] as c
 
 export type ReservedNamespace = (typeof RESERVED_NAMESPACES)[number]
 
+/** The reserved namespace a `frameworkHints` entry's synthesised manifest owns a part of. */
+export const HINT_NAMESPACE: ReservedNamespace = "framework:hint"
+
 /**
  * Which top-level namespaces each plugin type may own. Schema (`aburi.plugin.v1.json`
  * allOf if/then) already blocks most cross-type leaks; we re-encode the rules here

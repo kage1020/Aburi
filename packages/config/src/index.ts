@@ -6,7 +6,7 @@ export {
   type ContextFreeConfigErrorCode,
   type ValuedConfigErrorCode,
 } from "./errors"
-export { normalizeFrameworkHints } from "./framework-hints"
+export { frameworkHintPlugins, normalizeFrameworkHints } from "./framework-hints"
 export {
   type ConfigSource,
   configSourceFrom,

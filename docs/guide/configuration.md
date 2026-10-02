@@ -142,6 +142,12 @@ writing a plugin:
 }
 ```
 
+Analysis output shows these kinds as `framework:hint:acme:controller`, so they
+never collide with a published `framework-acme` plugin. A rule can also add a
+`derivedBy` reason, or set `drop: true` to drop the symbols it matches. A plugin
+listed in `frameworks` goes first: a class it recognizes keeps its
+classification.
+
 For anything heavier, such as parsing a new language or recognising call shapes,
 write a [plugin](../extend/plugin-development.md) instead.
 

@@ -8,6 +8,7 @@ import type {
 } from "@aburi/types"
 import {
   deriveXPrefix,
+  HINT_NAMESPACE,
   isReserved,
   isUnderPrefix,
   type PluginType,
@@ -128,6 +129,24 @@ export class VocabRegistry implements VocabRegistryContract {
    * throws `name-collision`.
    */
   register(manifest: PluginManifest): void {
+    this.#register(manifest, null)
+  }
+
+  /**
+   * Register the manifest the config loader synthesised from one `frameworkHints` entry.
+   *
+   * `framework:hint` is reserved so that a hint can own a namespace under it, and this is the
+   * only way to hand one out: the hint's extKinds are written `framework:acme:controller` and
+   * stored as `framework:hint:acme:controller` (`config.md` §8.3.1), so `register` refused the
+   * prefix the loader had just derived and every command stopped at startup. An imported plugin
+   * goes through `register` and still cannot claim anything under it, and a hint still cannot
+   * claim `framework:hint` itself or any other reserved namespace.
+   */
+  registerHint(manifest: PluginManifest): void {
+    this.#register(manifest, HINT_NAMESPACE)
+  }
+
+  #register(manifest: PluginManifest, granted: string | null): void {
     this.#assertProvidesShape(manifest)
 
     const serialized = stableStringify(manifest)
@@ -145,7 +164,7 @@ export class VocabRegistry implements VocabRegistryContract {
     // Reserved-namespace check runs first because it is the strongest invariant
     // (no plugin may ever own those names, regardless of type). Type-namespace and
     // xPrefix checks are plugin-class concerns that come second.
-    this.#validateReserved(manifest)
+    this.#validateReserved(manifest, granted)
     this.#validateTypeNamespaces(manifest)
     this.#validateXPrefix(manifest)
     this.#validateOwnDuplicates(manifest)
@@ -366,8 +385,10 @@ export class VocabRegistry implements VocabRegistryContract {
     }
   }
 
-  #validateReserved(m: PluginManifest): void {
+  /** `granted` is a reserved namespace this registration may hold below, never at. */
+  #validateReserved(m: PluginManifest, granted: string | null): void {
     const checkOne = (value: string, kind: string): void => {
+      if (granted !== null && value !== granted && isUnderPrefix(value, granted)) return
       if (isReserved(value)) {
         raise(
           `Plugin "${m.name}" declares ${kind} "${value}" inside a reserved namespace ` +
