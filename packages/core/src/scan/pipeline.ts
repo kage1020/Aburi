@@ -34,6 +34,7 @@ import { toNfc } from "../codepoints"
 import { CoreError } from "../errors"
 import { computeSymbolFingerprint, ZERO_FINGERPRINT } from "../fingerprint"
 import { makeLanguageId } from "../id"
+import { normalizeRuleStrings } from "../rule-text"
 import { decideSymbolDrop } from "./drop-b"
 import type { DropCFilter } from "./drop-c"
 import { describeJsonType, describeThrown } from "./faults"
@@ -883,7 +884,10 @@ function buildKeptSymbol(input: BuildKeptSymbolInput): IRSymbol {
     // (source order within the same line)").
     decorators: [...input.candidate.decorators].sort((a, b) => a.line - b.line),
     signature: input.candidate.signature,
-    rules: [...input.rules].sort((a, b) => a.line - b.line),
+    // A plugin's rule strings are brought to the ir-schema.md §8.2 form here, at the boundary,
+    // so a long or multi-line condition never reaches the IR past the schema's `maxLength`
+    // whichever plugin wrote it.
+    rules: input.rules.map(normalizeRuleStrings).sort((a, b) => a.line - b.line),
     effects: [...input.effects].sort((a, b) => (a.line ?? 0) - (b.line ?? 0)),
     calls: [...input.calls].sort((a, b) => a.line - b.line),
     source: input.candidate.source,

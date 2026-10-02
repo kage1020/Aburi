@@ -86,6 +86,7 @@ export {
   type PropagationStats,
   propagateEffects,
 } from "./propagate"
+export { normalizeRuleStrings, normalizeRuleText, RULE_TEXT_LIMIT } from "./rule-text"
 export {
   buildComponentAttribution,
   type ComponentAttribution,

@@ -1,4 +1,4 @@
-import { isQnameSegment } from "@aburi/core"
+import { isQnameSegment, normalizeRuleText } from "@aburi/core"
 import {
   type BodyExtraction,
   type CallCandidate,
@@ -212,7 +212,7 @@ function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
       handleIfStatement(node, rules, calls)
       return
     case "throw_statement":
-      rules.push(makeRule("throw", node, { what: thrownValue(node)?.node.text ?? null }))
+      rules.push(makeRule("throw", node, { what: nullableRuleText(thrownValue(node)?.node) }))
       visitCallsInside(node, calls)
       return
     case "return_statement":
@@ -275,7 +275,7 @@ function handleIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): v
     const condition = node.childForFieldName("condition")
     rules.push(
       makeRule("guard", node, {
-        condition: condition !== null ? stripParens(condition.text) : null,
+        condition: condition !== null ? conditionText(condition) : null,
       }),
     )
   }
@@ -297,7 +297,7 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
     return
   }
   if (isTrivialExpr(value)) return
-  rules.push(makeRule("return", node, { expr: normalizeExpression(value.text) }))
+  rules.push(makeRule("return", node, { expr: ruleText(value) }))
   visitChildren(value, rules, calls)
 }
 
@@ -313,7 +313,7 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
 function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): void {
   const value = unparenthesized(body)
   if (!isCallOnly(value) && !isTrivialExpr(value)) {
-    rules.push(makeRule("return", body, { expr: normalizeExpression(value.text) }))
+    rules.push(makeRule("return", body, { expr: ruleText(value) }))
   }
   visitNode(body, rules, calls)
 }
@@ -652,15 +652,58 @@ function isUnderAwait(node: Node): boolean {
 
 function extractSwitchCondition(node: Node): string | null {
   const cond = node.childForFieldName("value") ?? node.childForFieldName("condition")
-  return cond !== null ? stripParens(cond.text) : null
+  return cond !== null ? conditionText(cond) : null
 }
 
-function stripParens(text: string): string {
-  return text.replace(/^\s*\(([\s\S]*)\)\s*$/, "$1").trim()
+/**
+ * A rule's `condition`, `what` or `expr` as ir-schema.md §8.2 writes it: the node's source
+ * text with every comment inside it taken out, then whitespace-collapsed and cut to length by
+ * `normalizeRuleText`.
+ *
+ * Comments go because fingerprint.md lists them among the edits `logic` does not see, and these
+ * strings are `logic`'s input: a guard with a block comment between `qty <= 0` and
+ * `|| unit < 0` is the guard `qty <= 0 || unit < 0`. Each one is replaced by a space rather than by nothing, so a comment
+ * that was the only thing between two tokens still leaves them apart.
+ *
+ * `from` / `to` narrow the text to part of the node: `conditionText` uses them to leave out
+ * the parentheses, which no comment can sit outside of.
+ */
+function ruleText(node: Node, from = node.startIndex, to = node.endIndex): string {
+  const source = node.text
+  const base = node.startIndex
+  let out = ""
+  let at = from
+  for (const descendant of walkDescendants(node)) {
+    if (descendant.type !== "comment") continue
+    out += `${source.slice(at - base, descendant.startIndex - base)} `
+    at = descendant.endIndex
+  }
+  out += source.slice(at - base, to - base)
+  return normalizeRuleText(out)
 }
 
-function normalizeExpression(text: string): string {
-  return text.replace(/\s+/g, " ").trim()
+function nullableRuleText(node: Node | undefined): string | null {
+  return node === undefined ? null : ruleText(node)
+}
+
+/**
+ * The condition of an `if` or a `switch` without the parentheses the statement requires around
+ * it: `if (a && b)` has the condition `a && b`. Only that one pair goes, read off the tree — the
+ * grammar wraps the condition in a `parenthesized_expression` whose first and last tokens are
+ * they — so `if ((a) || (b))` keeps `(a) || (b)`.
+ */
+function conditionText(condition: Node): string {
+  const open = condition.child(0)
+  const close = condition.child(condition.childCount - 1)
+  if (
+    condition.type !== "parenthesized_expression" ||
+    open?.type !== "(" ||
+    close?.type !== ")" ||
+    open.equals(close)
+  ) {
+    return ruleText(condition)
+  }
+  return ruleText(condition, open.endIndex, close.startIndex)
 }
 
 function makeRule(

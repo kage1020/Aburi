@@ -158,6 +158,8 @@ Represents the **meaning executed by the symbol's body**. Changes when the meani
 }
 ```
 
+The rule strings are the ones the IR holds, already in the ir-schema.md §8.2 form: comments removed, whitespace collapsed, and cut to 120 characters plus `...`. Reading what the IR holds keeps `logic` recomputable from a Document alone. The cost is that an edit past the 120th character of a long condition, throw value or return expression moves neither `logic` nor the diff's rule delta; `syntax` still moves, so the change is reported as syntax-only rather than missed.
+
 `Effect.id` (e.g. `db.write` / `x-prisma:create`) is **not included in the input**. Reasons:
 
 - `id` is the classification result of an effect plugin; changing the plugin configuration (`config.effects[]`) can give the same call a different id
@@ -176,7 +178,7 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 
 - Reordering the **declaration order** of methods leaves each method's `logic` unchanged (computed per-symbol)
 - Renaming a local variable that does **not appear** in the strings of rules/effects leaves `logic` unchanged
-- Adding comments / changing whitespace → unchanged (canonical string normalization)
+- Adding comments / changing whitespace → unchanged (the language plugin leaves comments out of rule strings, ir-schema.md §8.2, and canonical string normalization collapses whitespace)
 - Adding a call classified as decoration (logger / `console.log` / anything dropped at extraction) → unchanged
 - Adding / changing decorators → unchanged (decorators belong to the api axis)
 
