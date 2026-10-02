@@ -45,7 +45,8 @@ export function walkBody(symbol: SymbolCandidate<Node>, _ctx: WalkContext<Node>)
     }
     const parameters = body.parent?.childForFieldName("parameters") ?? null
     if (parameters !== null) visitParameterDefaults(parameters, rules, calls)
-    visitNode(body, rules, calls)
+    if (isConciseBody(body)) visitConciseBody(body, rules, calls)
+    else visitNode(body, rules, calls)
   }
   rules.sort((a, b) => a.line - b.line)
   calls.sort((a, b) => a.line - b.line)
@@ -248,7 +249,7 @@ function handleIfStatement(node: Node, rules: Rule[], calls: CallCandidate[]): v
 function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   const value = node.namedChildren[0] ?? null
   if (value === null) return
-  if (value.type === "call_expression" || value.type === "new_expression") {
+  if (isCallOnly(value)) {
     // Call-only return: no rule, but the call still goes into calls[] so effect plugins
     // can inspect it. Descend into the callee and arguments so nested calls like the
     // `bar()` in `return foo(bar())` are recorded too — otherwise the outer call would
@@ -260,6 +261,57 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
   if (isTrivialExpr(value)) return
   rules.push(makeRule("return", node, { expr: normalizeExpression(value.text) }))
   visitChildren(value, rules, calls)
+}
+
+/**
+ * An arrow's expression body: the arrow returns it, so it is read as `return <expr>` — the
+ * same rule, or the same absence of one, the block spelling `{ return <expr> }` gets. Without
+ * this an edit to `(u) => u.role === "admin"` moved no rule and so no `logic` fingerprint,
+ * where the block-bodied twin is a logic change.
+ *
+ * The rule is the only thing added. Calls are collected by the walk the body always had, so a
+ * concise body records exactly the calls it did before.
+ */
+function visitConciseBody(body: Node, rules: Rule[], calls: CallCandidate[]): void {
+  const value = unparenthesized(body)
+  if (!isCallOnly(value) && !isTrivialExpr(value)) {
+    rules.push(makeRule("return", body, { expr: normalizeExpression(value.text) }))
+  }
+  visitNode(body, rules, calls)
+}
+
+/**
+ * A body that is an expression rather than a block. Only an arrow can have one, and a walk root
+ * is only ever a declaration's `body` field, so the parent's kind settles it.
+ */
+function isConciseBody(body: Node): boolean {
+  return body.parent?.type === "arrow_function" && body.type !== "statement_block"
+}
+
+/**
+ * The expression inside one pair of parentheses. A concise body that returns an object literal
+ * must be wrapped — `() => ({ a: 1 })` — and the block spelling `return { a: 1 }` has nothing
+ * to match them, so they are not part of what is returned. A comment written inside the pair
+ * is not what is returned either, so a pair holding an object literal and a comment answers
+ * with the object. A pair holding anything else besides its one expression — a type annotation
+ * written inside it, `(x: T)` — answers with the parenthesis, since there is no one expression
+ * to answer with.
+ *
+ * Only one pair is required, so only one is taken off: `((a + b))` answers with `(a + b)`. A
+ * redundant second pair therefore stays in `expr`, and adding or removing one still moves the
+ * `logic` fingerprint.
+ */
+function unparenthesized(node: Node): Node {
+  if (node.type !== "parenthesized_expression") return node
+  const [only, ...rest] = node.namedChildren.filter(
+    (child): child is Node => child !== null && child.type !== "comment",
+  )
+  return only !== undefined && rest.length === 0 ? only : node
+}
+
+/** A returned value that is one call: recorded in `calls[]`, never a rule (`drop-list.md` §5.4). */
+function isCallOnly(value: Node): boolean {
+  return value.type === "call_expression" || value.type === "new_expression"
 }
 
 function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {

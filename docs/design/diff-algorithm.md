@@ -1120,6 +1120,7 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19f | A function whose body only calls something is deleted, and an unrelated class with one method is added elsewhere | removed: 1, added: 2 (the class and its method) — §3.3 never pairs across kinds |
 | DF19g | A class with one method moved file, without git rename information, and neither body names anything on the logic axis | moved: 2 when the class name says two words or more; when it says one, the class is added: 1, removed: 1 and the method moved: 1 — §3.3 pairs an owner and its members independently |
 | DF19h | A function whose body only calls something, or is one `for` loop over calls, is deleted, and an unrelated function of the same shape is added elsewhere; both names say two words or more | removed: 1, added: 1 — §3.3 has no lone-candidate branch where the logic names nothing |
+| DF19i | A function whose body returns a non-trivial expression moved file and was renamed, without git rename information — written as a concise arrow (`export const isAdminUser = (u) => u.role === "admin"`) or with a block body | moved+changed: 1, rationale: "logic-fingerprint", for both spellings — the arrow's expression is its `return` rule ([`lang-plugin.md`](./lang-plugin.md) LP19a), so its logic names something and §3.3's lone-candidate branch applies |
 
 ## 10.1 Diff schema compatibility policy
 

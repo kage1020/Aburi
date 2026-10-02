@@ -97,18 +97,25 @@ function walkSymbol(symbol: SymbolCandidate<Node>, ctx: ExtractionContext): Body
   return walkBody(symbol, walkCtx)
 }
 
-export async function walkOf(source: string, id: string): Promise<BodyExtraction> {
-  const result = await parseSource(source)
-  const ctx = makeExtractionCtx(DEFAULT_PATH, source)
+export async function walkOf(
+  source: string,
+  id: string,
+  path = DEFAULT_PATH,
+): Promise<BodyExtraction> {
+  const result = await parseSource(source, path)
+  const ctx = makeExtractionCtx(path, source)
   const target = extractSymbols(requireTree(result.tree), ctx).find((s) => s.id === id)
   if (target === undefined) throw new Error(`no Symbol ${id} in fixture`)
   return walkSymbol(target, ctx)
 }
 
 /** Walk the first Symbol extraction answers, for a fixture that declares exactly one. */
-export async function walkFirstSymbol(source: string): Promise<BodyExtraction> {
-  const result = await parseSource(source)
-  const ctx = makeExtractionCtx(DEFAULT_PATH, source)
+export async function walkFirstSymbol(
+  source: string,
+  path = DEFAULT_PATH,
+): Promise<BodyExtraction> {
+  const result = await parseSource(source, path)
+  const ctx = makeExtractionCtx(path, source)
   const [target] = extractSymbols(requireTree(result.tree), ctx)
   if (target === undefined) throw new Error("no symbols in fixture")
   return walkSymbol(target, ctx)
