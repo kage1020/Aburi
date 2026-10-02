@@ -706,6 +706,9 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | LP21 | code differing only in comments | normalizeAst yields identical strings |
 | LP22 | code differing only in whitespace | normalizeAst yields identical strings |
 | LP23 | code with different identifiers | normalizeAst yields different strings |
+| LP23a | code differing only in an operator, a declaration keyword, a modifier or a primitive type — `a + b` / `a - b`, `let` / `const`, `private` / `public`, `x as string` / `x as number` | normalizeAst yields different strings. These are unnamed tokens in most grammars, and a walk over named nodes alone drops them (fingerprint.md §5.1) |
+| LP23b | code differing only in punctuation `fingerprint.md` §5.1 item 4 leaves out — for example the quotes around a string that needs no escape either way, or `;` against `,` between interface members | normalizeAst yields identical strings |
+| LP23c | code differing only in a hole in an array or an array pattern — `[, token]` / `[token]`, `[1, , 3]` / `[1, 3]`, `[x, ,]` / `[x,]` | normalizeAst yields different strings. The grammar has no node for a hole, so the commas around it are all that record it: a comma right after `[` or after another comma is kept, and every other comma, a trailing one included, is dropped. A destructuring *parameter* is outside the body this string describes, so a hole in one is not covered here |
 
 ### 9.6 Import extraction
 
