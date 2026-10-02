@@ -418,7 +418,7 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 
 `"guard" | "throw" | "return" | "loop" | "try" | "switch" | "match"`
 
-- `guard`: an `if` statement containing an early return / throw / continue
+- `guard`: an `if` statement containing an early return / throw / continue — an exit from the flow the `if` sits in: a `return`, `throw` or `process.exit()`, or a `break` / `continue` whose loop, `switch` or label lies outside the `if`. A `return` inside a callback or function written in the consequence, or a `break` of a `switch` or loop nested there, leaves only that inner construct and does not make the `if` a guard
 - `throw`: a throw statement
 - `return`: any non-trivial return (trivial determination per `drop-list.md`), a walk-root arrow's expression body included
 - `loop`: for / while / do

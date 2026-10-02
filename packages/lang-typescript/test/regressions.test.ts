@@ -55,9 +55,84 @@ describe("I2: containsEarlyExit coverage", () => {
     ],
     ["break", "export function f(items: number[]) { for (const x of items) { if (x < 0) break } }"],
     ["process.exit()", "export function f(x: unknown) { if (x) process.exit(1) }"],
+    [
+      "a labeled break of an outer loop",
+      "export function f(rows: number[][]) { outer: for (const r of rows) { for (const x of r) { if (x < 0) { for (;;) break outer } } } }",
+    ],
+    [
+      "a continue past a nested switch",
+      "export function f(items: number[]) { for (const x of items) { if (x) { switch (x) { case 1: continue } } } }",
+    ],
+    [
+      "a return beside a callback",
+      "export function f(xs: number[]) { if (xs) { xs.forEach((x) => x); return } }",
+    ],
   ])("recognizes `%s` as an early exit inside a guard", async (_label, source) => {
     const { rules } = await walkFirstSymbol(source)
     expect(rules.filter((r) => r.type === "guard")).toHaveLength(1)
+  })
+
+  // Each leaves only something nested inside the `if`, so the `if` guards nothing; the one
+  // guard expected is the inner `if` the exit sits in, where there is one.
+  it.each([
+    [
+      "a return inside a callback",
+      "export function f(x: any) { if (x.list) { x.list.forEach((i: any) => { if (!i) return; use(i) }) } }",
+      ["!i"],
+    ],
+    [
+      "a return inside a function expression",
+      "export function f(x: any) { if (x) { run(function () { return 1 }) } }",
+      [],
+    ],
+    [
+      "a return inside a nested function declaration",
+      "export function f(x: any) { if (x) { function inner() { return 1 } run(inner) } }",
+      [],
+    ],
+    [
+      "a return inside a generator",
+      "export function f(x: any) { if (x) { run(function* () { return 1 }) } }",
+      [],
+    ],
+    [
+      "a return inside a class method",
+      "export function f(x: any) { if (x) { register(class { m() { return 1 } }) } }",
+      [],
+    ],
+    [
+      "a break of a nested switch",
+      "export function f(x: any, y: number) { if (x.mode) { switch (y) { case 1: a(); break } } }",
+      [],
+    ],
+    [
+      "a break of an inner loop",
+      "export function f(x: any) { for (const k of x.rows) { if (k) { for (const j of k) { if (j) break } } } }",
+      ["j"],
+    ],
+    [
+      "a continue of an inner loop",
+      "export function f(x: any) { if (x) { while (next()) { continue } } }",
+      [],
+    ],
+    [
+      "a labeled break of a label inside the consequence",
+      "export function f(x: any) { if (x) { inner: { if (y()) break inner } } }",
+      ["y()"],
+    ],
+  ])("does not count %s", async (_label, source, guards) => {
+    const { rules } = await walkFirstSymbol(source)
+    expect(rules.filter((r) => r.type === "guard").map((r) => r.condition)).toEqual(guards)
+  })
+
+  it("leaves an arrow's change from expression to block body a syntax-only edit", async () => {
+    const concise = await walkFirstSymbol(
+      "export function h(x: any) { if (x.items) { save(x.items.map((i: any) => i.id)) } }",
+    )
+    const block = await walkFirstSymbol(
+      "export function h(x: any) { if (x.items) { save(x.items.map((i: any) => { return i.id })) } }",
+    )
+    expect(block.rules).toEqual(concise.rules)
   })
 })
 

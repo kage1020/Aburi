@@ -14,7 +14,6 @@ import {
   firstNonCommentChild,
   hasErrorChild,
   thrownValue,
-  walkDescendants,
 } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 import { objectEntryOf } from "./object-members"
@@ -427,20 +426,70 @@ function isTrivialExpr(node: Node): boolean {
   }
 }
 
+/**
+ * Whether `node`, an `if`'s consequence, can leave the flow the `if` sits in: a `return`,
+ * `throw` or `process.exit()`, or a `break`/`continue` whose target is outside `node`.
+ *
+ * Code that only leaves something nested inside `node` does not count. A function written
+ * there, a class's methods included, is not entered: its `return` ends the callback, not the
+ * code the `if` guards. An unlabeled `break` counts only when no loop or `switch` inside `node` is
+ * nearer, an unlabeled `continue` only when no loop is, and a labeled one only when its label
+ * is not declared inside `node`.
+ */
 function containsEarlyExit(node: Node): boolean {
-  for (const current of walkDescendants(node)) {
-    switch (current.type) {
-      case "return_statement":
-      case "throw_statement":
-      case "continue_statement":
-      case "break_statement":
-        return true
-      case "call_expression": {
-        const callee = current.childForFieldName("function")
-        if (callee !== null && describeCallee(callee)?.target === "process.exit") return true
-        break
-      }
+  return exitsFrom(node, { inLoop: false, inSwitch: false, labels: [] })
+}
+
+interface ExitScope {
+  readonly inLoop: boolean
+  readonly inSwitch: boolean
+  readonly labels: readonly string[]
+}
+
+const LOOP_TYPES: ReadonlySet<string> = new Set([
+  "for_statement",
+  "for_in_statement",
+  "while_statement",
+  "do_statement",
+])
+
+/** Nodes whose `return`, `break` and `continue` cannot leave the code around them. */
+const EXIT_BOUNDARIES: ReadonlySet<string> = new Set([
+  "arrow_function",
+  "function_expression",
+  "function_declaration",
+  "generator_function",
+  "generator_function_declaration",
+  "method_definition",
+])
+
+function exitsFrom(node: Node, scope: ExitScope): boolean {
+  if (EXIT_BOUNDARIES.has(node.type)) return false
+  switch (node.type) {
+    case "return_statement":
+    case "throw_statement":
+      return true
+    case "break_statement":
+    case "continue_statement": {
+      const label = node.childForFieldName("label")
+      if (label !== null) return !scope.labels.includes(label.text)
+      return node.type === "break_statement" ? !scope.inLoop && !scope.inSwitch : !scope.inLoop
     }
+    case "call_expression": {
+      const callee = node.childForFieldName("function")
+      if (callee !== null && describeCallee(callee)?.target === "process.exit") return true
+      break
+    }
+  }
+  const inner: ExitScope = LOOP_TYPES.has(node.type)
+    ? { ...scope, inLoop: true }
+    : node.type === "switch_statement"
+      ? { ...scope, inSwitch: true }
+      : node.type === "labeled_statement"
+        ? { ...scope, labels: [...scope.labels, node.childForFieldName("label")?.text ?? ""] }
+        : scope
+  for (const child of node.namedChildren) {
+    if (child !== null && exitsFrom(child, inner)) return true
   }
   return false
 }
