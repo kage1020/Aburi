@@ -183,8 +183,7 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
   })
 
   it("names the diff JSON when a directory stands where it would go", async () => {
-    // Every run clears the reports an earlier run left before it computes anything, so a
-    // directory at the path is refused there, before either IR is compared.
+    // The removal, not the write, is what meets the directory: it runs before either IR is read.
     const { base, head } = await writeIRPair()
     await mkdir(resolve(scratch, "out", DIFF_JSON_FILENAME), { recursive: true })
 
@@ -192,7 +191,7 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi diff could not remove the diff JSON an earlier run left at ${resolve(scratch, "out", DIFF_JSON_FILENAME)}`,
+      `aburi diff could not remove the diff JSON at ${resolve(scratch, "out", DIFF_JSON_FILENAME)}`,
     )
     expect(stderr).toContain("--output-dir")
   })
@@ -215,7 +214,7 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi diff could not remove the diff Markdown an earlier run left at ${resolve(scratch, "out", DIFF_MD_FILENAME)}`,
+      `aburi diff could not remove the diff Markdown at ${resolve(scratch, "out", DIFF_MD_FILENAME)}`,
     )
   })
 
@@ -229,7 +228,7 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi diff could not remove the uncapped diff Markdown an earlier run left at ${resolve(scratch, "out", DIFF_FULL_MD_FILENAME)}`,
+      `aburi diff could not remove the uncapped diff Markdown at ${resolve(scratch, "out", DIFF_FULL_MD_FILENAME)}`,
     )
     expect(stderr).toContain("--output-dir")
   })

@@ -187,27 +187,26 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   // And created now, for the same reason: a destination that cannot hold the report is
   // refused before two scans are run for it.
   await createOutputDir("diff", outputDir)
-  // Every report an earlier run left here goes now, whatever the format, so the order is
-  // always "remove, then write if needed", and a path that cannot be cleared is refused before
-  // the scans rather than after. A run that stops before it writes — a plugin that fails to
-  // load, a strict scan's undeclared value — then leaves no report at all, rather than one of
-  // some other diff that a caller checking for the file would post as this one's. The uncapped
-  // report is written only when this run's cap shortens `diff.md`, so it goes for the same
-  // reason even on a run that does write.
+  // Removed before the scans, whatever the format, so the order is always "remove, then write if
+  // needed" and a path that cannot be cleared is refused before two scans are run for it. A run
+  // that stops first — a plugin that fails to load, a strict scan's undeclared value — then leaves
+  // nothing a caller checking for `diff.md` would post as this run's report. `diff.full.md` goes
+  // too: written only when this run's cap shortens `diff.md`, one left here would be the full
+  // report of some other diff even on a run that does write.
   await removeOutputFile({
     command: "diff",
-    artefact: "the diff JSON an earlier run left",
+    artefact: "the diff JSON",
     path: resolve(outputDir, DIFF_JSON_FILENAME),
   })
   await removeOutputFile({
     command: "diff",
-    artefact: "the diff Markdown an earlier run left",
+    artefact: "the diff Markdown",
     path: resolve(outputDir, DIFF_MD_FILENAME),
   })
   const fullMdPath = resolve(outputDir, DIFF_FULL_MD_FILENAME)
   await removeOutputFile({
     command: "diff",
-    artefact: "the uncapped diff Markdown an earlier run left",
+    artefact: "the uncapped diff Markdown",
     path: fullMdPath,
   })
   const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(

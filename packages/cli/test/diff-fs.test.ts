@@ -208,8 +208,8 @@ describe("runDiff — --base/--head (file mode)", () => {
   it("leaves no earlier report behind when the run stops before it writes one", async () => {
     // A caller deciding whether to post `diff.md` by whether it exists — the GitHub Action does —
     // would otherwise post an earlier run's report as this one's, when this run failed after
-    // the output directory was chosen: here an unreadable head IR, in the action a plugin that
-    // fails to load.
+    // the output directory was chosen: here a --head IR that is not there, in the action a plugin
+    // that fails to load.
     const out = resolve(scratch, "out")
     const basePath = resolve(scratch, "base.json")
     await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
@@ -232,7 +232,7 @@ describe("runDiff — --base/--head (file mode)", () => {
         refSpec: null,
         format: "both",
       }),
-    ).rejects.toThrow()
+    ).rejects.toThrow(`Failed to read IR file "${resolve(scratch, "missing.json")}"`)
     expect(await pathExists(resolve(out, "diff.md"))).toBe(false)
     expect(await pathExists(resolve(out, "diff.json"))).toBe(false)
   })

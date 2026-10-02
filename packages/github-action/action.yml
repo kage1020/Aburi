@@ -39,7 +39,9 @@ inputs:
     required: false
     default: ""
   output-dir:
-    description: "Where `aburi diff` writes `diff.json` and `diff.md` (forwarded to `--output-dir`)."
+    description: >-
+      Where `aburi diff` writes `diff.json` and `diff.md` (forwarded to `--output-dir`): a relative
+      value is relative to `working-directory`, an absolute one is used as it is. Must not be empty.
     required: false
     default: "out"
   format:
@@ -96,10 +98,10 @@ inputs:
 
 outputs:
   diff-json-path:
-    description: "Absolute path to the JSON diff artefact this run's `aburi diff` wrote (empty when `format=md`, or when the CLI stopped before writing it)."
+    description: "Absolute path to the JSON diff artefact this run's `aburi diff` wrote (empty when `format=md`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear."
     value: ${{ steps.diff.outputs.diff-json-path }}
   diff-md-path:
-    description: "Absolute path to the Markdown diff artefact this run's `aburi diff` wrote (empty when `format=json`, or when the CLI stopped before writing it)."
+    description: "Absolute path to the Markdown diff artefact this run's `aburi diff` wrote (empty when `format=json`, or when the run stopped before writing it). Read it together with `cli-exit-code`: a run that exits 1 or 2 can leave a path to something it could not clear."
     value: ${{ steps.diff.outputs.diff-md-path }}
   cli-exit-code:
     description: "Numeric exit code from `aburi diff` (0=clean, 1=runtime error, 2=input error, 3=--fail-on gate or plugin error). Matches `packages/cli/src/exit-codes.ts`. Also 2 when `cli: workspace` finds no CLI to run, which is the one value the diff itself did not produce."
@@ -121,6 +123,7 @@ runs:
         COMMENT: ${{ inputs.comment }}
         CLI: ${{ inputs.cli }}
         MAX_BYTES: ${{ inputs.max-bytes }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
       run: |
         set -euo pipefail
         if [ "$COMMENT" = "true" ] && [ "$FORMAT" = "json" ]; then
@@ -148,6 +151,12 @@ runs:
         # `0` is the documented "no cap" spelling, so it passes.
         if [ -n "$MAX_BYTES" ] && ! printf '%s' "$MAX_BYTES" | grep -Eq '^(0|[1-9][0-9]*)$'; then
           echo "::error::max-bytes must be a non-negative integer, or empty (got '$MAX_BYTES')." >&2
+          exit 2
+        fi
+        # The CLI reads `--output-dir ""` as the directory it runs in, while the report paths
+        # would be looked for elsewhere; an empty value has no one meaning, so it is refused.
+        if [ -z "$OUTPUT_DIR" ]; then
+          echo "::error::output-dir must not be empty." >&2
           exit 2
         fi
 
@@ -272,17 +281,30 @@ runs:
         status=$?
         set -e
 
-        # Absolute, and only for a file this run wrote: `scripts/report-paths.mjs` says why, and
-        # `test/report-paths.test.ts` runs it. An empty `diff-md-path` is what keeps the comment
-        # step from posting after a plugin error, which exits 3 like a tripped gate.
-        node "$GITHUB_ACTION_PATH/scripts/report-paths.mjs" >> "$GITHUB_OUTPUT"
         # Preserve the CLI's own exit code:
         #   0 = success, 1 = runtime error, 2 = input error, 3 = --fail-on gate or plugin error.
         # See `packages/cli/src/exit-codes.ts` for the canonical mapping.
         # We propagate `status` instead of failing here so the subsequent comment step
         # can still post the diff (which is especially valuable when status=3 — a
-        # triggered gate is precisely what reviewers need to see on the PR).
+        # triggered gate is precisely what reviewers need to see on the PR). Written before the
+        # report paths are worked out, so a failure there cannot lose the gate's verdict.
         echo "cli-exit-code=$status" >> "$GITHUB_OUTPUT"
+
+        # Absolute, and only for a file this run wrote: `scripts/report-paths.mjs` says why, and
+        # `test/report-paths.test.ts` runs it. An empty `diff-md-path` is what keeps the comment
+        # step from posting after a plugin error, which exits 3 like a tripped gate. Same shape as
+        # the two scripts above: captured, and both paths written empty if the script fails, so
+        # `$GITHUB_OUTPUT` never holds half of its answer.
+        set +e
+        paths=$(node "$GITHUB_ACTION_PATH/scripts/report-paths.mjs")
+        paths_status=$?
+        set -e
+        if [ "$paths_status" != "0" ]; then
+          printf 'diff-json-path=\ndiff-md-path=\n' >> "$GITHUB_OUTPUT"
+          echo "::error::report-paths.mjs failed; no report path was published." >&2
+          exit 1
+        fi
+        printf '%s\n' "$paths" >> "$GITHUB_OUTPUT"
 
     - name: "Aburi: upsert PR comment"
       id: post-comment

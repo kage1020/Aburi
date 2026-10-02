@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
+import { DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
 import { afterAll, describe, expect, it } from "vitest"
 
 const execFileAsync = promisify(execFile)
@@ -48,46 +49,69 @@ async function run(cwd: string, env: Record<string, string>): Promise<Record<str
 describe("report-paths.mjs", () => {
   it("names a relative output-dir's reports by absolute path", async () => {
     const cwd = await workingDirectory()
-    await writeReports(join(cwd, "out"), ["diff.json", "diff.md"])
+    await writeReports(join(cwd, "out"), [DIFF_JSON_FILENAME, DIFF_MD_FILENAME])
     const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "both" })
     expect(outputs).toEqual({
-      "diff-json-path": join(cwd, "out", "diff.json"),
-      "diff-md-path": join(cwd, "out", "diff.md"),
+      "diff-json-path": join(cwd, "out", DIFF_JSON_FILENAME),
+      "diff-md-path": join(cwd, "out", DIFF_MD_FILENAME),
     })
   })
 
   it("leaves an absolute output-dir as it is, wherever the CLI ran", async () => {
-    // The case that failed: with `working-directory: .` the comment step was handed
-    // `.//home/runner/work/_temp/aburi/diff.md`.
+    // An absolute output-dir must come back untouched, whatever directory the script ran in.
     const cwd = await workingDirectory()
     const elsewhere = await workingDirectory()
     const outputDir = join(elsewhere, "aburi")
-    await writeReports(outputDir, ["diff.json", "diff.md"])
+    await writeReports(outputDir, [DIFF_JSON_FILENAME, DIFF_MD_FILENAME])
     const outputs = await run(cwd, { OUTPUT_DIR: outputDir, FORMAT: "both" })
-    expect(outputs["diff-md-path"]).toBe(join(outputDir, "diff.md"))
-    expect(outputs["diff-json-path"]).toBe(join(outputDir, "diff.json"))
+    expect(outputs["diff-md-path"]).toBe(join(outputDir, DIFF_MD_FILENAME))
+    expect(outputs["diff-json-path"]).toBe(join(outputDir, DIFF_JSON_FILENAME))
     expect(isAbsolute(outputs["diff-md-path"] ?? "")).toBe(true)
   })
 
   it("gives empty paths when the CLI stopped before writing, as a plugin error does", async () => {
-    // A plugin that fails to load exits 3, the code a tripped gate exits with; the empty
-    // `diff-md-path` is what keeps the comment step from running against no file.
+    // The directory is there and nothing is in it: the CLI created it and stopped. Both paths come
+    // back empty, which is what the comment step's `diff-md-path != ''` reads.
     const cwd = await workingDirectory()
     await mkdir(join(cwd, "out"))
     const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "both" })
     expect(outputs).toEqual({ "diff-json-path": "", "diff-md-path": "" })
   })
 
-  it.each([
-    ["json", { "diff-json-path": "diff.json", "diff-md-path": "" }],
-    ["md", { "diff-json-path": "", "diff-md-path": "diff.md" }],
-  ])("names only what --format %s asked for, whatever else is there", async (format, expected) => {
+  it("names only the JSON under --format json, whatever else is there", async () => {
     const cwd = await workingDirectory()
-    await writeReports(join(cwd, "out"), ["diff.json", "diff.md"])
-    const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: format })
+    await writeReports(join(cwd, "out"), [DIFF_JSON_FILENAME, DIFF_MD_FILENAME])
+    const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "json" })
     expect(outputs).toEqual({
-      "diff-json-path": expected["diff-json-path"] && join(cwd, "out", "diff.json"),
-      "diff-md-path": expected["diff-md-path"] && join(cwd, "out", "diff.md"),
+      "diff-json-path": join(cwd, "out", DIFF_JSON_FILENAME),
+      "diff-md-path": "",
     })
+  })
+
+  it("names only the Markdown under --format md, whatever else is there", async () => {
+    const cwd = await workingDirectory()
+    await writeReports(join(cwd, "out"), [DIFF_JSON_FILENAME, DIFF_MD_FILENAME])
+    const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "md" })
+    expect(outputs).toEqual({
+      "diff-json-path": "",
+      "diff-md-path": join(cwd, "out", DIFF_MD_FILENAME),
+    })
+  })
+
+  it("names the JSON alone when the run wrote it and stopped before the Markdown", async () => {
+    const cwd = await workingDirectory()
+    await writeReports(join(cwd, "out"), [DIFF_JSON_FILENAME])
+    const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "both" })
+    expect(outputs).toEqual({
+      "diff-json-path": join(cwd, "out", DIFF_JSON_FILENAME),
+      "diff-md-path": "",
+    })
+  })
+
+  it("does not name a directory standing where a report would be", async () => {
+    const cwd = await workingDirectory()
+    await mkdir(join(cwd, "out", DIFF_MD_FILENAME), { recursive: true })
+    const outputs = await run(cwd, { OUTPUT_DIR: "out", FORMAT: "md" })
+    expect(outputs).toEqual({ "diff-json-path": "", "diff-md-path": "" })
   })
 })

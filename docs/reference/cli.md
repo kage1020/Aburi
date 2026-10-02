@@ -204,8 +204,8 @@ went:
 The sections that survive are always the important ones: API changes go last, Syntax-only first.
 `diff.json` is never capped, so nothing is lost from the artefact you can query. When the cap
 changed anything, the uncapped report is written beside the capped one as `diff.full.md`, which
-is what the note points at; every other run, whatever its `--format`, removes any
-`diff.full.md` left from an earlier one.
+is what the note points at. Like `diff.json` and `diff.md`, one left from an earlier run is
+removed before the comparison starts (see `--output-dir` above).
 
 The CLI has no cap unless you pass one: omitting `--max-bytes` writes the whole document.
 `--max-bytes 0` is not the way to say that — it exits `2`, along with every other value that is
