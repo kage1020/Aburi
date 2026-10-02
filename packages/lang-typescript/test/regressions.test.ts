@@ -62,15 +62,24 @@ describe("I2: containsEarlyExit coverage", () => {
 })
 
 describe("I3: try/catch/finally scope pin", () => {
-  it("keeps catch body calls out of the try rule's Symbol calls", async () => {
+  it("records the catch body's calls and keeps its rules out", async () => {
+    // ir-schema.md §8.1 withholds the catch body's rules, so a rewritten error handler's
+    // branching does not move the logic axis. Its calls are another matter: no other Symbol
+    // records them, and a database write added there reached no effect at all.
     const { calls, rules } = await walkFirstSymbol(
-      "export function f() { try { doThing() } catch { errorHandler() } }",
+      "export function f() { try { doThing() } catch (e) { if (!e) return; errorHandler(e); throw e } }",
     )
-    expect(rules.some((r) => r.type === "try")).toBe(true)
-    // The catch handler's contents are semantically part of another Symbol's scope
-    // (or dropped when trivial). doThing (inside try) is recorded; errorHandler is not.
-    expect(calls.map((c) => c.target)).toContain("doThing")
-    expect(calls.map((c) => c.target)).not.toContain("errorHandler")
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls.map((c) => c.target)).toEqual(["doThing", "errorHandler"])
+  })
+
+  it("walks the finally block like the try block", async () => {
+    // It runs on every path, so its rules and calls are the Symbol's.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { doThing() } finally { if (!held) return; release() } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try", "guard"])
+    expect(calls.map((c) => c.target)).toEqual(["doThing", "release"])
   })
 })
 

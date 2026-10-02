@@ -233,8 +233,6 @@ function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
       return
     case "try_statement":
       rules.push(makeRule("try", node))
-      // Only the try block's statements contribute rules/calls; catch/finally are skipped
-      // per ir-schema.md so a rewritten error handler does not perturb the logic axis.
       handleTryStatement(node, rules, calls)
       return
     case "switch_statement":
@@ -352,9 +350,21 @@ function isCallOnly(value: Node): boolean {
   return value.type === "call_expression" || value.type === "new_expression"
 }
 
+/**
+ * The try block and the `finally` block are walked as any block is: `finally` runs on every path,
+ * so what it does is what the Symbol does. The catch clause gives its **calls** and withholds its
+ * rules (ir-schema.md §8.1 — a rewritten error handler's branching does not move the logic axis),
+ * the way a `throw` gives the calls in its argument. Withholding the calls too left a database
+ * write added in either block in no Symbol's `calls[]` or `effects[]`, so the diff filed it as a
+ * syntax-only change.
+ */
 function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   const body = node.childForFieldName("body")
   if (body !== null) visitNode(body, rules, calls)
+  const handler = node.childForFieldName("handler")
+  if (handler !== null) visitCallsInside(handler, calls)
+  const finalizer = node.childForFieldName("finalizer")
+  if (finalizer !== null) visitNode(finalizer, rules, calls)
 }
 
 function handleCall(node: Node, calls: CallCandidate[]): void {

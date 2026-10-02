@@ -422,7 +422,7 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 - `throw`: a throw statement
 - `return`: any non-trivial return (trivial determination per `drop-list.md`), a walk-root arrow's expression body included
 - `loop`: for / while / do
-- `try`: try-catch (rules inside the catch body are not expanded into the same Symbol's rules)
+- `try`: try-catch (rules inside the catch body are not expanded into the same Symbol's rules; its calls, and so its effects, are the Symbol's like any other, and the `finally` block is walked like the try block, since it runs on every path)
 - `switch`: a switch statement
 - `match`: pattern matching (used only in symbols with `extKind: "fp:match"`)
 
