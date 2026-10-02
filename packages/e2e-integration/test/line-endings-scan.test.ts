@@ -8,7 +8,7 @@ import { useScratchWorkspace } from "../src/scratch"
  * The same source saved with LF, CRLF or a lone CR is the same program, and its Document must
  * not say otherwise: a template literal's line break reached the `syntax` fingerprint as the
  * characters `\r\n`, a guard's `condition` and a decorator's `raw` kept the `\r`, and a CR-only
- * file read as one line (fingerprint.md §5.3, issue #345).
+ * file read as one line (fingerprint.md §5.3).
  */
 
 const workspace = useScratchWorkspace("line-endings-scan")
