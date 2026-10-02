@@ -255,7 +255,9 @@ describe("a class of function-valued fields is not a data model", () => {
     // "holds a function": a generator and a wrapped closure both fall to the data branch, so
     // the class is dropped and the calls it was carrying for them go with it. Pinned rather
     // than fixed here, because widening the set is the same decision at three sites at once —
-    // this one, whether the member gets a Symbol, and whose body the walk records.
+    // this one, whether the member gets a Symbol, and whose body the walk records. A module-level
+    // `const` written like `handle` has its closure read as the const's body (LP7c); a field
+    // does not, so the class still carries `inner` and is still dropped.
     const generator = classOf("  gen = function* () { yield q() }")
     const wrapped = classOf("  handle = withAuth(() => { inner() })")
 

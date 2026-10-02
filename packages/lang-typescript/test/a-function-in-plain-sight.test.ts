@@ -47,7 +47,8 @@ describe("a function behind a wrapper is a function", () => {
 
   it("stops at a call, which is not a wrapper", async () => {
     // `withAuth(...)` returns a function by convention and nothing in the tree says so. The
-    // unwrap is syntactic, so it ends here rather than guessing.
+    // unwrap is syntactic, so it ends here rather than guessing. That settles the kind only: the
+    // function inside the call is still read, as the const's body (LP7c, below).
     const symbol = await symbolOf("export const h = (withAuth(() => { q() }))", "ts:src/a.ts#h")
 
     expect(symbol.kind).toBe("const")
@@ -174,6 +175,185 @@ describe("a registration call's inline handler is its body", () => {
 
     expect(symbol.derivedBy).toContain("inline-handler")
     expect(symbol.signature).toBeNull()
+  })
+})
+
+/**
+ * A `const` initialised by a call stays a const (LP7b): nothing says the call returns what it
+ * was given. But the function it hands the call is written in that declaration and nowhere else,
+ * so it is the const's body, the way a registration's inline handler is the registration's.
+ */
+describe("a function a const hands to a call is the const's body (LP7c)", () => {
+  const POST = [
+    "export const POST = withAuth(async (id: number) => {",
+    '  if (!id) throw new Error("missing id")',
+    "  return prisma.user.delete({ where: { id } })",
+    "})",
+  ].join("\n")
+
+  it("walks the wrapped handler onto the const, and keeps the const a const", async () => {
+    const symbol = await symbolOf(POST, "ts:src/a.ts#POST")
+    const { rules, calls } = await walkOf(POST, "ts:src/a.ts#POST")
+
+    expect(symbol.kind).toBe("const")
+    expect(symbol.signature).toBeNull()
+    expect(symbol.derivedBy).toEqual(["call-argument-function", "export-keyword"])
+    // One function, so one body and no further ones: `plugins.ts` and LP8i, absent never empty.
+    expect("mergedDeclarations" in symbol).toBe(false)
+    expect(rules.map((r) => r.type)).toEqual(["guard", "throw"])
+    // The wrapping call is not a body, so `withAuth` is not one of the const's calls.
+    expect(calls.map((c) => c.target)).toEqual(["Error", "prisma.user.delete"])
+  })
+
+  it.each([
+    ["memo", "export const Row = memo(function Row(p: any) { track(p.id) })", "Row", ["track"]],
+    [
+      "forwardRef",
+      "export const Input = forwardRef((props: any, ref: any) => { useFocus(ref) })",
+      "Input",
+      ["useFocus"],
+    ],
+    [
+      "cache",
+      "export const load = cache(async (id: string) => { await db.find(id) })",
+      "load",
+      ["db.find"],
+    ],
+  ])("walks the function handed to %s", async (_label, source, name, targets) => {
+    expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual(targets)
+  })
+
+  it("walks every function on the initializer's spine, in source order", async () => {
+    const source = [
+      "export const list = t.procedure",
+      "  .use(async ({ next }: any) => { audit(); return next() })",
+      "  .query(() => { db.read() })",
+    ].join("\n")
+    const symbol = await symbolOf(source, "ts:src/a.ts#list")
+
+    expect(symbol.mergedDeclarations).toHaveLength(1)
+    expect(await callsOf(source, "ts:src/a.ts#list")).toEqual(["audit", "next", "db.read"])
+  })
+
+  it("stops at a call inside an argument, as a registration does", async () => {
+    // `withLogging(...)` returns something by convention too; the reading is LP20g's, direct
+    // arguments only.
+    const source = "export const POST = withAuth(withLogging(async () => { q() }))"
+
+    expect((await symbolOf(source, "ts:src/a.ts#POST")).bodyNode).toBeNull()
+  })
+
+  it("leaves a const whose call is handed no function without a body", async () => {
+    const symbol = await symbolOf(
+      "export const client = makeClient({ retries: 3 })",
+      "ts:src/a.ts#client",
+    )
+
+    expect(symbol.bodyNode).toBeNull()
+    expect(symbol.derivedBy).toEqual(["export-keyword"])
+    expect("mergedDeclarations" in symbol).toBe(false)
+  })
+
+  it.each([
+    ["map", "export const names = users.map((u: any) => u.name)", "names", 0, []],
+    [
+      "a chain of collection calls",
+      "export const ids = xs.filter((x: any) => ok(x)).map((x: any) => x.id)",
+      "ids",
+      1,
+      ["ok"],
+    ],
+    [
+      "reduce",
+      "export const total = items.reduce((a: number, i: any) => { if (!i) throw new Error('x'); return a + i.n }, 0)",
+      "total",
+      0,
+      ["Error"],
+    ],
+  ])("reads %s the same way, because it asks nothing about the call", async (_label, source, name, further, targets) => {
+    // The breadth LP7c names: the reading is LP20g's, and that has never asked what the call is.
+    const symbol = await symbolOf(source, `ts:src/a.ts#${name}`)
+
+    expect(symbol.bodyNode).not.toBeNull()
+    expect(symbol.derivedBy).toContain("call-argument-function")
+    expect(symbol.mergedDeclarations?.length ?? 0).toBe(further)
+    expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual(targets)
+  })
+
+  it("reads a concise arrow it hands its call as returning its body, as the block spelling", async () => {
+    // Each handed function is a walk root, so LP19a applies: the expression body is the arrow's
+    // return value, and the block twin's `return` gives the same rule.
+    const concise = await walkOf("export const d = xs.map((x: number) => x * 2)", "ts:src/a.ts#d")
+    const block = await walkOf(
+      "export const d = xs.map((x: number) => { return x * 2 })",
+      "ts:src/a.ts#d",
+    )
+
+    expect(concise.rules.map((r) => [r.type, r.expr])).toEqual([["return", "x * 2"]])
+    expect(concise.rules.map((r) => [r.type, r.expr])).toEqual(
+      block.rules.map((r) => [r.type, r.expr]),
+    )
+  })
+
+  it("is still described by the whole declaration, so the wrapper is visible", async () => {
+    const withAuth = await symbolOf(POST, "ts:src/a.ts#POST")
+    const withRole = await symbolOf(POST.replace("withAuth", "withRole"), "ts:src/a.ts#POST")
+
+    expect(normalizeAst(withAuth)).not.toBe(normalizeAst(withRole))
+    // The string the const had while it had no body, so no existing syntax fingerprint moves.
+    expect(normalizeAst(withAuth)).toBe(normalizeAst({ ...withAuth, bodyNode: null }))
+  })
+
+  it("does not describe a second wrapped function twice", async () => {
+    const source = "export const h = pipe(() => { a() }, () => { b() })"
+    const symbol = await symbolOf(source, "ts:src/a.ts#h")
+
+    expect(symbol.mergedDeclarations).toHaveLength(1)
+    const { mergedDeclarations: _, ...bodyless } = symbol
+    expect(normalizeAst(symbol)).toBe(normalizeAst({ ...bodyless, bodyNode: null }))
+  })
+})
+
+describe("what LP7c does not read", () => {
+  it.each([
+    [
+      "a function handed to `new`",
+      "export const p = new Promise((resolve: any) => { q(resolve) })",
+      "p",
+    ],
+    ["an initializer behind `await`", "export const r = await withRetry(() => { q() })", "r"],
+    ["a generator argument", "export const w = wrap(function* () { yield q() })", "w"],
+    [
+      "a function in an object property",
+      "export const o = useQuery({ queryFn: () => { q() } })",
+      "o",
+    ],
+    ["a body of no width", "export const z = withAuth(async (req: any) =>)", "z"],
+  ])("leaves %s unwalked", async (_label, source, name) => {
+    // A generator and a zero-width body are refused by the reading LP20g shares (the mirrors of
+    // the two refusals below); the rest are not a function written as a call's direct argument.
+    const symbol = await symbolOf(source, `ts:src/a.ts#${name}`)
+
+    expect(symbol.kind).toBe("const")
+    expect(symbol.bodyNode).toBeNull()
+    expect(symbol.derivedBy).not.toContain("call-argument-function")
+    expect(await callsOf(source, `ts:src/a.ts#${name}`)).toEqual([])
+  })
+
+  it("gives the bindings of a destructuring declaration no body", async () => {
+    // Each binding is its own Symbol, and none of them is the call's result as a whole.
+    const source = "export const { GET, POST } = createHandlers(() => { q() })"
+
+    expect((await symbolsOf(source)).map((s) => [s.id, s.bodyNode])).toEqual([
+      ["ts:src/a.ts#GET", null],
+      ["ts:src/a.ts#POST", null],
+    ])
+  })
+
+  it("produces no Symbol for a wrapped default export", async () => {
+    // A default export's value is read for the declaration it names (LP6a), and a call names
+    // none, so the handler is in no Symbol here. LP7c reads a `const` and does not close this.
+    expect(await symbolsOf("export default withAuth(() => { q() })")).toEqual([])
   })
 })
 
