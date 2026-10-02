@@ -166,7 +166,7 @@ const INLINE_LINK_PATTERN = /^@link(?:code|plain)?\s+([^\s|]+)/
 const BARE_TYPE_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
 /**
- * The exception types a JSDoc block declares (#330).
+ * The exception types a JSDoc block declares.
  *
  * - `{Type} …` records `Type`; `{@link Type} …` (TSDoc's form) records `Type`.
  * - With no braces, the tag is `@throws Type` or `@throws free-text description`, and the two

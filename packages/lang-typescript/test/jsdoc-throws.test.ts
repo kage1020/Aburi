@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { byId, symbolsOf } from "./fixtures/ctx"
 
 /**
- * What a JSDoc `@throws` tag contributes to `signature.throws` (#330). `throws` is an input of
+ * What a JSDoc `@throws` tag contributes to `signature.throws`. `throws` is an input of
  * the api fingerprint, so a word of prose recorded as a type turns a reworded comment into an
  * API change. The rule favours recording nothing when a tag's text is not plainly a type.
  */
