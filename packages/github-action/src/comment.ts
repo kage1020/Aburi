@@ -110,6 +110,7 @@ interface StoredComment {
   readonly id: number
   readonly body: string
   readonly htmlUrl: string
+  readonly author: { readonly login: string; readonly isBot: boolean }
 }
 
 /** What every call to the API needs: where it is, who is asking, and how to reach it. */
@@ -124,8 +125,33 @@ function commentsPath(ref: PullRequestRef): string {
   return `repos/${ref.owner}/${ref.repo}/issues/${ref.pullNumber}/comments`
 }
 
+/**
+ * Who this token posts as: a personal token's login from `GET /user`, or `null` for an
+ * installation token (the default `github.token`, or a GitHub App's), which that endpoint refuses
+ * and which posts as a `[bot]` account whose name it cannot read.
+ */
+async function posterLogin(api: ApiContext): Promise<string | null> {
+  const response = await api.fetch(buildApiUrl(api.apiBase, "user"), {
+    method: "GET",
+    headers: authHeaders(api.token),
+  })
+  if (response.status === 401 || response.status === 403 || response.status === 404) return null
+  if (!response.ok) throw await githubError("identify the token's user", response)
+  const login = ((await response.json()) as { login?: unknown } | null)?.login
+  if (typeof login !== "string" || login === "") {
+    throw new Error("GitHub returned a user without a login for this token.")
+  }
+  return login
+}
+
+/**
+ * Aburi's comment is one this token wrote, opening with the marker. A comment that merely quotes
+ * the marker is someone else's and is never rewritten. The token's identity is asked once, and
+ * only when a comment opens with the marker.
+ */
 async function findMarkerComment(api: ApiContext, marker: string): Promise<StoredComment | null> {
   const perPage = 100
+  let self: { readonly login: string | null } | undefined
   for (let page = 1; ; page++) {
     const url = buildApiUrl(api.apiBase, commentsPath(api.ref))
     url.searchParams.set("per_page", String(perPage))
@@ -142,7 +168,10 @@ async function findMarkerComment(api: ApiContext, marker: string): Promise<Store
     }
     for (const row of rows) {
       const parsed = parseComment(row)
-      if (parsed?.body.includes(marker)) return parsed
+      if (!parsed?.body.startsWith(marker)) continue
+      self ??= { login: await posterLogin(api) }
+      const own = self.login === null ? parsed.author.isBot : parsed.author.login === self.login
+      if (own) return parsed
     }
     if (rows.length < perPage) return null
   }
@@ -205,14 +234,23 @@ function parseComment(row: unknown): StoredComment | null {
   if (typeof id !== "number") return null
   if (typeof body !== "string") return null
   if (typeof htmlUrl !== "string") return null
-  return { id, body, htmlUrl }
+  const user = (row as { user?: unknown }).user
+  const login = typeof user === "object" && user !== null ? (user as { login?: unknown }).login : ""
+  const type = typeof user === "object" && user !== null ? (user as { type?: unknown }).type : ""
+  return {
+    id,
+    body,
+    htmlUrl,
+    author: { login: typeof login === "string" ? login : "", isBot: type === "Bot" },
+  }
 }
 
 /**
- * Prepend the marker if the caller's body does not already contain it. Users can pass
- * a body that embeds their own marker (rare — mostly for tests), which is preserved.
+ * Prepend the marker unless the caller's body already opens with it. A body that only quotes the
+ * marker further down still gets it first: only a comment that opens with it is recognised as
+ * Aburi's on the next run.
  */
 export function ensureMarker(body: string, marker: string): string {
-  if (body.includes(marker)) return body
+  if (body.startsWith(marker)) return body
   return `${marker}${MARKER_SEPARATOR}${body}`
 }

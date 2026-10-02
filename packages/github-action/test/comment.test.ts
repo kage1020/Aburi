@@ -21,7 +21,13 @@ interface FakeFetchOptions {
   readonly listStatus?: number
   readonly createStatus?: number
   readonly patchStatus?: number
+  /** `GET /user`. Default: refused with a 403, as it is for the default `github.token`. */
+  readonly userStatus?: number
+  readonly userResponse?: unknown
 }
+
+/** The account the default `github.token` posts as. */
+const ACTIONS_BOT = { login: "github-actions[bot]", type: "Bot" }
 
 function makeFakeFetch(options: FakeFetchOptions): {
   readonly fetch: typeof globalThis.fetch
@@ -44,6 +50,12 @@ function makeFakeFetch(options: FakeFetchOptions): {
       pageIndex += 1
       return new Response(JSON.stringify(rows), {
         status,
+        headers: { "content-type": "application/json" },
+      })
+    }
+    if (method === "GET" && url.endsWith("/user")) {
+      return new Response(JSON.stringify(options.userResponse ?? { message: "forbidden" }), {
+        status: options.userStatus ?? 403,
         headers: { "content-type": "application/json" },
       })
     }
@@ -75,9 +87,15 @@ describe("ensureMarker", () => {
     expect(out.endsWith("hello")).toBe(true)
   })
 
-  it("leaves the body untouched when the marker is already present", () => {
+  it("leaves the body untouched when it already opens with the marker", () => {
     const body = `${ABURI_COMMENT_MARKER}\n\ncontent`
     expect(ensureMarker(body, ABURI_COMMENT_MARKER)).toBe(body)
+  })
+
+  it("still puts the marker first when the body only quotes it further down", () => {
+    // Only a comment that opens with the marker is found again on the next run.
+    const body = `Report\n\n\`${ABURI_COMMENT_MARKER}\` marks this comment`
+    expect(ensureMarker(body, ABURI_COMMENT_MARKER)).toBe(`${ABURI_COMMENT_MARKER}\n\n${body}`)
   })
 })
 
@@ -113,6 +131,7 @@ describe("upsertPullRequestComment", () => {
       id: 222,
       body: `${ABURI_COMMENT_MARKER}\n\nold`,
       html_url: "https://github.com/kage1020/Aburi/pull/42#issuecomment-222",
+      user: ACTIONS_BOT,
     }
     const { fetch, calls } = makeFakeFetch({
       listPages: [[existing]],
@@ -140,7 +159,7 @@ describe("upsertPullRequestComment", () => {
   it("returns 'unchanged' when the existing comment body already matches", async () => {
     const body = `${ABURI_COMMENT_MARKER}\n\nsame`
     const { fetch, calls } = makeFakeFetch({
-      listPages: [[{ id: 333, body, html_url: "u" }]],
+      listPages: [[{ id: 333, body, html_url: "u", user: ACTIONS_BOT }]],
     })
 
     const outcome = await upsertPullRequestComment({
@@ -165,6 +184,7 @@ describe("upsertPullRequestComment", () => {
       id: 999,
       body: `${ABURI_COMMENT_MARKER}\n\nold`,
       html_url: "u",
+      user: ACTIONS_BOT,
     }
     const { fetch, calls } = makeFakeFetch({
       listPages: [filler, [target]],
@@ -184,7 +204,7 @@ describe("upsertPullRequestComment", () => {
 
     expect(outcome.action).toBe("updated")
     expect(outcome.commentId).toBe(999)
-    const gets = calls.filter((c) => c.method === "GET")
+    const gets = calls.filter((c) => c.method === "GET" && c.url.includes("/comments"))
     expect(gets.length).toBe(2)
     expect(gets[0]?.url).toContain("page=1")
     expect(gets[1]?.url).toContain("page=2")
@@ -198,13 +218,18 @@ describe("upsertPullRequestComment", () => {
   })
 
   it("sends bearer token and required GitHub API headers on every call", async () => {
-    const existing = { id: 5, body: `${ABURI_COMMENT_MARKER}\n\nold`, html_url: "u" }
+    const existing = {
+      id: 5,
+      body: `${ABURI_COMMENT_MARKER}\n\nold`,
+      html_url: "u",
+      user: ACTIONS_BOT,
+    }
     const { fetch, calls } = makeFakeFetch({
       listPages: [[existing]],
       patchResponse: { ...existing, body: `${ABURI_COMMENT_MARKER}\n\nx` },
     })
     await upsertPullRequestComment({ ref: REF, body: "x", token: "secret", fetch })
-    expect(calls.map((c) => c.method)).toEqual(["GET", "PATCH"])
+    expect(calls.map((c) => c.method)).toEqual(["GET", "GET", "PATCH"])
     for (const call of calls) {
       expect(call.url).toContain("api.github.com")
       expect(call.headers).toMatchObject({
@@ -236,7 +261,12 @@ describe("upsertPullRequestComment", () => {
   })
 
   /** The list page that routes the upsert to a create (no marker comment) or an update. */
-  const existing = { id: 555, body: `${ABURI_COMMENT_MARKER}\n\nold`, html_url: "u" }
+  const existing = {
+    id: 555,
+    body: `${ABURI_COMMENT_MARKER}\n\nold`,
+    html_url: "u",
+    user: ACTIONS_BOT,
+  }
   const routeTo = { create: { listPages: [[]] }, update: { listPages: [[existing]] } }
 
   it.each([
@@ -268,6 +298,87 @@ describe("upsertPullRequestComment", () => {
     await expect(
       upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
     ).rejects.toThrow(/without id\/body\/html_url/)
+  })
+
+  describe("whose comment it is", () => {
+    const quoted = {
+      id: 101,
+      body: `Why does the bot search for \`${ABURI_COMMENT_MARKER}\`?`,
+      html_url: "u101",
+      user: { login: "alice", type: "User" },
+    }
+    const planted = {
+      id: 102,
+      body: `${ABURI_COMMENT_MARKER}\n\n# a report alice wrote`,
+      html_url: "u102",
+      user: { login: "alice", type: "User" },
+    }
+    const ours = {
+      id: 202,
+      body: `${ABURI_COMMENT_MARKER}\n\n# old report`,
+      html_url: "u202",
+      user: ACTIONS_BOT,
+    }
+
+    it("passes over a person's comments that quote or open with the marker", async () => {
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[quoted, planted, ours]],
+        patchResponse: { ...ours, body: `${ABURI_COMMENT_MARKER}\n\nnew` },
+      })
+      const outcome = await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(outcome).toMatchObject({ action: "updated", commentId: 202 })
+      expect(calls.find((c) => c.method === "PATCH")?.url).toContain("/issues/comments/202")
+    })
+
+    it("creates its own comment when only a person's carries the marker", async () => {
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[quoted, planted]],
+        createResponse: { id: 303, body: "x", html_url: "u303" },
+      })
+      const outcome = await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(outcome).toMatchObject({ action: "created", commentId: 303 })
+      expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    })
+
+    it("asks who the token is only once a comment opens with the marker", async () => {
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[quoted]],
+        createResponse: { id: 304, body: "x", html_url: "u304" },
+      })
+      await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(calls.some((c) => c.url.endsWith("/user"))).toBe(false)
+    })
+
+    it("matches a personal token's own login, and no bot's", async () => {
+      const mine = { ...planted, id: 103, user: { login: "kage1020", type: "User" } }
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[ours, planted, mine]],
+        userStatus: 200,
+        userResponse: { login: "kage1020" },
+        patchResponse: { ...mine, body: `${ABURI_COMMENT_MARKER}\n\nnew` },
+      })
+      const outcome = await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(outcome).toMatchObject({ action: "updated", commentId: 103 })
+      expect(calls.find((c) => c.method === "PATCH")?.url).toContain("/issues/comments/103")
+    })
+
+    it("matches a GitHub App's bot under an installation token", async () => {
+      const app = { ...ours, id: 204, user: { login: "aburi-reports[bot]", type: "Bot" } }
+      const { fetch, calls } = makeFakeFetch({
+        listPages: [[planted, app]],
+        patchResponse: { ...app, body: `${ABURI_COMMENT_MARKER}\n\nnew` },
+      })
+      const outcome = await upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch })
+      expect(outcome).toMatchObject({ action: "updated", commentId: 204 })
+      expect(calls.find((c) => c.method === "PATCH")?.url).toContain("/issues/comments/204")
+    })
+
+    it("throws when GitHub fails to say who the token is", async () => {
+      const { fetch } = makeFakeFetch({ listPages: [[ours]], userStatus: 502 })
+      await expect(
+        upsertPullRequestComment({ ref: REF, body: "new", token: "t", fetch }),
+      ).rejects.toThrow(/identify the token's user: 502/)
+    })
   })
 
   it("rejects a non-array list response instead of silently treating it as empty", async () => {

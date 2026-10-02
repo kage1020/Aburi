@@ -155,6 +155,14 @@ One comment per pull request, found by the marker `<!-- aburi:diff-comment -->` 
 place, so a pushed branch does not accumulate a column of reports. A body identical to what is
 already there is left alone (`unchanged`), which keeps a re-run from notifying everyone again.
 
+The comment meant is the one Aburi wrote: its body opens with the marker, and its author is the
+account the token posts as. A personal token names that account through `GET /user`; an
+installation token (the default `github.token`, or a GitHub App's) is refused there and posts as a
+`[bot]` account, so under one any bot's comment that opens with the marker is taken. A person's
+comment is never rewritten, whether it quotes the marker in a code span or opens with it, as a
+fork's author could post one before the `workflow_run` companion (§5.1) runs. Both writers put the
+marker first, even in a report that quotes it further down.
+
 The upsert itself is [`scripts/upsert-comment.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/upsert-comment.mjs),
 a committed dependency-free script rather than an inline `actions/github-script` block, for the
 reason the CLI resolver is a script too — it can be run in a test — and for one the resolver does
