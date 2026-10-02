@@ -5,7 +5,7 @@ import { idsOf, symbolOf } from "./fixtures/ctx"
 /**
  * An overload signature folds into its implementation's Symbol as a declaration with no body,
  * so the syntax axis sees the overload set; the implementation still leads (LP8f, LP8q). Dropped
- * outright, adding, removing or retyping an overload was no change on any axis (issue #341).
+ * outright, adding, removing or retyping an overload was no change on any axis.
  */
 
 const PARSE = [
