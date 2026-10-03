@@ -189,14 +189,26 @@ export async function runDiff(options: DiffOptions): Promise<DiffReport> {
   // And created now, for the same reason: a destination that cannot hold the report is
   // refused before two scans are run for it.
   await createOutputDir("diff", outputDir)
-  // The uncapped report is written only when this run's cap shortens `diff.md`, so one an
-  // earlier run left here would be the full report of some other diff. It goes now, whatever
-  // the format, so the order is always "remove, then write if needed", and a path that cannot
-  // be cleared is refused before the scans rather than after.
+  // Removed before the scans, whatever the format, so the order is always "remove, then write if
+  // needed" and a path that cannot be cleared is refused before two scans are run for it. A run
+  // that stops first — a plugin that fails to load, a strict scan's undeclared value — then leaves
+  // nothing a caller checking for `diff.md` would post as this run's report. `diff.full.md` goes
+  // too: written only when this run's cap shortens `diff.md`, one left here would be the full
+  // report of some other diff even on a run that does write.
+  await removeOutputFile({
+    command: "diff",
+    artefact: "the diff JSON",
+    path: resolve(outputDir, DIFF_JSON_FILENAME),
+  })
+  await removeOutputFile({
+    command: "diff",
+    artefact: "the diff Markdown",
+    path: resolve(outputDir, DIFF_MD_FILENAME),
+  })
   const fullMdPath = resolve(outputDir, DIFF_FULL_MD_FILENAME)
   await removeOutputFile({
     command: "diff",
-    artefact: "the uncapped diff Markdown an earlier run left",
+    artefact: "the uncapped diff Markdown",
     path: fullMdPath,
   })
   const { baseIR, headIR, baseRef, headRef, gitRenames, scans } = await resolveIRs(
