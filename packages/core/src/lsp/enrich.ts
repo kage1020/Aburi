@@ -905,25 +905,25 @@ function extractOwnerClassName(hoverText: string): string | null {
  * line or the same one, or to the end of the hover. Only a tag written as in source is read:
  * typescript-language-server renders one as `*@throws* — …`, which this does not match.
  */
-const HOVER_THROWS_PATTERN =
+const THROWS_JSDOC_PATTERN =
   /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}\n]+)\})?((?:(?!\n[ \t]*@|[ \t]@[a-zA-Z])[\s\S])*)/g
-/** `@link X`, `@linkcode X` or `@linkplain X` inside a `{…}`, and `X` when it names a declaration. */
-const HOVER_LINK_PATTERN =
+/** `@link X`, `@linkcode X` or `@linkplain X` in a `{…}`, and `X` when it names a declaration. */
+const THROWS_LINK_PATTERN =
   /^@link(?:code|plain)?\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:[\s|]|$)/
-/** An identifier or dotted path whose first segment starts upper-case. */
-const HOVER_TYPE_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
+/** A brace-less tag's whole text, read as a type: an identifier or path, upper-case first. */
+const THROWS_PLAIN_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
 function extractInferredThrowsFromHover(hoverText: string): string[] {
   const out = new Set<string>()
-  for (const match of hoverText.matchAll(HOVER_THROWS_PATTERN)) {
+  for (const match of hoverText.matchAll(THROWS_JSDOC_PATTERN)) {
     const braced = match[1]?.trim()
     if (braced !== undefined) {
-      const typed = braced.startsWith("@") ? HOVER_LINK_PATTERN.exec(braced)?.[1] : braced
+      const typed = braced.startsWith("@") ? THROWS_LINK_PATTERN.exec(braced)?.[1] : braced
       if (typed !== undefined && typed.length > 0) out.add(typed)
       continue
     }
     const text = (match[2] ?? "").replace(/\s+/g, " ").trim()
-    if (HOVER_TYPE_PATTERN.test(text)) out.add(text)
+    if (THROWS_PLAIN_PATTERN.test(text)) out.add(text)
   }
   return [...out]
 }
