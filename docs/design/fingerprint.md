@@ -256,11 +256,13 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 ### 5.3 Guaranteed invariance conditions
 
 - Whitespace / newline / indentation changes → unchanged
-- Line terminators (LF, CRLF, a lone CR) → unchanged: the scan reads every source file with CRLF and CR converted to LF before a plugin sees it, so a line break inside a template literal or a string that continues across lines, which the whitespace collapse cannot reach, is the same on every checkout
+- Line terminators (LF, CRLF, a lone CR) → unchanged
 - Adding / removing comments → unchanged
 - The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
 
 These are the punctuation item 4 leaves out, not formatter output in general. A formatter that quotes an object key (`{ a: 1 }` → `{ "a": 1 }`), picks the quote that needs fewer escapes (`'it\'s'` → `"it's"`), wraps a multi-line expression in parentheses, or rewrites JSX (`<Foo></Foo>` → `<Foo />`) changes the structure, and `syntax` changes with it.
+
+Line terminators are held by the core, not by `normalizeAst`, which is why S2d in §7.6 is the core's row rather than a plugin's: the scan reads every source file with CRLF and a lone CR converted to LF before a plugin sees it. The step is needed because the syntax axis does not pass through the canonical-string collapse (§2.2), and item 3 drops whitespace tokens but not a literal's content, so a line break inside a template literal, or inside a string that continues across lines, would otherwise reach `syntax_input` as `\r\n` on one checkout and `\n` on another. `api` and `logic` never needed it, since §2.2 collapses that line break with the rest of the whitespace.
 
 ### 5.4 Guaranteed change conditions
 
@@ -384,6 +386,7 @@ The reference implementation and every language plugin must pass the following t
 | S2a | Change the quotes around a string that needs no escape either way | syntax unchanged |
 | S2b | Add a trailing comma | syntax unchanged |
 | S2c | Drop optional semicolons | syntax unchanged |
+| S2d | Save the file with CRLF or a lone CR | syntax unchanged — guaranteed by the core's scan, not by `normalizeAst` (§5.3) |
 
 ### 7.7 syntax change conditions
 
@@ -396,7 +399,7 @@ The reference implementation and every language plugin must pass the following t
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 
-Every row of §7.6 and §7.7 falls under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
+Every row of §7.6 and §7.7 except S2d, which the core's scan holds (§5.3), falls under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
 
 ```js
 // must be included in the language plugin's test suite
