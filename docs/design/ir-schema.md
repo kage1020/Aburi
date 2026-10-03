@@ -422,7 +422,7 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 - `throw`: a throw statement
 - `return`: any non-trivial return (trivial determination per `drop-list.md`), a walk-root arrow's expression body included
 - `loop`: for / while / do
-- `try`: try-catch (rules inside the catch body are not expanded into the same Symbol's rules; its calls, and so its effects, are the Symbol's like any other, and the `finally` block is walked like the try block, since it runs on every path)
+- `try`: a `try` statement, with or without a `catch` or a `finally` clause (what each clause contributes to the Symbol is §8.2)
 - `switch`: a switch statement
 - `match`: pattern matching (used only in symbols with `extKind: "fp:match"`)
 
@@ -431,6 +431,8 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 - The same AST node must not produce multiple Rules
 - `condition`/`what`/`expr` are whitespace-normalized (consecutive whitespace collapsed to one, newlines removed, trailing `...` when over 120 characters)
 - Simple returns such as `return x` / `return true` do not become Rules (inclusion follows the trivial determination in `drop-list.md`)
+- A `try` statement's `try` block and its `finally` block are walked like any block: their rules and their calls are the Symbol's. The `finally` block is included because it runs on every path through the statement.
+- A `catch` clause contributes its calls only. A call inside it is the Symbol's exactly when it would be in the `try` block, since the drop list applies to both alike, and so is any effect an effect plugin classifies from that call. Rules inside it — a guard, a `throw`, a nested `try` — are not expanded into the Symbol's rules, so rewriting an error handler's control flow does not move the `logic` fingerprint. Nothing on such an effect says it runs only when the `try` block throws: it is recorded, and propagated to callers, like an effect on any other path.
 
 ## 9. Effect
 
