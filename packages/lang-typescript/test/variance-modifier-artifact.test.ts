@@ -1,6 +1,8 @@
+import type { SymbolCandidate } from "@aburi/types"
 import { describe, expect, it } from "vitest"
+import type { Node } from "web-tree-sitter"
 import { normalizeAst } from "../src/index"
-import { callsOf, parseSource, symbolsOf } from "./fixtures/ctx"
+import { callsOf, parseSource, symbolOf, symbolsOf } from "./fixtures/ctx"
 
 /**
  * The typescript grammar has no rule for TypeScript 4.7's `in` / `out` variance modifiers, so
@@ -259,6 +261,12 @@ describe("the Symbols are the same with the modifiers as without them", () => {
     }))
   }
 
+  /** A class's string less its head: with its body as its full node, no head is read. */
+  function bodyOf(symbol: SymbolCandidate<Node>): string {
+    if (symbol.bodyNode === null) throw new Error(`${symbol.id} has no body`)
+    return normalizeAst({ ...symbol, fullNode: symbol.bodyNode })
+  }
+
   it("parses the twin cleanly, so the comparison is against a tree with no error in it", async () => {
     expect(WITHOUT_MODIFIERS).not.toMatch(/\b(in|out) /)
     expect(await errorsOf(WITHOUT_MODIFIERS)).toEqual([])
@@ -282,10 +290,31 @@ describe("the Symbols are the same with the modifiers as without them", () => {
     expect(shape).toEqual(await shapeOf(WITHOUT_MODIFIERS))
   })
 
-  it("serialises a class and an interface the same, since only their bodies are read", async () => {
-    const withAst = (await symbolsOf(WITH_MODIFIERS)).filter((s) => s.kind !== "type")
-    const withoutAst = (await symbolsOf(WITHOUT_MODIFIERS)).filter((s) => s.kind !== "type")
+  it("serialises an interface the same, since only its body is read", async () => {
+    // The equality is a known gap, not the rule: an interface's type parameters and `extends`
+    // sit beside its body, as a class's head does, and it has no signature either, so they reach
+    // no axis. LP8p closes that for a class and records the interface as still open.
+    const withAst = (await symbolsOf(WITH_MODIFIERS)).filter((s) => s.kind === "interface")
+    const withoutAst = (await symbolsOf(WITHOUT_MODIFIERS)).filter((s) => s.kind === "interface")
     expect(withAst.map(normalizeAst)).toEqual(withoutAst.map(normalizeAst))
+  })
+
+  it("serialises a class's body the same, and its head as the grammar recovered it", async () => {
+    // A class's head reaches its string (LP8p), so the two strings differ — but as a
+    // grammar-recovery artifact, not because a variance modifier is read: recovery takes `in`
+    // for the parameter's name and leaves `out T` in an ERROR that `serialize` drops (LP27c).
+    // A grammar that learns the rule changes this head again.
+    const E = "ts:src/a.ts#E"
+    const withModifiers = await symbolOf(WITH_MODIFIERS, E)
+    const withoutModifiers = await symbolOf(WITHOUT_MODIFIERS, E)
+    const body = bodyOf(withModifiers)
+    expect(bodyOf(withoutModifiers)).toBe(body)
+    expect(normalizeAst(withModifiers)).toBe(
+      `${body} (type_parameters "<" (type_parameter (type_identifier "in")) ">")`,
+    )
+    expect(normalizeAst(withoutModifiers)).toBe(
+      `${body} (type_parameters "<" (type_parameter (type_identifier "T")) ">")`,
+    )
   })
 
   it("keeps the calls inside and after the annotated declaration", async () => {
@@ -312,20 +341,34 @@ describe("where the rule stops", () => {
     expect(await errorsOf(source)).toEqual([])
   })
 
+  const astOf = async (source: string) => {
+    const [symbol] = await symbolsOf(source)
+    if (symbol === undefined) throw new Error("no Symbol in fixture")
+    return normalizeAst(symbol)
+  }
+
   it("cannot tell an annotated type alias's parameters apart in `normalizeAst`", async () => {
     // The alias is serialised whole, and the grammar reads `out` as the parameter's name and
     // leaves the real one in an ERROR that `serialize` skips. That predates the rule; what the
     // rule adds is that the file no longer says it is doubtful. The unannotated twins differ.
-    const astOf = async (source: string) => {
-      const [symbol] = await symbolsOf(source)
-      if (symbol === undefined) throw new Error("no Symbol in fixture")
-      return normalizeAst(symbol)
-    }
     expect(await astOf("export type F<out T> = () => void")).toBe(
       await astOf("export type F<out U> = () => void"),
     )
     expect(await astOf("export type F<T> = () => void")).not.toBe(
       await astOf("export type F<U> = () => void"),
+    )
+  })
+
+  it("cannot tell an annotated class's parameters apart in `normalizeAst` either", async () => {
+    // A class's type parameters reach its string with the rest of its head (LP8p), through the
+    // same `serialize`, so they inherit the alias's misread: where the body does not name the
+    // parameter, renaming it changes nothing, and `fingerprint.md` S4 does not hold for a
+    // variance-annotated class. The unannotated twins differ.
+    expect(await astOf("export class E<in out T> { m() {} }")).toBe(
+      await astOf("export class E<in out U> { m() {} }"),
+    )
+    expect(await astOf("export class E<T> { m() {} }")).not.toBe(
+      await astOf("export class E<U> { m() {} }"),
     )
   })
 })
