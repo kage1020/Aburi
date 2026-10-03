@@ -17,14 +17,15 @@ import {
 } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 import { objectEntryOf } from "./object-members"
-import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
+import { decodeStringLiteral, readStaticString } from "./string-escape"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
  *
  * Which statements become rules, and which returns are too trivial to, is the drop-list
- * contract (`drop-list.md`); `visitNode` is the switch that applies it. A `catch`
- * body's contents do not feed the same Symbol's rules (`ir-schema.md`).
+ * contract (`drop-list.md`); `visitNode` is the switch that applies it. A `try` statement's
+ * `try` block and `finally` block feed the Symbol like any other block. Its `catch` clause feeds
+ * the Symbol's calls and none of its rules (`ir-schema.md` §8.2, `handleTryStatement`).
  *
  * Calls are every call_expression whose callee we can normalize. `await` and `new`
  * modifiers surface as flags; each argument's literal value (if any) is captured on
@@ -232,8 +233,6 @@ function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
       return
     case "try_statement":
       rules.push(makeRule("try", node))
-      // Only the try block's statements contribute rules/calls; catch/finally are skipped
-      // per ir-schema.md so a rewritten error handler does not perturb the logic axis.
       handleTryStatement(node, rules, calls)
       return
     case "switch_statement":
@@ -351,9 +350,30 @@ function isCallOnly(value: Node): boolean {
   return value.type === "call_expression" || value.type === "new_expression"
 }
 
+/**
+ * The try block and the `finally` block are walked as any block is: `finally` runs on every path,
+ * so what it does is what the Symbol does. The catch clause gives its **calls** and withholds its
+ * rules (ir-schema.md §8.2), so an error handler's own control flow leaves `logic` alone, while a
+ * call it makes moves `logic` exactly as it would anywhere else once an effect plugin classifies
+ * it. Neither block was visited before, so a database write added in either one reached no
+ * Symbol's `calls[]` or `effects[]` and the diff filed the edit as a syntax-only change.
+ *
+ * The clause goes through `visitNode`, as a try block does, so it records exactly the calls the
+ * same statements would record there, with the drop list applied the same way: neither
+ * `return a[g()]` nor `return a[h()]` in `try { … } catch (e) { … }` records its call. The rules
+ * that walk produces — a guard, a `throw`, a loop, a nested `try` and whatever that `try`'s own
+ * `finally` holds — go into `withheld`, which nothing reads. `visitCallsInside`, which the `throw`
+ * arm uses, would not do: a thrown value is an expression, where the two walks agree, but a
+ * catch clause holds statements, where it would record calls the drop list leaves out.
+ */
 function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   const body = node.childForFieldName("body")
   if (body !== null) visitNode(body, rules, calls)
+  const handler = node.childForFieldName("handler")
+  const withheld: Rule[] = []
+  if (handler !== null) visitNode(handler, withheld, calls)
+  const finalizer = node.childForFieldName("finalizer")
+  if (finalizer !== null) visitNode(finalizer, rules, calls)
 }
 
 function handleCall(node: Node, calls: CallCandidate[]): void {
@@ -689,7 +709,8 @@ function extractLiteral(node: Node): string | null {
     case "undefined":
       return node.text
     case "string":
-      return decodeStringLiteralOrRaw(node)
+    case "template_string":
+      return readStaticString(node)
     default:
       return null
   }

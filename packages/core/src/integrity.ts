@@ -288,9 +288,11 @@ function checkWorkspaceLanguages(ir: IR, out: IntegrityViolation[]): void {
  *   grammar being ASCII — and that grammar is ECMAScript's IdentifierName now, so a
  *   decomposed `café` passes #17 and only this check tells the two spellings apart.
  *   Measured, not assumed.
- * - Strings the Document only quotes — a decorator's raw source text, a signature type —
- *   decide nothing by their spelling, and normalizing a quotation would misquote it. They
- *   still reach disk normalized, because the serializer normalizes everything.
+ * - Strings the Document only quotes — a decorator's raw source text, a signature type — are
+ *   matched against nothing, and the api fingerprint, which hashes both, normalizes its own
+ *   input (fingerprint.md §2.2), so their composition decides nothing; normalizing a
+ *   quotation would misquote it. They still reach disk normalized, because the serializer
+ *   normalizes everything.
  *
  * `dependencies[]` endpoints are here rather than with the ids because no id grammar is
  * applied to them: #17 does not look at them, #4 only checks the Symbol-shaped ones, and #11
