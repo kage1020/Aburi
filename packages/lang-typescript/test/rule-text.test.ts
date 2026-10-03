@@ -104,3 +104,29 @@ describe("rule text is cut to 120 characters", () => {
     expect(guard?.condition).toBe(exact)
   })
 })
+
+describe("a finally block's rules take the same form", () => {
+  // The finally block is walked like the try block (ir-schema.md §8.2), so its rules are the
+  // Symbol's and reach `logic`: a comment or a re-wrap there must not move it any more than
+  // one in the try block does, and a long one must still fit the schema.
+  const long = Array.from({ length: 20 }, (_, i) => `a.f${i} > ${i}`).join(" && ")
+
+  it("drops comments and collapses whitespace", async () => {
+    const rules = await rulesOf(
+      "try { b() } finally {\n  if (\n    a /* why */ ||\n    c // why\n  ) return\n  throw make(\n    a, /* code */ b\n  )\n}",
+    )
+
+    expect(rules.map((r) => [r.type, ...strings(r)])).toEqual([
+      ["try", null, null, null],
+      ["guard", "a || c", null, null],
+      ["throw", null, "make( a, b )", null],
+    ])
+  })
+
+  it("cuts a long rule to 120 characters", async () => {
+    const rules = await rulesOf(`try { b() } finally { if (${long}) return }`)
+    const guard = rules.find((r) => r.type === "guard")
+
+    expect(guard?.condition).toBe(`${long.slice(0, 120)}...`)
+  })
+})
