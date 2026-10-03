@@ -130,7 +130,11 @@ function classifyUseCall(
   return null
 }
 
-/** `app.use('/api', router)`: a path literal, a bare identifier, and no handler-shaped argument. */
+/**
+ * `app.use('/api', router)`: a path literal, a bare identifier, and no handler-shaped argument.
+ * The path may be written in backticks with no substitution (`` app.use(`/api`, router) ``),
+ * which is the same value and is the path the registration's id is named by.
+ */
 function isMountShape(shape: UseArgumentShape): boolean {
   return (
     shape.argCount === 2 &&

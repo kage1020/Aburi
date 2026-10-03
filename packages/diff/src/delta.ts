@@ -357,6 +357,23 @@ function decoratorsEqual(a: Decorator, b: Decorator): boolean {
   )
 }
 
+type SignatureInput = Signature["inputs"][number]
+
+/**
+ * Two inputs at one position read the same when their name, type and form agree. `optional`
+ * and `rest` are compared because the api fingerprint hashes them: a parameter that turns
+ * optional moves `api`, and the delta has to show which one did. An absent marker reads as
+ * `false`, as the fingerprint reads it.
+ */
+function inputsEqual(a: SignatureInput, b: SignatureInput): boolean {
+  return (
+    a.name === b.name &&
+    a.type === b.type &&
+    (a.optional === true) === (b.optional === true) &&
+    (a.rest === true) === (b.rest === true)
+  )
+}
+
 /**
  * Signature delta (diff-algorithm.md). Both `null` → `null`; one `null` → the present side
  * emitted verbatim as `added` or `removed`; both present → per-list sub-deltas: `inputs`
@@ -368,10 +385,7 @@ function diffSignature(base: Signature | null, head: Signature | null): Signatur
   if (head === null) return oneSidedSignatureDelta(base, "removed")
   // Parameters are positional, so the index is part of the identity and the fuzz is 0. Every
   // key is then unique within its list, so the pairing never has a choice to make here.
-  const inputMapper = (
-    input: { name: string; type: string },
-    index: number,
-  ): Identified<{ name: string; type: string }> => ({
+  const inputMapper = (input: SignatureInput, index: number): Identified<SignatureInput> => ({
     item: input,
     key: `${index}:${input.name}`,
     line: index,
@@ -379,7 +393,7 @@ function diffSignature(base: Signature | null, head: Signature | null): Signatur
   const inputs = classifyArrayDelta(
     base.inputs.map(inputMapper),
     head.inputs.map(inputMapper),
-    (a, b) => a.name === b.name && a.type === b.type,
+    inputsEqual,
     0,
   )
   return {

@@ -20,6 +20,7 @@ import { renderSymbolBlock } from "./component"
 import {
   appendAll,
   compareStrings,
+  formatInput,
   inlineCode,
   isSymbolEdge,
   propagatedFromSuffix,
@@ -767,17 +768,20 @@ function describeCallLike(value: unknown): string | null {
 }
 
 /**
- * `Signature.inputs` entries as `name: type`. If every entry fails the shape, the count is
- * emitted instead — unlike `appendBucket` — because "1 item(s)" at least says a parameter
- * moved, where silence would claim none did.
+ * `Signature.inputs` entries as `formatInput` spells them: `name: type`, with an optional or
+ * rest parameter's marker where TypeScript writes it. If every entry fails the shape, the
+ * count is emitted instead — unlike `appendBucket` — because "1 item(s)" at least says a
+ * parameter moved, where silence would claim none did.
  */
 function describeInputs(items: readonly unknown[]): string {
   const rendered = items
     .map((value) => {
       if (!isRecord(value)) return null
-      const { name, type } = value
+      const { name, type, optional, rest } = value
       if (typeof name !== "string" || typeof type !== "string") return null
-      return inlineCode(`${name}: ${type}`)
+      return inlineCode(
+        formatInput({ name, type, optional: optional === true, rest: rest === true }),
+      )
     })
     .filter((line): line is string => line !== null)
   return rendered.length > 0 ? rendered.join(", ") : `${items.length} item(s)`
@@ -837,7 +841,17 @@ function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
 function unknownExplanation(item: SymbolUnknown): string {
   const side = item.absentFrom
   const fate = side === "head" ? "may still exist" : "may not be new"
-  return `the ${side} scan skipped ${inlineCode(item.symbol.source.file)} (${item.reason}), so this Symbol ${fate}`
+  return `the ${side} scan skipped ${skippedFile(item)} (${item.reason}), so this Symbol ${fate}`
+}
+
+/**
+ * The path the absent scan's own skip record is under. That is the Symbol's file unless git
+ * renamed it between the revisions, and then the File line shows the other revision's name, so
+ * the phrase says how the two relate rather than naming a path the reader cannot place.
+ */
+function skippedFile(item: SymbolUnknown): string {
+  if (item.lostPath === undefined) return inlineCode(item.symbol.source.file)
+  return `this file under its ${item.absentFrom} name, ${inlineCode(item.lostPath)}`
 }
 
 /**
@@ -854,7 +868,12 @@ function renderNotCompared(files: readonly NotComparedFile[]): string[] {
       file.baseReason === file.headReason
         ? `${file.baseReason} on both`
         : `${file.baseReason} at base, ${file.headReason} at head`
-    rows.push(`- ${inlineCode(file.path)} — ${reasons}`)
+    // A renamed file is one entry under two names; the base's is where its base skip record is.
+    const name =
+      file.basePath === undefined
+        ? inlineCode(file.path)
+        : `${inlineCode(file.basePath)} → ${inlineCode(file.path)}`
+    rows.push(`- ${name} — ${reasons}`)
   }
   rows.push("")
   return rows
@@ -1163,8 +1182,10 @@ function renderMemberFollowup(change: SymbolChange): string {
       return deltaAxisSummary(change.delta)
     case "dropped-toggled":
       return `dropped-toggled: ${change.direction}`
-    case "unknown":
-      return `unknown: the ${change.absentFrom} scan skipped this file (${change.reason})`
+    case "unknown": {
+      const file = change.lostPath === undefined ? "this file" : skippedFile(change)
+      return `unknown: the ${change.absentFrom} scan skipped ${file} (${change.reason})`
+    }
   }
 }
 
