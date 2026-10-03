@@ -163,8 +163,9 @@ A `return` statement is **not turned into a rule** when its returned expression 
 |---|---|
 | string/number/boolean/null/undefined literal | `return 1` / `return 'x'` / `return true` |
 | identifier | `return x` |
-| `this` or a member chain (arbitrary depth) | `return this.value` / `return obj.a.b.c` |
-| unary operator + trivial expression | `return !x` / `return -count` |
+| `this`, `super` or a member chain (arbitrary depth) | `return this.value` / `return obj.a.b.c` |
+| bracket access with a trivial object and a trivial index | `return items[0]` / `return map[key]` |
+| unary or update operator + trivial expression | `return !x` / `return -count` |
 | `void` expression | `return void 0` |
 
 **Non-trivial returns** (included as rules):
@@ -174,6 +175,7 @@ A `return` statement is **not turned into a rule** when its returned expression 
 - object/array literals containing spread/dynamic computation (`return { ...x, status: 'ok' }`)
 - template literals with interpolation (`` return `hello ${name}` ``)
 - new expressions composed with something else (`return new Foo() ?? bar`)
+- bracket access with a non-trivial index (`return cache[computeKey(k)]`, `return LABELS[await count()]`) — a type-level wrapper around the index is read through, so `return obj[key as keyof T]` stays trivial (§5.5)
 
 An arrow that is a Symbol's walk root has its expression body read as its returned value, so it goes through the same determination as `return <expr>`: `(u) => u.role === "admin"` gets the `return` rule `function f(u) { return u.role === "admin" }` gets, `(id) => fetchUser(id)` gets none and records the call (§5.4), and `(u) => u.role` gets none (§5.5). An arrow written inside another body, such as the callback in `return xs.map((x) => x * 2)`, is not a walk root: its expression body adds no rule to the enclosing Symbol, where a block-bodied callback's `return` does. A function a `const` hands its initializer's call is one (`lang-plugin.md` LP7c), so `export const doubled = xs.map((x) => x * 2)` gets `return: x * 2`, as its block spelling does. So is a property holding an arrow in a binding's object literal (LP7d): `const can = { admin: (u) => u.role === "admin" }` gives `can.admin` that `return` rule. One pair of parentheses around the body is not part of `expr` — the grammar requires them around an object literal (`() => ({ a: 1 })`), and the block spelling `return { a: 1 }` has nothing to match them. The rule's `line` is the body's first line — the opening parenthesis's when the body is parenthesized — not a `return` keyword's.
 
@@ -190,15 +192,20 @@ Thus a forward method containing `return foo()` becomes "rules: empty, calls: fo
 
 ```
 isTrivialExpr(node):
-  literal             → true
-  identifier          → true
-  this                → true
-  member_expression   → isTrivialExpr(node.object)   # arbitrary depth
-  subscript_expression → isTrivialExpr(node.object) and isTrivialExpr(node.index)
-  subscript_expression → isTrivialExpr(node.object) and isTrivialExpr(node.index)
-  unary_expression    → isTrivialExpr(node.argument)
-  parenthesized       → isTrivialExpr(node.expression)
-  otherwise           → false
+  literal              → true
+  identifier           → true
+  this                 → true
+  super                → true
+  member_expression    → isTrivialExpr(node.object)   # arbitrary depth
+  subscript_expression → isTrivialExpr(node.object) and isTrivialExpr(unwrapType(node.index))
+  unary_expression     → isTrivialExpr(node.argument)
+  update_expression    → isTrivialExpr(node.argument)
+  parenthesized        → isTrivialExpr(node.expression)
+  otherwise            → false
+
+unwrapType(index):     # an index only, never the returned expression itself
+  while index is as / satisfies / non-null (!) / <T> / parenthesized → index = its expression
+  return index
 
 isTrivialReturn(returnStatement):
   arg = returnStatement.argument
@@ -208,7 +215,9 @@ isTrivialReturn(returnStatement):
   otherwise                 → false  # non-trivial return Rule
 ```
 
-Whether a call_expression's arguments are trivial is not part of the determination (calls are recorded independently as calls, so it is unnecessary for evaluating return wrapping).
+A type-level wrapper asserts something about the index without replacing it, so `a[i as number]`, `a[i!]`, `a[<number>i]`, `a[k satisfies string]` and `obj[key as keyof T]` are read as `a[i]`, `a[k]` and `obj[key]` are. Only an index is read through one: `isTrivialExpr` has no case for a wrapper, so `return x as T` is a rule. A template literal is not a `literal`, with or without a substitution, so `` return `k` `` is a rule and so is `` return a[`k`] ``, where `return a['k']` is trivial. An index that updates a name is read as the update is at the top, so `return a[i++]` is trivial, as `return i++` is.
+
+Whether a call_expression's arguments are trivial is not part of the determination (calls are recorded independently as calls, so it is unnecessary for evaluating return wrapping). A call-only return is walked, so its arguments' calls are recorded whatever they are; a trivial return is not walked at all. That is why the index is part of the determination: a property is a name, but an index is an expression and can hold a call, and `return cache[computeKey(k)]` read as trivial would record no `computeKey` in any Symbol.
 
 ### 5.6 Dropping decorators
 
@@ -349,10 +358,11 @@ Properties the extraction pipeline must satisfy.
 | T12 | `` `hello ${name}` `` | no |
 | T13 | `items[0]` | yes |
 | T14 | `map[key]` | yes |
-| T15 | `cache[computeKey(k)]` | no (a `return` rule; `computeKey` is recorded in calls) |
-| T13 | `items[0]` | yes |
-| T14 | `map[key]` | yes |
-| T15 | `cache[computeKey(k)]` | no (a `return` rule; `computeKey` is recorded in calls) |
+| T15 | `cache[computeKey(k)]` | no |
+| T16 | `obj[key as keyof T]` | yes |
+| T17 | `key as keyof T` | no |
+| T18 | `` a[`k`] `` | no |
+| T19 | `a[i++]` | yes |
 
 ## 9. Configuration examples
 
