@@ -30,7 +30,6 @@ import {
   functionValuedField,
   hasPrivateName,
   isConstructorMember,
-  memberNameSegment,
   memberSymbolSegment,
 } from "./class-members"
 import { readDecorators } from "./decorators"
@@ -460,14 +459,16 @@ function addClassAndMembers(
 }
 
 /**
- * One candidate per member, not per member declaration. Which class-body nodes are members
- * at all — and why an overload `method_signature` is not one outside a `declare` — is
- * `memberSymbolSegment`'s answer.
+ * One candidate per member, not per member declaration. Which class-body nodes declare a
+ * member at all, an overload `method_signature` among them, is `memberSymbolSegment`'s answer;
+ * which of a member's declarations leads it is `foldMemberGroup`'s.
  *
- * What is left can still name one member twice: `get v()` beside `set v(n)` is one property,
- * and two `method_definition` nodes. Those fold into one candidate, and the getter is the one
- * that claims it — a property's type is what reading it answers, so taking the setter's
- * signature would report the member as `(n) => void`.
+ * So one member can be written more than once: `get v()` beside `set v(n)` is one property,
+ * and two `method_definition` nodes, and `find(id: string): User;` beside `find(id: any) { … }`
+ * is one method (LP8q). Those fold into one candidate. Of an accessor pair the getter is the
+ * one that claims it — a property's type is what reading it answers, so taking the setter's
+ * signature would report the member as `(n) => void` — and of an overload set, the
+ * implementation.
  *
  * A field holding a function is a member here too, and folds by id with the rest: a field
  * and a method of the same name are one id, which is what `tsc` calls TS2300 anyway.
@@ -482,7 +483,7 @@ function addClassMembers(
   const byId = new Map<string, MemberGroup>()
   for (const member of body.namedChildren) {
     if (member === null) continue
-    const segment = memberSymbolSegment(classNode, member) ?? overloadSegment(classNode, member)
+    const segment = memberSymbolSegment(classNode, member)
     if (segment === null) continue
     // Which of the two member shapes this is. A field the predicate admitted always answers
     // with the function it holds, and a `method_definition` falls out on one type test.
@@ -497,17 +498,6 @@ function addClassMembers(
     const folded = foldMemberGroup(group)
     if (folded !== null) out.add(folded)
   }
-}
-
-/**
- * The segment of a method overload signature in an ordinary class body, which
- * `memberSymbolSegment` refuses because it is not a member of its own: it folds into the
- * implementation beside it (LP8q), led by that implementation.
- */
-function overloadSegment(classNode: Node, member: Node): string | null {
-  if (member.type !== "method_signature" || !isOverloadSignature(member)) return null
-  if (nameFieldText(classNode) === null) return null
-  return memberNameSegment(member)
 }
 
 /** One member declaration, with the one thing about it that decides which of a pair leads. */
@@ -570,9 +560,11 @@ function makeFunctionCandidate(
 }
 
 /**
- * One class member `memberSymbolSegment` has already admitted, and the segment it admitted it
- * by: a member whose name has no qualified-name segment — computed, quoted into something that
- * is not an identifier, numeric — never reaches here, and the name is not read a second time.
+ * One class-member declaration `memberSymbolSegment` has already admitted — an overload
+ * signature included, which becomes a candidate here and folds into its implementation's — and
+ * the segment it admitted it by: a member whose name has no qualified-name segment — computed,
+ * quoted into something that is not an identifier, numeric — never reaches here, and the name
+ * is not read a second time.
  *
  * Taking the segment as an argument is what leaves no way for this to refuse a name. Reading
  * the name here instead would mean handing its text to the id builder, which throws on

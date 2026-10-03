@@ -1,12 +1,6 @@
 import { isQnameSegment } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
-import {
-  functionValueOf,
-  hasChildOfType,
-  hasErrorChild,
-  inAmbientContext,
-  nameFieldText,
-} from "./ast-helpers"
+import { functionValueOf, hasChildOfType, hasErrorChild, nameFieldText } from "./ast-helpers"
 import { decodeStringLiteral } from "./string-escape"
 
 /**
@@ -63,8 +57,8 @@ function admitSegment(candidate: string, privateName = false): string | null {
 }
 
 /**
- * The qualified-name segment extraction gives this class-body member, or null when the member
- * has no SymbolCandidate of its own.
+ * The qualified-name segment of the member Symbol this class-body node declares, or null when
+ * it declares none.
  *
  * **One reader, one answer.** Extraction asks this to decide what to emit and `walkBody` asks
  * it to decide whose body a member's calls and rules belong to; the moment they disagree a
@@ -82,19 +76,22 @@ function admitSegment(candidate: string, privateName = false): string | null {
  * Four member shapes qualify. A `method_definition` is a member when `memberNameSegment` gives
  * it one. A field holding a function is a member because calling it is what runs the body
  * (`functionValuedField`). The other two are the shapes a member with **no body of its own**
- * is written in, and what separates them from an overload is whether an implementation can be
- * written beside them:
+ * is written in:
  *
  * - `abstract_method_signature` is a member. The language forbids an implementation beside it,
  *   so nothing else in the class declares `doIt`, and skipping it left an abstract class
  *   reporting only the methods it happened to implement.
- * - `method_signature` is a member **only in an ambient class**. In an ordinary class body it
- *   is an overload declaration and the implementation beside it carries the body and the
- *   parameter types the member is actually called with — so it stays skipped, which is also
- *   how a top-level `function_signature` behaves. An ambient class body has no implementations
- *   to defer to, and reading its members as overloads left `export declare class` with no
- *   methods at all. A class body of signatures and no implementation therefore still declares
- *   no members outside a `declare`, which is what `tsc` calls TS2391 anyway.
+ * - `method_signature` declares the member wherever it is written. In an ambient class it is
+ *   the member's whole declaration: there are no implementations to defer to, and skipping it
+ *   left `export declare class` with no methods at all. In an ordinary class body it is an
+ *   overload, and folds into the implementation beside it, which leads (LP8q) — as a top-level
+ *   `function_signature` does.
+ *
+ * So this answers which member a node declares, not whether that member gets a Symbol: which
+ * declaration leads is extraction's question (`foldMemberGroup`), and a class body of overload
+ * signatures with no implementation has none to lead and no member Symbol, which is what `tsc`
+ * calls TS2391 anyway. The walk's answer does not depend on that: a signature has no body for
+ * a member Symbol to carry, so `walkBody` reads it whole on the class either way.
  */
 export function memberSymbolSegment(classNode: Node, member: Node): string | null {
   if (nameFieldText(classNode) === null) return null
@@ -102,7 +99,7 @@ export function memberSymbolSegment(classNode: Node, member: Node): string | nul
   if (segment === null) return null
   if (member.type === "method_definition") return segment
   if (member.type === "abstract_method_signature") return segment
-  if (member.type === "method_signature") return inAmbientContext(classNode) ? segment : null
+  if (member.type === "method_signature") return segment
   return functionValuedField(member) === null ? null : segment
 }
 
