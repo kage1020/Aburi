@@ -65,7 +65,9 @@ export interface ImportEdge {
    * ` as `. Callers that only care about the exported name split on the
    * separator; callers that need the local binding (call resolution) do the
    * same split and pick the right half. Un-aliased imports emit the plain
-   * exported name (`"X"`).
+   * exported name (`"X"`). A default import (`import Y from './x'`) binds the
+   * module's `default` export and is written as `{ default as Y }` would be,
+   * `"default as Y"`, so it never reads as a named import of `Y`.
    */
   symbols: string[] | "*"
   line: number

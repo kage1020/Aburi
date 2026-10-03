@@ -12,7 +12,7 @@ import type {
 import { CALL_SITE_KEY_SEPARATOR, makeCallSiteKey, receiverHead } from "./call-site"
 import { groupBy } from "./collections"
 import { CoreError } from "./errors"
-import { trySymbolId } from "./id"
+import { DEFAULT_EXPORT_QNAME, trySymbolId } from "./id"
 import { splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
 import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
@@ -696,6 +696,13 @@ function resolveInImportScope(
     for (const raw of edge.symbols) {
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
+      if (imported === "default") {
+        for (const exported of defaultExportsOf(ctx, targetFile)) {
+          const candidateId = memberId(ctx, targetFile, exported.name, tail)
+          if (candidateId !== null) candidates.add(candidateId)
+        }
+        continue
+      }
       const candidateId = memberId(ctx, targetFile, imported, tail)
       if (candidateId !== null) candidates.add(candidateId)
     }
@@ -707,6 +714,27 @@ function resolveInImportScope(
   const [only] = candidates
   if (only === undefined) return null
   return { id: only, confidence: "high" }
+}
+
+/**
+ * The top-level Symbols a file's default export names: the anonymous `<default>` one
+ * (`ir-schema.md` §3.2), or a named declaration carrying `export-default` in `derivedBy`
+ * (`export default function makeApp`). A default import binds whichever it is under a local
+ * name of the importer's choosing, so the local name says nothing about which Symbol it is
+ * (`call-resolution.md` §4.4, CR5). More than one is left to the caller's ambiguity check.
+ */
+function defaultExportsOf(ctx: ResolveTargetContext, file: string): IRSymbol[] {
+  const perName = ctx.topLevelByFile.get(file)
+  if (perName === undefined) return []
+  const found: IRSymbol[] = []
+  for (const bucket of perName.values()) {
+    for (const symbol of bucket) {
+      if (symbol.name === DEFAULT_EXPORT_QNAME || symbol.derivedBy.includes("export-default")) {
+        found.push(symbol)
+      }
+    }
+  }
+  return found
 }
 
 /**

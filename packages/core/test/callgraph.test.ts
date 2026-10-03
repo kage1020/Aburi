@@ -1090,6 +1090,56 @@ describe("resolveCallGraph", () => {
     ])
   })
 
+  describe("CR5: a default import resolves to the module's default export", () => {
+    /** Where `caller`'s one call at line 6 lands, with `src/a.ts` importing `symbols` from `./x`. */
+    function resolvedOf(target: string, symbols: string[], callees: IRSymbol[]) {
+      const caller = withCalls("ts:src/a.ts#caller", [{ target, line: 6 }])
+      const imports = new Map<string, readonly ImportEdge[]>([
+        ["src/a.ts", [importEdge({ source: "./x", symbols })]],
+      ])
+      const result = resolveCallGraph({ symbols: [caller, ...callees], importsByFile: imports })
+      return result.edges.map((edge) => [edge.to, edge.confidence])
+    }
+
+    it("reaches an anonymous default export", () => {
+      const anon = makeSymbol("ts:src/x.ts#<default>", { derivedBy: ["export-default"] })
+      expect(resolvedOf("inc", ["default as inc"], [anon])).toEqual([
+        ["ts:src/x.ts#<default>", "high"],
+      ])
+    })
+
+    it("reaches a named default export imported under another name", () => {
+      const makeApp = makeSymbol("ts:src/x.ts#makeApp", { derivedBy: ["export-default"] })
+      expect(resolvedOf("createApp", ["default as createApp"], [makeApp])).toEqual([
+        ["ts:src/x.ts#makeApp", "high"],
+      ])
+    })
+
+    it("does not take a named export that happens to share the local name", () => {
+      const createClient = makeSymbol("ts:src/x.ts#createClient", { derivedBy: ["export-default"] })
+      const connect = makeSymbol("ts:src/x.ts#connect")
+      const callees = [createClient, connect]
+      expect(resolvedOf("connect", ["default as connect"], callees)).toEqual([
+        ["ts:src/x.ts#createClient", "high"],
+      ])
+      // The named import of the same name still reaches the named export.
+      expect(resolvedOf("connect", ["connect"], callees)).toEqual([["ts:src/x.ts#connect", "high"]])
+    })
+
+    it("reaches a member of a default-exported class", () => {
+      const svc = makeSymbol("ts:src/x.ts#Svc", { kind: "class", derivedBy: ["export-default"] })
+      const run = makeSymbol("ts:src/x.ts#Svc::run", { kind: "method" })
+      expect(resolvedOf("Svc.run", ["default as Svc"], [svc, run])).toEqual([
+        ["ts:src/x.ts#Svc::run", "high"],
+      ])
+    })
+
+    it("leaves a module without a default export unresolved", () => {
+      const connect = makeSymbol("ts:src/x.ts#connect")
+      expect(resolvedOf("connect", ["default as connect"], [connect])).toEqual([])
+    })
+  })
+
   // ---------------------------------------------------------------------------
   // Integrated matrix — intra-file / intra-component / workspace / dynamic in one run
   // ---------------------------------------------------------------------------

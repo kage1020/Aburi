@@ -10,12 +10,11 @@
 /**
  * The two names a single `ImportEdge.symbols` entry carries.
  *
- * `imported` is the name the source module exports it under **as far as the wire format can
- * tell**; `local` is the binding the importing file writes. They are equal for an unaliased
- * import, and for a default import (`import Foo from './x'`) — where the module in fact
- * exports `default`, not `Foo`. Both shapes reach this format as a bare identifier and
- * nothing distinguishes them, so a consumer matching a vocabulary table reads a default
- * import as a named one.
+ * `imported` is the name the source module exports it under; `local` is the binding the
+ * importing file writes. They are equal for an unaliased import. A default import
+ * (`import Foo from './x'`) arrives as `"default as Foo"`, so `imported` is `"default"`: the
+ * module exports `default`, not `Foo`, and a consumer matching a vocabulary table has to
+ * decide what a default import means to it.
  *
  * Neither half is guaranteed non-empty: `" as Y"` and `"X as "` are not shapes a language
  * plugin should emit, and this parser reports them rather than repairing them. A consumer
