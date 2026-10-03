@@ -82,6 +82,15 @@ describe("walkBody — rules (LP16-LP20)", () => {
     expect(call?.literalArgs).toEqual(["users", "42", null])
   })
 
+  it("reads a backtick literal with no substitution as the string it spells", async () => {
+    // The same value as `'users'`, so an effect plugin reading the table or route sees it.
+    const { calls } = await walkFirstSymbol(
+      `export function f() { doThing(\`users\`, \`a/\${b}\`) }`,
+    )
+    const call = calls.find((c) => c.target === "doThing")
+    expect(call?.literalArgs).toEqual(["users", null])
+  })
+
   it("counts arguments, not the comments written between them", async () => {
     // Comments are grammar `extras`, so tree-sitter hangs them wherever they were
     // written — a comment inside the parentheses is a named child of the argument list

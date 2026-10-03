@@ -1,7 +1,37 @@
-import type { Symbol as IRSymbol, Rule } from "@aburi/types"
+import type { Effect, Symbol as IRSymbol, Rule } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { logicFingerprint, logicNamesNothing } from "../../src/index"
-import { makeSymbol } from "../fixtures/ir"
+import { hashCanonicalObject, logicFingerprint, logicNamesNothing } from "../../src/index"
+import { makeSymbol, symbolId } from "../fixtures/ir"
+
+/** A locally-detected effect: the plugin classified a call in this body, at `line`. */
+function localEffect(id: string, target: string, line: number): Effect {
+  return {
+    id,
+    target,
+    line,
+    plugin: "effects-test",
+    confidence: "high",
+    derivedBy: "convention:test",
+  }
+}
+
+/** A propagated effect as the propagation pass writes one: no `line`, a direct callee. */
+function propagatedEffect(id: string, target: string): Effect {
+  return {
+    id,
+    target,
+    plugin: "effects-test",
+    confidence: "high",
+    derivedBy: "convention:test",
+    propagated: true,
+    derivedFrom: [symbolId("ts:src/invoice.ts#saveInvoice")],
+  }
+}
+
+/** A caller with no rules, so its logic input is its effects alone. */
+function caller(effects: Effect[]): IRSymbol {
+  return makeSymbol("ts:src/invoice.ts#handleCheckout", { rules: [], effects })
+}
 
 function base(): IRSymbol {
   return makeSymbol("ts:src/a.ts#foo", {
@@ -137,6 +167,85 @@ describe("logicFingerprint — invariance", () => {
     expect(logicFingerprint(sym)).toBe(baseFp)
   })
 
+  it("L12a: an id change that reorders two propagated effects leaves the caller's logic alone", () => {
+    // The IR sorts the propagated segment by (id, target), so db.write → x-acme:create moves
+    // prisma.invoice.create from before bus.emit to after it. The callee, whose local effects
+    // keep call order, keeps its hash; the caller has to as well (fingerprint.md §4.5).
+    const before = caller([
+      propagatedEffect("db.write", "prisma.invoice.create"),
+      propagatedEffect("event.publish", "bus.emit"),
+    ])
+    const after = caller([
+      propagatedEffect("event.publish", "bus.emit"),
+      propagatedEffect("x-acme:create", "prisma.invoice.create"),
+    ])
+
+    expect(logicFingerprint(after)).toBe(logicFingerprint(before))
+  })
+
+  it("L12a: the same reorder leaves the caller's logic alone beside a local effect of its own", () => {
+    // The realistic shape: a controller with an effect of its own that reaches a write and a
+    // publish through its callees. Both segments are populated, so the split between them is
+    // exercised; before the fix this pair hashed apart as well.
+    const readsClock = localEffect("time.now", "Date.now", 4)
+    const before = caller([
+      readsClock,
+      propagatedEffect("db.write", "prisma.invoice.create"),
+      propagatedEffect("event.publish", "bus.emit"),
+    ])
+    const after = caller([
+      readsClock,
+      propagatedEffect("event.publish", "bus.emit"),
+      propagatedEffect("x-acme:create", "prisma.invoice.create"),
+    ])
+
+    expect(logicFingerprint(after)).toBe(logicFingerprint(before))
+  })
+
+  it("L12b: one target reaching a caller under two ids hashes as it does once the ids agree", () => {
+    // Two callees classify prisma.invoice.create differently (one file imports the client the
+    // plugin gates on, the other does not), so propagation, which merges on (id, target), hands
+    // the caller two entries for it. A plugin upgrade that unifies the ids leaves one; the
+    // callees' logic does not move, and the caller's must not either.
+    const split = caller([
+      propagatedEffect("db.write", "prisma.invoice.create"),
+      propagatedEffect("x-acme:create", "prisma.invoice.create"),
+    ])
+    const unified = caller([propagatedEffect("db.write", "prisma.invoice.create")])
+
+    expect(logicFingerprint(split)).toBe(logicFingerprint(unified))
+  })
+
+  it("L12c: a propagated target the caller already calls locally adds nothing, whatever its id", () => {
+    // Propagation drops a propagated entry only when the caller has a local effect with the
+    // same (id, target). With the callee classifying the target as x-acme:create and the caller
+    // as db.write, the entry stays; once the ids agree, propagation drops it. The caller's
+    // logic must be the same either way.
+    const own = localEffect("db.write", "prisma.invoice.create", 6)
+    const split = caller([own, propagatedEffect("x-acme:create", "prisma.invoice.create")])
+    const unified = caller([own])
+
+    expect(logicFingerprint(split)).toBe(logicFingerprint(unified))
+  })
+
+  it("keeps local effects in call order ahead of the propagated ones", () => {
+    // The input pinned in full. Both local entries keep call order, the one written with an
+    // explicit `propagated: false` among them, since only `true` moves an entry to the second
+    // segment. The propagated entry comes after them although its target sorts first.
+    const sym = caller([
+      localEffect("db.write", "z.local", 3),
+      { ...localEffect("db.write", "m.local", 5), propagated: false },
+      propagatedEffect("db.write", "a.propagated"),
+    ])
+
+    expect(logicFingerprint(sym)).toBe(
+      hashCanonicalObject({
+        effects: [{ target: "z.local" }, { target: "m.local" }, { target: "a.propagated" }],
+        rules: [],
+      }),
+    )
+  })
+
   it("whitespace-only differences in rule condition strings are invariant", () => {
     const sym = makeSymbol(base().id, {
       ...base(),
@@ -236,6 +345,13 @@ describe("logicFingerprint — change conditions", () => {
       ],
     })
     expect(logicFingerprint(sym)).not.toBe(baseFp)
+  })
+
+  it("L10: a propagated effect enters the hash, so a caller whose only effect is one moves", () => {
+    // What propagation is for (effect-propagation.md §12.4): a callee gaining a db.write has to
+    // reach the caller's logic even when the caller's own body has no effect at all.
+    const reachesWrite = caller([propagatedEffect("db.write", "prisma.invoice.create")])
+    expect(logicFingerprint(reachesWrite)).not.toBe(logicFingerprint(caller([])))
   })
 
   it("L8b: changing Rule.what perturbs the hash", () => {
@@ -378,6 +494,11 @@ describe("logicNamesNothing", () => {
   it("fails on any effect, the rules notwithstanding", () => {
     const { effects } = base()
     expect(logicNamesNothing(makeSymbol(base().id, { rules: [], effects }))).toBe(false)
+  })
+
+  it("fails on a propagated effect alone", () => {
+    const reachesWrite = caller([propagatedEffect("db.write", "prisma.invoice.create")])
+    expect(logicNamesNothing(reachesWrite)).toBe(false)
   })
 
   it("does not read what the hash does not: a rule's line", () => {

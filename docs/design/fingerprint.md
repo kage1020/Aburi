@@ -46,6 +46,7 @@ Hash inputs are serialized as JSON before being fed to SHA-256. Serialization fo
 3. Array element order **follows the rules specified in this document** (default: preserve input order)
 4. Numbers follow the JSON standard (no decimal point on integers, `NaN` / `Infinity` not allowed)
 5. String escaping follows the JSON standard; characters other than ASCII control characters are emitted as-is (no `\uXXXX` required)
+6. A key whose value is absent (`undefined`) is not written at all. `null` is a value and is written, as `extKind`'s is. The parameter markers of §3.1 rely on the first: a parameter that carries neither serializes to `{"type":…}` alone
 
 Encode as UTF-8, then pass to SHA-256.
 
@@ -69,7 +70,11 @@ Represents the symbol's **externally observable contract**. Changes when the "pu
     }
   ],                                            // all decorators, sorted by (name, line)
   "signature": null | {
-    "inputs": [{ "type": <canonical(input.type)> }],  // name excluded, input order preserved
+    "inputs": [{
+      "type": <canonical(input.type)>,
+      "optional": true,                         // only when input.optional is true
+      "rest": true                              // only when input.rest is true
+    }],                                         // name excluded, input order preserved
     "outputs": [<canonical(output)>],           // input order preserved
     "throws": [<canonical(throw)>],             // sorted (alpha)
     "async": <bool>,
@@ -80,6 +85,8 @@ Represents the symbol's **externally observable contract**. Changes when the "pu
 ```
 
 `language` is **not included in the input**. It is already separated by the `<language>:` prefix inside Symbol.id, and by design `language` never changes between Symbols with the same ID. The fingerprint represents only the API surface of a single Symbol.
+
+`optional` and `rest` are what a caller sees of a parameter's form besides its type ([ir-schema.md](./ir-schema.md) §7). Each is written only when `true`, and by §2.3 rule 6 an absent marker writes nothing, so a parameter with neither contributes the same bytes whether or not its Document knows of the fields. A `false` written against the Class B rule hashes as absent.
 
 ### 3.2 Formula
 
@@ -111,6 +118,7 @@ Examples:
 ### 3.4 Guaranteed invariance conditions
 
 - Changing `signature.inputs[].name` does not change `api` (parameter names are not part of the contract)
+- Changing only a default's **value** (`limit = 10` → `limit = 20`) does not change `api`: omitting the argument stays legal either way, so the value is not part of the api contract. The IR records that a default exists (`optional`) and not what it is. What the default runs is read with the body instead ([lang-plugin.md](./lang-plugin.md) LP20d), so a default that calls something reaches `logic`
 - Changing local variable names, the function body, or rules/effects does not change `api`
 - Reordering the **occurrence order** of decorators does not change `api` (because of the sort convention)
 - **Changing only the class-scope portion of `Symbol.name` (`InvoiceService.createInvoice` → `BillingService.createInvoice`) does not change `api`** (the last segment is the same)
@@ -118,6 +126,7 @@ Examples:
 ### 3.5 Guaranteed change conditions
 
 - `visibility` changes → changes
+- A parameter becomes optional or required, gains or loses a default, or becomes or stops being a rest parameter → changes (`signature.inputs[].optional` / `.rest`, [ir-schema.md](./ir-schema.md) §7). A default's value does not (§3.4)
 - Any of `signature.inputs[].type` / `outputs` / `throws` changes → changes
 - Adding / removing a decorator or changing its arguments → changes (whether boundary or non-boundary)
 - `shortName` change (= renaming the method/function itself) → changes
@@ -154,11 +163,18 @@ Represents the **meaning executed by the symbol's body**. Changes when the meani
     {
       "target": <canonical(Effect.target)>
     }
-  ]                                             // input order (= source order = ascending line) preserved
+  ]                                             // locally detected effects in input order, then propagated targets (below)
 }
 ```
 
 The rule strings are the ones the IR holds, already in the ir-schema.md §8.2 form: comments removed, whitespace collapsed, and cut to 120 characters plus `...`. Reading what the IR holds keeps `logic` recomputable from a Document alone. The cost is that an edit past the 120th character of a long condition, throw value or return expression moves neither `logic` nor the diff's rule delta; `syntax` still moves, so the change is reported as syntax-only rather than missed.
+
+`effects` is built in two segments, split on `Effect.propagated`, the one field besides `target` the input reads ([`effect-propagation.md`](./effect-propagation.md) §5.1):
+
+1. **Locally detected effects** (`propagated` absent or `false`), in input order (= call order = ascending `line`), one entry per effect: a target called twice is two entries.
+2. **Propagated effects** (`propagated: true`), after every locally detected one, by `canonical(target)` alone: sorted ascending by UTF-16 code unit, each target once, and leaving out any target segment 1 already holds.
+
+Segment 2 is not read as the IR stores it. The IR orders that segment by `(id, target)` and merges it on that pair ([`effect-propagation.md`](./effect-propagation.md) §5.1, §8), and `id` is not part of the input (below), so reading it as stored would let an id change reorder a caller's targets, repeat one, or leave in place a target the caller's own effects already name. Each moves the `logic` of every transitive caller while the callee's own stays put (§4.5). Propagated entries have no call-site position, and propagation already merges their repeats, so this loses nothing §4.7 protects.
 
 `Effect.id` (e.g. `db.write` / `x-prisma:create`) is **not included in the input**. Reasons:
 
@@ -185,15 +201,16 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 ### 4.4 Guaranteed change conditions
 
 - Reordering **rules** → changes (control-flow execution order carries meaning)
-- Reordering **effects** → changes (side-effect occurrence order carries meaning)
+- Reordering **locally detected effects** → changes (side-effect occurrence order carries meaning). The order of propagated effects is not read (§4.1)
 - Changing the expression of `rules[].condition` / `what` / `expr` itself → changes
-- Adding / removing an effect, or changing its `target` → changes
+- Adding / removing an effect, or changing its `target` → changes, except that a propagated effect on a target another effect of the Symbol already names adds or removes nothing (§4.1)
 
 ### 4.5 Guaranteed invariance conditions (plugin-configuration robustness)
 
 - Even if the `effects[].id` classification of an effect plugin changes (e.g. `db.write` ↔ `x-prisma:create`), `logic` is unchanged as long as the target is the same
 - Adding / removing effect plugins or reordering the config does not break the logic stability of the IR
 - Time-series comparison against past IRs is robust to plugin configuration changes
+- This holds for propagated effects too. The IR orders their segment by `(id, target)` and merges it on that pair ([`effect-propagation.md`](./effect-propagation.md) §5.1, §8), so an id change can reorder its entries, split one target into two entries or merge two into one, and decide whether a locally detected effect on the same target suppresses one. The fingerprint reads the segment by target alone (§4.1): sorted, each target once, and none a locally detected effect already names, so none of this reaches `logic`. Locally detected effects keep their call order and their repeats (§4.7)
 
 ### 4.6 Known current limitations (before LSP enrichment)
 
@@ -204,11 +221,13 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 
 These are explicitly declared as "not yet guaranteed". A field rename appearing as `logic changed` during review is, today, per spec.
 
-### 4.7 Why effects order is preserved (= not sorted)
+### 4.7 Why the order of locally detected effects is preserved (= not sorted)
 
 By design, the order of effects can carry meaning (transaction boundaries, idempotency, retry safety). Discarding order would give "DB write before event publish" and "event publish before DB write" the same fingerprint, making refactoring-induced bugs undetectable in the diff.
 
 As a trade-off, "unintended reordering" also shows up in the diff, but a miss was judged more costly than noise.
+
+This applies to locally detected effects, each of which sits at a call site in the body. Propagated effects have none: propagation appends them after the local ones in `(id, target)` order ([`effect-propagation.md`](./effect-propagation.md) §8), an order that never followed the sequence in which the callees' side effects run. The fingerprint therefore reads them by target alone (§4.1, §4.5), which loses no ordering this section protects.
 
 ### 4.8 A value that names nothing
 
@@ -258,10 +277,13 @@ syntax = lower_hex(SHA-256(UTF-8(syntax_input))[0..6])
 ### 5.3 Guaranteed invariance conditions
 
 - Whitespace / newline / indentation changes → unchanged
+- Line terminators (LF, CRLF, a lone CR) → unchanged
 - Adding / removing comments → unchanged
 - The quotes around a string that needs no escape either way, a trailing comma, optional semicolons → unchanged
 
 These are the punctuation item 4 leaves out, not formatter output in general. A formatter that quotes an object key (`{ a: 1 }` → `{ "a": 1 }`), picks the quote that needs fewer escapes (`'it\'s'` → `"it's"`), wraps a multi-line expression in parentheses, or rewrites JSX (`<Foo></Foo>` → `<Foo />`) changes the structure, and `syntax` changes with it.
+
+Line terminators are held by the core, not by `normalizeAst`, which is why S2d in §7.6 is the core's row rather than a plugin's: the scan reads every source file with CRLF and a lone CR converted to LF before a plugin sees it. The step is needed because the syntax axis does not pass through the canonical-string collapse (§2.2), and item 3 drops whitespace tokens but not a literal's content, so a line break inside a template literal, or inside a string that continues across lines, would otherwise reach `syntax_input` as `\r\n` on one checkout and `\n` on another. `api` and `logic` never needed it, since §2.2 collapses that line break with the rest of the whitespace.
 
 ### 5.4 Guaranteed change conditions
 
@@ -339,6 +361,8 @@ The reference implementation and every language plugin must pass the following t
 | A3 | Reorder decorators (distinct decorators) | api unchanged |
 | A12 | Change only the class-scope portion of `Symbol.name` (`Old.method` → `New.method`) | api unchanged |
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
+| A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
+| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
 
 ### 7.3 api change conditions
 
@@ -353,6 +377,8 @@ The reference implementation and every language plugin must pass the following t
 | A10 | Change `kind` (`function` → `method`, etc.) | api changes |
 | A11 | Change `extKind` | api changes |
 | A14 | Change `shortName` (last segment) | api changes |
+| A20 | Toggle `signature.inputs[].optional` (absent ↔ `true`) | api changes |
+| A21 | Toggle `signature.inputs[].rest` (absent ↔ `true`) | api changes |
 
 ### 7.4 logic invariance conditions
 
@@ -365,16 +391,19 @@ The reference implementation and every language plugin must pass the following t
 | L5 | Change a decorator | logic unchanged |
 | L11 | Change only the effect's `id` (same target) — plugin configuration robustness | logic unchanged |
 | L12 | Adding/removing/reordering effect plugins classifies the same target under a different id | logic unchanged |
+| L12a | L11/L12 on a callee's effect that reaches a caller as one of two propagated effects, where the id change flips the two entries' `(id, target)` order; the caller is compared, with or without a locally detected effect of its own | logic unchanged |
+| L12b | L11/L12 unifies the ids under which two callees classify one target, which reached a caller as two propagated effects on that target and now reaches it as one; the caller is compared | logic unchanged |
+| L12c | L11/L12 unifies a callee's id for a target with the id of the caller's own locally detected effect on that target, so propagation now drops the propagated entry it kept before; the caller is compared | logic unchanged |
 
 ### 7.5 logic change conditions
 
 | ID | Mutation | Expected |
 |---|---|---|
 | L6 | Reorder rules | logic changes |
-| L7 | Reorder effects | logic changes |
+| L7 | Reorder locally detected effects | logic changes |
 | L8 | Change a rule's condition | logic changes |
 | L9 | Change an effect's target | logic changes |
-| L10 | Add / remove an effect | logic changes |
+| L10 | Add / remove an effect, locally detected or propagated (a propagated one on a target no other effect of the Symbol names) | logic changes |
 
 ### 7.6 syntax invariance conditions
 
@@ -385,6 +414,7 @@ The reference implementation and every language plugin must pass the following t
 | S2a | Change the quotes around a string that needs no escape either way | syntax unchanged |
 | S2b | Add a trailing comma | syntax unchanged |
 | S2c | Drop optional semicolons | syntax unchanged |
+| S2d | Save the file with CRLF or a lone CR | syntax unchanged — guaranteed by the core's scan, not by `normalizeAst` (§5.3) |
 
 ### 7.7 syntax change conditions
 
@@ -397,7 +427,7 @@ The reference implementation and every language plugin must pass the following t
 
 ### 7.7.1 syntax test criteria every language plugin must satisfy
 
-Every row of §7.6 and §7.7 falls under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
+Every row of §7.6 and §7.7 except S2d, which the core's scan holds (§5.3), falls under the responsibility of each language plugin's `normalizeAst()` implementation, but **the core cannot test the contract itself**, so every plugin must ship the following test harness:
 
 ```js
 // must be included in the language plugin's test suite
@@ -493,7 +523,11 @@ export function apiFingerprint(sym) {
   const signature = sym.signature ? {
     async: sym.signature.async,
     generator: sym.signature.generator,
-    inputs: sym.signature.inputs.map(i => ({ type: canonical(i.type) })),
+    inputs: sym.signature.inputs.map(i => ({
+      type: canonical(i.type),
+      ...(i.optional === true ? { optional: true } : {}),  // §3.1: only when true
+      ...(i.rest === true ? { rest: true } : {})
+    })),
     outputs: sym.signature.outputs.map(canonical),
     throws: [...sym.signature.throws].map(canonical).sort(),
     typeParameters: sym.signature.typeParameters.map(canonical)
@@ -512,7 +546,7 @@ export function apiFingerprint(sym) {
 
 export function logicFingerprint(sym) {
   return hash({
-    effects: sym.effects.map(e => ({ target: canonical(e.target) })),  // id excluded (§4.5)
+    effects: logicEffects(sym.effects),  // id excluded (§4.5)
     rules: sym.rules.map(r => ({
       condition: r.condition !== null ? canonical(r.condition) : null,
       expr:      r.expr !== null ? canonical(r.expr) : null,
@@ -521,6 +555,17 @@ export function logicFingerprint(sym) {
       what:      r.what !== null ? canonical(r.what) : null
     }))
   })
+}
+
+function logicEffects(effects) {
+  // §4.1 segment 1: locally detected effects in call order (§4.7), repeats kept
+  const local = effects.filter(e => e.propagated !== true).map(e => canonical(e.target))
+  // §4.1 segment 2: propagated targets, each once, none segment 1 holds, sorted by UTF-16
+  // code unit (`<`, not localeCompare) rather than in the IR's (id, target) order (§4.5)
+  const propagated = [...new Set(effects.filter(e => e.propagated === true).map(e => canonical(e.target)))]
+    .filter(t => !local.includes(t))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return [...local, ...propagated].map(target => ({ target }))
 }
 
 function canonical(s) {

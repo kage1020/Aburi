@@ -61,16 +61,59 @@ describe("I2: containsEarlyExit coverage", () => {
   })
 })
 
-describe("I3: try/catch/finally scope pin", () => {
-  it("keeps catch body calls out of the try rule's Symbol calls", async () => {
+describe("I3: try/catch/finally walk contract", () => {
+  it.each([
+    ["catch (e) { … }", "catch (e) { if (!e) return; errorHandler(e); throw e }"],
+    ["catch { … }", "catch { if (!ok) return; errorHandler(); throw failure }"],
+  ])("records the calls of `%s` and keeps its rules out", async (_label, clause) => {
+    // ir-schema.md §8.2 withholds a catch clause's rules, so a rewritten error handler's
+    // control flow does not move the logic axis. Its calls are another matter: no other Symbol
+    // records them, and a database write added there reached no effect at all. Both spellings
+    // of the clause, with a binding and without one, hand the walk the same `catch_clause`.
     const { calls, rules } = await walkFirstSymbol(
-      "export function f() { try { doThing() } catch { errorHandler() } }",
+      `export function f() { try { doThing() } ${clause} }`,
     )
-    expect(rules.some((r) => r.type === "try")).toBe(true)
-    // The catch handler's contents are semantically part of another Symbol's scope
-    // (or dropped when trivial). doThing (inside try) is recorded; errorHandler is not.
-    expect(calls.map((c) => c.target)).toContain("doThing")
-    expect(calls.map((c) => c.target)).not.toContain("errorHandler")
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls.map((c) => c.target)).toEqual(["doThing", "errorHandler"])
+  })
+
+  it("walks the finally block like the try block", async () => {
+    // The finally block runs on every path, so its rules and calls are the Symbol's.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { doThing() } finally { if (!held) return; release() } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try", "guard"])
+    expect(calls.map((c) => c.target)).toEqual(["doThing", "release"])
+  })
+
+  it("takes the try block whole, the catch clause's calls and the finally block whole together", async () => {
+    // The one guard is the finally block's; the catch clause's guard is withheld.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { a() } catch (e) { if (!e) return; b() } finally { if (x) return; c() } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try", "guard"])
+    expect(calls.map((c) => c.target)).toEqual(["a", "b", "c"])
+  })
+
+  it("records the calls a catch clause would record as a try block, and no others", async () => {
+    // `return a[g()]` is a trivial return, which the drop list stops at without recording the
+    // call inside it (drop-list.md §5.5, LP19a). The catch clause is walked the same way
+    // (LP20m), so the same statement gives the same answer on both sides.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f(a: number[]) { try { return a[g()] } catch (e) { return a[h()] } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls).toEqual([])
+  })
+
+  it("withholds the rules of a finally block nested inside a catch clause", async () => {
+    // Running on every path of the inner try does not lift a finally out of the catch clause
+    // it is written in: nothing under a catch clause gives the Symbol a rule.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { a() } catch (e) { try { b() } finally { if (y) return; c() } } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls.map((c) => c.target)).toEqual(["a", "b", "c"])
   })
 })
 

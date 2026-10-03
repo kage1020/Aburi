@@ -571,7 +571,8 @@ interface ClassifyCallsInput {
  *   the leaf name alone.
  *
  * `decorators[].raw` is left alone for the reason the signature's type strings are: it is a
- * quotation of source text (ir-schema.md), not a value anything matches against.
+ * quotation of source text (ir-schema.md), not a value anything matches against. The api
+ * fingerprint hashes both, and puts what it hashes into NFC itself (fingerprint.md §2.2).
  *
  * `id` is deliberately not touched: it is constructed rather than read, `makeSymbolId`
  * normalizes it there, and quietly repairing one asserted by hand would hide the plugin bug
@@ -631,8 +632,10 @@ function normalizeDecoratorNames(
 
 /**
  * Only `inputs[].name` is normalized. The type strings beside it are quotations of source
- * text (ir-schema.md): their spelling decides nothing, and rewriting one would misquote the
- * declaration the Document is reporting.
+ * text (ir-schema.md §7): nothing matches against them, the api fingerprint that hashes them
+ * normalizes its own input (fingerprint.md §2.2), and rewriting one would misquote the
+ * declaration the Document is reporting. `optional` and `rest` are booleans, carried over as
+ * they are.
  */
 function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["signature"]>(
   signature: T,

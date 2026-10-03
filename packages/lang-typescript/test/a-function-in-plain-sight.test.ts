@@ -114,11 +114,12 @@ describe("a registration call's inline handler is its body", () => {
       ["first", "second"],
     ],
     // The Symbol stands for the whole statement, and both handlers are written in it. Naming
-    // it after the leaf method is the existing convention and is not what this changes.
+    // it after the leaf method is the existing convention and is not what this changes; the
+    // path written up the chain is what discriminates it (LP20i1).
     [
       "both handlers of a chained registration",
       'app.route("/x").get(() => { read() }).post(() => { write() })',
-      "ts:src/a.ts#app__post__d0",
+      "ts:src/a.ts#app__post__$x__d0",
       ["read", "write"],
     ],
     // The chain is walked through the same wrappers a value is read through; stopping at the
@@ -126,7 +127,7 @@ describe("a registration call's inline handler is its body", () => {
     [
       "a chain with a wrapper standing in the middle",
       '(app.route("/x").get(() => { read() })).post(() => { write() })',
-      "ts:src/a.ts#app__post__d0",
+      "ts:src/a.ts#app__post__$x__d0",
       ["read", "write"],
     ],
     [
@@ -450,7 +451,11 @@ describe("the statement's spine is one Symbol's worth of registrations", () => {
       "ts:src/a.ts#app__get__$x__d0",
     ],
     // …and where it wraps a call rather than a receiver, which is the other arm of the walk
-    ["a wrapped call", "(app.route('/x') as R).get(() => { read() })", "ts:src/a.ts#app__get__d0"],
+    [
+      "a wrapped call",
+      "(app.route('/x') as R).get(() => { read() })",
+      "ts:src/a.ts#app__get__$x__d0",
+    ],
   ])("names the receiver through %s, the way a value is read through one", async (_l, source, id) => {
     expect(await callsOf(source, id)).toEqual(["read"])
   })

@@ -124,6 +124,39 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
     expect(violations.map((v) => v.subject)).toContain("components[0].roots[0]")
   })
 
+  it("checks a parameter's optional and rest markers when they are present", () => {
+    // The api fingerprint reads both, so a marker that is not a boolean changes a hash by
+    // accident of whatever the producer wrote there.
+    const symbol = makeSymbol("ts:src/a.ts#foo", {
+      signature: {
+        inputs: [
+          { name: "a", type: "string", optional: true },
+          { name: "ids", type: "string[]", rest: true },
+        ],
+        outputs: [],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+    }) as unknown as Record<string, unknown>
+    expect(shapeViolations(withField("symbols", [symbol]))).toEqual([])
+
+    symbol.signature = {
+      inputs: [{ name: "a", type: "string", optional: "yes", rest: 1 }],
+      outputs: [],
+      throws: [],
+      async: false,
+      generator: false,
+      typeParameters: [],
+    }
+    const violations = shapeViolations(withField("symbols", [symbol]))
+    expect(violations.map((v) => [v.subject, v.message])).toEqual([
+      ["symbols[0].signature.inputs[0]", '"optional" is a string, not a boolean'],
+      ["symbols[0].signature.inputs[0]", '"rest" is a number, not a boolean'],
+    ])
+  })
+
   it("reports NaN and Infinity as themselves rather than as numbers", () => {
     const symbol = makeSymbol("ts:src/a.ts#foo") as unknown as Record<string, unknown>
     symbol.calls = [{ target: "t", line: Number.NaN, resolved: null }]

@@ -335,6 +335,8 @@ A symbol with everything empty (class without boundary, no methods) is normally 
 `(name: type, name: type) → output` form. Multiple outputs are separated by `|`. `throws: A, B` is appended.
 `async` / `generator*` / `<T,U>` (type parameters) are shown alongside as badges.
 
+Each input is written as TypeScript writes it, whatever language the IR came from: an input's `optional` and `rest` fields ([ir-schema.md](./ir-schema.md) §7) print as `a?: string` and `...ids: string[]`, and a defaulted input as the optional one it is to a caller, `limit?`. An input with an empty `type` prints its name alone, `x`. The `signature.inputs` rows of a diff entry spell inputs the same way.
+
 Example:
 ```
 (id: string) → Promise<User | null> throws NotFoundError ⚡async
@@ -516,16 +518,23 @@ Entries with `status: "unknown"` — a Symbol one document has and the other nev
 ### `handleRequest` *(function)*
 **File**: `apps/web/src/route.ts:12`
 **Why**: the head scan skipped `apps/web/src/route.ts` (parse-failed), so this Symbol may still exist
+
+### `Billing` *(class)*
+**File**: `src/big.ts:1`
+**Why**: the head scan skipped this file under its head name, `src/billing.ts` (over-size), so this Symbol may still exist
 ```
 
 `absentFrom: "base"` reads `may not be new` instead. The `reason` is quoted because it decides the next move: `parse-timeout` usually clears on a re-run, the rest clear only when the file is fixed.
 
+The path is the one the absent scan skipped, which is where its skip record is. When git renamed the file between the revisions that is `lostPath`, and the File line shows the other revision's name — a path the absent scan never had, so naming it as the skipped file would send the reader to raise a size cap or fix a parse for the wrong file. The line says how the two names relate instead, and the Slice View's member line does the same: ``unknown: the head scan skipped this file under its head name, `src/billing.ts` (over-size)``, where a file that kept its name reads `skipped this file`.
+
 #### 🚫 Not compared
 
-`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown, and apart from it for the reason Unknown is itself apart from Removed: the next action differs. Both are gaps rather than changes, so a reader scanning for what the diff does not cover finds them together; what separates them is who can close one — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed.
+`notCompared[]` — files **neither** revision analysed ([`diff-algorithm.md`](./diff-algorithm.md) §6.3), so nothing above says anything about them. Beside Unknown, and apart from it for the reason Unknown is itself apart from Removed: the next action differs. Both are gaps rather than changes, so a reader scanning for what the diff does not cover finds them together; what separates them is who can close one — an Unknown Symbol needs one revision re-scanned, while a file here was missed by both, and is usually a standing property of the workspace that every diff will keep missing until the cause is changed. Each line is the path and each revision's reason; a file git renamed between the revisions, one entry under two names, is named `` `base` → `head` `` so either revision's skip record can be found.
 
 ```md
 - `apps/web/src/route.ts` — parse-timeout at base, over-size at head
+- `src/big.ts` → `src/billing.ts` — over-size on both
 - `vendor/bundle.js` — over-size on both
 ```
 
@@ -889,6 +898,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
 | MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
+| MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
 
 ## 12. Design decisions
 
