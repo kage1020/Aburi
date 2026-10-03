@@ -252,10 +252,13 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
  * The two ways there can be none are kept apart, because only one of them is the author's
  * doing.
  *
- * - `readLiteralSpecifier` answering `null` means the node was not a literal the reader can
+ * - `readStaticString` answering `null` means the node was not a literal the reader can
  *   evaluate — a computed specifier (`import(p)`, `import("" + x)`, a template with a
- *   substitution in it), or a shape this reader does not model. There is nothing to report:
- *   the author wrote something valid that static analysis cannot follow.
+ *   substitution in it, whose fragments joined would answer `"./"` for `` `./${p}` ``, an edge
+ *   to a module the author never named), or a shape this reader does not model. There is
+ *   nothing to report: the author wrote something valid that static analysis cannot follow.
+ *   A `string` and a substitution-free `` `template` `` are one specifier written with
+ *   different quotes (LP26j), and both are read.
  * - A literal that *is* there and is empty is something someone typed, and it names no
  *   module. `ImportEdge.source` is a non-empty specifier (`lang-plugin.md`) and the
  *   shared guards in `@aburi/plugin-registry/plugin-input` throw on one that is not, so no
@@ -269,6 +272,12 @@ function walkForDynamicImports(root: Node, edges: ImportEdge[], errors: ParseErr
  *
  * The test is emptiness, not blankness: `" "` is a module name that will not resolve, which
  * is the type checker's business rather than this reader's.
+ *
+ * A partial read is kept: `"./a\uZZZZb"` comes back as `./a`, the parser's own syntax error
+ * accounting for the rest. The fallback to source text (`decodeStringLiteralOrRaw`) is what
+ * keeps a literal whose contents are entirely an ERROR out of the empty-specifier diagnostic —
+ * a third complaint claiming the author wrote no module name, when they did. A literal that is
+ * only a line continuation is empty and whole, and does reach that diagnostic.
  */
 function readModuleSpecifier(
   node: Node | null,
@@ -276,7 +285,7 @@ function readModuleSpecifier(
   errors: ParseError[],
 ): string | null {
   if (node === null) return null
-  const specifier = readLiteralSpecifier(node)
+  const specifier = readStaticString(node)
   if (specifier === null) return null
   if (specifier.length > 0) return specifier
   errors.push({
@@ -294,27 +303,6 @@ function readModuleSpecifier(
  * looking at the wrong line.
  */
 type ImportSite = "import" | "re-export" | "dynamic import"
-
-/**
- * Read the contents of a specifier written as a literal, decoded (see
- * `decodeStringLiteralOrRaw` for the escape semantics and for when the source text stands in).
- *
- * A `string` and a substitution-free `` `template` `` are the same specifier written with
- * different quotes. A template *with* a `template_substitution` is refused — joining its
- * fragments would answer `"./"` for `` `./${p}` ``, an edge to a module the author never
- * named. Anything else (an identifier, a concatenation) is a computed specifier and answers
- * `null`, which the caller treats as nothing to say rather than as a fault; an empty literal
- * answers `""`, which is the caller's to judge.
- *
- * A partial read is kept: `"./a\uZZZZb"` comes back as `./a`, the parser's own syntax error
- * accounting for the rest. The fallback to source text is what keeps a literal whose contents
- * are entirely an ERROR out of the empty-specifier diagnostic — a third complaint claiming the
- * author wrote no module name, when they did. A literal that is only a line continuation is
- * empty and whole, and does reach that diagnostic.
- */
-function readLiteralSpecifier(node: Node): string | null {
-  return readStaticString(node)
-}
 
 /**
  * Dedupe on the semantic identity of an edge: same source at the same line with the same
