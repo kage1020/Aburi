@@ -1,4 +1,4 @@
-import type { Confidence, ImportEdge, Symbol as IRSymbol } from "@aburi/types"
+import type { Confidence, ImportEdge, Symbol as IRSymbol, Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../src/call-site"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
@@ -596,6 +596,56 @@ describe("resolveCallGraph", () => {
       importsByFile: new Map(),
     })
     expect(result.edges).toEqual([])
+  })
+
+  describe("CR9: a destructuring parameter shadows the names it binds", () => {
+    // A rest parameter is named by its binding without the `...` and carries `rest`, so
+    // `...save` shadows through `name` alone and `...[save]` through `bindings`.
+    it.each<[string, Signature["inputs"][number]]>([
+      ["{ save }", { name: "{ save }", type: "Deps", bindings: ["save"] }],
+      ["[save]", { name: "[save]", type: "Deps", bindings: ["save"] }],
+      ["{ persist: save }", { name: "{ persist: save }", type: "Deps", bindings: ["save"] }],
+      ["{ save = fallback }", { name: "{ save = fallback }", type: "Deps", bindings: ["save"] }],
+      ["...save", { name: "save", type: "Deps[]", rest: true }],
+      ["...[save]", { name: "[save]", type: "Deps", rest: true, bindings: ["save"] }],
+      ["...{ save }", { name: "{ save }", type: "Deps", rest: true, bindings: ["save"] }],
+    ])("`%s`", (_written, input) => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: {
+          inputs: [input],
+          outputs: [],
+          throws: [],
+          async: false,
+          generator: false,
+          typeParameters: [],
+        },
+        calls: [
+          { target: "save", line: 5, resolved: null },
+          { target: "save.call", line: 6, resolved: null },
+        ],
+      })
+      const save = makeSymbol("ts:src/a.ts#save")
+      const result = resolveCallGraph({ symbols: [caller, save], importsByFile: new Map() })
+      expect(result.edges).toEqual([])
+      expect(result.symbols[0]?.calls.map((call) => call.resolved)).toEqual([null, null])
+    })
+
+    it("does not shadow a name the pattern only reads (`{ a = fallback }` reads `fallback`)", () => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: {
+          inputs: [{ name: "{ a = fallback }", type: "", bindings: ["a"] }],
+          outputs: [],
+          throws: [],
+          async: false,
+          generator: false,
+          typeParameters: [],
+        },
+        calls: [{ target: "fallback", line: 5, resolved: null }],
+      })
+      const fallback = makeSymbol("ts:src/a.ts#fallback")
+      const result = resolveCallGraph({ symbols: [caller, fallback], importsByFile: new Map() })
+      expect(result.symbols[0]?.calls[0]?.resolved).toBe("ts:src/a.ts#fallback")
+    })
   })
 
   it("never fabricates an edge into a dropped Symbol body (file scope, direct name)", () => {

@@ -5,7 +5,8 @@ import { symbolOf } from "./fixtures/ctx"
 /**
  * What a caller sees of a parameter's form is recorded in fields of its own: `optional` for an
  * optional or defaulted parameter, `rest` for a rest one, each written only when true. `name`
- * is the bare binding and `type` the annotation alone (LP11b).
+ * is the bare binding and `type` the annotation alone (LP11b). A binding that destructures
+ * also lists the names it binds, in `bindings` (LP11d).
  */
 
 type Input = Signature["inputs"][number]
@@ -34,16 +35,20 @@ const FORMS: Array<[string, string, Input]> = [
   ["an untyped defaulted parameter", "limit = 10", { name: "limit", type: "", optional: true }],
   ["a rest parameter", "...ids: string[]", { name: "ids", type: "string[]", rest: true }],
   ["an untyped rest parameter", "...ids", { name: "ids", type: "", rest: true }],
-  ["a destructured rest parameter", "...[p, q]: T", { name: "[p, q]", type: "T", rest: true }],
+  [
+    "a destructured rest parameter",
+    "...[p, q]: T",
+    { name: "[p, q]", type: "T", rest: true, bindings: ["p", "q"] },
+  ],
   [
     "a defaulted destructured parameter",
     "{ x }: Opts = {}",
-    { name: "{ x }", type: "Opts", optional: true },
+    { name: "{ x }", type: "Opts", optional: true, bindings: ["x"] },
   ],
   [
     "an untyped defaulted destructured parameter",
     "{ a } = {}",
-    { name: "{ a }", type: "", optional: true },
+    { name: "{ a }", type: "", optional: true, bindings: ["a"] },
   ],
   ["a `this` parameter", "this: Foo", { name: "this", type: "Foo" }],
   [

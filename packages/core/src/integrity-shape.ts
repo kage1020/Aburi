@@ -113,7 +113,13 @@ const SOURCE_RANGE: RecordSpec = {
 const FINGERPRINT: RecordSpec = { api: str, logic: str, syntax: str }
 
 const SIGNATURE: RecordSpec = {
-  inputs: recordArray({ name: str, type: str, optional: optional(bool), rest: optional(bool) }),
+  inputs: recordArray({
+    name: str,
+    type: str,
+    optional: optional(bool),
+    rest: optional(bool),
+    bindings: optional(strs),
+  }),
   outputs: strs,
   throws: strs,
   inferredThrows: optional(strs),

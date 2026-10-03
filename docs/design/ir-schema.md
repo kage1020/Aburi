@@ -61,6 +61,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | `Signature.inferredThrows` | no | B | omitted when nothing was inferred; never `[]` (§7) |
 | `Signature.inputs[].optional` | no | B | present iff `true`: a caller may omit the argument (schema-enforced by `const: true`, which refuses `false`, §7) |
 | `Signature.inputs[].rest` | no | B | present iff `true`: the parameter collects the remaining arguments (schema-enforced the same way, §7) |
+| `Signature.inputs[].bindings` | no | B | present iff the parameter destructures; omitted for a parameter that is a single name; never `[]` (§7) |
 | `Effect.line` | no | B | present iff the entry is locally detected (schema-enforced by the `allOf`'s required/forbidden flip, §9.4) |
 | `Effect.propagated` | no | B | present iff `true`. Convention only — the schema's `if` treats `false` and absent alike, so `propagated: false` validates while violating this rule (§9.4) |
 | `Effect.derivedFrom` | no | B | present iff `propagated` is `true` (schema-enforced by the same flip, §9.4) |
@@ -387,7 +388,8 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
 ```jsonc
 {
   "inputs": [
-    { "name": "createInvoiceDto", "type": "CreateInvoiceDto" }
+    { "name": "createInvoiceDto", "type": "CreateInvoiceDto" },
+    { "name": "{ save, persist: write }", "type": "Deps", "bindings": ["save", "write"] }  // bindings: Class B (§1.1)
   ],
   "outputs": ["Promise<Invoice>"],
   "throws": ["CreditLimitExceeded"],
@@ -398,6 +400,7 @@ The `boundary: true` determination is made by the framework plugin. The Aburi co
 }
 ```
 
+- `name` is the parameter's binding as written: its name, or the source text of its pattern when it destructures. A rest parameter's `...` is not part of it (`...ids` → `ids`, `...[x]` → `[x]`). A pattern's text is not a name, so a destructuring parameter also carries `bindings`: the identifiers the pattern binds, in source order, read as §3.2 reads a destructuring declaration (`{ a: b }` binds `b`; `{ a = fallback }` binds `a`; a rest element binds what it holds). The call resolver's local-scope step treats each of them as a parameter ([call-resolution.md](./call-resolution.md) §4.2). It is **Class B** per §1.1: a parameter that is a single name omits the key, a rest parameter included (`...ids` is named `ids` and carries `rest`), and the schema enforces `minItems: 1`. `bindings` is not part of the api fingerprint, any more than `name` is ([fingerprint.md](./fingerprint.md) §3.1). In a pattern the parser repaired, only the names it placed are listed: neither a MISSING identifier nor text it could not place is a binding ([lang-plugin.md](./lang-plugin.md) LP11d)
 - `type` is the string representation as read from the AST: an input's annotation text and nothing else, `""` when there is none. No type resolution is performed, and no later pass rewrites it — LSP enrichment included, which changes no fingerprint ([lsp-enrichment.md](./lsp-enrichment.md)). A rewritten `type` would make `api` differ with LSP on and off, which is what the `inferredThrows` split below exists to prevent
 - `optional` and `rest` record what a caller sees of an input's form. The api fingerprint reads them beside `type`, and does not read `name` ([fingerprint.md](./fingerprint.md) §3.1). `optional: true` when a call may leave the argument out, whether the parameter is written optional or with a default: `limit = 10` → `{ "name": "limit", "type": "", "optional": true }`; the default's value is not recorded. `rest: true` when the parameter collects the remaining arguments: `...ids: string[]` → `{ "name": "ids", "type": "string[]", "rest": true }`, with `name` the bare binding. Both are **Class B** per §1.1: a writer omits the key rather than writing `false`. Renderers print them in the parameter's spelling — `a?: string`, `...ids: string[]`, and `limit?` for a default ([lang-plugin.md](./lang-plugin.md) LP11b)
 - `name` is never empty (`minLength: 1`). Where a recovered parse leaves no binding the source wrote — a MISSING node, which [fingerprint.md](./fingerprint.md) §5.1(6) treats as not written — the plugin names the input by the nearest text the source did write, so both rules hold ([lang-plugin.md](./lang-plugin.md) LP11c)

@@ -69,6 +69,8 @@ Steps 1–3 handle same-file / directly-imported calls. Steps 4–5 catch cases 
 
 For `target` of the form `name` or `name.<rest>`, if `name` is a parameter, local variable, or nested function declared in the caller Symbol's body, the call is **unresolvable** (the receiver is a runtime value, not a source Symbol) and `resolved` stays `null`. Confidence of this determination is `high` — a local shadow is textual and unambiguous.
 
+A parameter written as a destructuring pattern declares every name the pattern binds, and each of them shadows: `function f({ save }) { save() }` is the same local call as `function f(save) { save() }`. The resolver reads those names from `Signature.inputs[].bindings` ([ir-schema.md](./ir-schema.md) §7), never from the pattern text in `name`, so `{ a: b }` shadows `b` and `{ a = fallback }` shadows `a` but not `fallback`. A rest parameter follows the same rule: `...[save]` is named `[save]` and binds `save`, while `...save` is a single name, `save`, and needs no list.
+
 Rationale: promoting a locally-scoped identifier to a Symbol id would produce false edges. Emitting `null` here is a **correct** resolution, not a failure.
 
 ### 4.3 Step 2: file scope
@@ -344,6 +346,7 @@ Every implementation of the resolver must pass the following.
 | CR7 | bare specifier (`import { sortBy } from 'lodash'; sortBy()`) | `resolved` = `null`, confidence `high` |
 | CR8 | dynamic import (`await import('./y')`) — no direct call at the site | no `Call` entry, no edge |
 | CR9 | call to a parameter (`function f(cb) { cb() }`) | `resolved` = `null`, confidence `high` (local shadow) |
+| CR9a | call to a name a destructuring parameter binds (`{ x }`, `[x]`, `{ a: x }`, `{ x = y }`, `...[x]`) | `resolved` = `null`, confidence `high` (local shadow); a call to `y` in `{ x = y }` is not shadowed. A single-name rest parameter (`...x`) is CR9's case: its `name` is `x` |
 | CR10 | call to a local nested function | `resolved` = `null`, confidence `high` |
 | CR11 | qualified cross-file same-component (`PricingService.calc()` no import) | `resolved` = that Symbol id when unique, confidence `medium` |
 | CR12 | qualified workspace-scope (no import, unique globally) | `resolved` = that Symbol id, confidence `low` |

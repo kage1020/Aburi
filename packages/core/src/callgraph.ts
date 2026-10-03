@@ -512,8 +512,9 @@ export function reconstructCallEdgesFromIR(ir: IR): CallEdge[] {
  * Step 1 of call-resolution.md's untyped step order requires the resolver to leave a call
  * unresolved when the callee identifier shadows a caller-local declaration
  * (parameter, local variable, or nested function). The IR only surfaces the
- * parameter list today — `Symbol.signature.inputs[].name` — so this helper
- * captures the parameter subset of the local-scope domain. Local variables and
+ * parameter list today — `Symbol.signature.inputs[].name`, plus `inputs[].bindings` for a
+ * destructuring parameter — so this helper captures the parameter subset of the
+ * local-scope domain. Local variables and
  * nested functions inside the body are NOT visible in the IR yet; catching
  * them fully requires the language plugin to expose local declarations via a
  * follow-up seam on `walkBody`. Guarding parameters alone still eliminates
@@ -524,7 +525,12 @@ function collectParameterNames(symbol: IRSymbol): ReadonlySet<string> {
   const inputs = symbol.signature?.inputs
   if (inputs === undefined) return EMPTY_NAME_SET
   const out = new Set<string>()
-  for (const input of inputs) out.add(input.name)
+  for (const input of inputs) {
+    out.add(input.name)
+    // A destructuring parameter's `name` is the pattern's text (`{ save }`), which no call
+    // head can equal; the names it binds are listed beside it.
+    for (const binding of input.bindings ?? []) out.add(binding)
+  }
   return out
 }
 
