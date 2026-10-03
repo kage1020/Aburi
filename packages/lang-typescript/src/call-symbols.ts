@@ -1,6 +1,12 @@
 import type { ExtractionContext, MergedDeclaration, SymbolCandidate } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
-import { asFunctionValue, findChild, makeSourceRange, unwrapValue } from "./ast-helpers"
+import {
+  asFunctionValue,
+  findChild,
+  firstNonCommentChild,
+  makeSourceRange,
+  unwrapValue,
+} from "./ast-helpers"
 import { makeTsSymbolId, nestedQname } from "./qname"
 import { readStaticString } from "./string-escape"
 
@@ -27,7 +33,10 @@ const PROMOTABLE_METHOD_NAMES: ReadonlySet<string> = new Set([
   "disable",
 ])
 
-/** How many registrations of each `receiver__method__path` stem the module has produced so far. */
+/**
+ * How many registrations of each `<receiver>__<method>__<discriminator>` stem the module has
+ * produced so far.
+ */
 export interface CallExtractionState {
   seen: Map<string, number>
 }
@@ -43,10 +52,11 @@ export function makeCallExtractionState(): CallExtractionState {
  * framework registration shapes (Express in particular), not arbitrary expression
  * statements.
  *
- * Named `<receiver>__<method>__<discriminator>__d<N>`. The discriminator is the path slug when
- * the first argument is a literal string (quotes or a substitution-free backtick), otherwise the
- * names the arguments carry (`argumentNames`), and absent when neither says anything. `N` counts
- * earlier registrations with the same stem, so it is source order only among those.
+ * Named `<receiver>__<method>__<discriminator>__d<N>`. The discriminator is the path slug when a
+ * call on the chain is handed a path (`registrationPath`), otherwise the names the leaf call's
+ * arguments carry (`argumentNames`), and absent when neither says anything. `N` counts earlier
+ * registrations with the same stem, so it is source order only among those: the uniqueness
+ * tiebreaker ir-schema.md §3.3 admits, never the name.
  *
  * The `__d<N>` suffix is emitted UNCONDITIONALLY (even for the first occurrence). Skipping
  * it for `N=0` used to break Symbol.id uniqueness: `app.get('/x')` seen twice and
@@ -68,19 +78,17 @@ export function visitCallStatement(
   const receiver = receiverSegment(parsed.receiver)
   if (receiver === null) return null
 
-  const argsNode = call.childForFieldName("arguments") ?? findChild(call, "arguments")
-  const literalPath = argsNode !== null ? firstStringLiteralArg(argsNode) : null
   // A path names a registration. Without one, the names its arguments carry do; the ordinal
-  // below is left to separate only registrations that agree on both.
-  const pathSlug =
-    literalPath !== null
-      ? slugifyPath(literalPath)
-      : argsNode !== null
-        ? argumentNames(argsNode)
-        : ""
+  // below is left to separate only registrations that agree on the discriminator.
+  const path = registrationPath(call)
+  const argsNode = argumentsOf(call)
+  const names = path === null && argsNode !== null ? argumentNames(argsNode) : ""
+  const discriminator = path !== null ? slugifyPath(path) : names
 
   const stem =
-    pathSlug === "" ? `${receiver}__${parsed.method}` : `${receiver}__${parsed.method}__${pathSlug}`
+    discriminator === ""
+      ? `${receiver}__${parsed.method}`
+      : `${receiver}__${parsed.method}__${discriminator}`
   const ordinal = state.seen.get(stem) ?? 0
   state.seen.set(stem, ordinal + 1)
   const qname = nestedQname([`${stem}__d${ordinal}`])
@@ -97,7 +105,7 @@ export function visitCallStatement(
     // the handler's would publish the framework's callback shape as the route's signature.
     signature: null,
     source: makeSourceRange(call, ctx),
-    derivedBy: makeDerivedBy(parsed, literalPath, lead !== undefined),
+    derivedBy: makeDerivedBy(parsed, path, names, lead !== undefined),
     bodyNode: lead?.bodyNode ?? null,
     fullNode: call,
     // Absent, never empty — `plugins.ts` states the contract and LP8i pins it.
@@ -138,7 +146,7 @@ export function visitCallStatement(
 export function inlineHandlers(call: Node, declaration: Node): MergedDeclaration<Node>[] {
   const bodies: Node[] = []
   for (const step of spineCalls(call)) {
-    const args = step.childForFieldName("arguments") ?? findChild(step, "arguments")
+    const args = argumentsOf(step)
     if (args === null) continue
     for (const argument of args.namedChildren) {
       if (argument === null) continue
@@ -255,24 +263,76 @@ function firstCallExpression(exprStatement: Node): Node | null {
   return null
 }
 
-/** The path a registration's first argument spells, written with any quotes, backtick included. */
+/** A call's argument list, or null when the parser recovered a call without one. */
+function argumentsOf(call: Node): Node | null {
+  return call.childForFieldName("arguments") ?? findChild(call, "arguments")
+}
+
+/**
+ * The path a registration is mounted at: the earliest-written first argument, among the method
+ * calls on the statement's chain, that is a literal string with something in it. Null when
+ * none is.
+ *
+ * The chain, not only the leaf call, because the chain is one statement and one Symbol (LP20g):
+ * `app.route('/a').get(h)` writes its path one call up the spine, and reading only `.get(h)`
+ * named it by the handler, so `app.route('/b').get(h)` shared its stem and the two were told
+ * apart by order alone. Earliest, because a path written further left is the one the rest of
+ * the chain hangs off. Method calls only: a call that *starts* the chain
+ * (`require("express")().get(h)`, `createApp("/base").get(h)`) is what makes the receiver, and
+ * its argument is not a path the registration is mounted at.
+ *
+ * An empty literal (`app.get("", h)`) says nothing a slug could keep, so it is passed over and
+ * the names the arguments carry stand in, as for no literal at all; tagging it `path-literal:`
+ * would claim a path the id does not contain.
+ */
+function registrationPath(call: Node): string | null {
+  let path: string | null = null
+  let at = Number.POSITIVE_INFINITY
+  for (const step of spineCalls(call)) {
+    const callee = step.childForFieldName("function")
+    if (callee === null || unwrapValue(callee).type !== "member_expression") continue
+    const args = argumentsOf(step)
+    // The spine is walked outermost first, so the earliest-written list comes last.
+    if (args === null || args.startIndex >= at) continue
+    const literal = firstStringLiteralArg(args)
+    if (literal === null || literal === "") continue
+    path = literal
+    at = args.startIndex
+  }
+  return path
+}
+
+/**
+ * The string a call's first argument spells, written with any quotes, backtick included; null
+ * when it is not a literal string.
+ *
+ * Read past a comment and through the wrappers a value is read through (`firstNonCommentChild`,
+ * `unwrapValue`), as `argumentNames` reads its arguments. `"/users" as string`, `("/users")` and
+ * `"/users"` with a comment written in front of it register the route `"/users"` does, and
+ * taking the first child by position found the wrapper or the comment instead, so adding a
+ * comment above a route's path renamed the route.
+ */
 function firstStringLiteralArg(argsNode: Node): string | null {
-  const first = argsNode.namedChildren[0]
-  if (first === undefined || first === null) return null
-  return readStaticString(first)
+  const first = firstNonCommentChild(argsNode)
+  return first === null ? null : readStaticString(unwrapValue(first))
 }
 
 /**
  * What tells a registration with no path apart from the others of its method: the names its
- * arguments carry — an identifier (`authMw`), a dotted reference (`express.json`), or the callee
- * of a call (`cors()`, `express.static("public")`), each folded to a segment and joined by `$`.
- * Empty when no argument names anything: an inline function, a number, an object.
+ * arguments carry (`referenceName`), each folded to a segment and joined by `$`. Empty when no
+ * argument names anything: an inline function, a number, an object.
  *
  * Content, not position, because the ordinal is source order (ir-schema.md §3.3): with only the
  * bare `app__use` stem, inserting `app.use(compression())` above `app.use(cors())` renumbered
  * every later middleware, and the diff paired each one with the body its id used to hold. The
  * ordinal still separates registrations whose names agree, which is where position is all there
  * is.
+ *
+ * Only the leaf call's arguments are read, and only for a registration with no path: a path
+ * names the registration on its own, and a middleware added to a route
+ * (`app.get("/x", h)` → `app.get("/x", auth, h)`) is an edit to that route rather than a new
+ * one. What a call is handed is not read either (`express.static("public")` is
+ * `express_static`), so renaming a directory does not rename the registration serving it.
  */
 function argumentNames(argsNode: Node): string {
   const names: string[] = []
@@ -284,11 +344,22 @@ function argumentNames(argsNode: Node): string {
   return names.join("$")
 }
 
-/** `a`, `a.b.c`, or the callee of `a.b()` — as a segment-safe string; null for anything else. */
+/**
+ * The name a reference spells, as a segment-safe string, or null when it spells none.
+ *
+ * An identifier is itself (`authMw`), and a property access joins its object's name to its
+ * property with `_`, at any depth (`a.b.c` → `a_b_c`). A call answers for its callee, a `new`
+ * for its constructor and a spread for what it spreads, wherever they stand in a dotted path:
+ * `cors()` → `cors`, `new Logger()` → `Logger`, `...mws` → `mws`, `a.b().c` → `a_b_c`.
+ * Wrappers are read through at every step. Anything else — a literal, an inline function, an
+ * object — names nothing.
+ */
 function referenceName(node: Node): string | null {
-  if (node.type === "call_expression") {
-    const callee = node.childForFieldName("function")
-    return callee === null ? null : referenceName(unwrapValue(callee))
+  if (node.type === "call_expression") return fieldReferenceName(node, "function")
+  if (node.type === "new_expression") return fieldReferenceName(node, "constructor")
+  if (node.type === "spread_element") {
+    const spread = firstNonCommentChild(node)
+    return spread === null ? null : referenceName(unwrapValue(spread))
   }
   if (node.type === "identifier") return node.text.length === 0 ? null : slugifyName(node.text)
   if (node.type === "member_expression") {
@@ -301,18 +372,40 @@ function referenceName(node: Node): string | null {
   return null
 }
 
-function slugifyName(name: string): string {
-  return Array.from(name)
-    .map((ch) => foldChar(ch, SEGMENT_PART))
-    .join("")
+function fieldReferenceName(node: Node, field: string): string | null {
+  const child = node.childForFieldName(field)
+  return child === null ? null : referenceName(unwrapValue(child))
 }
 
-/** The characters `QNAME_SEGMENT_PATTERN` admits at the head of a segment, and after it. */
-const SEGMENT_START = /[A-Za-z_$]/
-const SEGMENT_PART = /[A-Za-z0-9_$]/
+function slugifyName(name: string): string {
+  return toNfc(Array.from(name, (ch) => foldChar(ch, SEGMENT_PART)).join(""))
+}
+
+/**
+ * The characters `QNAME_SEGMENT_PATTERN` in `@aburi/core` admits at the head of a segment, and
+ * after it: ECMAScript's IdentifierName, so `app.use(認証)` and `app.use(圧縮)` keep their names
+ * rather than both folding to `__`. `ID_Continue` covers the digits and `ID_Start` does not,
+ * which is the head rule; ZWNJ and ZWJ are already in `ID_Continue` on the Node version the
+ * workspace pins, as the pattern's own doc measures.
+ */
+const SEGMENT_START = /[$_\p{ID_Start}]/u
+const SEGMENT_PART = /[$\p{ID_Continue}]/u
 
 function foldChar(ch: string, allowed: RegExp): string {
   return allowed.test(ch) ? ch : "_"
+}
+
+/**
+ * Unicode NFC, the form every string in a Document is held in (ir-schema.md §1.2).
+ *
+ * The segment becomes `symbols[].name`, which invariant #19 holds to NFC, and an identifier or
+ * a path read from source carries whichever spelling the file was saved in, so a composed and a
+ * decomposed `café` would otherwise be two names. It is the folded text that is normalized, not
+ * the source text, because folding can itself leave a pair NFC composes: `:` becomes `Z`, and a
+ * combining acute written after it then composes to `Ź`.
+ */
+function toNfc(value: string): string {
+  return value.normalize("NFC")
 }
 
 /**
@@ -325,7 +418,7 @@ function slugifyPath(path: string): string {
   for (const ch of path) {
     out += ch === "/" ? "$" : ch === ":" ? "Z" : foldChar(ch, SEGMENT_PART)
   }
-  return out
+  return toNfc(out)
 }
 
 /**
@@ -335,19 +428,32 @@ function slugifyPath(path: string): string {
  */
 function receiverSegment(name: string): string | null {
   if (name.length === 0) return null
-  return Array.from(name)
-    .map((ch, i) => foldChar(ch, i === 0 ? SEGMENT_START : SEGMENT_PART))
-    .join("")
+  return toNfc(
+    Array.from(name, (ch, i) => foldChar(ch, i === 0 ? SEGMENT_START : SEGMENT_PART)).join(""),
+  )
 }
 
+/**
+ * Says where the name came from. `path-literal:<path>` and `argument-names:<slug>` are
+ * exclusive, as the discriminators they report are, and neither is written when the name has
+ * none.
+ *
+ * The stem alone cannot say which it was: `$` is both a path's `/` and the argument-name
+ * joiner, so `app.use($api)` and `app.use("/api", x)` share `app__use__$api`, and only the tag
+ * tells them apart. It does not undo the fold: `_` is both a member's `.` and the replacement
+ * for a character the segment grammar refuses, so `express.json` and `express_json` are one
+ * slug in the tag as in the stem, and the ordinal separates them.
+ */
 function makeDerivedBy(
   parsed: MemberCall,
-  literalPath: string | null,
+  path: string | null,
+  names: string,
   hasInlineHandler: boolean,
 ): string[] {
   const tags: string[] = [`call-statement:${parsed.receiver}.${parsed.method}`]
   if (parsed.chained) tags.push("chained-call")
-  if (literalPath !== null) tags.push(`path-literal:${literalPath}`)
+  if (path !== null) tags.push(`path-literal:${path}`)
+  else if (names !== "") tags.push(`argument-names:${names}`)
   // Says why a Symbol whose declaration is a call has a body at all.
   if (hasInlineHandler) tags.push("inline-handler")
   return tags

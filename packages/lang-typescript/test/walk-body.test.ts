@@ -84,8 +84,9 @@ describe("walkBody — rules (LP16-LP20)", () => {
 
   it("reads a backtick literal with no substitution as the string it spells", async () => {
     // The same value as `'users'`, so an effect plugin reading the table or route sees it.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: TypeScript source, not a template
-    const { calls } = await walkFirstSymbol("export function f() { doThing(`users`, `a/${b}`) }")
+    const { calls } = await walkFirstSymbol(
+      `export function f() { doThing(\`users\`, \`a/\${b}\`) }`,
+    )
     const call = calls.find((c) => c.target === "doThing")
     expect(call?.literalArgs).toEqual(["users", null])
   })
