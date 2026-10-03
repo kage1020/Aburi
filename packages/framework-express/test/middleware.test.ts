@@ -56,6 +56,34 @@ describe("analyzeUseArguments", () => {
     expect(shape?.hasErrorHandler).toBe(false)
   })
 
+  it.each([
+    ["in backticks", "app.use(`/api`, router)"],
+    ["behind a comment", 'app.use(/* v1 */ "/api", router)'],
+    ["in parentheses", 'app.use(("/api"), router)'],
+    ["under an assertion", 'app.use("/api" as string, router)'],
+  ])("reads the mount path written %s as the path it is", async (_label, line) => {
+    // `@aburi/lang-typescript` names each of these registrations by the path `/api`, so the
+    // classification has to agree that there is one: a Symbol whose id says `$api` and whose
+    // kind says `middleware` contradicts itself.
+    const sym = await firstCallSymbol(
+      `import express from "express"\nconst app = express()\n${line}\n`,
+    )
+    expect(sym.name).toBe("app__use__$api__d0")
+
+    const shape = analyzeUseArguments(sym.fullNode)
+    expect(shape?.firstArgIsPathLiteral).toBe(true)
+    expect(shape?.argCount).toBe(2)
+  })
+
+  it("reads no path from a backtick with a substitution", async () => {
+    // Its value is decided when it runs, so it is no more a path than an identifier is.
+    const sym = await firstCallSymbol(
+      `import express from "express"\nconst app = express()\napp.use(\`/\${v}\`, router)\n`,
+    )
+
+    expect(analyzeUseArguments(sym.fullNode)?.firstArgIsPathLiteral).toBe(false)
+  })
+
   it("flags identifier-arg middleware without asserting arity", async () => {
     const sym = await firstCallSymbol(
       `import express from "express"\nconst app = express()\napp.use(logger)\n`,
