@@ -12,8 +12,10 @@ import { idsOf, makeExtractionCtx, symbolOf, symbolsOf, walkOf } from "./fixture
  * this plugin could have extracted, which is what these tests are about.
  *
  * TypeScript models all three the same way: one entity, several declarations. So does this
- * now. The first declaration claims the Symbol and every scalar on it; the rest contribute
- * their rationale and their body.
+ * now. One declaration leads and claims every scalar on the Symbol — the first written, unless
+ * it is an overload signature, which gives way to its implementation, or a setter, which gives
+ * way to its getter — and the rest contribute their rationale, their body, and their text to
+ * the syntax axis.
  */
 
 const SETTER_FIRST_DECORATED = [
@@ -49,7 +51,7 @@ const NESTED_NAMESPACE = [
   "}",
 ].join("\n")
 
-describe("an overload declaration declares nothing the implementation does not", () => {
+describe("an overload declaration folds into its implementation's Symbol", () => {
   it.each([
     ["a method", "export class Repo { find(id: string): number; find(id: any) { return 1 } }"],
     [
@@ -80,11 +82,11 @@ describe("an overload declaration declares nothing the implementation does not",
 
   it("emits no member for a declaration with no implementation", async () => {
     // The same answer a top-level `function f(a: string): void` with no implementation gets:
-    // `function_signature` is not in the statement switch, so nothing is declared by it.
+    // the signature is a candidate, and nothing in its group can lead it (TS2391).
     expect(await idsOf("export class D { f(a: string): void }")).toEqual(["ts:src/a.ts#D"])
   })
 
-  it("leaves a top-level overload pair alone", async () => {
+  it("emits one Symbol for a top-level overload pair", async () => {
     expect(await idsOf("export function f(a: string): void; export function f(a: any) {}")).toEqual(
       ["ts:src/a.ts#f"],
     )
@@ -514,6 +516,17 @@ describe("a namespace merged into a class declares static members", () => {
       "method",
       ["static-method", "type-alias", "export-keyword", "declaration-merged"],
     ])
+  })
+
+  it.each([
+    ["overloads", "export class C { static m(a: string): void; static m(a: any) {} }"],
+    ["an accessor pair", "export class C { static get m() { return 1 } static set m(v) {} }"],
+  ])("says declaration-merged once when a member folded from %s meets an exported type", async (_label, member) => {
+    // The member is a fold before the sink sees it, and folds again with the type there.
+    const source = `${member}\nexport namespace C { export type m = number }`
+    const m = await symbolOf(source, "ts:src/a.ts#C::m")
+    expect(m.mergedDeclarations).toHaveLength(2)
+    expect(m.derivedBy.filter((token) => token === "declaration-merged")).toHaveLength(1)
   })
 
   it("still folds an instance member and a namespace local of the same name", async () => {
