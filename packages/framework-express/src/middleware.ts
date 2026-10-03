@@ -13,7 +13,10 @@ export interface UseArgumentShape {
   readonly hasErrorHandler: boolean
   /** True when at least one argument is a function expression / arrow with arity 3. */
   readonly hasRegularHandler: boolean
-  /** True when the first argument is a string literal (path). */
+  /**
+   * True when the first argument is a literal string (path): quoted, or a backtick with no
+   * substitution, read through the wrappers a value is read through (`isPathLiteral`).
+   */
   readonly firstArgIsPathLiteral: boolean
   /** True when the second argument is a plain identifier (router / imported handler). */
   readonly secondArgIsIdentifier: boolean
@@ -32,7 +35,9 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
 
   const argChildren: SyntaxNode[] = []
   for (const child of argsNode.namedChildren) {
-    if (child !== null) argChildren.push(child)
+    // A comment is a named node the grammar hangs wherever it was written, not an argument:
+    // counted, `app.use(/* v1 */ "/api", router)` was a three-argument call and no mount.
+    if (child !== null && child.type !== "comment") argChildren.push(child)
   }
 
   let hasErrorHandler = false
@@ -55,7 +60,7 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
   return {
     hasErrorHandler,
     hasRegularHandler,
-    firstArgIsPathLiteral: first !== undefined && isStringLiteral(first),
+    firstArgIsPathLiteral: first !== undefined && isPathLiteral(first),
     secondArgIsIdentifier: second !== undefined && isIdentifier(second),
     argCount: argChildren.length,
     hasIdentifierArg,
@@ -104,6 +109,38 @@ function isIdentifier(node: SyntaxNode): boolean {
   return node.type === "identifier"
 }
 
-function isStringLiteral(node: SyntaxNode): boolean {
-  return node.type === "string"
+/**
+ * A literal string, read as `@aburi/lang-typescript` reads the path it names a registration
+ * by: quoted, or a backtick with no substitution, which is the same value (`readStaticString`
+ * there), and through the wrappers a value is read through (`unwrapValue` there).
+ *
+ * The two readers have to agree, because one Symbol carries both answers. When this accepted
+ * only `"…"`, `` app.use(`/api`, usersRouter) `` was named `app__use__$api__d0` with
+ * `path-literal:/api` and classified `middleware` rather than `mount`: a registration mounted
+ * at a path by its id and at none by its kind. This package depends on `@aburi/core`'s
+ * `SyntaxNode` alone, so the check is restated here rather than imported.
+ */
+function isPathLiteral(node: SyntaxNode): boolean {
+  const value = unwrapValue(node)
+  if (value.type === "string") return true
+  if (value.type !== "template_string") return false
+  return value.namedChildren.every((child) => child?.type !== "template_substitution")
+}
+
+/** `lang-typescript`'s `unwrapValue` set: each wraps one expression, written first. */
+const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
+  "parenthesized_expression",
+  "as_expression",
+  "satisfies_expression",
+  "non_null_expression",
+])
+
+function unwrapValue(node: SyntaxNode): SyntaxNode {
+  let cursor = node
+  while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
+    const inner = cursor.namedChildren.find((child) => child !== null && child.type !== "comment")
+    if (inner === undefined || inner === null) return cursor
+    cursor = inner
+  }
+  return cursor
 }

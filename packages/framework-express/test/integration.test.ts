@@ -108,6 +108,18 @@ describe("framework-express — Router-based app", () => {
     }
   })
 
+  it("classifies a mount whose path is written in backticks as the quoted one is", async () => {
+    // One value written with different quotes. The language plugin names this registration by
+    // the path, so a kind that read it as no path would contradict the Symbol's own id.
+    const rows = await classifyFixture(
+      "src/routes.ts",
+      `import express from "express"\nconst app = express()\napp.use(\`/users\`, usersRouter)\n`,
+    )
+    const mount = findByExtKind(rows, "framework:express:mount")
+    expect(mount.candidate.name).toBe("app__use__$users__d0")
+    expect(mount.candidate.derivedBy).toContain("path-literal:/users")
+  })
+
   it("classifies routes attached to a router as framework:express:route with the router as receiver", async () => {
     const rows = await classifyFixture("src/routes.ts", source)
     const routes = rows.filter((r) => r.classification?.extKind === "framework:express:route")
