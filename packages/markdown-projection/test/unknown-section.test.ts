@@ -1,4 +1,4 @@
-import { endpoint, languageId, makeSymbol } from "@aburi/test-support"
+import { endpoint, languageId, makeSymbol, sliceId, symbolId } from "@aburi/test-support"
 import type { Dependency, IR, SymbolUnknown } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff, projectWorkspace } from "../src"
@@ -41,6 +41,74 @@ describe("projectDiff — the Unknown section", () => {
     expect(md).toContain("may not be new")
   })
 
+  it("names the path the skipping scan recorded when git renamed the file", () => {
+    // The File line shows the base's name, which the head does not have at all: naming it as
+    // the skipped path would send the reader to raise the size cap for the wrong file.
+    const md = projectDiff(
+      makeDiff({
+        symbols: [
+          unknown({
+            symbol: makeSymbol({ id: "ts:src/big.ts#Billing", name: "Billing" }),
+            reason: "over-size",
+            lostPath: "src/billing.ts",
+          }),
+        ],
+        summary: { ...emptySummary(), unknown: 1 },
+      }),
+    )
+    expect(md).toContain("**File**: `src/big.ts:1`")
+    expect(md).toContain(
+      "**Why**: the head scan skipped this file under its head name, `src/billing.ts` (over-size), so this Symbol may still exist",
+    )
+    expect(md).not.toContain("skipped `src/big.ts`")
+  })
+
+  it("names the base's path for a renamed file the base skipped", () => {
+    const md = projectDiff(
+      makeDiff({
+        symbols: [
+          unknown({
+            symbol: makeSymbol({ id: "ts:src/billing.ts#Billing", name: "Billing" }),
+            absentFrom: "base",
+            reason: "parse-timeout",
+            lostPath: "src/big.ts",
+          }),
+        ],
+        summary: { ...emptySummary(), unknown: 1 },
+      }),
+    )
+    expect(md).toContain(
+      "the base scan skipped this file under its base name, `src/big.ts` (parse-timeout), so this Symbol may not be new",
+    )
+  })
+
+  it("names the renamed path in the Slice View too, where the member line shows the other", () => {
+    const lost = unknown({
+      symbol: makeSymbol({ id: "ts:src/big.ts#Billing", name: "Billing" }),
+      reason: "over-size",
+      lostPath: "src/billing.ts",
+    })
+    const plain = unknown({
+      symbol: makeSymbol({ id: "ts:src/gone.ts#helper", name: "helper" }),
+    })
+    const md = projectDiff(
+      makeDiff({
+        symbols: [lost, plain],
+        slices: [
+          {
+            id: sliceId("slice:ts:src/big.ts#Billing"),
+            members: [symbolId("ts:src/big.ts#Billing"), symbolId("ts:src/gone.ts#helper")],
+          },
+        ],
+        summary: { ...emptySummary(), unknown: 2 },
+      }),
+    )
+    expect(md).toContain(
+      "↳ unknown: the head scan skipped this file under its head name, `src/billing.ts` (over-size)",
+    )
+    expect(md).toContain("↳ unknown: the head scan skipped this file (parse-failed)")
+  })
+
   it("qualifies the summary line, so the counts beside it are not read as complete", () => {
     const md = projectDiff(
       makeDiff({ symbols: [unknown()], summary: { ...emptySummary(), removed: 2, unknown: 1 } }),
@@ -70,6 +138,22 @@ describe("projectDiff — the Not compared section", () => {
     expect(md).toContain("## 🚫 Not compared")
     expect(md).toContain("`vendor/huge.ts`")
     expect(md).toContain("parse-timeout at base, over-size at head")
+  })
+
+  it("names a renamed file by both its paths", () => {
+    const md = projectDiff(
+      makeDiff({
+        notCompared: [
+          {
+            path: "src/billing.ts",
+            basePath: "src/big.ts",
+            baseReason: "over-size",
+            headReason: "over-size",
+          },
+        ],
+      }),
+    )
+    expect(md).toContain("- `src/big.ts` → `src/billing.ts` — over-size on both")
   })
 
   it("says it once when both revisions gave the same reason", () => {

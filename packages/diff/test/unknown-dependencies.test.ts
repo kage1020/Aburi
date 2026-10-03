@@ -1,7 +1,7 @@
 import { makeIR, makeSymbol } from "@aburi/test-support"
 import type { Dependency, IR, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDiff, type DependencySideView, diffDependencies } from "../src"
+import { buildDiff, type DependencySideView, diffDependencies, renameDirections } from "../src"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
@@ -382,7 +382,7 @@ describe("diffDependencies — a side view with nothing to say", () => {
     const result = diffDependencies(
       [dep("ts:src/gone.ts#gone", "ts:src/kept.ts#kept")],
       [dep("billing", "pricing", { via: "import" })],
-      { base: blind, head: blind },
+      { base: blind, head: blind, renames: renameDirections(null) },
     )
     expect(result.removed).toHaveLength(1)
     expect(result.added).toHaveLength(1)

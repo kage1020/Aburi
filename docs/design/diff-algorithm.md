@@ -467,10 +467,11 @@ Symbols not paired by this point are finalized:
 
 A leftover Symbol whose `source.file` appears in the other document's `stats.skippedFiles[]` is not evidence of an addition or a deletion. That document did not read the file, so it cannot say whether the Symbol is there. The entry carries `absentFrom` (`base` or `head` — the document that lost the file, so `head` reads as "this may still exist" and `base` as "this may not be new") and the skip `reason`, which is what decides the reader's next move: `parse-timeout` depends on how loaded the machine was and usually clears on a re-run, while `parse-failed`, `extraction-failed`, `over-size` and `unroutable` describe the file and clear only when something is fixed.
 
-Three properties this rests on:
+Four properties this rests on:
 
 - **Read after all five stages, never before.** A Symbol that moved *out of* a lost file into a file the other document has is matched by stage 3 or 4, and that document holds real evidence for it — it is `moved`. Filtering the base list up front would throw that answer away.
 - **Both directions.** A file fine at head and withdrawn at base makes phantom `added` entries exactly as a file withdrawn at head makes phantom `removed` ones.
+- **Across a git rename.** A leftover names its file the way its own document does, and when git renamed that file between the revisions the other document recorded it under the other name. So the lookup is the leftover's own path first, then the path the rename map gives it on the other side: `src/big.ts → src/billing.ts` with `src/billing.ts` skipped at head leaves the base Symbols of `src/big.ts` `unknown`, not `removed`, and the mirror case is `unknown` with `absentFrom: "base"`, not `added`. Such an entry carries `lostPath`, the name the absent document skipped the file under: that is where its skip record is, and `symbol.source.file` is a path that document does not have, so naming it would send the reader to raise a size cap or fix a parse for the wrong file. `lostPath` is left out whenever the two names agree, on the terms §10.1 gives an optional scalar. Without the map (`--base`/`--head` IR files) only the first lookup is possible. A map that renames two base paths onto one head path — git writes none, but `buildDiff` accepts any — is read in path order, so which record answers does not depend on the order the map lists them in.
 - **`dropped` leftovers keep their counters.** They produce no `symbols[]` entry on either side today and nothing gates on them, so they stay in `droppedAdded` / `droppedRemoved` rather than becoming `unknown` entries where there were none.
 
 When the other document omits `stats.skippedFiles` entirely — written before the field existed — nothing changes: the leftovers keep `added` / `removed`. The list cannot be inferred from `totalFiles > parsedFiles` without attaching the doubt to whichever Symbols happened to be missing, so `aburi diff` reports what it can see and warns on stderr that the check was unavailable (cli-spec.md §6.6).
@@ -840,10 +841,11 @@ Dependency identity is judged by (from, to, via). Changes to direction / effect 
 
 An edge one document holds is `unknown` when the other document never analysed the file an endpoint of it lives in. `absentFrom` names that document, on the same reading as §3.5.1 (`head` means "this may still exist", `base` means "this may not be new"), and `lostFiles[]` names the files with the reason each was skipped.
 
-Three properties, two of them differing from the Symbol side:
+Four properties, two of them differing from the Symbol side:
 
-- **The endpoint's file comes from the document that holds the edge.** An endpoint is matched against `symbols[].source.file` in that document, which is the same space `stats.skippedFiles[].path` is in and the same space §3.5.1 classifies Symbols by. Reading the file out of the id's path segment instead would be a second answer to the same question, and nothing in the schema forces the two to agree — a re-export or a generated file is where they come apart. Both sides read one `DependencySideView` per document, built once, so the agreement is a property of the wiring rather than a convention to be maintained.
+- **The endpoint's file comes from the document that holds the edge.** An endpoint is matched against `symbols[].source.file` in that document, which is written in the form `stats.skippedFiles[].path` is and is the space §3.5.1 classifies Symbols by — the same form, though after a git rename not the same name, which the third property deals with. Reading the file out of the id's path segment instead would be a second answer to the same question, and nothing in the schema forces the two to agree — a re-export or a generated file is where they come apart. Both sides read one `DependencySideView` per document, built once, so the agreement is a property of the wiring rather than a convention to be maintained.
 - **`lostFiles` is a list, where `SymbolUnknown` carries one `reason`.** An edge has two endpoints: they can sit in two files skipped for two different reasons, one of which says re-run and the other says fix something. An intra-file edge collapses to the single file it lost.
+- **A renamed endpoint file is looked up under both names**, as §3.5.1 does for a leftover Symbol, and `lostFiles[].path` is the path the absent document recorded — the one its `stats.skippedFiles[]` holds — not the holder's. A reader joining `lostFiles[].path` against the holder's `symbols[].source.file` therefore misses a renamed file; the list joins against the absent document's skip list, which is what it was copied from. It is deduplicated and sorted on those names, so an intra-file edge in a renamed file still collapses to one entry.
 - **Component-level edges are never reclassified.** A Component is an aggregate over roots and has no file to lose, so a component endpoint is simply absent from the lookup. Stated rather than left to be inferred, because the asymmetry is otherwise invisible.
 
 A direction or effect flip stays an added + removed pair, and no loss check runs on it. The reason is not that neither document lost an endpoint file — nothing forbids a path from being both a `symbols[].source.file` and a skipped one, so that inference has no invariant behind it. It is that both documents *hold* the edge, so neither is silent about it, and `unknown` exists only to explain a silence.
@@ -854,8 +856,16 @@ An edge touching a Symbol that **moved** can be `unknown` while the Symbol itsel
 
 ### 6.3 Files neither revision analysed
 
-`notCompared[]` names every path both `stats.skippedFiles` lists hold, with the reason each
-scan gave. Sorted by path.
+`notCompared[]` names every file both `stats.skippedFiles` lists hold, with the reason each
+scan gave. Usually both lists hold it under one path; a file git renamed between the revisions
+is one file under two names, and it is one entry, under the head path, with the base path in
+`basePath` — written on the terms §10.1 gives an optional scalar. Sorted by path, then by the
+base's name for the file (`basePath`, else `path`).
+
+The second key only decides anything for a rename map `buildDiff` is handed directly, since git
+renames no two files onto one path and never renames onto a path the base has. Such a map can
+lead two base records to one head path, and each is its own entry: keeping only one would drop
+a skip record on the strength of whichever the map or the skip list happened to list first.
 
 It exists because the Symbol level cannot express the loss. A file skipped on **one** side
 leaves Symbols on the other, and those become `unknown` (§3.5.1); a file skipped on **both**
@@ -866,7 +876,7 @@ the size cap, a language no plugin claims, a file unparseable since before the b
 so this is the ordinary case: a workspace with a standing blind spot got a clean-looking diff
 on every pull request while a whole directory sat outside the comparison.
 
-**The intersection, not the union.** A one-sided loss is already reported as `unknown`, and
+**Lost by both, not by either.** A one-sided loss is already reported as `unknown`, and
 listing it here as well would count one loss twice in two vocabularies that mean different
 things.
 
@@ -925,7 +935,8 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
     { "status": "moved",   "before": {...}, "after": {...}, "rationale": "git-rename" },
     { "status": "changed", "before": {...}, "after": {...}, "delta": { /* see §5 */ } },
     { "status": "moved+changed", "before": {...}, "after": {...}, "rationale": "...", "delta": {...} },
-    { "status": "dropped-toggled", "before": {...}, "after": {...}, "direction": "to-dropped" | "to-kept" }
+    { "status": "dropped-toggled", "before": {...}, "after": {...}, "direction": "to-dropped" | "to-kept" },
+    { "status": "unknown", "symbol": {...}, "absentFrom": "head", "reason": "over-size", "lostPath": "..." /* only after a git rename — see §3.5.1 */ }
   ],
   "components": {
     "added":   [ /* Component[] */ ],
@@ -937,7 +948,7 @@ state per side (cli-spec.md §6.6) and the artifact does not invent it.
     "removed": [ /* Dependency[] */ ],
     "unknown": [ /* {dependency, absentFrom, lostFiles} — see §6.2.1 */ ]
   },
-  "notCompared": [ /* {path, baseReason, headReason} — see §6.3 */ ]
+  "notCompared": [ /* {path, basePath?, baseReason, headReason} — see §6.3 */ ]
 }
 ```
 
@@ -1121,6 +1132,9 @@ If they survive with the same ID they are treated as unchanged; if caught by sta
 | DF19g | A class with one method moved file, without git rename information, and neither body names anything on the logic axis | moved: 2 when the class name says two words or more; when it says one, the class is added: 1, removed: 1 and the method moved: 1 — §3.3 pairs an owner and its members independently |
 | DF19h | A function whose body only calls something, or is one `for` loop over calls, is deleted, and an unrelated function of the same shape is added elsewhere; both names say two words or more | removed: 1, added: 1 — §3.3 has no lone-candidate branch where the logic names nothing |
 | DF19i | A function whose body returns a non-trivial expression moved file and was renamed, without git rename information — written as a concise arrow (`export const isAdminUser = (u) => u.role === "admin"`) or with a block body | moved+changed: 1, rationale: "logic-fingerprint", for both spellings — the arrow's expression is its `return` rule ([`lang-plugin.md`](./lang-plugin.md) LP19a), so its logic names something and §3.3's lone-candidate branch applies |
+| DF19j | git renames `src/big.ts` → `src/billing.ts`; the head skips `src/billing.ts` (or the base skips `src/big.ts`, or both do) | the base Symbols are `unknown` with `absentFrom: "head"` and `lostPath: "src/billing.ts"` (or the head Symbols `unknown` with `absentFrom: "base"` and `lostPath: "src/big.ts"`), never `removed` / `added`; skipped on both sides, one `notCompared[]` entry with `path: "src/billing.ts"` and `basePath: "src/big.ts"` (§3.5.1, §6.3) |
+| DF19k | DF19j with the head skipping `src/billing.ts`, and the base holding an edge `ts:src/big.ts#Billing` → `ts:src/kept.ts#kept` | the edge is in `dependencies.unknown` with `absentFrom: "head"` and `lostFiles: [{ path: "src/billing.ts", … }]` — the head's name for the file, not the holder's `src/big.ts` — never in `removed` (§6.2.1) |
+| DF19l | A rename map handed to `buildDiff` sends two base paths onto one head path, or onto a path the base also skipped — git writes neither | the same `symbols[]` and `notCompared[]`, byte for byte, whatever order the map and the skip lists are in; a `notCompared[]` entry for each base record that reaches a head one (§3.5.1, §6.3) |
 
 ## 10.1 Diff schema compatibility policy
 
@@ -1132,6 +1146,7 @@ In particular, because the CI gate (`aburi diff --fail-on`) depends on it:
 - Adding a `summary` field is non-breaking
 - Adding an optional `SymbolDelta` boolean is non-breaking, and the producer emits it unconditionally, `false` included, for the reason the next row gives
 - Adding an optional array is non-breaking on the same terms — to `componentDiff` / `dependencyDiff` or to the document itself — and carries one extra obligation: a reader must be able to tell "the writer had nothing to report" from "the writer predates the field". Where no arithmetic elsewhere in the document supplies that — which is everywhere in a diff — the producer emits the key unconditionally, empty included, and optionality in the schema covers only documents written before it existed. This is where the diff parts company with the IR, whose Class B fields (ir-schema.md §1.1) are omitted when empty: an IR reader can fall back on `totalFiles - parsedFiles`, and a diff reader has nothing to fall back on.
+- Adding an optional scalar to an entry is non-breaking, and unlike an array it may be left out when it has nothing to say, provided its absence is unambiguous by construction. `NotComparedFile.basePath` and `SymbolUnknown.lostPath` are the cases: each is written only when git renamed the file between the revisions, and a writer that predates them did not look across a rename at all, so it never produced an entry that needed one. In a document of either age, absence means "the other name is the same", and nothing has to be emitted to say so. A scalar whose absence an older writer could have meant differently is emitted unconditionally, as the `SymbolDelta` booleans are.
 
 ## 11. Design decisions
 
