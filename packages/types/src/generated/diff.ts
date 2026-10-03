@@ -30,7 +30,7 @@ dependencies: DependencyDiff
  */
 slices: SliceRecord[]
 /**
- * Files neither revision analysed, so the comparison never covered them. A symbol-level status cannot carry this: `unknown` is derived from the matcher's leftovers, and a file skipped on both sides contributes no Symbols to either document and therefore no leftover — the diff would otherwise be silent about it, which reads exactly like a file that was compared and found unchanged. Most skip reasons are properties of the file rather than of the revision (a generated bundle over the size cap, a language no plugin claims, a file unparseable since before the branch), so this is the ordinary case rather than the exceptional one. Sorted by path. Optional only so a diff written before the field existed stays valid; a current writer always emits the key, empty array included, because nothing else in the document would let a reader tell "nothing was missed" from "this writer could not say".
+ * Files neither revision analysed, so the comparison never covered them. A symbol-level status cannot carry this: `unknown` is derived from the matcher's leftovers, and a file skipped on both sides contributes no Symbols to either document and therefore no leftover — the diff would otherwise be silent about it, which reads exactly like a file that was compared and found unchanged. Most skip reasons are properties of the file rather than of the revision (a generated bundle over the size cap, a language no plugin claims, a file unparseable since before the branch), so this is the ordinary case rather than the exceptional one. Sorted by path, then by the base's name for the file (`basePath`, else `path`) for entries that share a path, which a rename map from git never produces. Optional only so a diff written before the field existed stays valid; a current writer always emits the key, empty array included, because nothing else in the document would let a reader tell "nothing was missed" from "this writer could not say".
  */
 notCompared?: NotComparedFile[]
 }
@@ -132,7 +132,7 @@ after: Symbol
 direction: ("to-dropped" | "to-kept")
 }
 /**
- * `symbol` is the entry as the document that does have it records it. A Symbol present in one document and absent from the other, where the absent side never analysed the file it lives in — `stats.skippedFiles[]` names that file. Not `added` or `removed`: nothing was written or deleted, the evidence is missing. Reporting it as either is the failure this status exists to prevent, because a scan that dropped a file would otherwise produce a confident report of API the author never touched.
+ * `symbol` is the entry as the document that does have it records it. A Symbol present in one document and absent from the other, where the absent side never analysed the file it lives in — that side's `stats.skippedFiles[]` names the file, under `lostPath` when git renamed it between the revisions and under `symbol.source.file` otherwise. Not `added` or `removed`: nothing was written or deleted, the evidence is missing. Reporting it as either is the failure this status exists to prevent, because a scan that dropped a file would otherwise produce a confident report of API the author never touched.
  */
 export interface SymbolUnknown {
 status: "unknown"
@@ -142,6 +142,10 @@ symbol: Symbol
  */
 absentFrom: ("base" | "head")
 reason: SkipReason
+/**
+ * Present only when git renamed the Symbol's file between the two revisions: the path the absent document skipped it under, which is the one its `stats.skippedFiles[]` holds. `symbol.source.file` is the file's name in the document that has it, so without this a reader could not find the skip record that explains the entry. Absent, that record is under `symbol.source.file`. Same form as SourceRange.file.
+ */
+lostPath?: string
 }
 export interface ComponentDiff {
 added: Component[]
@@ -174,7 +178,7 @@ dependency: Dependency
  */
 absentFrom: ("base" | "head")
 /**
- * The endpoint files that document skipped, sorted by path with no repeats. A list rather than the single `reason` SymbolUnknown carries, because an edge has two endpoints: they can live in two different files with two different reasons, and an intra-file edge collapses to one entry. Component-level endpoints never appear — a Component is an aggregate over roots and has no file to lose.
+ * The endpoint files that document skipped, as its own `stats.skippedFiles[]` names them, sorted by path with no repeats. For an endpoint file git renamed between the revisions that is the name on the absent side, not the holder's `symbols[].source.file`. A list rather than the single `reason` SymbolUnknown carries, because an edge has two endpoints: they can live in two different files with two different reasons, and an intra-file edge collapses to one entry. Component-level endpoints never appear — a Component is an aggregate over roots and has no file to lose.
  * 
  * @minItems 1
  */
@@ -185,7 +189,7 @@ lostFiles: SkippedFile[]
  */
 export interface SkippedFile {
 /**
- * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses. That is what puts it in the same space as symbols[].source.file, which is how an endpoint's file is matched against this list at all.
+ * Workspace-relative POSIX path, NFC, the same form SourceRange.file uses, exactly as the document that skipped the file recorded it. That form is what lets an endpoint's symbols[].source.file be matched against the list at all. For a file git renamed between the revisions the two documents name it differently, and this is the skipping document's name, not the holder's.
  */
 path: string
 reason: SkipReason

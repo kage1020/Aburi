@@ -1,7 +1,7 @@
-import { makeIR, makeSymbol } from "@aburi/test-support"
-import type { Dependency, IR, SkippedFile } from "@aburi/types"
+import { dependency, makeIR, makeSymbol } from "@aburi/test-support"
+import type { IR, SkippedFile } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { buildDiff } from "../src"
+import { buildDiff, renameDirections } from "../src"
 
 const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
 
@@ -10,11 +10,11 @@ const IR_REF = { ref: "test", irSchema: "aburi.ir.v1.json" } as const
  * skipped it recorded the name it had on its own side. A leftover from it names the file the
  * other way, so §3.5.1's lookup has to go through the rename map, or the Symbols of a renamed
  * file the other side skipped come out as confident `removed` / `added` (diff-algorithm.md
- * DF19j).
+ * DF19j–DF19l).
  */
 
-function dep(from: string, to: string): Dependency {
-  return { from, to, via: "call", direction: "outbound", effect: null } as Dependency
+function call(from: string, to: string) {
+  return dependency({ from, to, via: "call" })
 }
 
 function withSkipped(ir: IR, skipped: readonly SkippedFile[], totalFiles = 3): IR {
@@ -47,8 +47,16 @@ describe("buildDiff — a renamed file one side skipped", () => {
 
     expect(diff.summary.removed).toBe(0)
     expect(diff.summary.unknown).toBe(1)
-    expect(diff.symbols).toEqual([
-      { status: "unknown", symbol: atOld, absentFrom: "head", reason: "over-size" },
+    // `lostPath` is the head's own name for the file, which is where its skip record is: the
+    // Symbol's `source.file` is a path the head does not have at all.
+    expect(diff.symbols).toStrictEqual([
+      {
+        status: "unknown",
+        symbol: atOld,
+        absentFrom: "head",
+        reason: "over-size",
+        lostPath: "src/billing.ts",
+      },
     ])
     expect(diff.notCompared).toEqual([])
   })
@@ -60,9 +68,34 @@ describe("buildDiff — a renamed file one side skipped", () => {
     )
 
     expect(diff.summary.added).toBe(0)
-    expect(diff.symbols).toEqual([
-      { status: "unknown", symbol: atNew, absentFrom: "base", reason: "over-size" },
+    expect(diff.symbols).toStrictEqual([
+      {
+        status: "unknown",
+        symbol: atNew,
+        absentFrom: "base",
+        reason: "over-size",
+        lostPath: "src/big.ts",
+      },
     ])
+  })
+
+  it("carries no lostPath when the other side skipped the file under the Symbol's own name", () => {
+    // The rename map is present, but this file is not in it: the skip record is under
+    // `source.file`, and the key is left out rather than repeating it.
+    const diff = diffOf(
+      makeIR({ symbols: [kept, atOld] }),
+      withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/big.ts", reason: "parse-failed" }]),
+      new Map([["src/other.ts", "src/elsewhere.ts"]]),
+    )
+
+    const [entry] = diff.symbols
+    expect(entry).toStrictEqual({
+      status: "unknown",
+      symbol: atOld,
+      absentFrom: "head",
+      reason: "parse-failed",
+    })
+    expect(entry !== undefined && "lostPath" in entry).toBe(false)
   })
 
   it("still reports a deletion when there is no rename map to read", () => {
@@ -77,20 +110,60 @@ describe("buildDiff — a renamed file one side skipped", () => {
     expect(diff.summary.unknown).toBe(0)
   })
 
+  it("answers from the lowest base path when a hand-built map renames two onto one head path", () => {
+    // git never writes this map — it renames no two files onto one path — but `buildDiff`
+    // accepts any map, and which claimant explains the absence must not follow its order.
+    const baseIR = withSkipped(makeIR({ symbols: [kept] }), [
+      { path: "src/b.ts", reason: "over-size" },
+      { path: "src/a.ts", reason: "parse-timeout" },
+    ])
+    const headIR = makeIR({ symbols: [kept, atNew] })
+    const forward = diffOf(
+      baseIR,
+      headIR,
+      new Map([
+        ["src/a.ts", "src/billing.ts"],
+        ["src/b.ts", "src/billing.ts"],
+      ]),
+    )
+    const reversed = diffOf(
+      baseIR,
+      headIR,
+      new Map([
+        ["src/b.ts", "src/billing.ts"],
+        ["src/a.ts", "src/billing.ts"],
+      ]),
+    )
+
+    const expected = [
+      {
+        status: "unknown",
+        symbol: atNew,
+        absentFrom: "base",
+        reason: "parse-timeout",
+        lostPath: "src/a.ts",
+      },
+    ]
+    expect(forward.symbols).toStrictEqual(expected)
+    expect(reversed.symbols).toStrictEqual(expected)
+  })
+})
+
+describe("buildDiff — an edge into a renamed file one side skipped", () => {
   it("names the file the absent side recorded on an edge it lost", () => {
     // `lostFiles[]` is copied from that side's `stats.skippedFiles[]`, so it is the head's name.
     const diff = diffOf(
       makeIR({
         symbols: [kept, atOld],
-        dependencies: [dep("ts:src/big.ts#Billing", "ts:src/kept.ts#kept")],
+        dependencies: [call("ts:src/big.ts#Billing", "ts:src/kept.ts#kept")],
       }),
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/billing.ts", reason: "over-size" }]),
     )
 
     expect(diff.summary.depsRemoved).toBe(0)
-    expect(diff.dependencies.unknown).toEqual([
+    expect(diff.dependencies.unknown).toStrictEqual([
       {
-        dependency: dep("ts:src/big.ts#Billing", "ts:src/kept.ts#kept"),
+        dependency: call("ts:src/big.ts#Billing", "ts:src/kept.ts#kept"),
         absentFrom: "head",
         lostFiles: [{ path: "src/billing.ts", reason: "over-size" }],
       },
@@ -102,17 +175,57 @@ describe("buildDiff — a renamed file one side skipped", () => {
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/big.ts", reason: "parse-timeout" }]),
       makeIR({
         symbols: [kept, atNew],
-        dependencies: [dep("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing")],
+        dependencies: [call("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing")],
       }),
     )
 
     expect(diff.summary.depsAdded).toBe(0)
-    expect(diff.dependencies.unknown).toEqual([
+    expect(diff.dependencies.unknown).toStrictEqual([
       {
-        dependency: dep("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing"),
+        dependency: call("ts:src/kept.ts#kept", "ts:src/billing.ts#Billing"),
         absentFrom: "base",
         lostFiles: [{ path: "src/big.ts", reason: "parse-timeout" }],
       },
+    ])
+  })
+
+  it("collapses an edge inside a renamed file to the one file the absent side lost", () => {
+    const helper = makeSymbol({ id: "ts:src/big.ts#charge", name: "charge" })
+    const diff = diffOf(
+      makeIR({
+        symbols: [kept, atOld, helper],
+        dependencies: [call("ts:src/big.ts#Billing", "ts:src/big.ts#charge")],
+      }),
+      withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/billing.ts", reason: "over-size" }]),
+    )
+
+    expect(diff.dependencies.unknown?.map((entry) => entry.lostFiles)).toStrictEqual([
+      [{ path: "src/billing.ts", reason: "over-size" }],
+    ])
+  })
+
+  it("sorts lostFiles by the absent side's names, not the holder's", () => {
+    // `src/a.ts` sorts before `src/m.ts` in the base, but the head calls it `src/z.ts`; the list
+    // names what the head recorded, so it is sorted the way the head's names sort.
+    const fromRenamed = makeSymbol({ id: "ts:src/a.ts#A", name: "A" })
+    const toStaying = makeSymbol({ id: "ts:src/m.ts#M", name: "M" })
+    const diff = diffOf(
+      makeIR({
+        symbols: [kept, fromRenamed, toStaying],
+        dependencies: [call("ts:src/a.ts#A", "ts:src/m.ts#M")],
+      }),
+      withSkipped(makeIR({ symbols: [kept] }), [
+        { path: "src/z.ts", reason: "parse-failed" },
+        { path: "src/m.ts", reason: "over-size" },
+      ]),
+      new Map([["src/a.ts", "src/z.ts"]]),
+    )
+
+    expect(diff.dependencies.unknown?.map((entry) => entry.lostFiles)).toStrictEqual([
+      [
+        { path: "src/m.ts", reason: "over-size" },
+        { path: "src/z.ts", reason: "parse-failed" },
+      ],
     ])
   })
 })
@@ -124,7 +237,7 @@ describe("buildDiff — a renamed file both sides skipped", () => {
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/billing.ts", reason: "over-size" }]),
     )
 
-    expect(diff.notCompared).toEqual([
+    expect(diff.notCompared).toStrictEqual([
       {
         path: "src/billing.ts",
         basePath: "src/big.ts",
@@ -140,8 +253,56 @@ describe("buildDiff — a renamed file both sides skipped", () => {
       withSkipped(makeIR({ symbols: [kept] }), [{ path: "src/same.ts", reason: "over-size" }]),
     )
 
-    expect(diff.notCompared).toEqual([
+    // `toStrictEqual`, because `toEqual` would also accept `basePath: undefined`.
+    expect(diff.notCompared).toStrictEqual([
       { path: "src/same.ts", baseReason: "over-size", headReason: "over-size" },
     ])
+  })
+
+  it("keeps every base skip record a hand-built map leads to one head path, in either order", () => {
+    // The base skipped the rename's target as well as its source, which git cannot produce —
+    // a rename target is a file the base does not have — and both records reach the head's
+    // one. Keeping only one would drop the other on the strength of the skip list's order.
+    const head = withSkipped(makeIR({ symbols: [kept] }), [
+      { path: "src/billing.ts", reason: "over-size" },
+    ])
+    const skippedAtBase: SkippedFile[] = [
+      { path: "src/big.ts", reason: "over-size" },
+      { path: "src/billing.ts", reason: "parse-timeout" },
+    ]
+    const forward = diffOf(withSkipped(makeIR({ symbols: [kept] }), skippedAtBase), head)
+    const reversed = diffOf(
+      withSkipped(makeIR({ symbols: [kept] }), [...skippedAtBase].reverse()),
+      head,
+    )
+
+    const expected = [
+      {
+        path: "src/billing.ts",
+        basePath: "src/big.ts",
+        baseReason: "over-size",
+        headReason: "over-size",
+      },
+      { path: "src/billing.ts", baseReason: "parse-timeout", headReason: "over-size" },
+    ]
+    expect(forward.notCompared).toStrictEqual(expected)
+    expect(reversed.notCompared).toStrictEqual(expected)
+  })
+})
+
+describe("renameDirections", () => {
+  it("copies the map it is given, so a later change to it reaches no diff", () => {
+    const renames = new Map([["src/big.ts", "src/billing.ts"]])
+    const directions = renameDirections(renames)
+    renames.set("src/other.ts", "src/elsewhere.ts")
+
+    expect([...directions.baseToHead]).toStrictEqual([["src/big.ts", "src/billing.ts"]])
+    expect([...directions.headToBase]).toStrictEqual([["src/billing.ts", ["src/big.ts"]]])
+  })
+
+  it("reads null as no rename information", () => {
+    const directions = renameDirections(null)
+    expect(directions.baseToHead.size).toBe(0)
+    expect(directions.headToBase.size).toBe(0)
   })
 })

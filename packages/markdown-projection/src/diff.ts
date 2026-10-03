@@ -837,7 +837,17 @@ function symbolEntry(symbol: IRSymbol, extraRows: readonly string[]): string[] {
 function unknownExplanation(item: SymbolUnknown): string {
   const side = item.absentFrom
   const fate = side === "head" ? "may still exist" : "may not be new"
-  return `the ${side} scan skipped ${inlineCode(item.symbol.source.file)} (${item.reason}), so this Symbol ${fate}`
+  return `the ${side} scan skipped ${skippedFile(item)} (${item.reason}), so this Symbol ${fate}`
+}
+
+/**
+ * The path the absent scan's own skip record is under. That is the Symbol's file unless git
+ * renamed it between the revisions, and then the File line shows the other revision's name, so
+ * the phrase says how the two relate rather than naming a path the reader cannot place.
+ */
+function skippedFile(item: SymbolUnknown): string {
+  if (item.lostPath === undefined) return inlineCode(item.symbol.source.file)
+  return `this file under its ${item.absentFrom} name, ${inlineCode(item.lostPath)}`
 }
 
 /**
@@ -1168,8 +1178,10 @@ function renderMemberFollowup(change: SymbolChange): string {
       return deltaAxisSummary(change.delta)
     case "dropped-toggled":
       return `dropped-toggled: ${change.direction}`
-    case "unknown":
-      return `unknown: the ${change.absentFrom} scan skipped this file (${change.reason})`
+    case "unknown": {
+      const file = change.lostPath === undefined ? "this file" : skippedFile(change)
+      return `unknown: the ${change.absentFrom} scan skipped ${file} (${change.reason})`
+    }
   }
 }
 

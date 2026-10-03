@@ -503,8 +503,16 @@ function warnOnUnenumerableLosses(ir: IR, side: DiffSide, warn: WarnFn): void {
 function warnOnSymmetricLosses(notCompared: readonly NotComparedFile[], warn: WarnFn): void {
   if (notCompared.length === 0) return
   warn(
-    `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${joinCapped(notCompared.map((file) => file.path))}.`,
+    `⚠ ${notCompared.length} file(s) were skipped by both scans; see notCompared[] in diff.json: ${joinCapped(notCompared.map(notComparedName))}.`,
   )
+}
+
+/**
+ * A renamed file by both its names, as `diff.md` prints it: the line drops reasons, not
+ * identity, and the base scan's own warning above names the file under the base's name.
+ */
+function notComparedName(file: NotComparedFile): string {
+  return file.basePath === undefined ? file.path : `${file.basePath} → ${file.path}`
 }
 
 /** Trigger phrasing so the CLI wrapper can pipe it to stderr. */
@@ -991,12 +999,12 @@ async function collectRenames(
     if (result.stderr.trim().length > 0) {
       warn(
         `⚠ git reported while collecting renames for ${spec.base}..${spec.head}: ${result.stderr.trim()}. ` +
-          `Rename hints may be missing (raise diff.renameLimit if it says so); moves without one are reported as removed + added.`,
+          `Rename hints may be missing (raise diff.renameLimit if it says so); moves without one are reported as removed + added, ${RENAMED_AND_SKIPPED}.`,
       )
     }
   } catch (error) {
     warn(
-      `⚠ Failed to collect git renames (${errorMessage(error)}); the diff will treat renamed files as removed + added.`,
+      `⚠ Failed to collect git renames (${errorMessage(error)}); the diff will treat renamed files as removed + added, ${RENAMED_AND_SKIPPED}.`,
     )
     return null
   }
@@ -1005,12 +1013,21 @@ async function collectRenames(
   if (!parsed.ok) {
     warn(
       `⚠ git diff --name-status -z for ${spec.base}..${spec.head} produced a record this parser could not read ` +
-        `(field ${parsed.index}: ${describeBadField(parsed.field)}); the diff will treat renamed files as removed + added.`,
+        `(field ${parsed.index}: ${describeBadField(parsed.field)}); the diff will treat renamed files as removed + added, ${RENAMED_AND_SKIPPED}.`,
     )
     return null
   }
   return parsed.renames
 }
+
+/**
+ * The other cost of a missing rename hint. The map also decides whether a file one scan skipped
+ * is the one the other scan has under another name (`diff-algorithm.md` §3.5.1), so without it
+ * that file's Symbols are a lone removal or addition — no matching half — and `--fail-on removed`
+ * fires on a file nobody deleted.
+ */
+const RENAMED_AND_SKIPPED =
+  "and the Symbols of a renamed file one scan skipped as removed or added rather than unknown"
 
 /** A field goes into a warning quoted and capped: it is a path, so it can carry control bytes. */
 function describeBadField(field: string): string {

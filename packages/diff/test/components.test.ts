@@ -2,18 +2,31 @@ import { makeLanguageId } from "@aburi/core"
 import { component, componentId, dependency } from "@aburi/test-support"
 import type { Component, ComponentDiff } from "@aburi/types"
 import { describe, expect, it } from "vitest"
-import { type DependencySideView, DiffError, diffComponents, diffDependencies } from "../src"
+import {
+  type DependencySideView,
+  DiffError,
+  diffComponents,
+  diffDependencies,
+  type RenameDirections,
+  renameDirections,
+} from "../src"
 
-/**
- * Side views for two documents that skipped nothing. Every one of these tests is about
- * identity comparison, not about loss, so the honest input is a pair that has no skip list to
- * offer — which `diffDependencies` requires a caller to spell rather than default into.
- */
 type ComponentDelta = ComponentDiff["changed"][number]["delta"]
 
-const NO_LOSSES: { base: DependencySideView; head: DependencySideView } = {
+/**
+ * Side views for two documents that skipped nothing, with no rename map between them. Every
+ * one of these tests is about identity comparison, not about loss, so the honest input is a
+ * pair that has no skip list or rename to offer — which `diffDependencies` requires a caller to
+ * spell rather than default into.
+ */
+const NO_LOSSES: {
+  base: DependencySideView
+  head: DependencySideView
+  renames: RenameDirections
+} = {
   base: { symbolFiles: new Map(), lostFiles: new Map() },
   head: { symbolFiles: new Map(), lostFiles: new Map() },
+  renames: renameDirections(null),
 }
 
 describe("diffComponents (I5)", () => {
