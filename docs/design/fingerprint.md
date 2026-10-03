@@ -154,9 +154,16 @@ Represents the **meaning executed by the symbol's body**. Changes when the meani
     {
       "target": <canonical(Effect.target)>
     }
-  ]                                             // input order (= source order = ascending line) preserved
+  ]                                             // locally detected effects in input order, then propagated targets (below)
 }
 ```
+
+`effects` is built in two segments, split on `Effect.propagated`, the one field besides `target` the input reads ([`effect-propagation.md`](./effect-propagation.md) §5.1):
+
+1. **Locally detected effects** (`propagated` absent or `false`), in input order (= call order = ascending `line`), one entry per effect: a target called twice is two entries.
+2. **Propagated effects** (`propagated: true`), after every locally detected one, by `canonical(target)` alone: sorted ascending by UTF-16 code unit, each target once, and leaving out any target segment 1 already holds.
+
+Segment 2 is not read as the IR stores it. The IR orders that segment by `(id, target)` and merges it on that pair ([`effect-propagation.md`](./effect-propagation.md) §5.1, §8), and `id` is not part of the input (below), so reading it as stored would let an id change reorder a caller's targets, repeat one, or leave in place a target the caller's own effects already name. Each moves the `logic` of every transitive caller while the callee's own stays put (§4.5). Propagated entries have no call-site position, and propagation already merges their repeats, so this loses nothing §4.7 protects.
 
 `Effect.id` (e.g. `db.write` / `x-prisma:create`) is **not included in the input**. Reasons:
 
@@ -183,16 +190,16 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 ### 4.4 Guaranteed change conditions
 
 - Reordering **rules** → changes (control-flow execution order carries meaning)
-- Reordering **effects** → changes (side-effect occurrence order carries meaning)
+- Reordering **locally detected effects** → changes (side-effect occurrence order carries meaning). The order of propagated effects is not read (§4.1)
 - Changing the expression of `rules[].condition` / `what` / `expr` itself → changes
-- Adding / removing an effect, or changing its `target` → changes
+- Adding / removing an effect, or changing its `target` → changes, except that a propagated effect on a target another effect of the Symbol already names adds or removes nothing (§4.1)
 
 ### 4.5 Guaranteed invariance conditions (plugin-configuration robustness)
 
 - Even if the `effects[].id` classification of an effect plugin changes (e.g. `db.write` ↔ `x-prisma:create`), `logic` is unchanged as long as the target is the same
 - Adding / removing effect plugins or reordering the config does not break the logic stability of the IR
 - Time-series comparison against past IRs is robust to plugin configuration changes
-- This holds for propagated effects too: their segment is ordered by `(effectId, target)` in the IR ([`effect-propagation.md`](./effect-propagation.md) §8), which an id change can reorder, so the fingerprint reads it sorted by `target` alone. Locally-detected effects keep call order (§4.7)
+- This holds for propagated effects too. The IR orders their segment by `(id, target)` and merges it on that pair ([`effect-propagation.md`](./effect-propagation.md) §5.1, §8), so an id change can reorder its entries, split one target into two entries or merge two into one, and decide whether a locally detected effect on the same target suppresses one. The fingerprint reads the segment by target alone (§4.1): sorted, each target once, and none a locally detected effect already names, so none of this reaches `logic`. Locally detected effects keep their call order and their repeats (§4.7)
 
 ### 4.6 Known current limitations (before LSP enrichment)
 
@@ -203,11 +210,13 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 
 These are explicitly declared as "not yet guaranteed". A field rename appearing as `logic changed` during review is, today, per spec.
 
-### 4.7 Why effects order is preserved (= not sorted)
+### 4.7 Why the order of locally detected effects is preserved (= not sorted)
 
 By design, the order of effects can carry meaning (transaction boundaries, idempotency, retry safety). Discarding order would give "DB write before event publish" and "event publish before DB write" the same fingerprint, making refactoring-induced bugs undetectable in the diff.
 
 As a trade-off, "unintended reordering" also shows up in the diff, but a miss was judged more costly than noise.
+
+This applies to locally detected effects, each of which sits at a call site in the body. Propagated effects have none: propagation appends them after the local ones in `(id, target)` order ([`effect-propagation.md`](./effect-propagation.md) §8), an order that never followed the sequence in which the callees' side effects run. The fingerprint therefore reads them by target alone (§4.1, §4.5), which loses no ordering this section protects.
 
 ### 4.8 A value that names nothing
 
@@ -364,17 +373,19 @@ The reference implementation and every language plugin must pass the following t
 | L5 | Change a decorator | logic unchanged |
 | L11 | Change only the effect's `id` (same target) — plugin configuration robustness | logic unchanged |
 | L12 | Adding/removing/reordering effect plugins classifies the same target under a different id | logic unchanged |
-| L12a | L11/L12 on a caller with two propagated effects, where the id change flips the two entries' `(id, target)` order | logic unchanged on the caller as on the callee |
+| L12a | L11/L12 on a callee's effect that reaches a caller as one of two propagated effects, where the id change flips the two entries' `(id, target)` order; the caller is compared, with or without a locally detected effect of its own | logic unchanged |
+| L12b | L11/L12 unifies the ids under which two callees classify one target, which reached a caller as two propagated effects on that target and now reaches it as one; the caller is compared | logic unchanged |
+| L12c | L11/L12 unifies a callee's id for a target with the id of the caller's own locally detected effect on that target, so propagation now drops the propagated entry it kept before; the caller is compared | logic unchanged |
 
 ### 7.5 logic change conditions
 
 | ID | Mutation | Expected |
 |---|---|---|
 | L6 | Reorder rules | logic changes |
-| L7 | Reorder effects | logic changes |
+| L7 | Reorder locally detected effects | logic changes |
 | L8 | Change a rule's condition | logic changes |
 | L9 | Change an effect's target | logic changes |
-| L10 | Add / remove an effect | logic changes |
+| L10 | Add / remove an effect, locally detected or propagated (a propagated one on a target no other effect of the Symbol names) | logic changes |
 
 ### 7.6 syntax invariance conditions
 
@@ -512,11 +523,7 @@ export function apiFingerprint(sym) {
 
 export function logicFingerprint(sym) {
   return hash({
-    effects: [  // id excluded (§4.5)
-      ...sym.effects.filter(e => !e.propagated).map(e => ({ target: canonical(e.target) })),  // call order (§4.7)
-      ...sym.effects.filter(e => e.propagated).map(e => ({ target: canonical(e.target) }))
-        .sort(byTarget),  // not the IR's (id, target) order, which an id change can reorder
-    ],
+    effects: logicEffects(sym.effects),  // id excluded (§4.5)
     rules: sym.rules.map(r => ({
       condition: r.condition !== null ? canonical(r.condition) : null,
       expr:      r.expr !== null ? canonical(r.expr) : null,
@@ -525,6 +532,17 @@ export function logicFingerprint(sym) {
       what:      r.what !== null ? canonical(r.what) : null
     }))
   })
+}
+
+function logicEffects(effects) {
+  // §4.1 segment 1: locally detected effects in call order (§4.7), repeats kept
+  const local = effects.filter(e => e.propagated !== true).map(e => canonical(e.target))
+  // §4.1 segment 2: propagated targets, each once, none segment 1 holds, sorted by UTF-16
+  // code unit (`<`, not localeCompare) rather than in the IR's (id, target) order (§4.5)
+  const propagated = [...new Set(effects.filter(e => e.propagated === true).map(e => canonical(e.target)))]
+    .filter(t => !local.includes(t))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  return [...local, ...propagated].map(target => ({ target }))
 }
 
 function canonical(s) {

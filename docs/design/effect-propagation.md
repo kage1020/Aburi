@@ -199,11 +199,11 @@ Therefore the algorithm terminates in `O((V + E) log V)` steps for any input. No
 
 ## 8. Interaction with the 3-Layer Fingerprint
 
-Propagated effects **enter the `logic` fingerprint input**. Because they are stored in `Symbol.effects[]` (§5.1), they are visible to the `logic` fingerprint's serialization ([`fingerprint.md`](./fingerprint.md) §4.1) with no change to the serialization contract. Concretely: when a callee gains a `db.write`, every Symbol in the transitive callers' closure sees a new entry in its `effects[]`, and each of those Symbols' `logic` fingerprint changes on the next `aburi scan`.
+Propagated effects **enter the `logic` fingerprint input**. Because they are stored in `Symbol.effects[]` (§5.1), they are visible to the `logic` fingerprint's serialization ([`fingerprint.md`](./fingerprint.md) §4.1), which reads them as a segment of their own, by `target` (see the end of this section). Concretely: when a callee gains a `db.write`, every Symbol in the transitive callers' closure sees a new entry in its `effects[]`, and each of those Symbols' `logic` fingerprint changes on the next `aburi scan`, unless the Symbol already had an effect on that target.
 
 This is the intended review signal. The reviewer of a diff that added a `db.write` to a repository method wants to see the controllers and services above it show up as `changed` with a logic delta — that is the entire point of propagation.
 
-Reconciliation with [`fingerprint.md`](./fingerprint.md) §4.5. §4.5 guarantees the `logic` fingerprint is unchanged when an effect plugin **renames** an effect's `id` (e.g. `db.write` ↔ `x-prisma:create`) while the `target` stays the same. That robustness is preserved here because `target` (not Symbol id) is the merge key (§5.4) and because the `logic` fingerprint input for effects is `{ target }` only. Propagation, by contrast, **adds and removes** `Effect` records, which is already covered by [`fingerprint.md`](./fingerprint.md) §4.4 test case `L10` ("add / remove an effect → logic changes"). Adding effects to a caller because the callee gained one is a legitimate `logic` change; suppressing it would blind the reviewer.
+Reconciliation with [`fingerprint.md`](./fingerprint.md) §4.5. §4.5 guarantees the `logic` fingerprint is unchanged when an effect plugin **renames** an effect's `id` (e.g. `db.write` ↔ `x-prisma:create`) while the `target` stays the same. That robustness is preserved here because `target` (not Symbol id) is the merge key (§5.4) and because the `logic` fingerprint input for effects is `{ target }` only. `{ target }` alone is not enough for the propagated segment, though: its `(effectId, target)` order and merge still let an id change show through, and the fingerprint closes that by reading the segment by target, as the last paragraphs of this section describe. Propagation, by contrast, **adds and removes** `Effect` records, which is already covered by [`fingerprint.md`](./fingerprint.md) §4.4 test case `L10` ("add / remove an effect → logic changes"). Adding effects to a caller because the callee gained one is a legitimate `logic` change; suppressing it would blind the reviewer.
 
 Ordering rule: within `Symbol.effects[]`, propagated entries appear **after** locally-detected entries. The effective order at emission time is:
 
@@ -212,9 +212,15 @@ Ordering rule: within `Symbol.effects[]`, propagated entries appear **after** lo
 
 This reconciles with `fingerprint.md` §4.7: the "order is preserved" guarantee applies to entries that have an intrinsic call-site position. Propagated entries lack that position, so a fixed lexicographic order is applied only within the propagated segment; the locally-detected segment ahead of it retains call order verbatim.
 
-The `logic` fingerprint does not read the propagated segment in this order. It hashes `{ target }` only, and an `(effectId, target)` sort lets an id change move a target past another one — `db.write` → `x-acme:create` on `prisma.invoice.create` sorts it after an `event.publish` on `bus.emit` — so every transitive caller's `logic` would change for a reclassification the callee's `logic` ignores. The fingerprint therefore reads the propagated segment sorted by `target` alone ([`fingerprint.md`](./fingerprint.md) §4.5). The IR keeps `(effectId, target)`: integrity invariant #11 checks it, and a stored IR written in that order has to stay valid.
+The `logic` fingerprint does not read the propagated segment as stored. It hashes `{ target }` only, and the segment's `(effectId, target)` order and merge let an id change reach every transitive caller's `logic` in three ways the callee's own `logic` ignores:
 
-Dedup (§5.1) is applied **before** the fingerprint reads the array so that no `(effectId, target)` pair appears twice.
+- Order: the sort moves a target past another one. `db.write` → `x-acme:create` on `prisma.invoice.create` sorts it after an `event.publish` on `bus.emit`.
+- Count: the merge keeps a target twice while two callees classify it under different ids, and once when they agree.
+- Local suppression: the §5.1 dedup drops a propagated entry only when the caller has a locally-detected entry with the same `(effectId, target)`, so a local `db.write` on a target leaves a propagated `x-acme:create` on that target in place until the ids agree.
+
+The fingerprint therefore reads the propagated segment by `target` alone: sorted, each target once, and none the locally-detected segment already names ([`fingerprint.md`](./fingerprint.md) §4.1, §4.5). The IR keeps `(effectId, target)` for both the order and the merge: integrity invariant #11 checks the order, a stored IR written in it has to stay valid, and the diff pairs effects on that pair (§9).
+
+Dedup (§5.1) is applied **before** the fingerprint reads the array, so no `(effectId, target)` pair appears twice in the IR; the fingerprint's reading of the propagated segment then narrows it to one entry per target the locally-detected segment does not already name.
 
 Alternative rejected — exclude propagated effects from `logic` fingerprint input: this would mean that a repository gaining a `db.write` triggers no `changed` on the controllers that invoke it, and reviewers would lose the propagated-effect signal in the diff. The purpose of the pass is to surface those changes; excluding them from the fingerprint would defeat it.
 
@@ -315,7 +321,7 @@ Both terminate on the same result because the join is monotone over a finite lat
 
 If the callee gains `db.write` and the caller's `logic` fingerprint does not change, the reviewer misses the propagated fact — which was the reason for building this pass. Entering `logic` is the mechanism that surfaces the change through the existing diff pipeline without any new status enum value.
 
-[`fingerprint.md`](./fingerprint.md) §4.5's plugin-configuration robustness is preserved because `target` (not Symbol id) is the merge key; renaming an effect plugin still leaves the `target` values verbatim, and the fingerprint reads the propagated segment by `target` rather than in the IR's `(effectId, target)` order (§8), so `logic` still ignores the rename.
+[`fingerprint.md`](./fingerprint.md) §4.5's plugin-configuration robustness is preserved because `target` (not Symbol id) is the merge key; renaming an effect plugin still leaves the `target` values verbatim, and the fingerprint reads the propagated segment by `target` alone (sorted, each target once, and none the Symbol's own effects name) rather than as the IR's `(effectId, target)` order and merge leave it (§8), so `logic` still ignores the rename.
 
 ### 12.5 Why propagation does not stop at Boundary symbols
 
