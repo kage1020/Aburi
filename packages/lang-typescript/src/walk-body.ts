@@ -18,7 +18,7 @@ import {
 } from "./ast-helpers"
 import { functionValuedField, isConstructorMember, memberSymbolSegment } from "./class-members"
 import { objectEntryOf } from "./object-members"
-import { decodeStringLiteral, decodeStringLiteralOrRaw } from "./string-escape"
+import { decodeStringLiteral, readStaticString } from "./string-escape"
 
 /**
  * Walk a Symbol's body and produce control-flow rules + call candidates.
@@ -640,7 +640,8 @@ function extractLiteral(node: Node): string | null {
     case "undefined":
       return node.text
     case "string":
-      return decodeStringLiteralOrRaw(node)
+    case "template_string":
+      return readStaticString(node)
     default:
       return null
   }

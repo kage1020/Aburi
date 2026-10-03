@@ -287,17 +287,20 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     byId(symbols, "#app__get__$users$Zid__d0")
   })
 
-  it("CS3: no path literal ⇒ qname is receiver__method__d0", async () => {
+  it("CS3: no path literal ⇒ the names the arguments carry stand in for it", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.use(logger)\n`,
     )
-    const sym = byId(symbols, "#app__use__d0")
+    const sym = byId(symbols, "#app__use__logger__d0")
     expect(sym.derivedBy).not.toContain(
       sym.derivedBy.find((tag) => tag.startsWith("path-literal:")) ?? "",
     )
+    // The tag says where the discriminator came from: `$` is also a path's `/`, so
+    // `app.use($api)` and `app.use("/api", x)` share a stem and only this tells them apart.
+    expect(sym.derivedBy).toContain("argument-names:logger")
   })
 
-  it("CS4: duplicate (receiver, method, pathSlug) triples get document-order suffixes", async () => {
+  it("CS4: registrations agreeing on (receiver, method, discriminator) get document-order suffixes", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.get('/x', a)\napp.get('/x', b)\napp.get('/x', c)\n`,
     )
@@ -306,13 +309,53 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
     byId(symbols, "#app__get__$x__d2")
   })
 
-  it("CS5: chained receiver (app.route('/x').get(h)) records chained-call and roots on app", async () => {
+  it("CS5: chained receiver (app.route('/x').get(h)) records chained-call, roots on app and is named by the path up the chain", async () => {
     const symbols = await symbolsOf(
       `import express from "express"\nconst app = express()\napp.route('/thing').get(handler)\n`,
     )
-    const sym = byId(symbols, "#app__get__d0")
+    const sym = byId(symbols, "#app__get__$thing__d0")
     expect(sym.derivedBy).toContain("chained-call")
     expect(sym.derivedBy).toContain("call-statement:app.get")
+    expect(sym.derivedBy).toContain("path-literal:/thing")
+  })
+
+  it("CS5a: routes mounted through app.route with one handler name keep their ids when one is inserted", async () => {
+    // Named by the leaf call alone, all three were `app__get__h`, told apart by order: the
+    // insertion renumbered the two below it, which is the failure CS13 pins for `use`.
+    const ids = async (lines: string[]) =>
+      (await symbolsOf(`${lines.join("\n")}\n`))
+        .filter((s) => s.kind === "call")
+        .map((s) => s.id)
+        .sort()
+
+    const before = await ids(["app.route('/a').get(h)", "app.route('/b').get(h)"])
+    const after = await ids([
+      "app.route('/new').get(h)",
+      "app.route('/a').get(h)",
+      "app.route('/b').get(h)",
+    ])
+
+    expect(before).toEqual(["ts:src/a.ts#app__get__$a__d0", "ts:src/a.ts#app__get__$b__d0"])
+    expect(after).toEqual(["ts:src/a.ts#app__get__$new__d0", ...before].sort())
+  })
+
+  it.each([
+    // The earliest path is the one the rest of the chain hangs off.
+    ["the earliest of two paths", "app.route('/a').get('/b', h)", "#app__get__$a__d0", "/a"],
+    // A member step between the calls is still the same chain (LP20g).
+    ["a path behind a member step", "app.use(h0).router.get('/x', h1)", "#app__get__$x__d0", "/x"],
+    // The call that starts the chain makes the receiver: its argument is not a mount path.
+    [
+      "no path from the call that starts the chain",
+      'require("express")().get(h)',
+      "#require__get__h__d0",
+      null,
+    ],
+  ])("CS5b: reads %s", async (_label, source, id, path) => {
+    const sym = byId(await symbolsOf(`${source}\n`), id)
+
+    const tags = sym.derivedBy.filter((tag) => tag.startsWith("path-literal:"))
+    expect(tags).toEqual(path === null ? [] : [`path-literal:${path}`])
   })
 
   it("CS6: non-whitelisted method names (e.g. Sentry.captureException) are not promoted", async () => {
@@ -377,6 +420,156 @@ describe("extractSymbols — Call promotion (module-level chained calls)", () =>
 
     const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
     expect(ids).toEqual(["ts:src/a.ts#app__get___u12b$a__d0", "ts:src/a.ts#app__get___u12b$b__d0"])
+  })
+
+  it("CS11: reads a path written in backticks as the same path in quotes", async () => {
+    const backtick = await symbolsOf("app.get(`/users`, h)\n")
+    const quoted = await symbolsOf('app.get("/users", h)\n')
+
+    const ids = (symbols: typeof backtick) =>
+      symbols.filter((s) => s.kind === "call").map((s) => s.id)
+    expect(ids(backtick)).toEqual(["ts:src/a.ts#app__get__$users__d0"])
+    expect(ids(backtick)).toEqual(ids(quoted))
+    expect(byId(backtick, "#app__get__$users__d0").derivedBy).toContain("path-literal:/users")
+  })
+
+  it("CS12: a backtick path with a substitution is not a path", async () => {
+    // Its value is decided when it runs; the names the arguments carry stand in.
+    const symbols = await symbolsOf(`app.get(\`/users/\${id}\`, h)\n`)
+
+    const sym = byId(symbols, "#app__get__h__d0")
+    expect(sym.derivedBy).toContain("argument-names:h")
+    expect(sym.derivedBy.some((tag) => tag.startsWith("path-literal:"))).toBe(false)
+  })
+
+  it("CS13: inserting a registration with no path leaves the later ones their ids", async () => {
+    // With the bare `app__use` stem the ordinal, which is source order, was all that told
+    // these apart: inserting `compression()` first renamed every later middleware, and the
+    // diff paired each with the body its id used to hold (ir-schema.md §3.3).
+    const inline =
+      "app.use((req, res, next) => {\n  if (!req.headers.authorization) return\n  next()\n})"
+    const ids = async (lines: string[]) =>
+      (await symbolsOf(`${lines.join("\n")}\n`))
+        .filter((s) => s.kind === "call")
+        .map((s) => s.id)
+        .sort()
+
+    const before = await ids(["app.use(cors())", "app.use(helmet())", "app.use(authMw)", inline])
+    const after = await ids([
+      "app.use(compression())",
+      "app.use(cors())",
+      "app.use(helmet())",
+      "app.use(authMw)",
+      inline,
+    ])
+
+    expect(before).toEqual([
+      "ts:src/a.ts#app__use__authMw__d0",
+      "ts:src/a.ts#app__use__cors__d0",
+      "ts:src/a.ts#app__use__d0",
+      "ts:src/a.ts#app__use__helmet__d0",
+    ])
+    expect(after).toEqual(["ts:src/a.ts#app__use__compression__d0", ...before].sort())
+  })
+
+  it("CS14: names a dotted reference and a call's callee by their whole path", async () => {
+    const symbols = await symbolsOf(
+      'app.use(express.json())\napp.use(express.static("public"))\napp.use(rateLimit({ max: 5 }), audit.log)\n',
+    )
+
+    expect(symbols.filter((s) => s.kind === "call").map((s) => s.id)).toEqual([
+      "ts:src/a.ts#app__use__express_json__d0",
+      "ts:src/a.ts#app__use__express_static__d0",
+      "ts:src/a.ts#app__use__rateLimit$audit_log__d0",
+    ])
+  })
+
+  it.each([
+    ["a comment", 'app.get(/* why */ "/users", h)'],
+    ["parentheses", 'app.get(("/users"), h)'],
+    ["an assertion", 'app.get("/users" as string, h)'],
+    ["a satisfies", 'app.get("/users" satisfies string, h)'],
+  ])("CS15: reads the path past %s written in front of it", async (_label, source) => {
+    // Taken by position, the first child was the comment or the wrapper, so writing one
+    // renamed the route to `app__get__h__d0` — the rename this naming exists to prevent.
+    const sym = byId(await symbolsOf(`${source}\n`), "#app__get__$users__d0")
+
+    expect(sym.derivedBy).toContain("path-literal:/users")
+  })
+
+  it("CS16: an empty path says nothing, so the names the arguments carry stand in", async () => {
+    // A slug of nothing left the bare `app__get` stem and tagged a path the id does not hold.
+    const sym = byId(await symbolsOf('app.get("", h)\n'), "#app__get__h__d0")
+
+    expect(sym.derivedBy).toContain("argument-names:h")
+    expect(sym.derivedBy.some((tag) => tag.startsWith("path-literal:"))).toBe(false)
+  })
+
+  it.each([
+    ["a constructor", "app.use(new Logger())", "Logger"],
+    ["a spread", "app.use(...mws)", "mws"],
+    ["a three-level member", "app.use(a.b.c)", "a_b_c"],
+    ["a call inside a dotted path", "app.use(a.b().c)", "a_b_c"],
+    ["a wrapped argument", "app.use((authMw as Handler))", "authMw"],
+  ])("CS17: names %s by the name it carries", async (_label, source, names) => {
+    const sym = byId(await symbolsOf(`${source}\n`), `#app__use__${names}__d0`)
+
+    expect(sym.derivedBy).toContain(`argument-names:${names}`)
+  })
+
+  it("CS18: registrations whose names agree are told apart by order alone, and stay unique", async () => {
+    // The ordinal is the only discriminator here, which is where the position-dependence this
+    // naming removes elsewhere is still reachable. `$` joins argument names, so `(a, b)` and
+    // `(a$b)` share a stem too.
+    const symbols = await symbolsOf(
+      [
+        'app.use(express.static("a"))',
+        'app.use(express.static("b"))',
+        "app.use(a, b)",
+        "app.use(a$b)",
+      ].join("\n"),
+    )
+
+    const ids = symbols.filter((s) => s.kind === "call").map((s) => s.id)
+    expect(ids).toEqual([
+      "ts:src/a.ts#app__use__a$b__d0",
+      "ts:src/a.ts#app__use__a$b__d1",
+      "ts:src/a.ts#app__use__express_static__d0",
+      "ts:src/a.ts#app__use__express_static__d1",
+    ])
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it("CS19: keeps a name outside ASCII, as the qualified-name grammar does", async () => {
+    // Folded through an ASCII class, both middleware were `app__use____` and the path and the
+    // receiver lost every character, leaving source order to tell them apart.
+    const symbols = await symbolsOf(
+      ["app.use(認証)", "app.use(圧縮)", 'app.get("/ユーザー", h)', "アプリ.use(café)"].join("\n"),
+    )
+
+    expect(symbols.filter((s) => s.kind === "call").map((s) => s.id)).toEqual([
+      "ts:src/a.ts#app__get__$ユーザー__d0",
+      "ts:src/a.ts#app__use__圧縮__d0",
+      "ts:src/a.ts#app__use__認証__d0",
+      "ts:src/a.ts#アプリ__use__café__d0",
+    ])
+  })
+
+  it("CS20: names a registration in Unicode NFC, whichever spelling the file was saved in", async () => {
+    // `symbols[].name` is held to NFC (invariant #19). A decomposed `é` is `e` and a combining
+    // acute; the path's `:` folds to `Z`, which the acute after it then composes with.
+    const decomposed = "cafe\u0301"
+    const symbols = await symbolsOf(
+      [`app.use(${decomposed})`, "app.use(caf\u00e9)", 'app.get("/a:\u0301", h)'].join("\n"),
+    )
+
+    const names = symbols.filter((s) => s.kind === "call").map((s) => s.name)
+    expect(names).toEqual([
+      "app__get__$a\u0179__d0",
+      "app__use__caf\u00e9__d0",
+      "app__use__caf\u00e9__d1",
+    ])
+    for (const name of names) expect(name).toBe(name.normalize("NFC"))
   })
 })
 
