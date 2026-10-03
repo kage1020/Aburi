@@ -1,4 +1,10 @@
-import { type ScanInput, type ScanResult, type ServerFactory, scan } from "@aburi/core"
+import {
+  CLASSIFY_TIMEOUT_MAX_MS,
+  type ScanInput,
+  type ScanResult,
+  type ServerFactory,
+  scan,
+} from "@aburi/core"
 import { buildDiff } from "@aburi/diff"
 import { nestEffectsPlugin } from "@aburi/effects-nest"
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
@@ -34,6 +40,15 @@ export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFac
  * does not have. Injecting the objects keeps the fixtures free of an install step while
  * exercising the same pipeline (discovery → parse → classify → drop → fingerprint →
  * integrity). Plugin-name resolution is covered by `packages/cli/test/plugin-loader.test.ts`.
+ *
+ * `classifyTimeoutMs` defaults to the schema's ceiling, `CLASSIFY_TIMEOUT_MAX_MS` (5000 ms),
+ * unless `config` sets it. Each effect classification is timed, and one that overruns its budget
+ * loses its effect: the call stays in `calls[]`, and the overrun is recorded in
+ * `ir.stats.effectClassifyTimeouts`. The conditions under which the 50 ms default was overrun
+ * were a macOS CI runner and the first classification in the process, so a test asserting that
+ * scan's first effect failed there and passed on a rerun. The budget is checked after the
+ * synchronous call returns, so the ceiling makes nothing wait. A test that wants the default
+ * passes `classifyTimeoutMs` itself.
  */
 export async function scanWith(
   workspaceRoot: string,
@@ -48,7 +63,15 @@ export async function scanWith(
   const registry = new VocabRegistry()
   for (const plugin of [...languages, ...frameworks, ...effects]) registry.register(plugin.manifest)
 
-  return scan({ workspaceRoot, config, languages, frameworks, effects, registry, ...extras })
+  return scan({
+    workspaceRoot,
+    config: { classifyTimeoutMs: CLASSIFY_TIMEOUT_MAX_MS, ...config },
+    languages,
+    frameworks,
+    effects,
+    registry,
+    ...extras,
+  })
 }
 
 /** Plugins layered on top of `scanFixture`'s default TypeScript + NestJS lineup. */

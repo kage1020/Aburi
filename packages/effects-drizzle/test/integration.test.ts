@@ -247,6 +247,26 @@ export function mountUserRoutes(router: Router, db: ReturnType<typeof drizzle>) 
     expect(write?.confidence).toBe("high")
   })
 
+  it("does not classify a route registration whose path is written in backticks", async () => {
+    // The same path in other quotes. A template with no substitution reaches
+    // `calls[].literalArgs` as the string it spells, so the literal-first-argument veto reads
+    // it; before, it was no literal at all and the route was a medium-confidence db.write.
+    const results = await classifyCalls(
+      "src/routes/users.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js"
+import type { Router } from "express"
+export function mountUserRoutes(router: Router) {
+  router.delete(\`/users/:id\`, async (req, res) => {
+    res.json({ ok: true })
+  })
+}`,
+      [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
+    const route = results.find((r) => r.target === "router.delete")
+    expect(route).toBeDefined()
+    expect(route?.effectId).toBeNull()
+  })
+
   it("keeps a write whose argument list carries a comment", async () => {
     // Comments are grammar `extras`: tree-sitter hangs them inside the argument list, and
     // counting them made this a two-argument call. Nothing downstream would have said so —
