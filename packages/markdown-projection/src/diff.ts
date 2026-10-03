@@ -20,6 +20,7 @@ import { renderSymbolBlock } from "./component"
 import {
   appendAll,
   compareStrings,
+  formatInput,
   inlineCode,
   isSymbolEdge,
   propagatedFromSuffix,
@@ -767,17 +768,20 @@ function describeCallLike(value: unknown): string | null {
 }
 
 /**
- * `Signature.inputs` entries as `name: type`. If every entry fails the shape, the count is
- * emitted instead — unlike `appendBucket` — because "1 item(s)" at least says a parameter
- * moved, where silence would claim none did.
+ * `Signature.inputs` entries as `formatInput` spells them: `name: type`, with an optional or
+ * rest parameter's marker where TypeScript writes it. If every entry fails the shape, the
+ * count is emitted instead — unlike `appendBucket` — because "1 item(s)" at least says a
+ * parameter moved, where silence would claim none did.
  */
 function describeInputs(items: readonly unknown[]): string {
   const rendered = items
     .map((value) => {
       if (!isRecord(value)) return null
-      const { name, type } = value
+      const { name, type, optional, rest } = value
       if (typeof name !== "string" || typeof type !== "string") return null
-      return inlineCode(`${name}: ${type}`)
+      return inlineCode(
+        formatInput({ name, type, optional: optional === true, rest: rest === true }),
+      )
     })
     .filter((line): line is string => line !== null)
   return rendered.length > 0 ? rendered.join(", ") : `${items.length} item(s)`

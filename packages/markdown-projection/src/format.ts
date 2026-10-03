@@ -234,13 +234,14 @@ export function renderDecoratorList(decorators: readonly Decorator[]): string {
 }
 
 /**
- * markdown-projection.md — `(name: type) → output` + optional `throws A, B` + `⚡async` /
+ * markdown-projection.md §5.5 — `(name: type) → output`, each input as `formatInput` spells
+ * it (`a?: string`, `...ids: string[]`), + optional `throws A, B` + `⚡async` /
  * `*generator*` / `<T,U>` badges; multiple outputs are `|`-separated. `null` when there is
  * no signature, so the section-omit logic can branch on presence.
  */
 export function signatureLine(signature: Signature | null | undefined): string | null {
   if (signature === null || signature === undefined) return null
-  const inputs = signature.inputs.map((i) => `${i.name}: ${i.type}`).join(", ")
+  const inputs = signature.inputs.map(formatInput).join(", ")
   const outputs = signature.outputs.length > 0 ? signature.outputs.join(" | ") : "void"
   const throwsPart = signature.throws.length > 0 ? ` throws ${signature.throws.join(", ")}` : ""
   const asyncBadge = signature.async ? " ⚡async" : ""
@@ -463,4 +464,22 @@ export function isSymbolIdEndpoint(endpoint: DependencyEndpoint): boolean {
 /** Whether either end of a Dependency is a Symbol, which routes it to the symbol-level sections. */
 export function isSymbolEdge(dependency: Dependency): boolean {
   return isSymbolIdEndpoint(dependency.from) || isSymbolIdEndpoint(dependency.to)
+}
+
+/**
+ * One `Signature.inputs` entry as TypeScript writes it — deliberately, whichever language the
+ * IR came from, so a Python `*args` prints as `...args` too. The `rest` and `optional` fields
+ * (ir-schema.md §7) go where TypeScript puts them, `...ids: string[]` and `a?: string`, and a
+ * defaulted parameter prints as the optional one it is to a caller, `limit?`. An untyped
+ * parameter prints its name alone, as it is written: an unannotated `(x)` and LP11a's
+ * parenthesis-free `x => …` both carry `type: ""`.
+ */
+export function formatInput(input: {
+  name: string
+  type: string
+  optional?: boolean | undefined
+  rest?: boolean | undefined
+}): string {
+  const head = `${input.rest === true ? "..." : ""}${input.name}${input.optional === true ? "?" : ""}`
+  return input.type === "" ? head : `${head}: ${input.type}`
 }

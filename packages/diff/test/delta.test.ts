@@ -527,4 +527,25 @@ describe("Signature delta three branches", () => {
     expect(outputs?.added).toEqual(["boolean"])
     expect(outputs?.removed).toEqual(["void"])
   })
+
+  it.each([
+    ["turns optional", { optional: true } as const],
+    ["turns into a rest parameter", { rest: true } as const],
+  ])("reports an input that %s as modified, since the api moved with it", (_label, form) => {
+    const b = makeSymbol({
+      id: "ts:src/a.ts#F",
+      name: "F",
+      signature: sig({ inputs: [{ name: "x", type: "string" }] }),
+    })
+    const h = makeSymbol({
+      ...b,
+      signature: sig({ inputs: [{ name: "x", type: "string", ...form }] }),
+      fingerprint: { ...shared, api: "api-diff" },
+    })
+    expect(computeSymbolDelta(b, h).signature?.inputs).toEqual({
+      added: [],
+      removed: [],
+      modified: [{ name: "x", type: "string", ...form }],
+    })
+  })
 })

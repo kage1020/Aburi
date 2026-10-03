@@ -150,7 +150,8 @@ describe("a declaration whose body is a function written inside it is described 
 
 describe("a Symbol several declarations wrote describes each of them once", () => {
   // Positionless, so a declaration serializes the same alone and beside another: the merged
-  // string is the parts, joined in source order.
+  // string is the parts, joined in source order. A class's head stays with its own class, so
+  // that holds whether the class leads or follows.
   async function alone(source: string, name: string): Promise<string> {
     return normalizeAst(await symbolOf(source, `ts:src/a.ts#${name}`))
   }
@@ -182,6 +183,27 @@ describe("a Symbol several declarations wrote describes each of them once", () =
       ["export type N = string", "export const N = pipe(() => { a() }, () => { b() })"],
       [["export type N = string"], ["export const N = pipe(() => { a() }, () => { b() })"]],
       "N",
+    ],
+    [
+      "a class with a head, then a namespace",
+      ["export class C extends Base { m() { a() } }", "export namespace C { export const x = 1 }"],
+      [
+        ["export class C extends Base { m() { a() } }"],
+        ["export namespace C { export const x = 1 }"],
+      ],
+      "C",
+    ],
+    [
+      "an interface, then a class with a head",
+      [
+        "export interface C { z: number }",
+        "export abstract class C<T> extends Base { m() { a() } }",
+      ],
+      [
+        ["export interface C { z: number }"],
+        ["export abstract class C<T> extends Base { m() { a() } }"],
+      ],
+      "C",
     ],
   ])("%s", async (_label, merged, parts, name) => {
     const expected = await Promise.all(parts.map((lines) => alone(lines.join("\n"), name)))
