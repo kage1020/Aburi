@@ -35,7 +35,10 @@ macOS, and Windows.
    design doc under [`docs/design/`](docs/design/), write the tests, then the
    implementation.
 3. If the change affects a published package, add a changeset:
-   `pnpm changeset`.
+   `pnpm changeset`. A change that moves a stored fingerprint of previously
+   correct output, so that an IR scanned before the release, compared with one
+   scanned after, reports Symbols nobody edited as changed, is `minor`; `patch`
+   only when no stored fingerprint moves.
 4. Open a pull request against `main`.
 
 Two workflows then run on your pull request. CI runs the four commands above on Ubuntu, macOS
