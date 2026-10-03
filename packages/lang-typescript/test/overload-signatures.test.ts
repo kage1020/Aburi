@@ -33,17 +33,25 @@ async function stringOf(lines: readonly string[], id: string): Promise<string> {
   return normalizeAst(await symbolOf(lines.join("\n"), id))
 }
 
+/** Every id once: two Symbols under one id is what integrity invariant #1 refuses. */
+async function expectDistinctIds(source: string): Promise<void> {
+  const ids = await idsOf(source)
+  expect(new Set(ids).size).toBe(ids.length)
+}
+
 describe("an overload signature beside its implementation", () => {
   it("is one Symbol led by the implementation, carrying the overloads", async () => {
     const parse = await symbolOf(PARSE.join("\n"), "ts:src/a.ts#parse")
 
     expect(parse.signature?.inputs).toEqual([{ name: "input", type: "any" }])
+    // Every scalar is the lead's, the range included, so the overload lines sit outside it.
     expect(parse.source.startLine).toBe(4)
-    expect(parse.derivedBy).toContain("declaration-merged")
+    expect(parse.derivedBy.filter((token) => token === "declaration-merged")).toHaveLength(1)
     expect(parse.mergedDeclarations?.map((d) => d.fullNode.text)).toEqual([
       "function parse(input: string): Config;",
       "function parse(input: Buffer): Config;",
     ])
+    await expectDistinctIds(PARSE.join("\n"))
   })
 
   it.each([
@@ -67,7 +75,13 @@ describe("an overload signature beside its implementation", () => {
   it("does the same for a method's overloads in a class", async () => {
     const find = await symbolOf(FIND.join("\n"), "ts:src/a.ts#R.find")
     expect(find.signature?.inputs).toEqual([{ name: "id", type: "any" }])
-    expect(find.mergedDeclarations).toHaveLength(2)
+    expect(find.source.startLine).toBe(4)
+    expect(find.derivedBy.filter((token) => token === "declaration-merged")).toHaveLength(1)
+    expect(find.mergedDeclarations?.map((d) => d.fullNode.text)).toEqual([
+      "find(id: string): User",
+      "find(id: number): User",
+    ])
+    await expectDistinctIds(FIND.join("\n"))
 
     const removed = FIND.filter((line) => !line.includes("id: number"))
     expect(await stringOf(removed, "ts:src/a.ts#R.find")).not.toBe(
@@ -75,9 +89,60 @@ describe("an overload signature beside its implementation", () => {
     )
   })
 
+  it.each([
+    [
+      "a constructor",
+      "export class K { constructor(a: string); constructor(a: any) { init() } }",
+      "ts:src/a.ts#K.constructor",
+      { kind: "constructor", visibility: "public" },
+    ],
+    [
+      "a static method",
+      "export class K { static m(a: string): void; static m(a: any) { s() } }",
+      "ts:src/a.ts#K::m",
+      { kind: "method", visibility: "public" },
+    ],
+    [
+      "a #-private method",
+      "export class K { #m(a: string): void; #m(a: any) { p() } }",
+      "ts:src/a.ts#K.#m",
+      { kind: "method", visibility: "private" },
+    ],
+    [
+      "a generator method",
+      "export class K { *m(a: string): Iterable<string>; *m(a: any) { yield a } }",
+      "ts:src/a.ts#K.m",
+      { kind: "method", visibility: "public" },
+    ],
+    [
+      "a function in a namespace",
+      "export namespace N { export function f(a: string): void; export function f(a: any) { q() } }",
+      "ts:src/a.ts#N.f",
+      { kind: "function", visibility: "public" },
+    ],
+  ])("folds %s's overload under the id its implementation has", async (_label, source, id, scalars) => {
+    const symbol = await symbolOf(source, id)
+    expect(symbol).toMatchObject(scalars)
+    expect(symbol.bodyNode).not.toBeNull()
+    expect(symbol.signature?.inputs).toEqual([{ name: "a", type: "any" }])
+    expect(symbol.mergedDeclarations?.map((d) => d.bodyNode)).toEqual([null])
+    await expectDistinctIds(source)
+
+    const retyped = source.replace("(a: string)", "(a: number)")
+    expect(normalizeAst(await symbolOf(retyped, id))).not.toBe(normalizeAst(symbol))
+  })
+
   it("gives overloads with no implementation no Symbol, as tsc's TS2391 has it", async () => {
     expect(await idsOf("export function lone(a: string): void;\n")).toEqual([])
     expect(await idsOf("export class S {\n  m(a: string): void;\n}\n")).toEqual(["ts:src/a.ts#S"])
+  })
+
+  it("folds an overload with no implementation into another declaration of its name", async () => {
+    // TS2391 still, and the namespace leads: it is the one declaration in the group that can.
+    const source = "function f(a: string): void;\nnamespace f { export const x = 1 }\n"
+    const f = await symbolOf(source, "ts:src/a.ts#f")
+    expect(f.kind).toBe("namespace")
+    expect(f.mergedDeclarations?.map((d) => d.fullNode.type)).toEqual(["function_signature"])
   })
 
   it("leaves an ambient overload set led by its first declaration", async () => {
@@ -86,6 +151,19 @@ describe("an overload signature beside its implementation", () => {
       "ts:src/a.ts#g",
     )
     expect(declared.signature?.inputs).toEqual([{ name: "a", type: "string" }])
+  })
+
+  it("does not fold a module-level generator's overloads, which the grammar cannot parse", async () => {
+    // The divergence LP8q records: tree-sitter reads `export function* g(…): T;` as an
+    // expression statement and an ERROR, not a `function_signature`, so there is nothing to
+    // fold, where a class body's `*m(…): T;` folds. Pinned so the answer is a decision.
+    const source = [
+      "export function* g(a: string): Iterable<string>;",
+      "export function* g(a: any) { yield a }",
+      "",
+    ].join("\n")
+    expect(await idsOf(source)).toEqual(["ts:src/a.ts#g"])
+    expect((await symbolOf(source, "ts:src/a.ts#g")).mergedDeclarations).toBeUndefined()
   })
 })
 
@@ -112,5 +190,20 @@ describe("a bodyless accessor signature, which tsc rejects outside a declare", (
 
   it("declares no member on its own", async () => {
     expect(await idsOf("class C { get x(): number; }")).toEqual(["ts:src/a.ts#C"])
+  })
+})
+
+describe("what an overload's parameter list holds", () => {
+  it("stays on the class, which reads the signature whole", async () => {
+    // The member's walk starts from bodies and an overload has none, so a parameter decorator's
+    // arguments go where an implementation's go, and a default (TS2371) goes with them.
+    const source =
+      "class C { m(@Inject() a: string): void; m(a = compute()): void; m(a: any) { log(a) } }"
+
+    expect((await walkOf(source, "ts:src/a.ts#C")).calls.map((c) => c.target)).toEqual([
+      "Inject",
+      "compute",
+    ])
+    expect((await walkOf(source, "ts:src/a.ts#C.m")).calls.map((c) => c.target)).toEqual(["log"])
   })
 })
