@@ -1,7 +1,7 @@
 import { nestjsFrameworkPlugin } from "@aburi/framework-nestjs"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { describe, expect, it } from "vitest"
-import { scanWith } from "../src/scan-helper"
+import { scanWith, symbolNamed } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
 /**
@@ -21,8 +21,7 @@ const SOURCE = [
   '  ) throw new Error("bad id")',
   "  return sql`",
   "    select * from users",
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: TypeScript source, not a template
-  "    where id = ${id}",
+  `    where id = $\{id}`,
   "  `",
   "}",
   "",
@@ -38,6 +37,12 @@ const SOURCE = [
   "",
 ].join("\n")
 
+/**
+ * What the fixture is written for: `userQuery` holds the template literal and the guard, and
+ * the class and its route hold the decorators.
+ */
+const COVERED = ["userQuery", "UsersController", "UsersController.list"]
+
 async function symbolsSavedWith(terminator: string) {
   await workspace.writeSource("package.json", '{"name":"demo","private":true}\n')
   await workspace.writeSource("src/q.ts", SOURCE.replaceAll("\n", terminator))
@@ -45,7 +50,7 @@ async function symbolsSavedWith(terminator: string) {
     languages: [langTypescriptPlugin],
     frameworks: [nestjsFrameworkPlugin],
   })
-  return JSON.stringify(result.ir.symbols)
+  return { result, json: JSON.stringify(result.ir.symbols) }
 }
 
 describe("scan — line terminators", () => {
@@ -56,7 +61,10 @@ describe("scan — line terminators", () => {
     const lf = await symbolsSavedWith("\n")
     const other = await symbolsSavedWith(terminator)
 
-    expect(lf).not.toContain("\\r")
-    expect(other).toBe(lf)
+    // Two empty lists are equal and hold no `\r`, so the Symbols are pinned before either
+    // comparison; the equality then carries them to the other side.
+    for (const name of COVERED) symbolNamed(lf.result, name)
+    expect(lf.json).not.toContain("\\r")
+    expect(other.json).toBe(lf.json)
   })
 })
