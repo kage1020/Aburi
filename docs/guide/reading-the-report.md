@@ -113,6 +113,10 @@ names the file and the cause:
 **Why**: the head scan skipped `src/app/api/legacy/route.ts` (parse-failed), so this Symbol may still exist
 ```
 
+If git renamed the file between the two revisions, the entry reads
+`this file under its head name` (or `base name`) followed by the path the
+skipping scan used, because that is the file to fix.
+
 A `parse-timeout` clears on a re-run most of the time. For the rest, fix the
 file or leave it out with [`ignore`](./configuration.md#exclude-files).
 
