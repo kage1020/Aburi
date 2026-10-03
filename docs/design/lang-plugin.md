@@ -103,8 +103,8 @@ interface LanguagePlugin {
 
 ```ts
 interface SourceFile {
-  path: string                                 // workspace-relative POSIX
-  content: string                              // UTF-8
+  path: string                                 // workspace-relative POSIX, NFC
+  content: string                              // UTF-8, LF line endings only (no CR)
 }
 
 interface ParseResult {
