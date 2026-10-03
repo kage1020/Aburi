@@ -18,9 +18,9 @@ import { walkFirstSymbol } from "./fixtures/ctx"
  *
  * What stays trivial is pinned on both operands — `this` or a member chain as the object, `?.`
  * before the bracket, an index that is a type wrapper around a name — and so is what does not: a
- * call in the object, an index that awaits a value without calling anything, and a template
- * literal, which is never trivial, so `` a[`k`] `` is a rule where `a["k"]` is not. A type
- * wrapper is read through in an index only; `return x as T` is still a rule.
+ * call in the object, and an index that is a conditional, awaits a value without calling
+ * anything, or is a template literal, which is never trivial, so `` a[`k`] `` is a rule where
+ * `a["k"]` is not. A type wrapper is read through in an index only; `return x as T` is a rule.
  */
 
 async function walked(body: string) {
@@ -35,7 +35,7 @@ describe("a returned subscript", () => {
     ["a member index", "return map[x.key]"],
     ["a trivial bracket access as the index", "return a[b[c]]"],
     ["an update as the index", "return a[i++]"],
-    ["`this` and a member under the object", "return this.items[0]"],
+    ["a member of `this` as the object", "return this.items[0]"],
     ["a member chain as the object", "return a.b[x]"],
     ["optional chaining", "return a?.[x]"],
     ["an `as` around the index", "return a[i as number]"],
