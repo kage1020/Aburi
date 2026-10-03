@@ -46,6 +46,7 @@ Hash inputs are serialized as JSON before being fed to SHA-256. Serialization fo
 3. Array element order **follows the rules specified in this document** (default: preserve input order)
 4. Numbers follow the JSON standard (no decimal point on integers, `NaN` / `Infinity` not allowed)
 5. String escaping follows the JSON standard; characters other than ASCII control characters are emitted as-is (no `\uXXXX` required)
+6. A key whose value is absent (`undefined`) is not written at all. `null` is a value and is written, as `extKind`'s is. The parameter markers of §3.1 rely on the first: a parameter that carries neither serializes to `{"type":…}` alone
 
 Encode as UTF-8, then pass to SHA-256.
 
@@ -69,7 +70,11 @@ Represents the symbol's **externally observable contract**. Changes when the "pu
     }
   ],                                            // all decorators, sorted by (name, line)
   "signature": null | {
-    "inputs": [{ "type": <canonical(input.type)> }],  // name excluded, input order preserved
+    "inputs": [{
+      "type": <canonical(input.type)>,
+      "optional": true,                         // only when input.optional is true
+      "rest": true                              // only when input.rest is true
+    }],                                         // name excluded, input order preserved
     "outputs": [<canonical(output)>],           // input order preserved
     "throws": [<canonical(throw)>],             // sorted (alpha)
     "async": <bool>,
@@ -80,6 +85,8 @@ Represents the symbol's **externally observable contract**. Changes when the "pu
 ```
 
 `language` is **not included in the input**. It is already separated by the `<language>:` prefix inside Symbol.id, and by design `language` never changes between Symbols with the same ID. The fingerprint represents only the API surface of a single Symbol.
+
+`optional` and `rest` are what a caller sees of a parameter's form besides its type ([ir-schema.md](./ir-schema.md) §7). Each is written only when `true`, and by §2.3 rule 6 an absent marker writes nothing, so a parameter with neither contributes the same bytes whether or not its Document knows of the fields. A `false` written against the Class B rule hashes as absent.
 
 ### 3.2 Formula
 
@@ -111,6 +118,7 @@ Examples:
 ### 3.4 Guaranteed invariance conditions
 
 - Changing `signature.inputs[].name` does not change `api` (parameter names are not part of the contract)
+- Changing only a default's **value** (`limit = 10` → `limit = 20`) does not change `api`: omitting the argument stays legal either way, so the value is not part of the api contract. The IR records that a default exists (`optional`) and not what it is. What the default runs is read with the body instead ([lang-plugin.md](./lang-plugin.md) LP20d), so a default that calls something reaches `logic`
 - Changing local variable names, the function body, or rules/effects does not change `api`
 - Reordering the **occurrence order** of decorators does not change `api` (because of the sort convention)
 - **Changing only the class-scope portion of `Symbol.name` (`InvoiceService.createInvoice` → `BillingService.createInvoice`) does not change `api`** (the last segment is the same)
@@ -118,7 +126,7 @@ Examples:
 ### 3.5 Guaranteed change conditions
 
 - `visibility` changes → changes
-- A parameter becomes optional or required, gains or loses a default, or becomes or stops being a rest parameter → changes (the marker rides in `inputs[].type`, [ir-schema.md](./ir-schema.md) §7). The default's **value** is not part of the contract: what a function does with an omitted argument is its body's business
+- A parameter becomes optional or required, gains or loses a default, or becomes or stops being a rest parameter → changes (`signature.inputs[].optional` / `.rest`, [ir-schema.md](./ir-schema.md) §7). A default's value does not (§3.4)
 - Any of `signature.inputs[].type` / `outputs` / `throws` changes → changes
 - Adding / removing a decorator or changing its arguments → changes (whether boundary or non-boundary)
 - `shortName` change (= renaming the method/function itself) → changes
@@ -351,6 +359,8 @@ The reference implementation and every language plugin must pass the following t
 | A3 | Reorder decorators (distinct decorators) | api unchanged |
 | A12 | Change only the class-scope portion of `Symbol.name` (`Old.method` → `New.method`) | api unchanged |
 | A13 | Change `language` (never happens in practice; defensive) | api unchanged (`language` is not part of the input) |
+| A22 | Change `signature.inputs[].name` from `ids` to `...ids` | api unchanged (A1's case: rest-ness is `rest`, and a marker spelled into `name` reaches no axis) |
+| A23 | Change only the value of a parameter's default (`limit = 10` → `limit = 20`) | `signature.inputs` and api unchanged (the IR records that a default exists, as `optional`, and not its value) |
 
 ### 7.3 api change conditions
 
@@ -365,8 +375,8 @@ The reference implementation and every language plugin must pass the following t
 | A10 | Change `kind` (`function` → `method`, etc.) | api changes |
 | A11 | Change `extKind` | api changes |
 | A14 | Change `shortName` (last segment) | api changes |
-| A15 | A parameter optional ↔ required (`a?: string` ↔ `a: string`, or a default added or dropped) | api changes |
-| A16 | A parameter `T[]` ↔ `...T[]` | api changes |
+| A20 | Toggle `signature.inputs[].optional` (absent ↔ `true`) | api changes |
+| A21 | Toggle `signature.inputs[].rest` (absent ↔ `true`) | api changes |
 
 ### 7.4 logic invariance conditions
 
@@ -511,7 +521,11 @@ export function apiFingerprint(sym) {
   const signature = sym.signature ? {
     async: sym.signature.async,
     generator: sym.signature.generator,
-    inputs: sym.signature.inputs.map(i => ({ type: canonical(i.type) })),
+    inputs: sym.signature.inputs.map(i => ({
+      type: canonical(i.type),
+      ...(i.optional === true ? { optional: true } : {}),  // §3.1: only when true
+      ...(i.rest === true ? { rest: true } : {})
+    })),
     outputs: sym.signature.outputs.map(canonical),
     throws: [...sym.signature.throws].map(canonical).sort(),
     typeParameters: sym.signature.typeParameters.map(canonical)

@@ -5,9 +5,12 @@ import { lastQnameSegment } from "./short-name"
 import { normalizeFingerprintString } from "./string"
 
 /**
- * Shape of the api fingerprint input. Locked to keep the SHA-256 input stable across
- * releases: adding a field is a breaking change to every previously-computed api hash,
- * so any addition must ship with a schema version bump.
+ * Shape of the api fingerprint input (fingerprint.md §3.1). The hash is compared against IRs
+ * earlier releases wrote, so a key added here must be absent wherever it has nothing to say:
+ * the canonical serializer drops an absent key, and a Symbol that does not carry it then
+ * hashes to the bytes it always did. A key present on every Symbol would move every api hash
+ * at once. The two parameter markers are of the first kind — Class B fields (ir-schema.md
+ * §1.1), written only when `true` — so only a parameter that carries one hashes differently.
  */
 interface ApiInput {
   decorators: Array<{ name: string; raw: string; boundary: boolean }>
@@ -17,12 +20,19 @@ interface ApiInput {
   signature: {
     async: boolean
     generator: boolean
-    inputs: Array<{ type: string }>
+    inputs: ApiParameter[]
     outputs: string[]
     throws: string[]
     typeParameters: string[]
   } | null
   visibility: string
+}
+
+/** One parameter as the api axis sees it: everything about it a caller writes against. */
+interface ApiParameter {
+  type: string
+  optional?: true
+  rest?: true
 }
 
 /**
@@ -33,7 +43,8 @@ interface ApiInput {
  *   - Symbol.name's class-scope prefix (only the short name, so a class rename does not
  *     perturb every method's api)
  *   - the parameter names of the signature (they are not part of the caller-visible contract
- *     in most languages we care about)
+ *     in most languages we care about). What a caller does see of a parameter is kept: its
+ *     type, and whether it may be omitted or collects the rest of the arguments
  *   - anything from rules / effects / calls (those are the logic axis's job)
  */
 export function apiFingerprint(symbol: IRSymbol): string {
@@ -78,11 +89,23 @@ function canonicalizeSignature(signature: Signature | null): ApiInput["signature
   return {
     async: signature.async,
     generator: signature.generator,
-    inputs: signature.inputs.map((i) => ({ type: normalizeFingerprintString(i.type) })),
+    inputs: signature.inputs.map(canonicalizeParameter),
     outputs: signature.outputs.map(normalizeFingerprintString),
     // throws are compared as a set — swapping their order in source should not register
     // as an api change. Sort by code unit for determinism.
     throws: [...signature.throws].map(normalizeFingerprintString).sort(compareCodeUnit),
     typeParameters: signature.typeParameters.map(normalizeFingerprintString),
   }
+}
+
+/**
+ * A marker enters the hash only when it is `true`, so a parameter with neither serializes to
+ * `{"type":…}` alone, byte for byte what a Document without the fields hashes. A `false` from
+ * a producer that ignores the Class B rule says the same as absence and hashes the same.
+ */
+function canonicalizeParameter(input: Signature["inputs"][number]): ApiParameter {
+  const out: ApiParameter = { type: normalizeFingerprintString(input.type) }
+  if (input.optional === true) out.optional = true
+  if (input.rest === true) out.rest = true
+  return out
 }
