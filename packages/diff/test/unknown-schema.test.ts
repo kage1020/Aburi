@@ -63,6 +63,39 @@ describe("aburi.diff.v1.json — SymbolUnknown instances", () => {
     expect(validateDiff(diff), report(validateDiff.errors)).toBe(true)
   })
 
+  it("validates an unknown entry naming the path a renamed file was skipped under", () => {
+    const diff = buildDiff({
+      baseIR: makeIR({ symbols: [gone, kept] }),
+      headIR: withSkipped(
+        makeIR({ symbols: [kept] }),
+        [{ path: "src/renamed.ts", reason: "over-size" }],
+        2,
+      ),
+      base: IR_REF,
+      head: IR_REF,
+      gitRenames: new Map([["src/gone.ts", "src/renamed.ts"]]),
+    })
+    const [entry] = diff.symbols
+    expect(entry?.status === "unknown" ? entry.lostPath : null).toBe("src/renamed.ts")
+    expect(validateDiff(diff), report(validateDiff.errors)).toBe(true)
+  })
+
+  it("refuses an empty lostPath", () => {
+    const diff = buildDiff({
+      baseIR: makeIR({ symbols: [kept] }),
+      headIR: makeIR({ symbols: [kept] }),
+      base: IR_REF,
+      head: IR_REF,
+    })
+    const broken = {
+      ...diff,
+      symbols: [
+        { status: "unknown", symbol: gone, absentFrom: "head", reason: "over-size", lostPath: "" },
+      ],
+    }
+    expect(validateDiff(broken)).toBe(false)
+  })
+
   it("validates a diff with no unknown entries, where the counter is zero", () => {
     const diff = buildDiff({
       baseIR: makeIR({ symbols: [kept] }),
@@ -175,6 +208,33 @@ describe("aburi.diff.v1.json — notCompared instances", () => {
   it("validates a diff naming a file neither scan read", () => {
     const diff = symmetricDiff()
     expect(diff.notCompared).toHaveLength(1)
+    expect(validateDiff(diff), report(validateDiff.errors)).toBe(true)
+  })
+
+  it("validates an entry for a renamed file, carrying the base's path", () => {
+    const diff = buildDiff({
+      baseIR: withSkipped(
+        makeIR({ symbols: [kept] }),
+        [{ path: "vendor/old.ts", reason: "over-size" }],
+        2,
+      ),
+      headIR: withSkipped(
+        makeIR({ symbols: [kept] }),
+        [{ path: "vendor/new.ts", reason: "over-size" }],
+        2,
+      ),
+      base: IR_REF,
+      head: IR_REF,
+      gitRenames: new Map([["vendor/old.ts", "vendor/new.ts"]]),
+    })
+    expect(diff.notCompared).toStrictEqual([
+      {
+        path: "vendor/new.ts",
+        basePath: "vendor/old.ts",
+        baseReason: "over-size",
+        headReason: "over-size",
+      },
+    ])
     expect(validateDiff(diff), report(validateDiff.errors)).toBe(true)
   })
 

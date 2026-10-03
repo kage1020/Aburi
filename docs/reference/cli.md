@@ -168,7 +168,7 @@ scanning.
 | `<base>..<head>` | Ref-spec dispatch. A ref git cannot resolve exits `2`, and the message says whether that is because the directory is not a repository, the repository has no commits, or the name is unknown. |
 | `--base <path>` `--head <path>` | File-mode dispatch. Mutually exclusive with the ref-spec. |
 | `--fail-on <spec>` | The CI gate. See below. |
-| `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. Created if missing; a path a file already stands on exits `2` and names it. |
+| `--output-dir <dir>` | Where to write. Falls back to `output.dir`, then `out`. Created if missing; a path a file already stands on exits `2` and names it. Any `diff.json`, `diff.md` or `diff.full.md` already there is removed before the comparison starts, so a run that fails leaves no earlier report to be mistaken for its own. |
 | `--format <fmt>` | `json`, `md`, or `both`. |
 | `--compact` | JSON without indentation. |
 | `--max-bytes <n>` | Cap `diff.md` at n bytes. See below. |
@@ -204,8 +204,8 @@ went:
 The sections that survive are always the important ones: API changes go last, Syntax-only first.
 `diff.json` is never capped, so nothing is lost from the artefact you can query. When the cap
 changed anything, the uncapped report is written beside the capped one as `diff.full.md`, which
-is what the note points at; every other run, whatever its `--format`, removes any
-`diff.full.md` left from an earlier one.
+is what the note points at. Like `diff.json` and `diff.md`, one left from an earlier run is
+removed before the comparison starts (see `--output-dir` above).
 
 The CLI has no cap unless you pass one: omitting `--max-bytes` writes the whole document.
 `--max-bytes 0` is not the way to say that — it exits `2`, along with every other value that is

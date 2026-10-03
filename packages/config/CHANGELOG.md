@@ -1,5 +1,104 @@
 # @aburi/config
 
+## 0.4.0
+
+### Minor Changes
+
+- 0f168b1: `frameworkHints` works: a hint with an `extKind` no longer stops every command, and every rule is applied
+
+  A hint with an `extKind` stopped `scan`, `diff` and `explain` at startup with exit 1, because the
+  loader moves `framework:acme:controller` under `framework:hint:acme` as `config.md` §8.3.1 says,
+  and the registry refused that prefix as reserved. A hint without one loaded and changed nothing:
+  no code read the rules, so `boundary`, `derivedBy`, `drop` and every `classNamePatterns` rule were
+  accepted and ignored. The guide's example now scans to `extKind: "framework:hint:acme:controller"`
+  with `boundary: true` on `@AcmeController`, and `framework:hint:acme:handler` on `OrderHandler`.
+
+  - `@aburi/plugin-registry`: `VocabRegistry.registerHint(manifest)` admits a namespace under the
+    reserved `framework:hint`, and only there. `register` still refuses it, so a plugin listed in
+    `frameworks` cannot claim one, and a hint still cannot claim `framework:hint` itself.
+  - `@aburi/config`: `frameworkHintPlugins(config)` builds a framework plugin per entry, and
+    `LoadedConfig.syntheticPlugins` now holds those plugins rather than their manifests (read
+    `.manifest` for what it held before; `normalizeFrameworkHints` still returns the manifests).
+    Decorator rules match the decorator's leaf name, class-name rules match a class's own name
+    against a glob (`*`, `?`), and the first `extKind` among the rules that apply wins.
+  - `@aburi/types`: `FrameworkPlugin` gains an optional `symbolDropHint`, the route a hint's
+    `drop: true` takes into Category B. `@aburi/core` asks every framework plugin for it, whichever
+    one classified the Symbol, after the core's shape rules and before the language plugin's. A
+    hint drop is recorded as `frameworkHints "acme": @AcmeInternal` or
+    `frameworkHints "acme": class *Handler`, and a Symbol with a boundary decorator is kept.
+  - `@aburi/cli`: hint plugins run after every plugin in `frameworks`, so a class a configured
+    plugin recognizes keeps that plugin's classification. A hint the registry refuses (two entries
+    writing the same vendor, or a `derivedBy` prefix a configured plugin owns) is a config error
+    (exit 2) naming the entry, rather than a bare registry error on exit 1. The IR's
+    `generator.plugins` lists each hint as `hint-<name>`.
+
+- fd0aced: A config key named twice, contradictory `scan` format flags, and an empty `--fail-on` clause are refused
+
+  Existing configs and CI arguments that relied on any of these now exit 2. Each was settled rather
+  than reported. `{ "ignore": ["a/**"], "ignore": ["b/**"] }` kept the second list and dropped
+  `a/**`; it is now `config-invalid`, naming the key, the object and the line of the second, and so
+  is a `__proto__` key, which the schema could not see. `aburi scan --no-md --no-json` wrote the IR
+  anyway, and `--format md --no-md` wrote JSON. A combination that drops everything, or drops an
+  output `--format` includes, now exits 2 and writes nothing. `--fail-on 'added,'` and
+  `'added,,removed'` skipped the empty clause; they now exit 2 like an empty value does. A
+  `--fail-on` error names the whole value as typed and which clause failed.
+
+### Patch Changes
+
+- d99dda0: `parsePluginManifest` refuses JSONC that names one key twice in an object, as `manifest-invalid`
+
+  `jsonc-parser` keeps the last of two equal keys and says nothing, so a JSON manifest that wrote
+  `"name"` twice registered under the second, and the registry's duplicate checks ran on whichever
+  entry survived. `parsePluginManifest` and `loadPluginManifest` now refuse a repeated key at any
+  depth, and `__proto__` at all, naming the key, its object and the line, as `aburi.json` already
+  did. This guards the published API and third-party plugins that read their own JSON manifest; a
+  manifest exported from a TypeScript module, as the first-party plugins' are, never goes through
+  JSONC. A schema failure's `cause` is now ajv's `ErrorObject[]`, as in `@aburi/config`.
+
+  The scan is published as `@aburi/plugin-registry/repeated-keys` (`scanKeys`,
+  `describeRepeatedKey`, `JSONC_PARSE_OPTIONS`, and the `RepeatedKey` and `KeyScan` types), a
+  subpath that does not compile the plugin schema. `@aburi/config` reads it from there. For
+  `aburi.json` the `__proto__` message now says the parser assigns the key instead of defining it,
+  an object path escapes `~` and `/` as JSON Pointer does, and the `cause` of a key error carries
+  `kind`, `owner` (formerly `path`), `offset` and `length` as well.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+- Updated dependencies [aedc9fd]
+- Updated dependencies [5a9ebda]
+- Updated dependencies [0f168b1]
+- Updated dependencies [d99dda0]
+- Updated dependencies [c7c54eb]
+- Updated dependencies [c28f20c]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [6b2b2f9]
+- Updated dependencies [16429c8]
+- Updated dependencies [3dd0dd0]
+  - @aburi/types@0.5.0
+  - @aburi/plugin-registry@0.5.0
+
 ## 0.3.0
 
 ### Minor Changes
