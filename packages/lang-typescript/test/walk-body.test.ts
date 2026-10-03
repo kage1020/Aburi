@@ -323,9 +323,9 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     ).toEqual(["{ a: 1 }"])
   })
 
-  // The two places the concise spelling answers differently from the block one, pinned as they
-  // stand. In both the block spelling is the less exact: parentheses decide whether its `return`
-  // is call-only, and a returned value it calls trivial is not walked at all.
+  // The one place the concise spelling answers differently from the block one, pinned as it
+  // stands. The block spelling is the less exact: parentheses decide whether its `return` is
+  // call-only.
   it("is call-only for a parenthesized call, where the block spelling takes a rule", async () => {
     const concise = await walkFirstSymbol("export const f = () => (g())")
     const block = await walkFirstSymbol("export function f() { return (g()) }")
@@ -337,16 +337,13 @@ describe("walkBody — a concise arrow body (LP19a)", () => {
     ])
   })
 
-  it("reads a subscript with a computed index as a return in both spellings", async () => {
-    const concise = await walkFirstSymbol("export const f = (a: any) => a[g()]")
-    const block = await walkFirstSymbol("export function f(a: any) { return a[g()] }")
+  // A computed index is not trivial (`drop-list.md` §5.5), so both spellings take the rule and
+  // record the call. `subscript-index.test.ts` pins the block spelling.
+  it("reads a subscript with a computed index as a return, and records the call", async () => {
+    const { rules, calls } = await walkFirstSymbol("export const f = (a: any) => a[g()]")
 
-    expect([concise.rules.map((r) => r.expr), concise.calls.map((c) => c.target)]).toEqual([
-      ["a[g()]"],
-      ["g"],
-    ])
-    expect([block.rules.map((r) => r.expr), block.calls.map((c) => c.target)]).toEqual([
-      ["a[g()]"],
+    expect([rules.map((r) => [r.type, r.expr]), calls.map((c) => c.target)]).toEqual([
+      [["return", "a[g()]"]],
       ["g"],
     ])
   })

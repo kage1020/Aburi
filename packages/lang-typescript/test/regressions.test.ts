@@ -95,15 +95,17 @@ describe("I3: try/catch/finally walk contract", () => {
     expect(calls.map((c) => c.target)).toEqual(["a", "b", "c"])
   })
 
-  it("records the calls a catch clause would record as a try block, and no others", async () => {
-    // `return a[g()]` is a trivial return, which the drop list stops at without recording the
-    // call inside it (drop-list.md §5.5, LP19a). The catch clause is walked the same way
-    // (LP20m), so the same statement gives the same answer on both sides.
+  it("records the calls a catch clause would record as a try block, and withholds its rule", async () => {
+    // `return a[g()]` is a `return` rule that records `g` (drop-list.md §5.5). The catch clause is
+    // walked the same way (LP20m), so its twin records `h` and its rule is withheld.
     const { calls, rules } = await walkFirstSymbol(
       "export function f(a: number[]) { try { return a[g()] } catch (e) { return a[h()] } }",
     )
-    expect(rules.map((r) => r.type)).toEqual(["try"])
-    expect(calls).toEqual([])
+    expect(rules.map((r) => [r.type, r.expr])).toEqual([
+      ["try", null],
+      ["return", "a[g()]"],
+    ])
+    expect(calls.map((c) => c.target)).toEqual(["g", "h"])
   })
 
   it("withholds the rules of a finally block nested inside a catch clause", async () => {
