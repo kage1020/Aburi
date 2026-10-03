@@ -168,6 +168,13 @@ function makeCandidateSink(): CandidateSink {
  * so it leads (LP8f). The overloads still fold in, as declarations with no body, so the syntax
  * axis sees them (LP8q): dropping them made adding, removing or retyping an overload no change at
  * all. A group of overloads and nothing else is TS2391, and stays without a Symbol, as before.
+ *
+ * The rule runs at **two levels**: `foldMemberGroup` applies it to one class member's
+ * declarations, and the sink applies it again to everything with that member's id — which by
+ * then is the member Symbol already folded. The sink cannot tell an already-decided Symbol from
+ * a raw declaration, since it reads the lead's `fullNode` either way, so a member Symbol led by
+ * an overload reads as a group of overloads and is dropped, body and all. That is why
+ * `foldMemberGroup` never lets an overload lead, whatever else would.
  */
 function leadOf(group: readonly SymbolCandidate<Node>[]): SymbolCandidate<Node> | null {
   return group.find((declaration) => !isOverloadSignature(declaration.fullNode)) ?? null
@@ -523,10 +530,21 @@ function groupMemberDeclaration(
   else group.push({ candidate, isGetter })
 }
 
+/**
+ * One member's declarations as one candidate, or null when none of them can lead.
+ *
+ * An overload never leads, and that is decided before the getter rule rather than after it.
+ * `get x(): number;` outside a `declare` is an overload signature that is also a getter, and
+ * the sink runs `leadOf` again on what this returns: a member led by that signature would read
+ * there as a group of overloads and lose its Symbol, while the walk still skipped the body of
+ * the `set x(v) { … }` beside it, expecting the member's Symbol to carry it. So the getter rule
+ * picks among the declarations that can lead, and a member of overloads alone has none.
+ */
 function foldMemberGroup(group: MemberGroup): SymbolCandidate<Node> | null {
+  const leads = group.filter((member) => !isOverloadSignature(member.candidate.fullNode))
+  const lead = leads.find((member) => member.isGetter) ?? leads[0]
   const declarations = group.map((member) => member.candidate)
-  const lead = group.find((member) => member.isGetter)?.candidate ?? leadOf(declarations)
-  return lead === null ? null : foldDeclarations(declarations, lead)
+  return lead === undefined ? null : foldDeclarations(declarations, lead.candidate)
 }
 
 function makeFunctionCandidate(

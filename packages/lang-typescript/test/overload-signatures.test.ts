@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { normalizeAst } from "../src/index"
-import { idsOf, symbolOf } from "./fixtures/ctx"
+import { idsOf, symbolOf, walkOf } from "./fixtures/ctx"
 
 /**
  * An overload signature folds into its implementation's Symbol as a declaration with no body,
@@ -84,5 +84,31 @@ describe("an overload signature beside its implementation", () => {
       "ts:src/a.ts#g",
     )
     expect(declared.signature?.inputs).toEqual([{ name: "a", type: "string" }])
+  })
+})
+
+describe("a bodyless accessor signature, which tsc rejects outside a declare", () => {
+  it("leaves the member to the setter beside it, body and all", async () => {
+    const source = "class C { get x(): number; set x(v: number) { store(v) } }"
+    const x = await symbolOf(source, "ts:src/a.ts#C.x")
+
+    expect(x.fullNode.text).toBe("set x(v: number) { store(v) }")
+    expect(x.signature?.inputs).toEqual([{ name: "v", type: "number" }])
+    expect((await walkOf(source, "ts:src/a.ts#C.x")).calls.map((c) => c.target)).toEqual(["store"])
+    // The class skips the setter's body because the member carries it, so it has none.
+    expect((await walkOf(source, "ts:src/a.ts#C")).calls).toEqual([])
+  })
+
+  it("leaves the member to the getter with a body", async () => {
+    const source = "class C { get x(): number; get x() { return mk() } }"
+    const x = await symbolOf(source, "ts:src/a.ts#C.x")
+
+    expect(x.fullNode.text).toBe("get x() { return mk() }")
+    expect(x.mergedDeclarations?.map((d) => d.bodyNode)).toEqual([null])
+    expect((await walkOf(source, "ts:src/a.ts#C.x")).calls.map((c) => c.target)).toEqual(["mk"])
+  })
+
+  it("declares no member on its own", async () => {
+    expect(await idsOf("class C { get x(): number; }")).toEqual(["ts:src/a.ts#C"])
   })
 })
