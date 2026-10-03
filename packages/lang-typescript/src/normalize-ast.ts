@@ -29,46 +29,50 @@ import type { Node } from "web-tree-sitter"
  * handed a function has the same shape and gets the same answer, through `describedNode`
  * rather than its kind, because such a const can also arrive as a merged declaration.
  *
- * A Symbol several declarations wrote — a getter beside its setter, an interface reopened —
- * gets each further declaration's description appended, in source order. Each declaration is
- * described once: a const that hands its call two functions has two bodies but one
- * declaration, and both bodies name it (`inlineHandlers`).
+ * A class's description is its body followed by its head (`classHead`), which the body leaves
+ * out and nothing else reads.
+ *
+ * A Symbol several declarations wrote — a getter beside its setter, an interface reopened, a
+ * class beside an interface or a namespace — describes the leading declaration and then each
+ * further one in source order, a class's head straight after that class's own body. So a class
+ * keeps its head whichever declaration leads, and the string is each declaration's string
+ * alone, joined. Each declaration is described once: a const that hands its call two functions
+ * has two bodies but one declaration, and both bodies name it (`inlineHandlers`).
  *
  * So giving a const a body moved no existing fingerprint, for three reasons that each have to
- * keep holding: a Symbol with one declaration and its own body or none serializes exactly as it
- * did; a const that gained a body is described by the declaration that described it while it
- * had none; and a declaration is described once, so a second function adds no second copy.
+ * keep holding: a Symbol with one declaration serializes as that declaration's description and
+ * nothing else; a const that gained a body is described by the declaration that described it
+ * while it had none; and a declaration is described once, so a second function adds no second
+ * copy. A class's head moved only the classes that have one, since an empty head adds nothing.
  */
 export function normalizeAst(symbol: SymbolCandidate<Node>): string {
   if (symbol.kind === "call") return serialize(symbol.fullNode)
-  const merged = symbol.mergedDeclarations ?? []
-  const lead = describedNode(symbol)
-  const head = classHead(symbol.fullNode)
-  if (merged.length === 0) return head === "" ? serialize(lead) : `${serialize(lead)} ${head}`
-  const described = [lead]
-  for (const declaration of merged) {
+  const described: { node: Node; fullNode: Node }[] = []
+  for (const declaration of [symbol, ...(symbol.mergedDeclarations ?? [])]) {
     const node = describedNode(declaration)
-    if (described.some((seen) => seen.id === node.id)) continue
-    described.push(node)
+    if (described.some((seen) => seen.node.id === node.id)) continue
+    described.push({ node, fullNode: declaration.fullNode })
   }
-  return [serialize(described[0] as Node), head, ...described.slice(1).map(serialize)]
+  return described
+    .flatMap(({ node, fullNode }) => [serialize(node), classHead(fullNode)])
     .filter((part) => part.length > 0)
     .join(" ")
 }
 
 /**
  * What a class's declaration says outside its body: `abstract`, its type parameters, and its
- * `extends` / `implements`. The body describes a class (`describedNode`), and for a function
- * that is safe because its head is the signature the api axis hashes — but a class has no
- * signature, so without this nothing saw a re-parent, a dropped `abstract` or a new required
- * type parameter, each of which breaks callers (fingerprint.md §1, lang-plugin.md LP8p).
- * Appended after the body and only when present, so a class with no head keeps the string it
- * had. Decorators stay out: they are on the api axis already.
+ * `extends` / `implements`. Empty for a class with none, so that class keeps the string it had.
+ * A class has no signature (`fingerprint.md` §3.1), so without this a change to any of them
+ * reached no axis, though each moves the class's contract and `fingerprint.md` §5.4 already
+ * asks the syntax axis to see a renamed identifier or a changed modifier. The case in full, and
+ * where it stops, is `lang-plugin.md` LP8p.
+ *
+ * `class` is the node type of an anonymous `export default class`. A class expression a `const`
+ * holds never arrives as a full node: that Symbol is described by its whole declaration, head
+ * included.
  */
 function classHead(fullNode: Node): string {
-  if (fullNode.type !== "class_declaration" && fullNode.type !== "abstract_class_declaration") {
-    return ""
-  }
+  if (!CLASS_TYPES.has(fullNode.type)) return ""
   const parts: string[] = []
   if (fullNode.type === "abstract_class_declaration") parts.push(JSON.stringify("abstract"))
   for (const child of fullNode.namedChildren) {
@@ -79,6 +83,17 @@ function classHead(fullNode: Node): string {
   }
   return parts.join(" ")
 }
+
+/**
+ * Every node type a class Symbol's declaration can have. Not `CLASS_DECLARATION_TYPES` in
+ * `extract-symbols.ts`, which looks for a *named* class to merge a namespace into and so leaves
+ * `class` out.
+ */
+const CLASS_TYPES: ReadonlySet<string> = new Set([
+  "class_declaration",
+  "abstract_class_declaration",
+  "class",
+])
 
 /**
  * What describes one declaration: its body when the body is the declaration's own, and the whole

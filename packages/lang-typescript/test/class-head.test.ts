@@ -1,17 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { normalizeAst } from "../src/index"
-import { symbolsOf } from "./fixtures/ctx"
+import { symbolOf } from "./fixtures/ctx"
 
 /**
- * A class has no signature, so its head — `abstract`, type parameters, `extends`, `implements`
- * — reached no axis: re-parenting a class, dropping `abstract` or adding a required type
- * parameter left every fingerprint identical and the diff reported nothing (LP8p).
+ * A class's head — `abstract`, type parameters, `extends`, `implements` — reaches its normalized
+ * string, after its body and only when present. Why, and where that stops, is LP8p.
  */
 
-async function classString(source: string, id = "ts:src/a.ts#C"): Promise<string> {
-  const symbol = (await symbolsOf(source)).find((s) => s.id === id)
-  if (symbol === undefined) throw new Error(`${id} missing`)
-  return normalizeAst(symbol)
+async function stringOf(source: string, id = "ts:src/a.ts#C"): Promise<string> {
+  return normalizeAst(await symbolOf(source, id))
 }
 
 const BODY = "{ run() { go() } }"
@@ -25,7 +22,7 @@ describe("normalizeAst — a class's head", () => {
     ],
     ["dropping extends", `export class C extends Base ${BODY}`, `export class C ${BODY}`],
     [
-      "another interface",
+      "swapping the interface it implements",
       `export class C implements Reader ${BODY}`,
       `export class C implements Writer ${BODY}`,
     ],
@@ -35,14 +32,47 @@ describe("normalizeAst — a class's head", () => {
       `export class C<T, K extends keyof T> ${BODY}`,
     ],
     ["dropping abstract", `export abstract class C ${BODY}`, `export class C ${BODY}`],
+    [
+      "a re-parent of a class merged behind an interface",
+      `export interface C { z: number }\nexport class C extends Base ${BODY}`,
+      `export interface C { z: number }\nexport class C extends Audited ${BODY}`,
+    ],
+    [
+      "adding abstract to a class merged behind an interface",
+      `export interface C { z: number }\nexport class C ${BODY}`,
+      `export interface C { z: number }\nexport abstract class C ${BODY}`,
+    ],
   ])("changes the string for %s", async (_label, before, after) => {
-    expect(await classString(after)).not.toBe(await classString(before))
+    expect(await stringOf(after)).not.toBe(await stringOf(before))
+  })
+
+  it("changes the string for a re-parent of an anonymous default class", async () => {
+    // Its node is tree-sitter's `class`, not a `class_declaration`.
+    const id = "ts:src/a.ts#<default>"
+    expect(await stringOf(`export default class extends Audited ${BODY}`, id)).not.toBe(
+      await stringOf(`export default class extends Base ${BODY}`, id),
+    )
+  })
+
+  it("follows the body with the head, in the order the declaration writes it", async () => {
+    // Pinned in full: the order, the quoted `"abstract"` and the one space between the parts each
+    // move every class's fingerprint if they change.
+    const source = `export abstract class C<T> extends Base<T> implements Reader, Writer ${BODY}`
+    expect(await stringOf(source)).toBe(
+      [
+        '(class_body (method_definition (property_identifier "run") (formal_parameters) (statement_block (expression_statement (call_expression (identifier "go") (arguments))))))',
+        '"abstract"',
+        '(type_parameters "<" (type_parameter (type_identifier "T")) ">")',
+        '(class_heritage (extends_clause "extends" (identifier "Base") (type_arguments "<" (type_identifier "T") ">")) (implements_clause "implements" (type_identifier "Reader") (type_identifier "Writer")))',
+      ].join(" "),
+    )
   })
 
   it("leaves a class with no head described by its body alone", async () => {
-    const symbol = (await symbolsOf(`export class C ${BODY}`)).find((s) => s.kind === "class")
-    if (symbol === undefined || symbol.bodyNode === null) throw new Error("class body missing")
-    const bodyOnly = normalizeAst({ ...symbol, kind: "function", fullNode: symbol.bodyNode })
+    const symbol = await symbolOf(`export class C ${BODY}`, "ts:src/a.ts#C")
+    if (symbol.bodyNode === null) throw new Error("class body missing")
+    // With its body as its full node the Symbol has no class node to read a head off.
+    const bodyOnly = normalizeAst({ ...symbol, fullNode: symbol.bodyNode })
     expect(normalizeAst(symbol)).toBe(bodyOnly)
   })
 })
