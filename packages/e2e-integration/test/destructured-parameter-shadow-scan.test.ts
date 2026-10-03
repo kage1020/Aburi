@@ -30,6 +30,7 @@ const SHADOWED = [
   "defaulted",
   "nested",
   "rest",
+  "restName",
   "arrow",
   "Handler.handle",
 ]
@@ -62,6 +63,7 @@ describe("scan — a destructuring parameter shadows the import it names", () =>
         "export async function defaulted({ save = async (n: number) => {} }: Partial<Deps> = {}) { await save(5) }",
         "export async function nested({ deps: { save } }: { deps: Deps }) { await save(6) }",
         'export async function rest(...[save]: [Deps["save"]]) { await save(7) }',
+        "export async function restName(...save: any) { await save(11) }",
         "export const arrow = async ({ save }: Deps) => { await save(8) }",
         "export class Handler { async handle({ save }: any) { await save(9) } }",
         "export async function direct() { await save(10) }",

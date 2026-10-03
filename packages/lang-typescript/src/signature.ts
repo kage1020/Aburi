@@ -9,10 +9,12 @@ import { collectPatternBindings } from "./pattern-bindings"
  * method_definition, arrow_function, function_expression, etc.).
  *
  * Rules that mirror lang-plugin.md / fingerprint.md:
- * - `inputs[].name` is the parameter binding name (destructured / rest / this variants
- *   collapse to a printable form).
+ * - `inputs[].name` is the binding as written: an identifier, `this`, or the source text of a
+ *   destructuring pattern. A rest parameter's `...` is not part of it (`readParameter`).
+ * - `inputs[].optional` / `inputs[].rest` record what a caller sees of the parameter's form,
+ *   and are written only when true (LP11b).
  * - `inputs[].bindings` lists the names a destructuring parameter binds, and is absent for
- *   a parameter that is a single name.
+ *   a parameter that is a single name (LP11d).
  * - `inputs[].type` and `outputs[]` are the AST-visible type text; we do not resolve
  *   types.
  * - `throws[]` is the union of explicit `throw new X()` statements inside the body plus
@@ -58,17 +60,13 @@ function readParameters(node: Node): Signature["inputs"] {
   const params = node.childForFieldName("parameters") ?? findChild(node, "formal_parameters")
   if (params === null) return readBareParameter(node)
   const out: Signature["inputs"] = []
+  // TypeScript's grammar writes every parameter as one of these two; a rest parameter is a
+  // `required_parameter` whose pattern is a `rest_pattern`, which is where `readParameter`
+  // reads it.
   for (const child of params.namedChildren) {
     if (child === null) continue
-    if (
-      child.type === "required_parameter" ||
-      child.type === "optional_parameter" ||
-      child.type === "rest_pattern"
-    ) {
-      const name = extractParamName(child)
-      const type = extractParamType(child)
-      const bindings = extractParamBindings(child)
-      out.push(bindings.length > 0 ? { name, type, bindings } : { name, type })
+    if (child.type === "required_parameter" || child.type === "optional_parameter") {
+      out.push(readParameter(child))
     }
   }
   return out
@@ -95,34 +93,75 @@ function readBareParameter(node: Node): Signature["inputs"] {
   return [{ name, type: "" }]
 }
 
-function extractParamName(param: Node): string {
+/**
+ * One parameter: its binding, its written type, and two fields for what a caller sees of its
+ * form — `optional` when a call may leave the argument out (`a?: T`, or a default as in
+ * `a = 10`) and `rest` when the parameter collects the remaining arguments (`...ids: T[]`).
+ * They are fields because the api fingerprint hashes them, and does not hash `name`
+ * (fingerprint.md §3.1, §3.4). Renderers print them in the parameter's spelling: `a?: T`,
+ * `...ids: T[]`, and `limit?` for a default. The default's value is not recorded here: it is
+ * not part of the api contract, and the body walk reads it with the body (LP20d), so what it
+ * runs reaches the logic axis. A binding that destructures also lists the names it binds, in
+ * `bindings` (`readPatternBindings`).
+ *
+ * `name` is the binding's own text, without a rest parameter's `...`. A recovered parse can
+ * leave no binding to read. For `...: T[]` the parser inserts a zero-width MISSING identifier,
+ * and in a method it can wrap the `:` of `...: T` in an ERROR node instead. fingerprint.md
+ * §5.1(6) treats a MISSING node as not written, and an ERROR node is no binding, so the name
+ * falls back to the text of the nearest enclosing node the source did write: the pattern
+ * (`...`), else the whole parameter (`?: string`). The parser only builds a parameter around
+ * something it read, so that text is never empty. Neither rule gives way: nothing the parser
+ * invented becomes a name, and no name is the empty string the schema's `minLength: 1`
+ * refuses.
+ */
+function readParameter(param: Node): Signature["inputs"][number] {
   const pattern = param.childForFieldName("pattern") ?? param.namedChild(0)
-  if (pattern === null) return ""
-  if (pattern.type === "identifier") return pattern.text
-  // Destructuring / rest patterns: keep the raw text as the "name". The api fingerprint
-  // discards the name field anyway, and downstream renderers surface the raw form as-is.
-  return pattern.text
+  const rest = pattern !== null && pattern.type === "rest_pattern"
+  const binding = rest ? pattern.namedChild(0) : pattern
+  const input: Signature["inputs"][number] = {
+    name: writtenText(binding) ?? writtenText(pattern) ?? param.text,
+    type: extractParamType(param),
+  }
+  if (param.type === "optional_parameter" || param.childForFieldName("value") !== null) {
+    input.optional = true
+  }
+  if (rest) input.rest = true
+  const bindings = readPatternBindings(binding)
+  if (bindings.length > 0) input.bindings = bindings
+  return input
+}
+
+/** The node's source text, or null where the source wrote no binding there. */
+function writtenText(node: Node | null): string | null {
+  if (node === null || node.isMissing || node.type === "ERROR") return null
+  return node.text
 }
 
 /**
  * The names a destructuring parameter binds — `{ save }`, `[save]`, `{ persist: save }`,
- * `{ save = fallback }`, `...{ save }` all bind `save`. The `name` beside them is the
+ * `{ save = fallback }`, `...[save]` all bind `save`. The `name` beside them is the
  * pattern's text, which binds nothing by that spelling, so without this list the call
  * resolver's parameter shadow (call-resolution.md §4.2) never sees these names and links
- * `save()` to whatever `save` the file imports. A single-name parameter returns nothing:
- * its `name` already is the binding, and the key stays absent (Class B).
+ * `save()` to whatever `save` the file imports.
+ *
+ * `binding` is what `readParameter` names the input by, so a rest parameter arrives here
+ * already without its `...`: `...[save]` is read as `[save]`, and `...save` as the single name
+ * `save`. A single name returns nothing, rest or not: its `name` already is the binding, and
+ * the key stays absent (Class B).
+ *
+ * A recovered parse can put a zero-width MISSING identifier inside the pattern (`{ a: }`).
+ * It is left out for the reason `readParameter` never names an input by one: the source wrote
+ * no binding there, and its empty text is a name the schema's `minLength: 1` refuses.
  */
-function extractParamBindings(param: Node): string[] {
-  const pattern = param.childForFieldName("pattern") ?? param.namedChild(0)
-  if (pattern === null) return []
-  if (
-    pattern.type !== "object_pattern" &&
-    pattern.type !== "array_pattern" &&
-    pattern.type !== "rest_pattern"
-  ) {
-    return []
+function readPatternBindings(binding: Node | null): string[] {
+  if (binding === null) return []
+  if (binding.type !== "object_pattern" && binding.type !== "array_pattern") return []
+  const out: string[] = []
+  for (const node of collectPatternBindings(binding)) {
+    const name = writtenText(node)
+    if (name !== null) out.push(name)
   }
-  return collectPatternBindings(pattern).map((binding) => binding.text)
+  return out
 }
 
 function extractParamType(param: Node): string {

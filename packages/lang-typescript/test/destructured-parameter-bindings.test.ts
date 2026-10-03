@@ -5,7 +5,7 @@ import { symbolOf } from "./fixtures/ctx"
  * A destructuring parameter's `name` is the pattern's text, which no call can name. The
  * identifiers the pattern binds go beside it in `bindings`, read the way a destructuring
  * declaration is (ir-schema.md §3.2): a rename binds its value, a default binds its left
- * side, and a rest element binds what it holds.
+ * side, and a rest element binds what it holds (lang-plugin.md LP11d).
  */
 
 async function inputsOf(source: string, id = "ts:src/a.ts#f") {
@@ -22,7 +22,6 @@ describe("a destructuring parameter lists the names it binds", () => {
     ["array default", "function f([save = fallback]: D) {}", ["save"]],
     ["nested", "function f({ deps: { save, log: [first] } }: D) {}", ["save", "first"]],
     ["rest element", "function f({ a, ...rest }: D) {}", ["a", "rest"]],
-    ["rest parameter", "function f(...save: D[]) {}", ["save"]],
     ["rest of a pattern", "function f(...[save, load]: D) {}", ["save", "load"]],
     ["whole-parameter default", "function f({ save } = {}) {}", ["save"]],
     ["optional parameter", "function f({ save }?: D) {}", ["save"]],
@@ -33,7 +32,7 @@ describe("a destructuring parameter lists the names it binds", () => {
   })
 
   it("leaves the key out for a parameter that is a single name", async () => {
-    const inputs = await inputsOf("function f(save: D, n = 1, this: X) {}")
+    const inputs = await inputsOf("function f(save: D, n = 1, this: X, ...rest: D[]) {}")
 
     for (const input of inputs ?? []) expect(Object.keys(input)).not.toContain("bindings")
   })
@@ -44,5 +43,47 @@ describe("a destructuring parameter lists the names it binds", () => {
 
     expect(arrow?.[0]?.bindings).toEqual(["save"])
     expect(method?.[0]?.bindings).toEqual(["save"])
+  })
+})
+
+/**
+ * A rest parameter's `name` is its binding without the `...`, and `rest` says it collects the
+ * remaining arguments (LP11b). When that binding is itself a pattern, `name` is the pattern's
+ * text and `bindings` lists what it binds, so the three fields together still name every
+ * identifier the call resolver must treat as local. A single-name rest parameter is named by
+ * its binding and needs no list.
+ */
+describe("a rest parameter whose binding destructures", () => {
+  it.each([
+    ["function f(...[x]: T) {}", { name: "[x]", type: "T", rest: true, bindings: ["x"] }],
+    [
+      "function f(...{ a, b: [c] }: T) {}",
+      { name: "{ a, b: [c] }", type: "T", rest: true, bindings: ["a", "c"] },
+    ],
+    ["function f(...save: T[]) {}", { name: "save", type: "T[]", rest: true }],
+  ])("reads %j", async (source, expected) => {
+    expect(await inputsOf(source)).toStrictEqual([expected])
+  })
+
+  it("reads a method's the same way", async () => {
+    const inputs = await inputsOf("class C { m(...[x]: T) {} }", "ts:src/a.ts#C.m")
+
+    expect(inputs).toStrictEqual([{ name: "[x]", type: "T", rest: true, bindings: ["x"] }])
+  })
+})
+
+/**
+ * A recovered parse can leave a zero-width MISSING identifier where a pattern's binding would
+ * be (`{ a: }`). The source wrote no name there, so none is listed: the empty string would be
+ * a binding the schema refuses (LP11c's rule, one level down).
+ */
+describe("a destructuring parameter the parser repaired", () => {
+  it("lists no binding the source did not write", async () => {
+    const inputs = await inputsOf("function f({ a: }: T, { b, c: }: U) {}")
+
+    expect(inputs).toStrictEqual([
+      { name: "{ a: }", type: "T" },
+      { name: "{ b, c: }", type: "U", bindings: ["b"] },
+    ])
   })
 })

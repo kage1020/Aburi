@@ -230,6 +230,28 @@ export class Repo {
     expect(evicted?.effectId).toBeNull()
   })
 
+  it("drops a Map delete keyed by a backtick literal, as by a quoted one", async () => {
+    // A template with no substitution is the same literal (`calls[].literalArgs`), so the veto
+    // reads it. One with a substitution is not a literal — its value is decided when it runs —
+    // and is classified as `delete(key)` is: recorded, at medium.
+    const results = await classifyCalls(
+      "src/cache-template.ts",
+      `import { PrismaClient } from "@prisma/client"
+export class Repo {
+  private prisma = new PrismaClient()
+  private cache = { items: new Map<string, string>() }
+  evictSession(id: string) {
+    this.cache.items.delete(\`session\`)
+    this.cache.items.delete(\`session:\${id}\`)
+  }
+}`,
+    )
+    const [fixed, computed] = results.filter((r) => r.target === "this.cache.items.delete")
+    expect(fixed?.effectId).toBeNull()
+    expect(computed?.effectId).toBe("db.write")
+    expect(computed?.confidence).toBe("medium")
+  })
+
   it("emits derivedBy under the shared effects-plugin:prisma prefix", async () => {
     const results = await classifyCalls(
       "src/services/prefix-check.ts",

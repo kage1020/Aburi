@@ -181,6 +181,14 @@ inputs: {
 name: string
 type: string
 /**
+ * A caller may omit the argument: the parameter is written optional (`a?: T`) or with a default (`a = 10`). The default's value is not recorded. Hashed by the api fingerprint (fingerprint.md §3.1). Class B per ir-schema.md: writers MUST omit the key for a parameter a caller must pass, never emit false.
+ */
+optional?: true
+/**
+ * A rest parameter, which collects the remaining arguments (`...ids: T[]`); `type` is still the written type alone. Hashed by the api fingerprint (fingerprint.md §3.1). Class B per ir-schema.md: writers MUST omit the key for any other parameter, never emit false.
+ */
+rest?: true
+/**
  * The identifiers a destructuring parameter binds, in source order, read as a destructuring declaration is (ir-schema.md §3.2); the call resolver treats each as a parameter (call-resolution.md §4.2). Class B per ir-schema.md: writers MUST omit the key for a parameter that is a single name, never emit as [].
  * 
  * @minItems 1

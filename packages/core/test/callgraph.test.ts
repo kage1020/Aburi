@@ -1,4 +1,4 @@
-import type { Confidence, ImportEdge, Symbol as IRSymbol } from "@aburi/types"
+import type { Confidence, ImportEdge, Symbol as IRSymbol, Signature } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../src/call-site"
 import { reconstructCallEdgesFromIR, resolveCallGraph } from "../src/callgraph"
@@ -599,16 +599,20 @@ describe("resolveCallGraph", () => {
   })
 
   describe("CR9: a destructuring parameter shadows the names it binds", () => {
-    it.each([
-      ["{ save }", ["save"]],
-      ["[save]", ["save"]],
-      ["{ persist: save }", ["save"]],
-      ["{ save = fallback }", ["save"]],
-      ["...save", ["save"]],
-    ])("`%s`", (pattern, bindings) => {
+    // A rest parameter is named by its binding without the `...` and carries `rest`, so
+    // `...save` shadows through `name` alone and `...[save]` through `bindings`.
+    it.each<[string, Signature["inputs"][number]]>([
+      ["{ save }", { name: "{ save }", type: "Deps", bindings: ["save"] }],
+      ["[save]", { name: "[save]", type: "Deps", bindings: ["save"] }],
+      ["{ persist: save }", { name: "{ persist: save }", type: "Deps", bindings: ["save"] }],
+      ["{ save = fallback }", { name: "{ save = fallback }", type: "Deps", bindings: ["save"] }],
+      ["...save", { name: "save", type: "Deps[]", rest: true }],
+      ["...[save]", { name: "[save]", type: "Deps", rest: true, bindings: ["save"] }],
+      ["...{ save }", { name: "{ save }", type: "Deps", rest: true, bindings: ["save"] }],
+    ])("`%s`", (_written, input) => {
       const caller = makeSymbol("ts:src/a.ts#caller", {
         signature: {
-          inputs: [{ name: pattern, type: "Deps", bindings }],
+          inputs: [input],
           outputs: [],
           throws: [],
           async: false,

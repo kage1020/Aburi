@@ -107,6 +107,16 @@ describe("apiFingerprint — invariance", () => {
     expect(apiFingerprint(asTs)).toBe(apiFingerprint(asTsx))
   })
 
+  it("A22: spelling a rest marker into signature.inputs[].name does not change the hash", () => {
+    // Rest-ness is `rest`, not the name: a `...` written into the name reaches no axis, which
+    // is why the marker needs a field the hash reads.
+    const withInputs = (inputs: Signature["inputs"]) =>
+      makeSymbol(base().id, { ...base(), signature: { ...sig(base()), inputs } })
+    expect(apiFingerprint(withInputs([{ name: "...ids", type: "string[]" }]))).toBe(
+      apiFingerprint(withInputs([{ name: "ids", type: "string[]" }])),
+    )
+  })
+
   it("throws set is order-insensitive (sorted before hashing)", () => {
     const sym = base()
     const twoInOrder = makeSymbol(sym.id, {
@@ -266,6 +276,39 @@ describe("apiFingerprint — change conditions", () => {
       ],
     })
     expect(apiFingerprint(asBoundary)).not.toBe(apiFingerprint(notBoundary))
+  })
+
+  it("A20: toggling signature.inputs[].optional perturbs the hash", () => {
+    const optional = makeSymbol(base().id, {
+      ...base(),
+      signature: {
+        ...sig(base()),
+        inputs: [{ name: "dto", type: "CreateInvoiceDto", optional: true }],
+      },
+    })
+    expect(apiFingerprint(optional)).not.toBe(beforeFp)
+  })
+
+  it("A21: toggling signature.inputs[].rest perturbs the hash", () => {
+    const rest = makeSymbol(base().id, {
+      ...base(),
+      signature: {
+        ...sig(base()),
+        inputs: [{ name: "dto", type: "CreateInvoiceDto", rest: true }],
+      },
+    })
+    expect(apiFingerprint(rest)).not.toBe(beforeFp)
+  })
+
+  it("A20/A21: optional and rest are two contracts, not one", () => {
+    const withForm = (form: { optional?: true; rest?: true }) =>
+      makeSymbol(base().id, {
+        ...base(),
+        signature: { ...sig(base()), inputs: [{ name: "dto", type: "CreateInvoiceDto", ...form }] },
+      })
+    expect(apiFingerprint(withForm({ optional: true }))).not.toBe(
+      apiFingerprint(withForm({ rest: true })),
+    )
   })
 })
 

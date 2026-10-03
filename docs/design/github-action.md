@@ -26,7 +26,7 @@ prefixing a marker, and never decides what is worth failing on — `--fail-on` i
 | `refspec` | *(empty)* | `<base>..<head>` for `aburi diff`. Empty falls back to the event's base/head SHAs on `pull_request` and `pull_request_target`; any other event with an empty `refspec` is exit 2. |
 | `fail-on` | *(empty)* | Forwarded to `--fail-on` verbatim. Empty runs report-only. |
 | `config` | *(empty)* | Forwarded to `--config`. |
-| `output-dir` | `out` | Forwarded to `--output-dir`, always, because the action reads `diff.md` back. A workspace that sets `config.output.dir` must set this to match. |
+| `output-dir` | `out` | Forwarded to `--output-dir`, always, because the action reads `diff.md` back. A workspace that sets `config.output.dir` must set this to match. Relative to `working-directory`, or absolute; how the comment step finds the file either way is §4. Empty is exit 2. |
 | `format` | `both` | Forwarded to `--format`. Must include Markdown when `comment: true`. |
 | `working-directory` | `.` | Where the CLI runs, and — under `cli: workspace` — where it is resolved from. |
 | `cli` | `dlx` | Resolution mode. §3. |
@@ -147,7 +147,13 @@ so without that a 403 in the comment step would end the job on an API error and 
 gate.
 
 The comment step is skipped for exit 1 and 2, where `diff.md` is missing or partial and an ENOENT
-from the upsert would bury the real failure.
+from the upsert would bury the real failure. Exit 3 alone does not say a report exists, since a
+plugin error exits 3 before anything is written, so the step also needs a non-empty
+`diff-md-path`, and the diff step sets one only for a file that is there after the CLI returns
+([`scripts/report-paths.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/report-paths.mjs)).
+That check means "this run wrote it" because `aburi diff` removes the reports an earlier run left
+before it compares anything. A path it does set is absolute, resolved from `working-directory`, so
+an absolute `output-dir` reaches the comment step as itself.
 
 ## 5. The comment
 

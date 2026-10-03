@@ -518,9 +518,9 @@ With refs (every git command these steps run gets the caller's environment as §
 4. Run `aburi scan` on the head (the original cwd)
    - Both scans root at the repository: the workspace-root walk stops at the first `.git` ([`component-detect.md`](./component-detect.md) §2.1, CD32), the head checkout's own `.git` (a directory or a file) on one side and the temporary worktree's `.git` file on the other. Rooted anywhere else, the two sides scan different trees (`component-detect.md` §11.1 has the layouts that did), so a base scan that roots anywhere but its worktree ends the run as a bug in Aburi (exit `1`, §9)
 5. Compare the two IRs and compute the diff ([`diff-algorithm.md`](./diff-algorithm.md))
-6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since it would be the full report of another diff; a path there that cannot be removed is refused like one that cannot be written
+6. Write `<output-dir>/diff.json` + `<output-dir>/diff.md`, and `<output-dir>/diff.full.md` (the uncapped `diff.md`, written before `diff.md` so the note never points at a file that failed to land) when `--max-bytes` changed the report. Any `diff.json`, `diff.md` or `diff.full.md` already there was removed when the output directory was created, ahead of step 1 and whatever the `--format`, since each would describe another diff. So a run that stops before this step (a plugin that fails to load, a strict scan's undeclared value) leaves no report at all rather than an earlier one a caller would take for its own. A path there that cannot be removed is refused like one that cannot be written
 7. Print a one-line summary to stdout
-8. Clean up the worktree
+8. Clean up the worktree. This holds for a run stopped by `SIGINT`, `SIGTERM` or `SIGHUP` too: from just after the temporary directory is created until this cleanup has finished, a listener for each removes the worktree and the temporary directory synchronously, then raises the same signal again, so on POSIX the exit status stays 128+N. On Windows a signal cannot be raised against the process again; the run exits with that same 128+N instead. A failed removal on this path is reported on stderr. `SIGKILL` cannot be caught, and leaves both behind; `SIGQUIT` and `SIGBREAK` are not handled either
 
 With file inputs: skip steps 1-3 and start at step 5.
 
@@ -537,8 +537,8 @@ Before creating the worktree, the following checks run in order; on failure, a c
 | | `Base ref '<ref>' could not be resolved, and git would not say why. What it reported: <git's stderr>` — when git refuses either question inside a repository. Dubious ownership is the everyday case, and git's own report carries the `safe.directory` remedy, which no diagnosis of ours could | 1 |
 | `git` can be spawned at all | `git executable not found in PATH. aburi diff <base>..<head> requires a working git installation. Install git or use --base/--head with pre-generated IR files.` | 1 |
 | Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` | 1 |
-| Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` | 1 |
-| `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) | — |
+| Sparse-checkout is disabled (`git config --bool --default false core.sparseCheckout` is `false`; `--bool` reads `1`, `yes` and `on` as `true` too) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` | 1 |
+| The index holds no submodules: no gitlink (mode `160000`) in `git ls-files -z --stage`, run at the head workspace root. This is the list `git submodule status` prints. `-z` is what keeps each path whole: without it git renders a path outside printable ASCII the way `core.quotePath` asks — double-quoted and octal-escaped — and under it each record is NUL-terminated and git's path quoting is bypassed entirely. `git worktree add` does not populate submodules, so the base side would see each one empty while the head walks into its checkout; the paths are therefore left out of both **file** scans (as `ignore` patterns matching each path literally), and the warning names them. Component detection still walks them, since it looks for manifests without `ignore`, so a submodule that is itself a workspace package can still appear in the Component delta | `Submodules detected: <list>. Submodule-aware diff is not yet supported, so their files are left out of both file scans. Component detection still walks them, so a workspace package inside one can still be reported as a Component added or removed.` (warning; continue) | — |
 | On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) | — |
 
 The two diagnosing questions are asked only once a ref has failed, so a run whose refs resolve pays for no extra git calls. Only an answer becomes a diagnosis: a question git refuses ends the run with git's own words rather than with a guess, because whatever refused the ref is still refusing, and a guess would replace the one precise sentence there is with a wrong one at the wrong exit code.
@@ -564,7 +564,7 @@ Required setup when using `aburi diff` in CI:
     fetch-depth: 0    # full history (aburi diff fails on shallow clones)
 ```
 
-Nothing less: the pre-validation above refuses a shallow repository outright, so a `fetch-depth` of `50` produces a clone this command will not diff, and the default of `1` cannot be used either.
+Nothing less: the pre-validation above refuses a shallow repository outright, so a `fetch-depth` of `50` produces a clone this command will not diff, and the default of `1` cannot be used either. Nor a partial tree: `sparse-checkout:` on `actions/checkout` turns `core.sparseCheckout` on, which the pre-validation refuses too, so the job that runs `aburi diff` leaves it out.
 
 #### 6.4.3 The Caller's Git Environment
 
@@ -624,7 +624,7 @@ The `unknown` count is appended to the first line when there is one — `+5 -3 ~
 
 It counts Symbols only. `summary.depsUnknown` counts the same thing for `dependencies[]` ([`diff-algorithm.md`](./diff-algorithm.md) §6.2.1) and stays out of this line for the reason the dependency counts already do: the glyph line reports the Symbol-level shape of a change, and `depsAdded` / `depsRemoved` are not on it either. `depsAdded`, `depsRemoved` and `depsUnknown` all appear in `diff.json`; `diff.md` lists the corresponding edges under Dependency changes and prints no counts at all.
 
-A file skipped by **both** scans produces no `unknown` entry — there are no Symbols from it in either document, so the matcher has no leftover to classify. It is reported at document level instead: `diff.json` carries the path and each scan's reason in `notCompared[]`, and `diff.md` lists it under `## 🚫 Not compared` ([`diff-algorithm.md`](./diff-algorithm.md) §6.3). The stderr line stays, deliberately shorter than the artifact — a count and a capped list of paths, no reasons — because it is the cover note for whoever is watching the command, and a terminal line that grows with the size of a workspace's blind spot stops being read.
+A file skipped by **both** scans produces no `unknown` entry — there are no Symbols from it in either document, so the matcher has no leftover to classify. It is reported at document level instead: `diff.json` carries the path and each scan's reason in `notCompared[]`, and `diff.md` lists it under `## 🚫 Not compared` ([`diff-algorithm.md`](./diff-algorithm.md) §6.3). The stderr line stays, deliberately shorter than the artifact — a count and a capped list of paths, a renamed file as `base → head` as `diff.md` names it, no reasons — because it is the cover note for whoever is watching the command, and a terminal line that grows with the size of a workspace's blind spot stops being read.
 
 An IR that dropped files but predates `stats.skippedFiles` reports the count without the list, and `aburi diff` cannot then tell a lost file from a deleted one — it classifies every leftover as `added` / `removed`, which is the pre-field behaviour, and warns on **stderr** for each side that is in that state. It does not guess: inferring the list from `totalFiles > parsedFiles` would attach the doubt to whichever Symbols happened to be missing.
 
@@ -899,7 +899,7 @@ Description: NestJS OnModuleInit hook
 | 2 | Input error (CLI arguments / config / missing / ambiguous) |
 | 3 | Plugin error / fail-on gate / strict violation |
 
-128+N is for fatal signals (Aburi itself does not use it).
+128+N is for fatal signals. Aburi does not choose it: a run stopped by a signal ends on that signal once its cleanup has run, so the status is the one the shell reports for the signal (§6.4, step 8).
 
 The line between `1` and `2` is who has to act, not which subsystem failed. `2` covers the whole
 of what the reader wrote: a config that does not parse, does not conform, or names the same

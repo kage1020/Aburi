@@ -96,6 +96,25 @@ describe("renderDeltaBody — signature branches", () => {
     expect(md).toContain("- signature.inputs removed: `a: string`")
   })
 
+  it("prints an added rest input with its `...`", () => {
+    const md = renderWith({
+      ...baseDelta(),
+      signature: {
+        inputs: {
+          added: [{ name: "ids", type: "string[]", rest: true }],
+          removed: [],
+          modified: [],
+        },
+        outputs: { added: [], removed: [], modified: [] },
+        throws: { added: [], removed: [], modified: [] },
+        asyncChanged: false,
+        generatorChanged: false,
+        typeParametersChanged: false,
+      },
+    })
+    expect(md).toContain("- signature.inputs added: `...ids: string[]`")
+  })
+
   it("emits async / generator / typeParameters toggles", () => {
     const md = renderWith({
       ...baseDelta(),

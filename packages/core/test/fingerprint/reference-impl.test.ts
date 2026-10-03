@@ -48,6 +48,34 @@ describe("reference implementation — pinned hex", () => {
     expect(apiFingerprint(sym)).toBe("abf3a0597098")
   })
 
+  it("apiFingerprint of a parameter with neither marker is pinned, `false` included", () => {
+    // `optional` and `rest` enter the input only when true, so a parameter carrying neither
+    // hashes exactly as a Document without the fields does. A shift here re-hashes every
+    // function in every stored IR, not only those with an optional or rest parameter.
+    const withInputs = (inputs: Array<{ name: string; type: string }>) =>
+      makeSymbol("ts:src/a.ts#find", {
+        kind: "function",
+        name: "find",
+        visibility: "public",
+        signature: {
+          inputs,
+          outputs: ["User[]"],
+          throws: [],
+          async: false,
+          generator: false,
+          typeParameters: [],
+        },
+      })
+    const plain = [
+      { name: "query", type: "string" },
+      { name: "ids", type: "string[]" },
+    ]
+    expect(apiFingerprint(withInputs(plain))).toBe("a1f625081136")
+    // A producer that writes `false` against the Class B rule means "absent", and is read so.
+    const writtenFalse = plain.map((input) => ({ ...input, optional: false, rest: false }))
+    expect(apiFingerprint(withInputs(writtenFalse))).toBe("a1f625081136")
+  })
+
   it("logicFingerprint of a Symbol with no rules and no effects is pinned", () => {
     const sym = makeSymbol("ts:src/a.ts#foo", { rules: [], effects: [] })
     // With canonicalizeRules and canonicalizeEffects both returning [], the JSON input is
