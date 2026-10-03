@@ -1,5 +1,13 @@
 # @aburi/plugin-registry
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [36fd72f]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

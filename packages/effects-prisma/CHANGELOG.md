@@ -1,5 +1,14 @@
 # @aburi/effects-prisma
 
+## 0.4.2
+
+### Patch Changes
+
+- Updated dependencies [36fd72f]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+  - @aburi/plugin-registry@0.5.1
+
 ## 0.4.1
 
 ### Patch Changes

@@ -1,5 +1,16 @@
 # @aburi/framework-react
 
+## 0.3.3
+
+### Patch Changes
+
+- Updated dependencies [50c0bd2]
+- Updated dependencies [36fd72f]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [47f8ef9]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.3.2
 
 ### Patch Changes
