@@ -537,8 +537,8 @@ Before creating the worktree, the following checks run in order; on failure, a c
 | | `Base ref '<ref>' could not be resolved, and git would not say why. What it reported: <git's stderr>` — when git refuses either question inside a repository. Dubious ownership is the everyday case, and git's own report carries the `safe.directory` remedy, which no diagnosis of ours could | 1 |
 | `git` can be spawned at all | `git executable not found in PATH. aburi diff <base>..<head> requires a working git installation. Install git or use --base/--head with pre-generated IR files.` | 1 |
 | Repository is not shallow (`git rev-parse --is-shallow-repository` is `false`) | `Repository is shallow. aburi diff requires base ref history. Run: git fetch --unshallow` | 1 |
-| Sparse-checkout is disabled (`git config core.sparseCheckout` is `false` or unset) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` | 1 |
-| `git submodule status` is empty (submodules are not yet supported) | `Submodules detected: <list>. Submodule-aware diff is not yet supported.` (warning; continue) | — |
+| Sparse-checkout is disabled (`git config --bool --default false core.sparseCheckout` is `false`; `--bool` reads `1`, `yes` and `on` as `true` too) | `Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable` | 1 |
+| The index holds no submodules: no gitlink (mode `160000`) in `git ls-files -z --stage`, run at the head workspace root. This is the list `git submodule status` prints. `-z` is what keeps each path whole: without it git renders a path outside printable ASCII the way `core.quotePath` asks — double-quoted and octal-escaped — and under it each record is NUL-terminated and git's path quoting is bypassed entirely. `git worktree add` does not populate submodules, so the base side would see each one empty while the head walks into its checkout; the paths are therefore left out of both **file** scans (as `ignore` patterns matching each path literally), and the warning names them. Component detection still walks them, since it looks for manifests without `ignore`, so a submodule that is itself a workspace package can still appear in the Component delta | `Submodules detected: <list>. Submodule-aware diff is not yet supported, so their files are left out of both file scans. Component detection still walks them, so a workspace package inside one can still be reported as a Component added or removed.` (warning; continue) | — |
 | On Windows, trial-check whether the base ref contains symbolic links | `Symbolic links in working tree may fail to materialize in worktree on Windows.` (warning; continue) | — |
 
 The two diagnosing questions are asked only once a ref has failed, so a run whose refs resolve pays for no extra git calls. Only an answer becomes a diagnosis: a question git refuses ends the run with git's own words rather than with a guess, because whatever refused the ref is still refusing, and a guess would replace the one precise sentence there is with a wrong one at the wrong exit code.
@@ -564,7 +564,7 @@ Required setup when using `aburi diff` in CI:
     fetch-depth: 0    # full history (aburi diff fails on shallow clones)
 ```
 
-Nothing less: the pre-validation above refuses a shallow repository outright, so a `fetch-depth` of `50` produces a clone this command will not diff, and the default of `1` cannot be used either.
+Nothing less: the pre-validation above refuses a shallow repository outright, so a `fetch-depth` of `50` produces a clone this command will not diff, and the default of `1` cannot be used either. Nor a partial tree: `sparse-checkout:` on `actions/checkout` turns `core.sparseCheckout` on, which the pre-validation refuses too, so the job that runs `aburi diff` leaves it out.
 
 #### 6.4.3 The Caller's Git Environment
 
