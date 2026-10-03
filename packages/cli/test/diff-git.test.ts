@@ -208,6 +208,83 @@ describe("runDiff refspec mode — git executable missing", () => {
   })
 })
 
+/**
+ * The sparse and submodule checks of `cli-spec.md` §6.4.1, as calls. Every unmodelled command
+ * answers empty output, so a refactor that changed either command's first two words would
+ * leave its check reading `""`: the sparse check would pass every checkout and the submodule
+ * one would find none, with every other test still green.
+ */
+describe("runDiff refspec mode — the sparse and submodule questions", () => {
+  /** A repository root by its `.git`, and a directory inside it to run from. */
+  async function repository(): Promise<{ root: string; cwd: string }> {
+    const root = resolve(scratch, "repo")
+    const cwd = resolve(root, "pkg")
+    await mkdir(resolve(root, ".git"), { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    return { root, cwd }
+  }
+
+  it("asks both before the worktree, the submodule one at the workspace root", async () => {
+    const { root, cwd } = await repository()
+    const { runner, calls } = fakeGit({
+      handlers: {
+        "worktree add": () => {
+          throw new Error("stop here")
+        },
+      },
+    })
+    await runDiff({
+      cwd,
+      refSpec: "main..HEAD",
+      git: runner,
+      outputDir: resolve(scratch, "out"),
+      warn: () => {},
+    }).catch(() => {
+      // The worktree refusal ends the run; the calls before it are what this asserts.
+    })
+
+    expect(calls.filter((c) => c.args[0] === "config" || c.args[0] === "ls-files")).toEqual([
+      { args: ["config", "--bool", "--default", "false", "core.sparseCheckout"], cwd },
+      // At the root, not where the run started: `ls-files` lists only what lies under its cwd.
+      { args: ["ls-files", "-z", "--stage"], cwd: root },
+    ])
+    const order = [
+      "rev-parse --is-shallow-repository",
+      "config --bool",
+      "ls-files -z",
+      "worktree add",
+    ]
+    expect(
+      calls.map((c) => c.args.slice(0, 2).join(" ")).filter((asked) => order.includes(asked)),
+    ).toEqual(order)
+  })
+
+  it("refuses a sparse checkout before any worktree is added", async () => {
+    const { cwd } = await repository()
+    const { runner, calls } = fakeGit({
+      handlers: { "config --bool": () => gitOutput("true\n") },
+    })
+    const run = runDiff({
+      cwd,
+      refSpec: "main..HEAD",
+      git: runner,
+      outputDir: resolve(scratch, "out"),
+      warn: () => {},
+    })
+
+    await expect(run).rejects.toMatchObject({
+      message:
+        "Sparse-checkout detected. aburi diff requires full file tree. Disable with: git sparse-checkout disable",
+      code: "runtime-error",
+    })
+    const asked = calls.map((c) => c.args.slice(0, 2).join(" "))
+    // Positive first, so the absences below cannot pass on a run that never reached the check.
+    expect(asked).toContain("config --bool")
+    expect(asked).not.toContain("ls-files -z")
+    expect(asked).not.toContain("worktree add")
+  })
+})
+
 describe("runDiff refspec mode — collectRenames failure warns", () => {
   it("does not silently return null when git diff fails", async () => {
     // Base + head verify succeed and the shallow check returns false, but the rename
