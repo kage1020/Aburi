@@ -1,5 +1,29 @@
 # @aburi/diff
 
+## 0.6.0
+
+### Minor Changes
+
+- 47f8ef9: A file git renamed between the revisions and skipped by one scan now leaves its Symbols `unknown` instead of confidently `removed` or `added`. The skip was looked up only under the leftover's own path, while the other scan had recorded the file under its other name, so `src/big.ts → src/billing.ts` with `src/billing.ts` over the size cap at head reported every Symbol of `src/big.ts` as removed and tripped `--fail-on removed`.
+
+  - Such an entry carries the new optional `SymbolUnknown.lostPath` (`aburi.diff.v1`), the path the skipping scan recorded. `diff.md` names that path as this file's head (or base) name, where it used to name the other revision's path as the one skipped.
+  - Dependency edges get the same lookup, and their `lostFiles[].path` is the path the skipping scan recorded, not the holder's.
+  - A renamed file both scans skipped appears in `notCompared[]` under the head path, with the base path in the new optional `NotComparedFile.basePath`. `diff.md` and the stderr line name it as `base → head`.
+  - `diffDependencies` now requires `renames`. `RenameDirections` and `renameDirections` are exported to build it, and a caller with no rename information passes `renameDirections(null)`.
+
+### Patch Changes
+
+- 36fd72f: A parameter's optional marker, default and rest marker now reach the `api` fingerprint. Each `Signature.inputs` entry can carry two new optional fields, written only when true: `optional` for a parameter written `a?: T` or with a default, and `rest` for `...ids: T[]`. The api fingerprint hashes them beside `type`, which stays the annotation alone; a rest parameter's `name` is now the bare binding (`ids` rather than `...ids`). Making an optional parameter required, dropping a default, or turning `T[]` into `...T[]` used to leave every fingerprint identical, so `aburi diff` reported no change and `--fail-on api-changed` passed. The diff now reports an api change and names the parameter under `signature.inputs modified`. The Markdown output prints the markers where TypeScript writes them (`a?: string`, `...ids: string[]`, and `limit?` for a default), and an untyped parameter as its name alone rather than `x: `. A parameter whose name a recovered parse left missing, such as `f(?: string)`, is named by the text the source wrote rather than by an empty string.
+
+  Functions with an optional, defaulted or rest parameter get a new `api` value once. A parameter with neither carries no new key, so its hash is byte-identical. Scanning this repository, 191 of its 2,714 kept Symbols moved `api`, and none moved `logic`, `syntax`, `calls[].resolved` or `dependencies[]`. Those can move in one narrow case: a function calls, by its bare name, a Symbol that one of its own rest parameters also names, as in `function run(...save) { save() }` with a `save` declared in or imported into the module. The bare name now shadows that Symbol, as any other parameter's name does, so the call no longer resolves to it. The edge and the effects it carried leave the function, and because `logic` is computed after effect propagation, callers that inherited those effects move `logic` too. An IR scanned before this release, compared with one scanned after, reports the affected Symbols as changed; rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides and is unaffected.
+
+- Updated dependencies [50c0bd2]
+- Updated dependencies [36fd72f]
+- Updated dependencies [eb4ab00]
+- Updated dependencies [47f8ef9]
+  - @aburi/core@0.6.0
+  - @aburi/types@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

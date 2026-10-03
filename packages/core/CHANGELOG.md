@@ -1,5 +1,27 @@
 # @aburi/core
 
+## 0.6.0
+
+### Minor Changes
+
+- eb4ab00: The `logic` fingerprint now reads a Symbol's propagated effects by target alone: sorted, each target once, and none of the targets its own locally-detected effects name. It read them as the IR stores them, ordered and merged by `(effectId, target)`, so an effect plugin reclassifying one call (`db.write` → `x-acme:create`, or two effect plugins swapped in the config) could change the `logic` of every transitive caller while the callee kept its own: by moving a target past another one, by making one target two entries while two callees classified it under different ids, or by keeping a propagated entry that a local effect on the same target drops once the ids agree. `aburi diff` then reported those callers as changed and tripped `--fail-on changed`. Locally-detected effects keep their call order and their repeats, and the IR is unchanged.
+
+  Callers whose propagated targets were not already in that order, or that had a propagated target twice or a propagated target they also call themselves, get a new `logic` value once. An IR scanned before this release, compared with one scanned after, reports them as changed, and there is no `grammarRevision` counterpart for `logic` to warn you that a stored IR predates the release. If such a Symbol was also renamed, or moved to another file without a git rename to follow, it no longer shares a `logic` value with its old self, so the diff cannot pair it on `logic` and falls back to matching by name and signature, which can leave it added + removed. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides and is unaffected.
+
+### Patch Changes
+
+- 50c0bd2: Scans now read source with CRLF and lone-CR line endings converted to LF, so a file the scan reads gives the same Symbols whatever line endings it was checked out with. A line break inside a multi-line template literal used to reach the `syntax` fingerprint as `\r\n` on a CRLF checkout (Git for Windows' default `core.autocrlf=true`, or a commit that only converts line endings), so `aburi diff` reported the Symbol as changed and tripped `--fail-on changed`; fields copied from source text, such as a guard's `condition` and a decorator's `raw`, kept the `\r` too. Line numbers and columns are unchanged on an LF or CRLF checkout; a file that breaks lines with CR alone, which used to read as a single line, now gains the lines it was written with.
+
+  An IR scanned before this release from files saved with CRLF or a lone CR, compared with one scanned after, reports each Symbol with a line break inside a template literal or a string as a syntax-only change, once; `api` and `logic` do not move. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with this release and is unaffected.
+
+- 36fd72f: A parameter's optional marker, default and rest marker now reach the `api` fingerprint. Each `Signature.inputs` entry can carry two new optional fields, written only when true: `optional` for a parameter written `a?: T` or with a default, and `rest` for `...ids: T[]`. The api fingerprint hashes them beside `type`, which stays the annotation alone; a rest parameter's `name` is now the bare binding (`ids` rather than `...ids`). Making an optional parameter required, dropping a default, or turning `T[]` into `...T[]` used to leave every fingerprint identical, so `aburi diff` reported no change and `--fail-on api-changed` passed. The diff now reports an api change and names the parameter under `signature.inputs modified`. The Markdown output prints the markers where TypeScript writes them (`a?: string`, `...ids: string[]`, and `limit?` for a default), and an untyped parameter as its name alone rather than `x: `. A parameter whose name a recovered parse left missing, such as `f(?: string)`, is named by the text the source wrote rather than by an empty string.
+
+  Functions with an optional, defaulted or rest parameter get a new `api` value once. A parameter with neither carries no new key, so its hash is byte-identical. Scanning this repository, 191 of its 2,714 kept Symbols moved `api`, and none moved `logic`, `syntax`, `calls[].resolved` or `dependencies[]`. Those can move in one narrow case: a function calls, by its bare name, a Symbol that one of its own rest parameters also names, as in `function run(...save) { save() }` with a `save` declared in or imported into the module. The bare name now shadows that Symbol, as any other parameter's name does, so the call no longer resolves to it. The edge and the effects it carried leave the function, and because `logic` is computed after effect propagation, callers that inherited those effects move `logic` too. An IR scanned before this release, compared with one scanned after, reports the affected Symbols as changed; rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides and is unaffected.
+
+- Updated dependencies [36fd72f]
+- Updated dependencies [47f8ef9]
+  - @aburi/types@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
