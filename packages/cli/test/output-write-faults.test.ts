@@ -183,6 +183,7 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
   })
 
   it("names the diff JSON when a directory stands where it would go", async () => {
+    // The removal, not the write, is what meets the directory: it runs before either IR is read.
     const { base, head } = await writeIRPair()
     await mkdir(resolve(scratch, "out", DIFF_JSON_FILENAME), { recursive: true })
 
@@ -190,13 +191,14 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi diff could not write the diff JSON to ${resolve(scratch, "out", DIFF_JSON_FILENAME)}`,
+      `aburi diff could not remove the diff JSON at ${resolve(scratch, "out", DIFF_JSON_FILENAME)}`,
     )
+    expect(stderr).toContain("--output-dir")
   })
 
-  it("names the diff Markdown when that is the artefact that could not land", async () => {
-    // `--format md`, because under the default the JSON is written first and would be the
-    // one to fail.
+  it("names the diff Markdown when that is the artefact in the way", async () => {
+    // `--format json`, because the Markdown an earlier run left is cleared whatever this run
+    // writes: left behind, it would read as this run's report.
     const { base, head } = await writeIRPair()
     await mkdir(resolve(scratch, "out", DIFF_MD_FILENAME), { recursive: true })
 
@@ -207,12 +209,12 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
       "--head",
       head,
       "--format",
-      "md",
+      "json",
     ])
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi diff could not write the diff Markdown to ${resolve(scratch, "out", DIFF_MD_FILENAME)}`,
+      `aburi diff could not remove the diff Markdown at ${resolve(scratch, "out", DIFF_MD_FILENAME)}`,
     )
   })
 
@@ -226,7 +228,7 @@ describe("CL28 — aburi diff with an --output-dir that cannot hold the outputs"
 
     expect(exitCode).toBe(EXIT.INPUT_ERROR)
     expect(stderr).toContain(
-      `aburi diff could not remove the uncapped diff Markdown an earlier run left at ${resolve(scratch, "out", DIFF_FULL_MD_FILENAME)}`,
+      `aburi diff could not remove the uncapped diff Markdown at ${resolve(scratch, "out", DIFF_FULL_MD_FILENAME)}`,
     )
     expect(stderr).toContain("--output-dir")
   })

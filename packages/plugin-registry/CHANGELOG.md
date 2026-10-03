@@ -1,5 +1,178 @@
 # @aburi/plugin-registry
 
+## 0.5.0
+
+### Minor Changes
+
+- 0f168b1: `frameworkHints` works: a hint with an `extKind` no longer stops every command, and every rule is applied
+
+  A hint with an `extKind` stopped `scan`, `diff` and `explain` at startup with exit 1, because the
+  loader moves `framework:acme:controller` under `framework:hint:acme` as `config.md` §8.3.1 says,
+  and the registry refused that prefix as reserved. A hint without one loaded and changed nothing:
+  no code read the rules, so `boundary`, `derivedBy`, `drop` and every `classNamePatterns` rule were
+  accepted and ignored. The guide's example now scans to `extKind: "framework:hint:acme:controller"`
+  with `boundary: true` on `@AcmeController`, and `framework:hint:acme:handler` on `OrderHandler`.
+
+  - `@aburi/plugin-registry`: `VocabRegistry.registerHint(manifest)` admits a namespace under the
+    reserved `framework:hint`, and only there. `register` still refuses it, so a plugin listed in
+    `frameworks` cannot claim one, and a hint still cannot claim `framework:hint` itself.
+  - `@aburi/config`: `frameworkHintPlugins(config)` builds a framework plugin per entry, and
+    `LoadedConfig.syntheticPlugins` now holds those plugins rather than their manifests (read
+    `.manifest` for what it held before; `normalizeFrameworkHints` still returns the manifests).
+    Decorator rules match the decorator's leaf name, class-name rules match a class's own name
+    against a glob (`*`, `?`), and the first `extKind` among the rules that apply wins.
+  - `@aburi/types`: `FrameworkPlugin` gains an optional `symbolDropHint`, the route a hint's
+    `drop: true` takes into Category B. `@aburi/core` asks every framework plugin for it, whichever
+    one classified the Symbol, after the core's shape rules and before the language plugin's. A
+    hint drop is recorded as `frameworkHints "acme": @AcmeInternal` or
+    `frameworkHints "acme": class *Handler`, and a Symbol with a boundary decorator is kept.
+  - `@aburi/cli`: hint plugins run after every plugin in `frameworks`, so a class a configured
+    plugin recognizes keeps that plugin's classification. A hint the registry refuses (two entries
+    writing the same vendor, or a `derivedBy` prefix a configured plugin owns) is a config error
+    (exit 2) naming the entry, rather than a bare registry error on exit 1. The IR's
+    `generator.plugins` lists each hint as `hint-<name>`.
+
+- d99dda0: `parsePluginManifest` refuses JSONC that names one key twice in an object, as `manifest-invalid`
+
+  `jsonc-parser` keeps the last of two equal keys and says nothing, so a JSON manifest that wrote
+  `"name"` twice registered under the second, and the registry's duplicate checks ran on whichever
+  entry survived. `parsePluginManifest` and `loadPluginManifest` now refuse a repeated key at any
+  depth, and `__proto__` at all, naming the key, its object and the line, as `aburi.json` already
+  did. This guards the published API and third-party plugins that read their own JSON manifest; a
+  manifest exported from a TypeScript module, as the first-party plugins' are, never goes through
+  JSONC. A schema failure's `cause` is now ajv's `ErrorObject[]`, as in `@aburi/config`.
+
+  The scan is published as `@aburi/plugin-registry/repeated-keys` (`scanKeys`,
+  `describeRepeatedKey`, `JSONC_PARSE_OPTIONS`, and the `RepeatedKey` and `KeyScan` types), a
+  subpath that does not compile the plugin schema. `@aburi/config` reads it from there. For
+  `aburi.json` the `__proto__` message now says the parser assigns the key instead of defining it,
+  an object path escapes `~` and `/` as JSON Pointer does, and the `cause` of a key error carries
+  `kind`, `owner` (formerly `path`), `offset` and `length` as well.
+
+- c28f20c: Carry the receiver a decorator was written through, and read it against the file's imports
+
+  `@nest.Controller()` and `@tsed.Controller()` were indistinguishable by the time a framework
+  plugin saw them. `readDecorator` reduced a qualified decorator to its leaf identifier, so
+  `Decorator` said `Controller` and nothing said which module it came from — and
+  `readImportedNames` skipped `symbols: "*"` edges outright, so even a recorded
+  `namespaceBinding` was never indexed. Both halves had to be wrong for the bug to hold, and
+  both were.
+
+  The consequence was the provenance table in `lang-plugin.md` §5.2.2 being out of order in its
+  last row. A decorator written through a module object landed in "no edge binds it" and came
+  back `high`, while the _named_ import of the same decorator from the same library came back
+  `medium`. The file that disclosed more was trusted less.
+
+  `Decorator` now carries `qualifier`: the receiver verbatim, `nest` for `@nest.Controller()`
+  and `a.b` for `@a.b.C()`. It is Class B per `ir-schema.md` §1.1 — a bare decorator omits the
+  key entirely — so a document written before this change reads exactly as it did, and `raw`
+  still quotes the whole written form. `@aburi/framework-nestjs` resolves a qualified decorator
+  through the receiver's first segment, which is the only part that can name something in
+  scope, and looks that segment up in **both** binding indexes: `import * as nest` binds the
+  module object under `namespaceBinding`, `import nest from` binds it as a named symbol, and a
+  decorator written through either has disclosed the same thing.
+
+  A qualified decorator deliberately does **not** resolve its _leaf_ through the named-import
+  index. The leaf is a property of a module object, not an identifier in the file's scope, so a
+  file that imports `Controller` by name from NestJS while writing `@tsed.Controller()` no
+  longer reports the second as though it were the first.
+
+  **What changes for a caller**
+
+  - A NestJS Symbol classified from a module object of a competing library now reports
+    `confidence: "medium"` where it reported `high`, whether the module was bound by
+    `import * as` or by a default import.
+  - `SymbolClassification.decoratorBoundaries` is keyed on the decorator as the source **wrote**
+    it, receiver included: `nest.Controller`, not `Controller`. The contract always said
+    "written name"; before `qualifier` existed the leaf _was_ that name. The leaf alone is not a
+    usable key, because two decorators on one Symbol can share it while resolving to different
+    vocabulary, and a shared key flags both — putting `boundary: true` on a decorator that was
+    never classified, which `drop-b` then reads.
+  - `@aburi/framework-nestjs` renames the exported `ImportedNames` to `ImportedBindings`, now an
+    interface of two maps rather than one map, and `resolveDecoratorName` takes the decorator
+    (`Pick<Decorator, "name" | "qualifier">`) instead of a bare name. Both are in the published
+    types.
+  - `@aburi/plugin-registry` adds `assertNamespaceBinding`, the namespace-edge counterpart to
+    `assertImportBinding`: a `namespaceBinding` that is present but empty is an upstream fault
+    rather than an edge to skip.
+
+  Most `api` fingerprints do not move: `canonicalizeDecorators` names the fields it takes and
+  `qualifier` is not among them, while `raw` already carried the receiver. The exception is a
+  decorator whose classification changes, since `ApiInput` includes `extKind` and
+  `decorators[].boundary` — a decorator that used to resolve its leaf through a named import and
+  now resolves its receiver can stop matching the vocabulary, and its Symbol's api hash moves
+  with it. That movement is the fix working.
+
+- 09fc3b3: Internal refactor: trim narrative comments, share duplicated helpers, collapse redundant tests, and rename unclear identifiers across the workspace. Public exports are unchanged apart from additions.
+
+  - `@aburi/core` now exports the ordering helpers (`compareCodeUnit`, `compareBy`, `stringArraysEqual`), the collection helpers (`groupBy`, `countBy`) and the tree-sitter shim (`SyntaxNode`, `asSyntaxNode`, `findNamedChildOfType`, `findFirstDescendantOfType`, `calleeText`, `calleeLeaf`, `anyCallCalleeMatches`) that the framework plugins previously each carried a copy of.
+  - `@aburi/plugin-registry/plugin-input` gains `receiverConfidence`, `defineEffectsManifest` and `matchesModuleOrSubpath`, which the four effects plugins now share.
+  - `@aburi/lang-typescript` reads string-literal call arguments through the same decoder as member
+    names, so an escape sequence inside a route path or `literalArgs` entry is now decoded instead of
+    dropped. **This moves Symbol ids and `fingerprints.api`** for any call whose literal carries an
+    escape: `app.get("/us\u0065rs")` was `$usrs` and is now `$users`, and `db.query("SELECT\t1")`
+    reports `literalArgs` as `["SELECT<TAB>1"]` rather than `["SELECT\\t1"]`. The first `aburi diff`
+    after updating reports those Symbols as changed. Hence the minor bump.
+  - `@aburi/core` `detectWorkspaceRoot` no longer aborts on a `package.json` / `Cargo.toml` /
+    `pyproject.toml` it could not read in a directory **above** the root it settles on. The walk asks
+    every ancestor whether it declares workspaces, so a malformed or unreadable manifest outside the
+    project — `$HOME/package.json` at mode 600 on a shared machine — used to fail the whole command
+    with a path the reader has no business fixing. A failure at or below the settled root is still
+    raised, unchanged: that one is the workspace's own, and absorbing it would root every Symbol id at
+    the package the command was run from. `aburi scan` is where this is observable.
+  - `@aburi/cli` `init` resolves the workspace root through the same code path as `scan`. With the
+    above in place this is a refactor and not a behaviour change: a malformed root manifest still
+    exits 1 out of `detectManagers`, and a manifest above the root still does not fail the command.
+  - `@aburi/framework-react` `calleeText` returns `null` rather than `""` for an empty callee, matching `@aburi/framework-express`.
+
+### Patch Changes
+
+- c7c54eb: Refuse a manifest whose own prefixes nest
+
+  `VocabRegistry.register` compared a manifest's prefixes only with those of plugins already
+  registered, never with each other. A manifest declaring `extKindPrefixes: ["fp:pipe",
+"fp:pipe:async"]` therefore registered, and the first `findExtKind` under both threw an internal
+  invariant violation that named the same plugin twice and blamed `register()` for a check it did not
+  make. `register` now refuses such a manifest with `prefix-prefix-overlap`, naming both prefixes and
+  the plugin; nesting `derivedByPrefixes` such as `["acme", "acme:route"]` are refused with
+  `derivedby-prefix-overlap`. Each list is compared with itself, so the same string in `extKindPrefixes`
+  and `derivedByPrefixes`, as every framework plugin writes it, still registers. A prefix written twice
+  in one list is refused earlier, by the schema's `uniqueItems`; `register` itself leaves an exact
+  repeat alone, since it cannot give a lookup two owners.
+
+- 6b2b2f9: A manifest that declares one effect id or extKind twice is refused, and an unknown `type` is always `manifest-invalid`
+
+  The registry compared a manifest only with the plugins already registered, so an id declared twice
+  in one manifest kept whichever came last. A hand-built manifest whose `type` names something on
+  `Object.prototype` (`toString`, `constructor`, `__proto__`) was read with the prototype's value as
+  its rules: with extKinds it failed with an uncoded `TypeError`, with effects it failed with the
+  wrong code (`namespace-type-mismatch`), and with nothing declared it registered. All of these now
+  raise the coded errors the other cases already do (`duplicate-id`, `manifest-invalid`), and so does
+  a `provides` whose arrays are inherited rather than its own.
+
+- 16429c8: Refuse a malformed `provides` entry with a coded error
+
+  `VocabRegistry.register` checked that each `provides` array existed, but not what the arrays held.
+  A manifest built by hand rather than read through `loadPluginManifest` could carry a `null` effect,
+  an extKind without an `id`, or a number among the prefixes, and `register` then failed with a bare
+  `TypeError` such as `Cannot read properties of null (reading 'id')`. It now throws a
+  `RegistryError` with code `manifest-invalid` that names the plugin and the entry, for example
+  `Plugin "effects-prisma" provides.effects[1] must be an object (got null).` Each effect needs its
+  own string `id` and `description`, each extKind also a string `baseKind`, and the prefix and
+  framework arrays hold strings. A manifest whose `name` is not a string, which failed the same way
+  once an effects plugin derived its `xPrefix` from it, is refused too. A non-array `provides` field
+  now reads `(got null)` rather than `(got object)` when it is `null`.
+
+- Updated dependencies [aedc9fd]
+- Updated dependencies [5a9ebda]
+- Updated dependencies [0f168b1]
+- Updated dependencies [c28f20c]
+- Updated dependencies [664e993]
+- Updated dependencies [41a75a0]
+- Updated dependencies [09fc3b3]
+- Updated dependencies [3dd0dd0]
+  - @aburi/types@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes

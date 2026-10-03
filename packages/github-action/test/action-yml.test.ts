@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { DEFAULT_OUTPUT_DIRNAME, DIFF_JSON_FILENAME, DIFF_MD_FILENAME } from "@aburi/cli"
+import { DEFAULT_OUTPUT_DIRNAME } from "@aburi/cli"
 import { describe, expect, it } from "vitest"
 import { parse } from "yaml"
 import { ABURI_COMMENT_BODY_MAX_BYTES, ABURI_COMMENT_MARKER } from "../src/comment"
@@ -22,6 +22,13 @@ const MAX_BYTES_PATH = resolve(
   "..",
   "scripts",
   "resolve-max-bytes.mjs",
+)
+
+const REPORT_PATHS_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "scripts",
+  "report-paths.mjs",
 )
 
 const UPSERT_PATH = resolve(
@@ -309,26 +316,50 @@ describe("action.yml", () => {
     expect(env.PR_NUMBER).toContain("github.event.issue.number")
   })
 
-  it("reads the exact artefact filenames that @aburi/cli writes", async () => {
-    // Parity check between action.yml (which resolves diff-json-path /
-    // diff-md-path via string concatenation in bash) and the CLI's actual
-    // artifact-paths module. Without this, a rename of `diff.json` / `diff.md`
-    // on the CLI side would surface only at runtime, as the upsert script
-    // exiting 2 on a path that is not there — long after CI green.
+  it("names the report paths with the committed script", async () => {
+    // What the script answers, filenames included, is asserted by running it in
+    // `report-paths.test.ts`; this pins only that the diff step is what runs it.
+    await expect(stat(REPORT_PATHS_PATH)).resolves.toBeDefined()
+    const action = await loadAction()
+    const diffStep = action.runs.steps.find((s) => s.id === "diff")
+    expect(diffStep?.run).toContain('paths=$(node "$GITHUB_ACTION_PATH/scripts/report-paths.mjs")')
+  })
+
+  it("writes cli-exit-code before working out the report paths", async () => {
+    // A failure in the script must not cost the caller the gate's verdict.
+    const action = await loadAction()
+    const run = action.runs.steps.find((s) => s.id === "diff")?.run ?? ""
+    const exitCode = run.indexOf('echo "cli-exit-code=$status"')
+    expect(exitCode).toBeGreaterThan(-1)
+    expect(exitCode).toBeLessThan(run.indexOf("scripts/report-paths.mjs"))
+  })
+
+  it("no longer names the pre-refactor aburi.diff.* artefacts", async () => {
+    // The CLI never writes them, so a stale copy would break only at runtime.
     const raw = await readFile(ACTION_PATH, "utf8")
-    expect(raw).toContain(`$OUTPUT_DIR/${DIFF_JSON_FILENAME}`)
-    expect(raw).toContain(`$OUTPUT_DIR/${DIFF_MD_FILENAME}`)
-    // Defence in depth: also assert the pre-refactor "aburi.diff.*" names are
-    // gone. A stale copy would satisfy the concat above but still break at
-    // runtime because the CLI never writes them.
     expect(raw).not.toContain("aburi.diff.json")
     expect(raw).not.toContain("aburi.diff.md")
+  })
+
+  it("posts only when the diff step named a Markdown file this run wrote", async () => {
+    const action = await loadAction()
+    const commentStep = action.runs.steps.find((s) => s.id === "post-comment")
+    expect(commentStep?.if).toContain("steps.diff.outputs.diff-md-path != ''")
+  })
+
+  it("hands the comment step the report path as the diff step resolved it", async () => {
+    // The path is absolute already. Prefixing `working-directory` turned an absolute
+    // `output-dir` into `.//home/...`, a relative path under the repository root that was not
+    // there, and the upsert failed on a diff that had succeeded.
+    const action = await loadAction()
+    const env = action.runs.steps.find((s) => s.id === "post-comment")?.env ?? {}
+    expect(env.MARKDOWN_PATH).toBe(`${EXPRESSION_OPEN} steps.diff.outputs.diff-md-path }}`)
   })
 
   it("defaults output-dir to the directory the CLI defaults to", async () => {
     // The action forwards this to `--output-dir`, so the two defaults have to be the same
     // string: a rename on the CLI side would leave the action writing somewhere the comment
-    // step does not read, and the concat check above would still pass.
+    // step does not read.
     const action = await loadAction()
     expect(action.inputs?.["output-dir"]?.default).toBe(DEFAULT_OUTPUT_DIRNAME)
   })

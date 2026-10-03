@@ -205,6 +205,38 @@ describe("runDiff — --base/--head (file mode)", () => {
     }
   })
 
+  it("leaves no earlier report behind when the run stops before it writes one", async () => {
+    // A caller deciding whether to post `diff.md` by whether it exists — the GitHub Action does —
+    // would otherwise post an earlier run's report as this one's, when this run failed after
+    // the output directory was chosen: here a --head IR that is not there, in the action a plugin
+    // that fails to load.
+    const out = resolve(scratch, "out")
+    const basePath = resolve(scratch, "base.json")
+    await writeFile(basePath, JSON.stringify(emptyIR()), "utf8")
+    const earlier = await runDiff({
+      cwd: scratch,
+      base: basePath,
+      head: basePath,
+      refSpec: null,
+      format: "both",
+    })
+    expect(earlier.diffMdPath).toBe(resolve(out, "diff.md"))
+    expect(await pathExists(resolve(out, "diff.md"))).toBe(true)
+    expect(await pathExists(resolve(out, "diff.json"))).toBe(true)
+
+    await expect(
+      runDiff({
+        cwd: scratch,
+        base: basePath,
+        head: resolve(scratch, "missing.json"),
+        refSpec: null,
+        format: "both",
+      }),
+    ).rejects.toThrow(`Failed to read IR file "${resolve(scratch, "missing.json")}"`)
+    expect(await pathExists(resolve(out, "diff.md"))).toBe(false)
+    expect(await pathExists(resolve(out, "diff.json"))).toBe(false)
+  })
+
   it("warns, rather than fails, when a budget cannot be met", async () => {
     const basePath = resolve(scratch, "base.json")
     const headPath = resolve(scratch, "head.json")
