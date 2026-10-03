@@ -206,7 +206,26 @@ function memberBodySkippedHere(classNode: Node, member: Node): Node | null {
   return (functionValuedField(member) ?? member).childForFieldName("body")
 }
 
+/**
+ * Every loop kind the grammar has, with the `loopKind` its `loop` rule carries. `visitNode` reads
+ * it for that rule and `scopeInside` for where a `break` or `continue` ends, so a kind missing
+ * here loses both at once: no `loop` rule, and a `continue` inside it read as leaving the `if`
+ * around it. `for_in_statement` is `for…in`, `for…of` and `for await…of` alike.
+ */
+const LOOP_KINDS: ReadonlyMap<string, NonNullable<Rule["loopKind"]>> = new Map([
+  ["for_statement", "for"],
+  ["for_in_statement", "for"],
+  ["while_statement", "while"],
+  ["do_statement", "do"],
+])
+
 function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
+  const loopKind = LOOP_KINDS.get(node.type)
+  if (loopKind !== undefined) {
+    rules.push(makeRule("loop", node, { loopKind }))
+    visitChildren(node, rules, calls)
+    return
+  }
   switch (node.type) {
     case "if_statement":
       handleIfStatement(node, rules, calls)
@@ -217,19 +236,6 @@ function visitNode(node: Node, rules: Rule[], calls: CallCandidate[]): void {
       return
     case "return_statement":
       handleReturnStatement(node, rules, calls)
-      return
-    case "for_statement":
-    case "for_in_statement":
-      rules.push(makeRule("loop", node, { loopKind: "for" }))
-      visitChildren(node, rules, calls)
-      return
-    case "while_statement":
-      rules.push(makeRule("loop", node, { loopKind: "while" }))
-      visitChildren(node, rules, calls)
-      return
-    case "do_statement":
-      rules.push(makeRule("loop", node, { loopKind: "do" }))
-      visitChildren(node, rules, calls)
       return
     case "try_statement":
       rules.push(makeRule("try", node))
@@ -447,33 +453,48 @@ function isTrivialExpr(node: Node): boolean {
 }
 
 /**
- * Whether `node`, an `if`'s consequence, can leave the flow the `if` sits in: a `return`,
- * `throw` or `process.exit()`, or a `break`/`continue` whose target is outside `node`.
+ * Whether `node`, an `if`'s consequence, can leave the flow the `if` sits in: a `throw` or
+ * `process.exit()` anywhere in it, a `return`, or a `break`/`continue` whose target is outside
+ * `node`.
  *
- * Code that only leaves something nested inside `node` does not count. A function written
- * there, a class's methods included, is not entered: its `return` ends the callback, not the
- * code the `if` guards. An unlabeled `break` counts only when no loop or `switch` inside `node` is
- * nearer, an unlabeled `continue` only when no loop is, and a labeled one only when its label
- * is not declared inside `node`.
+ * Code that only leaves something nested inside `node` does not count. A `return`, `break` or
+ * `continue` inside a function written there, a class's methods included, or inside a class
+ * static block cannot get past that function or block to the code the `if` guards. A `throw` or
+ * `process.exit()` there still counts: a callback called synchronously throws or exits through
+ * the `if`, and `readThrows` counts the same `throw` for the Symbol. An unlabeled `break` counts
+ * only when no loop or `switch` inside `node` is nearer, an unlabeled `continue` only when no
+ * loop is, and a labeled one only when its label is not declared inside `node`.
  */
 function containsEarlyExit(node: Node): boolean {
-  return exitsFrom(node, { inLoop: false, inSwitch: false, labels: [] })
+  return exitsFrom(node, NO_INNER_TARGETS)
 }
 
 interface ExitScope {
+  /** Inside a function or static block written in the consequence. */
+  readonly inFunction: boolean
   readonly inLoop: boolean
   readonly inSwitch: boolean
   readonly labels: readonly string[]
 }
 
-const LOOP_TYPES: ReadonlySet<string> = new Set([
-  "for_statement",
-  "for_in_statement",
-  "while_statement",
-  "do_statement",
-])
+/**
+ * The scope a consequence is read from. It records only the loops, `switch`es and labels found
+ * inside the consequence on the way down, never the ones around the `if`: a `break` or `continue`
+ * that meets no target of its own inside the consequence ends something outside it, and that is
+ * what makes `switch (k) { case "a": if (!ok) break; … }` a guard. Seeded from the enclosing
+ * context instead, that `break` would read as staying inside and the guard would be lost.
+ */
+const NO_INNER_TARGETS: ExitScope = {
+  inFunction: false,
+  inLoop: false,
+  inSwitch: false,
+  labels: [],
+}
 
-/** Nodes whose `return`, `break` and `continue` cannot leave the code around them. */
+/**
+ * Nodes that no `return`, `break` or `continue` written inside them can leave, so none of those
+ * counts there. They are still entered, for a `throw` or `process.exit()`, which do leave them.
+ */
 const EXIT_BOUNDARIES: ReadonlySet<string> = new Set([
   "arrow_function",
   "function_expression",
@@ -481,16 +502,21 @@ const EXIT_BOUNDARIES: ReadonlySet<string> = new Set([
   "generator_function",
   "generator_function_declaration",
   "method_definition",
+  "class_static_block",
 ])
 
 function exitsFrom(node: Node, scope: ExitScope): boolean {
-  if (EXIT_BOUNDARIES.has(node.type)) return false
   switch (node.type) {
-    case "return_statement":
     case "throw_statement":
       return true
+    case "return_statement":
+      // In a function a `return` ends only that function, and its value is still read:
+      // `return process.exit(1)` exits all the same.
+      if (!scope.inFunction) return true
+      break
     case "break_statement":
     case "continue_statement": {
+      if (scope.inFunction) return false
       const label = node.childForFieldName("label")
       if (label !== null) return !scope.labels.includes(label.text)
       return node.type === "break_statement" ? !scope.inLoop && !scope.inSwitch : !scope.inLoop
@@ -501,17 +527,23 @@ function exitsFrom(node: Node, scope: ExitScope): boolean {
       break
     }
   }
-  const inner: ExitScope = LOOP_TYPES.has(node.type)
-    ? { ...scope, inLoop: true }
-    : node.type === "switch_statement"
-      ? { ...scope, inSwitch: true }
-      : node.type === "labeled_statement"
-        ? { ...scope, labels: [...scope.labels, node.childForFieldName("label")?.text ?? ""] }
-        : scope
+  const inner = scopeInside(node, scope)
   for (const child of node.namedChildren) {
     if (child !== null && exitsFrom(child, inner)) return true
   }
   return false
+}
+
+/** The scope `node`'s children are read in: `scope` plus whatever target `node` opens. */
+function scopeInside(node: Node, scope: ExitScope): ExitScope {
+  if (EXIT_BOUNDARIES.has(node.type)) return { ...scope, inFunction: true }
+  if (LOOP_KINDS.has(node.type)) return { ...scope, inLoop: true }
+  if (node.type === "switch_statement") return { ...scope, inSwitch: true }
+  if (node.type === "labeled_statement") {
+    const label = node.childForFieldName("label")
+    if (label !== null) return { ...scope, labels: [...scope.labels, label.text] }
+  }
+  return scope
 }
 
 /**
