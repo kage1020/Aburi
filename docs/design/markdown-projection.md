@@ -335,6 +335,8 @@ A symbol with everything empty (class without boundary, no methods) is normally 
 `(name: type, name: type) → output` form. Multiple outputs are separated by `|`. `throws: A, B` is appended.
 `async` / `generator*` / `<T,U>` (type parameters) are shown alongside as badges.
 
+Each input is written as TypeScript writes it, whatever language the IR came from: an input's `optional` and `rest` fields ([ir-schema.md](./ir-schema.md) §7) print as `a?: string` and `...ids: string[]`, and a defaulted input as the optional one it is to a caller, `limit?`. An input with an empty `type` prints its name alone, `x`. The `signature.inputs` rows of a diff entry spell inputs the same way.
+
 Example:
 ```
 (id: string) → Promise<User | null> throws NotFoundError ⚡async
@@ -896,6 +898,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
 | MP14 | Symbol block with Rules, Effects, Calls and a fingerprint, the last rule inline or fenced | A blank line before `**Effects**:`, `**Calls**:` and the `<sub>` line in both cases; none before a list or after the last section |
+| MP15 | A signature with an optional input and a rest input; a diff entry whose `signature.inputs.added` holds a rest input | `(a?: string, ...ids: string[])` in the signature line, and `` `...ids: string[]` `` in the diff row (§5.5). An input with an empty `type` prints as its name alone |
 
 ## 12. Design decisions
 
