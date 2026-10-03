@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { symbolOf } from "./fixtures/ctx"
+import { symbolOf, symbolsOf } from "./fixtures/ctx"
 
 /**
  * A destructuring parameter's `name` is the pattern's text, which no call can name. The
@@ -74,8 +74,11 @@ describe("a rest parameter whose binding destructures", () => {
 
 /**
  * A recovered parse can leave a zero-width MISSING identifier where a pattern's binding would
- * be (`{ a: }`). The source wrote no name there, so none is listed: the empty string would be
- * a binding the schema refuses (LP11c's rule, one level down).
+ * be (`{ a: }`), or wrap text it could not place in an ERROR node (`{ a b }`). Neither is a
+ * name the source wrote into a binding position, so neither is listed: the empty string would
+ * be a binding the schema refuses, and an ERROR's text was never placed as one (LP11c's rule,
+ * one level down; LP11d). The parameter keeps its written text as `name`, and the file keeps
+ * every Symbol, as it did when the parameter was read by its text alone.
  */
 describe("a destructuring parameter the parser repaired", () => {
   it("lists no binding the source did not write", async () => {
@@ -85,5 +88,25 @@ describe("a destructuring parameter the parser repaired", () => {
       { name: "{ a: }", type: "T" },
       { name: "{ b, c: }", type: "U", bindings: ["b"] },
     ])
+  })
+
+  it.each([
+    ["{ a, ? }", { name: "{ a, ? }", type: "", bindings: ["a"] }],
+    ["{ a = }", { name: "{ a = }", type: "", bindings: ["a"] }],
+    ["{ a b }", { name: "{ a b }", type: "", bindings: ["a"] }],
+    ["[...]", { name: "[...]", type: "" }],
+    ["{ ... }", { name: "{ ... }", type: "" }],
+    ["...[a b]", { name: "[a b]", type: "", rest: true, bindings: ["a"] }],
+  ])("reads `%s` around the text the parser could not place", async (params, expected) => {
+    const symbols = await symbolsOf(`function f(${params}) {}\nfunction g(c) {}`)
+
+    expect(symbols.map((s) => s.id)).toEqual(["ts:src/a.ts#f", "ts:src/a.ts#g"])
+    expect(symbols[0]?.signature?.inputs).toStrictEqual([expected])
+  })
+
+  it("leaves a destructuring declaration refusing the same text", async () => {
+    // Only the parameter path skips an ERROR node. A declaration's bindings become Symbols,
+    // and one it could not read is refused rather than passed over (pattern-bindings.ts).
+    await expect(symbolsOf("export const { a, ? } = m")).rejects.toThrow(/Unmodelled node "ERROR"/)
   })
 })

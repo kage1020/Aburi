@@ -18,10 +18,22 @@ import type { Node } from "web-tree-sitter"
  * — so an unmodelled node type is refused rather than passed over. An array hole (`[, x]`)
  * binds nothing and is not a named child, so it needs no case; a `comment` is a named child
  * and gets one.
+ *
+ * `unplaced` says what to do with an `ERROR` node, the text of a recovered parse the parser
+ * could not place (`{ a, ? }`, `{ a b }`, `[...]`). A declaration refuses it like any other
+ * node it does not model, which is the default. A parameter passes `"skip"`: the subtree binds
+ * nothing, since a name the parser could not place is no binding, and the rest of the pattern
+ * is still read. Refusing there would take the whole file out of the scan over one malformed
+ * parameter list, which reading the parameter by its text alone never did. Only `ERROR` is
+ * skipped; a node type the grammar does build and this walk does not model is still refused.
  */
-export function collectPatternBindings(pattern: Node): Node[] {
+export function collectPatternBindings(
+  pattern: Node,
+  unplaced: "refuse" | "skip" = "refuse",
+): Node[] {
   const out: Node[] = []
   const visit = (node: Node): void => {
+    if (node.type === "ERROR" && unplaced === "skip") return
     switch (node.type) {
       case "identifier":
       case "shorthand_property_identifier_pattern":

@@ -149,15 +149,19 @@ function writtenText(node: Node | null): string | null {
  * `save`. A single name returns nothing, rest or not: its `name` already is the binding, and
  * the key stays absent (Class B).
  *
- * A recovered parse can put a zero-width MISSING identifier inside the pattern (`{ a: }`).
- * It is left out for the reason `readParameter` never names an input by one: the source wrote
- * no binding there, and its empty text is a name the schema's `minLength: 1` refuses.
+ * A recovered parse leaves two kinds of thing inside a pattern that are not bindings, and
+ * neither is listed, for the reason `readParameter` never names an input by one. A zero-width
+ * MISSING identifier (`{ a: }`) is a name the source did not write, and its empty text is one
+ * the schema's `minLength: 1` refuses. An ERROR node (`{ a, ? }`, `{ a b }`, `[...]`) is text
+ * the parser could not place, so the walk skips it and lists the names around it that it did
+ * place: `{ a b }` binds `a`. A destructuring declaration refuses the same ERROR node, but here
+ * that would drop the whole file over one parameter whose `name` is still its written text.
  */
 function readPatternBindings(binding: Node | null): string[] {
   if (binding === null) return []
   if (binding.type !== "object_pattern" && binding.type !== "array_pattern") return []
   const out: string[] = []
-  for (const node of collectPatternBindings(binding)) {
+  for (const node of collectPatternBindings(binding, "skip")) {
     const name = writtenText(node)
     if (name !== null) out.push(name)
   }

@@ -1,6 +1,7 @@
 import { prismaEffectsPlugin } from "@aburi/effects-prisma"
 import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import { beforeEach, describe, expect, it } from "vitest"
+import { irValidator } from "../src/ir-schema"
 import { scanWith, symbolById } from "../src/scan-helper"
 import { useScratchWorkspace } from "../src/scratch"
 
@@ -35,20 +36,19 @@ const SHADOWED = [
   "Handler.handle",
 ]
 
+const REPO = [
+  'import { PrismaClient } from "@prisma/client"',
+  "const prisma = new PrismaClient()",
+  "",
+  "export async function save(total: number) {",
+  "  await prisma.invoice.create({ data: { total } })",
+  "}",
+  "",
+].join("\n")
+
 describe("scan — a destructuring parameter shadows the import it names", () => {
   beforeEach(async () => {
-    await workspace.writeSource(
-      "src/repo.ts",
-      [
-        'import { PrismaClient } from "@prisma/client"',
-        "const prisma = new PrismaClient()",
-        "",
-        "export async function save(total: number) {",
-        "  await prisma.invoice.create({ data: { total } })",
-        "}",
-        "",
-      ].join("\n"),
-    )
+    await workspace.writeSource("src/repo.ts", REPO)
     await workspace.writeSource(
       "src/handler.ts",
       [
@@ -88,5 +88,54 @@ describe("scan — a destructuring parameter shadows the import it names", () =>
       ["save", "ts:src/repo.ts#save"],
     ])
     expect(direct.effects.map((e) => e.id)).toEqual(["db.write"])
+  })
+})
+
+/**
+ * A destructuring parameter the parser could not fully place still leaves its file in the
+ * scan (lang-plugin.md LP11d). What the parser placed as a binding shadows; the text it wrapped
+ * in an ERROR node binds nothing, so where that is all the pattern holds, `save()` is the
+ * import's again.
+ */
+describe("scan — a destructuring parameter with text the parser could not place", () => {
+  beforeEach(async () => {
+    await workspace.writeSource("src/repo.ts", REPO)
+    await workspace.writeSource(
+      "src/broken.ts",
+      [
+        'import { save } from "./repo"',
+        "",
+        "export async function stray({ save, ? }: any) { await save(1) }",
+        "export async function dangling({ save = }: any) { await save(2) }",
+        "export async function unseparated({ save b }: any) { await save(3) }",
+        "export async function arraySpread([...]: any) { await save(4) }",
+        "export async function objectSpread({ ... }: any) { await save(5) }",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it("keeps the file, and the document still validates", async () => {
+    const result = await scanWorkspace()
+    const violations = await irValidator()
+
+    expect(result.skipped).toEqual([])
+    expect(violations(result.ir)).toEqual([])
+  })
+
+  it.each([
+    ["stray", "{ save, ? }", ["save"], null],
+    ["dangling", "{ save = }", ["save"], null],
+    ["unseparated", "{ save b }", ["save"], null],
+    ["arraySpread", "[...]", undefined, "ts:src/repo.ts#save"],
+    ["objectSpread", "{ ... }", undefined, "ts:src/repo.ts#save"],
+  ])("%s binds only what the source placed", async (qname, name, bindings, resolved) => {
+    const result = await scanWorkspace()
+    const symbol = symbolById(result, `ts:src/broken.ts#${qname}`)
+
+    expect(symbol.signature?.inputs).toStrictEqual([
+      bindings === undefined ? { name, type: "any" } : { name, type: "any", bindings },
+    ])
+    expect(symbol.calls.map((c) => [c.target, c.resolved])).toEqual([["save", resolved]])
   })
 })
