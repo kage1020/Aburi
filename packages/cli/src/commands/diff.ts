@@ -828,8 +828,14 @@ function labelFor(target: ScanTarget): string {
 /**
  * One scan of one side, reading the config both sides share. `pinnedConfig` replaces
  * `options.configPath`: the flag is relative to the caller's directory and the base scan runs
- * in the worktree. `pluginRefRoot` and `ignore` are passed to both sides so they differ only in
+ * in the worktree. `pluginRefRoot` is the head's absolute path on both sides, because the plugin
+ * set is pinned to the head environment (`cli-spec.md` §6.4.1.5), so the sides differ only in
  * their sources.
+ *
+ * `submoduleIgnore` reaches both sides for another reason: it holds workspace-root-relative
+ * patterns that each scan resolves against its own root, so passing it to both removes the same
+ * sources from each. `runScan` appends it to the config's own `ignore` (`mergeCliOverrides`)
+ * rather than replacing that, and none of it is the user's: `aburi diff` has no `--ignore`.
  */
 async function runScanInDir(
   cwd: string,
@@ -839,7 +845,7 @@ async function runScanInDir(
   pinnedConfig: PinnedConfig,
   pluginRefRoot: string,
   target: ScanTarget,
-  ignore: readonly string[],
+  submoduleIgnore: readonly string[],
 ): Promise<ScanReport> {
   const scanOptions: Parameters<typeof runScan>[0] = {
     cwd,
@@ -849,7 +855,7 @@ async function runScanInDir(
     incidents: { warn, label: labelFor(target) },
     pinnedConfig,
     pluginRefRoot,
-    ...(ignore.length === 0 ? {} : { ignore }),
+    ...(submoduleIgnore.length === 0 ? {} : { ignore: submoduleIgnore }),
     ...(options.compact === undefined ? {} : { compact: options.compact }),
   }
   return runScan(scanOptions)
@@ -1015,8 +1021,10 @@ async function assertNotShallow(git: GitRunner, cwd: string): Promise<void> {
 }
 
 /**
- * `cli-spec.md` §6.4.1: a sparse checkout is missing files the head scan would read as removed.
- * `--default false` because `git config` exits 1 for a key that is not set, the usual case.
+ * `cli-spec.md` §6.4.1: a sparse checkout is missing files the diff would read as removed.
+ * `--bool` because git also takes `1`, `yes` and `on` for true and, untyped, prints the value as
+ * written; `--bool` normalises every spelling to the `true` compared below. `--default false`
+ * because `git config` exits 1 for a key that is not set, the usual case.
  */
 async function assertNotSparse(git: GitRunner, cwd: string): Promise<void> {
   const { stdout } = await git.run(
@@ -1032,18 +1040,24 @@ async function assertNotSparse(git: GitRunner, cwd: string): Promise<void> {
 }
 
 /**
- * Ignore patterns that leave every submodule out of both scans, after the §6.4.1 warning.
+ * Ignore patterns that leave every submodule out of both file scans, after the §6.4.1 warning.
  *
  * `git worktree add` does not populate submodules, so the base side sees each one as an empty
  * directory while the head side, whose submodules are checked out, walks into them as ordinary
  * sources: every Symbol in an unchanged submodule would read as added. Leaving them out of both
- * sides is what makes the warning describe a limitation rather than excuse a wrong report, and
- * it needs no network access, which `git submodule update --init` in the worktree would.
+ * file scans is what makes the warning describe a limitation rather than excuse a wrong report,
+ * and it needs no network access, which `git submodule update --init` in the worktree would.
+ * Component detection is not covered, since it looks for manifests without `ignore`: a submodule
+ * that is itself a workspace package still yields a Component on the head side only, which the
+ * warning says.
  *
  * The submodules are the gitlinks (mode `160000`) in the index, which is the list
- * `git submodule status` prints; `ls-files -z` is asked instead because its records survive any
- * path, where `submodule status` quotes some and decorates every line. Run at the head workspace
- * root, so the paths are relative to the root both scans share.
+ * `git submodule status` prints, one decorated line each. `ls-files -z` is asked instead, and the
+ * `-z` is the point: without it git renders a path outside printable ASCII the way
+ * `core.quotePath` asks — double-quoted and octal-escaped — while under it each record is
+ * NUL-terminated and git's path quoting is bypassed entirely, so a record survives any path, a
+ * newline or a tab in it included (`diff-algorithm.md` states the same contract for renames).
+ * Run at the head workspace root, so the paths are relative to the root both scans share.
  */
 async function submodulePatterns(
   git: GitRunner,
@@ -1054,12 +1068,19 @@ async function submodulePatterns(
   const paths = parseSubmodulePaths(stdout)
   if (paths.length === 0) return []
   warn(
-    `⚠ Submodules detected: ${paths.join(", ")}. Submodule-aware diff is not yet supported, so their files are left out of both sides.`,
+    `⚠ Submodules detected: ${paths.join(", ")}. Submodule-aware diff is not yet supported, so their files are left out of both file scans. Component detection still walks them, so a workspace package inside one can still be reported as a Component added or removed.`,
   )
   return paths.map((path) => `${escapeGlob(path)}/**`)
 }
 
-/** The gitlink paths in `git ls-files -z --stage` output: `<mode> <sha> <stage>\t<path>\0`. */
+/**
+ * The gitlink paths in `git ls-files -z --stage` output: `<mode> <sha> <stage>\t<path>\0`.
+ *
+ * Collected in a `Set` because an unmerged gitlink is listed once per stage (1, 2 and 3), and
+ * sorted so the warning text and the pattern order are stable. Not normalised to NFC, unlike
+ * `parseRenameRecords` below: these become `ignore` globs, which match the spelling on disk,
+ * while rename records are looked up against IR paths, which are NFC.
+ */
 export function parseSubmodulePaths(stdout: string): string[] {
   const paths = new Set<string>()
   for (const record of stdout.split("\0")) {
@@ -1071,7 +1092,14 @@ export function parseSubmodulePaths(stdout: string): string[] {
   return [...paths].sort()
 }
 
-/** A path as an ignore glob that matches only itself: the pattern spends `\` as an escape. */
+/**
+ * A path as glob text that matches it literally; the caller appends `/**` to take in the
+ * subtree under it. Patterns reach picomatch (through tinyglobby), and the escaped set is the
+ * characters its parser gives meaning to: `\` itself, which it spends as an escape, the
+ * wildcards `*` and `?`, the class `[ ]`, the braces `{ }`, the group `( | )`, and the extglob
+ * prefixes `!`, `+` and `@` (`!` also negates at the start of a pattern). Every other character
+ * a path can hold, `.`, `$`, `^`, `,` and `#` among them, picomatch already matches as itself.
+ */
 function escapeGlob(path: string): string {
   return path.replace(/[\\()[\]{}*?|!+@]/g, "\\$&")
 }
