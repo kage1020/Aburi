@@ -114,9 +114,10 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
  *
  * Declarations of an id accumulate in source order and fold at the end. The **leading**
  * declaration gives the Symbol every scalar — kind, visibility, range, signature — and the
- * rest contribute what is list-shaped; here the leader is simply the first, which is what
- * source order already says. TypeScript requires the class or function to precede a
- * namespace merged into it once that namespace holds a value (TS2434), and requires a merge's
+ * rest contribute what is list-shaped; here the leader is the first declaration that is not an
+ * overload signature (`leadOf`), so an overload set is led by its implementation and anything
+ * else by what source order already says. TypeScript requires the class or function to precede
+ * a namespace merged into it once that namespace holds a value (TS2434), and requires a merge's
  * declarations to agree on whether they are exported, so the choice is between declarations
  * legal source keeps in agreement. A namespace holding only types may come first, and then it
  * leads.
@@ -129,6 +130,12 @@ export function extractSymbols(tree: Tree, ctx: ExtractionContext): SymbolCandid
  * absorbs is not a silent loss: the surviving Symbol carries every declaration's `derivedBy`
  * plus `declaration-merged`, so the merge is readable in the IR — where the alternative was
  * a run that ended with one violation and no document at all.
+ *
+ * One group is dropped, and silently: overload signatures with nothing beside them that can
+ * lead, which `tsc` rejects as TS2391. No declaration in it carries a body or the parameter
+ * types the function is called with, so there is no Symbol to give it, and no drop reason says
+ * so — the answer each such signature got while it was skipped on its own. An overload written
+ * beside some other declaration of its name, a namespace say, folds into that one's Symbol.
  */
 interface CandidateSink {
   add(candidate: SymbolCandidate<Node>): void
@@ -165,8 +172,10 @@ function makeCandidateSink(): CandidateSink {
  * `method_signature` in an ordinary class body) is written ahead of its implementation, but the
  * implementation carries the body and the parameter types the function is actually called with,
  * so it leads (LP8f). The overloads still fold in, as declarations with no body, so the syntax
- * axis sees them (LP8q): dropping them made adding, removing or retyping an overload no change at
- * all. A group of overloads and nothing else is TS2391, and stays without a Symbol, as before.
+ * axis sees them (LP8q). Dropped, they reached no fingerprint of the Symbol they belong to: an
+ * edit to a method's overload moved only its class's `syntax`, whose body serializes every
+ * member, and one to a module-level overload moved nothing. A group of overloads and nothing
+ * else is TS2391, and stays without a Symbol, as before.
  *
  * The rule runs at **two levels**: `foldMemberGroup` applies it to one class member's
  * declarations, and the sink applies it again to everything with that member's id — which by
@@ -179,7 +188,12 @@ function leadOf(group: readonly SymbolCandidate<Node>[]): SymbolCandidate<Node> 
   return group.find((declaration) => !isOverloadSignature(declaration.fullNode)) ?? null
 }
 
-/** A bodyless function or method declaration an implementation can be written beside. */
+/**
+ * A bodyless function or method declaration an implementation can be written beside. Under a
+ * `declare` nothing can be, so the signature is the declaration (LP36); an
+ * `abstract_method_signature` is not one either, since the language forbids an implementation
+ * beside it (LP35).
+ */
 function isOverloadSignature(node: Node): boolean {
   return (
     (node.type === "function_signature" || node.type === "method_signature") &&
@@ -264,15 +278,12 @@ function visitStatement(
   switch (node.type) {
     case "function_declaration":
     case "generator_function_declaration":
-      out.add(makeFunctionCandidate(node, ctx, namespacePath))
-      return
     case "function_signature":
-      // A bodyless function is a Symbol only where nothing can be written beside it to carry
-      // the body. At module level it is an overload declaration and the implementation below it
-      // is the Symbol; under a `declare` there are no implementations, so the signature is the
-      // whole declaration and skipping it left `declare function f(): void` extracting nothing.
-      // Outside one it is an overload: still added, so it folds into the implementation's Symbol
-      // as a declaration with no body (LP8q), and the sink makes the implementation lead.
+      // A bodyless `function_signature` is added like any function, and the sink decides what
+      // it is. Under a `declare` there are no implementations, so the signature is the whole
+      // declaration and leads (skipping it left `declare function f(): void` extracting
+      // nothing). Outside one it is an overload, which folds into the implementation's Symbol as
+      // a declaration with no body and never leads it (`leadOf`, LP8q).
       out.add(makeFunctionCandidate(node, ctx, namespacePath))
       return
     case "function_expression":
