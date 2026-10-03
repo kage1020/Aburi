@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { byId, symbolsOf } from "./fixtures/ctx"
 
 /**
- * What a JSDoc `@throws` tag contributes to `signature.throws`. `throws` is an input of
+ * LP13a: what a JSDoc `@throws` tag contributes to `signature.throws`. `throws` is an input of
  * the api fingerprint, so a word of prose recorded as a type turns a reworded comment into an
  * API change. The rule favours recording nothing when a tag's text is not plainly a type.
  */
@@ -12,7 +12,7 @@ async function throwsOf(doc: string): Promise<readonly string[] | undefined> {
   return byId(symbols, "#f").signature?.throws
 }
 
-describe("JSDoc @throws", () => {
+describe("LP13a: JSDoc @throws", () => {
   it("records nothing for a free-text description", async () => {
     expect(await throwsOf("/** @throws If the id is unknown. */")).toEqual([])
     expect(await throwsOf("/** @throws Will throw an error if the argument is null. */")).toEqual(
@@ -37,9 +37,20 @@ describe("JSDoc @throws", () => {
     ])
   })
 
+  it("keeps a bare type name written on the line after the tag", async () => {
+    expect(await throwsOf("/**\n * @throws\n * NotFound\n */")).toEqual(["NotFound"])
+  })
+
   it("does not keep a lower-case or non-identifier word", async () => {
     expect(await throwsOf("/** @throws error */")).toEqual([])
     expect(await throwsOf("/** @throws - */")).toEqual([])
+  })
+
+  it("holds only a bare name's first segment to upper case, and takes no trailing full stop", async () => {
+    expect(await throwsOf("/** @throws Errors.notFound */")).toEqual(["Errors.notFound"])
+    expect(await throwsOf("/** @throws errors.Gone */")).toEqual([])
+    expect(await throwsOf("/** @throws {errors.Gone} */")).toEqual(["errors.Gone"])
+    expect(await throwsOf("/** @throws PaymentDeclined. */")).toEqual([])
   })
 
   it("does not take a description that continues on the next line", async () => {
@@ -52,14 +63,33 @@ describe("JSDoc @throws", () => {
     ])
   })
 
+  it("records what the braces hold verbatim, and nothing for empty ones", async () => {
+    expect(await throwsOf("/** @throws {} */")).toEqual([])
+    expect(await throwsOf("/** @throws { } */")).toEqual([])
+    expect(await throwsOf("/** @throws {A | B} */")).toEqual(["A | B"])
+    expect(await throwsOf("/** @throws {A}{B} */")).toEqual(["A"])
+  })
+
+  it("reads braces only when they open and close on the tag's own line", async () => {
+    expect(await throwsOf("/**\n * @throws {Err\n * @returns {Bar}\n */")).toEqual([])
+    expect(await throwsOf("/**\n * @throws\n * {NotFoundError} if missing\n */")).toEqual([])
+  })
+
   it("records the target of a TSDoc {@link}", async () => {
     expect(await throwsOf("/** @throws {@link NotFoundError} if the row is missing */")).toEqual([
       "NotFoundError",
     ])
+    expect(await throwsOf("/** @throws {@linkcode errors.Gone} */")).toEqual(["errors.Gone"])
     expect(await throwsOf("/** @throws {@linkcode errors.Gone | Gone} */")).toEqual(["errors.Gone"])
     expect(await throwsOf("/** @throws {@linkplain Conflict the conflict} */")).toEqual([
       "Conflict",
     ])
+  })
+
+  it("records nothing for a link that names no declaration, or another inline tag", async () => {
+    expect(await throwsOf("/** @throws {@link} */")).toEqual([])
+    expect(await throwsOf("/** @throws {@link https://e.com/x | site} */")).toEqual([])
+    expect(await throwsOf("/** @throws {@inheritDoc} */")).toEqual([])
   })
 
   it("reads every tag in a block", async () => {
@@ -71,5 +101,42 @@ describe("JSDoc @throws", () => {
       " */",
     ].join("\n")
     expect(await throwsOf(doc)).toEqual(["A", "B"])
+  })
+
+  it("reads the singular @throw spelling, and no longer tag name", async () => {
+    expect(await throwsOf("/** @throw Gone */")).toEqual(["Gone"])
+    expect(await throwsOf("/** @throwsFoo */")).toEqual([])
+  })
+
+  it("ends a tag's text at a tag written later on the same line", async () => {
+    expect(await throwsOf("/** @throws {A} first @throws {B} second */")).toEqual(["A", "B"])
+    expect(await throwsOf("/** @throws A @throws B */")).toEqual(["A", "B"])
+    expect(await throwsOf("/** @throws E @internal */")).toEqual(["E"])
+    expect(await throwsOf("/** @internal @throws E */")).toEqual(["E"])
+  })
+
+  it("ends a tag's text where its comment closes, on one * or several", async () => {
+    expect(await throwsOf("/** @throws Foo */")).toEqual(["Foo"])
+    expect(await throwsOf("/** @throws Foo **/")).toEqual(["Foo"])
+  })
+
+  it("does not read into the next block of the run", async () => {
+    expect(await throwsOf("/** @throws Gone */\n/** Explains Gone. */")).toEqual(["Gone"])
+    expect(await throwsOf("/** @throws {Foo */\n/** @param x {y} */")).toEqual([])
+  })
+
+  it("reads a long run of * or of blanks in linear time", async () => {
+    // Asking at every `*` of a run whether a `/` ends it, or splitting a run of blanks between
+    // two `[ \t]*`s, costs the square of the run: seconds at this length, where a linear scan
+    // takes about a millisecond.
+    const length = 100_000
+    for (const doc of [
+      `/** @throws Foo ${"*".repeat(length)}x */`,
+      `/**\n * @throws Foo\n${" ".repeat(length)}x\n */`,
+    ]) {
+      const started = performance.now()
+      expect(await throwsOf(doc)).toEqual([])
+      expect(performance.now() - started).toBeLessThan(1_000)
+    }
   })
 })

@@ -152,37 +152,59 @@ function extractThrownType(throwNode: Node): string | null {
 }
 
 /**
- * One `@throws` / `@throw` / `@exception` tag: an optional `{…}` and then the tag's text, which
- * runs to the next block tag (a `@` opening a line) or the end of its comment — the text read
- * here can be several blocks joined (`readLeadingJsDoc`), and a tag never reads into the next.
+ * One `@throws` / `@throw` / `@exception` tag: an optional `{…}`, which must open and close on the
+ * tag's own line, and then the tag's text, which runs to the next tag — one opening a line, or one
+ * written later on the same line after a blank — or to the end of its comment. The string read
+ * here can be several blocks joined (`readLeadingJsDoc`), and neither part reads into the next
+ * block or into a tag on a later line: the braces end at their line, and the text at a tag or at
+ * the end of the comment.
+ *
+ * A run of `*`s is taken whole, and ends the text when a `/` follows it, since a comment can close
+ * on `**` as well as on one `*`. Asking at each `*` of a run whether a `/` ends it would cost the
+ * square of the run's length, and so would two `[ \t]*`s either side of the gutter's optional `*`,
+ * which split one run of blanks every way; hence `[ \t]*(?:\*[ \t]*)?`.
  */
 const JSDOC_THROWS_PATTERN =
-  /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}]+)\})?((?:(?!\n[ \t]*\*?[ \t]*@|\*\/)[\s\S])*)/g
+  /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}\n]+)\})?((?:\*+(?![*/])|(?!\n[ \t]*(?:\*[ \t]*)?@|[ \t]@[a-zA-Z])[^*])*)/g
 
-/** `{@link X}`, `{@linkcode X}`, `{@linkplain X}`, with or without a `| label` or label text. */
+/**
+ * The inside of a `{…}` that is a TSDoc link — `@link X`, `@linkcode X`, `@linkplain X`, with or
+ * without a `| label` or label text — and its target.
+ */
 const INLINE_LINK_PATTERN = /^@link(?:code|plain)?\s+([^\s|]+)/
 
-/** An identifier or dotted path starting with an upper-case letter: `E`, `NotFound`, `Errors.NotFound`. */
+/** A link target that names a declaration: an identifier or dotted path, which a URL is not. */
+const DECLARATION_PATH_PATTERN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
+
+/**
+ * An identifier or dotted path starting with an upper-case letter: `E`, `NotFound`,
+ * `Errors.NotFound`. Only the first segment is held to upper case (`Errors.notFound` is one), so a
+ * bare `errors.Gone` records nothing where `{errors.Gone}` records it, a trailing `.`
+ * (`PaymentDeclined.`) records nothing, and `[A-Z]` and `\w` are ASCII-only.
+ */
 const BARE_TYPE_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
 /**
- * The exception types a JSDoc block declares.
+ * The exception types declared by the `@throws` tags in the JSDoc text above a declaration, which
+ * is several blocks joined when several were written.
  *
- * - `{Type} …` records `Type`; `{@link Type} …` (TSDoc's form) records `Type`.
+ * - A tag with braces records the text in its braces, verbatim and unchecked; the braces must be on
+ *   the tag's own line. `@throws {A}{B}` records `A` only. The one exception is a `{…}` opening
+ *   with `@`, which holds an inline tag rather than a type: a TSDoc link, `{@link X}` or its
+ *   `linkcode` / `linkplain` spelling, records `X` when `X` is an identifier or dotted path, and
+ *   anything else (`{@link}`, a URL, `{@inheritDoc}`) records nothing.
  * - With no braces, the tag is `@throws Type` or `@throws free-text description`, and the two
  *   cannot be told apart by syntax. A word is recorded only when it is the tag's whole text and
- *   reads as a type name (upper-case first letter, identifier or dotted path). Anything else —
- *   `@throws If the id is unknown.` — is prose and records nothing: a reworded description must
- *   not move the `api` axis. `@throws {Type} description` declares a type with a description.
+ *   reads as a type name (`BARE_TYPE_PATTERN`). Anything else — `@throws If the id is unknown.` —
+ *   is prose and records nothing: a reworded description must not move the `api` axis.
  */
 function extractJsDocThrows(jsDoc: string): string[] {
   const out: string[] = []
   for (const match of jsDoc.matchAll(JSDOC_THROWS_PATTERN)) {
     const braced = match[1]?.trim()
     if (braced !== undefined) {
-      const linked = INLINE_LINK_PATTERN.exec(braced)
-      const typed = linked === null ? braced : linked[1]
-      if (typed !== undefined && typed.length > 0) out.push(typed)
+      const typed = braced.startsWith("@") ? linkTarget(braced) : braced
+      if (typed !== null && typed.length > 0) out.push(typed)
       continue
     }
     const text = tagText(match[2] ?? "")
@@ -191,7 +213,13 @@ function extractJsDocThrows(jsDoc: string): string[] {
   return out
 }
 
-/** A tag's text without the comment's line-leading `*`s, whitespace-collapsed. */
+/** The target of a TSDoc link, or null for a link with none, a URL, or another inline tag. */
+function linkTarget(inline: string): string | null {
+  const target = INLINE_LINK_PATTERN.exec(inline)?.[1]
+  return target !== undefined && DECLARATION_PATH_PATTERN.test(target) ? target : null
+}
+
+/** A tag's text without the comment's gutter — one leading `*` per line — whitespace-collapsed. */
 function tagText(raw: string): string {
   return raw
     .split("\n")
