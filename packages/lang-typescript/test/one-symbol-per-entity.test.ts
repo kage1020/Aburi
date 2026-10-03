@@ -518,6 +518,17 @@ describe("a namespace merged into a class declares static members", () => {
     ])
   })
 
+  it.each([
+    ["overloads", "export class C { static m(a: string): void; static m(a: any) {} }"],
+    ["an accessor pair", "export class C { static get m() { return 1 } static set m(v) {} }"],
+  ])("says declaration-merged once when a member folded from %s meets an exported type", async (_label, member) => {
+    // The member is a fold before the sink sees it, and folds again with the type there.
+    const source = `${member}\nexport namespace C { export type m = number }`
+    const m = await symbolOf(source, "ts:src/a.ts#C::m")
+    expect(m.mergedDeclarations).toHaveLength(2)
+    expect(m.derivedBy.filter((token) => token === "declaration-merged")).toHaveLength(1)
+  })
+
   it("still folds an instance member and a namespace local of the same name", async () => {
     // Not the intent. The local is no member of `C`, so it keeps the dot and shares the
     // method's name; the fold absorbs it.

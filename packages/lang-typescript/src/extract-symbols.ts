@@ -221,6 +221,10 @@ const MERGED_DECLARATION = "declaration-merged"
  * Symbol *is*: `interface P {}` beside `@Controller() class P {}` is legal with the interface
  * written first, so the lead is the declaration carrying no decorators, and a lost `boundary`
  * decorator turns a controller into an `interface (data model)` drop.
+ *
+ * `declaration-merged` is said once, like every other token. A declaration can be a fold
+ * already — a class member whose accessor pair or overloads `foldMemberGroup` joined, meeting
+ * a merged namespace's export of the same id here — and it then brings the token with it.
  */
 function foldDeclarations(
   declarations: readonly SymbolCandidate<Node>[],
@@ -239,7 +243,7 @@ function foldDeclarations(
     merged.push({ bodyNode: declaration.bodyNode, fullNode: declaration.fullNode })
     merged.push(...(declaration.mergedDeclarations ?? []))
   }
-  derivedBy.push(MERGED_DECLARATION)
+  if (!derivedBy.includes(MERGED_DECLARATION)) derivedBy.push(MERGED_DECLARATION)
   return { ...lead, decorators, derivedBy, mergedDeclarations: merged }
 }
 
