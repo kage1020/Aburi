@@ -9,6 +9,27 @@ import { type MockLspClient, mockServerFactory } from "./fixtures/mock-server"
 const HOVER_METHOD = "textDocument/hover"
 const DOC_SYMBOL_METHOD = "textDocument/documentSymbol"
 
+/** What `C.bar`, which calls `this.foo()`, infers when the hover on `foo` ends in `tags`. */
+async function inferredThrowsFrom(tags: string): Promise<readonly string[] | undefined> {
+  const cls = makeClassSymbol("src/a.ts", "C", 1)
+  const foo = makeMethodSymbol("src/a.ts", "C", "foo", 2)
+  const bar = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])
+  const factory = mockServerFactory((_lang, client) => {
+    client.installHandler(DOC_SYMBOL_METHOD, () => [])
+    client.installHandler(HOVER_METHOD, () => ({
+      contents: { kind: "markdown", value: `(method) C.foo(): void\n${tags}` },
+    }))
+  })
+  const enrichment = await enrichWithLsp(
+    makeEnrichmentInput({
+      symbols: [cls, foo, bar],
+      fileContents: { "src/a.ts": "class C {\n  foo() {}\n  bar() {\n    this.foo()\n  }\n}" },
+      serverFactory: factory,
+    }),
+  )
+  return enrichment.symbols.find((s) => s.id === "ts:src/a.ts#C.bar")?.signature?.inferredThrows
+}
+
 describe("LSP enrichment", () => {
   it("resolves this.foo() in class C to C.foo via receiverHints at high confidence", async () => {
     const cls = makeClassSymbol("src/a.ts", "C", 1)
@@ -266,6 +287,18 @@ describe("LSP enrichment", () => {
     const barSymbol = enrichment.symbols.find((s) => s.id === "ts:src/a.ts#C.bar") as IRSymbol
     expect(barSymbol.signature?.inferredThrows).toEqual(["NetworkError"])
     expect(barSymbol.signature?.throws).toEqual([])
+  })
+
+  it("reads a hover's @throws by the rule Signature.throws follows", async () => {
+    // `inferredThrows` is no api input, but the two fields must not disagree about what one tag
+    // declares: a description's first word is not a type, and a link records its target.
+    expect(await inferredThrowsFrom("@throws If the id is unknown.")).toBeUndefined()
+    expect(await inferredThrowsFrom("@throws error")).toBeUndefined()
+    expect(await inferredThrowsFrom("@throws NotFoundError when missing")).toBeUndefined()
+    expect(await inferredThrowsFrom("@throws Gone")).toEqual(["Gone"])
+    expect(await inferredThrowsFrom("@throws {@link NotFound} if missing")).toEqual(["NotFound"])
+    expect(await inferredThrowsFrom("@throws {@link https://e.com/x | site}")).toBeUndefined()
+    expect(await inferredThrowsFrom("@throws A @throws B")).toEqual(["A", "B"])
   })
 
   it("never lowers edge confidence relative to the untyped tier", async () => {
