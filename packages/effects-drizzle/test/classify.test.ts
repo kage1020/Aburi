@@ -31,10 +31,34 @@ describe("classifyDrizzleCall — write terminals", () => {
   const ctx = makeCtx({ imports: [makeDrizzleImport()] })
 
   it.each(["insert", "update", "delete"])("classifies db.%s as db.write", (method) => {
-    const result = classifyDrizzleCall(makeCall({ target: `db.${method}` }), ctx)
+    const result = classifyDrizzleCall(makeCall({ target: `db.${method}`, argumentCount: 1 }), ctx)
     expect(result?.effectId).toBe("db.write")
     expect(result?.confidence).toBe("high")
     expect(result?.derivedBy).toBe("effects-plugin:drizzle:write")
+  })
+
+  it.each([
+    "db.insert",
+    "db.update",
+    "db.delete",
+    "this.update",
+    "form.delete",
+    "user.delete",
+  ])("returns null for %s with argCount=0 — every write terminal takes a table", (target) => {
+    // `insert(table)`, `update(table)` and `delete(table)` all require one, so a bare call is a
+    // class's own `update()`, a form's or an Active Record model's `delete()`, or broken source.
+    // The floor is checked before the receiver, so a client word does not save it either.
+    expect(classifyDrizzleCall(makeCall({ target, argumentCount: 0 }), ctx)).toBeNull()
+  })
+
+  it("still records form.delete(row) at medium — EP11, not the floor", () => {
+    const result = classifyDrizzleCall(makeCall({ target: "form.delete", argumentCount: 1 }), ctx)
+    expect(result).toMatchObject({ effectId: "db.write", confidence: "medium" })
+  })
+
+  it("leaves a bare read terminal to the receiver — db.select() takes no argument", () => {
+    const result = classifyDrizzleCall(makeCall({ target: "db.select", argumentCount: 0 }), ctx)
+    expect(result).toMatchObject({ effectId: "db.read", confidence: "high" })
   })
 })
 
