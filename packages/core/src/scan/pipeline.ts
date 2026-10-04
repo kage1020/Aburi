@@ -643,11 +643,9 @@ function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["sig
   const inputs = mapPreservingIdentity(signature.inputs, (input) => {
     const name = toNfc(input.name)
     const written = input.bindings
-    const bindings = written === undefined ? written : mapPreservingIdentity(written, toNfc)
-    if (name === input.name && bindings === written) return input
-    const next = { ...input, name }
-    if (bindings !== undefined) next.bindings = bindings
-    return next
+    if (written === undefined) return name === input.name ? input : { ...input, name }
+    const bindings = mapPreservingIdentity(written, toNfc)
+    return name === input.name && bindings === written ? input : { ...input, name, bindings }
   })
   return inputs === signature.inputs ? signature : ({ ...signature, inputs } as T)
 }

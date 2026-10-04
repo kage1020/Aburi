@@ -7,7 +7,7 @@ import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * A name a destructuring parameter binds is a parameter, so a call to it is local
- * (call-resolution.md §4.2, CR9) — the same as `function plain(save) { save() }`. Reading
+ * (call-resolution.md §4.2, CR9a) — the same as `function plain(save) { save() }`. Reading
  * the parameter by its pattern text (`{ save }`) left `save` out of the shadow set, and the
  * call went on to the imported `save` and took its database write.
  */
@@ -93,9 +93,10 @@ describe("scan — a destructuring parameter shadows the import it names", () =>
 
 /**
  * A destructuring parameter the parser could not fully place still leaves its file in the
- * scan (lang-plugin.md LP11d). What the parser placed as a binding shadows; the text it wrapped
- * in an ERROR node binds nothing, so where that is all the pattern holds, `save()` is the
- * import's again.
+ * scan (lang-plugin.md LP11d). What the parser placed as a binding shadows, a malformed array
+ * pattern it kept only as an expression included; the text it wrapped in an ERROR node, and an
+ * expression it placed where a binding belongs, bind nothing, so where that is all the pattern
+ * holds, `save()` is the import's again.
  */
 describe("scan — a destructuring parameter with text the parser could not place", () => {
   beforeEach(async () => {
@@ -110,6 +111,12 @@ describe("scan — a destructuring parameter with text the parser could not plac
         "export async function unseparated({ save b }: any) { await save(3) }",
         "export async function arraySpread([...]: any) { await save(4) }",
         "export async function objectSpread({ ... }: any) { await save(5) }",
+        "export async function strayFirst({ a, ?, save }: any) { await save(6) }",
+        "export async function arrayStray([a, ?, save]: any) { await save(7) }",
+        "export async function arrayStrayLast([save, ?]: any) { await save(8) }",
+        "export async function arrayUnseparated([a, save b]: any) { await save(9) }",
+        "export async function placed({ a: obj.b, save }: any) { await save(10) }",
+        "export async function placedOnly({ save: obj.b }: any) { await save(11) }",
         "",
       ].join("\n"),
     )
@@ -129,6 +136,12 @@ describe("scan — a destructuring parameter with text the parser could not plac
     ["unseparated", "{ save b }", ["save"], null],
     ["arraySpread", "[...]", undefined, "ts:src/repo.ts#save"],
     ["objectSpread", "{ ... }", undefined, "ts:src/repo.ts#save"],
+    ["strayFirst", "{ a, ?, save }", ["a", "save"], null],
+    ["arrayStray", "[a, ?, save]", ["a", "save"], null],
+    ["arrayStrayLast", "[save, ?]", ["save"], null],
+    ["arrayUnseparated", "[a, save b]", ["a", "save"], null],
+    ["placed", "{ a: obj.b, save }", ["save"], null],
+    ["placedOnly", "{ save: obj.b }", undefined, "ts:src/repo.ts#save"],
   ])("%s binds only what the source placed", async (qname, name, bindings, resolved) => {
     const result = await scanWorkspace()
     const symbol = symbolById(result, `ts:src/broken.ts#${qname}`)
@@ -137,5 +150,39 @@ describe("scan — a destructuring parameter with text the parser could not plac
       bindings === undefined ? { name, type: "any" } : { name, type: "any", bindings },
     ])
     expect(symbol.calls.map((c) => [c.target, c.resolved])).toEqual([["save", resolved]])
+  })
+})
+
+/**
+ * Characterization of a known limit, not a guarantee (call-resolution.md §4.2, CR9a). The
+ * shadow reads the caller Symbol's own `signature`, and a `const` whose function is handed to a
+ * call has none: the function is its body (lang-plugin.md LP7c), so `save()` in it resolves to
+ * the import and carries the write, destructured or not.
+ */
+describe("scan — a function a const hands its call is not shadowed", () => {
+  beforeEach(async () => {
+    await workspace.writeSource("src/repo.ts", REPO)
+    await workspace.writeSource(
+      "src/route.ts",
+      [
+        'import { save } from "./repo"',
+        'import { withAuth } from "./auth"',
+        "",
+        "export const POST = withAuth(async ({ save }: any) => { await save(1) })",
+        "export const PUT = withAuth(async (save: any) => { await save(2) })",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  it.each(["POST", "PUT"])("%s links `save` to the import", async (qname) => {
+    const result = await scanWorkspace()
+    const symbol = symbolById(result, `ts:src/route.ts#${qname}`)
+
+    expect(symbol.signature).toBeNull()
+    expect(symbol.calls.map((c) => [c.target, c.resolved])).toEqual([
+      ["save", "ts:src/repo.ts#save"],
+    ])
+    expect(symbol.effects.map((e) => e.id)).toEqual(["db.write"])
   })
 })

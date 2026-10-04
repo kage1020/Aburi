@@ -929,7 +929,12 @@ function makeVariableCandidates(
 ): SymbolCandidate<Node>[] {
   const nameNode = declarator.childForFieldName("name")
   if (nameNode !== null && isBindingPattern(nameNode)) {
-    return collectPatternBindings(nameNode).map((binding) =>
+    const refuse = (node: Node): never =>
+      refuseAnonymousId(
+        `Unmodelled node "${node.type}" inside a destructuring pattern at ${nameNode.startPosition.row + 1}; refusing to report bindings this walk may have missed`,
+        node.type,
+      )
+    return collectPatternBindings(nameNode, refuse).map((binding) =>
       makeDestructuredCandidate(binding, statement, ctx, namespacePath),
     )
   }

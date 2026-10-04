@@ -598,7 +598,7 @@ describe("resolveCallGraph", () => {
     expect(result.edges).toEqual([])
   })
 
-  describe("CR9: a destructuring parameter shadows the names it binds", () => {
+  describe("CR9a: a destructuring parameter shadows the names it binds", () => {
     // A rest parameter is named by its binding without the `...` and carries `rest`, so
     // `...save` shadows through `name` alone and `...[save]` through `bindings`.
     it.each<[string, Signature["inputs"][number]]>([

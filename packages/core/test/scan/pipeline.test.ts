@@ -577,7 +577,9 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
       },
     }
     const result = await runPipelineWithStubs({ candidate })
-    expect(result.symbols[0]?.signature?.inputs[0]?.bindings).toEqual(["a", composed])
+    expect(result.symbols[0]?.signature?.inputs).toStrictEqual([
+      { name: `{ ${composed} }`, type: "", bindings: ["a", composed] },
+    ])
   })
 
   it("leaves a single-name parameter without bindings", async () => {
@@ -593,7 +595,7 @@ describe("runFilePipeline — Unicode normalization at the plugin boundary", () 
       },
     }
     const result = await runPipelineWithStubs({ candidate })
-    expect(Object.keys(result.symbols[0]?.signature?.inputs[0] ?? {})).not.toContain("bindings")
+    expect(result.symbols[0]?.signature?.inputs).toStrictEqual([{ name: composed, type: "" }])
   })
 
   it("normalizes decorators[].name, which a framework plugin matches against the edges", async () => {

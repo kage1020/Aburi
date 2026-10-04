@@ -71,6 +71,8 @@ For `target` of the form `name` or `name.<rest>`, if `name` is a parameter, loca
 
 A parameter written as a destructuring pattern declares every name the pattern binds, and each of them shadows: `function f({ save }) { save() }` is the same local call as `function f(save) { save() }`. The resolver reads those names from `Signature.inputs[].bindings` ([ir-schema.md](./ir-schema.md) §7), never from the pattern text in `name`, so `{ a: b }` shadows `b` and `{ a = fallback }` shadows `a` but not `fallback`. A rest parameter follows the same rule: `...[save]` is named `[save]` and binds `save`, while `...save` is a single name, `save`, and needs no list.
 
+Both rules read the parameters from the caller Symbol's own `signature`, so neither reaches a function that a `const` only hands to a call. `export const POST = withAuth(async ({ save }) => { await save(1) })` is a `const` with a null `signature` whose body is the arrow ([lang-plugin.md](./lang-plugin.md) LP7c), so `save()` there resolves to an imported `save` as though no parameter declared it, and takes its effects. A single-name parameter in the same place, `withAuth((save) => save())`, is resolved the same way. Route handlers and RPC procedures are commonly written like this.
+
 Rationale: promoting a locally-scoped identifier to a Symbol id would produce false edges. Emitting `null` here is a **correct** resolution, not a failure.
 
 ### 4.3 Step 2: file scope
@@ -346,7 +348,7 @@ Every implementation of the resolver must pass the following.
 | CR7 | bare specifier (`import { sortBy } from 'lodash'; sortBy()`) | `resolved` = `null`, confidence `high` |
 | CR8 | dynamic import (`await import('./y')`) — no direct call at the site | no `Call` entry, no edge |
 | CR9 | call to a parameter (`function f(cb) { cb() }`) | `resolved` = `null`, confidence `high` (local shadow) |
-| CR9a | call to a name a destructuring parameter binds (`{ x }`, `[x]`, `{ a: x }`, `{ x = y }`, `...[x]`) | `resolved` = `null`, confidence `high` (local shadow); a call to `y` in `{ x = y }` is not shadowed. A single-name rest parameter (`...x`) is CR9's case: its `name` is `x` |
+| CR9a | call to a name a destructuring parameter binds (`{ x }`, `[x]`, `{ a: x }`, `{ x = y }`, `...[x]`) | `resolved` = `null`, confidence `high` (local shadow); a call to `y` in `{ x = y }` is not shadowed. A single-name rest parameter (`...x`) is CR9's case: its `name` is `x`. Not reached through a function a `const` hands its call (`const h = withAuth(({ x }) => x())`, LP7c), whose parameters are on no `signature`: that `x()` resolves as though nothing shadowed it, as CR9's `withAuth((x) => x())` does (§4.2) |
 | CR10 | call to a local nested function | `resolved` = `null`, confidence `high` |
 | CR11 | qualified cross-file same-component (`PricingService.calc()` no import) | `resolved` = that Symbol id when unique, confidence `medium` |
 | CR12 | qualified workspace-scope (no import, unique globally) | `resolved` = that Symbol id, confidence `low` |

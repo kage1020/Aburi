@@ -189,7 +189,7 @@ optional?: true
  */
 rest?: true
 /**
- * The identifiers a destructuring parameter binds, in source order, read as a destructuring declaration is (ir-schema.md §3.2); the call resolver treats each as a parameter (call-resolution.md §4.2). Class B per ir-schema.md: writers MUST omit the key for a parameter that is a single name, never emit as [].
+ * The identifiers a destructuring parameter binds, in source order, read as a destructuring declaration is (ir-schema.md §3.2); the call resolver treats each as a parameter (call-resolution.md §4.2). Class B per ir-schema.md: writers MUST omit the key for a parameter that is a single name and for a pattern that binds no name, never emit as [].
  * 
  * @minItems 1
  */

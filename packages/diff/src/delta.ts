@@ -364,6 +364,11 @@ type SignatureInput = Signature["inputs"][number]
  * and `rest` are compared because the api fingerprint hashes them: a parameter that turns
  * optional moves `api`, and the delta has to show which one did. An absent marker reads as
  * `false`, as the fingerprint reads it.
+ *
+ * `bindings` is not compared. The api fingerprint does not read it, and it is the plugin's
+ * reading of the pattern text in `name`, so one plugin cannot give two inputs the same `name`
+ * and different `bindings`. Leaving it out also keeps a base scanned before the field existed,
+ * set against a head that carries it, from reporting every destructuring parameter as modified.
  */
 function inputsEqual(a: SignatureInput, b: SignatureInput): boolean {
   return (

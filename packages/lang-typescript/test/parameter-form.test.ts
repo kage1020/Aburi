@@ -76,18 +76,18 @@ describe("readParameters — the form of a parameter", () => {
     ["an arrow", inArrow],
   ])("in %s", (_host, host) => {
     it.each(FORMS)("records %s", async (_label, params, expected) => {
-      expect(await inputsOf(params, host)).toEqual([expected])
+      expect(await inputsOf(params, host)).toStrictEqual([expected])
     })
   })
 
   it("marks an optional parameter and a defaulted one alike, since a caller may omit either", async () => {
-    expect(await inputsOf("a?: string")).toEqual(await inputsOf('a: string = "x"'))
+    expect(await inputsOf("a?: string")).toStrictEqual(await inputsOf('a: string = "x"'))
   })
 
   it("reads an abstract method's parameters", async () => {
     const source = "export abstract class A {\n  abstract m(a?: string, ...ids: string[]): void\n}"
     const symbol = await symbolOf(source, "ts:src/a.ts#A.m")
-    expect(symbol.signature?.inputs).toEqual([
+    expect(symbol.signature?.inputs).toStrictEqual([
       { name: "a", type: "string", optional: true },
       { name: "ids", type: "string[]", rest: true },
     ])
@@ -96,7 +96,7 @@ describe("readParameters — the form of a parameter", () => {
   it("reads an ambient method's parameters", async () => {
     const source = "export declare class D {\n  m(limit?: number, ...rest: T[]): void\n}"
     const symbol = await symbolOf(source, "ts:src/a.ts#D.m")
-    expect(symbol.signature?.inputs).toEqual([
+    expect(symbol.signature?.inputs).toStrictEqual([
       { name: "limit", type: "number", optional: true },
       { name: "rest", type: "T[]", rest: true },
     ])
@@ -123,6 +123,6 @@ const REPAIRED: Array<[source: string, id: string, expected: Input]> = [
 describe("readParameters — a parameter the parser repaired", () => {
   it.each(REPAIRED)("names the parameter in %j", async (source, id, expected) => {
     const symbol = await symbolOf(source, id)
-    expect(symbol.signature?.inputs).toEqual([expected])
+    expect(symbol.signature?.inputs).toStrictEqual([expected])
   })
 })

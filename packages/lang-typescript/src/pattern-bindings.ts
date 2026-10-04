@@ -1,5 +1,10 @@
-import { CoreError } from "@aburi/core"
 import type { Node } from "web-tree-sitter"
+
+/**
+ * What `collectPatternBindings` does with a node it does not model. A destructuring declaration
+ * passes the refusal that withdraws its file, and a destructuring parameter passes `"skip"`.
+ */
+export type Unmodelled = "skip" | ((node: Node) => never)
 
 /**
  * Every identifier a destructuring pattern *binds*, in source order.
@@ -14,27 +19,32 @@ import type { Node } from "web-tree-sitter"
  * pattern would declare both of those, so each wrapper is entered through the one
  * field that holds a binding rather than through its children.
  *
- * Which makes the *set of wrappers* the thing that has to be right, and a missing one silent
- * — so an unmodelled node type is refused rather than passed over. An array hole (`[, x]`)
- * binds nothing and is not a named child, so it needs no case; a `comment` is a named child
- * and gets one.
+ * Which makes the *set of wrappers* the thing that has to be right, and a missing one silent.
+ * An array hole (`[, x]`) binds nothing and is not a named child, so it needs no case; a
+ * `comment` is a named child and gets one.
  *
- * `unplaced` says what to do with an `ERROR` node, the text of a recovered parse the parser
- * could not place (`{ a, ? }`, `{ a b }`, `[...]`). A declaration refuses it like any other
- * node it does not model, which is the default. A parameter passes `"skip"`: the subtree binds
- * nothing, since a name the parser could not place is no binding, and the rest of the pattern
- * is still read. Refusing there would take the whole file out of the scan over one malformed
- * parameter list, which reading the parameter by its text alone never did. Only `ERROR` is
- * skipped; a node type the grammar does build and this walk does not model is still refused.
+ * `unmodelled` says what to do with every other node, and the two readers answer differently
+ * because a missed binding costs them different things. A declaration's binding lost without
+ * a word is a Symbol missing from the IR with no diagnostic and no `skipped` entry, which is
+ * how `assignment_pattern` once went missing, so a declaration refuses and its file goes to
+ * the per-file boundary, which names it. A parameter's binding missed costs a shadow, never a
+ * Symbol, while a refusal there would take the whole file out of the scan over one malformed
+ * parameter list, which reading the parameter by its text alone never did. So a parameter
+ * skips the node, which binds nothing, and the rest of the pattern is still read. That covers
+ * the text of a recovered parse the parser could not place (an ERROR node: `{ a, ? }`,
+ * `{ a b }`, `[...]`) and an expression the grammar places where a binding belongs, which no
+ * compiler accepts in a parameter (`{ a: obj.b }`, `[a[0]]`, `{ a: b!, c }`,
+ * `{ a: undefined }`). The two readers share this walk, so a pattern node type the grammar
+ * gains is refused by the first declaration that writes one, not skipped unseen.
+ *
+ * A parameter also reads one repair the parser makes to a malformed pattern
+ * (`isRepairedPattern`), and reads the expression it gets through `EXPRESSION_SPELLING`.
  */
-export function collectPatternBindings(
-  pattern: Node,
-  unplaced: "refuse" | "skip" = "refuse",
-): Node[] {
+export function collectPatternBindings(pattern: Node, unmodelled: Unmodelled): Node[] {
   const out: Node[] = []
-  const visit = (node: Node): void => {
-    if (node.type === "ERROR" && unplaced === "skip") return
-    switch (node.type) {
+  const visit = (node: Node, repaired: boolean): void => {
+    const type = repaired ? (EXPRESSION_SPELLING.get(node.type) ?? node.type) : node.type
+    switch (type) {
       case "identifier":
       case "shorthand_property_identifier_pattern":
         out.push(node)
@@ -42,7 +52,7 @@ export function collectPatternBindings(
       case "object_pattern":
       case "array_pattern":
         for (const child of node.namedChildren) {
-          if (child !== null) visit(child)
+          if (child !== null) visit(child, repaired)
         }
         return
       case "pair_pattern": {
@@ -50,7 +60,7 @@ export function collectPatternBindings(
         // `computed_property_name` depending on how it was written, and none of them is a
         // declaration. Reading the `value` field says so rather than filtering them out.
         const value = node.childForFieldName("value")
-        if (value !== null) visit(value)
+        if (value !== null) visit(value, repaired)
         return
       }
       // Two node types for one idea: the grammar uses `object_assignment_pattern` for an
@@ -61,12 +71,12 @@ export function collectPatternBindings(
       case "object_assignment_pattern": {
         // `left` is the binding; `right` is a default expression evaluated elsewhere.
         const left = node.childForFieldName("left") ?? node.namedChild(0)
-        if (left !== null) visit(left)
+        if (left !== null) visit(left, repaired)
         return
       }
       case "rest_pattern": {
         const inner = node.namedChild(0)
-        if (inner !== null) visit(inner)
+        if (inner !== null) visit(inner, repaired)
         return
       }
       case "comment":
@@ -74,17 +84,51 @@ export function collectPatternBindings(
         // legitimately binds nothing.
         return
       default:
-        // Loud, because the alternative is the failure this whole change is about. A node
-        // type this walk does not model binds nothing here, which is indistinguishable from
-        // a pattern that declares nothing — and a binding lost that way leaves no Symbol (or,
-        // in a parameter, no shadow), no diagnostic and no `skipped` entry. `assignment_pattern` went missing exactly this
-        // way. Refusing sends the file to the per-file boundary instead, which names it.
-        throw new CoreError(
-          `Unmodelled node "${node.type}" inside a destructuring pattern at ${pattern.startPosition.row + 1}; refusing to report bindings this walk may have missed`,
-          { code: "anonymous-symbol-id-attempted", value: node.type },
-        )
+        // A node this walk does not model: a declaration refuses it, and a parameter skips it
+        // unless it is the one repair the walk reads through.
+        if (unmodelled !== "skip") unmodelled(node)
+        if (isRepairedPattern(node)) {
+          const operand = node.namedChild(0)
+          if (operand !== null) visit(operand, true)
+        }
     }
   }
-  visit(pattern)
+  visit(pattern, false)
   return out
 }
+
+/**
+ * Whether `node` is a destructuring pattern the parser could keep only as an expression.
+ *
+ * The parser does not always keep a malformed array pattern as an `array_pattern` around an
+ * ERROR node. For `[a, ?, b]` or `[a, b c]` in a parameter, and for an object pattern holding
+ * one (`{ q, k: [a, ?] }`), it reads an array (or object) expression and inserts a zero-width
+ * `!` after it, since a non-null expression is something the grammar lets a parameter hold. The
+ * parameter then arrives as `non_null_expression > array`, the `!` MISSING. The names inside
+ * were still written in binding position, so a parameter reads them. A `!` the source wrote
+ * (`[a]!`) is no repair: it binds nothing, like any other expression in a pattern.
+ */
+export function isRepairedPattern(node: Node): boolean {
+  if (node.type !== "non_null_expression") return false
+  const bang = node.lastChild
+  if (bang === null || bang.type !== "!" || !bang.isMissing) return false
+  const operand = node.namedChild(0)
+  return operand !== null && (operand.type === "array" || operand.type === "object")
+}
+
+/**
+ * The pattern node each expression node stands for under a repaired pattern
+ * (`isRepairedPattern`). The parser read the text as an expression, so `[a = 1, ?]` arrives as
+ * an `array` holding an `assignment_expression`, and `{ q, k: [x, ?] }` as an `object` holding
+ * a `shorthand_property_identifier` and a `pair`. Each is read through the same field as the
+ * pattern node it spells. These are the types measured under the repair; nowhere else is one of
+ * them read as a pattern.
+ */
+const EXPRESSION_SPELLING: ReadonlyMap<string, string> = new Map([
+  ["array", "array_pattern"],
+  ["object", "object_pattern"],
+  ["pair", "pair_pattern"],
+  ["shorthand_property_identifier", "shorthand_property_identifier_pattern"],
+  ["assignment_expression", "assignment_pattern"],
+  ["spread_element", "rest_pattern"],
+])

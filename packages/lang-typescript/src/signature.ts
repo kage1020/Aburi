@@ -2,7 +2,7 @@ import { compareCodeUnit } from "@aburi/core"
 import type { Signature } from "@aburi/types"
 import type { Node } from "web-tree-sitter"
 import { findChild, thrownValue, walkDescendants } from "./ast-helpers"
-import { collectPatternBindings } from "./pattern-bindings"
+import { collectPatternBindings, isRepairedPattern } from "./pattern-bindings"
 
 /**
  * Build a Signature for a function-like declaration node (function_declaration,
@@ -14,7 +14,7 @@ import { collectPatternBindings } from "./pattern-bindings"
  * - `inputs[].optional` / `inputs[].rest` record what a caller sees of the parameter's form,
  *   and are written only when true (LP11b).
  * - `inputs[].bindings` lists the names a destructuring parameter binds, and is absent for
- *   a parameter that is a single name (LP11d).
+ *   a parameter that is a single name and for a pattern that binds none, as `{}` (LP11d).
  * - `inputs[].type` and `outputs[]` are the AST-visible type text; we do not resolve
  *   types.
  * - `throws[]` is the union of explicit `throw new X()` statements inside the body plus
@@ -149,17 +149,24 @@ function writtenText(node: Node | null): string | null {
  * `save`. A single name returns nothing, rest or not: its `name` already is the binding, and
  * the key stays absent (Class B).
  *
- * A recovered parse leaves two kinds of thing inside a pattern that are not bindings, and
- * neither is listed, for the reason `readParameter` never names an input by one. A zero-width
- * MISSING identifier (`{ a: }`) is a name the source did not write, and its empty text is one
- * the schema's `minLength: 1` refuses. An ERROR node (`{ a, ? }`, `{ a b }`, `[...]`) is text
- * the parser could not place, so the walk skips it and lists the names around it that it did
- * place: `{ a b }` binds `a`. A destructuring declaration refuses the same ERROR node, but here
- * that would drop the whole file over one parameter whose `name` is still its written text.
+ * Only a name the parser placed in binding position is listed. A zero-width MISSING identifier
+ * (`{ a: }`) is a name the source did not write, for the reason `readParameter` never names an
+ * input by one, and its empty text is one the schema's `minLength: 1` refuses. The walk skips
+ * an ERROR node, text the parser could not place (`{ a b }`), and an expression the grammar
+ * places where a binding belongs (`{ a: obj.b, c }`), and lists the names around them: those
+ * two bind `a` and `c`. A destructuring declaration refuses both, but here a refusal would drop
+ * the whole file over one parameter whose `name` is still its written text. Where the parser
+ * kept a malformed array pattern only as an expression behind a `!` it inserted, the walk reads
+ * the expression as the pattern it spells, so `[a, ?, b]` binds `a` and `b`
+ * (`isRepairedPattern`).
  */
 function readPatternBindings(binding: Node | null): string[] {
   if (binding === null) return []
-  if (binding.type !== "object_pattern" && binding.type !== "array_pattern") return []
+  const destructures =
+    binding.type === "object_pattern" ||
+    binding.type === "array_pattern" ||
+    isRepairedPattern(binding)
+  if (!destructures) return []
   const out: string[] = []
   for (const node of collectPatternBindings(binding, "skip")) {
     const name = writtenText(node)
