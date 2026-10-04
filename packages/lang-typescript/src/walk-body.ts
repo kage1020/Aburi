@@ -809,8 +809,10 @@ function extractSwitchCondition(node: Node): string | null {
  *
  * Comments go because fingerprint.md lists them among the edits `logic` does not see, and these
  * strings are `logic`'s input: a guard with a block comment between `qty <= 0` and
- * `|| unit < 0` is the guard `qty <= 0 || unit < 0`. Each one is replaced by a space rather than by nothing, so a comment
- * that was the only thing between two tokens still leaves them apart.
+ * `|| unit < 0` is the guard `qty <= 0 || unit < 0`. Each one is replaced by a space rather
+ * than by nothing, so a comment that was the only thing between two tokens still leaves them
+ * apart: with a block comment as all that separates `a-` from `-b`, the guard is `a- -b`, where
+ * `a--b` would read as a decrement.
  *
  * `from` / `to` narrow the text to part of the node: `conditionText` uses them to leave out
  * the parentheses, which no comment can sit outside of.
@@ -818,6 +820,9 @@ function extractSwitchCondition(node: Node): string | null {
 function ruleText(node: Node, from = node.startIndex, to = node.endIndex): string {
   const source = node.text
   const base = node.startIndex
+  // Every `comment` node opens with `//` or `/*`, so text without a `/` holds none, and the
+  // walk below would only copy it.
+  if (!source.includes("/")) return normalizeRuleText(source.slice(from - base, to - base))
   let out = ""
   let at = from
   for (const descendant of walkDescendants(node)) {
