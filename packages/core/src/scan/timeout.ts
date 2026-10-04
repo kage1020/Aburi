@@ -14,15 +14,16 @@ export const CLASSIFY_TIMEOUT_MIN_MS = 10
 export const CLASSIFY_TIMEOUT_MAX_MS = 5000
 
 /**
- * A single soft-timeout observation. Aggregated into `stats.effectClassifyTimeouts[]`
- * so the IR consumer can detect run-to-run non-determinism ("this call classified
- * successfully in run 1 but timed out in run 2 → the plugin is on the edge").
+ * A single overrun observation. Aggregated into `stats.effectClassifyTimeouts[]` so the IR
+ * consumer can see which plugin is slow, and where. The classification itself is kept, so an
+ * overrun changes that record and nothing else in the Document.
  *
- * `symbolId` names the owning Symbol so the timeout event can be joined against the
- * IR's Symbol map; `budgetMs` is the configured cap in effect at the time (matches the
- * schema's `stats.effectClassifyTimeouts[].timeoutMs` semantics — "the budget that was
- * blown", not the actual wall-clock). `elapsedMs` is the observed wall-clock, kept for
- * CI signal wiring.
+ * `symbolId` names the owning Symbol so the event can be joined against the IR's Symbol map;
+ * `budgetMs` is the clamped budget in effect (the schema's
+ * `stats.effectClassifyTimeouts[].timeoutMs`: the budget the call ran past, not the wall
+ * clock). The IR record keeps only those two and the plugin. `target`, `file`, `line` and
+ * `elapsedMs` stay on `ScanResult.timeoutEvents`, for a `scan()` caller that wants to name the
+ * call and say how far over it went, the way `ParseTimeoutEvent` does for a file.
  */
 export interface ClassifyTimeoutEvent {
   plugin: string
@@ -39,17 +40,7 @@ export interface ClassifyWithTimeoutOptions {
   onTimeout?: (event: ClassifyTimeoutEvent) => void
 }
 
-/**
- * Run `plugin.classify(call, ctx)` under a soft wall-clock budget. The classifier is
- * expected to be synchronous (effect-plugin.md recommends pure-function shape) so
- * the runtime cannot preempt it mid-execution — the check happens AFTER the call
- * returns. A classifier that violates the sync contract by returning a Promise is
- * caught and rejected the same way an overtime call is.
- *
- * Returns the classification when the call finished within budget, or `null` when it
- * timed out. Timeouts fire the `onTimeout` hook so `stats.effectClassifyTimeouts` can
- * accumulate the observation.
- */
+/** Where the classified call sits, for the overrun event. */
 export interface ClassifyWithTimeoutContext {
   /** Owning Symbol id — required so the timeout event can be joined against the IR. */
   symbolId: string
@@ -57,6 +48,18 @@ export interface ClassifyWithTimeoutContext {
   file: string
 }
 
+/**
+ * Run `plugin.classify(call, ctx)` against a wall-clock budget. The classifier must be
+ * synchronous (effect-plugin.md §5.1.1), so the runtime cannot preempt it mid-execution and
+ * the clock is read after the call returns. A classifier that breaks that contract by
+ * returning a Promise fails the run.
+ *
+ * Returns the classification whether or not the call overran. By the time the clock is
+ * read the work is done, so discarding the answer saves nothing, and keeping it is what
+ * makes the IR depend on the source rather than on how busy the machine was: a cold first
+ * call (module initialisation, JIT, a GC pause) is the usual overrun. An overrun fires the
+ * `onTimeout` hook so `stats.effectClassifyTimeouts` can record it.
+ */
 export function classifyWithTimeout(
   plugin: EffectPlugin,
   call: CallCandidate,
@@ -71,9 +74,9 @@ export function classifyWithTimeout(
 
   if (typeof result === "object" && result !== null && "then" in result) {
     // A classifier that returned a Promise violates the sync contract (effect-plugin.md
-    // pure-function shape). Attach a swallow-catch so the floating rejection does
-    // not blow up the process under Node's --unhandled-rejections=strict mode, then
-    // surface the misconfiguration to the caller.
+    // §5.1.1). Attach a swallow-catch so the floating rejection does not blow up the process
+    // under Node's --unhandled-rejections=strict mode, then surface the misconfiguration to
+    // the caller.
     void (result as unknown as PromiseLike<unknown>).then(
       () => undefined,
       () => undefined,
@@ -94,7 +97,6 @@ export function classifyWithTimeout(
       budgetMs: budget,
       elapsedMs: elapsed,
     })
-    return null
   }
 
   return result

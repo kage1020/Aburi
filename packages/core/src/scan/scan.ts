@@ -102,7 +102,11 @@ export interface ScanResult {
    * because it was broken, appears in both.
    */
   skipped: readonly SkippedFile[]
-  /** Rich timeout observations for logging / CI signals. Aggregated into `ir.stats` too. */
+  /**
+   * One record per effect classification that ran past its budget, in scan order. Each one's
+   * plugin, Symbol and budget are also in `ir.stats.effectClassifyTimeouts`; this carries the
+   * call and the wall clock beside them.
+   */
   timeoutEvents: readonly ClassifyTimeoutEvent[]
   /**
    * One record per file abandoned for exceeding `config.parseTimeoutMs`, in scan order.
@@ -110,8 +114,8 @@ export interface ScanResult {
    * reader wanting the count consults; this carries the budget and the wall clock beside
    * it, so a caller can report how far over the file went without parsing a message.
    *
-   * Deliberately not in `ir.stats`: unlike `effectClassifyTimeouts`, which records a
-   * decision the Document embodies, this records a file the Document does not mention.
+   * Deliberately not in `ir.stats`: unlike `effectClassifyTimeouts`, which records a slow
+   * call whose answer the Document carries, this records a file the Document does not mention.
    */
   parseTimeouts: readonly ParseTimeoutEvent[]
   /**
@@ -217,7 +221,7 @@ export interface ParseErrorRecord {
  *      language plugin survive.
  *   2. Language routing via `buildLanguageRouter`.
  *   3. Per-file extraction through `runFilePipeline` — parse → extractSymbols →
- *      framework classify → walkBody → effect classify (with per-call timeout) →
+ *      framework classify → walkBody → effect classify (timed per call) →
  *      Category B/C drop → fingerprint.
  *   4. Assemble the IR (Symbols + Components + Dependencies + Stats), sort every array
  *      per the schema's ordering rules.

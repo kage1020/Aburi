@@ -280,7 +280,7 @@ describe("reportScanIncidents — the lines a real scan cannot be made to produc
 
   it("names the effect-classify timeout budget", () => {
     expect(incidentLinesFrom(scanReportWith({ timeoutCount: 4 }), null)).toEqual([
-      "⚠ 4 effect classification(s) hit the per-call timeout budget.",
+      "⚠ 4 effect classification(s) ran past the per-call budget; their results were kept.",
     ])
   })
 

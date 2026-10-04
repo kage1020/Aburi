@@ -14,14 +14,8 @@ import { useScratchWorkspace } from "../src/scratch"
 
 const workspace = useScratchWorkspace("destructured-parameter-shadow")
 
-// The budget is raised so the control's write never depends on how fast the first
-// classification runs on the machine.
 const scanWorkspace = () =>
-  scanWith(
-    workspace.root,
-    { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] },
-    { classifyTimeoutMs: 5000 },
-  )
+  scanWith(workspace.root, { languages: [langTypescriptPlugin], effects: [prismaEffectsPlugin] })
 
 const SHADOWED = [
   "plain",

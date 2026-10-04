@@ -557,7 +557,9 @@ export function reportScanIncidents(report: ScanReport, warn: WarnFn, label: str
     )
   }
   if (report.timeoutCount > 0) {
-    sayIncident(`${report.timeoutCount} effect classification(s) hit the per-call timeout budget.`)
+    sayIncident(
+      `${report.timeoutCount} effect classification(s) ran past the per-call budget; their results were kept.`,
+    )
   }
   reportSkipped(report.skipped, sayIncident, warn)
   const lsp = report.lspEnrichment

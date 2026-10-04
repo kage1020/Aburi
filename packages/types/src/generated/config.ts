@@ -71,7 +71,7 @@ minParsedFileRatio?: number
  */
 parseTimeoutMs?: number
 /**
- * Per-call timeout for effect plugin classify(). Exceeding calls fall through to next plugin and are recorded in stats.effectClassifyTimeouts[]. Default 50 ms; raise to 200-500 for SQL/regex-heavy effect plugins.
+ * Per-call budget for effect plugin classify(). A call that overruns it keeps its classification and is recorded in stats.effectClassifyTimeouts[]. Default 50 ms; raise to 200-500 for SQL/regex-heavy effect plugins.
  */
 classifyTimeoutMs?: number
 /**

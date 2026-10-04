@@ -80,7 +80,6 @@ describe("scan + diff — writes in catch and finally", () => {
     ])
     // The catch clause's `throw e` is withheld (ir-schema.md §8.2): the one rule is the `try`.
     expect(symbol.rules.map((r) => r.type)).toEqual(["try"])
-    expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
     expect(head.ir.stats.effectPropagation.symbolsWithPropagatedEffects).toBe(0)
 
     const changes = diffIRs(base.ir, head.ir).symbols
@@ -134,7 +133,6 @@ describe("scan + diff — a call in catch or finally to a helper that writes", (
       ["db.write", "prisma.audit.create", [AUDIT]],
     ])
     expect(head.ir.stats.effectPropagation.propagatedEffectCount).toBeGreaterThanOrEqual(1)
-    expect(head.ir.stats.effectClassifyTimeouts).toBeUndefined()
 
     const changes = diffIRs(base.ir, head.ir).symbols
     expect(changes).toHaveLength(1)

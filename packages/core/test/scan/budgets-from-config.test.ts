@@ -94,6 +94,8 @@ describe("the classify budget comes from the config", () => {
     if (result.kind !== "extracted") return
     expect(result.timeoutEvents).toHaveLength(1)
     expect(result.timeoutEvents[0]?.budgetMs).toBe(10)
+    // The overrunning answer was null and no other plugin is loaded, so the call stays (EP13).
+    expect(result.symbols[0]?.calls).toEqual([{ target: "db.query", line: 2, resolved: null }])
   })
 
   it("falls back to the documented default when the config names no budget", async () => {

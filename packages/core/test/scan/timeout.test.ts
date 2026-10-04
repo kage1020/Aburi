@@ -1,6 +1,6 @@
 import { noopRegistry } from "@aburi/test-support"
 import type { CallCandidate, ClassifyContext, EffectPlugin, EffectsManifest } from "@aburi/types"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { type ClassifyTimeoutEvent, classifyWithTimeout } from "../../src"
 import { symbolId } from "../fixtures/ir"
 import { effectsManifest } from "../fixtures/plugins"
@@ -49,7 +49,9 @@ describe("classifyWithTimeout", () => {
     expect(result?.effectId).toBe("db.read")
   })
 
-  it("returns null and fires onTimeout when the wall-clock exceeds the budget", () => {
+  it("keeps the classification and fires onTimeout when the wall-clock exceeds the budget", () => {
+    // The answer was already computed when the clock was read. Dropping it saved no time and
+    // made the IR depend on the machine: a cold first call lost its effect on a busy runner.
     const plugin: EffectPlugin = {
       manifest: stubManifest,
       init: async () => {},
@@ -69,7 +71,11 @@ describe("classifyWithTimeout", () => {
       { symbolId: "ts:test.ts#Fn", file: "test.ts" },
       { timeoutMs: 50, onTimeout: (event) => events.push(event) },
     )
-    expect(result).toBeNull()
+    expect(result).toEqual({
+      effectId: "db.read",
+      confidence: "high",
+      derivedBy: "effects-plugin:stub:x",
+    })
     expect(events).toHaveLength(1)
     expect(events[0]?.plugin).toBe("effects-stub")
     expect(events[0]?.symbolId).toBe("ts:test.ts#Fn")
@@ -118,28 +124,45 @@ describe("classifyWithTimeout", () => {
       { symbolId: "ts:test.ts#Fn", file: "test.ts" },
       { timeoutMs: 1, onTimeout: (event) => (observed = event.budgetMs) },
     )
-    expect(result).toBeNull()
+    expect(result?.effectId).toBe("db.read")
     expect(observed).toBe(10)
   })
 
-  it("clamps timeoutMs above the maximum (5000 ms) down to the ceiling", () => {
-    let observed = 0
-    const plugin: EffectPlugin = {
-      manifest: stubManifest,
-      init: async () => {},
-      classify: () => {
-        return { effectId: "db.read", confidence: "high", derivedBy: "effects-plugin:stub:x" }
-      },
+  describe("clamps timeoutMs above the maximum (5000 ms) down to the ceiling", () => {
+    // The clock is faked here, unlike everywhere else in these tests, because what is under test
+    // is the arithmetic of the clamp and not the timing mechanism, and spending five real seconds
+    // to reach the ceiling would buy nothing. Both sides of the bound are pinned.
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    function classifyTaking(ms: number): ClassifyTimeoutEvent[] {
+      vi.useFakeTimers({ toFake: ["performance"] })
+      const plugin: EffectPlugin = {
+        manifest: stubManifest,
+        init: async () => {},
+        classify: () => {
+          vi.advanceTimersByTime(ms)
+          return { effectId: "db.read", confidence: "high", derivedBy: "effects-plugin:stub:x" }
+        },
+      }
+      const events: ClassifyTimeoutEvent[] = []
+      classifyWithTimeout(
+        plugin,
+        makeCall("x.y"),
+        makeCtx(),
+        { symbolId: "ts:test.ts#Fn", file: "test.ts" },
+        { timeoutMs: 99_999, onTimeout: (event) => events.push(event) },
+      )
+      return events
     }
-    classifyWithTimeout(
-      plugin,
-      makeCall("x.y"),
-      makeCtx(),
-      { symbolId: "ts:test.ts#Fn", file: "test.ts" },
-      { timeoutMs: 99_999, onTimeout: (event) => (observed = event.budgetMs) },
-    )
-    // The classifier resolved fast so no timeout event fires; we only assert the
-    // clamp had a chance to run by verifying the plugin actually classified.
-    expect(observed).toBe(0)
+
+    it("reports a call one millisecond past the ceiling, against the ceiling", () => {
+      expect(classifyTaking(5001).map((event) => event.budgetMs)).toEqual([5000])
+    })
+
+    it("does not report a call that took exactly the ceiling", () => {
+      expect(classifyTaking(5000)).toEqual([])
+    })
   })
 })

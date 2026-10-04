@@ -43,12 +43,11 @@ export type ScanExtras = Pick<ScanInput, "components" | "logger" | "lspServerFac
  *
  * `classifyTimeoutMs` defaults to the schema's ceiling, `CLASSIFY_TIMEOUT_MAX_MS` (5000 ms),
  * unless `config` sets it. Each effect classification is timed, and one that overruns its budget
- * loses its effect: the call stays in `calls[]`, and the overrun is recorded in
- * `ir.stats.effectClassifyTimeouts`. The conditions under which the 50 ms default was overrun
- * were a macOS CI runner and the first classification in the process, so a test asserting that
- * scan's first effect failed there and passed on a rerun. The budget is checked after the
- * synchronous call returns, so the ceiling makes nothing wait. A test that wants the default
- * passes `classifyTimeoutMs` itself.
+ * keeps its answer but is recorded in `ir.stats.effectClassifyTimeouts`. The 50 ms default can
+ * be overrun by the first classification in the process on a loaded macOS CI runner, so under it
+ * a test comparing whole IRs or reading `stats` would depend on the runner. The budget is
+ * checked after the synchronous call returns, so the ceiling makes nothing wait. A test that
+ * wants the default passes `classifyTimeoutMs` itself.
  */
 export async function scanWith(
   workspaceRoot: string,

@@ -9,6 +9,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { CoreError, scan, VocabCheck } from "../../src"
+import { spend } from "../fixtures/clock"
 import {
   effectsManifest,
   frameworkManifest,
@@ -72,11 +73,15 @@ function language(extKind: string | null = null) {
   })
 }
 
-function effectPlugin(name: string, effectId: string): EffectPlugin {
+/** Emits `effectId` for every call, after spending `ms` of real time on it. */
+function effectPlugin(name: string, effectId: string, ms = 0): EffectPlugin {
   return {
     manifest: effectsManifest(name),
     init: async () => {},
-    classify: () => ({ effectId: effectId as never, confidence: "high", derivedBy: `${name}:x` }),
+    classify: () => {
+      spend(ms)
+      return { effectId: effectId as never, confidence: "high", derivedBy: `${name}:x` }
+    },
   }
 }
 
@@ -95,14 +100,19 @@ const workspace = useStubWorkspace("vocab")
 
 function run(options: {
   strict?: boolean
+  classifyTimeoutMs?: number
   registry: VocabRegistry
   effects?: EffectPlugin[]
   frameworks?: FrameworkPlugin[]
   languageExtKind?: string
 }) {
+  const { strict, classifyTimeoutMs } = options
   return scan({
     workspaceRoot: workspace.root,
-    config: options.strict === undefined ? {} : { strict: options.strict },
+    config: {
+      ...(strict === undefined ? {} : { strict }),
+      ...(classifyTimeoutMs === undefined ? {} : { classifyTimeoutMs }),
+    },
     languages: [language(options.languageExtKind ?? null)],
     frameworks: options.frameworks ?? [],
     effects: options.effects ?? [],
@@ -125,6 +135,18 @@ describe("a strict run (the default)", () => {
         'Plugin "effects-acme" emitted effect "x-acme:ping" at a.stub:4',
       ),
     })
+  })
+
+  it("ends at an undeclared effect id whose call ran past its budget too (EP13)", async () => {
+    // The answer is kept, so it is checked like a fast one. A dropped answer would skip the
+    // check and let a slow enough call pass the run. 30 ms against the 10 ms floor overruns on
+    // any machine.
+    const outcome = run({
+      classifyTimeoutMs: 10,
+      registry: registryOwning({}),
+      effects: [effectPlugin("effects-acme", "x-acme:ping", 30)],
+    })
+    await expect(outcome).rejects.toMatchObject({ code: "vocab-undeclared", value: "x-acme:ping" })
   })
 
   it("ends at an id another plugin owns, since ownership is per plugin", async () => {

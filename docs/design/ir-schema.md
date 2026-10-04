@@ -45,7 +45,7 @@ The reader rule is what carries backward compatibility, and it is the more impor
 | Field | Type admits `null` | Class | Writer rule |
 |---|---|---|---|
 | `generatedAt` | no | B | reserved for the producer's clock; **no writer emits it today**, so the key is always absent. `--no-timestamp` currently suppresses only the Markdown projection's "Generated" line |
-| `stats.effectClassifyTimeouts` | no | B | omitted when no classification timed out |
+| `stats.effectClassifyTimeouts` | no | B | omitted when no classification overran its budget |
 | `stats.lspEnrichment` | no | B | omitted when the LSP pass did not run |
 | `stats.lspEnrichment.hintsProduced` | no | B | emitted by the current pipeline whenever the enclosing record is; absence means the document predates the counter |
 | `stats.lspEnrichment.hintsConsumed` | no | B | as above |
