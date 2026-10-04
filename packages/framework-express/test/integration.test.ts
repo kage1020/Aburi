@@ -12,7 +12,7 @@ interface ClassifiedRow {
 async function classifyFixture(path: string, source: string): Promise<ClassifiedRow[]> {
   const parsed = await parseTypescriptFile({ path, content: source })
   if (parsed.tree === null) throw new Error(`fixture ${path} failed to parse`)
-  const ctx = makeCtx(path, source)
+  const ctx = { ...makeCtx(path, source), imports: parsed.imports }
   const candidates = extractSymbols(parsed.tree, ctx) as SymbolCandidate<unknown>[]
   return candidates.map((candidate) => ({
     candidate,
@@ -143,6 +143,33 @@ describe("framework-express — confidence downgrades without an express import"
   })
 })
 
+describe("framework-express — CommonJS app", () => {
+  const source = [
+    `const express = require("express")`,
+    ``,
+    `const app = express()`,
+    `const router = express.Router()`,
+    ``,
+    `router.get('/users', (req, res) => { res.json([]) })`,
+    `app.use((req, res, next) => { next() })`,
+    `app.use('/api', router)`,
+  ].join("\n")
+
+  it("rates every Symbol high, as an import would", async () => {
+    const rows = await classifyFixture("src/app.js", source)
+    const rated = rows
+      .filter((r) => r.classification !== null)
+      .map((r) => `${r.classification?.extKind} ${r.classification?.confidence}`)
+      .sort()
+    expect(rated).toEqual([
+      "framework:express:middleware high",
+      "framework:express:mount high",
+      "framework:express:route high",
+      "framework:express:router high",
+    ])
+  })
+})
+
 describe("framework-express — abstains", () => {
   it("returns null for non-Router const symbols", async () => {
     const rows = await classifyFixture(
@@ -161,5 +188,54 @@ describe("framework-express — abstains", () => {
     // These aren't promoted to call symbols in the first place (extractor filter);
     // even if they were, classifier would still abstain.
     expect(rows.some((r) => r.classification !== null)).toBe(false)
+  })
+})
+
+describe("framework-express — a statement declaring several names", () => {
+  /** `"<name> <derivedBy>"` per Symbol classified as a Router, sorted. */
+  function routersIn(rows: ClassifiedRow[]): string[] {
+    return rows
+      .filter((r) => r.classification?.extKind === "framework:express:router")
+      .map((r) => `${r.candidate.name} ${r.classification?.derivedBy}`)
+      .sort()
+  }
+
+  it("classifies only the name bound to the Router call", async () => {
+    const rows = await classifyFixture(
+      "src/routes.ts",
+      [
+        `import express, { Router } from "express"`,
+        `export const router = express.Router(), API_PREFIX = "/api/v1", MAX_BODY = 1024`,
+        `export const limit = 10, adminRouter = express.Router()`,
+        `export const usersRouter = Router(), auditRouter = express.Router()`,
+      ].join("\n"),
+    )
+    expect(routersIn(rows)).toEqual([
+      "adminRouter framework:express:router:express.Router",
+      "auditRouter framework:express:router:express.Router",
+      "router framework:express:router:express.Router",
+      "usersRouter framework:express:router:Router",
+    ])
+  })
+
+  it("classifies a Router declared in a namespace by its qualified name", async () => {
+    const rows = await classifyFixture(
+      "src/routes.ts",
+      [
+        `import { Router } from "express"`,
+        `export namespace api {`,
+        `  export const version = 1, router = Router()`,
+        `}`,
+      ].join("\n"),
+    )
+    expect(routersIn(rows)).toEqual(["api.router framework:express:router:Router"])
+  })
+
+  it("rates a Router declared second medium when nothing imports express", async () => {
+    const rows = await classifyFixture("src/routes.ts", `const limit = 10, r = Router()\n`)
+    const rated = rows
+      .filter((r) => r.classification !== null)
+      .map((r) => `${r.candidate.name} ${r.classification?.confidence}`)
+    expect(rated).toEqual(["r medium"])
   })
 })

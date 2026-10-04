@@ -1,7 +1,7 @@
 import { makeCall } from "@aburi/test-support"
 import { describe, expect, it } from "vitest"
 import { classificationConfidence, DRIZZLE_CLIENT_WORDS, namesDrizzleClient } from "../src/index"
-import { maxArgumentsFor } from "../src/methods"
+import { maxArgumentsFor, minArgumentsFor } from "../src/methods"
 
 describe("namesDrizzleClient", () => {
   it.each([
@@ -113,5 +113,34 @@ describe("maxArgumentsFor", () => {
       expect(maxArgumentsFor(method)).toBe(1)
     }
     expect(maxArgumentsFor("batch")).toBe(1)
+  })
+})
+
+describe("minArgumentsFor", () => {
+  it("requires one argument for the write and transaction terminals", () => {
+    for (const method of ["insert", "update", "delete", "transaction", "batch"]) {
+      expect(minArgumentsFor(method)).toBe(1)
+    }
+  })
+
+  it("lets the read and relational query terminals be called bare", () => {
+    for (const method of [
+      "select",
+      "selectDistinct",
+      "selectDistinctOn",
+      "findMany",
+      "findFirst",
+    ]) {
+      expect(minArgumentsFor(method)).toBe(0)
+    }
+  })
+
+  it("returns 0 for a name outside the vocabulary", () => {
+    // The classifier answers `null` for these whatever the floor says, so only a direct case
+    // sees this default. `constructor` is there for a table rewritten as an object literal,
+    // where the lookup would reach `Object.prototype`.
+    for (const method of ["from", "commit", "findUnique", "constructor"]) {
+      expect(minArgumentsFor(method)).toBe(0)
+    }
   })
 })
