@@ -124,6 +124,8 @@ A PR often **breaks** a call: `RefundController` used to call `RefundService.ref
 
 Formally: an edge `(u, v)` is included whenever `u` called `v` in base OR `u` called `v` in head. If `u` and `v` are both Nodes and were ever connected in either revision, the slice acknowledges that history.
 
+A base edge names its endpoints by base ids, and a Node is named by its head id (§4.1). The two differ for a pair whose id changed between the revisions: a `moved+changed` from a renamed file, or a `dropped-toggled` Symbol in one. So each base edge endpoint that is a pair's base id is read as that pair's head id before the edge is matched against the Node set. Without that, renaming the controller's file in the example above would drop its base edge to the removed service and leave that service a singleton.
+
 ### 5.4 Unresolved calls contribute nothing
 
 If a call has `resolved: null` in one of the two IRs (call-resolution declined to identify the callee — see [`call-resolution.md`](./call-resolution.md) §4.5 / §4.6 / §4.7), it produces no `CallEdge` on that side and therefore no candidate edge in this pass. Slice View does NOT read `Symbol.calls[]` directly; it reads only the resolved `CallEdge[]`. This preserves the [`call-resolution.md`](./call-resolution.md) §2 promise that "enabling LSP MUST NOT change the shape or ordering" of what downstream consumers see — a slice does not silently split or merge based on whether LSP was available.
@@ -442,6 +444,9 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | ID | Input | Expected |
 |---|---|---|
 | SV6 | Controller `C` (changed) called Service `S1` (removed) in base; calls Service `S2` (added) in head | Exactly one Slice containing `{C, S1, S2}` (§5.3) |
+| SV6a | SV6 with `C`'s file renamed, so `C` is `moved+changed` and its base id differs from its head id | Same — one Slice `{C, S1, S2}`, with `C` under its head id |
+| SV6b | `C` (`moved+changed`, file renamed) called `S` (removed) in base and inlines the call in head | One Slice `{C, S}` from the base edge alone; an `added` Symbol that took `C`'s old id does not join it |
+| SV6c | `C` (changed) called `S` in base only; `S`'s file is renamed, so `S` is `moved+changed` | One Slice `{C, S}`, with `S` under its head id: a base edge's callee is read like its caller |
 | SV7 | Edge exists only in `headCallEdges` between two Nodes | Two Nodes cluster into one Slice |
 | SV8 | Edge exists only in `baseCallEdges` between two Nodes | Same — two Nodes cluster into one Slice |
 
@@ -452,6 +457,7 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV9 | Directed cycle `A → B → C → A`, all three `changed` | One Slice containing `{A, B, C}` (§6.2) |
 | SV10 | `dropped-toggled` Symbol whose `calls[]` on the dropped side is empty, and no edges from the kept side connect it to any other Node | Singleton Slice (§4.2) |
 | SV11 | `dropped-toggled` Symbol whose kept-side `calls[]` connects to another Node | Clusters with that Node |
+| SV11a | SV11 with the `dropped-toggled` Symbol's file renamed, so its base and head ids differ | Still clusters with that Node through its base edge |
 
 ### 13.4 Cluster identity and ordering
 

@@ -41,7 +41,12 @@ export function computeSlices(input: SliceInput): SliceRecord[] {
   if (nodeIds.length === 0) return []
 
   const nodeIdSet = new Set<SymbolId>(nodeIds)
-  const edges = collectEdges(input.baseCallEdges, input.headCallEdges, nodeIdSet)
+  const edges = collectEdges(
+    input.baseCallEdges,
+    input.headCallEdges,
+    nodeIdSet,
+    headIdsByBaseId(input.changes),
+  )
 
   const components = computeWeaklyConnectedComponents<SymbolId>(nodeIds, edges, (id) => id)
 
@@ -295,6 +300,24 @@ function assertNeverChange(change: never): never {
 }
 
 /**
+ * The head id each paired change's base id stands for in the Node set.
+ *
+ * A Node is named by its head id (slice-view.md §4.1), and a base edge by base ids. The two
+ * differ for a pair whose id changed between the revisions — a `moved+changed` from a renamed
+ * file, a `dropped-toggled` in one — and without this a base edge from or to such a Node named
+ * no Node at all, so the Symbols it connected fell into separate Slices. Every pair is
+ * entered, `moved` included: its head id is no Node either, so a base edge through it joins
+ * nothing, even when an unrelated Symbol was added at the old id.
+ */
+function headIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId, SymbolId> {
+  const out = new Map<SymbolId, SymbolId>()
+  for (const change of changes) {
+    if ("before" in change) out.set(change.before.id, change.after.id)
+  }
+  return out
+}
+
+/**
  * Edge selection: union of base and head, restricted to edges whose
  * BOTH endpoints are Nodes, canonicalised to `(u, v)` with `u < v` (self-
  * loops implicitly dropped). Multi-edges collapse naturally inside the WCC
@@ -302,24 +325,30 @@ function assertNeverChange(change: never): never {
  *
  * The union is the load-bearing rule of slice-view.md: a controller that called an
  * old service in base and a new service in head needs both edges to land
- * all three Symbols in a single Slice.
+ * all three Symbols in a single Slice. A base edge is read in Node ids first, so that rule
+ * holds when the controller's file was renamed too.
  */
 function collectEdges(
   baseEdges: readonly CallEdge[],
   headEdges: readonly CallEdge[],
   nodeIds: ReadonlySet<SymbolId>,
+  headIdsByBase: ReadonlyMap<SymbolId, SymbolId>,
 ): [SymbolId, SymbolId][] {
   const pairs: [SymbolId, SymbolId][] = []
-  for (const edge of baseEdges) appendEdgeIfBothNodes(edge, nodeIds, pairs)
-  for (const edge of headEdges) appendEdgeIfBothNodes(edge, nodeIds, pairs)
+  const inNodeIds = (id: SymbolId) => headIdsByBase.get(id) ?? id
+  for (const edge of baseEdges) {
+    appendEdgeIfBothNodes(inNodeIds(edge.from), inNodeIds(edge.to), nodeIds, pairs)
+  }
+  for (const edge of headEdges) appendEdgeIfBothNodes(edge.from, edge.to, nodeIds, pairs)
   return pairs
 }
 
 function appendEdgeIfBothNodes(
-  edge: CallEdge,
+  from: SymbolId,
+  to: SymbolId,
   nodeIds: ReadonlySet<SymbolId>,
   out: [SymbolId, SymbolId][],
 ): void {
-  if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) return
-  out.push([edge.from, edge.to])
+  if (!nodeIds.has(from) || !nodeIds.has(to)) return
+  out.push([from, to])
 }

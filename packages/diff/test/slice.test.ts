@@ -225,6 +225,48 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     ])
   })
 
+  it("SV6a: SV6 with the controller's file renamed reads the base edge under the head id", () => {
+    const oldC = "ts:src/ctl.ts#handleRefund"
+    const C = "ts:src/controller.ts#handleRefund"
+    const oldS = "ts:src/refund.ts#refund"
+    const newS = "ts:src/refund2.ts#refundV2"
+    const slices = computeSlices({
+      changes: [movedChanged(oldC, C), removed(oldS), added(newS)],
+      baseCallEdges: [edge(oldC, oldS)],
+      headCallEdges: [edge(C, newS)],
+    })
+    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, oldS, newS].sort() }])
+  })
+
+  it("SV6b: an inlined call keeps its base edge, and a newcomer at the old id stays out", () => {
+    const oldC = "ts:src/checkout.ts#submitCheckoutOrder"
+    const C = "ts:src/orders/checkout.ts#submitCheckoutOrder"
+    const S = "ts:src/helpers.ts#legacyNormalizeAmount"
+    // A different Symbol now lives at the controller's old id. The base edge names the
+    // controller, not it, so the two must not be joined through that id.
+    const slices = computeSlices({
+      changes: [movedChanged(oldC, C), removed(S), added(oldC)],
+      baseCallEdges: [edge(oldC, S)],
+      headCallEdges: [],
+    })
+    expect(slices).toEqual([
+      { id: `slice:${oldC}`, members: [oldC] },
+      { id: `slice:${S}`, members: [S, C].sort() },
+    ])
+  })
+
+  it("SV6c: a base edge into a callee whose file was renamed reads the callee under its head id", () => {
+    const C = "ts:src/checkout.ts#submitCheckoutOrder"
+    const oldS = "ts:src/helpers.ts#normalizeAmount"
+    const S = "ts:src/money/helpers.ts#normalizeAmount"
+    const slices = computeSlices({
+      changes: [changed(C), movedChanged(oldS, S)],
+      baseCallEdges: [edge(C, oldS)],
+      headCallEdges: [],
+    })
+    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S].sort() }])
+  })
+
   it("SV7: edge only in headCallEdges still unifies its Nodes", () => {
     const A = "ts:src/a.ts#A"
     const B = "ts:src/b.ts#B"
@@ -279,6 +321,26 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
     const slices = computeSlices({
       changes: [droppedToggled(X, "to-dropped"), changed(K)],
       baseCallEdges: [edge(X, K)], // kept-side (base) edge from X to a still-changed Symbol
+      headCallEdges: [],
+    })
+    expect(slices).toEqual([{ id: `slice:${K}`, members: [K, X] }])
+  })
+})
+
+describe("computeSlices — a dropped-toggled Symbol in a renamed file (SV11a)", () => {
+  it("SV11a: clusters through its base edge under its head id", () => {
+    const oldX = "ts:src/x.ts#X"
+    const X = "ts:src/y.ts#X"
+    const K = "ts:src/k.ts#K"
+    const toggled: SymbolChange = {
+      status: "dropped-toggled",
+      before: makeSymbol({ id: oldX, name: "X" }),
+      after: makeSymbol({ id: X, name: "X", dropped: true, fingerprint: zeroFp() }),
+      direction: "to-dropped",
+    }
+    const slices = computeSlices({
+      changes: [toggled, changed(K)],
+      baseCallEdges: [edge(oldX, K)],
       headCallEdges: [],
     })
     expect(slices).toEqual([{ id: `slice:${K}`, members: [K, X] }])
