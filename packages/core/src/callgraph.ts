@@ -12,8 +12,8 @@ import type {
 import { CALL_SITE_KEY_SEPARATOR, makeCallSiteKey, receiverHead } from "./call-site"
 import { groupBy } from "./collections"
 import { CoreError } from "./errors"
-import { trySymbolId } from "./id"
-import { splitAliasedImportName } from "./import-edge"
+import { DEFAULT_EXPORT_QNAME, trySymbolId } from "./id"
+import { DEFAULT_EXPORT_NAME, splitAliasedImportName } from "./import-edge"
 import type { ReceiverHint } from "./lsp/enrich"
 import { emptyHintUsage, type LspConsumerRejection, type LspHintUsage } from "./lsp/stats"
 import { compareCodeUnit } from "./order"
@@ -661,8 +661,9 @@ function memberId(
 
 /**
  * Step 3 of call-resolution.md's untyped step order: consult `importTable[caller.file]`.
- * Named imports and aliased imports resolve the head directly; namespace imports
- * (`import * as ns from './y'`) resolve when the target reads `ns.member`.
+ * Named imports and aliased imports resolve the head directly, and a default import resolves
+ * it to the module's default export; namespace imports (`import * as ns from './y'`) resolve
+ * when the target reads `ns.member`.
  * Import specifier resolution is limited to relative paths in this pass (step 1 of
  * call-resolution.md's import-specifier resolution); path aliases and workspace-package
  * specifiers are the concern of the follow-up implementation.
@@ -696,6 +697,16 @@ function resolveInImportScope(
     for (const raw of edge.symbols) {
       const { imported, local } = splitAliasedImportName(raw)
       if (local !== head) continue
+      // A default import (`"default as S"`) binds whatever the module exports as `default`,
+      // under a name the importer chose, so the module is searched for its default export and
+      // never for a Symbol called `S` (call-resolution.md §4.4, CR5–CR5d).
+      if (imported === DEFAULT_EXPORT_NAME) {
+        for (const exportedName of defaultExportsOf(ctx, targetFile)) {
+          const candidateId = memberId(ctx, targetFile, exportedName, tail)
+          if (candidateId !== null) candidates.add(candidateId)
+        }
+        continue
+      }
       const candidateId = memberId(ctx, targetFile, imported, tail)
       if (candidateId !== null) candidates.add(candidateId)
     }
@@ -707,6 +718,29 @@ function resolveInImportScope(
   const [only] = candidates
   if (only === undefined) return null
   return { id: only, confidence: "high" }
+}
+
+/**
+ * The names of the top-level Symbols a file exports as `default`. The evidence is
+ * `export-default` in `derivedBy`, which the TypeScript plugin puts on a named declaration
+ * (`export default function makeApp`, and `const f = …; export default f`) and on its
+ * anonymous `<default>` Symbol alike. The `<default>` name is accepted without the token as a
+ * guard, not as a second case: `lang-plugin.md` LP6 asks a plugin for the name only, and one
+ * that gives nothing more still reaches its anonymous default export (`call-resolution.md`
+ * §4.4). More than one name is left to the caller's ambiguity check.
+ */
+function defaultExportsOf(ctx: ResolveTargetContext, file: string): string[] {
+  const perName = ctx.topLevelByFile.get(file)
+  if (perName === undefined) return []
+  const found: string[] = []
+  for (const bucket of perName.values()) {
+    for (const symbol of bucket) {
+      if (symbol.name === DEFAULT_EXPORT_QNAME || symbol.derivedBy.includes("export-default")) {
+        found.push(symbol.name)
+      }
+    }
+  }
+  return found
 }
 
 /**

@@ -81,7 +81,9 @@ Import scope (§4.4) composes a dotted tail past the imported name the same way.
 
 ### 4.4 Step 3: import scope
 
-Read `importTable[caller.file]`. If `name` appears in an `ImportEdge.symbols` (named import) or matches an `import * as name` alias, resolve `name` to the imported source module.
+Read `importTable[caller.file]`. If `name` is the local binding of an `ImportEdge.symbols` entry (a named or a default import) or matches an `import * as name` alias, resolve `name` to the imported source module. A named import is looked up under the name the module exports it as, the half of the entry before ` as `.
+
+A **default import** arrives as `"default as name"` ([`lang-plugin.md`](./lang-plugin.md) LP24a) and is looked up as the module's default export instead: the file's `<default>` Symbol ([`ir-schema.md`](./ir-schema.md) §3.2), or the top-level declaration whose `derivedBy` carries `export-default` — `export default function makeApp`, or the `const f = …; export default f` of [`lang-plugin.md`](./lang-plugin.md) LP6a. The importer chooses `name` freely, so it plays no part in the lookup, and a named export that happens to share it is never taken. A dotted tail composes past the default export's own name as §4.3 composes it: `S.run()` through `import S from './y'` reaches `Svc::run` in a module that writes `export default class Svc`. A module with no default export leaves the call `null`, bucketed `no-match` (§8.1). Two default exports in one module (TS2528, an ordinary state in the middle of an edit) leave it `null`, bucketed `ambiguous` with both candidates recorded, rather than linking to either.
 
 Sub-cases:
 
@@ -90,10 +92,12 @@ Sub-cases:
 | `import { X } from './y'` | `name = X` → resolve to `<lang>:<resolved-file>#X` |
 | `import { X as Alias } from './y'` | `name = Alias` → resolve to `<lang>:<resolved-file>#X` (original name) |
 | `import * as ns from './y'` | `name = ns` and `target = ns.foo` → resolve to `<lang>:<resolved-file>#foo` |
-| `import Default from './y'` | `name = Default` → resolve to `<lang>:<resolved-file>#<default>` |
+| `import Default from './y'`, `import { default as Default } from './y'` | `name = Default` → resolve to the module's default export: `<lang>:<resolved-file>#<default>` when it is anonymous, `<lang>:<resolved-file>#makeApp` when it is `export default function makeApp`; a named export called `Default` is not taken |
 | `import type { X } from './y'` | ignored (type-only imports produce no runtime edge) |
 | `import('./y')` (dynamic) | ignored at the target site; recorded as a `via: import` component edge only |
 | bare specifier `'lodash'` | out-of-workspace — `resolved` stays `null`, confidence `high` (this is a definite external, not a failure) |
+
+A default export is reached only as one of those two Symbols, and four spellings of one are not. `export { connect as default }` is an export clause, which the TypeScript plugin does not read ([`lang-plugin.md`](./lang-plugin.md) LP6a), so nothing marks `connect` as the default export. A default export that is a value rather than a declaration (`export default withAuth(Page)`, `export default { Page }`) has no Symbol. An anonymous `export default class` has no member Symbols for a dotted tail to reach, since `<default>::run` is not a qualified name ([`ir-schema.md`](./ir-schema.md) §3.2). And a default re-exported from another module (`export { default } from './impl'`) leads to the re-exporting file, which §8.3 does not see past. Each leaves the call `null`, bucketed `no-match`. Reading the binding as a named import would reach `connect` in the first, but only because the importer happened to write the declaration's own name; the same reading takes the wrong Symbol wherever the names part (CR5c).
 
 Resolving `./y` to a Symbol file requires the file-path normalizer defined in §4.4.1.
 
@@ -339,7 +343,11 @@ Every implementation of the resolver must pass the following.
 | CR2b | named-import call through a directory specifier (`'.'`, `'..'`, or any whose last segment is empty, `.` or `..`, such as `'./'`, `'../'`, `'./y/..'`) | `resolved` = that directory's `index.<ext>` Symbol id, confidence `high`; a sibling `<dir>.<ext>` is never probed, nor the directory's `package.json#main`, which TypeScript consults before `index` (§4.4.1); a `..` that climbs above the workspace root resolves to nothing rather than to the root index, and a miss is bucketed `no-match`, not `external`, as for any relative specifier |
 | CR3 | aliased named-import (`import { X as A } from './y'; A()`) | `resolved` = `<lang>:./y#X`, confidence `high` |
 | CR4 | namespace import (`import * as N from './y'; N.foo()`) | `resolved` = `<lang>:./y#foo`, confidence `high` |
-| CR5 | default import (`import D from './y'; D()`) | `resolved` = `<lang>:./y#<default>`, confidence `high` |
+| CR5 | default import of an anonymous default export (`export default () => …` in `./y`; `import D from './y'; D()`) | `resolved` = `<lang>:./y#<default>`, confidence `high` |
+| CR5a | default import of a named default export under another local name (`export default function makeApp() {}` in `./y`; `import createApp from './y'; createApp()`), including one declared apart from its export (`const f = …; export default f`) | `resolved` = the declaration's Symbol id (`<lang>:./y#makeApp`, `<lang>:./y#f`), confidence `high` |
+| CR5b | dotted call through a default import (`export default class Svc { static run() {} }` in `./y`; `import S from './y'; S.run()`) | `resolved` = `<lang>:./y#Svc::run`, confidence `high`: the tail composes past the default export's own name as §4.3 composes it |
+| CR5c | default import whose local name is also a named export of the module (`import connect from './y'` where `./y` has `export function connect`) | the named export is never taken: `resolved` = the module's default export when it has one (CR5, CR5a), and `null`, bucketed `no-match`, when it has none |
+| CR5d | default import of a module with two default exports (TS2528) | `resolved` = `null`, diagnostic bucket `ambiguous`, both candidates recorded |
 | CR6 | type-only import used as call — cannot happen at runtime but resolver sees the string | `resolved` = `null`, confidence `high` |
 | CR7 | bare specifier (`import { sortBy } from 'lodash'; sortBy()`) | `resolved` = `null`, confidence `high` |
 | CR8 | dynamic import (`await import('./y')`) — no direct call at the site | no `Call` entry, no edge |

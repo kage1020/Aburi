@@ -20,7 +20,7 @@ describe("an escaped specifier names the module the author wrote", () => {
   it("keeps a sibling file relative when its leading dot is escaped", async () => {
     const { imports, errors } = await importsOf(`import x from "${BACKSLASH}x2E/e"`)
 
-    expect(imports).toEqual([{ source: "./e", symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([{ source: "./e", symbols: ["default as x"], line: 1, dynamic: false }])
     expect(errors).toEqual([])
   })
 
@@ -31,14 +31,18 @@ describe("an escaped specifier names the module the author wrote", () => {
   ])("restores the leading dot from %s", async (_label, written, expected) => {
     const { imports } = await importsOf(`import x from "${written}"`)
 
-    expect(imports).toEqual([{ source: expected, symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: expected, symbols: ["default as x"], line: 1, dynamic: false },
+    ])
   })
 
   it("keeps a separator that was written as an escape", async () => {
     // `./a/b` and `./ab` are two different files, and the old reader could not tell them apart.
     const { imports } = await importsOf(`import x from "./a${BACKSLASH}u002Fb"`)
 
-    expect(imports).toEqual([{ source: "./a/b", symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: "./a/b", symbols: ["default as x"], line: 1, dynamic: false },
+    ])
   })
 
   it.each([
@@ -53,7 +57,9 @@ describe("an escaped specifier names the module the author wrote", () => {
     // The whole edge list, not the first source: decoding changes how many edges there are as
     // well as what they say, because `dedupeEdges` keys on the decoded specifier — two
     // writings on one line that differed only by an escape now collapse into one.
-    expect(imports).toEqual([{ source: expected, symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: expected, symbols: ["default as x"], line: 1, dynamic: false },
+    ])
     expect(errors).toEqual([])
   })
 
@@ -62,7 +68,9 @@ describe("an escaped specifier names the module the author wrote", () => {
     // nothing about its bucket changes — only the string, which is the same defect quieter.
     const { imports } = await importsOf(`import x from "./${BACKSLASH}te"`)
 
-    expect(imports).toEqual([{ source: "./\te", symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: "./\te", symbols: ["default as x"], line: 1, dynamic: false },
+    ])
   })
 
   it("decodes on the dynamic path too", async () => {
@@ -132,7 +140,9 @@ describe("an escape the grammar admits but ECMAScript has no value for", () => {
     // "a plugin bug", over one character in one specifier.
     const { imports, errors } = await importsOf(`import x from "./a${BACKSLASH}u{110000}b"`)
 
-    expect(imports).toEqual([{ source: "./au{110000}b", symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: "./au{110000}b", symbols: ["default as x"], line: 1, dynamic: false },
+    ])
     expect(errors).toEqual([])
   })
 
@@ -142,7 +152,9 @@ describe("an escape the grammar admits but ECMAScript has no value for", () => {
     // Neither the sloppy-mode U+0001 nor a refusal: the characters the author typed. Nothing
     // downstream learns the specifier had no legal value, which is a gap this change does not
     // close — it is the same silence for `\1`, `\8` and `\u{110000}` alike.
-    expect(imports).toEqual([{ source: "./a1b", symbols: ["x"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: "./a1b", symbols: ["default as x"], line: 1, dynamic: false },
+    ])
     expect(errors).toEqual([])
   })
 })

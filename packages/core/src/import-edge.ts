@@ -1,21 +1,36 @@
 /**
  * Readers for the wire format of `ImportEdge.symbols`.
  *
- * The language plugin emits one entry per named import, verbatim as it appeared in source:
- * `"X"` for a plain import and `"X as Y"` for a renamed one. Two independent consumers —
- * the call-graph resolver and the framework plugins' decorator matching — have to recover
- * the same two halves from it, so the parser lives here rather than in either of them.
+ * The language plugin emits one entry per binding an import clause makes: `"X"` for a plain
+ * named import, `"X as Y"` for a renamed one, and `"default as Y"` for a default import. Only
+ * the last is not always what the source wrote: `import Y from './x'` writes no ` as `, and
+ * the plugin composes the entry `import { default as Y }` would quote. Two independent
+ * consumers — the call-graph resolver and the framework plugins' decorator matching — have to
+ * recover the same two halves from it, so the parser lives here rather than in either of them.
  */
+
+/**
+ * The name a module's default export goes by in an import, and so the `imported` half of
+ * every default import's entry: `import Foo from './x'` arrives as `"default as Foo"`, the
+ * way `import { default as Foo } from './x'` is written. Not to be confused with
+ * `DEFAULT_EXPORT_QNAME`, the qualified name of the Symbol an anonymous default export gets.
+ */
+export const DEFAULT_EXPORT_NAME = "default"
 
 /**
  * The two names a single `ImportEdge.symbols` entry carries.
  *
- * `imported` is the name the source module exports it under **as far as the wire format can
- * tell**; `local` is the binding the importing file writes. They are equal for an unaliased
- * import, and for a default import (`import Foo from './x'`) — where the module in fact
- * exports `default`, not `Foo`. Both shapes reach this format as a bare identifier and
- * nothing distinguishes them, so a consumer matching a vocabulary table reads a default
- * import as a named one.
+ * `imported` is the name the source module exports it under; `local` is the binding the
+ * importing file writes. They are equal for an unaliased import. A default import
+ * (`import Foo from './x'`) arrives as `"default as Foo"`, so `imported` is `"default"`: the
+ * module exports `default`, not `Foo`, and a consumer matching a vocabulary table has to
+ * decide what a default import means to it.
+ *
+ * Nothing checks that a language plugin spells a default import that way. One that emits a
+ * bare `"Foo"` produces an entry no reader can tell from `import { Foo }`: call resolution
+ * looks for a named `Foo` in the module and links to it when there is one, whatever the
+ * default export is, and nothing reports that anything was misread (`lang-plugin.md` LP24a
+ * puts the spelling on the plugin).
  *
  * Neither half is guaranteed non-empty: `" as Y"` and `"X as "` are not shapes a language
  * plugin should emit, and this parser reports them rather than repairing them. A consumer

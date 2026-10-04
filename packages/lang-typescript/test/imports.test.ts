@@ -24,9 +24,18 @@ describe("import extraction", () => {
     expect(imports).toEqual([{ source: "./x", symbols: "*", line: 1, dynamic: true }])
   })
 
-  it("captures a default binding as a single-entry symbol list", async () => {
+  it("LP24a: captures a default binding as the module's `default` under its local name", async () => {
     const { imports } = await importsOf("import Foo from './foo'")
-    expect(imports).toEqual([{ source: "./foo", symbols: ["Foo"], line: 1, dynamic: false }])
+    expect(imports).toEqual([
+      { source: "./foo", symbols: ["default as Foo"], line: 1, dynamic: false },
+    ])
+  })
+
+  it("spells `{ default as Foo }` as it spells `import Foo`, so no consumer reads them apart", async () => {
+    const { imports } = await importsOf("import { default as Foo } from './foo'")
+    expect(imports).toEqual([
+      { source: "./foo", symbols: ["default as Foo"], line: 1, dynamic: false },
+    ])
   })
 
   it("handles bare side-effect imports with a wildcard symbols entry", async () => {
@@ -36,7 +45,7 @@ describe("import extraction", () => {
 
   it("handles named + default mixed imports", async () => {
     const { imports } = await importsOf("import Foo, { A, B } from './x'")
-    expect(imports[0]?.symbols).toEqual(["Foo", "A", "B"])
+    expect(imports[0]?.symbols).toEqual(["default as Foo", "A", "B"])
   })
 
   it("captures re-exports as static edges", async () => {

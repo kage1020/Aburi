@@ -123,6 +123,25 @@ describe("provenance decides how far the classification is trusted", () => {
     expect(result?.confidence).toBe("medium")
   })
 
+  it("reads a default-imported decorator by the name the file gave it, at medium", () => {
+    const result = classifyNestjsSymbol(
+      makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),
+      makeCtx({ imports: [makeImport("./decorators", ["default as Controller"])] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:controller")
+    expect(result?.confidence).toBe("medium")
+  })
+
+  it("reads a decorator default-imported from NestJS by the name the file gave it, at high", () => {
+    const result = classifyNestjsSymbol(
+      makeCandidate({ kind: "method", name: "C.list", decorators: [makeDecorator("Get")] }),
+      makeCtx({ imports: [makeImport(NEST, ["default as Get"])] }),
+    )
+    expect(result?.extKind).toBe("framework:nestjs:route")
+    expect(result?.derivedBy).toBe("framework:nestjs:route:Get")
+    expect(result?.confidence).toBeUndefined()
+  })
+
   it("leaves a decorator the file says nothing about at high confidence", () => {
     const result = classifyNestjsSymbol(
       makeCandidate({ kind: "class", name: "C", decorators: [makeDecorator("Controller")] }),

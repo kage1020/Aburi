@@ -61,7 +61,7 @@ export {
   toPosixRelative,
   trySymbolId,
 } from "./id"
-export { type ImportBinding, splitAliasedImportName } from "./import-edge"
+export { DEFAULT_EXPORT_NAME, type ImportBinding, splitAliasedImportName } from "./import-edge"
 export { assertIRIntegrity, checkIRIntegrity, isCoreEffectId } from "./integrity"
 export { checkDocumentShape, DOCUMENT_SUBJECT } from "./integrity-shape"
 export {

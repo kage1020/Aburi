@@ -81,7 +81,7 @@ describe("an empty module specifier produces no edge and one recoverable error",
 
   it("LP26d: keeps a whitespace-only specifier, which names a module rather than nothing", async () => {
     const { imports, errors } = await importsOf('import a from " "')
-    expect(imports).toEqual([{ source: " ", symbols: ["a"], line: 1, dynamic: false }])
+    expect(imports).toEqual([{ source: " ", symbols: ["default as a"], line: 1, dynamic: false }])
     expect(emptySpecifierErrors(errors)).toEqual([])
   })
 

@@ -169,7 +169,7 @@ Classifies a `SymbolCandidate` into a framework-owned `extKind` and optionally
 overrides decorator boundaries.
 
 ```ts
-import { splitAliasedImportName } from "@aburi/core"
+import { DEFAULT_EXPORT_NAME, splitAliasedImportName } from "@aburi/core"
 import { assertImportBinding, assertImportEdgeSource } from "@aburi/plugin-registry/plugin-input"
 import type { Confidence, FrameworkClassifyContext, ImportEdge, SymbolClassification } from "@aburi/types"
 
@@ -203,7 +203,10 @@ class MyFrameworkPlugin implements FrameworkPlugin {
       const origin = names.get(d.name)
       // No edge mentions it: nothing to resolve, so the written name stands.
       if (origin === undefined) return d.name === "Widget"
-      if (origin.imported !== "Widget") return false
+      // A default import arrives as `"default as Widget"`: `default` is in no vocabulary, so
+      // the written name is the only evidence of which decorator it is.
+      const exported = origin.imported === DEFAULT_EXPORT_NAME ? d.name : origin.imported
+      if (exported !== "Widget") return false
       // Same name, someone else's module. Classify, but say you are less sure.
       confidence = origin.mine ? "high" : "medium"
       return true
@@ -238,7 +241,8 @@ Contracts:
 - Match a decorator on the name it was **imported** under, not the one the source
   wrote, and read `ImportEdge.source` for provenance. Matching the written name
   alone loses `import { Widget as W }` and claims a `@Widget` that came from some
-  other library. When the edges attribute the name to a module you do not own,
+  other library. A default import's imported name is `default`, so match its
+  written name instead. When the edges attribute the name to a module you do not own,
   classify at `confidence: "medium"` rather than refusing, because a
   project-local re-export barrel looks like a foreign package. See
   the [language plugin spec](../design/lang-plugin.md#522-matching-a-decorator-against-the-import-edges).
