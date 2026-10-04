@@ -67,14 +67,18 @@ const movedChanged = (before: string, after: string): SymbolChange => ({
   },
 })
 
-const droppedToggled = (id: string, direction: "to-dropped" | "to-kept"): SymbolChange => ({
+const droppedToggled = (
+  before: string,
+  after: string,
+  direction: "to-dropped" | "to-kept",
+): SymbolChange => ({
   status: "dropped-toggled",
-  before: makeSymbol({ id, name: id, dropped: direction !== "to-dropped" }),
+  before: makeSymbol({ id: before, name: before, dropped: direction !== "to-dropped" }),
   after: makeSymbol({
-    id,
-    name: id,
+    id: after,
+    name: after,
     dropped: direction === "to-dropped",
-    fingerprint: direction === "to-dropped" ? zeroFp() : fp(id),
+    fingerprint: direction === "to-dropped" ? zeroFp() : fp(after),
   }),
   direction,
 })
@@ -225,7 +229,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     ])
   })
 
-  it("SV6a: SV6 with the controller's file renamed reads the base edge under the head id", () => {
+  it("SV6a: SV6 with the controller relocated to another file reads its base edge under the head id", () => {
     const oldC = "ts:src/ctl.ts#handleRefund"
     const C = "ts:src/controller.ts#handleRefund"
     const oldS = "ts:src/refund.ts#refund"
@@ -242,8 +246,9 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     const oldC = "ts:src/checkout.ts#submitCheckoutOrder"
     const C = "ts:src/orders/checkout.ts#submitCheckoutOrder"
     const S = "ts:src/helpers.ts#legacyNormalizeAmount"
-    // A different Symbol now lives at the controller's old id. The base edge names the
-    // controller, not it, so the two must not be joined through that id.
+    // A different Symbol sits at the controller's old id. `buildDiff` cannot produce this:
+    // stage 1 would pair the old id with it, leaving no `moved+changed` from that id. This pins
+    // `computeSlices` as public API: the base edge names the controller, not the newcomer.
     const slices = computeSlices({
       changes: [movedChanged(oldC, C), removed(S), added(oldC)],
       baseCallEdges: [edge(oldC, S)],
@@ -255,7 +260,7 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
     ])
   })
 
-  it("SV6c: a base edge into a callee whose file was renamed reads the callee under its head id", () => {
+  it("SV6c: a base edge into a callee under a new id reads the callee under its head id", () => {
     const C = "ts:src/checkout.ts#submitCheckoutOrder"
     const oldS = "ts:src/helpers.ts#normalizeAmount"
     const S = "ts:src/money/helpers.ts#normalizeAmount"
@@ -265,6 +270,18 @@ describe("computeSlices — Base/head edge union (SV6–SV8)", () => {
       headCallEdges: [],
     })
     expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S].sort() }])
+  })
+
+  it("SV6d: a caller renamed within its own file reads its base edge under the new name", () => {
+    const oldC = "ts:src/a.ts#oldName"
+    const C = "ts:src/a.ts#newName"
+    const S = "ts:src/b.ts#S"
+    const slices = computeSlices({
+      changes: [movedChanged(oldC, C), removed(S)],
+      baseCallEdges: [edge(oldC, S)],
+      headCallEdges: [],
+    })
+    expect(slices).toEqual([{ id: `slice:${C}`, members: [C, S] }])
   })
 
   it("SV7: edge only in headCallEdges still unifies its Nodes", () => {
@@ -308,7 +325,7 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
   it("SV10: dropped-toggled Symbol with no in-Node edges becomes a singleton", () => {
     const X = "ts:src/x.ts#X"
     const slices = computeSlices({
-      changes: [droppedToggled(X, "to-dropped")],
+      changes: [droppedToggled(X, X, "to-dropped")],
       baseCallEdges: [],
       headCallEdges: [],
     })
@@ -319,27 +336,19 @@ describe("computeSlices — Cycles and dropped (SV9–SV11)", () => {
     const X = "ts:src/x.ts#X"
     const K = "ts:src/k.ts#K"
     const slices = computeSlices({
-      changes: [droppedToggled(X, "to-dropped"), changed(K)],
+      changes: [droppedToggled(X, X, "to-dropped"), changed(K)],
       baseCallEdges: [edge(X, K)], // kept-side (base) edge from X to a still-changed Symbol
       headCallEdges: [],
     })
     expect(slices).toEqual([{ id: `slice:${K}`, members: [K, X] }])
   })
-})
 
-describe("computeSlices — a dropped-toggled Symbol in a renamed file (SV11a)", () => {
-  it("SV11a: clusters through its base edge under its head id", () => {
+  it("SV11a: SV11 with the dropped-toggled Symbol under a new id clusters under its head id", () => {
     const oldX = "ts:src/x.ts#X"
     const X = "ts:src/y.ts#X"
     const K = "ts:src/k.ts#K"
-    const toggled: SymbolChange = {
-      status: "dropped-toggled",
-      before: makeSymbol({ id: oldX, name: "X" }),
-      after: makeSymbol({ id: X, name: "X", dropped: true, fingerprint: zeroFp() }),
-      direction: "to-dropped",
-    }
     const slices = computeSlices({
-      changes: [toggled, changed(K)],
+      changes: [droppedToggled(oldX, X, "to-dropped"), changed(K)],
       baseCallEdges: [edge(oldX, K)],
       headCallEdges: [],
     })
@@ -586,7 +595,7 @@ describe("computeSlices — anchor derivation invariant (SV23, SV25)", () => {
     // the very guarantee it exists to pin was gone. Descending input makes the
     // sort load-bearing here.
     const slices = computeSlices({
-      changes: [droppedToggled(Z, "to-dropped"), removed(C), added(B), changed(A)],
+      changes: [droppedToggled(Z, Z, "to-dropped"), removed(C), added(B), changed(A)],
       baseCallEdges: [edge(C, A)],
       headCallEdges: [edge(A, B)],
     })

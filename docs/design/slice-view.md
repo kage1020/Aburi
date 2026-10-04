@@ -105,12 +105,19 @@ A Symbol whose `changed` status is driven **solely** by a `propagated: true` ent
 
 ### 5.1 The Edge set
 
-Edges are drawn from the **union** of `baseCallEdges` and `headCallEdges`, then undirected, then restricted to edges whose **both** endpoints are in the Node set (§4). Each edge is canonicalised as an ordered pair `(u, v)` with `u < v` in ascending Symbol id order:
+Edges are drawn from the **union** of `baseCallEdges` and `headCallEdges`, then undirected, then restricted to edges whose **both** endpoints are in the Node set (§4). A base edge's endpoints are first translated by `φ`, which takes a pair's base id to the id §4.1 names the pair by (§5.3 gives the reason). Each edge is canonicalised as an ordered pair `(u, v)` with `u < v` in ascending Symbol id order:
 
 ```
+φ(x) = p.after.id   if x = p.before.id for a change p that carries both sides
+                    (changed, moved, moved+changed, dropped-toggled)
+       x            otherwise
+
 E = { (u, v)  |  u, v ∈ Nodes,  u < v (ascending Symbol id order),
-                 ∃ CallEdge in baseCallEdges ∪ headCallEdges from u to v  OR  from v to u }
+                 ∃ CallEdge from x to y in baseCallEdges  with {φ(x), φ(y)} = {u, v}
+              OR ∃ CallEdge from x to y in headCallEdges  with {x, y} = {u, v} }
 ```
+
+`φ` is a function: a base id names one base Symbol ([`ir-schema.md`](./ir-schema.md) §14 #1), and the matcher puts each base Symbol in at most one pair. It applies even when another change carries `x` too (only a direct `computeSlices` call can supply that, §5.3), since a base edge names a base Symbol. **Head edges are not translated**: their endpoints are head ids already, and a head id equal to some pair's `before.id` names the head Symbol that now holds that id, not the pair.
 
 The canonical `u < v` form collapses the multi-edge case (the same pair contributed by both `baseCallEdges` and `headCallEdges`, or by multiple call sites in either direction) into one undirected edge — clustering is a set-connectivity question, not a weight question. Self-loops (a `CallEdge` where `from === to`, e.g. direct recursion) are excluded by the strict `u < v` constraint. They contribute no connectivity between distinct Nodes.
 
@@ -124,7 +131,9 @@ A PR often **breaks** a call: `RefundController` used to call `RefundService.ref
 
 Formally: an edge `(u, v)` is included whenever `u` called `v` in base OR `u` called `v` in head. If `u` and `v` are both Nodes and were ever connected in either revision, the slice acknowledges that history.
 
-A base edge names its endpoints by base ids, and a Node is named by its head id (§4.1). The two differ for a pair whose id changed between the revisions: a `moved+changed` from a renamed file, or a `dropped-toggled` Symbol in one. So each base edge endpoint that is a pair's base id is read as that pair's head id before the edge is matched against the Node set. Without that, renaming the controller's file in the example above would drop its base edge to the removed service and leave that service a singleton.
+The translation `φ` in §5.1 exists because the two sides name Symbols differently. A base edge names its endpoints by base ids, while §4.1 names a Node by its head id when the change carries both sides, by its base id when it is `removed`, and by its one side's id when it is `unknown`. A `removed` or base-side `unknown` Node therefore already carries the id a base edge uses; only a pair can carry another. `φ` covers every pair — `changed`, `moved`, `moved+changed`, `dropped-toggled` — and is the identity wherever the pair's two ids agree. They differ only for a pair a stage after stage 1 matched, and what triggers it is the id, not the file: [`diff-algorithm.md`](./diff-algorithm.md) §4's `pathChanged` holds for an in-file rename as well as a relocation. So a `moved+changed` relocated to another file **or renamed within its own** carries a new id, and so does a `dropped-toggled` paired past stage 1. A pure `moved` is translated too; its head id is no Node, so a base edge through it still joins nothing. Without `φ`, moving or renaming the controller in the example above would drop its base edge to the removed service and leave that service a singleton.
+
+`buildDiff` never gives a pair's base id to a second change: base ids are unique, and if the head held a Symbol at that id, stage 1 would have paired the base Symbol with it. `computeSlices` is public API, so a direct caller can, and SV6b pins the reading for that input: the base edge still names the pair.
 
 ### 5.4 Unresolved calls contribute nothing
 
@@ -444,9 +453,10 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | ID | Input | Expected |
 |---|---|---|
 | SV6 | Controller `C` (changed) called Service `S1` (removed) in base; calls Service `S2` (added) in head | Exactly one Slice containing `{C, S1, S2}` (§5.3) |
-| SV6a | SV6 with `C`'s file renamed, so `C` is `moved+changed` and its base id differs from its head id | Same — one Slice `{C, S1, S2}`, with `C` under its head id |
-| SV6b | `C` (`moved+changed`, file renamed) called `S` (removed) in base and inlines the call in head | One Slice `{C, S}` from the base edge alone; an `added` Symbol that took `C`'s old id does not join it |
-| SV6c | `C` (changed) called `S` in base only; `S`'s file is renamed, so `S` is `moved+changed` | One Slice `{C, S}`, with `S` under its head id: a base edge's callee is read like its caller |
+| SV6a | SV6 with `C` relocated to another file, so `C` is `moved+changed` and its base id differs from its head id | Same — one Slice `{C, S1, S2}`, with `C` under its head id |
+| SV6b | `C` (`moved+changed`, base and head ids differ) called `S` (removed) in base and inlines the call in head, and an `added` Symbol sits at `C`'s old id. `buildDiff` cannot produce this input, as stage 1 would pair the old id (§5.3); it pins `computeSlices` called directly | Two Slices: `{C, S}` from the base edge alone, plus the `added` Symbol at `C`'s old id as a singleton |
+| SV6c | `C` (changed) called `S` in base only; `S` is `moved+changed` and its base id differs from its head id | One Slice `{C, S}`, with `S` under its head id: a base edge's callee is read like its caller |
+| SV6d | `C` renamed within its own file (`ts:src/a.ts#oldName` → `ts:src/a.ts#newName`, `moved+changed`) called `S` (removed) in base only | One Slice `{C, S}`, with `C` under its head id: the translation keys on the id, not on the file |
 | SV7 | Edge exists only in `headCallEdges` between two Nodes | Two Nodes cluster into one Slice |
 | SV8 | Edge exists only in `baseCallEdges` between two Nodes | Same — two Nodes cluster into one Slice |
 
@@ -457,7 +467,7 @@ Every implementation of the Slice View pass MUST pass the following. IDs are pre
 | SV9 | Directed cycle `A → B → C → A`, all three `changed` | One Slice containing `{A, B, C}` (§6.2) |
 | SV10 | `dropped-toggled` Symbol whose `calls[]` on the dropped side is empty, and no edges from the kept side connect it to any other Node | Singleton Slice (§4.2) |
 | SV11 | `dropped-toggled` Symbol whose kept-side `calls[]` connects to another Node | Clusters with that Node |
-| SV11a | SV11 with the `dropped-toggled` Symbol's file renamed, so its base and head ids differ | Still clusters with that Node through its base edge |
+| SV11a | SV11 with the `dropped-toggled` Symbol paired past stage 1, so its base and head ids differ | Still clusters with that Node through its base edge, under its head id |
 
 ### 13.4 Cluster identity and ordering
 
