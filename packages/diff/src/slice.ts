@@ -41,7 +41,12 @@ export function computeSlices(input: SliceInput): SliceRecord[] {
   if (nodeIds.length === 0) return []
 
   const nodeIdSet = new Set<SymbolId>(nodeIds)
-  const edges = collectEdges(input.baseCallEdges, input.headCallEdges, nodeIdSet)
+  const edges = collectEdges(
+    input.baseCallEdges,
+    input.headCallEdges,
+    nodeIdSet,
+    nodeIdsByBaseId(input.changes),
+  )
 
   const components = computeWeaklyConnectedComponents<SymbolId>(nodeIds, edges, (id) => id)
 
@@ -295,6 +300,22 @@ function assertNeverChange(change: never): never {
 }
 
 /**
+ * φ of slice-view.md §5.1: the base id of every pair (`changed`, `moved`, `moved+changed`,
+ * `dropped-toggled`) mapped to its representative id, the one §4.1 names a Node by. A base
+ * edge uses base ids, and a pair matched past stage 1 can have a different head id.
+ *
+ * `buildDiff` never hands a pair's base id to a second change: stage 1 would have paired it.
+ * `computeSlices` is public API, so a direct caller can, and a base edge still names the pair.
+ */
+function nodeIdsByBaseId(changes: readonly SymbolChange[]): ReadonlyMap<SymbolId, SymbolId> {
+  const out = new Map<SymbolId, SymbolId>()
+  for (const change of changes) {
+    if ("before" in change) out.set(change.before.id, representativeSymbol(change).id)
+  }
+  return out
+}
+
+/**
  * Edge selection: union of base and head, restricted to edges whose
  * BOTH endpoints are Nodes, canonicalised to `(u, v)` with `u < v` (self-
  * loops implicitly dropped). Multi-edges collapse naturally inside the WCC
@@ -302,24 +323,31 @@ function assertNeverChange(change: never): never {
  *
  * The union is the load-bearing rule of slice-view.md: a controller that called an
  * old service in base and a new service in head needs both edges to land
- * all three Symbols in a single Slice.
+ * all three Symbols in a single Slice. Each base-edge endpoint is first translated to the id
+ * its Node carries, so that rule holds when the controller's id changed too. Head-edge
+ * endpoints are head ids already and are not translated.
  */
 function collectEdges(
   baseEdges: readonly CallEdge[],
   headEdges: readonly CallEdge[],
   nodeIds: ReadonlySet<SymbolId>,
+  nodeIdsByBase: ReadonlyMap<SymbolId, SymbolId>,
 ): [SymbolId, SymbolId][] {
   const pairs: [SymbolId, SymbolId][] = []
-  for (const edge of baseEdges) appendEdgeIfBothNodes(edge, nodeIds, pairs)
-  for (const edge of headEdges) appendEdgeIfBothNodes(edge, nodeIds, pairs)
+  const asNodeId = (id: SymbolId) => nodeIdsByBase.get(id) ?? id
+  for (const edge of baseEdges) {
+    appendEdgeIfBothNodes(asNodeId(edge.from), asNodeId(edge.to), nodeIds, pairs)
+  }
+  for (const edge of headEdges) appendEdgeIfBothNodes(edge.from, edge.to, nodeIds, pairs)
   return pairs
 }
 
 function appendEdgeIfBothNodes(
-  edge: CallEdge,
+  from: SymbolId,
+  to: SymbolId,
   nodeIds: ReadonlySet<SymbolId>,
   out: [SymbolId, SymbolId][],
 ): void {
-  if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) return
-  out.push([edge.from, edge.to])
+  if (!nodeIds.has(from) || !nodeIds.has(to)) return
+  out.push([from, to])
 }
