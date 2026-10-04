@@ -143,6 +143,39 @@ describe("discoverFiles — .gitignore is decided the way git decides it", () =>
   })
 })
 
+describe("discoverFiles — patterns a library reads differently from git", () => {
+  // drop-list.md A3g. Each row is one root `.gitignore` against the same files, and each
+  // expectation is what `git ls-files -o --exclude-standard` listed for it.
+  it("reads `src/**/` as the directories below `src`, not the files directly in it", async () => {
+    for (const file of ["top.ts", "src/a.ts", "src/sub/c.ts"]) await writeFileAt(file)
+    await writeGitignore("src/**/")
+
+    expect(await discover()).toEqual(["src/a.ts", "top.ts"])
+  })
+
+  it("reads a lone `!` as a line that undoes nothing", async () => {
+    for (const file of ["top.ts", "src/a.ts", "src/sub/c.ts"]) await writeFileAt(file)
+    await writeGitignore("*", "!", "!*/", "!*.js")
+
+    expect(await discover()).toEqual([])
+  })
+
+  it("matches a POSIX class and a `]` that opens a bracket", async () => {
+    for (const file of ["a1.ts", "ax.ts", "a].ts", "b].ts"]) await writeFileAt(file)
+    await writeGitignore("a[[:digit:]].ts", "a[]].ts")
+
+    expect(await discover()).toEqual(["ax.ts", "b].ts"])
+  })
+
+  // A `?` cannot be part of a Windows filename, so there is no `q?.ts` to ignore there.
+  it.skipIf(process.platform === "win32")("matches an escaped `?` as the character", async () => {
+    for (const file of ["q?.ts", "qx.ts"]) await writeFileAt(file)
+    await writeGitignore("q\\?.ts")
+
+    expect(await discover()).toEqual(["qx.ts"])
+  })
+})
+
 describe("discoverFiles — .gitignore matching is case-sensitive", () => {
   // Git folds case only where `core.ignoreCase` says so — false on ext4, true on NTFS and
   // APFS — so no single setting agrees with git everywhere. Folding drops a file git keeps
@@ -248,7 +281,7 @@ describe("discoverFiles — the lines a .gitignore is allowed to contain", () =>
     expect((thrown as Error).message).toContain(".gitignore")
   })
 
-  it("takes a rule of exactly the maximum length, and refuses one character more", async () => {
+  it("takes a rule of exactly the maximum length, and refuses one byte more", async () => {
     // The limit is pinned from both sides or it is not pinned at all: every other fixture here
     // is far past it, so a limit lowered to sixty would pass them all while refusing ordinary
     // path globs. The honoured side is also what "rules out no real pattern" rests on.
@@ -261,20 +294,23 @@ describe("discoverFiles — the lines a .gitignore is allowed to contain", () =>
     const thrown = await discoverOrThrow()
 
     expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+
+    // Bytes, not characters: 2,049 of a two-byte character are 4,098 bytes.
+    await writeGitignore(String.fromCodePoint(0xe9).repeat(2_049))
+    const thrownForBytes = await discoverOrThrow()
+
+    expect((thrownForBytes as { code?: string }).code).toBe("scan-gitignore-unreadable")
   })
 
-  it("names the file when a rule inside the limit is one the engine refuses", async () => {
-    // The length gate is not the whole guard. `ignore` splits a pattern on `/` and builds the
-    // regex around the pieces, so a `[` with a `/` inside it is an unterminated character class
-    // at any length — five characters here. Without the per-line compilation this reaches a
-    // candidate as a bare SyntaxError, which is the failure the length gate cannot catch.
+  it("reads a rule git cannot match as one that matches nothing, rather than refusing it", async () => {
+    // An unterminated bracket, a trailing lone backslash and an unknown POSIX class each end
+    // git's match without a match, and git says nothing about them. The file beside them is
+    // still read: `b.ts` goes.
     await writeFileAt("src/a.ts")
-    await writeGitignore("a/[/b")
+    await writeFileAt("src/b.ts")
+    await writeGitignore("a/[/b", "src/a.ts\\", "src/a.t[s", "src/a[[:nope:]].ts", "src/b.ts")
 
-    const thrown = await discoverOrThrow()
-
-    expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
-    expect((thrown as Error).message).toContain("line 1")
+    expect(await discover()).toEqual(["src/a.ts"])
   })
 })
 

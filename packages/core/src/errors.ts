@@ -50,7 +50,7 @@ export type CoreErrorCode =
    * of the plugin.
    */
   | "scan-plugin-misconfigured"
-  /** A `.gitignore` — the workspace root's or any nested one — exists as a regular file and could not be used: an I/O error, a permission, or a line no regex engine will compile, which is reported against the line that holds it. A name that is not a regular file is not a rule file, and neither is a missing one; both are silently no patterns, as they are to git. */
+  /** A `.gitignore` — the workspace root's or any nested one — exists as a regular file and could not be used: an I/O error, a permission, or a rule longer than 4,096 bytes, which is reported against the line that holds it. A rule git reads but can never match is not one of these: it matches nothing, as it does in git. A name that is not a regular file is not a rule file, and neither is a missing one; both are silently no patterns, as they are to git. */
   | "scan-gitignore-unreadable"
   /** `ScanInput.workspaceRoot` was not an absolute path; scan cannot resolve files reliably. */
   | "scan-workspace-not-absolute"

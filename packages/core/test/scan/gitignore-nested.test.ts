@@ -26,8 +26,7 @@ let workRoot: string
  *
  * Not an engine failure: where the engine's own size limit falls, and what reaching it costs,
  * is the engine's business — see `MAX_RULE_LENGTH`. The matcher refuses at a fixed length
- * before any of that, which is what makes this fixture instant and identical everywhere. For a
- * rule the engine itself refuses, `a/[/b` is five characters and unterminated.
+ * before any of that, which is what makes this fixture instant and identical everywhere.
  */
 const UNUSABLE = "a".repeat(5_000)
 
@@ -151,6 +150,34 @@ describe("a .gitignore in every directory", () => {
     expect(await discover()).toEqual(["generated/g.ts"])
   })
 
+  it("re-includes a directory from a deeper file, and the files under it with it", async () => {
+    // The shallower file excluded `generated/sub/` as one of `generated/*`; the deeper one puts
+    // the directory back and says nothing about the file in it. The file is decided by what each
+    // file says about the file alone — the root's `generated/*` does not match
+    // `generated/sub/x.ts` itself, so the directory's re-inclusion is the last word.
+    await gitignoreIn("", "generated/*")
+    await gitignoreIn("generated", "!sub/")
+    await writeFileAt("generated/sub/x.ts")
+    await writeFileAt("generated/y.ts")
+    await writeFileAt("generated/other/z.ts")
+
+    expect(await discover()).toEqual(["generated/sub/x.ts"])
+  })
+
+  it("keeps a re-included directory's deeper exclusions and their own re-inclusions", async () => {
+    // Three files deep, measured with `git ls-files -o --exclude-standard`: `src/*` excludes
+    // `sub/`, `src/.gitignore` puts it back and excludes `sub/deep/`, and `src/sub/.gitignore`
+    // puts that back.
+    await gitignoreIn("", "src/*")
+    await gitignoreIn("src", "!sub/", "sub/deep/")
+    await gitignoreIn("src/sub", "!deep/")
+    await writeFileAt("src/a.ts")
+    await writeFileAt("src/sub/c.ts")
+    await writeFileAt("src/sub/deep/d.ts")
+
+    expect(await discover()).toEqual(["src/sub/c.ts", "src/sub/deep/d.ts"])
+  })
+
   it("does not let two nested files together rescue a file under an excluded directory", async () => {
     // The shape that needs the exclusion to be *inherited* rather than re-derived. `gen/` puts
     // the whole subtree out; `gen/.gitignore` un-excludes `sub/`, so asked in isolation that
@@ -244,11 +271,6 @@ describe("a nested file that cannot be used", () => {
     for (const [directory, rules] of [
       ["negation", [`!${UNUSABLE}`]],
       ["shadowed", ["a*", UNUSABLE]],
-      // The engine's own refusal rather than the length gate, in the position only per-line
-      // compilation reaches: `ignore` splits on `/`, so a `[` with a `/` inside it is an
-      // unterminated character class at five characters, and the assembled matcher never
-      // compiles a rule the one before it shadowed.
-      ["shadowed-syntax", ["a*", "a/[/b"]],
     ] as const) {
       await writeFileAt(`${directory}/a.ts`)
       await writeFileAt(join(directory, ".gitignore"), `${rules.join("\n")}\n`)
@@ -263,9 +285,9 @@ describe("a nested file that cannot be used", () => {
 
   it("measures the line the matcher compiles, not a trimmed version of it", async () => {
     // Two ways past a gate that reads `line.trim()`. Leading whitespace is part of a gitignore
-    // pattern, so a rule of four thousand spaces and one character trims to one; and `ignore`
+    // pattern, so a rule of four thousand spaces and one character trims to one; and git
     // treats `#` as a comment only at the first character, so `  #…` trims to a comment here
-    // and stays a live pattern there. Both were measured against the matcher, not reasoned out.
+    // and stays a live pattern there.
     for (const [directory, line] of [
       ["padded", `${" ".repeat(5_000)}x`],
       ["pseudo-comment", `  #${UNUSABLE}`],
@@ -282,7 +304,7 @@ describe("a nested file that cannot be used", () => {
   })
 
   it("leaves a real comment and a blank line alone", async () => {
-    // The other side of the same predicate: what `ignore` discards, this discards, so a file of
+    // The other side of the same predicate: what git discards, this discards, so a file of
     // comments is not a file of refusals.
     await writeFileAt("pkg/a.ts")
     await gitignoreIn("pkg", "", `#${UNUSABLE}`, "   ", "*.log")
@@ -299,20 +321,7 @@ describe("a nested file that cannot be used", () => {
     const thrown = await discoverOrThrow()
 
     expect((thrown as Error).message).toContain("line 4")
-    expect((thrown as Error).message).toContain("5000 characters")
-    expect((thrown as Error).message.length).toBeLessThan(1_000)
-  })
-
-  it("abridges the engine's own diagnostic too", async () => {
-    // A different string from the rule, and unbounded for a different reason: the engine quotes
-    // the whole pattern it refused, so a rule that stops just short of the length limit produces
-    // four kilobytes of message — and a `CoreError` is printed verbatim.
-    await writeFileAt("pkg/a.ts")
-    await gitignoreIn("pkg", `${"a".repeat(4_000)}/[/b`)
-
-    const thrown = await discoverOrThrow()
-
-    expect((thrown as { code?: string }).code).toBe("scan-gitignore-unreadable")
+    expect((thrown as Error).message).toContain("5000 bytes")
     expect((thrown as Error).message.length).toBeLessThan(1_000)
   })
 
