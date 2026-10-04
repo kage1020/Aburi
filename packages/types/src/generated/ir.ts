@@ -343,7 +343,7 @@ export interface LspHintRejections {
  */
 unparseableHover: number
 /**
- * Hover text the pass read but could not attribute to a class the Symbol table holds: either no owner class name appears in it, the name it carries is not a class the scan produced, or no class of that name is in the caller's file and more than one is elsewhere, so the name does not say which one the server meant. One bucket rather than two because the outcome per call site is the same and the hover text that separates the two causes is not in the IR.
+ * Hover text the pass read but could not attribute to one class the Symbol table holds: either no owner class name appears in it, the name it carries is not a class the scan produced, or no class of that name is in the caller's file and several are elsewhere, so the name does not say which one the server meant. Among several, a dropped class that lacks the member is set aside, and the name is taken when that leaves one. One bucket rather than three because the outcome per call site is the same and nothing a consumer could act on separates them.
  */
 ownerClassNotFound: number
 /**

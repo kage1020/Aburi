@@ -239,6 +239,23 @@ export function symbolIdFile(value: string): string | null {
   return parts.file
 }
 
+/**
+ * The three parts of a Symbol id, or `null` when `value` is not a well-formed one.
+ *
+ * For a caller that builds one id out of another, such as a class member's from its class's.
+ * The id it builds is a key, and what it shares with the id it is built from is the id's own
+ * parts. `name` and `source.file` say other things about the Symbol and are not tied to them:
+ * `Symbol.name` by ir-schema.md §3.1's own account, and `source.file` as `symbolIdFile` says.
+ * A key built from either can miss an id that is in the table.
+ *
+ * The same full grammar check as `symbolIdFile`, for the same reason.
+ */
+export function symbolIdParts(value: string): SymbolIdParts | null {
+  const parts = splitSymbolId(value)
+  if (parts === null || symbolIdViolation(parts) !== null) return null
+  return parts
+}
+
 /** Narrow an arbitrary string to a `ComponentId`. Counterpart of `isSymbolId`. */
 export function isComponentId(value: string): value is ComponentId {
   return COMPONENT_ID_PATTERN.test(value)
