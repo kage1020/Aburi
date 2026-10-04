@@ -1,4 +1,4 @@
-import { call, fp, makeSymbol, rule, symbolId } from "@aburi/test-support"
+import { call, component, fp, makeSymbol, rule, symbolId } from "@aburi/test-support"
 import type {
   Symbol as IRSymbol,
   SymbolChange,
@@ -11,7 +11,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { projectDiff } from "../src"
-import { type Arrangement, arrangeWithin, type Section } from "../src/diff"
+import { type Arrangement, arrangeWithin, type Section, type Shown } from "../src/diff"
 import { emptySummary, makeDiff } from "./fixtures"
 
 /**
@@ -500,6 +500,82 @@ describe("projectDiff — maxBytes against the sections above", () => {
     for (const file of notCompared) expect(md).toContain(`\`${file.path}\``)
   })
 
+  it("MP13b: keeps a section whole when that is smaller than naming it in the note", () => {
+    // One thin removed Symbol saves a couple of bytes as a names-only row and costs a claim in
+    // the note, so whole is its smaller form. Judged on its lines alone it was kept names-only
+    // or not at all, and a less important section stayed in its place.
+    const syntaxOnly = Array.from({ length: 8 }, (_, i) => {
+      const after = makeSymbol({ id: `ts:src/s.ts#helper${i}`, name: `helper${i}` })
+      return {
+        status: "changed" as const,
+        before: { ...after, fingerprint: fp("b") },
+        after,
+        delta: delta({ syntaxChanged: true }),
+      }
+    })
+    const diff = makeDiff({
+      symbols: [
+        {
+          status: "removed" as const,
+          symbol: makeSymbol({ id: "ts:src/billing/invoice.ts#voidInvoice", name: "voidInvoice" }),
+        },
+        ...syntaxOnly,
+      ],
+      summary: { ...emptySummary(), removed: 1, changed: 8, componentsAdded: 1 },
+      components: {
+        added: [component({ id: "payments", name: "Payments", roots: ["apps/payments"] })],
+        removed: [],
+        changed: [],
+      },
+    })
+    const removedOnly = projectDiff(diff, { maxBytes: 500 })
+    expect(headings(removedOnly)).toEqual(["## ➖ Removed"])
+    expect(removedOnly).not.toContain("_Names and locations only")
+    const both = bytes(projectDiff(diff, { maxBytes: 540 }))
+    for (const budget of [both, 540, 567]) {
+      const md = projectDiff(diff, { maxBytes: budget })
+      expect(headings(md), `at ${budget}`).toEqual(["## ➖ Removed", "## 🧱 Component changes"])
+      expect(bytes(md)).toBeLessThanOrEqual(budget)
+    }
+    expect(headings(projectDiff(diff, { maxBytes: both - 1 }))).toEqual(["## ➖ Removed"])
+  })
+
+  it("MP13c: keeps a thin section whole below a names-only one", () => {
+    // Below names-only API changes, the one removed Symbol is still smaller whole than named in
+    // the note. Held to "names-only or gone below a names-only list", it was named only, in a
+    // larger document, or omitted where that did not fit, although it fit whole.
+    const api = Array.from({ length: 12 }, (_, i) => {
+      const after = makeSymbol({ id: `ts:src/api.ts#api${i}`, name: `api${i}` })
+      return {
+        status: "changed" as const,
+        before: { ...after, fingerprint: fp(`b${i}`) },
+        after,
+        delta: delta({ apiChanged: true }),
+      }
+    })
+    const diff = makeDiff({
+      symbols: [
+        ...api,
+        {
+          status: "removed" as const,
+          symbol: makeSymbol({ id: "ts:src/billing/invoice.ts#voidInvoice", name: "voidInvoice" }),
+        },
+      ],
+      summary: { ...emptySummary(), removed: 1, changed: 12 },
+    })
+    const removedWhole = (md: string) => md.split("## ➖ Removed")[1]?.includes("### `voidInvoice`")
+    const tight = projectDiff(diff, { maxBytes: bytes(projectDiff(diff)) - 1 })
+    expect(headings(tight)).toEqual(["## ⚠ API changes", "## ➖ Removed"])
+    expect(noteOf(tight)).toContain("**1 section lists names only**")
+    expect(removedWhole(tight)).toBe(true)
+    // At exactly its own size the same document comes back: only the budget in the note differs.
+    const md = projectDiff(diff, { maxBytes: bytes(tight) })
+    expect(md.replace(/within \d+ bytes/, "")).toBe(tight.replace(/within \d+ bytes/, ""))
+    expect(headings(projectDiff(diff, { maxBytes: bytes(tight) - 1 }))).toEqual([
+      "## ⚠ API changes",
+    ])
+  })
+
   it("never offers a names-only list longer than the section it stands for", () => {
     // One changed Symbol with nothing in its delta is shorter whole than as a list with the line
     // saying it is one. Offered anyway, it would be kept in that longer form while the cap
@@ -584,6 +660,37 @@ describe("arrangeWithin — checked against every arrangement of small inputs", 
     return total
   }
 
+  /**
+   * `size` with a note on top: the first names-only section adds a claim to it and each one its
+   * title, `title` lines long, and likewise for omitted ones.
+   */
+  function notedWith(title: number): (arrangement: Arrangement) => number {
+    return (arrangement) => {
+      const count = (kind: string) => arrangement.filter(({ shown }) => shown.kind === kind).length
+      const named = (sections: number) => (sections > 0 ? 4 + title * sections : 0)
+      return size(arrangement) + named(count("short")) + named(count("omitted"))
+    }
+  }
+  const noted = notedWith(1)
+
+  const replaced = (arrangement: Arrangement, index: number, shown: Shown): Arrangement =>
+    arrangement.map((row, at) => (at === index ? { section: row.section, shown } : row))
+
+  /**
+   * The order the passes keep once the note is counted: a list shown whole below one shown
+   * names-only is whole only because names-only would not make the document smaller.
+   */
+  function inOrder(arrangement: Arrangement, measure: (arrangement: Arrangement) => number) {
+    const bytes = measure(arrangement)
+    let shortAbove = false
+    return arrangement.every(({ section, shown }, index) => {
+      if (section.short === undefined) return true
+      if (shown.kind === "short") shortAbove = true
+      if (shown.kind !== "full" || !shortAbove) return true
+      return measure(replaced(arrangement, index, { kind: "short", lines: section.short })) >= bytes
+    })
+  }
+
   function* every(sections: readonly Section[]): Generator<Arrangement> {
     const [first, ...rest] = sections
     if (first === undefined) {
@@ -638,7 +745,72 @@ describe("arrangeWithin — checked against every arrangement of small inputs", 
       }
       const kinds = (arrangement: Arrangement | null) =>
         arrangement?.map(({ shown }) => shown.kind) ?? null
-      expect(kinds(arrangeWithin(sections, fits))).toEqual(kinds(best))
+      expect(kinds(arrangeWithin(sections, size, budget))).toEqual(kinds(best))
+    }
+  })
+
+  it("makes a section put back late whole when that fits", () => {
+    // s0 fits in neither form beside the note naming s1 too, so the first pass omits it. With s1
+    // kept, s0 fits back, names-only being the smaller; whole it is the whole budget, and fits.
+    const sections = [section("s0", 7, 1), section("s1", 1, null)]
+    const kinds = arrangeWithin(sections, noted, 8).map(({ shown }) => shown.kind)
+    expect(kinds).toEqual(["full", "full"])
+  })
+
+  it("keeps a list whole below a names-only one when whole is the smaller document", () => {
+    // s1 saves one line as names-only and spends three on its title in the note, so whole is its
+    // smaller form. Held to "short or gone below a names-only list", it was omitted at 22.
+    const sections = [section("s0", 30, 5), section("s1", 10, 9)]
+    const kinds = arrangeWithin(sections, notedWith(3), 22).map(({ shown }) => shown.kind)
+    expect(kinds).toEqual(["short", "full"])
+    // A tie keeps it whole too: names-only would show less for the same bytes.
+    const tie = [section("s0", 30, 5), section("s1", 3, 2)]
+    expect(arrangeWithin(tie, noted, 13).map(({ shown }) => shown.kind)).toEqual(["short", "full"])
+  })
+
+  it("leaves no omitted section that fits back in, when the note's cost makes sizes interact", () => {
+    // The note is part of the document: the first names-only section adds a claim to it and
+    // each one its title, and likewise for omitted ones. With that in the size, a names-only
+    // form can make the document larger than the section whole, and omitting a short section
+    // can cost more than keeping it. The passes are greedy, so the property is the one they
+    // promise rather than the best arrangement of all: what is omitted does not fit back, the
+    // first names-only list does not fit whole, and the order holds.
+    let seed = 20261002
+    const random = () => {
+      seed = (seed * 48271) % 2147483647
+      return seed / 2147483647
+    }
+    for (let trial = 0; trial < 2000; trial++) {
+      const measure = notedWith(trial % 2 === 0 ? 1 : 3)
+      const sections = Array.from({ length: 5 }, (_, index) => {
+        const full = 1 + Math.floor(random() * 12)
+        const short = full > 1 && random() < 0.6 ? 1 + Math.floor(random() * (full - 1)) : null
+        return section(`s${index}`, full, short)
+      })
+      const budget = Math.floor(
+        random() * (sections.reduce((sum, s) => sum + s.lines.length, 0) + 20),
+      )
+      const got = arrangeWithin(sections, measure, budget)
+      const everyOmitted = got.map(({ section }) => ({ section, shown: { kind: "omitted" } }))
+      if (measure(everyOmitted as Arrangement) > budget) continue
+
+      expect(measure(got)).toBeLessThanOrEqual(budget)
+      expect(inOrder(got, measure)).toBe(true)
+      for (const [index, { section, shown }] of got.entries()) {
+        if (shown.kind !== "omitted") continue
+        const forms: Shown[] = [{ kind: "full" }]
+        if (section.short !== undefined) forms.push({ kind: "short", lines: section.short })
+        for (const form of forms) {
+          const candidate = replaced(got, index, form)
+          if (!inOrder(candidate, measure)) continue
+          expect(measure(candidate), `s${index} as ${form.kind}`).toBeGreaterThan(budget)
+        }
+      }
+      const firstShort = got.findIndex(({ shown }) => shown.kind === "short")
+      if (firstShort >= 0) {
+        const whole = replaced(got, firstShort, { kind: "full" })
+        if (inOrder(whole, measure)) expect(measure(whole)).toBeGreaterThan(budget)
+      }
     }
   })
 })
