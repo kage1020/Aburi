@@ -1090,6 +1090,91 @@ describe("resolveCallGraph", () => {
     ])
   })
 
+  describe("import scope: a default import resolves to the module's default export", () => {
+    /**
+     * Where `caller`'s one call at line 6 lands, with `src/a.ts` importing `symbols` from `./x`:
+     * the edge it produced, and the bucket and candidates of the diagnostic it left instead.
+     */
+    function resolvedOf(target: string, symbols: string[], callees: IRSymbol[]) {
+      const caller = withCalls("ts:src/a.ts#caller", [{ target, line: 6 }])
+      const imports = new Map<string, readonly ImportEdge[]>([
+        ["src/a.ts", [importEdge({ source: "./x", symbols })]],
+      ])
+      const result = resolveCallGraph({ symbols: [caller, ...callees], importsByFile: imports })
+      return {
+        edges: result.edges.map((edge) => [edge.to, edge.confidence]),
+        unresolved: result.diagnostics.map((d) => [d.bucket, d.candidates]),
+      }
+    }
+
+    it("CR5: reaches an anonymous default export", () => {
+      const anon = makeSymbol("ts:src/x.ts#<default>", { derivedBy: ["export-default"] })
+      expect(resolvedOf("inc", ["default as inc"], [anon])).toEqual({
+        edges: [["ts:src/x.ts#<default>", "high"]],
+        unresolved: [],
+      })
+    })
+
+    it("reaches a `<default>` Symbol that carries no `export-default`, as LP6 alone describes it", () => {
+      const anon = makeSymbol("ts:src/x.ts#<default>")
+      expect(resolvedOf("inc", ["default as inc"], [anon])).toEqual({
+        edges: [["ts:src/x.ts#<default>", "high"]],
+        unresolved: [],
+      })
+    })
+
+    it("CR5a: reaches a named default export imported under another name", () => {
+      const makeApp = makeSymbol("ts:src/x.ts#makeApp", { derivedBy: ["export-default"] })
+      expect(resolvedOf("createApp", ["default as createApp"], [makeApp])).toEqual({
+        edges: [["ts:src/x.ts#makeApp", "high"]],
+        unresolved: [],
+      })
+    })
+
+    it("CR5b: composes a dotted tail past the default export's own name, not the local one", () => {
+      const svc = makeSymbol("ts:src/x.ts#Svc", { kind: "class", derivedBy: ["export-default"] })
+      const run = makeSymbol("ts:src/x.ts#Svc::run", { kind: "method" })
+      expect(resolvedOf("S.run", ["default as S"], [svc, run])).toEqual({
+        edges: [["ts:src/x.ts#Svc::run", "high"]],
+        unresolved: [],
+      })
+    })
+
+    it("CR5c: does not take a named export that happens to share the local name", () => {
+      const createClient = makeSymbol("ts:src/x.ts#createClient", { derivedBy: ["export-default"] })
+      const connect = makeSymbol("ts:src/x.ts#connect")
+      const callees = [createClient, connect]
+      expect(resolvedOf("connect", ["default as connect"], callees)).toEqual({
+        edges: [["ts:src/x.ts#createClient", "high"]],
+        unresolved: [],
+      })
+      // The named import of the same name still reaches the named export.
+      expect(resolvedOf("connect", ["connect"], callees)).toEqual({
+        edges: [["ts:src/x.ts#connect", "high"]],
+        unresolved: [],
+      })
+    })
+
+    it("CR5c: leaves a module without a default export unresolved, bucketed `no-match`", () => {
+      const connect = makeSymbol("ts:src/x.ts#connect")
+      expect(resolvedOf("connect", ["default as connect"], [connect])).toEqual({
+        edges: [],
+        unresolved: [["no-match", []]],
+      })
+    })
+
+    it("CR5d: leaves two default exports unresolved, bucketed `ambiguous`, rather than taking one", () => {
+      // Two `export default`s in one file is TS2528, and an ordinary state in the middle of an
+      // edit: the extractor reports both declarations with the token.
+      const a = makeSymbol("ts:src/x.ts#a", { derivedBy: ["export-default"] })
+      const b = makeSymbol("ts:src/x.ts#b", { derivedBy: ["export-default"] })
+      expect(resolvedOf("x", ["default as x"], [b, a])).toEqual({
+        edges: [],
+        unresolved: [["ambiguous", ["ts:src/x.ts#a", "ts:src/x.ts#b"]]],
+      })
+    })
+  })
+
   // ---------------------------------------------------------------------------
   // Integrated matrix — intra-file / intra-component / workspace / dynamic in one run
   // ---------------------------------------------------------------------------
