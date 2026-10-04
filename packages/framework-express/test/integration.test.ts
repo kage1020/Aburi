@@ -191,6 +191,167 @@ describe("framework-express — abstains", () => {
   })
 })
 
+/**
+ * The one `kind: "call"` Symbol `source` produces, classified. Throws when there is none, so a
+ * row asserting an abstention cannot pass because the line stopped producing a call.
+ */
+async function callIn(source: string): Promise<ClassifiedRow> {
+  const calls = (await classifyFixture("src/app.ts", source)).filter(
+    (r) => r.candidate.kind === "call",
+  )
+  const [call] = calls
+  if (call === undefined || calls.length > 1) {
+    throw new Error(`expected one call Symbol, got: ${calls.map((r) => r.candidate.name)}`)
+  }
+  return call
+}
+
+/** `line` below an Express import and the app it registers on. */
+const inExpressApp = (line: string) =>
+  [`import express from "express"`, `const app = express()`, line].join("\n")
+
+describe("framework-express — a route method name is not a route", () => {
+  it.each([
+    ["Express's settings getter", `app.get("env")`],
+    ["a cache delete", `cache.delete("stale-key")`],
+    ["a settings read", `settings.get("port")`],
+    ["a Map delete", `seen.delete(process.argv[2])`],
+    ["a URLSearchParams delete", `url.searchParams.delete("sslmode")`],
+    ["an HTTP client posting data", `axios.post(url, { id: 1 })`],
+    ["a call with no arguments", `client.get()`],
+    ["an HTTP client passing options", `client.get(url, { headers: { accept: "json" } })`],
+    ["a delete handed a list of keys", `cache.delete("users", ["a", "b"])`],
+    ["a get handed a choice of defaults", `config.get("port", isProd ? 80 : 3000)`],
+    ["a put handed a computed value", `cache.put(key, count + 1)`],
+    ["a getter whose only other argument is a comment", `app.get("env" /* the mode */)`],
+    // A comment is no argument: counted, it would stand in the path's place and `key` would be
+    // read as the handler.
+    ["a delete whose only argument has a comment in front", `seen.delete(/* oldest */ key)`],
+    ["a delete at the end of a chain with no route call", `db.collection("users").delete(id)`],
+    ["a delete up a route call whose argument is not a path", `db.route("users").delete(recordId)`],
+  ])("abstains on %s", async (_label, line) => {
+    expect((await callIn(inExpressApp(line))).classification).toBeNull()
+  })
+
+  it("abstains on a cache delete in a file with no Express import", async () => {
+    // Without an import a route is classified `medium`, and an unrelated `import express` added
+    // later moved it to `high` on a line nobody touched: the abstention has to hold here too.
+    expect((await callIn(`cache.delete("key")`)).classification).toBeNull()
+  })
+
+  // Real registrations given up on purpose. Classifying one of them moves the line the README's
+  // "Not classified today" list draws, so a change here belongs with a change to that list.
+  it.each([
+    ["a handler that is awaited", `app.get("/users", await makeHandler())`],
+    ["a handler that is constructed", `app.get("/users", new AsyncHandler(listUsers))`],
+    ["a handler behind an old-style assertion", `app.get("/users", <RequestHandler>listUsers)`],
+    [
+      "an app.route chain bound to a name first",
+      `const userRoute = app.route("/users")\nuserRoute.get(listUsers)`,
+    ],
+    ["an app.route chain whose path is a name", `app.route(USERS_PATH).get(listUsers)`],
+  ])("knowingly abstains on %s", async (_label, line) => {
+    expect((await callIn(inExpressApp(line))).classification).toBeNull()
+  })
+
+  it.each([
+    ["an inline handler", `app.get("/users", (req, res) => res.json([]))`, "app.get"],
+    ["a handler identifier", `app.get("/users", listUsers)`, "app.get"],
+    ["a controller method", `app.get("/users", users.list)`, "app.get"],
+    [
+      "a wrapped inline handler",
+      `app.get("/users", asyncHandler(async (req, res) => res.json([])))`,
+      "app.get",
+    ],
+    [
+      "middleware before the handler",
+      `app.post("/users", validate(schema), createUser)`,
+      "app.post",
+    ],
+    [
+      "its path up an app.route chain",
+      `app.route("/users").get((req, res) => res.json([]))`,
+      "app.get",
+    ],
+    ["a handler identifier up an app.route chain", `app.route("/users").get(listUsers)`, "app.get"],
+    // One statement is one Symbol, named by the leaf call.
+    [
+      "several methods on one app.route chain",
+      `app.route("/users").get(listUsers).post(createUser)`,
+      "app.post",
+    ],
+    [
+      "an app.route chain with a non-null assertion",
+      `app.route("/users")!.get(listUsers)`,
+      "app.get",
+    ],
+    ["an app.route path in backticks", "app.route(`/users`).get(listUsers)", "app.get"],
+    ["an array of handlers", `app.get("/users", [authenticate, listUsers])`, "app.get"],
+    ["a spread of handlers", `app.get("/users", ...handlers)`, "app.get"],
+    ["a spread carrying the path as well", `app.get(...routeArgs)`, "app.get"],
+    ["a wrapped handler identifier", `app.get("/users", asyncHandler(listUsers))`, "app.get"],
+    ["a bound controller method", `app.get("/users", users.list.bind(users))`, "app.get"],
+    ["a handler cast to its type", `app.get("/users", listUsers as RequestHandler)`, "app.get"],
+    ["a handler picked by key", `app.get("/users", handlers["list"])`, "app.get"],
+    [
+      "a handler picked by a condition",
+      `app.get("/users", isProd ? cachedList : liveList)`,
+      "app.get",
+    ],
+    ["a handler with a || fallback", `app.get("/users", custom || defaultHandler)`, "app.get"],
+    ["a handler with a ?? fallback", `app.get("/users", options.handler ?? fallback)`, "app.get"],
+    [
+      "a handler factory handed only options",
+      `app.get("/auth/google", passport.authenticate("google", { scope: ["profile"] }))`,
+      "app.get",
+    ],
+  ])("classifies a route with %s", async (_label, line, receiverAndMethod) => {
+    expect((await callIn(inExpressApp(line))).classification).toEqual({
+      extKind: "framework:express:route",
+      derivedBy: `framework:express:route:${receiverAndMethod}`,
+      confidence: "high",
+    })
+  })
+})
+
+describe("framework-express — a .use argument behind a wrapper", () => {
+  it.each([
+    [
+      "a handler identifier cast to its type",
+      `app.use(logger as RequestHandler)`,
+      "framework:express:middleware",
+      "framework:express:middleware:app.use;identifier-arg",
+      "medium",
+    ],
+    [
+      "an inline handler cast to its type",
+      `app.use(((req, res, next) => next()) as RequestHandler)`,
+      "framework:express:middleware",
+      "framework:express:middleware:app.use;arity-3",
+      "high",
+    ],
+    [
+      "a router cast to its type",
+      `app.use("/api", apiRouter as Router)`,
+      "framework:express:mount",
+      "framework:express:mount:app.use;router-identifier",
+      "high",
+    ],
+  ])("classifies %s as the bare argument is", async (_label, line, extKind, derivedBy, confidence) => {
+    expect((await callIn(inExpressApp(line))).classification).toEqual({
+      extKind,
+      derivedBy,
+      confidence,
+    })
+  })
+
+  it("does not read an old-style assertion, as the language plugin does not", async () => {
+    expect(
+      (await callIn(inExpressApp(`app.use(<RequestHandler>logger)`))).classification,
+    ).toBeNull()
+  })
+})
+
 describe("framework-express — a statement declaring several names", () => {
   /** `"<name> <derivedBy>"` per Symbol classified as a Router, sorted. */
   function routersIn(rows: ClassifiedRow[]): string[] {

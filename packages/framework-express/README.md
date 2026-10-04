@@ -10,7 +10,7 @@ Recognised shapes:
 | Source shape | `extKind` | Signal |
 |---|---|---|
 | `const r = Router()` / `const r = express.Router()` | `framework:express:router` | Router factory call bound to that const's own declarator; in `const a = 1, r = Router()` only `r` |
-| `app.get('/users', h)` / `router.post(…)` | `framework:express:route` | member call whose leaf is `get`/`post`/`put`/`patch`/`delete`/`all` |
+| `app.get('/users', h)` / `router.post(…)` | `framework:express:route` | member call whose leaf is `get`/`post`/`put`/`patch`/`delete`/`all` and handed a handler after its path |
 | `app.use((req, res, next) => …)` | `framework:express:middleware` | `.use(…)` with an arity-3 inline handler |
 | `app.use(logger)` | `framework:express:middleware` | `.use(…)` with an out-of-scope identifier argument (confidence: `medium`) |
 | `app.use((err, req, res, next) => …)` | `framework:express:error-middleware` | `.use(…)` with an arity-4 handler |
@@ -19,6 +19,29 @@ Recognised shapes:
 Priorities inside `.use(...)` are first-match-wins in the order above: an
 arity-4 handler always wins over any other shape, then the two-arg
 `(path, identifier)` mount pattern, then plain middleware.
+
+A route method's name is shared vocabulary (`map.delete(key)`,
+`settings.get("port")`, Express's own settings getter `app.get("env")`), so a
+call is a route only when its arguments have a registration's shape. The first
+argument is taken as the path, and its shape is not checked, so
+`app.get(ROUTES.users, h)` is a route. At least one argument after it must be
+handler-shaped: an inline function, an identifier, a member path (`users.list`,
+`handlers["list"]`), a call (`asyncHandler(h)`,
+`passport.authenticate("local")`), a choice between those
+(`isProd ? cached : live`, `custom || fallback`, `options.handler ?? fallback`),
+or an array or spread of them. Data in the handler's place does not count, so
+`axios.post(url, { id })` is not a route, but an identifier can name data as
+well as a function, so `cache.put(key, value)` is one. Two shapes have no path
+to skip, and a handler alone makes them a route: a chain that has called
+`.route(path)` with a literal path beginning with `/`, on any receiver and at
+any depth (`app.route("/users").get(listUsers).post(createUser)`), and a call
+whose first argument is a spread (`app.get(...routeArgs)`).
+
+Arguments are read through `as`, `satisfies`, `!` and parentheses, and so is a
+route's receiver chain, as `@aburi/lang-typescript` reads them to name the
+registration: `app.use(logger as RequestHandler)` is middleware as
+`app.use(logger)` is, and `app.route("/users")!.get(h)` is a route as
+`app.route("/users").get(h)` is.
 
 Confidence is `high` when the file imports the `express` package or one of its
 subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
@@ -45,6 +68,19 @@ Not classified today (documented for completeness):
 - A name a destructuring pattern pulls out of a `Router()` call
   (`const { stack } = Router()`) — the binding is not the Router, only
   something read off it.
+- A route whose only handler is awaited (`app.get(p, await makeHandler())`) or
+  constructed (`app.get(p, new AsyncHandler(h))`) — either is ordinarily data
+  when handed to a `put` or a `post` (`axios.post(url, new FormData(form))`).
+- An argument behind an old-style type assertion (`app.get(p, <RequestHandler>h)`,
+  `app.use(<RequestHandler>logger)`) — `@aburi/lang-typescript` does not read
+  through `<T>x` either, and the two readers have to agree.
+- A route registered on a name an `app.route(path)` call was bound to
+  (`const r = app.route("/users")`, then `r.get(h)`) — `r.get(h)` is shaped
+  like `cache.get(key)`, and the plugin reads one statement at a time, so it
+  cannot see where `r` came from.
+- An `app.route(...)` chain whose path is not a literal beginning with `/`
+  (`app.route(USERS_PATH).get(h)`) — `route` is shared vocabulary too, and a
+  builder's `db.route("users").delete(id)` has the same shape.
 
 ## Install
 

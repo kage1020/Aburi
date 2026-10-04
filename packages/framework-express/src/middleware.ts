@@ -1,4 +1,5 @@
 import { asSyntaxNode, type SyntaxNode } from "@aburi/core"
+import { isPathLiteral, unwrapValue, writtenChildren } from "./ast-helpers"
 
 /** Method name that registers middleware / error-middleware / mount points. */
 export const EXPRESS_MIDDLEWARE_METHOD = "use"
@@ -18,33 +19,36 @@ export interface UseArgumentShape {
    * substitution, read through the wrappers a value is read through (`isPathLiteral`).
    */
   readonly firstArgIsPathLiteral: boolean
-  /** True when the second argument is a plain identifier (router / imported handler). */
+  /** True when the second argument is an identifier (router / imported handler). */
   readonly secondArgIsIdentifier: boolean
   /** Argument count from the AST. */
   readonly argCount: number
-  /** True when some argument is a bare identifier, i.e. a handler reference that cannot be arity-checked here. */
+  /** True when some argument is an identifier, i.e. a handler reference that cannot be arity-checked here. */
   readonly hasIdentifierArg: boolean
 }
 
-/** Shape of a `.use(...)` call's arguments; `null` when the node or its arguments are missing. */
+/**
+ * Shape of a `.use(...)` call's arguments; `null` when the node or its arguments are missing.
+ *
+ * Each argument is read through the wrappers a value is read through (`unwrapValue`), as
+ * `@aburi/lang-typescript` reads it for the registration's body and name: read bare, the
+ * handler in `app.use(logger as RequestHandler)` was no identifier and the call no middleware,
+ * and `app.use("/api", apiRouter as Router)`, named by its path, was no mount.
+ */
 export function analyzeUseArguments(callExpression: unknown): UseArgumentShape | null {
   const node = asSyntaxNode(callExpression)
   if (node === null) return null
   const argsNode = findArguments(node)
   if (argsNode === null) return null
 
-  const argChildren: SyntaxNode[] = []
-  for (const child of argsNode.namedChildren) {
-    // A comment is a named node the grammar hangs wherever it was written, not an argument:
-    // counted, `app.use(/* v1 */ "/api", router)` was a three-argument call and no mount.
-    if (child !== null && child.type !== "comment") argChildren.push(child)
-  }
+  const argChildren = writtenChildren(argsNode)
 
   let hasErrorHandler = false
   let hasRegularHandler = false
   let hasIdentifierArg = false
 
-  for (const arg of argChildren) {
+  for (const written of argChildren) {
+    const arg = unwrapValue(written)
     if (isFunctionLike(arg)) {
       const arity = functionArity(arg)
       if (arity === ERROR_MIDDLEWARE_ARITY) hasErrorHandler = true
@@ -61,7 +65,7 @@ export function analyzeUseArguments(callExpression: unknown): UseArgumentShape |
     hasErrorHandler,
     hasRegularHandler,
     firstArgIsPathLiteral: first !== undefined && isPathLiteral(first),
-    secondArgIsIdentifier: second !== undefined && isIdentifier(second),
+    secondArgIsIdentifier: second !== undefined && isIdentifier(unwrapValue(second)),
     argCount: argChildren.length,
     hasIdentifierArg,
   }
@@ -107,40 +111,4 @@ function findParametersChild(fn: SyntaxNode): SyntaxNode | null {
 
 function isIdentifier(node: SyntaxNode): boolean {
   return node.type === "identifier"
-}
-
-/**
- * A literal string, read as `@aburi/lang-typescript` reads the path it names a registration
- * by: quoted, or a backtick with no substitution, which is the same value (`readStaticString`
- * there), and through the wrappers a value is read through (`unwrapValue` there).
- *
- * The two readers have to agree, because one Symbol carries both answers. When this accepted
- * only `"…"`, `` app.use(`/api`, usersRouter) `` was named `app__use__$api__d0` with
- * `path-literal:/api` and classified `middleware` rather than `mount`: a registration mounted
- * at a path by its id and at none by its kind. This package depends on `@aburi/core`'s
- * `SyntaxNode` alone, so the check is restated here rather than imported.
- */
-function isPathLiteral(node: SyntaxNode): boolean {
-  const value = unwrapValue(node)
-  if (value.type === "string") return true
-  if (value.type !== "template_string") return false
-  return value.namedChildren.every((child) => child?.type !== "template_substitution")
-}
-
-/** `lang-typescript`'s `unwrapValue` set: each wraps one expression, written first. */
-const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
-  "parenthesized_expression",
-  "as_expression",
-  "satisfies_expression",
-  "non_null_expression",
-])
-
-function unwrapValue(node: SyntaxNode): SyntaxNode {
-  let cursor = node
-  while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
-    const inner = cursor.namedChildren.find((child) => child !== null && child.type !== "comment")
-    if (inner === undefined || inner === null) return cursor
-    cursor = inner
-  }
-  return cursor
 }

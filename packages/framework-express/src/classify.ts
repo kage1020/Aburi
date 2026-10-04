@@ -12,7 +12,7 @@ import { EXPRESS_DERIVED_BY_PREFIX } from "./ext-kinds"
 import { hasExpressImport } from "./imports"
 import { analyzeUseArguments, EXPRESS_MIDDLEWARE_METHOD, type UseArgumentShape } from "./middleware"
 import { extractRouterCall } from "./router"
-import { isRouteMethod } from "./routes"
+import { hasRouteArguments, isRouteMethod } from "./routes"
 
 /** `extKind` narrowed to the plugin's own union so a typo fails to compile. */
 interface ExpressClassification {
@@ -74,7 +74,7 @@ function classifyCallSymbol(
   const receiver = calleeRoot(callee)
   const importAnchored = hasExpressImport(ctx)
 
-  if (isRouteMethod(method)) {
+  if (isRouteMethod(method) && hasRouteArguments(call)) {
     return {
       extKind: "framework:express:route",
       derivedBy: `${EXPRESS_DERIVED_BY_PREFIX}:route:${receiver}.${method}`,

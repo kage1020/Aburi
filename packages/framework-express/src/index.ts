@@ -25,4 +25,4 @@ export {
 } from "./middleware"
 export { ExpressFrameworkPlugin, expressFrameworkPlugin } from "./plugin"
 export { EXPRESS_ROUTER_FACTORIES, extractRouterCall, type RouterCall } from "./router"
-export { EXPRESS_ROUTE_METHODS, isRouteMethod } from "./routes"
+export { EXPRESS_ROUTE_METHODS, hasRouteArguments, isRouteMethod } from "./routes"
