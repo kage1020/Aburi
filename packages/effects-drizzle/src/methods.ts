@@ -82,21 +82,22 @@ export function maxArgumentsFor(method: string): number {
  * `transaction(callback)` and `batch(statements)`. No Drizzle signature reaches a zero-argument
  * call to one, so that call is someone else's (effect-plugin.md §5.4, EP12). Everything else
  * may be called bare.
+ *
+ * Built from the write and transaction lists, so a terminal added to either takes the floor
+ * with it. A hand-written table keyed on the same unions would break the build only when a
+ * terminal is dropped; one added later would silently get no floor. A terminal Drizzle lets
+ * you call bare would have to be left out here by name.
  */
-const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlyMap<
-  DrizzleWriteMethod | DrizzleTransactionMethod,
-  number
-> = new Map<DrizzleWriteMethod | DrizzleTransactionMethod, number>([
-  ["insert", 1],
-  ["update", 1],
-  ["delete", 1],
-  ["transaction", 1],
-  ["batch", 1],
+const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlySet<
+  DrizzleWriteMethod | DrizzleTransactionMethod
+> = new Set<DrizzleWriteMethod | DrizzleTransactionMethod>([
+  ...DRIZZLE_WRITE_METHODS_LIST,
+  ...DRIZZLE_TRANSACTION_METHODS_LIST,
 ])
 
-/** The fewest arguments `method` takes as Drizzle's own API. */
+/** The fewest arguments `method` takes as Drizzle's own API: one for those terminals, else 0. */
 export function minArgumentsFor(method: string): number {
-  return (DRIZZLE_REQUIRED_ARGUMENT_TERMINALS as ReadonlyMap<string, number>).get(method) ?? 0
+  return (DRIZZLE_REQUIRED_ARGUMENT_TERMINALS as ReadonlySet<string>).has(method) ? 1 : 0
 }
 
 /**
