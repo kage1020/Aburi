@@ -69,16 +69,18 @@ what is recorded, and the last of them has a floor:
   `src/methods.ts` says so. More than the terminal takes is evidence against —
   but only evidence: `argumentCount` is a syntactic count, and a drop would
   erase a real query without logging anything, so an overflow costs the tier
-  instead. Fewer is different for `transaction` and `batch`, which both require
-  an argument: a zero-argument `firestore.batch()`, an unmanaged
-  `sequelize.transaction()` or a class's own `this.transaction()` is not
-  classified at all, whatever the receiver. Those calls have owners other than
-  Drizzle, and a call the parser counts at zero (`db.transaction(/* cb */)`) is
-  source that does not run.
+  instead. Fewer is different for the terminals that require an argument —
+  `insert`, `update` and `delete` take a table, `transaction` a callback and
+  `batch` a statement array: a zero-argument `firestore.batch()`, an unmanaged
+  `sequelize.transaction()`, a class's own `this.update()` or a form's
+  `form.delete()` is not classified at all, whatever the receiver, and neither
+  is `db.delete()`. Those calls have owners other than Drizzle, and a call the
+  parser counts at zero (`db.transaction(/* cb */)`) is source that does not
+  run.
 
 A match on all three gives `confidence: "high"`; anything short of that, other
-than a literal first argument or a zero-argument `transaction` / `batch`, still
-records the effect, at `confidence: "medium"`.
+than a literal first argument or a zero-argument call to a terminal that
+requires one, still records the effect, at `confidence: "medium"`.
 
 The `medium` tier is deliberate. Without the AST — which effect plugins never
 see — a client bound under a house naming convention and an unrelated object of

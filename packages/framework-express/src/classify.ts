@@ -1,7 +1,7 @@
 import { asSyntaxNode, calleeLeaf, calleeText } from "@aburi/core"
 import type {
   Confidence,
-  ExtractionContext,
+  FrameworkClassifyContext,
   OpaqueAstNode,
   SymbolCandidate,
   SymbolClassification,
@@ -27,7 +27,7 @@ interface ExpressClassification {
  */
 export function classifyExpressSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): SymbolClassification | null {
   const result = classifyBySymbolKind(symbol, ctx)
   if (result === null) return null
@@ -40,7 +40,7 @@ export function classifyExpressSymbol(
 
 function classifyBySymbolKind(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): ExpressClassification | null {
   if (symbol.kind === "const") return classifyConstSymbol(symbol, ctx)
   if (symbol.kind === "call") return classifyCallSymbol(symbol, ctx)
@@ -49,9 +49,9 @@ function classifyBySymbolKind(
 
 function classifyConstSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): ExpressClassification | null {
-  const routerCall = extractRouterCall(symbol.fullNode)
+  const routerCall = extractRouterCall(symbol.fullNode, symbol.name)
   if (routerCall === null) return null
   // An `express` import is what separates "definitely Express" (high) from "matches the pattern" (medium).
   const confidence: Confidence = hasExpressImport(ctx) ? "high" : "medium"
@@ -64,7 +64,7 @@ function classifyConstSymbol(
 
 function classifyCallSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
-  ctx: ExtractionContext,
+  ctx: FrameworkClassifyContext,
 ): ExpressClassification | null {
   const call = asSyntaxNode(symbol.fullNode)
   if (call === null) return null

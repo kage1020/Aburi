@@ -13,6 +13,11 @@ import { useScratchWorkspace } from "../src/scratch"
  * both take an argument, so the call is not Drizzle's: it stays in `calls[]` while the
  * function keeps the `db.read` its Drizzle query carries. A real `db.transaction(cb)` beside them
  * still classifies, so the positive and negative cases sit side by side.
+ *
+ * The same floor covers `insert`, `update` and `delete`, which all take a table. There the
+ * mistake was a phantom `db.write` rather than a withdrawn file, and a phantom effect travels:
+ * a class's own `this.update()` or a form's `form.delete()` gave its function a write, which
+ * effect propagation then carried to every caller that resolves to that function.
  */
 
 const workspace = useScratchWorkspace("foreign-batch")
@@ -81,5 +86,67 @@ describe("scan — a Firestore batch beside a Drizzle query", () => {
     const openTransaction = symbolNamed(result, "openTransaction")
     expect(openTransaction.effects).toEqual([])
     expect(openTransaction.calls.map((call) => call.target)).toContain("sequelize.transaction")
+  })
+})
+
+describe("scan — a zero-argument update() and delete() beside a Drizzle write", () => {
+  beforeEach(async () => {
+    await workspace.writeSource(
+      "src/profile-form.ts",
+      [
+        `import { eq } from "drizzle-orm"`,
+        `import { db } from "./db"`,
+        `import { users } from "./schema"`,
+        ``,
+        `export class ProfileForm {`,
+        `  update() {}`,
+        ``,
+        `  reset() {`,
+        `    this.update()`,
+        `  }`,
+        ``,
+        `  async rename(id: string, name: string) {`,
+        `    await db.update(users).set({ name }).where(eq(users.id, id))`,
+        `  }`,
+        `}`,
+        ``,
+        `export function discardDraft(form: { delete(): void }) {`,
+        `  form.delete()`,
+        `}`,
+        ``,
+        `export function cancelEdit(form: { delete(): void }) {`,
+        `  discardDraft(form)`,
+        `}`,
+        ``,
+      ].join("\n"),
+    )
+  })
+
+  it("keeps them as calls, with no write on their functions or the callers", async () => {
+    const result = await scanWith(workspace.root, {
+      languages: [langTypescriptPlugin],
+      effects: [drizzleEffectsPlugin],
+    })
+    expect(result.extractionFailures).toEqual([])
+    expect(result.skipped).toEqual([])
+
+    const reset = symbolNamed(result, "ProfileForm.reset")
+    expect(reset.effects).toEqual([])
+    expect(reset.calls.map((call) => call.target)).toContain("this.update")
+
+    const discardDraft = symbolNamed(result, "discardDraft")
+    expect(discardDraft.effects).toEqual([])
+    expect(discardDraft.calls.map((call) => call.target)).toContain("form.delete")
+
+    // The caller resolves to `discardDraft`, so a write recorded there would propagate here.
+    const cancelEdit = symbolNamed(result, "cancelEdit")
+    expect(cancelEdit.calls.map((call) => call.resolved)).toContain(discardDraft.id)
+    expect(cancelEdit.effects).toEqual([])
+
+    // A Drizzle write with its table still classifies.
+    const rename = symbolNamed(result, "ProfileForm.rename")
+    expect(
+      rename.effects.map((e) => ({ id: e.id, target: e.target, confidence: e.confidence })),
+    ).toEqual([{ id: "db.write", target: "db.update", confidence: "high" }])
   })
 })
