@@ -163,3 +163,21 @@ describe("framework-express — abstains", () => {
     expect(rows.some((r) => r.classification !== null)).toBe(false)
   })
 })
+
+describe("framework-express — a statement declaring several names", () => {
+  it("classifies the declarator that holds the Router call and no other", async () => {
+    const rows = await classifyFixture(
+      "src/routes.ts",
+      [
+        `import express from "express"`,
+        `export const router = express.Router(), API_PREFIX = "/api/v1", MAX_BODY = 1024`,
+        `export const limit = 10, adminRouter = express.Router()`,
+      ].join("\n"),
+    )
+    const routers = rows
+      .filter((r) => r.classification?.extKind === "framework:express:router")
+      .map((r) => r.candidate.name)
+      .sort()
+    expect(routers).toEqual(["adminRouter", "router"])
+  })
+})

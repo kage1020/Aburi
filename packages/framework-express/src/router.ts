@@ -2,7 +2,7 @@ import {
   asSyntaxNode,
   calleeLeaf,
   calleeText,
-  findNamedChildOfType,
+  lastQnameSegment,
   type SyntaxNode,
 } from "@aburi/core"
 
@@ -17,11 +17,16 @@ export interface RouterCall {
  * The declarator's `value` must BE the `Router()` / `express.Router()` call (parentheses
  * transparent); `[Router()]` or `withLogging(Router())` is rejected so `high` confidence
  * never goes to a merely adjacent Router mention.
+ *
+ * `fullNode` is the whole declaration statement, which can declare several names
+ * (`const router = Router(), API_PREFIX = "/api"`), so the declarator read is the one that
+ * declares `name`, the Symbol being classified. Taking the statement's first declarator made
+ * every sibling of a leading `Router()` a Router and missed a `Router()` declared second.
  */
-export function extractRouterCall(fullNode: unknown): RouterCall | null {
+export function extractRouterCall(fullNode: unknown, name: string): RouterCall | null {
   const node = asSyntaxNode(fullNode)
   if (node === null) return null
-  const declarator = findNamedChildOfType(node, "variable_declarator")
+  const declarator = declaratorOf(node, lastQnameSegment(name))
   if (declarator === null) return null
   const initializer = unwrapParens(declarator.childForFieldName("value"))
   if (initializer === null || initializer.type !== "call_expression") return null
@@ -29,6 +34,18 @@ export function extractRouterCall(fullNode: unknown): RouterCall | null {
   if (callee === null) return null
   if (!EXPRESS_ROUTER_FACTORIES.has(calleeLeaf(callee))) return null
   return { callee }
+}
+
+/** The `variable_declarator` of `statement` whose name is the plain identifier `binding`. */
+function declaratorOf(statement: SyntaxNode, binding: string): SyntaxNode | null {
+  for (const child of statement.namedChildren) {
+    if (child === null || child.type !== "variable_declarator") continue
+    const declared = child.childForFieldName("name")
+    if (declared !== null && declared.type === "identifier" && declared.text === binding) {
+      return child
+    }
+  }
+  return null
 }
 
 function unwrapParens(node: SyntaxNode | null): SyntaxNode | null {

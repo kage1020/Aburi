@@ -51,7 +51,7 @@ function classifyConstSymbol(
   symbol: SymbolCandidate<OpaqueAstNode>,
   ctx: ExtractionContext,
 ): ExpressClassification | null {
-  const routerCall = extractRouterCall(symbol.fullNode)
+  const routerCall = extractRouterCall(symbol.fullNode, symbol.name)
   if (routerCall === null) return null
   // An `express` import is what separates "definitely Express" (high) from "matches the pattern" (medium).
   const confidence: Confidence = hasExpressImport(ctx) ? "high" : "medium"
