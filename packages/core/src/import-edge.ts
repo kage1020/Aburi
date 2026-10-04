@@ -2,11 +2,11 @@
  * Readers for the wire format of `ImportEdge.symbols`.
  *
  * The language plugin emits one entry per binding an import clause makes: `"X"` for a plain
- * named import, `"X as Y"` for a renamed one, and `"default as Y"` for a default import. The
- * first two quote the source; the third is composed, since `import Y from './x'` writes no
- * ` as `. Two independent consumers — the call-graph resolver and the framework plugins'
- * decorator matching — have to recover the same two halves from it, so the parser lives here
- * rather than in either of them.
+ * named import, `"X as Y"` for a renamed one, and `"default as Y"` for a default import. Only
+ * the last is not always what the source wrote: `import Y from './x'` writes no ` as `, and
+ * the plugin composes the entry `import { default as Y }` would quote. Two independent
+ * consumers — the call-graph resolver and the framework plugins' decorator matching — have to
+ * recover the same two halves from it, so the parser lives here rather than in either of them.
  */
 
 /**
