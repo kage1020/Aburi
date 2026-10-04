@@ -1,4 +1,4 @@
-import { splitAliasedImportName } from "@aburi/core"
+import { DEFAULT_EXPORT_NAME, splitAliasedImportName } from "@aburi/core"
 import {
   assertImportBinding,
   assertImportEdgeSource,
@@ -21,7 +21,11 @@ export function isNestjsModule(source: string): boolean {
 
 /** What the file's imports say about one written identifier. */
 interface NameOrigin {
-  /** The name the source module exports it under — the key the decorator tables use. */
+  /**
+   * The name the source module exports it under. That is the key the decorator tables use,
+   * except for a default import: there it is `"default"`, which no table lists, and
+   * `resolveDecoratorName` matches the written name instead.
+   */
   readonly imported: string
   /** The module specifier the name came from, kept so a downgrade can say which module caused it. */
   readonly source: string
@@ -166,7 +170,7 @@ export function resolveDecoratorName(
   if (origin === undefined) return { canonical: name, confidence: "high" }
   // A default import (`import Controller from "./decorators"`) names the module's `default`,
   // which no table lists; the name the file chose for it is the only evidence of what it is.
-  const canonical = origin.imported === "default" ? name : origin.imported
+  const canonical = origin.imported === DEFAULT_EXPORT_NAME ? name : origin.imported
   return { canonical, confidence: origin.fromNestjs ? "high" : "medium" }
 }
 

@@ -70,7 +70,8 @@ export interface ImportEdge {
   /** Module specifier verbatim (e.g. "@billing/domain", "./util"). */
   source: string
   /**
-   * Named imports, or "*" for namespace / wildcard.
+   * The bindings the import makes (`"X"`, `"X as Y"`, `"default as Y"`), or
+   * "*" for namespace / wildcard.
    *
    * For aliased named imports (`import { X as Y }`) the entry is the string
    * `"X as Y"` — the exported name paired with the local rebind separated by
@@ -79,7 +80,9 @@ export interface ImportEdge {
    * same split and pick the right half. Un-aliased imports emit the plain
    * exported name (`"X"`). A default import (`import Y from './x'`) binds the
    * module's `default` export and is written as `{ default as Y }` would be,
-   * `"default as Y"`, so it never reads as a named import of `Y`.
+   * `"default as Y"`. That spelling is what lets a consumer tell it from a
+   * named import of `Y`; nothing enforces it, and a plugin that emits a bare
+   * `"Y"` is read as `import { Y }`.
    */
   symbols: string[] | "*"
   line: number

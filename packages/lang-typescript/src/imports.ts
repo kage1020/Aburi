@@ -1,4 +1,4 @@
-import { compareCodeUnit } from "@aburi/core"
+import { compareCodeUnit, DEFAULT_EXPORT_NAME } from "@aburi/core"
 import type { ImportEdge, ParseError } from "@aburi/types"
 import type { Node, Tree } from "web-tree-sitter"
 import { findChild, firstNonCommentChild, walkDescendants } from "./ast-helpers"
@@ -108,8 +108,9 @@ function readImportStatement(node: Node, errors: ParseError[]): ImportEdge[] {
  * The edge is a **namespace** edge and not a default binding, because `x` names the module
  * object the way `import * as x from './m'` does. Call resolution acts on the difference:
  * the namespace arm of `callgraph.ts` strips the head off `x.foo()` and looks for `foo` in
- * the target file, where a `symbols: ["x"]` edge would send it looking for `x.foo` there —
- * a name the target does not have. A wrong edge is worse than the missing one this replaces.
+ * the target file, where a `symbols: ["default as x"]` edge would send it looking for a
+ * member `foo` of the target's default export instead — not what `x.foo` names. A wrong edge
+ * is worse than the missing one this replaces.
  *
  * `dynamic` is false by definition rather than by consequence: the field means "written as
  * `import()`" (`lang-plugin.md`), and a require-equals is resolved when the module
@@ -172,7 +173,7 @@ function readImportClauseParts(clause: Node): {
         // to `Foo`, so it is written as `{ default as Foo }` would be. A bare `Foo` is what
         // `import { Foo }` produces, and a resolver reading it would look up the module's named
         // `Foo` instead (call-resolution.md §4.4).
-        names.push(`default as ${child.text}`)
+        names.push(`${DEFAULT_EXPORT_NAME} as ${child.text}`)
         break
       case "named_imports":
         for (const spec of child.namedChildren) {
