@@ -1382,10 +1382,12 @@ function promoteDefaultExports(
 
 /**
  * The JSDoc blocks written above a declaration, joined in source order, or `null` when there
- * are none. Only `/**`-opening comments count — `readThrows` scans the joined text for
- * `@throws` and cannot tell prose from a declaration once both are in it, and the space
- * between a decorator and its member is where `// biome-ignore` notes and commented-out
- * decorators are written.
+ * are none. Only `/**`-opening comments count. Any other comment is a note about the code rather
+ * than its documentation, and the space between a decorator and its member is where
+ * `// biome-ignore` notes and commented-out decorators are written. Once the text is joined,
+ * `readThrows` cannot tell which kind of comment a `@throws` came from, and its rule against
+ * reading a description as a type does not stand in for that: `// @throws Legacy` is a type name
+ * by that rule, and would be recorded.
  *
  * The scan starts at the outermost wrapper (`export`, `declare`), since that is where the
  * JSDoc sits, and walks backwards from the anchor rather than searching the parent's child
