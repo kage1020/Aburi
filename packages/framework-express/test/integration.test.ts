@@ -12,7 +12,7 @@ interface ClassifiedRow {
 async function classifyFixture(path: string, source: string): Promise<ClassifiedRow[]> {
   const parsed = await parseTypescriptFile({ path, content: source })
   if (parsed.tree === null) throw new Error(`fixture ${path} failed to parse`)
-  const ctx = makeCtx(path, source)
+  const ctx = { ...makeCtx(path, source), imports: parsed.imports }
   const candidates = extractSymbols(parsed.tree, ctx) as SymbolCandidate<unknown>[]
   return candidates.map((candidate) => ({
     candidate,

@@ -1,5 +1,5 @@
 import type {
-  ExtractionContext,
+  FrameworkClassifyContext,
   FrameworkPlugin,
   OpaqueAstNode,
   PluginContext,
@@ -17,7 +17,7 @@ class ExpressFrameworkPlugin implements FrameworkPlugin<OpaqueAstNode> {
 
   classifySymbol(
     symbol: SymbolCandidate<OpaqueAstNode>,
-    ctx: ExtractionContext,
+    ctx: FrameworkClassifyContext,
   ): SymbolClassification | null {
     return classifyExpressSymbol(symbol, ctx)
   }

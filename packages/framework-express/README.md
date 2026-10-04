@@ -20,10 +20,13 @@ Priorities inside `.use(...)` are first-match-wins in the order above: an
 arity-4 handler always wins over any other shape, then the two-arg
 `(path, identifier)` mount pattern, then plain middleware.
 
-Confidence is `high` when the file imports the `express` package (or reaches
-Express via CommonJS `require('express')`) and `medium` otherwise — the
-classification survives so the workspace projection still surfaces the shape,
-but consumers can treat medium-confidence rows as candidates for review.
+Confidence is `high` when the file imports the `express` package or one of its
+subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
+otherwise — the classification survives so the workspace projection still
+surfaces the shape, but consumers can treat medium-confidence rows as
+candidates for review. The import is read from the file's parsed import list,
+so how it is laid out does not matter and a commented-out import does not
+count; a `require` call is read from the source with comments removed.
 
 Not classified today (documented for completeness):
 

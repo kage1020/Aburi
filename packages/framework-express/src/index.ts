@@ -14,7 +14,7 @@ export {
   type ExpressExtKind,
   isExpressExtKind,
 } from "./ext-kinds"
-export { hasExpressImport, importListMentionsExpress } from "./imports"
+export { hasExpressImport, importListMentionsExpress, requiresExpress } from "./imports"
 export { frameworkExpressManifest } from "./manifest"
 export {
   analyzeUseArguments,
