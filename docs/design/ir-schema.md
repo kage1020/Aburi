@@ -440,6 +440,10 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 
 - The same AST node must not produce multiple Rules
 - `condition`/`what`/`expr` are whitespace-normalized (consecutive whitespace collapsed to one, newlines removed, trailing `...` when over 120 characters)
+  - Comments are not part of them: the language plugin takes them out, replacing each with a space, because telling a comment from the code around it takes the grammar ([`lang-plugin.md`](./lang-plugin.md) §4.4, LP19b). A `/* … */` inside a string literal is string content and stays
+  - Characters are code points, which is what the schema's `maxLength: 123` counts; a cut keeps the first 120 and appends `...`, and never splits a surrogate pair
+  - The scan applies the whitespace collapse and the cut again at the plugin boundary (`normalizeRuleText` in `@aburi/core`), so a plugin that skips them still writes a Document the schema accepts. The cut is idempotent, so a string a plugin already cut passes unchanged
+  - The outer parentheses an `if` or `switch` requires are not part of the `condition`; any others are (`if ((a) || (b))` gives `(a) || (b)`)
 - Simple returns such as `return x` / `return true` do not become Rules (inclusion follows the trivial determination in `drop-list.md`)
 - A `try` statement's `try` block and its `finally` block are walked like any block: their rules and their calls are the Symbol's. The `finally` block is included because it runs on every path through the statement.
 - A `catch` clause contributes its calls only. A call inside it is the Symbol's exactly when it would be in the `try` block, since the drop list applies to both alike, and so is any effect an effect plugin classifies from that call. Rules inside it — a guard, a `throw`, a nested `try` — are not expanded into the Symbol's rules, so rewriting an error handler's control flow does not move the `logic` fingerprint. Nothing on such an effect says it runs only when the `try` block throws: it is recorded, and propagated to callers, like an effect on any other path.

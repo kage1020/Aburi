@@ -12,7 +12,7 @@ interface ClassifiedRow {
 async function classifyFixture(path: string, source: string): Promise<ClassifiedRow[]> {
   const parsed = await parseTypescriptFile({ path, content: source })
   if (parsed.tree === null) throw new Error(`fixture ${path} failed to parse`)
-  const ctx = makeCtx(path, source)
+  const ctx = { ...makeCtx(path, source), imports: parsed.imports }
   const candidates = extractSymbols(parsed.tree, ctx) as SymbolCandidate<unknown>[]
   return candidates.map((candidate) => ({
     candidate,
@@ -140,6 +140,33 @@ describe("framework-express — confidence downgrades without an express import"
     const rows = await classifyFixture("src/app.ts", source)
     const route = findByExtKind(rows, "framework:express:route")
     expect(route.classification?.confidence).toBe("medium")
+  })
+})
+
+describe("framework-express — CommonJS app", () => {
+  const source = [
+    `const express = require("express")`,
+    ``,
+    `const app = express()`,
+    `const router = express.Router()`,
+    ``,
+    `router.get('/users', (req, res) => { res.json([]) })`,
+    `app.use((req, res, next) => { next() })`,
+    `app.use('/api', router)`,
+  ].join("\n")
+
+  it("rates every Symbol high, as an import would", async () => {
+    const rows = await classifyFixture("src/app.js", source)
+    const rated = rows
+      .filter((r) => r.classification !== null)
+      .map((r) => `${r.classification?.extKind} ${r.classification?.confidence}`)
+      .sort()
+    expect(rated).toEqual([
+      "framework:express:middleware high",
+      "framework:express:mount high",
+      "framework:express:route high",
+      "framework:express:router high",
+    ])
   })
 })
 

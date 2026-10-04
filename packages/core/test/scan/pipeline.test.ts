@@ -514,6 +514,40 @@ describe("runFilePipeline — array line ordering (IR integrity invariant #11)",
   })
 })
 
+describe("runFilePipeline — rule strings at the plugin boundary (ir-schema.md §8.2)", () => {
+  it("writes a plugin's long, multi-line rule strings in the §8.2 form", async () => {
+    const long = "x".repeat(200)
+    const result = await runPipelineWithStubs({
+      body: {
+        rules: [
+          {
+            type: "guard",
+            line: 3,
+            condition: `a ||\n    ${long}`,
+            what: null,
+            expr: null,
+            loopKind: null,
+          },
+          {
+            type: "throw",
+            line: 4,
+            condition: null,
+            what: "make({\n  code })",
+            expr: null,
+            loopKind: null,
+          },
+        ],
+        calls: [],
+      },
+    })
+    const rules = result.symbols[0]?.rules ?? []
+    expect(rules.map((r) => [r.condition, r.what])).toEqual([
+      [`a || ${"x".repeat(115)}...`, null],
+      [null, "make({ code })"],
+    ])
+  })
+})
+
 describe("runFilePipeline — Symbol id contract", () => {
   it("throws when the language plugin emits a Symbol id without a language prefix", async () => {
     const bogusCandidate = { ...baseCandidate(), id: symbolId("no-colon-here") }

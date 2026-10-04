@@ -13,6 +13,7 @@ import {
   isDrizzleTransactionMethod,
   isDrizzleWriteMethod,
   maxArgumentsFor,
+  minArgumentsFor,
 } from "./methods"
 import { classificationConfidence } from "./receivers"
 
@@ -31,9 +32,9 @@ import { classificationConfidence } from "./receivers"
  *    registration outright — no Drizzle root takes one — and the receiver plus argument
  *    count decide the tier.
  * 3. **Everything short of that downgrades rather than drops** — see `receiverConfidence`.
- * 4. **Arity has a floor for `transaction` / `batch`.** Both require an argument, so a
- *    zero-argument call is dropped whatever the receiver, where an overflow only costs the
- *    tier (effect-plugin.md §5.4).
+ * 4. **Arity has a floor for the terminals that require an argument** — `insert`, `update`,
+ *    `delete`, `transaction`, `batch`. A zero-argument call to one is dropped whatever the
+ *    receiver, where an overflow only costs the tier (effect-plugin.md §5.4).
  *
  * Throws only through the registry's input guards — `assertNonEmptySegments` on the target
  * and `hasMatchingImport` on each `ImportEdge.source` — upstream contract violations rather
@@ -58,6 +59,14 @@ export function classifyDrizzleCall(
   for (const segment of segments.slice(1, -1)) {
     if (fluentRoots.has(segment)) return null
   }
+
+  // `insert(table)`, `update(table)`, `delete(table)`, `transaction(cb)` and `batch([...])`
+  // all require an argument, so no Drizzle signature reaches a zero-argument call: a class's
+  // own `this.update()`, an Active Record model's `user.delete()`, a Firestore `batch()`, an
+  // unmanaged Sequelize or Knex `transaction()`. Not separable from broken source here, and a
+  // phantom write or transaction is the costlier of the two mistakes, so it is handed on
+  // unclassified.
+  if (call.argumentCount < minArgumentsFor(method)) return null
 
   // Relational query API: `<client>.query.<table>.findMany|findFirst`. Checked before the
   // generic dispatch because its terminals are not read methods. `query` sits at -3 and
@@ -93,11 +102,6 @@ export function classifyDrizzleCall(
   }
 
   if (isDrizzleTransactionMethod(method)) {
-    // `transaction(cb)` and `batch([...])` both require an argument, so no Drizzle signature
-    // reaches a zero-argument call: a Firestore `batch()`, an unmanaged Sequelize or Knex
-    // `transaction()`, or a class's own method. Not separable from broken source here, and a
-    // withdrawn file is the costlier of the two mistakes, so it is handed on unclassified.
-    if (call.argumentCount < 1) return null
     // A transaction takes a callback or a statement array, never a literal.
     if (hasLiteralFirstArgument(call)) return null
     return {
