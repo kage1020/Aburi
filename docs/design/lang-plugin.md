@@ -190,7 +190,7 @@ Nothing in the core checks that a plugin folded its declarations — the invaria
 
 ```ts
 interface BodyExtraction {
-  rules: Rule[]                                // ir-schema §8
+  rules: Rule[]                                // ir-schema §8; strings per the rule-string contract below
   calls: CallCandidate[]                       // raw calls before effect classification
 }
 
@@ -207,6 +207,35 @@ interface CallCandidate {
 
 walkBody **must not emit trivial returns as rules** (drop-list §5.3-5.5).
 For call-only returns such as `return foo()`, the call goes into CallCandidate but not into a Rule.
+
+#### Rule-string contract
+
+A rule's `condition`, `what` and `expr` are written in the form [ir-schema.md](./ir-schema.md)
+§8.2 gives them: comments taken out, every run of whitespace collapsed to one space, and cut to
+the first 120 code points plus `...`. They are the input of the `logic` fingerprint
+([fingerprint.md](./fingerprint.md) §4.1) and of the diff's rule delta, so anything left in
+them that is not the program moves `logic` and lists the rule under "rules modified".
+
+**Taking comments out falls to the plugin, because nothing after it can.** Telling a comment
+from the code around it takes the language's grammar: `/* … */` inside a string literal is
+string content, `#` opens a comment in Python and a private name in TypeScript, and
+`@aburi/core` holds no grammar. Nor can the core notice the omission. A Document whose rule
+strings still hold comments passes the schema and every integrity invariant, and the only
+symptom is a Symbol whose `logic` moves when someone edits a comment: it is reported as
+changed, with nothing to say why.
+
+Replace each comment with a space rather than with nothing. A comment that is all that
+separates two tokens would otherwise join them: `a-/**/-b` is `a - (-b)`, and `a--b` reads as
+a decrement. The space costs one case, which [fingerprint.md](./fingerprint.md) §4.3 names:
+such a comment, with no whitespace on either side, leaves a space the comment-free spelling
+does not have, so `a/**/||b` gives `a ||b` where `a||b` gives `a||b`.
+
+The whitespace collapse and the cut are applied again at the plugin boundary, so a plugin that
+skips them still writes a Document the schema accepts. Do not re-implement them: call
+`normalizeRuleText` from `@aburi/core` on the comment-free text. It counts code points, as the
+schema's `maxLength` does, so a cut never splits a surrogate pair, and it is idempotent, so the
+boundary pass leaves a string it produced unchanged. `normalizeRuleStrings` applies it to the
+three strings of one `Rule`. LP19b and LP19c (§9.4) are the criteria.
 
 #### Argument-list contract
 
@@ -699,6 +728,8 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | LP18 | `return foo()` | no return in rules, foo in calls |
 | LP19 | `return a + b` | return in rules (expr: "a + b") |
 | LP19a | an arrow with an expression body — `(u) => u.role === "admin"`, wherever the arrow is a walk root (a variable, a class field per LP20f, a property of a binding's object literal per LP7d, a registered handler per LP20g, a function a `const` hands its call per LP7c, a default export) | the rules its block twin `function f(u) { return u.role === "admin" }` gets: the body is the arrow's return value, so it goes through the triviality and call-only tests a `return` does (`drop-list.md` §5.3–§5.5). One outcome differs, where the block spelling is the less exact one: one pair of parentheses is taken off before the tests, so `() => (g())` is call-only, as `return g()` is, where `return (g())` takes a rule. The two record the same calls: the body is walked whole, and a block `return` is walked unless it is trivial, which an expression holding a call never is, so `(a) => a[g()]` and `return a[g()]` both take the rule and record `g` (`drop-list.md` §5.5). Read as a bare expression the body earned no rule, and an edit to it moved no `logic` fingerprint where the block twin's does. The rule is the only addition: the body's own walk is unchanged, so it records the same calls whether or not the rule is added |
+| LP19b | rule strings differing only in a comment with whitespace, or the start or end of the string, on at least one side of it — `if (a /* why */ \|\| b)` against `if (a  \|\| b)`, a line comment ending one line of a wrapped guard, a comment in a `throw` value, in a return expression or in a `switch` value | identical strings, holding no comment: `a \|\| b`. A comment that is the only thing between two tokens reads as one space (§4.4, rule-string contract): `a/**/\|\|b` gives `a \|\|b`, and `a-/**/-b` gives `a- -b`, never `a--b`. A `/* … */` inside a string literal is not a comment and stays |
+| LP19c | rule strings differing only in whitespace that is already there — a guard re-wrapped over several lines, re-indented, or with a run of spaces made longer or shorter | identical strings: a guard wrapped as `a < 18 \|\|` / `b \|\|` / `c === 1` over three lines gives `a < 18 \|\| b \|\| c === 1`, as its one-line spelling does. Whitespace appearing between two tokens that had none, or vanishing from between them, is not covered: `a\|\|b` and `a \|\| b` stay two strings ([fingerprint.md](./fingerprint.md) §4.3) |
 | LP20 | `for (let i...) ...` | loop in rules (loopKind: "for") |
 | LP20a | a type whose members are Symbols of their own — a class and its methods, and a binding's object literal and its members (LP7d) | the owner's walk reports **its own** body only: field initialisers, static blocks, and whatever the language runs on construction — for an object literal, the values defining it evaluates, at every depth LP7e reads. A member body reported twice is reported on two Symbols, and any resolution that reaches the owner (`call-resolution.md` CR15 resolves `new C()` to the class) carries the duplicate up into callers that touch nothing |
 | LP20b | the construction path — a constructor body | reported on the owner, because that is the Symbol an instantiation resolves to, **and** on the member's own Symbol. Reporting it twice costs nothing only while no call resolves to a constructor; a resolver that grew `super()` resolution ([`call-resolution.md`](./call-resolution.md) CR18 is adjacent) would make the second copy propagate, so the plugin owes this row a check against its core. Whether a static member named `constructor` is on the construction path is the language's answer, not the name's: in ECMAScript it is not |

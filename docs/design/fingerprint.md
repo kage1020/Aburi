@@ -167,6 +167,8 @@ Represents the **meaning executed by the symbol's body**. Changes when the meani
 }
 ```
 
+The rule strings are the ones the IR holds, already in the ir-schema.md §8.2 form: comments removed, whitespace collapsed, and cut to 120 characters plus `...`. Reading what the IR holds keeps `logic` recomputable from a Document alone. The cost is that an edit past the 120th character of a long condition, throw value or return expression moves neither `logic` nor the diff's rule delta; `syntax` still moves, so the change is reported as syntax-only rather than missed.
+
 `effects` is built in two segments, split on `Effect.propagated`, the one field besides `target` the input reads ([`effect-propagation.md`](./effect-propagation.md) §5.1):
 
 1. **Locally detected effects** (`propagated` absent or `false`), in input order (= call order = ascending `line`), one entry per effect: a target called twice is two entries.
@@ -192,7 +194,8 @@ logic = lower_hex(SHA-256(UTF-8(logic_input))[0..6])
 
 - Reordering the **declaration order** of methods leaves each method's `logic` unchanged (computed per-symbol)
 - Renaming a local variable that does **not appear** in the strings of rules/effects leaves `logic` unchanged
-- Adding comments / changing whitespace → unchanged (canonical string normalization)
+- Lengthening, shortening or re-wrapping a run of whitespace → unchanged (canonical string normalization collapses each run to one space). Whitespace appearing between two tokens that had none, or vanishing from between them, is a change: `a||b` and `a || b` are two strings
+- Adding or removing a comment with whitespace, or the start or end of the rule string, on at least one side of it → unchanged. The language plugin replaces each comment in a rule string with a space (ir-schema.md §8.2), and the collapse merges that space into the whitespace beside it; a line comment always qualifies, since a newline ends it. A comment that is the only thing between two tokens is not covered: the space it leaves is whitespace appearing between two tokens, the change the bullet above names, so `a/**/||b` gives `a ||b` where `a||b` gives `a||b`. Replacing the comment with nothing would close that case and open a worse one, reading `a-/**/-b`, which is `a - (-b)`, as `a--b`; telling which neighbours would merge takes the language's whole token table, not a character class
 - Adding a call classified as decoration (logger / `console.log` / anything dropped at extraction) → unchanged
 - Adding / changing decorators → unchanged (decorators belong to the api axis)
 
@@ -383,8 +386,8 @@ The reference implementation and every language plugin must pass the following t
 | ID | Mutation | Expected |
 |---|---|---|
 | L1 | Rename a local variable that does not appear in rules/effects strings | logic unchanged |
-| L2 | Add a comment | logic unchanged |
-| L3 | Change whitespace formatting | logic unchanged |
+| L2 | Add a comment with whitespace on at least one side of it (§4.3) | logic unchanged |
+| L3 | Lengthen, shorten or re-wrap a run of whitespace (§4.3) | logic unchanged |
 | L4 | Add a decoration (`console.log`, etc.) | logic unchanged |
 | L5 | Change a decorator | logic unchanged |
 | L11 | Change only the effect's `id` (same target) — plugin configuration robustness | logic unchanged |
