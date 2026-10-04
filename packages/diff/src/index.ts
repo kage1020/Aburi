@@ -3,6 +3,8 @@ export {
   dependencySideView,
   diffComponents,
   diffDependencies,
+  type RenameDirections,
+  renameDirections,
 } from "./components"
 export {
   computeSymbolDelta,

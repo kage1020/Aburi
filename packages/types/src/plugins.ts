@@ -27,9 +27,21 @@ export type OpaqueAstNode = unknown
 
 // --- Source input / parse output ---
 
-/** Workspace-relative POSIX path + UTF-8 source. */
+/**
+ * One source file as a language plugin is handed it. `scan` builds it from disk; a caller that
+ * builds one itself to drive `runFilePipeline` must keep both invariants below.
+ */
 export interface SourceFile {
+  /**
+   * Workspace-relative POSIX path, in Unicode NFC (ir-schema.md §1.2): the spelling Symbol ids
+   * are built from, which can differ from the one the filesystem stores.
+   */
   path: string
+  /**
+   * The UTF-8 source, with LF line endings only. It holds no CR: `scan` turns CRLF and a lone
+   * CR into LF before a plugin sees it, since a CR left in would make the `syntax` fingerprint
+   * depend on the checkout (fingerprint.md §5.3).
+   */
   content: string
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { importsOf, symbolsOf, walkFirstSymbol } from "./fixtures/ctx"
+import { importsOf, symbolsOf, walkFirstSymbol, walkOf } from "./fixtures/ctx"
 
 describe("C2: nested calls inside call-only return", () => {
   it("records the inner call of `return foo(bar())`", async () => {
@@ -57,22 +57,210 @@ describe("I2: containsEarlyExit coverage", () => {
     ],
     ["break", "export function f(items: number[]) { for (const x of items) { if (x < 0) break } }"],
     ["process.exit()", "export function f(x: unknown) { if (x) process.exit(1) }"],
+    [
+      "a labeled break of an outer loop",
+      "export function f(rows: number[][]) { outer: for (const r of rows) { for (const x of r) { if (x < 0) { for (;;) break outer } } } }",
+    ],
+    [
+      "a continue past a nested switch",
+      "export function f(items: number[]) { for (const x of items) { if (x) { switch (x) { case 1: continue } } } }",
+    ],
+    [
+      "a return beside a callback",
+      "export function f(xs: number[]) { if (xs) { xs.forEach((x) => x); return } }",
+    ],
+    // The scope starts empty at the consequence, so the `switch` around the `if` reads as
+    // outside it, which is what makes this `break` leave the `if`'s flow.
+    [
+      "a break of the switch around the if",
+      'export function f(k: string, ok: boolean) { switch (k) { case "a": if (!ok) break; run() } }',
+    ],
+    // A callback called synchronously throws or exits through the `if`, so a function boundary
+    // stops only `return`, `break` and `continue`.
+    [
+      "a throw inside a callback",
+      "export function f(x: any) { if (!x) { run(() => { throw new Error() }) } }",
+    ],
+    [
+      "process.exit() inside a callback",
+      "export function f(x: any) { if (!x) { run(() => { process.exit(1) }) } }",
+    ],
+    [
+      "process.exit() returned from a callback",
+      "export function f(x: any) { if (!x) { run(() => { return process.exit(1) }) } }",
+    ],
   ])("recognizes `%s` as an early exit inside a guard", async (_label, source) => {
     const { rules } = await walkFirstSymbol(source)
     expect(rules.filter((r) => r.type === "guard")).toHaveLength(1)
   })
+
+  // Each leaves only something nested inside the `if`, so the `if` guards nothing; the one
+  // guard expected is the inner `if` the exit sits in, where there is one. An empty guard list
+  // also passes when the walk read nothing, so each row pins the rule types the walk of `f` does
+  // record as well, the nested construct's own rule among them.
+  it.each([
+    [
+      "a return inside a callback",
+      "export function f(x: any) { if (x.list) { x.list.forEach((i: any) => { if (!i) return; use(i) }) } }",
+      ["!i"],
+      ["guard"],
+    ],
+    [
+      "a return inside a function expression",
+      "export function f(x: any) { if (x) { run(function () { return x.n + 1 }) } }",
+      [],
+      ["return"],
+    ],
+    [
+      "a return inside a nested function declaration",
+      "export function f(x: any) { if (x) { function inner() { return x.n + 1 } run(inner) } }",
+      [],
+      ["return"],
+    ],
+    [
+      "a return inside a generator",
+      "export function f(x: any) { if (x) { run(function* () { return x.n + 1 }) } }",
+      [],
+      ["return"],
+    ],
+    [
+      "a return inside a nested generator declaration",
+      "export function f(x: any) { if (x) { function* gen() { return x.n + 1 } run(gen) } }",
+      [],
+      ["return"],
+    ],
+    [
+      "a return inside a class method",
+      "export function f(x: any) { if (x) { register(class { m() { return x.n + 1 } }) } }",
+      [],
+      ["return"],
+    ],
+    // Syntax errors to JavaScript that the grammar parses cleanly, so the walk meets them too.
+    [
+      "a labeled break inside a callback",
+      "export function f(rows: any) { outer: for (const r of rows) { if (r) { run(() => { break outer }) } } }",
+      [],
+      ["loop"],
+    ],
+    [
+      "a return inside a class static block",
+      "export function f(x: any) { if (x) { use(class { static { if (y()) return } }) } }",
+      ["y()"],
+      ["guard"],
+    ],
+    [
+      "a break of a nested switch",
+      "export function f(x: any, y: number) { if (x.mode) { switch (y) { case 1: a(); break } } }",
+      [],
+      ["switch"],
+    ],
+    [
+      "a break of an inner loop",
+      "export function f(x: any) { for (const k of x.rows) { if (k) { for (const j of k) { if (j) break } } } }",
+      ["j"],
+      ["loop", "loop", "guard"],
+    ],
+    [
+      "a break of an inner C-style loop",
+      "export function f(x: any) { if (x) { for (let i = 0; i < x.n; i++) { if (i > 3) break } } }",
+      ["i > 3"],
+      ["loop", "guard"],
+    ],
+    [
+      "a continue of an inner loop",
+      "export function f(x: any) { if (x) { while (next()) { continue } } }",
+      [],
+      ["loop"],
+    ],
+    [
+      "a continue of an inner do loop",
+      "export function f(x: any) { if (x) { do { if (next()) continue } while (more()) } }",
+      ["next()"],
+      ["loop", "guard"],
+    ],
+    [
+      "a labeled break of a label inside the consequence",
+      "export function f(x: any) { if (x) { inner: { if (y()) break inner } } }",
+      ["y()"],
+      ["guard"],
+    ],
+  ])("does not count %s", async (_label, source, guards, types) => {
+    // By id, so a nested declaration that became a Symbol of its own could not stand in for `f`.
+    const { rules } = await walkOf(source, "ts:src/a.ts#f")
+    expect(rules.filter((r) => r.type === "guard").map((r) => r.condition)).toEqual(guards)
+    expect(rules.map((r) => r.type)).toEqual(types)
+  })
+
+  // Trivial and call-only bodies only: a callback's concise body earns no `return` rule
+  // (`visitConciseBody` reads walk roots only) while its block twin's non-trivial `return` does,
+  // so turning `(i) => ({ id: i.id })` into a block body still adds a rule.
+  it.each([
+    ["a trivial", "i.id"],
+    ["a call-only", "toDto(i)"],
+  ])("keeps the rules when %s arrow body becomes a block body", async (_label, body) => {
+    const concise = await walkFirstSymbol(
+      `export function h(x: any) { if (x.items) { save(x.items.map((i: any) => ${body})) } }`,
+    )
+    const block = await walkFirstSymbol(
+      `export function h(x: any) { if (x.items) { save(x.items.map((i: any) => { return ${body} })) } }`,
+    )
+    expect(block.rules).toEqual(concise.rules)
+  })
 })
 
-describe("I3: try/catch/finally scope pin", () => {
-  it("keeps catch body calls out of the try rule's Symbol calls", async () => {
+describe("I3: try/catch/finally walk contract", () => {
+  it.each([
+    ["catch (e) { … }", "catch (e) { if (!e) return; errorHandler(e); throw e }"],
+    ["catch { … }", "catch { if (!ok) return; errorHandler(); throw failure }"],
+  ])("records the calls of `%s` and keeps its rules out", async (_label, clause) => {
+    // ir-schema.md §8.2 withholds a catch clause's rules, so a rewritten error handler's
+    // control flow does not move the logic axis. Its calls are another matter: no other Symbol
+    // records them, and a database write added there reached no effect at all. Both spellings
+    // of the clause, with a binding and without one, hand the walk the same `catch_clause`.
     const { calls, rules } = await walkFirstSymbol(
-      "export function f() { try { doThing() } catch { errorHandler() } }",
+      `export function f() { try { doThing() } ${clause} }`,
     )
-    expect(rules.some((r) => r.type === "try")).toBe(true)
-    // The catch handler's contents are semantically part of another Symbol's scope
-    // (or dropped when trivial). doThing (inside try) is recorded; errorHandler is not.
-    expect(calls.map((c) => c.target)).toContain("doThing")
-    expect(calls.map((c) => c.target)).not.toContain("errorHandler")
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls.map((c) => c.target)).toEqual(["doThing", "errorHandler"])
+  })
+
+  it("walks the finally block like the try block", async () => {
+    // The finally block runs on every path, so its rules and calls are the Symbol's.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { doThing() } finally { if (!held) return; release() } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try", "guard"])
+    expect(calls.map((c) => c.target)).toEqual(["doThing", "release"])
+  })
+
+  it("takes the try block whole, the catch clause's calls and the finally block whole together", async () => {
+    // The one guard is the finally block's; the catch clause's guard is withheld.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { a() } catch (e) { if (!e) return; b() } finally { if (x) return; c() } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try", "guard"])
+    expect(calls.map((c) => c.target)).toEqual(["a", "b", "c"])
+  })
+
+  it("records the calls a catch clause would record as a try block, and no others", async () => {
+    // `return a[g()]` is a trivial return, which the drop list stops at without recording the
+    // call inside it (drop-list.md §5.5, LP19a). The catch clause is walked the same way
+    // (LP20m), so the same statement gives the same answer on both sides.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f(a: number[]) { try { return a[g()] } catch (e) { return a[h()] } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls).toEqual([])
+  })
+
+  it("withholds the rules of a finally block nested inside a catch clause", async () => {
+    // Running on every path of the inner try does not lift a finally out of the catch clause
+    // it is written in: nothing under a catch clause gives the Symbol a rule.
+    const { calls, rules } = await walkFirstSymbol(
+      "export function f() { try { a() } catch (e) { try { b() } finally { if (y) return; c() } } }",
+    )
+    expect(rules.map((r) => r.type)).toEqual(["try"])
+    expect(calls.map((c) => c.target)).toEqual(["a", "b", "c"])
   })
 })
 

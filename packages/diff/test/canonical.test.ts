@@ -1,4 +1,5 @@
 import { component, dependency, makeIR, makeSymbol } from "@aburi/test-support"
+import type { SkipReason } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDiff, writeCanonicalDiff } from "../src"
 
@@ -127,6 +128,64 @@ describe("writeCanonicalDiff — byte-deterministic output", () => {
       head: IR_REF,
     })
     expect(forward.notCompared).toHaveLength(2)
+    expect(writeCanonicalDiff(forward)).toBe(writeCanonicalDiff(reversed))
+  })
+
+  it("serialises notCompared byte-identically across renames, however anything is ordered", () => {
+    // The rename map translates base paths into head paths, so the order the base list walks in
+    // is not the order the entries sort in: `src/y.ts` becomes `src/b.ts`, ahead of the entry
+    // `src/a.ts` becomes. `src/z.ts` is skipped under its own name too, and shares the head
+    // path `src/a.ts` translates to — the case only the second sort key decides.
+    const kept = makeSymbol({ id: "ts:src/kept.ts#kept", name: "kept" })
+    const baseLosses = [
+      { path: "src/a.ts", reason: "over-size" as const },
+      { path: "src/y.ts", reason: "parse-failed" as const },
+      { path: "src/z.ts", reason: "parse-timeout" as const },
+    ]
+    const headLosses = [
+      { path: "src/z.ts", reason: "over-size" as const },
+      { path: "src/b.ts", reason: "parse-failed" as const },
+    ]
+    const renames: [string, string][] = [
+      ["src/a.ts", "src/z.ts"],
+      ["src/y.ts", "src/b.ts"],
+    ]
+    const withLosses = (skippedFiles: readonly { path: string; reason: SkipReason }[]) =>
+      makeIR({
+        symbols: [kept],
+        stats: {
+          totalFiles: 4,
+          parsedFiles: 4 - skippedFiles.length,
+          keptSymbols: 1,
+          droppedSymbols: 0,
+          effectPropagation: {
+            sccCount: 0,
+            maxSccSize: 0,
+            propagatedEffectCount: 0,
+            symbolsWithPropagatedEffects: 0,
+          },
+          skippedFiles: [...skippedFiles],
+        },
+      })
+    const forward = buildDiff({
+      baseIR: withLosses(baseLosses),
+      headIR: withLosses(headLosses),
+      base: IR_REF,
+      head: IR_REF,
+      gitRenames: new Map(renames),
+    })
+    const reversed = buildDiff({
+      baseIR: withLosses([...baseLosses].reverse()),
+      headIR: withLosses([...headLosses].reverse()),
+      base: IR_REF,
+      head: IR_REF,
+      gitRenames: new Map([...renames].reverse()),
+    })
+    expect(forward.notCompared.map((file) => [file.path, file.basePath ?? null])).toEqual([
+      ["src/b.ts", "src/y.ts"],
+      ["src/z.ts", "src/a.ts"],
+      ["src/z.ts", null],
+    ])
     expect(writeCanonicalDiff(forward)).toBe(writeCanonicalDiff(reversed))
   })
 
