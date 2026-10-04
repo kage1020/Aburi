@@ -899,16 +899,33 @@ function extractOwnerClassName(hoverText: string): string | null {
   return null
 }
 
-const THROWS_JSDOC_PATTERN = /@throws\s*\{([^}]+)\}/g
-const THROWS_PLAIN_PATTERN = /@throws\s+([A-Za-z_$][A-Za-z0-9_$.]*)/g
+/**
+ * A `@throws` / `@throw` / `@exception` tag in hover text, read by the rule `signature.throws`
+ * follows (ir-schema.md §7) so that the two fields agree about what one tag declares: the text in
+ * its braces, or the target of a `{@link X}` in them; with no braces, the tag's whole text when
+ * that is a type name, and nothing for a description. The text runs to the next tag, on a later
+ * line or the same one, or to the end of the hover. Only a tag written as in source is read:
+ * typescript-language-server renders one as `*@throws* — …`, which this does not match.
+ */
+const THROWS_JSDOC_PATTERN =
+  /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}\n]+)\})?((?:(?!\n[ \t]*@|[ \t]@[a-zA-Z])[\s\S])*)/g
+/** `@link X`, `@linkcode X` or `@linkplain X` in a `{…}`, and `X` when it names a declaration. */
+const THROWS_LINK_PATTERN =
+  /^@link(?:code|plain)?\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:[\s|]|$)/
+/** A brace-less tag's whole text, read as a type: an identifier or path, upper-case first. */
+const THROWS_PLAIN_PATTERN = /^[A-Z][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
 function extractInferredThrowsFromHover(hoverText: string): string[] {
   const out = new Set<string>()
   for (const match of hoverText.matchAll(THROWS_JSDOC_PATTERN)) {
-    if (match[1] !== undefined) out.add(match[1].trim())
-  }
-  for (const match of hoverText.matchAll(THROWS_PLAIN_PATTERN)) {
-    if (match[1] !== undefined) out.add(match[1].trim())
+    const braced = match[1]?.trim()
+    if (braced !== undefined) {
+      const typed = braced.startsWith("@") ? THROWS_LINK_PATTERN.exec(braced)?.[1] : braced
+      if (typed !== undefined && typed.length > 0) out.add(typed)
+      continue
+    }
+    const text = (match[2] ?? "").replace(/\s+/g, " ").trim()
+    if (THROWS_PLAIN_PATTERN.test(text)) out.add(text)
   }
   return [...out]
 }
