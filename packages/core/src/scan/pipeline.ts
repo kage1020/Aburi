@@ -556,9 +556,9 @@ interface ClassifyCallsInput {
  *
  * - `source.file`, which invariant #19 checks and which `resolveCallGraph` matches
  *   against call-site keys built from the already-normalized `SourceFile.path`.
- * - `signature.inputs[].name`, which the call resolver compares against a call's head
- *   segment to decide that a parameter shadows a Symbol of the same name
- *   (call-resolution.md). Missing that comparison emits an edge to an unrelated
+ * - `signature.inputs[].name` and `signature.inputs[].bindings`, which the call resolver
+ *   compares against a call's head segment to decide that a parameter shadows a Symbol of
+ *   the same name (call-resolution.md). Missing that comparison emits an edge to an unrelated
  *   Symbol, which then carries effects through propagation.
  * - `decorators[].name`, which a framework or effect plugin resolves against
  *   `ImportEdge.symbols` — already normalized by `normalizeImportEdge` below. Leaving this side
@@ -630,11 +630,11 @@ function normalizeDecoratorNames(
 }
 
 /**
- * Only `inputs[].name` is normalized. The type strings beside it are quotations of source
- * text (ir-schema.md §7): nothing matches against them, the api fingerprint that hashes them
- * normalizes its own input (fingerprint.md §2.2), and rewriting one would misquote the
- * declaration the Document is reporting. `optional` and `rest` are booleans, carried over as
- * they are.
+ * Only `inputs[].name` and `inputs[].bindings` are normalized. The type strings beside them
+ * are quotations of source text (ir-schema.md §7): nothing matches against them, the api
+ * fingerprint that hashes them normalizes its own input (fingerprint.md §2.2), and rewriting
+ * one would misquote the declaration the Document is reporting. `optional` and `rest` are
+ * booleans, carried over as they are.
  */
 function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["signature"]>(
   signature: T,
@@ -642,7 +642,10 @@ function normalizeSignatureStrings<T extends SymbolCandidate<OpaqueAstNode>["sig
   if (signature === null || signature === undefined) return signature
   const inputs = mapPreservingIdentity(signature.inputs, (input) => {
     const name = toNfc(input.name)
-    return name === input.name ? input : { ...input, name }
+    const written = input.bindings
+    if (written === undefined) return name === input.name ? input : { ...input, name }
+    const bindings = mapPreservingIdentity(written, toNfc)
+    return name === input.name && bindings === written ? input : { ...input, name, bindings }
   })
   return inputs === signature.inputs ? signature : ({ ...signature, inputs } as T)
 }

@@ -5,7 +5,8 @@ import { symbolOf } from "./fixtures/ctx"
 /**
  * What a caller sees of a parameter's form is recorded in fields of its own: `optional` for an
  * optional or defaulted parameter, `rest` for a rest one, each written only when true. `name`
- * is the bare binding and `type` the annotation alone (LP11b).
+ * is the bare binding and `type` the annotation alone (LP11b). A binding that destructures
+ * also lists the names it binds, in `bindings` (LP11d).
  */
 
 type Input = Signature["inputs"][number]
@@ -34,16 +35,20 @@ const FORMS: Array<[string, string, Input]> = [
   ["an untyped defaulted parameter", "limit = 10", { name: "limit", type: "", optional: true }],
   ["a rest parameter", "...ids: string[]", { name: "ids", type: "string[]", rest: true }],
   ["an untyped rest parameter", "...ids", { name: "ids", type: "", rest: true }],
-  ["a destructured rest parameter", "...[p, q]: T", { name: "[p, q]", type: "T", rest: true }],
+  [
+    "a destructured rest parameter",
+    "...[p, q]: T",
+    { name: "[p, q]", type: "T", rest: true, bindings: ["p", "q"] },
+  ],
   [
     "a defaulted destructured parameter",
     "{ x }: Opts = {}",
-    { name: "{ x }", type: "Opts", optional: true },
+    { name: "{ x }", type: "Opts", optional: true, bindings: ["x"] },
   ],
   [
     "an untyped defaulted destructured parameter",
     "{ a } = {}",
-    { name: "{ a }", type: "", optional: true },
+    { name: "{ a }", type: "", optional: true, bindings: ["a"] },
   ],
   ["a `this` parameter", "this: Foo", { name: "this", type: "Foo" }],
   [
@@ -71,18 +76,18 @@ describe("readParameters — the form of a parameter", () => {
     ["an arrow", inArrow],
   ])("in %s", (_host, host) => {
     it.each(FORMS)("records %s", async (_label, params, expected) => {
-      expect(await inputsOf(params, host)).toEqual([expected])
+      expect(await inputsOf(params, host)).toStrictEqual([expected])
     })
   })
 
   it("marks an optional parameter and a defaulted one alike, since a caller may omit either", async () => {
-    expect(await inputsOf("a?: string")).toEqual(await inputsOf('a: string = "x"'))
+    expect(await inputsOf("a?: string")).toStrictEqual(await inputsOf('a: string = "x"'))
   })
 
   it("reads an abstract method's parameters", async () => {
     const source = "export abstract class A {\n  abstract m(a?: string, ...ids: string[]): void\n}"
     const symbol = await symbolOf(source, "ts:src/a.ts#A.m")
-    expect(symbol.signature?.inputs).toEqual([
+    expect(symbol.signature?.inputs).toStrictEqual([
       { name: "a", type: "string", optional: true },
       { name: "ids", type: "string[]", rest: true },
     ])
@@ -91,7 +96,7 @@ describe("readParameters — the form of a parameter", () => {
   it("reads an ambient method's parameters", async () => {
     const source = "export declare class D {\n  m(limit?: number, ...rest: T[]): void\n}"
     const symbol = await symbolOf(source, "ts:src/a.ts#D.m")
-    expect(symbol.signature?.inputs).toEqual([
+    expect(symbol.signature?.inputs).toStrictEqual([
       { name: "limit", type: "number", optional: true },
       { name: "rest", type: "T[]", rest: true },
     ])
@@ -118,6 +123,6 @@ const REPAIRED: Array<[source: string, id: string, expected: Input]> = [
 describe("readParameters — a parameter the parser repaired", () => {
   it.each(REPAIRED)("names the parameter in %j", async (source, id, expected) => {
     const symbol = await symbolOf(source, id)
-    expect(symbol.signature?.inputs).toEqual([expected])
+    expect(symbol.signature?.inputs).toStrictEqual([expected])
   })
 })

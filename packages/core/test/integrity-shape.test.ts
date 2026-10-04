@@ -157,6 +157,39 @@ describe("checkIRIntegrity — documents that are not shaped like a Document", (
     ])
   })
 
+  it("checks a destructuring parameter's bindings when they are present", () => {
+    // The call resolver adds each entry to a set it compares call heads against, so an entry
+    // that is not a string would shadow nothing or fail inside the comparison.
+    const symbol = makeSymbol("ts:src/a.ts#foo", {
+      signature: {
+        inputs: [{ name: "{ save }", type: "Deps", bindings: ["save"] }],
+        outputs: [],
+        throws: [],
+        async: false,
+        generator: false,
+        typeParameters: [],
+      },
+    }) as unknown as Record<string, unknown>
+    expect(shapeViolations(withField("symbols", [symbol]))).toEqual([])
+
+    symbol.signature = {
+      inputs: [
+        { name: "{ save }", type: "Deps", bindings: "save" },
+        { name: "[a, b]", type: "", bindings: ["a", 7] },
+      ],
+      outputs: [],
+      throws: [],
+      async: false,
+      generator: false,
+      typeParameters: [],
+    }
+    const violations = shapeViolations(withField("symbols", [symbol]))
+    expect(violations.map((v) => v.subject)).toEqual([
+      "symbols[0].signature.inputs[0]",
+      "symbols[0].signature.inputs[1].bindings[1]",
+    ])
+  })
+
   it("reports NaN and Infinity as themselves rather than as numbers", () => {
     const symbol = makeSymbol("ts:src/a.ts#foo") as unknown as Record<string, unknown>
     symbol.calls = [{ target: "t", line: Number.NaN, resolved: null }]

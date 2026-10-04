@@ -734,7 +734,9 @@ function cloneSignature(
   signature: NonNullable<IRSymbol["signature"]>,
 ): NonNullable<IRSymbol["signature"]> {
   const base = {
-    inputs: signature.inputs.map((i) => ({ ...i })),
+    inputs: signature.inputs.map((i) =>
+      i.bindings === undefined ? { ...i } : { ...i, bindings: [...i.bindings] },
+    ),
     outputs: [...signature.outputs],
     throws: [...signature.throws],
     async: signature.async,
