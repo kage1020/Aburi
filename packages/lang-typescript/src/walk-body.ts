@@ -87,6 +87,13 @@ function visitParameterDefaults(parameters: Node, rules: Rule[], calls: CallCand
  * function is skipped the same way and for the same reason: constructing the class creates the
  * closure, and only entering it runs the body (LP20f).
  *
+ * An overload signature declares its member too, but has no body, so nothing of it is skipped
+ * and the class reads it whole, as it did before overloads folded into their implementation's
+ * Symbol (LP8q). The member's walk starts from bodies, and an overload's parameter list sits
+ * beside none. So what that list holds stays here: a parameter decorator's arguments, which is
+ * where an implementation's go too, and a default, which `tsc` rejects in an overload (TS2371)
+ * and which never runs.
+ *
  * And only for the Symbol's own bodies: a class written inside a function or a method is not
  * extracted, so every call in it belongs to the Symbol whose body encloses it (LP20e).
  */

@@ -131,10 +131,13 @@ describe("LP36: ambient declarations", () => {
     expect(byId(symbols, "#C.v").derivedBy).toContain("accessor-declaration")
   })
 
-  it("a method_signature in an ordinary class body stays an overload", async () => {
+  it("a method_signature in an ordinary class body is an overload its implementation leads", async () => {
     const symbols = await symbolsOf("class C { m(x: string): void; m(x: unknown) { return x } }")
     expect(names(symbols).sort()).toEqual(["C", "C.m"])
-    expect(byId(symbols, "#C.m").bodyNode).not.toBeNull()
+    const m = byId(symbols, "#C.m")
+    expect(m.bodyNode).not.toBeNull()
+    expect(m.derivedBy).not.toContain("ambient-declaration")
+    expect(m.mergedDeclarations?.map((d) => d.fullNode.text)).toEqual(["m(x: string): void"])
   })
 
   it("declare const, enum, interface and type each reach their own arm", async () => {
