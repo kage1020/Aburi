@@ -138,12 +138,12 @@ describe("LSP enrichment", () => {
   })
 
   it("asks for no hint on a `this.a.b` target, whose callee is not where it would look", async () => {
-    // `findMethodColumn` searches for `<head>.<method>` — here `this.emit` —
-    // and finds it inside `this.emitter`, so hover answers about the property
-    // and `calleeText` still says `emit`. The hint that came back was
-    // well-formed, correctly keyed and `kind`-consistent, and named a callee
-    // the call site never reaches: `C.emit`. Neither guard in the resolver can
-    // see that, so the request is not made.
+    // `findMethodColumn` hovers a `<head>.<member>` pair, and no pair names
+    // this call's callee: `this.emitter` hovers the property, and `this.emit`
+    // is on a line only where another call put it, which it would then hover.
+    // Either way the hint would be well-formed, correctly keyed and
+    // `kind`-consistent, and name a callee the call site never reaches.
+    // Neither guard in the resolver can see that, so the request is not made.
     const cls = makeClassSymbol("src/a.ts", "C", 1)
     const emit = makeMethodSymbol("src/a.ts", "C", "emit", 2)
     const run = makeMethodSymbol("src/a.ts", "C", "run", 3, [

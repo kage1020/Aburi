@@ -448,21 +448,23 @@ type RequestJob = {
  * requests whose result we cannot act on. When that seam lands the interface
  * job type returns here.
  *
- * Exactly two segments, because `findMethodColumn` searches for
- * `<head>.<method>` — the first segment and the last — and a longer target
- * makes that needle match the wrong token: `this.emitter.emit` searches for
- * `this.emit`, finds it inside `this.emitter`, and hovers the property. The
- * server then answers about `emitter` while `calleeText` still says `emit`, so
- * the hint that comes back is well-formed, correctly keyed, `kind`-consistent
- * — and names a callee the call site never reaches. Neither lock in
- * `resolveViaLspHint` can see that, because both are about the target and the
- * target is right; only declining the request stops it. Such a call keeps the
- * `resolved: null` and the `dynamic` diagnostic it has without LSP, which is
- * the honest answer until `findMethodColumn` can address the whole chain.
+ * Exactly two segments, because `findMethodColumn` hovers a `<head>.<member>`
+ * pair and a longer chain has no pair that names its callee. For
+ * `this.emitter.emit` the pair built here is `this.emitter`, which hovers the
+ * property; the pair holding the callee, `this.emit`, is on the line only
+ * where another call put it (`this.emit(a); this.emitter.emit(b)`), and then
+ * it hovers that call. Either way the hint that comes back is well-formed,
+ * correctly keyed, `kind`-consistent — and names a callee the call site never
+ * reaches. Neither lock in `resolveViaLspHint` can see that, because both are
+ * about the target and the target is right; only declining the request stops
+ * it. Such a call keeps the `resolved: null` and the `dynamic` diagnostic it
+ * has without LSP, which is the honest answer until `findMethodColumn` can
+ * address the whole chain.
  */
 function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): RequestJob[] {
   const jobs: RequestJob[] = []
   const lines = content.split(/\r?\n/)
+  const maskedLines = new Map<number, string>()
   for (const symbol of fileSymbols) {
     for (const call of symbol.calls) {
       if (call.resolved !== null) continue
@@ -473,7 +475,12 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
       const head = receiverHead(call.target)
       const method = segments[1] as string
       if (head !== "this" && head !== "super") continue
-      const column = findMethodColumn(line, head, method)
+      let masked = maskedLines.get(call.line)
+      if (masked === undefined) {
+        masked = maskStringsAndComments(line)
+        maskedLines.set(call.line, masked)
+      }
+      const column = findMethodColumn(line, masked, head, method)
       if (column === null) continue
       jobs.push({
         kind: "this-super-hover",
@@ -492,8 +499,9 @@ function buildRequestJobs(fileSymbols: readonly IRSymbol[], content: string): Re
 
 /**
  * The deterministic consumption order: Symbol id ascending, then call-site line
- * ascending, then call target — the three components of a job's identity, and a
- * total order over the jobs of one file because no two of them share all three.
+ * ascending, then call target — the three components of a job's identity. Two
+ * jobs share all three only for two calls to one target on one line, and those
+ * hover the same position, so their order cannot change what is applied.
  *
  * On the scan path this sort changes nothing: `scan.ts` sorts `symbols` by id
  * before calling `enrichWithLsp`, and `calls[]` reaches here in `(line, then
@@ -867,29 +875,46 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Column (0-based) of the method identifier inside `head.method` on the given
- * source line. Returns `null` when the joined form isn't found — no fallback
- * to a bare `method` substring search, since that would land on unrelated
- * occurrences (e.g. `console.log(myLog.log)` matching the wrong receiver).
+ * Column (0-based) of `method` in the call `<head>.<method>` on `line`; `masked` is `line`
+ * through `maskStringsAndComments`. The needle must stand as its own tokens and lie outside
+ * strings and comments: an unrelated occurrence earlier on the line draws the hover, and the
+ * hint that comes back names a member the call never reaches with nothing downstream able to
+ * tell. `?.` joins the two as `.` does, because a call's target spells `this?.save()` as
+ * `this.save`.
  *
- * The needle has to stand as its own tokens, with nothing that continues an identifier on
- * either side. A bare substring search hovered the first token the needle is a
- * prefix of — `this.saveAll(); return this.save()` hovered `saveAll`,
- * `this.handlers.forEach(() => this.handle())` hovered `handlers`, and
- * `mythis.foo(); this.foo()` hovered the `foo` of `mythis` — and the hint that came back named
- * a method the call never reaches, with nothing downstream able to tell. An occurrence inside a
- * string or a comment on the line is passed over for the same reason.
- *
- * The call is known to be on this line, so when the masked line holds no occurrence the mask
- * was wrong about it — JSX text such as `<p>Don't {this.title()}</p>`, whose apostrophe reads
- * as a quote, or a line inside a template literal or block comment opened above — and the first
- * whole-token occurrence in the raw line is hovered instead of none.
+ * When `masked` holds no occurrence, the mask may have invented a string or a comment that hides
+ * the call — a prose apostrophe read as a quote, in JSX text (`<p>Don't {this.title()}</p>`) or
+ * in prose on a line continuing a block comment or template literal opened above — so the raw
+ * line's occurrence is taken instead, if it is the line's only one: of several, nothing says
+ * which is code. Failing both, `null`, and deliberately no search for a bare `method`, which
+ * would land on unrelated occurrences (`console.log(myLog.log)` matching the wrong receiver).
  */
-function findMethodColumn(line: string, head: string, method: string): number | null {
-  const needle = new RegExp(`(?<![\\w$])${escapeRegExp(head)}\\.${escapeRegExp(method)}(?![\\w$])`)
-  const match = needle.exec(maskStringsAndComments(line)) ?? needle.exec(line)
-  if (match === null) return null
-  return match.index + head.length + 1
+function findMethodColumn(
+  line: string,
+  masked: string,
+  head: string,
+  method: string,
+): number | null {
+  const needle = new RegExp(
+    `${NO_NAME_BEFORE}${escapeRegExp(head)}\\??\\.${escapeRegExp(method)}${NO_NAME_AFTER}`,
+    "gu",
+  )
+  const match = masked.matchAll(needle).next().value ?? soleMatch(line, needle)
+  if (match === undefined) return null
+  return match.index + match[0].length - method.length
+}
+
+/**
+ * What may not touch the needle: a character that continues an identifier (ECMA-262's
+ * IdentifierPart) on either side, and before it a `.` that makes the head a property of
+ * something else (`ctx.this`, `ctx?.this`), unless that `.` ends a spread's `...`.
+ */
+const NO_NAME_BEFORE = String.raw`(?<![\p{ID_Continue}$\u{200C}\u{200D}])(?<!(?<!\.\.)\.)`
+const NO_NAME_AFTER = String.raw`(?![\p{ID_Continue}$\u{200C}\u{200D}])`
+
+function soleMatch(text: string, pattern: RegExp): RegExpExecArray | undefined {
+  const [only, ...rest] = text.matchAll(pattern)
+  return rest.length === 0 ? only : undefined
 }
 
 function escapeRegExp(text: string): string {
@@ -897,10 +922,12 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * `line` with the text of every string literal, template literal and comment it opens replaced
- * by spaces, so indices still line up with the source. A template literal's `${…}` is code, and
- * a call inside it stays visible. Read one line at a time, which is what the caller has: a line
- * that continues a block comment or a template literal from the line above is read as code.
+ * `line` with every string literal, template literal and comment it opens blanked to spaces,
+ * delimiters included, so indices still line up with the source. A template literal's `${…}` is
+ * code, and a call inside it stays visible. Two things are read as code although they are not:
+ * a regex literal, quotes and all (`/"/` opens a string), since telling one from a division takes
+ * more than a line of text; and a line that continues a block comment or a template literal from
+ * the line above, since the reading is one line at a time, which is what the caller has.
  */
 function maskStringsAndComments(line: string): string {
   const out = line.split("")
@@ -973,7 +1000,10 @@ function maskTemplate(line: string, start: number, out: string[]): number {
   return line.length
 }
 
-/** The index just past the literal opened by `quote` at `start`, honouring backslash escapes. */
+/**
+ * The index just past the literal opened by `quote` at `start`, honouring backslash escapes; an
+ * unclosed quote runs to the end of the line.
+ */
 function quotedEnd(line: string, start: number, quote: string): number {
   let i = start + 1
   while (i < line.length) {
