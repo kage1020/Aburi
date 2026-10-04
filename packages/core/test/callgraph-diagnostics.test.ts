@@ -122,6 +122,17 @@ describe("resolveCallGraph — unresolved-call diagnostics", () => {
     expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
   })
 
+  it("a default import from a bare specifier keeps its local binding as the `external` head", () => {
+    const caller = withCalls("ts:src/a.ts#caller", [{ target: "React.createElement", line: 2 }])
+    const result = resolveCallGraph({
+      symbols: [caller],
+      importsByFile: new Map([
+        ["src/a.ts", [importEdge({ source: "react", symbols: ["default as React"] })]],
+      ]),
+    })
+    expect(result.diagnostics.map((d) => d.bucket)).toEqual(["external"])
+  })
+
   it("an aliased import keeps the local binding as the `external` head", () => {
     const caller = withCalls("ts:src/a.ts#caller", [{ target: "sort", line: 2 }])
     const result = resolveCallGraph({

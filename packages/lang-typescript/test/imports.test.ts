@@ -24,8 +24,15 @@ describe("import extraction", () => {
     expect(imports).toEqual([{ source: "./x", symbols: "*", line: 1, dynamic: true }])
   })
 
-  it("captures a default binding as the module's `default` under its local name", async () => {
+  it("LP24a: captures a default binding as the module's `default` under its local name", async () => {
     const { imports } = await importsOf("import Foo from './foo'")
+    expect(imports).toEqual([
+      { source: "./foo", symbols: ["default as Foo"], line: 1, dynamic: false },
+    ])
+  })
+
+  it("spells `{ default as Foo }` as it spells `import Foo`, so no consumer reads them apart", async () => {
+    const { imports } = await importsOf("import { default as Foo } from './foo'")
     expect(imports).toEqual([
       { source: "./foo", symbols: ["default as Foo"], line: 1, dynamic: false },
     ])
