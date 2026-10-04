@@ -93,13 +93,17 @@ describe("diff — a registration inserted above others", () => {
     const a = "app.route('/a').get(async (req, res) => { res.json(await listA()) })"
     const b =
       "app.route('/b').get(async (req, res) => { await audit(req); res.json(await listB()) })"
-    const { diff } = await diffOfEdit(
+    const { headIR, diff } = await diffOfEdit(
       lines(...HEAD, a, b),
       lines(...HEAD, "app.route('/health').get((req, res) => { res.send('ok') })", a, b),
     )
 
     expect(diff.summary).toMatchObject({ added: 1, removed: 0, changed: 0, moved: 0 })
     expect(idsWith(diff, "added")).toEqual(["ts:src/server.ts#app__get__$health__d0"])
+    // Both sides are scanned with the same plugin, so the diff alone cannot see the chain stop
+    // being read as a route; the kind has to be asserted on its own.
+    const extKindOf = (id: string) => headIR.symbols.find((s) => s.id === id)?.extKind
+    expect(extKindOf("ts:src/server.ts#app__get__$health__d0")).toBe("framework:express:route")
   })
 })
 
