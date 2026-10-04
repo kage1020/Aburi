@@ -27,8 +27,9 @@ export function normalizeRuleText(text: string): string {
 }
 
 /**
- * The same form applied to the three strings of one rule. The rule comes back unchanged when
- * nothing differs, so an ordinary scan allocates nothing here.
+ * The same form applied to the three strings of one rule. When none of them changes, the rule
+ * itself comes back rather than a copy, so a plugin that already writes the form costs the scan
+ * no new Rule object per rule.
  */
 export function normalizeRuleStrings(rule: Rule): Rule {
   const condition = rule.condition === null ? null : normalizeRuleText(rule.condition)
