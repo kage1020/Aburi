@@ -152,9 +152,9 @@ The core times each plugin's `classify(call, ctx)` invocation against a **per-ca
 - Override: `config.classifyTimeoutMs` (default `50`, min `10`, max `5000`)
   - For plugins containing an SQL parser, raising it to 200-500ms is realistic
   - No per-plugin override (a single config value shared by all plugins)
-- Budget exceeded → the classification is **kept**, exactly as if the call had been fast: a non-null answer moves the call to `effects[]` (EP6), a `null` lets it flow to the next plugin (EP5). `classify()` is synchronous, so the clock is read after it returns: the work is already done, and discarding the answer would save nothing while making the IR depend on how busy the machine was. A cold first call (module initialisation, JIT, a GC pause) is the usual overrun, and dropping it used to lose a real `db.write` on a loaded CI runner
+- Budget exceeded → the classification is **kept**, exactly as if the call had been fast: a non-null answer moves the call to `effects[]` (EP6); a `null` passes the call to the next plugin in config order (EP4) and leaves it in `calls[]` when no plugin claims it (EP5). A kept answer meets the vocabulary check like any other (EP1), so an undeclared id ends a strict run whether or not its call was slow. `classify()` is synchronous, so the clock is read after it returns: the work is already done, and discarding the answer would save nothing while making the IR depend on how busy the machine was. A cold first call (module initialisation, JIT, a GC pause) is the usual overrun
 - **Overrun recording**: each overrun (plugin, Symbol, budget) is recorded in `stats.effectClassifyTimeouts[]`, and the CLI's scan prints their count as one warning (`N effect classification(s) ran past the per-call budget; their results were kept.`)
-  - Only the stats depend on it: `effects[]`, `calls[]` and every fingerprint are the same for a fast run and a slow one
+  - An overrun changes this record and nothing else in the Document: `effects[]`, `calls[]` and every fingerprint are what they would have been had the call been fast. The parse budget is different in kind: a file over `parseTimeoutMs` is left out of the Document altogether (lang-plugin.md §7.1.2)
   - CI can compare `effectClassifyTimeouts` across runs to spot plugin performance regressions
 - Plugin implementations must be synchronous: a `classify()` that returns a Promise fails the run (`scan-plugin-misconfigured`)
 
@@ -402,7 +402,7 @@ export const plugin: EffectPlugin = {
 | EP10 | classify returns `confidence: 'low'` | Symbol.effects[].confidence = "low" goes into the IR as-is |
 | EP11 | a call matching a plugin's shared-vocabulary shape on a receiver the plugin cannot identify (§5.4) | the effect is still recorded, at `confidence: "medium"` — not `high`, and not dropped |
 | EP12 | a call whose shape no signature in the plugin's vocabulary takes: a literal first argument, or no argument to a method that requires one (§5.4 item 1) | `null` (EP5), whatever the receiver: the call stays in `Symbol.calls[]` and the file keeps its Symbols. Not EP3a — the candidate is well formed, so this is a classification decision, not an input-contract violation |
-| EP13 | classify returns after running past `classifyTimeoutMs` (§5.1.1) | its answer is used as if it had been fast — EP6 for a classification, EP5 for `null` — and the overrun is one `stats.effectClassifyTimeouts` entry. `effects[]`, `calls[]` and the fingerprints do not depend on the machine's speed |
+| EP13 | classify returns after running past `classifyTimeoutMs` (§5.1.1) | its answer is used as if it had been fast — EP6 for a classification, EP5 for `null`, and EP4 still decides the order — and the overrun is one `stats.effectClassifyTimeouts` entry. `effects[]`, `calls[]` and the fingerprints do not depend on whether this classification overran its budget |
 
 ## 11. Design Decisions
 

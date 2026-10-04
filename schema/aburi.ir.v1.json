@@ -146,7 +146,7 @@
         "effectClassifyTimeouts": {
           "type": "array",
           "items": { "$ref": "#/$defs/EffectClassifyTimeout" },
-          "description": "Records effect classifications that ran longer than classifyTimeoutMs (effect-plugin.md); each one's classification is kept, so only this record depends on the machine's speed. Class B per ir-schema.md: writers omit the key when nothing overran rather than emitting []; non-empty entries are kept as a performance log."
+          "description": "Records effect classifications that ran longer than classifyTimeoutMs (effect-plugin.md). Each one's classification is kept, so an overrun changes this record and nothing else in the Document. Class B per ir-schema.md: writers omit the key when nothing overran rather than emitting []; non-empty entries are kept as a performance log."
         },
         "effectPropagation": {
           "$ref": "#/$defs/EffectPropagationStats",
@@ -395,12 +395,12 @@
         "symbolId": {
           "type": "string",
           "minLength": 1,
-          "description": "Affected Symbol id (extraction-stage uniqueness guaranteed)."
+          "description": "Id of the Symbol that makes the call (extraction-stage uniqueness guaranteed)."
         },
         "timeoutMs": {
           "type": "integer",
           "minimum": 1,
-          "description": "The classifyTimeoutMs value in effect at the time of timeout."
+          "description": "The classifyTimeoutMs value in effect: the budget the call ran past."
         }
       }
     },

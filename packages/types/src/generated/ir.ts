@@ -246,7 +246,7 @@ parsedFiles: number
 keptSymbols: number
 droppedSymbols: number
 /**
- * Records effect classifications that ran longer than classifyTimeoutMs (effect-plugin.md); each one's classification is kept, so only this record depends on the machine's speed. Class B per ir-schema.md: writers omit the key when nothing overran rather than emitting []; non-empty entries are kept as a performance log.
+ * Records effect classifications that ran longer than classifyTimeoutMs (effect-plugin.md). Each one's classification is kept, so an overrun changes this record and nothing else in the Document. Class B per ir-schema.md: writers omit the key when nothing overran rather than emitting []; non-empty entries are kept as a performance log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
@@ -263,11 +263,11 @@ export interface EffectClassifyTimeout {
  */
 plugin: string
 /**
- * Affected Symbol id (extraction-stage uniqueness guaranteed).
+ * Id of the Symbol that makes the call (extraction-stage uniqueness guaranteed).
  */
 symbolId: string
 /**
- * The classifyTimeoutMs value in effect at the time of timeout.
+ * The classifyTimeoutMs value in effect: the budget the call ran past.
  */
 timeoutMs: number
 }

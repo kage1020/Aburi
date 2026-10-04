@@ -3,6 +3,7 @@ import type {
   BodyExtraction,
   CallCandidate,
   ClassifyContext,
+  Config,
   EffectClassification,
   EffectPlugin,
   FrameworkPlugin,
@@ -15,6 +16,7 @@ import type {
 } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { buildDropCFilter, type ExtractedFile, runFilePipeline, VocabCheck } from "../../src"
+import { spend } from "../fixtures/clock"
 import { symbolId } from "../fixtures/ir"
 import {
   effectsManifest,
@@ -71,6 +73,7 @@ async function runPipelineWithStubs(overrides: {
   candidate?: SymbolCandidate<OpaqueAstNode>
   body?: BodyExtraction
   imports?: readonly ImportEdge[]
+  config?: Config
 }): Promise<ExtractedFile> {
   const candidate = overrides.candidate ?? baseCandidate()
   const body: BodyExtraction = overrides.body ?? { rules: [], calls: [] }
@@ -82,7 +85,7 @@ async function runPipelineWithStubs(overrides: {
     effects: overrides.effects ?? [],
     registry: noopRegistry,
     vocab: new VocabCheck(noopRegistry, true),
-    config: {},
+    config: overrides.config ?? {},
     dropCFilter: buildDropCFilter(),
     component: null,
     treeReleaseFailures: [],
@@ -289,6 +292,35 @@ describe("runFilePipeline — framework symbolDropHint", () => {
   })
 })
 
+const READ: EffectClassification = {
+  effectId: "db.read",
+  confidence: "high",
+  derivedBy: "effects-stub:read",
+}
+const WRITE: EffectClassification = {
+  ...READ,
+  effectId: "db.write",
+  derivedBy: "effects-stub:write",
+}
+
+/** An effects plugin that spends `ms` of real time on each call and then gives `answer`. */
+function answering(
+  name: string,
+  answer: EffectClassification | null,
+  ms: number,
+  asked: string[] = [],
+): EffectPlugin {
+  return {
+    manifest: effectsManifest(name),
+    init: async () => {},
+    classify: (call: CallCandidate) => {
+      asked.push(call.target)
+      spend(ms)
+      return answer
+    },
+  }
+}
+
 describe("runFilePipeline — effect classify dispatch", () => {
   it("stops at the first effect that classifies the call (first-non-null-wins)", async () => {
     const secondCalls: string[] = []
@@ -342,6 +374,57 @@ describe("runFilePipeline — effect classify dispatch", () => {
 
     expect(result.symbols[0]?.effects[0]?.plugin).toBe("effects-second")
     expect(result.symbols[0]?.effects[0]?.id).toBe("db.write")
+  })
+
+  // EP13: a classification that ran past `classifyTimeoutMs` is used as if it had been fast. The
+  // slow stub spends 30 ms of real time against the 10 ms floor, so it overruns on any machine.
+  it("keeps a classification that ran past its budget, and asks no later plugin (EP13)", async () => {
+    const asked: string[] = []
+    const result = await runPipelineWithStubs({
+      config: { classifyTimeoutMs: 10 },
+      effects: [answering("effects-slow", READ, 30), answering("effects-next", WRITE, 0, asked)],
+      body: { rules: [], calls: [stubCall("db.query")] },
+    })
+
+    expect(result.timeoutEvents.map((e) => e.plugin)).toEqual(["effects-slow"])
+    expect(result.symbols[0]?.effects.map((e) => [e.id, e.target, e.plugin])).toEqual([
+      ["db.read", "db.query", "effects-slow"],
+    ])
+    expect(result.symbols[0]?.calls).toEqual([])
+    expect(asked).toEqual([])
+  })
+
+  it("hands a null that ran past its budget to the next plugin, as a fast null (EP13)", async () => {
+    const result = await runPipelineWithStubs({
+      config: { classifyTimeoutMs: 10 },
+      effects: [answering("effects-slow", null, 30), answering("effects-next", READ, 0)],
+      body: { rules: [], calls: [stubCall("db.query")] },
+    })
+
+    // Only the slow plugin's overrun: the next one is timed against the same 10 ms, and saying it
+    // stayed under would be the two-sided assertion `spend` warns about.
+    expect(result.timeoutEvents.filter((e) => e.plugin === "effects-slow")).toHaveLength(1)
+    expect(result.symbols[0]?.effects.map((e) => [e.id, e.plugin])).toEqual([
+      ["db.read", "effects-next"],
+    ])
+  })
+
+  it("gives the Symbol a fast run gives, fingerprint included, after an overrun (EP13)", async () => {
+    const classifiedIn = (classifyTimeoutMs: number, ms: number) =>
+      runPipelineWithStubs({
+        config: { classifyTimeoutMs },
+        effects: [answering("effects-slow", READ, ms)],
+        body: { rules: [], calls: [stubCall("db.query")] },
+      })
+    const slow = await classifiedIn(10, 30)
+    const fast = await classifiedIn(5000, 0)
+
+    expect(slow.timeoutEvents).toHaveLength(1)
+    expect(fast.timeoutEvents).toEqual([])
+    expect(fast.symbols[0]?.effects.map((e) => e.id)).toEqual(["db.read"])
+    // The whole Symbol rather than `fingerprint` alone: `logic` hashes an effect by its target
+    // only, so an overrun that kept the effect but lost its confidence would not move it.
+    expect(slow.symbols).toEqual(fast.symbols)
   })
 
   it("hands the effect plugin each owner decorator's receiver, and none for a bare one", async () => {
