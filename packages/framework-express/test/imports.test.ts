@@ -87,6 +87,16 @@ describe("hasExpressImport", () => {
     expect(await importsExpress(source)).toBe(false)
   })
 
+  it("reads an import from its edge where the text reading loses it", async () => {
+    // The quote in the JSX text hides the rest of the line from the tokenizer (see
+    // `tokenize`); the parser still reads the import, and the edge is what answers.
+    const source = `const A = () => <p>Don't</p>; import express from "express"\n`
+    const parsed = await parseTypescriptFile({ path: "src/a.tsx", content: source })
+    const ctx = { ...makeCtx("src/a.tsx", source), imports: parsed.imports }
+    expect(readExpressFromText(source).imports).toBe(false)
+    expect(hasExpressImport(ctx)).toBe(true)
+  })
+
   it("answers each file from its own text when two contexts share one import list", () => {
     // The text reading is cached on the import list; a list shared across files must not
     // hand one file's answer to the other.
