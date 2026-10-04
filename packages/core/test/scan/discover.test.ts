@@ -1,4 +1,4 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises"
+import { chmod, mkdir, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -671,5 +671,53 @@ describe("discoverFiles — a candidate the stat cannot reach", () => {
     } finally {
       await chmod(sealed, 0o755)
     }
+  })
+})
+
+describe("discoverFiles — symlinks are not followed", () => {
+  // Git stores each link as one entry and never looks behind it, so a file is listed once, under
+  // its own path, whatever links reach it.
+  let outside: string
+
+  beforeEach(async () => {
+    outside = `${workRoot}-outside`
+    await mkdir(outside, { recursive: true })
+    await writeFile(join(outside, "o.ts"), "1", "utf8")
+    await writeFileAt("src/a.ts", "1")
+  })
+
+  afterEach(async () => {
+    const { rm } = await import("node:fs/promises")
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  it("does not walk through a link to a directory", async () => {
+    // Followed, the in-workspace link gave `src/a.ts` a second Symbol id under `shared/`, the
+    // outside one put that machine's file into the Document, and the cycle was expanded once
+    // before the walk stopped. A junction is what a directory link is on Windows: creating one
+    // needs no privilege there, and the walk reads it as a link, so this runs everywhere.
+    await symlink(join(workRoot, "src"), join(workRoot, "shared"), "junction")
+    await symlink(outside, join(workRoot, "src", "ext"), "junction")
+    await symlink(workRoot, join(workRoot, "src", "loop"), "junction")
+
+    const result = await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
+    expect(result.skipped).toEqual([])
+    expect(result.unrepresentableFiles).toEqual([])
+  })
+
+  // A link to a file is a symlink on Windows too, and creating one needs a privilege an
+  // ordinary test run does not have there.
+  it.skipIf(process.platform === "win32")("does not list a link to a file", async () => {
+    await symlink("a.ts", join(workRoot, "src", "b.ts"))
+    await symlink(join(outside, "o.ts"), join(workRoot, "src", "o.ts"))
+    await symlink("nowhere.ts", join(workRoot, "src", "dangling.ts"))
+
+    const result = await discoverFiles({ workspaceRoot: workRoot, languageExtensions: [".ts"] })
+
+    expect(result.files.map((f) => f.path)).toEqual(["src/a.ts"])
+    expect(result.skipped).toEqual([])
+    expect(result.unrepresentableFiles).toEqual([])
   })
 })

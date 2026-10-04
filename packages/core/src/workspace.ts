@@ -488,6 +488,9 @@ async function detectNx(root: string): Promise<ManagerScan | null> {
     ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**"],
     onlyFiles: true,
     absolute: true,
+    // Not through a symlink, as discovery does not walk through one: a project found there
+    // would be a component no scanned file could belong to.
+    followSymbolicLinks: false,
     deep: 10,
   })
   const candidates: WorkspaceCandidate[] = []

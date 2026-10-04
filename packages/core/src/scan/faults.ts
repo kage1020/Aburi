@@ -46,8 +46,8 @@ export function errorCode(error: unknown): string | null {
  * that sorting the fatal codes into deterministic and not would need a per-errno taxonomy
  * both callers agree on, and the two disagreeing is the whole defect this predicate exists to
  * close — so the conservative side is the one that stays shared. (A symlink cycle does not
- * reach discovery's `stat` in any case: the walk drops a cyclic link before it becomes a
- * candidate, in both follow modes.)
+ * reach discovery's `stat` in any case: the walk does not follow links, so no link of any kind
+ * becomes a candidate.)
  */
 export function isVanishedFile(error: unknown): boolean {
   const code = errorCode(error)

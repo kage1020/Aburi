@@ -32,6 +32,8 @@ drop means "removed from view", not "discarded". For transparency, symbol-level 
 
 Excludes an entire file from extraction. The file is not even AST-parsed.
 
+**Symlinks are not followed, to a file or to a directory.** Git stores a link as one entry and never looks behind it, and the walk does the same: no link is a candidate, and nothing under a linked directory is reached through it. Following them gave one file a Symbol id per path that reached it (`shared -> src` listed every file twice), put files from outside the workspace into the Document under a workspace path, and expanded a cyclic link once. Component detection's language census and nx project detection make the same decision, so neither finds anything only a link reaches.
+
 ### 3.1 Core standard patterns
 
 | Pattern | Reason |
@@ -308,6 +310,7 @@ Properties the extraction pipeline must satisfy.
 | A3d | `packages/app/.gitignore` holding `fixtures/` | Nothing under `packages/app/fixtures/` is scanned; `packages/other/fixtures/` is untouched |
 | A3e | Root `.gitignore` holding `*.ts`, `packages/app/.gitignore` holding `!keep.ts` | `packages/app/keep.ts` is scanned — the deeper file decides |
 | A4 | Adding `config.ignore: ["docs/**"]` | Everything under `docs/` is skipped |
+| A5 | `src/a.ts` beside `shared -> src`, `src/ext` linking out of the workspace, `src/loop -> ..`, and `src/b.ts -> a.ts` | Only `src/a.ts` is scanned, once: no link is a candidate and nothing is reached through one |
 
 ### 8.2 Symbol-level (Category B)
 
