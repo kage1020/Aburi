@@ -1,4 +1,4 @@
-import type { Config, Symbol as IRSymbol, LspServerConfig } from "@aburi/types"
+import type { Config, Symbol as IRSymbol, LanguageId, Logger, LspServerConfig } from "@aburi/types"
 import type { EnrichmentInput, ServerFactory } from "../../../src/lsp"
 import { makeSymbol } from "../../fixtures/ir"
 
@@ -32,6 +32,8 @@ export function makeEnrichmentInput(input: {
   lspConfig?: Config["lsp"]
   now?: () => number
   fsPaths?: Record<string, string>
+  languageIds?: readonly LanguageId[]
+  logger?: Logger
 }): EnrichmentInput {
   const base: EnrichmentInput = {
     symbols: input.symbols,
@@ -48,6 +50,8 @@ export function makeEnrichmentInput(input: {
     serverFactory: input.serverFactory,
   }
   if (input.now !== undefined) base.now = input.now
+  if (input.languageIds !== undefined) base.languageIds = input.languageIds
+  if (input.logger !== undefined) base.logger = input.logger
   return base
 }
 

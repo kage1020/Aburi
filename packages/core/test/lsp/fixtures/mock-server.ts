@@ -23,6 +23,8 @@ export type MockNotificationOutcome = (uri: string) => LspFailure | null
 export class MockLspClient implements LspClient {
   readonly requests: Array<{ method: string; params: unknown }> = []
   readonly openFiles: string[] = []
+  /** The `languageId` each `didOpen` carried, parallel to `openFiles`. */
+  readonly openLanguageIds: string[] = []
   readonly closedFiles: string[] = []
   /** Timeout budgets the pass handed to `didOpen` / `didClose`, in call order. */
   readonly openTimeouts: number[] = []
@@ -82,11 +84,12 @@ export class MockLspClient implements LspClient {
 
   async didOpen(
     uri: string,
-    _languageId: string,
+    languageId: string,
     _text: string,
     timeoutMs: number,
   ): Promise<LspFailure | null> {
     this.openFiles.push(uri)
+    this.openLanguageIds.push(languageId)
     this.openTimeouts.push(timeoutMs)
     return this.didOpenOutcome?.(uri) ?? null
   }

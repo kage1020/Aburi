@@ -84,6 +84,12 @@ export interface EnrichmentInput {
    */
   fileContents: ReadonlyMap<string, ReadFile>
   lspConfig: Config["lsp"] | undefined
+  /**
+   * The ids of the language plugins this run loaded. A `lsp.servers` key outside them is
+   * never looked up, so the pass warns about it rather than ignoring the server in silence.
+   * Absent means the caller does not know them, and nothing is warned.
+   */
+  languageIds?: readonly LanguageId[]
   logger?: Logger
   /**
    * Injected server factory. Real production always uses the default (spawn).
@@ -159,6 +165,7 @@ export async function enrichWithLsp(input: EnrichmentInput): Promise<EnrichmentR
   if (servers === undefined) return emptyResult
 
   const logger: Logger = input.logger ?? silentLogger
+  warnUnknownServerKeys(servers, input.languageIds, logger)
   const stats = createStatsBuilder(true)
   const fallback = createFallbackState()
 
@@ -297,7 +304,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
     const content = read.content
 
     const uri = fileUriFor(input.workspaceRoot, read.fsPath)
-    const languageIdForOpen = languageIdForLspOpen(input.language)
+    const languageIdForOpen = languageIdForLspOpen(input.language, read.fsPath)
     const fileSymbols = symbolsByFile.get(file) ?? []
 
     const fileStart = input.now()
@@ -763,18 +770,47 @@ function normalizeAbsolute(workspaceRoot: string, relativePath: string): string 
   return `${trimmedRoot}/${relativePath}`
 }
 
-function languageIdForLspOpen(languageId: LanguageId): string {
-  switch (languageId) {
-    case "ts":
-      return "typescript"
-    case "tsx":
-      return "typescriptreact"
-    case "js":
-      return "javascript"
-    case "jsx":
-      return "javascriptreact"
-    default:
-      return languageId
+/**
+ * The `languageId` a document is opened under. One IR language covers several LSP ones — the
+ * TypeScript plugin's `ts` takes `.tsx` and `.js` too — and a server parses a document by the
+ * id it was opened under, so a `.tsx` file opened as `typescript` has its JSX read as type
+ * assertions. The extension decides where it names an LSP language; the IR id is the rest.
+ */
+function languageIdForLspOpen(languageId: LanguageId, fsPath: string): string {
+  const byExtension = LSP_LANGUAGE_BY_EXTENSION.get(extensionOf(fsPath))
+  if (byExtension !== undefined) return byExtension
+  return languageId === "ts" ? "typescript" : languageId
+}
+
+const LSP_LANGUAGE_BY_EXTENSION: ReadonlyMap<string, string> = new Map([
+  [".ts", "typescript"],
+  [".mts", "typescript"],
+  [".cts", "typescript"],
+  [".tsx", "typescriptreact"],
+  [".js", "javascript"],
+  [".mjs", "javascript"],
+  [".cjs", "javascript"],
+  [".jsx", "javascriptreact"],
+])
+
+function extensionOf(path: string): string {
+  const base = path.slice(path.lastIndexOf("/") + 1)
+  const dot = base.lastIndexOf(".")
+  return dot <= 0 ? "" : base.slice(dot).toLowerCase()
+}
+
+function warnUnknownServerKeys(
+  servers: Readonly<Record<string, unknown>>,
+  languageIds: readonly LanguageId[] | undefined,
+  logger: Logger,
+): void {
+  if (languageIds === undefined) return
+  const known = new Set<string>(languageIds)
+  for (const key of Object.keys(servers).sort(compareCodeUnit)) {
+    if (known.has(key)) continue
+    logger.warn?.(
+      `[aburi:lsp] lsp.servers.${key} matches no loaded language plugin (loaded: ${[...known].sort(compareCodeUnit).join(", ") || "none"}); its server is never started`,
+    )
   }
 }
 

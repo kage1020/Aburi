@@ -492,6 +492,7 @@ export async function scan(input: ScanInput): Promise<ScanResult> {
     workspaceRoot: input.workspaceRoot,
     fileContents,
     lspConfig: input.config.lsp,
+    languageIds: input.languages.map((plugin) => plugin.languageId),
     logger,
   }
   if (input.lspServerFactory !== undefined) enrichmentInput.serverFactory = input.lspServerFactory

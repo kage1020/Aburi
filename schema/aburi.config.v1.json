@@ -227,7 +227,7 @@
     "LspLanguageKey": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*$",
-      "description": "Language short-form id (typescript, python, go, …). Matches ir-schema LanguageId."
+      "description": "The id of a loaded language plugin, exactly as Symbol ids carry it (ir-schema LanguageId): ts for @aburi/lang-typescript, which also covers .js, .jsx and .tsx. A key that names no loaded plugin is never looked up, and the scan warns about it."
     },
 
     "LspServerConfig": {
