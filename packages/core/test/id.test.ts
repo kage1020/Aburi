@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { symbolIdParts } from "../src/id"
 import {
   backslashSite,
   CoreError,
@@ -474,25 +475,46 @@ describe("id guards", () => {
     expect(symbolIdFile("ts:src/a.ts#C::#v")).toBe("src/a.ts")
   })
 
+  // Strings with the silhouette of an id that `makeSymbolId` would refuse. Every entry
+  // survives a split on the first `:` and the first `#`, which is what a later simplification
+  // would reach for.
+  const silhouettes = [
+    "slice:ts:src/a.ts#foo",
+    "ts:/abs/path.ts#foo",
+    "ts:../../etc/passwd#foo",
+    "ts:src\\a.ts#foo",
+    "ts:./src/a.ts#foo",
+    "ts:src/a.ts#3bad",
+    "ts:src/a.ts#foo bar",
+    "TS:src/a.ts#foo",
+    "#foo",
+    "src/a.ts",
+  ]
+
   it("symbolIdFile names no file for anything makeSymbolId would refuse", () => {
     // The whole point of the function: a caller uses the answer to make a positive statement
     // about a path ("this document never analysed it"), so a string that merely has the
-    // silhouette of an id must not produce one. Every entry here survives a split on the
-    // first `:` and the first `#`, which is what a later simplification would reach for.
-    const noFile = [
-      "slice:ts:src/a.ts#foo",
-      "ts:/abs/path.ts#foo",
-      "ts:../../etc/passwd#foo",
-      "ts:src\\a.ts#foo",
-      "ts:./src/a.ts#foo",
-      "ts:src/a.ts#3bad",
-      "ts:src/a.ts#foo bar",
-      "TS:src/a.ts#foo",
-      "#foo",
-      "src/a.ts",
-    ]
-    for (const value of noFile) {
+    // silhouette of an id must not produce one.
+    for (const value of silhouettes) {
       expect(symbolIdFile(value), value).toBeNull()
+    }
+  })
+
+  it("symbolIdParts answers with the three parts makeSymbolId would build the id from", () => {
+    for (const parts of [
+      { language: "ts", file: "src/a.ts", qualifiedName: "Repository" },
+      { language: "ts", file: "src/nested/dir/a.ts", qualifiedName: "C.#v" },
+      { language: "tsx", file: "src/a.tsx", qualifiedName: "C::m" },
+    ]) {
+      expect(symbolIdParts(makeSymbolId(parts))).toEqual(parts)
+    }
+  })
+
+  it("symbolIdParts answers nothing for anything makeSymbolId would refuse", () => {
+    // A caller builds another id out of the parts, so a string that is not an id must not
+    // hand any back.
+    for (const value of silhouettes) {
+      expect(symbolIdParts(value), value).toBeNull()
     }
   })
 

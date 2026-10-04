@@ -1,4 +1,10 @@
-import type { LspEnrichmentStats, LspHintRejections, SymbolId } from "@aburi/types"
+import type {
+  Symbol as IRSymbol,
+  LspEnrichmentStats,
+  LspHintRejections,
+  SourceRange,
+  SymbolId,
+} from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { makeCallSiteKey } from "../../src/call-site"
 import { resolveCallGraph } from "../../src/callgraph"
@@ -104,6 +110,287 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     const stats = statsOf(enrichment)
     expect(stats.hintsProduced).toBe(0)
     expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
+  })
+
+  // LE26a, LE26b
+  describe("a class name the hover gives without its file", () => {
+    const USERS = "src/users.ts"
+    const LIB = "src/lib/repository.ts"
+    const MODELS = "src/models/repository.ts"
+    const ENTITIES = "src/entities/repository.ts"
+    const HOVER = "(method) Repository.save(): string"
+    // Two hops, the shape the lookup has to get right: the caller's file binds no
+    // `Repository`, so it is free to declare one of its own.
+    const CALLER =
+      "class UserRepository extends BaseUserRepository {\n  create() {\n    return this.save()\n  }\n}"
+
+    /** What a file declares, and the Symbols the scan reads out of that text. */
+    interface Declarations {
+      text: string
+      symbols: IRSymbol[]
+    }
+
+    const at = (file: string, line: number): SourceRange => ({
+      file,
+      startLine: line,
+      endLine: line,
+      startColumn: null,
+      endColumn: null,
+    })
+
+    /** `class Repository` with a `save`. */
+    const repositoryIn = (file: string): Declarations => ({
+      text: "class Repository {\n  save() {}\n}",
+      symbols: [
+        makeClassSymbol(file, "Repository", 1),
+        makeMethodSymbol(file, "Repository", "save", 2),
+      ],
+    })
+
+    /** A `class Repository` with no methods, which lang-typescript drops as a pure DTO. */
+    const dtoIn = (file: string): Declarations => ({
+      text: 'class Repository {\n  id = ""\n}',
+      symbols: [
+        makeSymbol(`ts:${file}#Repository`, {
+          kind: "class",
+          name: "Repository",
+          dropped: true,
+          dropReason: "pure DTO",
+          source: at(file, 1),
+        }),
+      ],
+    })
+
+    /** `const Repository = { save }`, whose member gets the id a class's `save` would have. */
+    const objectLiteralIn = (file: string): Declarations => ({
+      text: 'const Repository = {\n  save: () => "local",\n}',
+      symbols: [
+        makeSymbol(`ts:${file}#Repository`, {
+          kind: "const",
+          name: "Repository",
+          source: at(file, 1),
+        }),
+        makeSymbol(`ts:${file}#Repository.save`, {
+          kind: "method",
+          name: "Repository.save",
+          source: at(file, 2),
+        }),
+      ],
+    })
+
+    /**
+     * `UserRepository.create` in `src/users.ts` calls `this.save()`, and the server answers
+     * that it is `Repository.save`. `own` is what `src/users.ts` declares above the caller, and
+     * `others` is every other file, by path.
+     */
+    const enrichUsers = async (scenario: {
+      own?: Declarations
+      others?: Record<string, Declarations>
+    }) => {
+      const own = scenario.own
+      const others = Object.entries(scenario.others ?? {})
+      // The caller follows what is declared above it, after one blank line.
+      const offset = own === undefined ? 0 : own.text.split("\n").length + 1
+      const enrichment = await enrichWithLsp(
+        makeEnrichmentInput({
+          symbols: [
+            ...(own?.symbols ?? []),
+            makeClassSymbol(USERS, "UserRepository", 1 + offset),
+            makeMethodSymbol(USERS, "UserRepository", "create", 2 + offset, [
+              { target: "this.save", line: 3 + offset },
+            ]),
+            ...others.flatMap(([, declarations]) => declarations.symbols),
+          ],
+          fileContents: {
+            ...Object.fromEntries(others.map(([file, declarations]) => [file, declarations.text])),
+            [USERS]: own === undefined ? CALLER : `${own.text}\n\n${CALLER}`,
+          },
+          serverFactory: hoverFactory(() => ({ contents: HOVER })),
+        }),
+      )
+      const key = makeCallSiteKey(USERS, 3 + offset, "this.save")
+      return { hint: enrichment.receiverHints.get(key)?.targetSymbolId, stats: statsOf(enrichment) }
+    }
+
+    it("declines when two other files declare it, and counts it as ownerClassNotFound", async () => {
+      // Two files declare it, so the old pass picked one — `src/lib/repository.ts`, the lower
+      // id — rather than the class the caller extends.
+      const { hint, stats } = await enrichUsers({
+        others: { [LIB]: repositoryIn(LIB), [MODELS]: repositoryIn(MODELS) },
+      })
+      expect(hint).toBeUndefined()
+      expect(stats.hintsProduced).toBe(0)
+      expect(stats.hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
+    })
+
+    it("takes the one class of that name in another file", async () => {
+      const { hint, stats } = await enrichUsers({ others: { [MODELS]: repositoryIn(MODELS) } })
+      expect(hint).toBe(`ts:${MODELS}#Repository.save`)
+      expect(stats.hintsProduced).toBe(1)
+      expect(stats.hintsRejected).toEqual(noRejections())
+    })
+
+    it("takes the caller's own file first, however many others declare the name", async () => {
+      const { hint, stats } = await enrichUsers({
+        own: repositoryIn(USERS),
+        others: { [LIB]: repositoryIn(LIB), [MODELS]: repositoryIn(MODELS) },
+      })
+      expect(hint).toBe(`ts:${USERS}#Repository.save`)
+      expect(stats.hintsProduced).toBe(1)
+      expect(stats.hintsRejected).toEqual(noRejections())
+    })
+
+    it("stops at a class in the caller's own file even when it lacks the member", async () => {
+      // An unrelated namesake, and the one `Repository` elsewhere does have `save`. The
+      // caller's file is where the lookup ends, not merely where it starts.
+      const { hint, stats } = await enrichUsers({
+        own: { text: "class Repository {}", symbols: [makeClassSymbol(USERS, "Repository", 1)] },
+        others: { [MODELS]: repositoryIn(MODELS) },
+      })
+      expect(hint).toBeUndefined()
+      expect(stats.hintsProduced).toBe(0)
+      expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
+    })
+
+    it.each<[string, Declarations]>([
+      ["a const holding an object literal", objectLiteralIn(USERS)],
+      [
+        "an interface",
+        {
+          text: "interface Repository {\n  save(): string\n}",
+          symbols: [
+            makeSymbol(`ts:${USERS}#Repository`, {
+              kind: "interface",
+              name: "Repository",
+              dropped: true,
+              dropReason: "interface (data model)",
+              source: at(USERS, 1),
+            }),
+          ],
+        },
+      ],
+    ])("passes over %s of that name in the caller's own file", async (_what, own) => {
+      const { hint, stats } = await enrichUsers({ own, others: { [MODELS]: repositoryIn(MODELS) } })
+      expect(hint).toBe(`ts:${MODELS}#Repository.save`)
+      expect(stats.hintsProduced).toBe(1)
+      expect(stats.hintsRejected).toEqual(noRejections())
+    })
+
+    it("sets aside a dropped class that lacks the member when another class has the name", async () => {
+      const { hint, stats } = await enrichUsers({
+        others: { [ENTITIES]: dtoIn(ENTITIES), [MODELS]: repositoryIn(MODELS) },
+      })
+      expect(hint).toBe(`ts:${MODELS}#Repository.save`)
+      expect(stats.hintsProduced).toBe(1)
+      expect(stats.hintsRejected).toEqual(noRejections())
+    })
+
+    it("still takes a dropped class that lacks the member when it is the only one", async () => {
+      const { hint, stats } = await enrichUsers({ others: { [ENTITIES]: dtoIn(ENTITIES) } })
+      expect(hint).toBeUndefined()
+      expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
+    })
+
+    it("counts a dropped class that holds the member, and declines", async () => {
+      // A framework hint drops the class and leaves its methods, so `save` is still in the
+      // table and this class is as likely to be the one meant as the live one.
+      const LEGACY = "src/legacy/repository.ts"
+      const legacy: Declarations = {
+        text: "@AcmeInternal()\nclass Repository {\n  save() {}\n}",
+        symbols: [
+          makeSymbol(`ts:${LEGACY}#Repository`, {
+            kind: "class",
+            name: "Repository",
+            decorators: [
+              {
+                name: "AcmeInternal",
+                raw: "AcmeInternal()",
+                arguments: [],
+                boundary: false,
+                line: 1,
+              },
+            ],
+            dropped: true,
+            dropReason: 'frameworkHints "acme": @AcmeInternal',
+            source: at(LEGACY, 2),
+          }),
+          makeMethodSymbol(LEGACY, "Repository", "save", 3),
+        ],
+      }
+      const { hint, stats } = await enrichUsers({
+        others: { [LEGACY]: legacy, [MODELS]: repositoryIn(MODELS) },
+      })
+      expect(hint).toBeUndefined()
+      expect(stats.hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
+    })
+
+    // LE26b
+    it("looks the member up in the file that declares the owner class, and nowhere else", async () => {
+      // The owner class lacks `save`, and `src/other.ts` has a `Repository.save` of its own.
+      const OTHER = "src/other.ts"
+      const { hint, stats } = await enrichUsers({
+        others: {
+          [MODELS]: {
+            text: "class Repository {}",
+            symbols: [makeClassSymbol(MODELS, "Repository", 1)],
+          },
+          [OTHER]: objectLiteralIn(OTHER),
+        },
+      })
+      expect(hint).toBeUndefined()
+      expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
+    })
+
+    // LE26b
+    it("builds the member's id from the owner class's id, not from its name", async () => {
+      // ir-schema.md §3.1: nothing in the Document ties `name` to the qualified name in the id.
+      const { hint } = await enrichUsers({
+        own: {
+          text: "class Repository {\n  save() {}\n}",
+          symbols: [
+            makeSymbol(`ts:${USERS}#Repository`, {
+              kind: "class",
+              name: "Repo",
+              source: at(USERS, 1),
+            }),
+            makeMethodSymbol(USERS, "Repository", "save", 2),
+          ],
+        },
+      })
+      expect(hint).toBe(`ts:${USERS}#Repository.save`)
+    })
+
+    // LE26b
+    it("keys the classes it looks for by the ids it holds, not by source.file", async () => {
+      // The ids say `src/users.ts` and every `source.file` in that file says `src/views/users.ts`;
+      // the two are not tied (`symbolIdFile`). The Symbol table is keyed by the ids.
+      const VIEWS = "src/views/users.ts"
+      const inViews = (symbol: IRSymbol): IRSymbol => ({
+        ...symbol,
+        source: { ...symbol.source, file: VIEWS },
+      })
+      const enrichment = await enrichWithLsp(
+        makeEnrichmentInput({
+          symbols: [
+            ...repositoryIn(USERS).symbols.map(inViews),
+            inViews(makeClassSymbol(USERS, "UserRepository", 5)),
+            inViews(
+              makeMethodSymbol(USERS, "UserRepository", "create", 6, [
+                { target: "this.save", line: 7 },
+              ]),
+            ),
+            ...repositoryIn(MODELS).symbols,
+          ],
+          fileContents: {
+            [MODELS]: repositoryIn(MODELS).text,
+            [VIEWS]: `${repositoryIn(USERS).text}\n\n${CALLER}`,
+          },
+          serverFactory: hoverFactory(() => ({ contents: HOVER })),
+        }),
+      )
+      const key = makeCallSiteKey(VIEWS, 7, "this.save")
+      expect(enrichment.receiverHints.get(key)?.targetSymbolId).toBe(`ts:${USERS}#Repository.save`)
+    })
   })
 
   // LE27

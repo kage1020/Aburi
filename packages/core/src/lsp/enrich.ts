@@ -36,7 +36,7 @@ import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languag
 import { makeCallSiteKey, receiverHead } from "../call-site"
 import { groupBy } from "../collections"
 import { lastQnameSegment } from "../fingerprint/short-name"
-import { trySymbolId } from "../id"
+import { symbolIdParts, trySymbolId } from "../id"
 import { silentLogger } from "../logger"
 import { compareBy, compareCodeUnit } from "../order"
 import {
@@ -550,18 +550,12 @@ function applyJobResult(
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
-  if (ownerClassId === null) {
+  const ownerClass = findOwnerClass(caller, ownerClassName, job.calleeText, workingById)
+  if (ownerClass === null) {
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const memberId = findMemberSymbolId(
-    caller.language,
-    caller.source.file,
-    ownerClassName,
-    job.calleeText,
-    workingById,
-  )
+  const memberId = findMemberSymbolId(ownerClass, job.calleeText, workingById)
   if (memberId === null) {
     countProducerRejection(stats, "memberNotFound")
     return
@@ -930,42 +924,66 @@ function extractInferredThrowsFromHover(hoverText: string): string[] {
   return [...out]
 }
 
-function findClassSymbolId(
+/**
+ * The class a hover names, by that name. A hover carries the name alone, not the file the
+ * class is declared in.
+ *
+ * A class of that qualified name in the caller's own file is the owner, and the lookup ends
+ * there: when it lacks the member the hover is `memberNotFound`, even if a class elsewhere has
+ * one. Only a class ends it. An interface, a type alias or a `const` of that name is not what
+ * a hover on a `this` or `super` call names, so the lookup goes on past it.
+ *
+ * Elsewhere in the language the name has to pick out one class. When two files each declare
+ * one, nothing here says which the server meant: taking the first by id sent `this.save()`
+ * into whichever `Repository` sorted first, whatever the caller extends. That is the
+ * multiple-match case of call-resolution.md §4.5 and §4.6, so it is declined as it is there
+ * (`ownerClassNotFound`) rather than guessed at (§11.7).
+ *
+ * Among several, a dropped class that lacks the member is set aside, and the name is taken
+ * when that leaves one. Of the drop rules that ship, only a framework hint removes a class
+ * that has methods, and it removes the class and not its members, so such a class still holds
+ * the member and still counts. One that lacks it was dropped for having no methods (pure DTO,
+ * pure constants: drop-list.md §4.1), and a method's hover does not name it. When it is the
+ * only class of that name it is still the owner, and the hover is `memberNotFound`.
+ */
+function findOwnerClass(
   caller: IRSymbol,
-  className: string,
-  workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
-  const expectedId = trySymbolId({
-    language: caller.language,
-    file: caller.source.file,
-    qualifiedName: className,
-  })
-  if (expectedId !== null && workingById.has(expectedId)) return expectedId
-  for (const s of workingById.values()) {
-    if (s.language === caller.language && s.name === className && s.kind === "class") {
-      return s.id
-    }
-  }
-  return null
-}
-
-function findMemberSymbolId(
-  language: string,
-  callerFile: string,
   className: string,
   methodName: string,
   workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
-  const idInSameFile = trySymbolId({
-    language,
-    file: callerFile,
-    qualifiedName: `${className}.${methodName}`,
-  })
-  if (idInSameFile !== null && workingById.has(idInSameFile)) return idInSameFile
+): IRSymbol | null {
+  const callerId = symbolIdParts(caller.id)
+  const ownId = callerId === null ? null : trySymbolId({ ...callerId, qualifiedName: className })
+  const own = ownId === null ? undefined : workingById.get(ownId)
+  if (own !== undefined && own.kind === "class") return own
+  const named: IRSymbol[] = []
   for (const s of workingById.values()) {
-    if (s.language === language && s.name === `${className}.${methodName}`) return s.id
+    if (s.language === caller.language && s.name === className && s.kind === "class") {
+      named.push(s)
+    }
   }
-  return null
+  if (named.length === 1) return named[0] ?? null
+  const owners = named.filter(
+    (s) => s.dropped !== true || findMemberSymbolId(s, methodName, workingById) !== null,
+  )
+  return owners.length === 1 ? (owners[0] ?? null) : null
+}
+
+/**
+ * The member a hover names on `ownerClass`: the class's id with `.methodName` appended, which
+ * puts it in the file that declares the class. Built from the id rather than from the class's
+ * `name` and `source.file`, because a member's id shares its class's id parts and nothing ties
+ * those two fields to them (`symbolIdParts`).
+ */
+function findMemberSymbolId(
+  ownerClass: IRSymbol,
+  methodName: string,
+  workingById: Map<SymbolId, IRSymbol>,
+): SymbolId | null {
+  const owner = symbolIdParts(ownerClass.id)
+  if (owner === null) return null
+  const id = trySymbolId({ ...owner, qualifiedName: `${owner.qualifiedName}.${methodName}` })
+  return id !== null && workingById.has(id) ? id : null
 }
 
 /** What a document symbol names a Symbol by: the segment after its last `.` or `::`. */
