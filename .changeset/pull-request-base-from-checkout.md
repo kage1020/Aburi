@@ -1,0 +1,7 @@
+---
+"@aburi/github-action": minor
+---
+
+With no `refspec`, a pull request is now compared against the tree its checkout grew from. The merge commit a plain `actions/checkout` gives a `pull_request` run is compared with its first parent, the base branch as it stands now. A checkout of the pull request's head is compared with its merge base with the base branch: `origin/<base.ref>` as the clone fetched it, and `pull_request.base.sha`. The action used to pass `base.sha..head.sha`, but `aburi diff` scans the working tree as the head, and `base.sha` does not follow the base branch. Once the base branch moved on, everything it had added, changed or removed since was reported as the pull request's own, `--fail-on removed` failed pull requests that deleted nothing, and the report's header named a head that was not the tree compared. Both sides are now the full SHAs of the trees compared.
+
+Any other checkout now stops with exit 2 and a message naming the commit that is checked out. That includes the base branch, which is what a `pull_request_target` checks out by default. There the action used to diff `base.sha` against the base branch's tip and label the result with the pull request's head, so the check passed or failed on changes the pull request did not make. A workflow in that state that used to go green now fails. Check out the pull request's head or merge ref, or set `refspec` to name both sides; an explicit `refspec` is used as given, as before. The step that decides this now runs from `working-directory`, after the Node and pnpm setup.

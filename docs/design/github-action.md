@@ -23,7 +23,7 @@ prefixing a marker, and never decides what is worth failing on — `--fail-on` i
 | Input | Default | Contract |
 |---|---|---|
 | `version` | `latest` | `@aburi/cli` version for `cli: dlx`. Not read under `cli: workspace`. |
-| `refspec` | *(empty)* | `<base>..<head>` for `aburi diff`. Empty falls back to the event's base/head SHAs on `pull_request` and `pull_request_target`; any other event with an empty `refspec` is exit 2. |
+| `refspec` | *(empty)* | `<base>..<head>` for `aburi diff`, used as given. Empty, on `pull_request` and `pull_request_target`, is resolved from what is checked out (§2.1); any other event with an empty `refspec` is exit 2. |
 | `fail-on` | *(empty)* | Forwarded to `--fail-on` verbatim. Empty runs report-only. |
 | `config` | *(empty)* | Forwarded to `--config`. |
 | `output-dir` | `out` | Forwarded to `--output-dir`, always, because the action reads `diff.md` back. A workspace that sets `config.output.dir` must set this to match. Relative to `working-directory`, or absolute; how the comment step finds the file either way is §4. Empty is exit 2. |
@@ -57,6 +57,64 @@ uses, which works because `github.token` is in scope there:
   token:
     default: ${{ github.token }}
 ```
+
+### 2.1 The refs a pull request means
+
+`aburi diff` scans the working tree as the head, whatever the ref spec calls it
+([`cli-spec.md`](./cli-spec.md) §6.4, step 4): the `<head>` it is given only labels the report.
+So with no `refspec`, the base has to be the tree the checkout grew from, and the action reads the
+checkout to find it rather than taking the event's word for it.
+
+The event's `pull_request.base.sha` is not that tree. A plain `actions/checkout` on `pull_request`
+checks out `refs/pull/<n>/merge`, the pull request's head merged into the base branch as it stands
+when the run starts, and `base.sha` does not follow the base branch. Once the base branch moves
+past it, `base.sha..head.sha` compares a tree without the base branch's newer commits against one
+that has them: everything the base branch added, changed or removed since is reported as the pull
+request's own, `--fail-on removed` fails a pull request that deleted nothing, and the header names
+`head.sha` for a tree that is the merge.
+
+The fallback, [`scripts/resolve-refspec.mjs`](https://github.com/kage1020/Aburi/blob/main/packages/github-action/scripts/resolve-refspec.mjs),
+reads `git rev-parse HEAD` in `working-directory`, where the CLI will run:
+
+| Checked out | Ref spec | Reports |
+|---|---|---|
+| A merge whose second parent is `head.sha`, which is what the merge ref is | `HEAD^1..HEAD` | What merging the pull request changes on the base branch's tip |
+| `head.sha` itself | `<merge base>..head.sha`, the merge base of `head.sha` with `origin/<base.ref>` and `base.sha` | The pull request's own commits, without the base branch's commits it has not merged |
+| Anything else | — | Exit 2 |
+
+Both sides are written as full SHAs, so the report's header names the trees that were compared.
+
+The head row reads the base branch as the clone fetched it, `origin/<base.ref>`, beside `base.sha`.
+`base.sha` alone is not enough: a pull request that merged the base branch after the event recorded
+it has `base.sha` as an ancestor, so the merge base would be `base.sha` itself, and the comparison
+would take in every base-branch commit up to the one merged, which is this section's defect again.
+The merge base with the tracking ref is the last base-branch commit the head contains. Giving
+`git merge-base` both keeps `base.sha` in play when the clone has no tracking ref, or when the base
+branch was rewritten past it; a `base.sha` the clone does not have is left out when the tracking
+ref is there.
+
+Anything else is refused rather than guessed at, as an event without both SHAs always was: the
+base branch, which is what a `pull_request_target` checks out by default, an earlier push's merge
+ref, a commit the workflow made itself. The report would name one tree and describe another. A
+`refspec` input skips the check and is used as given, which is how a workflow names both sides for
+any of those. A shallow clone has no parents or merge base to read, and the refusal says so; the
+`fetch-depth: 0` the CLI already needs for the base worktree covers this too.
+
+The base branch under `pull_request_target` is refused, not given a fallback, because there is no
+right one. That checkout holds none of the pull request's code, so every ref spec describes
+something else. The one this step used to build, `base.sha..head.sha`, compared `base.sha` with the
+base branch's tip and labelled that as the pull request: the base branch's own recent changes went
+through the gate, the pull request's went unexamined, and the check passed or failed on that. A
+warning with an empty report would turn the same misconfiguration into a green check. Checking out
+the pull request's code is the fix, and it is the workflow's decision, not this action's: under
+`pull_request_target` that code runs next to a writable token (§5.1). So the refusal says why the
+checkout is the base branch and names the two ways out, a ref for `actions/checkout` or the
+`refspec` input.
+
+The step runs after the toolchain, because the script runs on Node, and from `working-directory`,
+because the commit it reads has to be the one the CLI scans. `test/resolve-refspec.test.ts` runs it
+against real repositories in each of those shapes, including a base branch that has moved past
+`base.sha` and deleted a function on the way.
 
 ## 3. CLI resolution
 

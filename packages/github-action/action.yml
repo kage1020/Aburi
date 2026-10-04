@@ -21,10 +21,13 @@ inputs:
   # manifest to load. `test/action-yml.test.ts` holds the line.
   refspec:
     description: >-
-      `<base>..<head>` ref spec forwarded to `aburi diff`. When empty, the action falls back to the
-      event's own `github.event.pull_request.base.sha` and `github.event.pull_request.head.sha`,
-      on `pull_request` and `pull_request_target` events. Any other event with an empty `refspec`
-      fails with exit code 2.
+      `<base>..<head>` ref spec forwarded to `aburi diff`, as given. When empty, on `pull_request`
+      and `pull_request_target` events, the action reads what is checked out. The merge commit a
+      plain `actions/checkout` gives a pull request (its head, `github.event.pull_request.head.sha`,
+      as the second parent) is compared with its first parent, the base branch as it stands now;
+      the head itself is compared with its merge base with the base branch
+      (`origin/<github.event.pull_request.base.ref>`, and `github.event.pull_request.base.sha`).
+      Any other checkout, and any other event with an empty `refspec`, fails with exit code 2.
     required: false
     default: ""
   fail-on:
@@ -160,30 +163,6 @@ runs:
           exit 2
         fi
 
-    - name: "Aburi: resolve refspec"
-      id: refspec
-      shell: bash
-      env:
-        INPUT_REFSPEC: ${{ inputs.refspec }}
-        EVENT_NAME: ${{ github.event_name }}
-        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: |
-        set -euo pipefail
-        if [ -n "$INPUT_REFSPEC" ]; then
-          echo "value=$INPUT_REFSPEC" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "pull_request_target" ]; then
-          echo "::error::No 'refspec' input and event '$EVENT_NAME' does not carry a PR base/head." >&2
-          exit 2
-        fi
-        if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
-          echo "::error::pull_request event is missing base/head SHAs; refuse to guess." >&2
-          exit 2
-        fi
-        echo "value=${PR_BASE_SHA}..${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
-
     # Only the dlx path needs a toolchain of its own. Under `cli: workspace` the caller
     # has already installed the workspace, which they could not have done without Node and
     # pnpm; re-running these would swap that toolchain out from under the install and run
@@ -199,6 +178,27 @@ runs:
       uses: "actions/setup-node@v4"
       with:
         node-version: ${{ inputs.node-version }}
+
+    # The empty-`refspec` fallback reads the checkout rather than trusting the event's `base.sha`,
+    # which does not follow the base branch: `scripts/resolve-refspec.mjs` says why, and
+    # `test/resolve-refspec.test.ts` runs it against real repositories. After the toolchain because
+    # it is a Node script, and from `working-directory` so the commit it reads is the one the CLI
+    # scans as the head. Only stdout, the ref spec, is captured; a refusal is an `::error::` on
+    # stderr and exit 2, which ends the step.
+    - name: "Aburi: resolve refspec"
+      id: refspec
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_REFSPEC: ${{ inputs.refspec }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      run: |
+        set -euo pipefail
+        refspec=$(node "$GITHUB_ACTION_PATH/scripts/resolve-refspec.mjs")
+        echo "value=$refspec" >> "$GITHUB_OUTPUT"
 
     - name: "Aburi: run diff"
       id: diff
