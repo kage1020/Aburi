@@ -36,7 +36,8 @@ import type { DocumentSymbol, Position, SymbolInformation } from "vscode-languag
 import { makeCallSiteKey, receiverHead } from "../call-site"
 import { groupBy } from "../collections"
 import { lastQnameSegment } from "../fingerprint/short-name"
-import { trySymbolId } from "../id"
+import { DEFAULT_EXPORT_QNAME, trySymbolId } from "../id"
+import { DEFAULT_EXPORT_NAME } from "../import-edge"
 import { silentLogger } from "../logger"
 import { compareBy, compareCodeUnit } from "../order"
 import {
@@ -335,6 +336,7 @@ async function processLanguage(input: ProcessLanguageInput): Promise<void> {
       if (requestOk) {
         applyDocumentSymbols(
           docSymbols as DocumentSymbol[] | SymbolInformation[],
+          content,
           fileSymbols,
           input.workingById,
         )
@@ -555,13 +557,7 @@ function applyJobResult(
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const memberId = findMemberSymbolId(
-    caller.language,
-    caller.source.file,
-    ownerClassName,
-    job.calleeText,
-    workingById,
-  )
+  const memberId = findMemberSymbolId(caller, ownerClassName, job.calleeText, workingById)
   if (memberId === null) {
     countProducerRejection(stats, "memberNotFound")
     return
@@ -586,25 +582,43 @@ function applyJobResult(
 /**
  * Apply documentSymbol results: match by name+line to populate startColumn/endColumn.
  * DocumentSymbol range is 0-based; our SourceRange columns are 1-based.
+ *
+ * An entry is a Symbol's when the names agree and the Symbol's `startLine` lies between where
+ * the entry's `range` starts and where its `selectionRange` (the name) starts. The two are one
+ * line for most declarations. They part for a decorated one: tsserver starts the `range` at
+ * the first decorator, while the IR starts the declaration after its decorators, on the line
+ * the name is on or above it (`export class` over a decorated class's name is the same line).
+ * The start column is then the first non-blank column of that line, where the declaration
+ * begins once the decorators above it end; the server reports no column for that point.
+ *
+ * tsserver names an anonymous default export `default`; the IR names it `<default>`. Only at
+ * the top of the tree, where `default` cannot be anything else: a class member may be called
+ * `default`.
  */
 function applyDocumentSymbols(
   entries: DocumentSymbol[] | SymbolInformation[],
+  content: string,
   fileSymbols: readonly IRSymbol[],
   workingById: Map<SymbolId, IRSymbol>,
 ): void {
   const flat: Array<{
     name: string
     startLine: number
+    nameLine: number
     startCol: number
-    endLine: number
     endCol: number
   }> = []
-  const push = (name: string, range: { start: Position; end: Position }): void => {
+  const push = (
+    name: string,
+    topLevel: boolean,
+    range: { start: Position; end: Position },
+    selectionRange: { start: Position } | undefined,
+  ): void => {
     flat.push({
-      name,
+      name: topLevel && name === DEFAULT_EXPORT_NAME ? DEFAULT_EXPORT_QNAME : name,
       startLine: range.start.line + 1,
+      nameLine: (selectionRange ?? range).start.line + 1,
       startCol: range.start.character + 1,
-      endLine: range.end.line + 1,
       endCol: range.end.character + 1,
     })
   }
@@ -616,14 +630,19 @@ function applyDocumentSymbols(
   // Children are pushed in reverse so they come off in source order: matching below takes the
   // first entry at a given line and name, so the visit order decides which columns a Symbol
   // gets. That order is pre-order, parent before children — the same one the recursion had.
-  const stack: (DocumentSymbol | SymbolInformation)[] = [...entries].reverse()
+  const stack: Array<{ entry: DocumentSymbol | SymbolInformation; topLevel: boolean }> = [
+    ...entries,
+  ]
+    .reverse()
+    .map((entry) => ({ entry, topLevel: true }))
   while (stack.length > 0) {
-    const entry = stack.pop()
+    const item = stack.pop()
     // Unreachable under the loop condition; it is here because the index is unchecked. `continue`
     // rather than `break` so an impossible entry costs one entry rather than every queued sibling.
-    if (entry === undefined) continue
+    if (item === undefined) continue
+    const { entry, topLevel } = item
     if ("range" in entry) {
-      push(entry.name, entry.range)
+      push(entry.name, topLevel, entry.range, entry.selectionRange)
       // `Array.isArray`, not a presence check: `entries` is a cast over the server's JSON, so
       // the shape is no more the type's to promise than the depth is. A server that serializes
       // an empty child list as `null` is ordinary, and reading `.length` off it would cost the
@@ -632,28 +651,43 @@ function applyDocumentSymbols(
       if (Array.isArray(children)) {
         for (let i = children.length - 1; i >= 0; i--) {
           const child = children[i]
-          if (child !== undefined) stack.push(child)
+          if (child !== undefined) stack.push({ entry: child, topLevel: false })
         }
       }
       continue
     }
     const info = entry as SymbolInformation
-    if (info.location?.range !== undefined) push(info.name, info.location.range)
+    if (info.location?.range !== undefined) {
+      push(info.name, (info.containerName ?? "") === "", info.location.range, undefined)
+    }
   }
 
+  let lines: string[] | null = null
   for (const symbol of fileSymbols) {
+    const line = symbol.source.startLine
     const match = flat.find(
-      (e) => e.startLine === symbol.source.startLine && lastSegment(symbol.name) === e.name,
+      (e) => e.startLine <= line && line <= e.nameLine && lastSegment(symbol.name) === e.name,
     )
     if (match === undefined) continue
     const working = workingById.get(symbol.id)
     if (working === undefined) continue
+    let startColumn = match.startCol
+    if (match.startLine !== line) {
+      lines ??= content.split(/\r\n|\r|\n/)
+      startColumn = firstNonBlankColumn(lines[line - 1] ?? "")
+    }
     working.source = {
       ...working.source,
-      startColumn: match.startCol,
+      startColumn,
       endColumn: match.endCol,
     }
   }
+}
+
+/** 1-based column of the first character on `line` that is not a space or a tab. */
+function firstNonBlankColumn(line: string): number {
+  const blank = /^[ \t]*/.exec(line)?.[0].length ?? 0
+  return blank + 1
 }
 
 function appendInferredThrows(symbol: IRSymbol, throws: readonly string[]): void {
@@ -888,7 +922,11 @@ function extractHoverPayload(result: unknown): string | null {
   return null
 }
 
-const OWNER_CLASS_PATTERN = /\((?:method|property|getter|setter)\)\s+([A-Za-z_$][A-Za-z0-9_$]*)\./
+// A generic owner hovers with its type parameters between the name and the dot —
+// `(method) Store<T>.count(): number` — so they are allowed and skipped. Nested arguments
+// (`Cache<Map<K, V>>.get`) are skipped too: the group runs to whichever `>` a dot follows.
+const OWNER_CLASS_PATTERN =
+  /\((?:method|property|getter|setter)\)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:<.*?>)?\./
 const CLASS_METHOD_PATTERN = /class\s+([A-Za-z_$][A-Za-z0-9_$]*)/
 
 function extractOwnerClassName(hoverText: string): string | null {
@@ -904,11 +942,15 @@ function extractOwnerClassName(hoverText: string): string | null {
  * follows (ir-schema.md §7) so that the two fields agree about what one tag declares: the text in
  * its braces, or the target of a `{@link X}` in them; with no braces, the tag's whole text when
  * that is a type name, and nothing for a description. The text runs to the next tag, on a later
- * line or the same one, or to the end of the hover. Only a tag written as in source is read:
- * typescript-language-server renders one as `*@throws* — …`, which this does not match.
+ * line or the same one, or to the end of the hover.
+ *
+ * typescript-language-server renders a tag as `*@throws* — {NotFoundError} …`: the tag name in
+ * emphasis, then an em dash before the tag's text. Both are optional, so the tag as written in
+ * source, which a plaintext hover carries, reads the same; and the next rendered tag, which
+ * starts `*@`, ends the text as one written in source does.
  */
 const THROWS_JSDOC_PATTERN =
-  /@(?:throws?|exception)(?![\w$])[ \t]*(?:\{([^}\n]+)\})?((?:(?!\n[ \t]*@|[ \t]@[a-zA-Z])[\s\S])*)/g
+  /@(?:throws?|exception)(?![\w$])\*?(?![\w$])[ \t]*(?:—[ \t]*)?(?:\{([^}\n]+)\})?((?:(?!\n[ \t]*\*?@|[ \t]\*?@[a-zA-Z])[\s\S])*)/g
 /** `@link X`, `@linkcode X` or `@linkplain X` in a `{…}`, and `X` when it names a declaration. */
 const THROWS_LINK_PATTERN =
   /^@link(?:code|plain)?\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(?:[\s|]|$)/
@@ -949,23 +991,50 @@ function findClassSymbolId(
   return null
 }
 
+/**
+ * The member a hover names, under either spelling the IR gives a class member: `Class.m` for
+ * an instance member, `Class::m` for a static one (ir-schema.md §3). The hover does not say
+ * which — tsserver writes `(method) Factory.create()` for a static too — but the caller does:
+ * `this` in a static member is the class, so its `this.` and `super.` calls reach statics,
+ * and that spelling is tried first. The other is the fallback, so a class with only one of
+ * the two is found from either side.
+ */
 function findMemberSymbolId(
-  language: string,
-  callerFile: string,
+  caller: IRSymbol,
   className: string,
   methodName: string,
   workingById: Map<SymbolId, IRSymbol>,
 ): SymbolId | null {
+  const instance = `${className}.${methodName}`
+  const statik = `${className}::${methodName}`
+  const qualifiedNames = isStaticMember(caller.name) ? [statik, instance] : [instance, statik]
+  for (const qualifiedName of qualifiedNames) {
+    const found = findQualifiedName(caller, qualifiedName, workingById)
+    if (found !== null) return found
+  }
+  return null
+}
+
+function findQualifiedName(
+  caller: IRSymbol,
+  qualifiedName: string,
+  workingById: Map<SymbolId, IRSymbol>,
+): SymbolId | null {
   const idInSameFile = trySymbolId({
-    language,
-    file: callerFile,
-    qualifiedName: `${className}.${methodName}`,
+    language: caller.language,
+    file: caller.source.file,
+    qualifiedName,
   })
   if (idInSameFile !== null && workingById.has(idInSameFile)) return idInSameFile
   for (const s of workingById.values()) {
-    if (s.language === language && s.name === `${className}.${methodName}`) return s.id
+    if (s.language === caller.language && s.name === qualifiedName) return s.id
   }
   return null
+}
+
+/** Whether a qualified name's last segment is a static member's: it follows `::`, not `.`. */
+function isStaticMember(qualifiedName: string): boolean {
+  return qualifiedName.lastIndexOf("::") > qualifiedName.lastIndexOf(".")
 }
 
 /** What a document symbol names a Symbol by: the segment after its last `.` or `::`. */

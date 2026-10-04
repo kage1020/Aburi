@@ -82,11 +82,18 @@ Every LSP request the pass issues, the IR field it enriches, and the confidence 
 
 | LSP request | Position input | Response consumed | IR field enriched | Confidence |
 |---|---|---|---|---|
-| `textDocument/documentSymbol` | file URI | `DocumentSymbol[].range` (character offsets) | `SourceRange.startColumn`, `SourceRange.endColumn` | n/a (columns are not confidence-scored) |
+| `textDocument/documentSymbol` | file URI | `DocumentSymbol[].range` and `.selectionRange` (character offsets) | `SourceRange.startColumn`, `SourceRange.endColumn` | n/a (columns are not confidence-scored) |
 | `textDocument/hover` | call site of `this.<m>` / `super.<m>` / `<receiver>.<m>` | receiver type text | `receiverType(callSite)` fed to [`call-resolution.md`](./call-resolution.md) §5.2 / §5.3 | `high` for direct class dispatch, `medium` for walked hierarchy ([`call-resolution.md`](./call-resolution.md) §7.2) |
 | `textDocument/typeDefinition` | receiver position of an interface-typed call | destination symbol URI + range | resolves receiver to interface declaration for [`call-resolution.md`](./call-resolution.md) §5.3 lookup | `medium` (interface dispatch) |
 | `textDocument/implementation` | interface declaration URI | array of implementer URIs | `implementers(interfaceName)` for [`call-resolution.md`](./call-resolution.md) §5.3 | `medium` when there is exactly one implementer; unresolved (no promotion) on multi-implementer cases unless a framework plugin hook narrows it |
 | `textDocument/hover` on called symbol's declaration | declaration position of `foo` where a call site `foo()` was written | throws clauses in the declared signature | append to `Signature.inferredThrows` (§7.1) | n/a (`Signature.inferredThrows` is `string[]` with no per-entry confidence) |
+
+How the answers are read, in the shapes typescript-language-server sends them:
+
+- **`documentSymbol`.** An entry belongs to a Symbol when its name is the Symbol's last qualified-name segment and the Symbol's `startLine` lies between the line the entry's `range` starts on and the line its `selectionRange` (the name) starts on. Those are one line for most declarations; they part for a decorated one, whose `range` the server starts at the first decorator while the IR starts the declaration after its decorators. When the range starts on `startLine`, `startColumn` is the range's start; otherwise it is the first non-blank column of `startLine`, where the declaration begins once the decorators above it have ended. `endColumn` is the range's end either way. A top-level entry named `default` is the IR's `<default>`; a class member called `default` keeps its name.
+- **Owner class in a hover.** `(method) Name.m`, with any type arguments between the name and the dot skipped: a generic class hovers as `(method) Store<T>.count(): number`.
+- **Member lookup.** The hover does not say whether the member is static, since tsserver writes `(method) Factory.create()` for both. The IR spells the two differently (`Class.m`, `Class::m`; [`ir-schema.md`](./ir-schema.md) §3), so both are tried, the caller's own kind first: `this` inside a static member is the class.
+- **`@throws` in a hover.** The server renders the tag as `*@throws* — {NotFoundError} …` or `*@throws* — RangeError`: the tag name in emphasis, then an em dash. Both are optional, so the tag as written in source, which a plaintext hover carries, reads the same. The tag's text is read by the rule `signature.throws` follows ([`ir-schema.md`](./ir-schema.md) §7): the type in its braces, or a bare type name that is the whole text, while `*@throws* — TypeError when …` is a description and names nothing. The next tag, rendered or as in source, ends the text.
 
 Requests explicitly NOT used by this pass:
 
@@ -321,12 +328,14 @@ Concrete rules:
 ### 11.1 Communication protocol — LE1..LE3
 
 - LE1: `initialize` → `initialized` → open a fixture file → receive `documentSymbol` → columns populated on the IR for every Symbol in the fixture.
+- LE1a (decorated and default-exported declarations get columns): on the `documentSymbol` answer typescript-language-server gives for a decorated class, a decorated method and an anonymous `export default function`, each Symbol gets columns; a decorated one starts at the first non-blank column of its `startLine`, and an entry outside the range-to-name span matches nothing.
 - LE2: Server `command` binary absent → per-language fallback fires at initialize, one CLI warning emitted, IR still produced from the untyped tier.
 - LE3: Server process is `SIGKILL`ed mid-scan → per-language fallback fires on the next request, subsequent files use the untyped tier only.
 
 ### 11.2 Enrichment correctness — LE4..LE6
 
 - LE4: `this.foo()` in class `C` with method `foo` in the same file → `Call.resolved = C.foo`'s Symbol id, `CallEdge.confidence = high`. Matches [`call-resolution.md`](./call-resolution.md) test CR16.
+- LE4a (generic owners and static members): `this.count()` inside `class Store<T>` resolves to `Store.count`, and `this.create()` inside a static method resolves to `Factory::create`, from the hover text the server actually sends. A class with both an instance and a static member of one name resolves each caller to its own kind.
 - LE5: interface-typed receiver with exactly one implementer → `Call.resolved` = implementer's method Symbol id, `CallEdge.confidence = medium`. Matches [`call-resolution.md`](./call-resolution.md) test CR19.
 - LE6: file with no `this.*`, no interface-typed receivers, and all calls already resolved by the untyped tier → LSP pass is a no-op on every IR value in that file (only `SourceRange` columns change).
 
@@ -358,6 +367,7 @@ Concrete rules:
 
 - LE16 (`CallEdge.confidence` monotone): for any Symbol whose LSP-off `CallEdge.confidence` for a given edge is `C_untyped`, the LSP-on value `C_lsp` MUST satisfy `C_lsp ≥ C_untyped` on the `high > medium > low` lattice. The pass MUST NEVER lower a confidence.
 - LE17 (`inferredThrows` omit-vs-empty): for a Symbol whose LSP `hover` on called declarations returned no throws (either no calls declared throws, or LSP fell back), the emitted `Signature` JSON MUST NOT contain an `inferredThrows` key at all (per §6.2 / §7.1). Assert with a JSON-key existence check, not an array-length check.
+- LE17a (`@throws` as the server renders it): a callee whose JSDoc carries `@throws {NotFoundError} when …`, `@throws RangeError` and `@throws TypeError when …` gives the caller `inferredThrows: ["NotFoundError", "RangeError"]` from the hover typescript-language-server sends; `@throwsX` and `*@throws*Y` name nothing.
 - LE18 (no silent retry): inject a request that fails with a transient error at time `t` and succeeds at time `t + Δ`. The pass MUST NOT reissue that request within the same scan; the field stays at the untyped-tier value and `stats.lspEnrichment.requestsTimedOut` (or the appropriate bucket) increments by 1.
 
 ### 11.7 Hint observability — LE25..LE28
