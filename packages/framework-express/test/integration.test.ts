@@ -190,3 +190,52 @@ describe("framework-express — abstains", () => {
     expect(rows.some((r) => r.classification !== null)).toBe(false)
   })
 })
+
+describe("framework-express — a statement declaring several names", () => {
+  /** `"<name> <derivedBy>"` per Symbol classified as a Router, sorted. */
+  function routersIn(rows: ClassifiedRow[]): string[] {
+    return rows
+      .filter((r) => r.classification?.extKind === "framework:express:router")
+      .map((r) => `${r.candidate.name} ${r.classification?.derivedBy}`)
+      .sort()
+  }
+
+  it("classifies only the name bound to the Router call", async () => {
+    const rows = await classifyFixture(
+      "src/routes.ts",
+      [
+        `import express, { Router } from "express"`,
+        `export const router = express.Router(), API_PREFIX = "/api/v1", MAX_BODY = 1024`,
+        `export const limit = 10, adminRouter = express.Router()`,
+        `export const usersRouter = Router(), auditRouter = express.Router()`,
+      ].join("\n"),
+    )
+    expect(routersIn(rows)).toEqual([
+      "adminRouter framework:express:router:express.Router",
+      "auditRouter framework:express:router:express.Router",
+      "router framework:express:router:express.Router",
+      "usersRouter framework:express:router:Router",
+    ])
+  })
+
+  it("classifies a Router declared in a namespace by its qualified name", async () => {
+    const rows = await classifyFixture(
+      "src/routes.ts",
+      [
+        `import { Router } from "express"`,
+        `export namespace api {`,
+        `  export const version = 1, router = Router()`,
+        `}`,
+      ].join("\n"),
+    )
+    expect(routersIn(rows)).toEqual(["api.router framework:express:router:Router"])
+  })
+
+  it("rates a Router declared second medium when nothing imports express", async () => {
+    const rows = await classifyFixture("src/routes.ts", `const limit = 10, r = Router()\n`)
+    const rated = rows
+      .filter((r) => r.classification !== null)
+      .map((r) => `${r.candidate.name} ${r.classification?.confidence}`)
+    expect(rated).toEqual(["r medium"])
+  })
+})

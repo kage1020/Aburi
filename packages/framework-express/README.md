@@ -9,7 +9,7 @@ Recognised shapes:
 
 | Source shape | `extKind` | Signal |
 |---|---|---|
-| `const r = Router()` / `const r = express.Router()` | `framework:express:router` | Router factory call bound to a const |
+| `const r = Router()` / `const r = express.Router()` | `framework:express:router` | Router factory call bound to that const's own declarator; in `const a = 1, r = Router()` only `r` |
 | `app.get('/users', h)` / `router.post(…)` | `framework:express:route` | member call whose leaf is `get`/`post`/`put`/`patch`/`delete`/`all` |
 | `app.use((req, res, next) => …)` | `framework:express:middleware` | `.use(…)` with an arity-3 inline handler |
 | `app.use(logger)` | `framework:express:middleware` | `.use(…)` with an out-of-scope identifier argument (confidence: `medium`) |
@@ -42,6 +42,9 @@ Not classified today (documented for completeness):
 - Type-level inferences (whether a `Handler` typed function argument is an
   Express handler). The arity heuristic used here is the most reliable
   pre-LSP signal for a middleware / error-middleware split.
+- A name a destructuring pattern pulls out of a `Router()` call
+  (`const { stack } = Router()`) — the binding is not the Router, only
+  something read off it.
 
 ## Install
 
