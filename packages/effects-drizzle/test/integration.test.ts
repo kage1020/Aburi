@@ -179,6 +179,30 @@ export async function work(db: ReturnType<typeof drizzle>) {
     expect(drizzleRead?.effectId).toBe("db.read")
   })
 
+  it("leaves a class's own zero-argument update() and a form's delete() unclassified", async () => {
+    // Every Drizzle write terminal takes a table, so the zero-argument calls are not Drizzle's,
+    // whatever the receiver; `db.update(users)` beside them still classifies.
+    const results = await classifyCalls(
+      "src/services/profile-form.ts",
+      `import { drizzle } from "drizzle-orm/postgres-js"
+import { users } from "./schema"
+export class ProfileForm {
+  constructor(private readonly db: ReturnType<typeof drizzle>, private readonly form: { delete(): void }) {}
+  update() {}
+  async save(name: string) {
+    this.update()
+    this.form.delete()
+    await this.db.update(users).set({ name })
+  }
+}`,
+      [{ source: "drizzle-orm/postgres-js", symbols: ["drizzle"], line: 1, dynamic: false }],
+    )
+    const effectOf = (target: string) => results.find((r) => r.target === target)?.effectId
+    expect(effectOf("this.update")).toBeNull()
+    expect(effectOf("this.form.delete")).toBeNull()
+    expect(effectOf("this.db.update")).toBe("db.write")
+  })
+
   it("returns null for every call when drizzle-orm is not imported (cross-plugin non-interference)", async () => {
     // A Prisma-only file: `db.select` shape exists but with a non-Drizzle import.
     // Drizzle must not classify — leaves the call for the Prisma classifier upstream.

@@ -78,6 +78,28 @@ export function maxArgumentsFor(method: string): number {
 }
 
 /**
+ * Terminals that require an argument: `insert(table)`, `update(table)`, `delete(table)`,
+ * `transaction(callback)` and `batch(statements)`. No Drizzle signature reaches a zero-argument
+ * call to one, so that call is someone else's (effect-plugin.md §5.4, EP12). Everything else
+ * may be called bare.
+ */
+const DRIZZLE_REQUIRED_ARGUMENT_TERMINALS: ReadonlyMap<
+  DrizzleWriteMethod | DrizzleTransactionMethod,
+  number
+> = new Map<DrizzleWriteMethod | DrizzleTransactionMethod, number>([
+  ["insert", 1],
+  ["update", 1],
+  ["delete", 1],
+  ["transaction", 1],
+  ["batch", 1],
+])
+
+/** The fewest arguments `method` takes as Drizzle's own API. */
+export function minArgumentsFor(method: string): number {
+  return (DRIZZLE_REQUIRED_ARGUMENT_TERMINALS as ReadonlyMap<string, number>).get(method) ?? 0
+}
+
+/**
  * Verbs that anchor a fluent chain at its root. A target carrying one of these in an
  * internal segment is a downstream link (`db.select.from`) whose root already classified.
  * Internal to `classifyDrizzleCall`; not in the public barrel.
