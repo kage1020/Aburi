@@ -122,7 +122,7 @@ interface ParseError {
 
 interface ImportEdge {
   source: string                               // verbatim string (e.g. "@billing/domain", "./util")
-  symbols: string[] | '*'                      // named-import symbol names, or "*"
+  symbols: string[] | '*'                      // imported bindings ("X", "X as Y", "default as Y"), or "*"
   line: number
   dynamic: boolean                             // true for import()
   namespaceBinding?: string                    // the local name bound to the whole module, when there is one
@@ -423,17 +423,20 @@ The language plugin reports a decorator under the identifier the source wrote. T
 
 | What the edges say about the name | Match against | Confidence |
 |---|---|---|
-| imported from a module the plugin owns | the imported name | `high` |
-| imported from any other module | the imported name | `medium` |
+| imported by name from a module the plugin owns | the imported name | `high` |
+| imported by name from any other module | the imported name | `medium` |
+| bound by a default import (`import Controller from './decorators'`, `import { default as Controller } from …`) | the written name | `high` from a module the plugin owns, `medium` from any other |
 | no edge binds it | the written name | `high` |
 
-The middle row **downgrades rather than refuses**. Re-exporting a framework's vocabulary through a project-local barrel is ordinary practice, and a barrel reached through a build-tool path alias (`@app/common`) is indistinguishable from a foreign package without reading the build config — so refusing would take the boundary off a whole project's worth of Symbols to close a narrower false positive. `medium` is the `confidence` criterion for an identifier match (`ir-schema.md` §5.4), which is exactly what is left when provenance is unknown.
+The second row **downgrades rather than refuses**. Re-exporting a framework's vocabulary through a project-local barrel is ordinary practice, and a barrel reached through a build-tool path alias (`@app/common`) is indistinguishable from a foreign package without reading the build config — so refusing would take the boundary off a whole project's worth of Symbols to close a narrower false positive. `medium` is the `confidence` criterion for an identifier match (`ir-schema.md` §5.4), which is exactly what is left when provenance is unknown.
 
-Two consequences follow for the plugin's outputs. `SymbolClassification.decoratorBoundaries` is keyed on the decorator as the source **wrote** it, receiver included — `Controller` for `@Controller()`, `nest.Controller` for `@nest.Controller()` — because that is the key the core rebuilds from `Decorator.qualifier` and `Decorator.name` when it folds the result back in. The leaf alone is not a key: two decorators on one Symbol can share it and still resolve differently (`@Ctrl()` under `import { Controller as Ctrl }` classifies, while `@x.Ctrl()` canonicalises to `Ctrl` and matches nothing), and a shared key would flag both. `derivedBy` carries the **imported** name, because it is a closed vocabulary that diffs and filters read, and renaming an import changes nothing about what the decorator does.
+The third row exists because a default import's imported name is `default` (LP24a), which no vocabulary lists. Matched on it, every default-imported decorator would classify as nothing, so the written name is the only evidence left of which decorator the file means; the module it came from still decides how far that is trusted, as in the first two rows.
 
-A **qualified** decorator (`@nest.Controller()`) is read the same way, one column over: `Decorator.qualifier` carries the receiver, and the lookup is on the receiver rather than on the leaf. Only the receiver's first dot-separated segment can name a binding — `a.b` in `@a.b.C()` reaches scope as `a` — so that segment is what the plugin looks up, and the name matched against the vocabulary is the leaf as written, because a namespace import renames nothing. The same three rows then apply to the module the receiver names.
+Two consequences follow for the plugin's outputs. `SymbolClassification.decoratorBoundaries` is keyed on the decorator as the source **wrote** it, receiver included — `Controller` for `@Controller()`, `nest.Controller` for `@nest.Controller()` — because that is the key the core rebuilds from `Decorator.qualifier` and `Decorator.name` when it folds the result back in. The leaf alone is not a key: two decorators on one Symbol can share it and still resolve differently (`@Ctrl()` under `import { Controller as Ctrl }` classifies, while `@x.Ctrl()` canonicalises to `Ctrl` and matches nothing), and a shared key would flag both. `derivedBy` carries the **imported** name (the written one, for a default import), because it is a closed vocabulary that diffs and filters read, and renaming an import changes nothing about what the decorator does.
 
-**Which edges bind a receiver.** Both kinds, and a plugin that reads only one leaves the table out of order. `import * as nest from "m"` arrives as `symbols: "*"` with `namespaceBinding: "nest"`, and `import nest from "m"` arrives as `symbols: ["nest"]` with no `namespaceBinding` — two spellings of the same disclosure, one in each index. The last row of the table therefore means *no edge binds the receiver*, not *no namespace edge binds it*.
+A **qualified** decorator (`@nest.Controller()`) is read the same way, one column over: `Decorator.qualifier` carries the receiver, and the lookup is on the receiver rather than on the leaf. Only the receiver's first dot-separated segment can name a binding — `a.b` in `@a.b.C()` reaches scope as `a` — so that segment is what the plugin looks up, and the name matched against the vocabulary is the leaf as written, because a namespace import renames nothing. The same confidence tiers then apply to the module the receiver names.
+
+**Which edges bind a receiver.** Both kinds, and a plugin that reads only one leaves the table out of order. `import * as nest from "m"` arrives as `symbols: "*"` with `namespaceBinding: "nest"`, and `import nest from "m"` arrives as `symbols: ["default as nest"]` with no `namespaceBinding` (LP24a) — two spellings of the same disclosure, one in each index. The last row of the table therefore means *no edge binds the receiver*, not *no namespace edge binds it*.
 
 A qualified decorator must **not** fall back to the named-import index for its **leaf**. The leaf is a property of a module object, not an identifier in the file's scope, so a `Controller` imported by name from somewhere else says nothing about `@nest.Controller()`, and reading it would attribute the decorator to a module it was never written through. The receiver is the opposite case, which is why it is looked up in both indexes: `nest` really is an identifier in scope.
 
@@ -729,7 +732,7 @@ parameter (`x => …` → `() => …`) reads as no change at all, and adding the
 | ID | Input | Expected |
 |---|---|---|
 | LP24 | `import { X } from './y'` | imports = [{source: "./y", symbols: ["X"], line: 1, dynamic: false}] |
-| LP24a | `import X from './y'` | imports = [{source: "./y", symbols: ["default as X"], line: 1, dynamic: false}]: the binding is the module's `default` export, written as `{ default as X }` is, so call resolution looks for the default export and not for a named `X` ([call-resolution.md](./call-resolution.md) CR5) |
+| LP24a | `import X from './y'` | imports = [{source: "./y", symbols: ["default as X"], line: 1, dynamic: false}]: the binding is the module's `default` export, written as `{ default as X }` is, so call resolution looks for the default export and not for a named `X` ([call-resolution.md](./call-resolution.md) §4.4, CR5c) |
 | LP25 | `import * as Y from 'z'` | imports = [{source: "z", symbols: "*", line: 1, dynamic: false}] |
 | LP26 | `await import('./x')` | imports = [{source: "./x", symbols: "*", dynamic: true}] |
 | LP26a | an empty specifier on a form the reader already produces an edge for — `import a from ""`, `import ""`, `export * from ""`, `export { X } from ""`, `import type { B } from ''`, `import("")`, `import x = require("")`, ``import(``)`` | no edge, and one recoverable `ParseError` at the literal's line and column, naming which construct it belongs to. The specifier names no module, so no edge can carry it (§4.4), and a silent drop would leave the file looking as though the import were never written |
