@@ -56,6 +56,31 @@ describe("e2e scan — a long rule fits the schema", () => {
       ["return", `${sum.slice(0, 120)}...`],
     ])
   })
+
+  it("counts characters as code points, as the schema's maxLength does", async () => {
+    // Each 📦 is one code point and two UTF-16 code units, so the cut condition is 123
+    // characters to the schema and far more to `String.length`: a validator counting code
+    // units would reject it, and a cut counting them would split a pair.
+    const parcel = "📦".repeat(60)
+    await workspace.writeSource(
+      "src/label.ts",
+      [
+        "export function check(label: string): void {",
+        `  if (label === "${parcel}" || label === "${parcel}") {`,
+        '    throw new Error("parcel")',
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+    const { ir } = await scanFixture(workspace.root)
+    const guard = ir.symbols.find((s) => s.name === "check")?.rules[0]?.condition ?? ""
+
+    expect(guard).toBe(`label === "${parcel}" || label === "${"📦".repeat(33)}...`)
+    expect(Array.from(guard)).toHaveLength(123)
+    expect(guard.length).toBeGreaterThan(123)
+    expect(schemaViolations(JSON.parse(serializeCanonical(ir)))).toEqual([])
+  })
 })
 
 describe("e2e diff — a re-wrapped guard is the same guard", () => {
