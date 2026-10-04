@@ -106,6 +106,65 @@ describe("LSP hint accounting (lsp-enrichment.md)", () => {
     expect(stats.hintsRejected).toEqual(noRejections({ memberNotFound: 1 }))
   })
 
+  // LE26a
+  describe("a class name the hover gives without its file", () => {
+    const USERS =
+      "class UserRepository extends Repository {\n  create() {\n    return this.save()\n  }\n}"
+    const enrichRepositories = (files: string[]) => {
+      const repositories = files.flatMap((file) => [
+        makeClassSymbol(file, "Repository", 1),
+        makeMethodSymbol(file, "Repository", "save", 2),
+      ])
+      return enrichWithLsp(
+        makeEnrichmentInput({
+          symbols: [
+            makeClassSymbol("src/users.ts", "UserRepository", 1),
+            makeMethodSymbol("src/users.ts", "UserRepository", "create", 2, [
+              { target: "this.save", line: 3 },
+            ]),
+            ...repositories,
+          ],
+          fileContents: {
+            ...Object.fromEntries(
+              files.map((file) => [file, "class Repository {\n  save() {}\n}"]),
+            ),
+            // Last, so the caller's file keeps its call when it also declares a `Repository`.
+            "src/users.ts": USERS,
+          },
+          serverFactory: hoverFactory(() => ({ contents: "(method) Repository.save(): string" })),
+        }),
+      )
+    }
+    const hintFor = (enrichment: EnrichmentResult) =>
+      enrichment.receiverHints.get(makeCallSiteKey("src/users.ts", 3, "this.save"))?.targetSymbolId
+
+    it("declines when two other files declare it, and counts it as ownerClassNotFound", async () => {
+      // `src/lib` sorts before `src/models`, so taking the first by id picked the class the
+      // caller does not extend.
+      const enrichment = await enrichRepositories([
+        "src/lib/repository.ts",
+        "src/models/repository.ts",
+      ])
+      expect(hintFor(enrichment)).toBeUndefined()
+      expect(statsOf(enrichment).hintsRejected).toEqual(noRejections({ ownerClassNotFound: 1 }))
+    })
+
+    it("takes the one class of that name in another file", async () => {
+      const enrichment = await enrichRepositories(["src/models/repository.ts"])
+      expect(hintFor(enrichment)).toBe("ts:src/models/repository.ts#Repository.save")
+      expect(statsOf(enrichment).hintsRejected).toEqual(noRejections())
+    })
+
+    it("takes the caller's own file first, however many others declare the name", async () => {
+      const enrichment = await enrichRepositories([
+        "src/lib/repository.ts",
+        "src/models/repository.ts",
+        "src/users.ts",
+      ])
+      expect(hintFor(enrichment)).toBe("ts:src/users.ts#Repository.save")
+    })
+  })
+
   // LE27
   it("counts a hint carrying the other receiver kind as kindMismatch and leaves the call unresolved", () => {
     const caller = makeMethodSymbol("src/a.ts", "C", "bar", 3, [{ target: "this.foo", line: 4 }])

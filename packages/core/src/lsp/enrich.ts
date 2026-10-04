@@ -550,18 +550,12 @@ function applyJobResult(
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const ownerClassId = findClassSymbolId(caller, ownerClassName, workingById)
-  if (ownerClassId === null) {
+  const ownerClass = findOwnerClass(caller, ownerClassName, workingById)
+  if (ownerClass === null) {
     countProducerRejection(stats, "ownerClassNotFound")
     return
   }
-  const memberId = findMemberSymbolId(
-    caller.language,
-    caller.source.file,
-    ownerClassName,
-    job.calleeText,
-    workingById,
-  )
+  const memberId = findMemberSymbolId(ownerClass, job.calleeText, workingById)
   if (memberId === null) {
     countProducerRejection(stats, "memberNotFound")
     return
@@ -930,42 +924,47 @@ function extractInferredThrowsFromHover(hoverText: string): string[] {
   return [...out]
 }
 
-function findClassSymbolId(
+/**
+ * The class a hover names, by that name: the caller's own file first, then the one class of
+ * that name anywhere else in the language. A hover carries the name alone, not the file it
+ * was declared in, so when two other files each declare a class of that name nothing here
+ * says which one the server meant. Taking the first by id sent `this.save()` into whichever
+ * `Repository` sorted first, whatever the caller extends; call-resolution.md §5.3 says an
+ * ambiguous answer stays unresolved, so this declines instead (`ownerClassNotFound`).
+ */
+function findOwnerClass(
   caller: IRSymbol,
   className: string,
   workingById: Map<SymbolId, IRSymbol>,
-): SymbolId | null {
+): IRSymbol | null {
   const expectedId = trySymbolId({
     language: caller.language,
     file: caller.source.file,
     qualifiedName: className,
   })
-  if (expectedId !== null && workingById.has(expectedId)) return expectedId
+  const own = expectedId === null ? undefined : workingById.get(expectedId)
+  if (own !== undefined) return own
+  let found: IRSymbol | null = null
   for (const s of workingById.values()) {
-    if (s.language === caller.language && s.name === className && s.kind === "class") {
-      return s.id
-    }
+    if (s.language !== caller.language || s.name !== className || s.kind !== "class") continue
+    if (found !== null) return null
+    found = s
   }
-  return null
+  return found
 }
 
+/** `className.methodName` in the file that declares the owner class. */
 function findMemberSymbolId(
-  language: string,
-  callerFile: string,
-  className: string,
+  ownerClass: IRSymbol,
   methodName: string,
   workingById: Map<SymbolId, IRSymbol>,
 ): SymbolId | null {
-  const idInSameFile = trySymbolId({
-    language,
-    file: callerFile,
-    qualifiedName: `${className}.${methodName}`,
+  const id = trySymbolId({
+    language: ownerClass.language,
+    file: ownerClass.source.file,
+    qualifiedName: `${ownerClass.name}.${methodName}`,
   })
-  if (idInSameFile !== null && workingById.has(idInSameFile)) return idInSameFile
-  for (const s of workingById.values()) {
-    if (s.language === language && s.name === `${className}.${methodName}`) return s.id
-  }
-  return null
+  return id !== null && workingById.has(id) ? id : null
 }
 
 /** What a document symbol names a Symbol by: the segment after its last `.` or `::`. */
