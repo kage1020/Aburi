@@ -49,7 +49,9 @@ describe("classifyWithTimeout", () => {
     expect(result?.effectId).toBe("db.read")
   })
 
-  it("returns null and fires onTimeout when the wall-clock exceeds the budget", () => {
+  it("keeps the classification and fires onTimeout when the wall-clock exceeds the budget", () => {
+    // The answer was already computed when the clock was read. Dropping it saved no time and
+    // made the IR depend on the machine: a cold first call lost its effect on a busy runner.
     const plugin: EffectPlugin = {
       manifest: stubManifest,
       init: async () => {},
@@ -69,7 +71,11 @@ describe("classifyWithTimeout", () => {
       { symbolId: "ts:test.ts#Fn", file: "test.ts" },
       { timeoutMs: 50, onTimeout: (event) => events.push(event) },
     )
-    expect(result).toBeNull()
+    expect(result).toEqual({
+      effectId: "db.read",
+      confidence: "high",
+      derivedBy: "effects-plugin:stub:x",
+    })
     expect(events).toHaveLength(1)
     expect(events[0]?.plugin).toBe("effects-stub")
     expect(events[0]?.symbolId).toBe("ts:test.ts#Fn")
@@ -118,7 +124,7 @@ describe("classifyWithTimeout", () => {
       { symbolId: "ts:test.ts#Fn", file: "test.ts" },
       { timeoutMs: 1, onTimeout: (event) => (observed = event.budgetMs) },
     )
-    expect(result).toBeNull()
+    expect(result?.effectId).toBe("db.read")
     expect(observed).toBe(10)
   })
 

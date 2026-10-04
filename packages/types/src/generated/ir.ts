@@ -246,7 +246,7 @@ parsedFiles: number
 keptSymbols: number
 droppedSymbols: number
 /**
- * Records effect classifications aborted after exceeding classifyTimeoutMs (effect-plugin.md). Class B per ir-schema.md: writers omit the key when nothing timed out rather than emitting []; non-empty entries are kept as a determinism log.
+ * Records effect classifications that ran longer than classifyTimeoutMs (effect-plugin.md); each one's classification is kept, so only this record depends on the machine's speed. Class B per ir-schema.md: writers omit the key when nothing overran rather than emitting []; non-empty entries are kept as a performance log.
  */
 effectClassifyTimeouts?: EffectClassifyTimeout[]
 effectPropagation: EffectPropagationStats
@@ -259,7 +259,7 @@ skippedFiles?: SkippedFile[]
 }
 export interface EffectClassifyTimeout {
 /**
- * Effect plugin manifest name that timed out.
+ * Effect plugin manifest name whose classify() ran past the budget.
  */
 plugin: string
 /**

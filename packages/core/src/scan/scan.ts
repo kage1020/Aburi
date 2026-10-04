@@ -110,8 +110,8 @@ export interface ScanResult {
    * reader wanting the count consults; this carries the budget and the wall clock beside
    * it, so a caller can report how far over the file went without parsing a message.
    *
-   * Deliberately not in `ir.stats`: unlike `effectClassifyTimeouts`, which records a
-   * decision the Document embodies, this records a file the Document does not mention.
+   * Deliberately not in `ir.stats`: unlike `effectClassifyTimeouts`, which records a slow
+   * call whose answer the Document carries, this records a file the Document does not mention.
    */
   parseTimeouts: readonly ParseTimeoutEvent[]
   /**

@@ -14,9 +14,10 @@ export const CLASSIFY_TIMEOUT_MIN_MS = 10
 export const CLASSIFY_TIMEOUT_MAX_MS = 5000
 
 /**
- * A single soft-timeout observation. Aggregated into `stats.effectClassifyTimeouts[]`
- * so the IR consumer can detect run-to-run non-determinism ("this call classified
- * successfully in run 1 but timed out in run 2 → the plugin is on the edge").
+ * A single overrun observation. Aggregated into `stats.effectClassifyTimeouts[]` so the IR
+ * consumer can see which plugin is slow, and where ("this call took longer than the budget
+ * in run 2 → the plugin is on the edge"). The classification itself is kept, so an overrun
+ * changes the stats and nothing else.
  *
  * `symbolId` names the owning Symbol so the timeout event can be joined against the
  * IR's Symbol map; `budgetMs` is the configured cap in effect at the time (matches the
@@ -43,12 +44,14 @@ export interface ClassifyWithTimeoutOptions {
  * Run `plugin.classify(call, ctx)` under a soft wall-clock budget. The classifier is
  * expected to be synchronous (effect-plugin.md recommends pure-function shape) so
  * the runtime cannot preempt it mid-execution — the check happens AFTER the call
- * returns. A classifier that violates the sync contract by returning a Promise is
- * caught and rejected the same way an overtime call is.
+ * returns. A classifier that violates the sync contract by returning a Promise fails
+ * the run.
  *
- * Returns the classification when the call finished within budget, or `null` when it
- * timed out. Timeouts fire the `onTimeout` hook so `stats.effectClassifyTimeouts` can
- * accumulate the observation.
+ * Returns the classification whether or not the call overran. By the time the clock is
+ * read the work is done, so discarding the answer saves nothing, and keeping it is what
+ * makes the IR depend on the source rather than on how busy the machine was: a cold first
+ * call (module initialisation, JIT, a GC pause) is the usual overrun. An overrun fires the
+ * `onTimeout` hook so `stats.effectClassifyTimeouts` can record it.
  */
 export interface ClassifyWithTimeoutContext {
   /** Owning Symbol id — required so the timeout event can be joined against the IR. */
@@ -94,7 +97,6 @@ export function classifyWithTimeout(
       budgetMs: budget,
       elapsedMs: elapsed,
     })
-    return null
   }
 
   return result

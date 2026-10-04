@@ -145,23 +145,22 @@ for each call in symbol.calls:
 
 Plugins earlier in config order take priority. Placing a project-specific plugin above the standard plugins lets it take precedence.
 
-### 5.1.1 Timeout for classify()
+### 5.1.1 Budget for classify()
 
-The core sets a **per-call timeout** on each plugin's `classify(call, ctx)` invocation. Default 50ms.
+The core times each plugin's `classify(call, ctx)` invocation against a **per-call budget**. Default 50ms.
 
 - Override: `config.classifyTimeoutMs` (default `50`, min `10`, max `5000`)
   - For plugins containing an SQL parser, raising it to 200-500ms is realistic
   - No per-plugin override (a single config value shared by all plugins)
-- Timeout exceeded → treated as if `null` were returned; the call flows to the next plugin
-- **Non-determinism recording**: each timeout occurrence (plugin, target, file:line) is recorded in `stats.effectClassifyTimeouts[]`
-  - This makes non-determinism detectable from the IR: "the same input classifies successfully in run 1 but times out in run 2 and stays in calls[]"
+- Budget exceeded → the classification is **kept**, exactly as if the call had been fast: a non-null answer moves the call to `effects[]` (EP6), a `null` lets it flow to the next plugin (EP5). `classify()` is synchronous, so the clock is read after it returns: the work is already done, and discarding the answer would save nothing while making the IR depend on how busy the machine was. A cold first call (module initialisation, JIT, a GC pause) is the usual overrun, and dropping it used to lose a real `db.write` on a loaded CI runner
+- **Overrun recording**: each overrun (plugin, Symbol, budget) is recorded in `stats.effectClassifyTimeouts[]`, and the CLI's scan prints their count as one warning (`N effect classification(s) ran past the per-call budget; their results were kept.`)
+  - Only the stats depend on it: `effects[]`, `calls[]` and every fingerprint are the same for a fast run and a slow one
   - CI can compare `effectClassifyTimeouts` across runs to spot plugin performance regressions
-- warning log: `Plugin <name> classify() timed out for <target> at <file>:<line>`
-- Plugin implementations should be synchronous (not return a Promise). If asynchrony is needed, the plugin itself should implement the timeout
+- Plugin implementations must be synchronous: a `classify()` that returns a Promise fails the run (`scan-plugin-misconfigured`)
 
-This prevents a slow plugin from stalling the whole double loop of thousands of AST symbols × dozens of calls × number of plugins.
+The budget does not stop a slow plugin — nothing can interrupt a synchronous call — it names one. A plugin that overruns on every call shows up in the stats, call by call, and the remedy is the plugin's.
 
-A timeout degrades to `null` while an input-contract violation (§4.2) fails the run, and the split is deliberate: a slow classifier still received a well-formed callee, so the worst case is one call left unclassified in a run that is otherwise sound — and `stats.effectClassifyTimeouts[]` records exactly which. A violated input contract has no such record and no such bound: the value was never one the pipeline could produce, so nothing downstream of it is trustworthy. Degrade what you can account for; fail on what you cannot.
+An overrun is recorded while an input-contract violation (§4.2) fails the run, and the split is deliberate: a slow classifier still received a well-formed callee and returned a well-formed answer, so the run is sound and `stats.effectClassifyTimeouts[]` records which call was slow. A violated input contract has no such bound: the value was never one the pipeline could produce, so nothing downstream of it is trustworthy. Record what you can account for; fail on what you cannot.
 
 ### 5.2 Why multiple classification is disallowed
 
@@ -403,6 +402,7 @@ export const plugin: EffectPlugin = {
 | EP10 | classify returns `confidence: 'low'` | Symbol.effects[].confidence = "low" goes into the IR as-is |
 | EP11 | a call matching a plugin's shared-vocabulary shape on a receiver the plugin cannot identify (§5.4) | the effect is still recorded, at `confidence: "medium"` — not `high`, and not dropped |
 | EP12 | a call whose shape no signature in the plugin's vocabulary takes: a literal first argument, or no argument to a method that requires one (§5.4 item 1) | `null` (EP5), whatever the receiver: the call stays in `Symbol.calls[]` and the file keeps its Symbols. Not EP3a — the candidate is well formed, so this is a classification decision, not an input-contract violation |
+| EP13 | classify returns after running past `classifyTimeoutMs` (§5.1.1) | its answer is used as if it had been fast — EP6 for a classification, EP5 for `null` — and the overrun is one `stats.effectClassifyTimeouts` entry. `effects[]`, `calls[]` and the fingerprints do not depend on the machine's speed |
 
 ## 11. Design Decisions
 
