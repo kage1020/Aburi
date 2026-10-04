@@ -646,6 +646,26 @@ describe("resolveCallGraph", () => {
       const result = resolveCallGraph({ symbols: [caller, fallback], importsByFile: new Map() })
       expect(result.symbols[0]?.calls[0]?.resolved).toBe("ts:src/a.ts#fallback")
     })
+
+    it("reads the bindings of a pattern that follows a single-name parameter", () => {
+      const caller = makeSymbol("ts:src/a.ts#caller", {
+        signature: {
+          inputs: [
+            { name: "cb", type: "" },
+            { name: "{ save }", type: "Deps", bindings: ["save"] },
+          ],
+          outputs: [],
+          throws: [],
+          async: false,
+          generator: false,
+          typeParameters: [],
+        },
+        calls: [{ target: "save", line: 5, resolved: null }],
+      })
+      const save = makeSymbol("ts:src/a.ts#save")
+      const result = resolveCallGraph({ symbols: [caller, save], importsByFile: new Map() })
+      expect(result.symbols[0]?.calls[0]?.resolved).toBeNull()
+    })
   })
 
   it("never fabricates an edge into a dropped Symbol body (file scope, direct name)", () => {
