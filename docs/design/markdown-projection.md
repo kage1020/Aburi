@@ -476,7 +476,7 @@ Entries with `status: "changed"` or `"moved+changed"` and `delta.apiChanged: tru
 
 `added` and `removed` print the decorator's `raw`, arguments and receiver included, as the non-delta list does (§5.4). `modified` prints `qualifier.name`: the arguments are dropped because they may be the change, and the receiver is kept because it may be. Both fall back to `qualifier.name` when `raw` is absent. A modified row shows the head side only, so a receiver lost (`@nest.Post` → `@Post`) reads `@Post`, the same as an argument edit.
 
-A change whose `delta.confidenceChanged` is also true adds a row such as ``- confidence: `high` → `medium` ``, base side first, in whichever section the entry lands. This holds for every section that renders a delta body, Moved + Changed included. A fingerprint flag with no field-level row to explain it gets `- <axis> fingerprint changed; no field-level detail was recorded`; the component and confidence rows do not count as that explanation, since no fingerprint reads either, so a syntax change moved into Confidence changes still says it happened.
+A change whose `delta.confidenceChanged` is also true adds a row such as ``- confidence: `high` → `medium` ``, base side first, in whichever section the entry lands. This holds for every section that renders a delta body, Moved + Changed included. A fingerprint flag with no field-level row to explain it gets `- <axis> fingerprint changed; no field-level detail was recorded`; the component and confidence rows do not count as that explanation, since no fingerprint reads either, so a syntax change moved into Confidence changes still says it happened. The name row of a renamed pair (see Moved + Changed below) explains the API flag only when the last segment of the name changed, since that segment is all of the name the API fingerprint reads ([`fingerprint.md`](./fingerprint.md) §3.3): `Repo.save` → `UserRepo.save` still gets the note.
 
 #### 🔧 Logic changes
 
@@ -558,11 +558,14 @@ A Symbol can move without leaving its file: the diff counts any change of id in 
 ### `UserRepo.save` *(method)*
 **Moved**: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30) (`name-signature`)
 **Delta**:
+- name: `Repo.save` → `UserRepo.save`
 - rules modified:
   - guard: `user.id !== null` (L31)
 ```
 
 The folded list below reads the same way, less the head name it otherwise opens with, since the route already gives it. A Slice member's follow-up line opens with the route, ``↳ moved: within `apps/billing/src/repo.ts`: `Repo.save` (L12) → `UserRepo.save` (L30); delta.logicChanged``, as a move between files opens with its two paths. A names-only row ends ``(from `Repo.save` at L12)`` where a move between files ends ``(from `<path>`)``.
+
+A move between files that renamed the Symbol as well gives each path with its name, ``**Moved**: `parseAmount` in `src/parse.ts` → `readAmount` in `src/amount.ts` ``, and so do the folded row (without the head name it would open with), the follow-up line, and the names-only row, ``(from `parseAmount` in `src/parse.ts`)``. Every entry titled by its head name is otherwise silent about the old one, so wherever a pair whose names differ renders a delta body — Moved + Changed, and API changes or any other section it lands in — the body opens with ``- name: `<base name>` → `<head name>` ``. The old name of an exported function is the name its callers use, which is the fact a reviewer needs.
 
 #### 🔀 Moved (folded)
 
@@ -894,6 +897,7 @@ All Markdown projection output is **English, with fixed wording**.
 | MP10a | diff where `delta.confidenceChanged` is true and neither `apiChanged` nor `logicChanged` is | Classified into the Confidence changes section, with a `- confidence: <base> → <head>` row |
 | MP11 | diff containing a moved+changed symbol | Moved + Changed section (not folded) |
 | MP11a | diff containing a moved or moved+changed Symbol whose base and head files are the same | Every place the move is written (the Moved + Changed entry and its names-only row, the folded Moved list, a Slice member's follow-up) names the file once with the base and head names and lines, never the path twice. A move between files still writes both paths |
+| MP11b | diff containing a moved or moved+changed Symbol whose base and head names differ, within one file or between files | Every place the move is written carries the base name: a move between files writes each path with its name, and every delta body of the pair opens with ``- name: `<base>` → `<head>` ``. A rename of the last segment explains the API flag, so no "no field-level detail" row follows; a new owner alone (`Repo.save` → `UserRepo.save`) does not explain it |
 | MP12 | 0 components (empty IR) | workspace.md is emitted, but the Components table is empty |
 | MP13 | diff projected with `maxBytes` | Result is at most that many UTF-8 bytes, except where the title, the Summary line and the note alone exceed the budget — which is not achievable, and says so in the note instead. A section is omitted only when it cannot fit, at its smallest, beside every more important section at theirs; among the sections with a names-only form, the full ones come first and every one after the first short one is short or omitted. A note names the short ones and the omitted ones apart |
 | MP13a | diff of a large refactor (+142 · −302 · ~326 · 25 moved · 44 moved+changed) projected with `maxBytes: 65507` | Fits, and every removed Symbol is named with its `file:line` |
