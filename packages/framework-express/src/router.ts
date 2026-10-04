@@ -19,13 +19,14 @@ export interface RouterCall {
  * never goes to a merely adjacent Router mention.
  *
  * `fullNode` is the whole declaration statement, which can declare several names
- * (`const router = Router(), API_PREFIX = "/api"`), so the declarator read is the one that
- * declares `name`, the Symbol being classified. Taking the statement's first declarator made
- * every sibling of a leading `Router()` a Router and missed a `Router()` declared second.
+ * (`const router = Router(), API_PREFIX = "/api"`). `name` is the Symbol's qualified name, so
+ * the declarator read is the one binding its last segment — inside a namespace the Symbol is
+ * `api.router` and the declarator binds `router`.
  */
 export function extractRouterCall(fullNode: unknown, name: string): RouterCall | null {
   const node = asSyntaxNode(fullNode)
   if (node === null) return null
+  // `lastQnameSegment` throws on a broken qname; that is a language-plugin bug not to swallow.
   const declarator = declaratorOf(node, lastQnameSegment(name))
   if (declarator === null) return null
   const initializer = unwrapParens(declarator.childForFieldName("value"))
@@ -36,7 +37,11 @@ export function extractRouterCall(fullNode: unknown, name: string): RouterCall |
   return { callee }
 }
 
-/** The `variable_declarator` of `statement` whose name is the plain identifier `binding`. */
+/**
+ * The `variable_declarator` of `statement` binding the plain identifier `binding`. A
+ * destructuring pattern is not one, so a name pulled out of a `Router()` call is not bound to
+ * the call.
+ */
 function declaratorOf(statement: SyntaxNode, binding: string): SyntaxNode | null {
   for (const child of statement.namedChildren) {
     if (child === null || child.type !== "variable_declarator") continue

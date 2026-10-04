@@ -20,7 +20,11 @@ async function firstConstSymbol(source: string): Promise<SymbolCandidate<unknown
   return found
 }
 
-/** Each const Symbol's name with the Router callee it is read as, or `-`. */
+/**
+ * `"<name> <Router callee>"` per const Symbol, the two space-joined, with `-` when it is not
+ * read as a Router. The extractor hands Symbols back in id order rather than source order, so
+ * each caller sorts before comparing.
+ */
 async function routersOf(source: string, path?: string): Promise<string[]> {
   return (await constSymbols(source, path)).map(
     (s) => `${s.name} ${extractRouterCall(s.fullNode, s.name)?.callee ?? "-"}`,
@@ -52,7 +56,7 @@ describe("extractRouterCall", () => {
     expect(extractRouterCall(sym.fullNode, sym.name)).toBeNull()
   })
 
-  // C1 regression — the initializer must BE the Router() call, not merely contain one.
+  // The initializer must BE the Router() call, not merely contain one.
   it("rejects `const r = [Router()]` (Router inside an array literal)", async () => {
     const sym = await firstConstSymbol(`import { Router } from "express"\nconst r = [Router()]\n`)
     expect(extractRouterCall(sym.fullNode, sym.name)).toBeNull()
@@ -101,7 +105,35 @@ describe("extractRouterCall", () => {
       expect(routers.sort()).toEqual(["api.router Router", "api.version -"])
     })
 
-    it("does not read a name destructured from a Router call as a Router", async () => {
+    it("reads a declarator with no initializer as no Router, and the Router after it", async () => {
+      const routers = await routersOf(`import { Router } from "express"\nlet a, r = Router()\n`)
+      expect(routers.sort()).toEqual(["a -", "r Router"])
+    })
+
+    it("reads each Router's callee from its own declarator", async () => {
+      const routers = await routersOf(
+        `import express, { Router } from "express"\nconst a = Router(), b = express.Router()\n`,
+      )
+      expect(routers.sort()).toEqual(["a Router", "b express.Router"])
+    })
+  })
+
+  describe("a name destructured from a Router call", () => {
+    it("does not read a name an object pattern pulls out as a Router", async () => {
+      const routers = await routersOf(
+        `import { Router } from "express"\nconst { stack } = Router()\n`,
+      )
+      expect(routers).toEqual(["stack -"])
+    })
+
+    it("does not read a name an array pattern pulls out as a Router", async () => {
+      const routers = await routersOf(
+        `import { Router } from "express"\nconst [first] = Router()\n`,
+      )
+      expect(routers).toEqual(["first -"])
+    })
+
+    it("does not read it as a Router beside a Router declared in the same statement", async () => {
       const routers = await routersOf(
         `import { Router } from "express"\nconst { stack } = Router(), router = Router()\n`,
       )
