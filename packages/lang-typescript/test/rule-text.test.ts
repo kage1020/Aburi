@@ -64,8 +64,12 @@ describe("LP19b: rule text drops comments", () => {
   it.each([
     ["guard", "if (a /* why */ || b) throw x", "if (a  || b) throw x"],
     ["wrapped guard", "if (\n  a || // why\n  b\n) throw x", "if (\n  a || \n  b\n) throw x"],
-    ["guard's ends", "if (/* why */ a /* why */) throw x", "if ( a ) throw x"],
-    ["guard's operands", "if ((a) || /* why */ (b)) throw x", "if ((a) ||  (b)) throw x"],
+    ["guard with a comment at each end", "if (/* why */ a /* why */) throw x", "if ( a ) throw x"],
+    [
+      "guard between parenthesized operands",
+      "if ((a) || /* why */ (b)) throw x",
+      "if ((a) ||  (b)) throw x",
+    ],
     ["return", "return a ? b * 0.9 /* member */ : b", "return a ? b * 0.9  : b"],
     ["throw", "throw make(/* code */ 'bad')", "throw make( 'bad')"],
     [
@@ -100,10 +104,10 @@ describe("LP19c: rule text is whitespace-collapsed", () => {
   })
 
   it.each([
-    ["re-indented return", "return a ?\n      b * 2 :\n      c", "return a ? b * 2 : c"],
-    ["longer runs of spaces", "if (a  <   18 ||    b) throw x", "if (a < 18 || b) throw x"],
-    ["tabs and a CRLF", "if (a <\t18 ||\r\n  b) throw x", "if (a < 18 || b) throw x"],
-  ])("a %s gives the same strings", async (_label, spaced, plain) => {
+    ["re-indenting a return", "return a ?\n      b * 2 :\n      c", "return a ? b * 2 : c"],
+    ["lengthening runs of spaces", "if (a  <   18 ||    b) throw x", "if (a < 18 || b) throw x"],
+    ["writing a tab and a CRLF", "if (a <\t18 ||\r\n  b) throw x", "if (a < 18 || b) throw x"],
+  ])("%s leaves the strings as they are", async (_label, spaced, plain) => {
     const respaced = await rulesOf(spaced)
     const single = await rulesOf(plain)
 
