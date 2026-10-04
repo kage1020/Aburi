@@ -135,7 +135,8 @@ const VALUE_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   "non_null_expression",
 ])
 
-function unwrapValue(node: SyntaxNode): SyntaxNode {
+/** `node` with those wrappers stepped through; a route's handler is read through them too. */
+export function unwrapValue(node: SyntaxNode): SyntaxNode {
   let cursor = node
   while (VALUE_WRAPPER_TYPES.has(cursor.type)) {
     const inner = cursor.namedChildren.find((child) => child !== null && child.type !== "comment")

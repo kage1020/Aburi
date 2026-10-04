@@ -10,7 +10,7 @@ Recognised shapes:
 | Source shape | `extKind` | Signal |
 |---|---|---|
 | `const r = Router()` / `const r = express.Router()` | `framework:express:router` | Router factory call bound to a const |
-| `app.get('/users', h)` / `router.post(…)` | `framework:express:route` | member call whose leaf is `get`/`post`/`put`/`patch`/`delete`/`all` |
+| `app.get('/users', h)` / `router.post(…)` | `framework:express:route` | member call whose leaf is `get`/`post`/`put`/`patch`/`delete`/`all`, with a path and at least one handler (an inline function, an identifier, a member path such as `users.list`, a call such as `asyncHandler(h)` or `passport.authenticate("local")`, or an array or spread of handlers); after `app.route(path)` a handler alone; `app.get("env")`, `map.delete(key)` or `axios.post(url, { id })` is not a route |
 | `app.use((req, res, next) => …)` | `framework:express:middleware` | `.use(…)` with an arity-3 inline handler |
 | `app.use(logger)` | `framework:express:middleware` | `.use(…)` with an out-of-scope identifier argument (confidence: `medium`) |
 | `app.use((err, req, res, next) => …)` | `framework:express:error-middleware` | `.use(…)` with an arity-4 handler |

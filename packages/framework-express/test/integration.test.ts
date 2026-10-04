@@ -163,3 +163,57 @@ describe("framework-express — abstains", () => {
     expect(rows.some((r) => r.classification !== null)).toBe(false)
   })
 })
+
+describe("framework-express — a route method name is not a route", () => {
+  const routesOf = async (lines: string[]) =>
+    (await classifyFixture("src/app.ts", [`import express from "express"`, ...lines].join("\n")))
+      .filter((r) => r.classification?.extKind === "framework:express:route")
+      .map((r) => r.classification?.derivedBy)
+
+  it.each([
+    ["Express's settings getter", `app.get("env")`],
+    ["a cache delete", `cache.delete("stale-key")`],
+    ["a settings read", `settings.get("port")`],
+    ["a Map delete", `seen.delete(process.argv[2])`],
+    ["a URLSearchParams delete", `url.searchParams.delete("sslmode")`],
+    ["an HTTP client posting data", `axios.post(url, { id: 1 })`],
+    ["a call with no arguments", `client.get()`],
+    ["an HTTP client passing options", `client.get(url, { headers: { accept: "json" } })`],
+    ["a delete handed a list of keys", `cache.delete("users", ["a", "b"])`],
+    ["a get handed a choice of defaults", `config.get("port", isProd ? 80 : 3000)`],
+    ["a getter whose only other argument is a comment", `app.get("env" /* the mode */)`],
+    ["a delete at the end of a chain with no route call", `db.collection("users").delete(id)`],
+  ])("abstains on %s", async (_label, line) => {
+    expect(await routesOf([`const app = express()`, line])).toEqual([])
+  })
+
+  it.each([
+    ["an inline handler", `app.get("/users", (req, res) => res.json([]))`],
+    ["a handler identifier", `app.get("/users", listUsers)`],
+    ["a controller method", `app.get("/users", users.list)`],
+    [
+      "a wrapped inline handler",
+      `app.get("/users", asyncHandler(async (req, res) => res.json([])))`,
+    ],
+    ["middleware before the handler", `app.post("/users", validate(schema), createUser)`],
+    ["its path up an app.route chain", `app.route("/users").get((req, res) => res.json([]))`],
+    ["a handler identifier up an app.route chain", `app.route("/users").get(listUsers)`],
+    [
+      "several methods on one app.route chain",
+      `app.route("/users").get(listUsers).post(createUser)`,
+    ],
+    ["an array of handlers", `app.get("/users", [authenticate, listUsers])`],
+    ["a spread of handlers", `app.get("/users", ...handlers)`],
+    ["a wrapped handler identifier", `app.get("/users", asyncHandler(listUsers))`],
+    ["a bound controller method", `app.get("/users", users.list.bind(users))`],
+    ["a handler cast to its type", `app.get("/users", listUsers as RequestHandler)`],
+    ["a handler picked by key", `app.get("/users", handlers["list"])`],
+    ["a handler picked by a condition", `app.get("/users", isProd ? cachedList : liveList)`],
+    [
+      "a handler factory handed only options",
+      `app.get("/auth/google", passport.authenticate("google", { scope: ["profile"] }))`,
+    ],
+  ])("classifies a route with %s", async (_label, line) => {
+    expect(await routesOf([`const app = express()`, line])).toHaveLength(1)
+  })
+})

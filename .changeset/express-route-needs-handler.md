@@ -1,0 +1,7 @@
+---
+"@aburi/framework-express": minor
+---
+
+A module-level call is now a `framework:express:route` only when it passes a path and at least one handler, not whenever its method is `get`, `post`, `put`, `patch`, `delete` or `all`. `cache.delete("key")`, `settings.get("port")`, `url.searchParams.delete("x")`, `axios.post(url, { id })` and Express's own settings getter `app.get("env")` were classified as routes, at `medium` confidence in a file without an Express import, and adding an unrelated `import express` to such a file was reported as a confidence change. A handler is an inline function, an identifier, a member path (`users.list`, `handlers["list"]`), a call (`asyncHandler(listUsers)`, `passport.authenticate("google", { scope })`), a choice between handlers (`isProd ? cached : live`), or an array or spread of handlers. After `app.route(path)` the path is already written, so `app.route("/users").get(listUsers)` needs the handler alone. `hasRouteArguments` is exported.
+
+The `api` fingerprint reads `extKind`, so it moves for every call this stops classifying. Most were never routes, but a registration whose only handler is written another way, such as `app.get("/x", await makeHandler())`, is no longer one either. An IR scanned before this release, compared with one scanned after, reports those Symbols as api changes. Rescan the base rather than comparing against a stored IR. `aburi diff <base>..<head>` scans both sides with the installed plugin and is unaffected.
