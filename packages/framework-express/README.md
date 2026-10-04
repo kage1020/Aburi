@@ -9,7 +9,7 @@ Recognised shapes:
 
 | Source shape | `extKind` | Signal |
 |---|---|---|
-| `const r = Router()` / `const r = express.Router()` | `framework:express:router` | Router factory call bound to a const |
+| `const r = Router()` / `const r = express.Router()` | `framework:express:router` | Router factory call bound to that const's own declarator; in `const a = 1, r = Router()` only `r` |
 | `app.get('/users', h)` / `router.post(…)` | `framework:express:route` | member call whose leaf is `get`/`post`/`put`/`patch`/`delete`/`all` |
 | `app.use((req, res, next) => …)` | `framework:express:middleware` | `.use(…)` with an arity-3 inline handler |
 | `app.use(logger)` | `framework:express:middleware` | `.use(…)` with an out-of-scope identifier argument (confidence: `medium`) |
@@ -20,10 +20,17 @@ Priorities inside `.use(...)` are first-match-wins in the order above: an
 arity-4 handler always wins over any other shape, then the two-arg
 `(path, identifier)` mount pattern, then plain middleware.
 
-Confidence is `high` when the file imports the `express` package (or reaches
-Express via CommonJS `require('express')`) and `medium` otherwise — the
-classification survives so the workspace projection still surfaces the shape,
-but consumers can treat medium-confidence rows as candidates for review.
+Confidence is `high` when the file imports the `express` package or one of its
+subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
+otherwise — the classification survives so the workspace projection still
+surfaces the shape, but consumers can treat medium-confidence rows as
+candidates for review. The import is read from the file's parsed import list,
+so the line breaks it is written with do not matter and a commented-out import
+does not count. When that list names no `express`, the source is read as
+tokens, with comments skipped and literals read whole, for a `require` call
+and for an import the list missed (one the parser lost to a syntax error, or
+one inside a `declare module` block). JSX text with a quote or backtick in it
+can mislead that reading on the lines it spans.
 
 Not classified today (documented for completeness):
 
@@ -35,6 +42,9 @@ Not classified today (documented for completeness):
 - Type-level inferences (whether a `Handler` typed function argument is an
   Express handler). The arity heuristic used here is the most reliable
   pre-LSP signal for a middleware / error-middleware split.
+- A name a destructuring pattern pulls out of a `Router()` call
+  (`const { stack } = Router()`) — the binding is not the Router, only
+  something read off it.
 
 ## Install
 
