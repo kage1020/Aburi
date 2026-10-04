@@ -18,12 +18,14 @@ function strings(rule: Rule | undefined): (string | null)[] {
   return rule === undefined ? [] : [rule.condition, rule.what, rule.expr]
 }
 
-describe("rule text drops comments", () => {
+describe("LP19b: rule text drops comments", () => {
   it.each([
     ["block comment in a guard", "if (a /* why */ || b) throw x", "a || b"],
     ["line comment in a guard", "if (\n  a || // why\n  b\n) throw x", "a || b"],
     ["comment beside the parentheses", "if (/* why */ a /* why */) throw x", "a"],
     ["comment between two tokens", "if (a/**/||b) throw x", "a ||b"],
+    // The space is what keeps `a - (-b)` from reading as `a--b`.
+    ["comment that alone keeps two tokens apart", "if (a-/**/-b) throw x", "a- -b"],
   ])("%s", async (_label, body, condition) => {
     const [guard] = await rulesOf(body)
 
@@ -54,9 +56,33 @@ describe("rule text drops comments", () => {
 
     expect(guard?.condition).toBe('a === "/* not a comment */"')
   })
+
+  // The criterion itself: deleting a comment that has whitespace, or the end of the string, on
+  // at least one side leaves every rule string as it was. Each spelling without the comment
+  // holds no `/`, so it is read without the comment walk, and the pair also holds that
+  // shortcut to the walk's answer.
+  it.each([
+    ["guard", "if (a /* why */ || b) throw x", "if (a  || b) throw x"],
+    ["wrapped guard", "if (\n  a || // why\n  b\n) throw x", "if (\n  a || \n  b\n) throw x"],
+    ["guard's ends", "if (/* why */ a /* why */) throw x", "if ( a ) throw x"],
+    ["guard's operands", "if ((a) || /* why */ (b)) throw x", "if ((a) ||  (b)) throw x"],
+    ["return", "return a ? b * 0.9 /* member */ : b", "return a ? b * 0.9  : b"],
+    ["throw", "throw make(/* code */ 'bad')", "throw make( 'bad')"],
+    [
+      "switch",
+      "switch (a /* kind */) { case 1: return b + c }",
+      "switch (a ) { case 1: return b + c }",
+    ],
+  ])("the %s reads as it does with the comment deleted", async (_label, commented, bare) => {
+    const withComment = await rulesOf(commented)
+    const without = await rulesOf(bare)
+
+    expect(without.length).toBeGreaterThan(0)
+    expect(withComment.map(strings)).toEqual(without.map(strings))
+  })
 })
 
-describe("rule text is whitespace-collapsed", () => {
+describe("LP19c: rule text is whitespace-collapsed", () => {
   it("reads a re-wrapped guard as the one-line guard", async () => {
     const [wrapped] = await rulesOf(
       "if (\n    a < 18 ||\n    b ||\n    c === 1\n  ) {\n    throw x\n  }",
@@ -73,7 +99,21 @@ describe("rule text is whitespace-collapsed", () => {
     expect(rule?.what).toBe('make({ code: a, message: "bad", })')
   })
 
-  it("takes off only the parentheses the statement requires", async () => {
+  it.each([
+    ["re-indented return", "return a ?\n      b * 2 :\n      c", "return a ? b * 2 : c"],
+    ["longer runs of spaces", "if (a  <   18 ||    b) throw x", "if (a < 18 || b) throw x"],
+    ["tabs and a CRLF", "if (a <\t18 ||\r\n  b) throw x", "if (a < 18 || b) throw x"],
+  ])("a %s gives the same strings", async (_label, spaced, plain) => {
+    const respaced = await rulesOf(spaced)
+    const single = await rulesOf(plain)
+
+    expect(single.length).toBeGreaterThan(0)
+    expect(respaced.map(strings)).toEqual(single.map(strings))
+  })
+})
+
+describe("an if's condition", () => {
+  it("loses only the parentheses the statement requires", async () => {
     const [guard] = await rulesOf("if ((a) || (b)) throw x")
 
     expect(guard?.condition).toBe("(a) || (b)")

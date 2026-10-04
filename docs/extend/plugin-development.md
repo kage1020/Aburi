@@ -118,6 +118,19 @@ Contracts to know:
   claimed by your manifest). The pipeline throws otherwise.
 - `walkBody`'s `Rule` output is line-sorted by the pipeline before entering the
   IR, so you do not sort it yourself. Same for `calls`.
+- **Take comments out of rule strings yourself, and use the shared helper for the
+  rest.** A rule's `condition`, `what` and `expr` hold no comments, one space for
+  each run of whitespace, and at most 120 code points plus `...`. Only your plugin
+  has the grammar that tells a comment from the code around it, so replace each
+  one with a space before anything else sees the string. Nothing downstream can
+  notice a comment left in: the Document still validates, and the only symptom is
+  a `logic` fingerprint that moves when someone edits the comment. Do not
+  re-implement the collapse and the cut: `normalizeRuleText` from `@aburi/core`
+  does both to one string, counting code points as the schema's `maxLength` does,
+  and `normalizeRuleStrings` does all three strings of a `Rule`. The scan applies
+  them again at the plugin boundary, so a string they already produced passes
+  unchanged. The [rule-string contract](../design/lang-plugin.md#rule-string-contract)
+  has the reasoning.
 - `symbolDropHint` returns `{ reason, category: "B" | "C" }` or `null`. Category
   B drops keep the Symbol out of the IR, so use it for genuine boilerplate.
   Category C keeps the Symbol and prunes its calls.

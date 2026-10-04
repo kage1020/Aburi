@@ -437,7 +437,7 @@ Semantically meaningful branches, exceptions, loops, and compound returns in the
 
 - The same AST node must not produce multiple Rules
 - `condition`/`what`/`expr` are whitespace-normalized (consecutive whitespace collapsed to one, newlines removed, trailing `...` when over 120 characters)
-  - Comments are not part of them: the language plugin takes them out, replacing each with a space, because telling a comment from the code around it takes the grammar. A `/* … */` inside a string literal is string content and stays
+  - Comments are not part of them: the language plugin takes them out, replacing each with a space, because telling a comment from the code around it takes the grammar ([`lang-plugin.md`](./lang-plugin.md) §4.4, LP19b). A `/* … */` inside a string literal is string content and stays
   - Characters are code points, which is what the schema's `maxLength: 123` counts; a cut keeps the first 120 and appends `...`, and never splits a surrogate pair
   - The scan applies the whitespace collapse and the cut again at the plugin boundary (`normalizeRuleText` in `@aburi/core`), so a plugin that skips them still writes a Document the schema accepts. The cut is idempotent, so a string a plugin already cut passes unchanged
   - The outer parentheses an `if` or `switch` requires are not part of the `condition`; any others are (`if ((a) || (b))` gives `(a) || (b)`)
