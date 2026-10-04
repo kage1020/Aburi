@@ -25,8 +25,12 @@ subpaths (or reaches Express via CommonJS `require('express')`) and `medium`
 otherwise — the classification survives so the workspace projection still
 surfaces the shape, but consumers can treat medium-confidence rows as
 candidates for review. The import is read from the file's parsed import list,
-so how it is laid out does not matter and a commented-out import does not
-count; a `require` call is read from the source with comments removed.
+so the line breaks it is written with do not matter and a commented-out import
+does not count. When that list names no `express`, the source is read as
+tokens, with comments skipped and literals read whole, for a `require` call
+and for an import the list missed (one the parser lost to a syntax error, or
+one inside a `declare module` block). JSX text with a quote or backtick in it
+can mislead that reading on the lines it spans.
 
 Not classified today (documented for completeness):
 

@@ -143,6 +143,33 @@ describe("framework-express — confidence downgrades without an express import"
   })
 })
 
+describe("framework-express — CommonJS app", () => {
+  const source = [
+    `const express = require("express")`,
+    ``,
+    `const app = express()`,
+    `const router = express.Router()`,
+    ``,
+    `router.get('/users', (req, res) => { res.json([]) })`,
+    `app.use((req, res, next) => { next() })`,
+    `app.use('/api', router)`,
+  ].join("\n")
+
+  it("rates every Symbol high, as an import would", async () => {
+    const rows = await classifyFixture("src/app.js", source)
+    const rated = rows
+      .filter((r) => r.classification !== null)
+      .map((r) => `${r.classification?.extKind} ${r.classification?.confidence}`)
+      .sort()
+    expect(rated).toEqual([
+      "framework:express:middleware high",
+      "framework:express:mount high",
+      "framework:express:route high",
+      "framework:express:router high",
+    ])
+  })
+})
+
 describe("framework-express — abstains", () => {
   it("returns null for non-Router const symbols", async () => {
     const rows = await classifyFixture(

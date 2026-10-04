@@ -6,8 +6,9 @@ import { useScratchWorkspace } from "../src/scratch"
 
 /**
  * framework-express rates a Symbol `high` when its file imports `express` and `medium`
- * otherwise. The question is read off the file's parsed imports, so how the import is laid out
- * does not move it, and an import that is only a comment does not count.
+ * otherwise. The question is read off the file's parsed imports, and off its text with comments
+ * skipped where those name no `express`, so the line breaks an import is written with do not
+ * move it, an import that is only a comment does not count, and a `require` does.
  */
 
 const workspace = useScratchWorkspace("express-import-provenance")
@@ -69,5 +70,26 @@ describe("scan — where framework-express reads the express import from", () =>
     ])
 
     expect(confidences).toEqual(["app__get__$users__d0 medium"])
+  })
+
+  it("counts a CommonJS `require`, which has no import edge", async () => {
+    const confidences = await confidencesOf("src/server.js", [
+      'const express = require("express")',
+      "",
+      "const router = express.Router()",
+      "",
+      'router.get("/users", (req, res) => res.json([]))',
+      "",
+      "router.use((req, res, next) => next())",
+      "",
+      "module.exports = router",
+      "",
+    ])
+
+    expect(confidences).toEqual([
+      "router high",
+      "router__get__$users__d0 high",
+      "router__use__d0 high",
+    ])
   })
 })
