@@ -230,7 +230,7 @@ describe("extractSymbols — Signature (LP9-LP13)", () => {
     expect(sym.signature?.throws).toEqual(["MyError"])
   })
 
-  it("LP13b: JSDoc @throws {ErrorType} feeds throws[]", async () => {
+  it("LP13a: JSDoc @throws {ErrorType} feeds throws[]", async () => {
     const symbols = await symbolsOf(
       "/**\n * @throws {ValidationError}\n */\nexport function f() {}",
     )

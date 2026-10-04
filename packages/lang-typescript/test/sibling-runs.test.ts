@@ -126,8 +126,9 @@ describe("leading comment run", () => {
   })
 
   it("reads only `/**` blocks, not every comment", async () => {
-    // The one consumer scans the joined text for `@throws`, and cannot tell prose from a
-    // declaration once both are in it. `//` and `/* */` are prose.
+    // The one consumer scans the joined text for `@throws` and cannot tell which kind of comment
+    // a tag came from. Both of these read as a type name by its rule; only the comment kind
+    // keeps them out. `//` and `/* */` are notes, not documentation.
     const line = await symbolsOf("class C {\n  // @throws Legacy\n  m() {}\n}\n")
     expect(byId(line, "#C.m").signature?.throws).toEqual([])
     const block = await symbolsOf("class C {\n  /* @throws Blocky */\n  m() {}\n}\n")
