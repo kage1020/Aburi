@@ -307,6 +307,9 @@ function handleReturnStatement(node: Node, rules: Rule[], calls: CallCandidate[]
     visitChildren(value, rules, calls)
     return
   }
+  // A trivial return is not walked. That loses nothing only because a trivial expression holds
+  // no call: `isTrivialExpr` checks every operand that could hold one, and a case added there
+  // that leaves such an operand unchecked takes the calls in it out of every Symbol.
   if (isTrivialExpr(value)) return
   rules.push(makeRule("return", node, { expr: normalizeExpression(value.text) }))
   visitChildren(value, rules, calls)
@@ -372,12 +375,13 @@ function isCallOnly(value: Node): boolean {
  * Symbol's `calls[]` or `effects[]` and the diff filed the edit as a syntax-only change.
  *
  * The clause goes through `visitNode`, as a try block does, so it records exactly the calls the
- * same statements would record there, with the drop list applied the same way: neither
- * `return a[g()]` nor `return a[h()]` in `try { … } catch (e) { … }` records its call. The rules
- * that walk produces — a guard, a `throw`, a loop, a nested `try` and whatever that `try`'s own
- * `finally` holds — go into `withheld`, which nothing reads. `visitCallsInside`, which the `throw`
- * arm uses, would not do: a thrown value is an expression, where the two walks agree, but a
- * catch clause holds statements, where it would record calls the drop list leaves out.
+ * same statements would record there, with the drop list applied the same way. The rules that
+ * walk produces — a guard, a `throw`, a loop, a `return`, a nested `try` and whatever that
+ * `try`'s own `finally` holds — go into `withheld`, which nothing reads. `visitCallsInside`, which
+ * the `throw` arm uses, collects every call under a node whatever the drop list says. Over a
+ * catch clause it would record the same calls today, but only because a trivial return holds no
+ * call (`handleReturnStatement`); walking the clause as a block keeps the two sides agreeing
+ * without leaning on that.
  */
 function handleTryStatement(node: Node, rules: Rule[], calls: CallCandidate[]): void {
   const body = node.childForFieldName("body")
@@ -423,9 +427,11 @@ function handleCall(node: Node, calls: CallCandidate[]): void {
 }
 
 /**
- * Trivial expression detector matching drop-list.md exactly. Anything that reads like a
- * simple identifier / literal / member chain / unary wrap should NOT surface as a return
- * rule. Everything else does.
+ * Whether a returned expression is too trivial to be a `return` rule (`drop-list.md` §5.5): a
+ * literal, an identifier, `this` or `super`, a member chain on a trivial object, a bracket access
+ * whose object and index are both trivial, and a unary operator, an update operator or a
+ * parenthesis around a trivial expression. Anything else is a rule unless it is call-only, which
+ * each caller tests first (§5.4).
  */
 function isTrivialExpr(node: Node): boolean {
   switch (node.type) {
@@ -440,10 +446,17 @@ function isTrivialExpr(node: Node): boolean {
     case "this":
     case "super":
       return true
-    case "member_expression":
-    case "subscript_expression": {
+    case "member_expression": {
       const object = node.childForFieldName("object")
       return object !== null && isTrivialExpr(object)
+    }
+    case "subscript_expression": {
+      // A property is a name; an index is an expression, so it is the one place a call can hide in
+      // an otherwise-trivial read — and a trivial return is never walked, so it would be lost.
+      const object = node.childForFieldName("object")
+      const index = node.childForFieldName("index")
+      if (object === null || index === null) return false
+      return isTrivialExpr(object) && isTrivialExpr(withoutTypeWrappers(index))
     }
     case "unary_expression":
     case "update_expression": {
@@ -457,6 +470,23 @@ function isTrivialExpr(node: Node): boolean {
     default:
       return false
   }
+}
+
+/**
+ * An index without the type-level wrappers and parentheses around it. A type wrapper asserts
+ * something about the index without replacing it (`TYPE_WRAPPER_TYPES`), so `a[i as number]`,
+ * `a[i!]`, `a[<number>i]` and `obj[key as keyof T]` read what `a[i]` and `obj[key]` do. Only an
+ * index is read through them: `isTrivialExpr` has no case for a wrapper, so `return x as T` is a
+ * rule.
+ */
+function withoutTypeWrappers(index: Node): Node {
+  let cursor = index
+  while (TYPE_WRAPPER_TYPES.has(cursor.type) || cursor.type === "parenthesized_expression") {
+    const inner = wrappedExpression(cursor)
+    if (inner === null) return cursor
+    cursor = inner
+  }
+  return cursor
 }
 
 /**
@@ -584,7 +614,8 @@ interface CalleeShape {
 
 /**
  * The wrappers whose source text stands in for the name they wrap. Each asserts something
- * about a value without replacing it, so `svc!` still names `svc`.
+ * about a value without replacing it, so `svc!` still names `svc`, and `a[i!]` reads what
+ * `a[i]` does (`withoutTypeWrappers`).
  *
  * `ast-helpers.ts` keeps a near twin, `VALUE_WRAPPER_TYPES`, for a different question (which
  * value a binding holds), and leaves `<T>x` off it. This set reads `<T>x` (`type_assertion`) as
@@ -625,11 +656,7 @@ const LINE_BREAK = /[\n\r\u2028\u2029]/
  * name, and reformatting must not change it.
  */
 function describeTypeWrapper(node: Node): CalleeShape | null {
-  // The old-style `<T>x` puts the type first; the other three put the value first.
-  const innerNode =
-    node.type === "type_assertion"
-      ? (node.namedChildren.at(-1) ?? null)
-      : firstNonCommentChild(node)
+  const innerNode = wrappedExpression(node)
   if (innerNode === null) return null
   const inner = describeCallee(innerNode)
   if (inner === null) return null
@@ -637,6 +664,16 @@ function describeTypeWrapper(node: Node): CalleeShape | null {
   if (LINE_BREAK.test(node.text)) return UNMODELLED_EXPRESSION
   if (node.text.split(".").some((segment) => segment.length === 0)) return UNMODELLED_EXPRESSION
   return { target: node.text, dynamic: false, opaque: true }
+}
+
+/**
+ * The expression a wrapper wraps. The old-style `<T>x` puts the type first; the other type
+ * wrappers and a parenthesis put the value first.
+ */
+function wrappedExpression(node: Node): Node | null {
+  return node.type === "type_assertion"
+    ? (node.namedChildren.at(-1) ?? null)
+    : firstNonCommentChild(node)
 }
 
 function describeCallee(node: Node): CalleeShape | null {
