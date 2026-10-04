@@ -871,12 +871,124 @@ function delay(ms: number): Promise<void> {
  * source line. Returns `null` when the joined form isn't found — no fallback
  * to a bare `method` substring search, since that would land on unrelated
  * occurrences (e.g. `console.log(myLog.log)` matching the wrong receiver).
+ *
+ * The needle has to stand as its own tokens, with nothing that continues an identifier on
+ * either side. A bare substring search hovered the first token the needle is a
+ * prefix of — `this.saveAll(); return this.save()` hovered `saveAll`,
+ * `this.handlers.forEach(() => this.handle())` hovered `handlers`, and
+ * `mythis.foo(); this.foo()` hovered the `foo` of `mythis` — and the hint that came back named
+ * a method the call never reaches, with nothing downstream able to tell. An occurrence inside a
+ * string or a comment on the line is passed over for the same reason.
+ *
+ * The call is known to be on this line, so when the masked line holds no occurrence the mask
+ * was wrong about it — JSX text such as `<p>Don't {this.title()}</p>`, whose apostrophe reads
+ * as a quote, or a line inside a template literal or block comment opened above — and the first
+ * whole-token occurrence in the raw line is hovered instead of none.
  */
 function findMethodColumn(line: string, head: string, method: string): number | null {
-  const needle = `${head}.${method}`
-  const idx = line.indexOf(needle)
-  if (idx < 0) return null
-  return idx + head.length + 1
+  const needle = new RegExp(`(?<![\\w$])${escapeRegExp(head)}\\.${escapeRegExp(method)}(?![\\w$])`)
+  const match = needle.exec(maskStringsAndComments(line)) ?? needle.exec(line)
+  if (match === null) return null
+  return match.index + head.length + 1
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/**
+ * `line` with the text of every string literal, template literal and comment it opens replaced
+ * by spaces, so indices still line up with the source. A template literal's `${…}` is code, and
+ * a call inside it stays visible. Read one line at a time, which is what the caller has: a line
+ * that continues a block comment or a template literal from the line above is read as code.
+ */
+function maskStringsAndComments(line: string): string {
+  const out = line.split("")
+  maskCode(line, 0, out, false)
+  return out.join("")
+}
+
+/**
+ * Mask from `start` as code. Inside a template literal's `${…}` (`inInterpolation`), stops at
+ * the `}` that closes it and returns its index; otherwise runs to the end of the line.
+ */
+function maskCode(line: string, start: number, out: string[], inInterpolation: boolean): number {
+  let depth = 0
+  let i = start
+  while (i < line.length) {
+    const char = line[i]
+    const next = line[i + 1]
+    if (char === "/" && next === "/") {
+      blank(out, i, line.length)
+      return line.length
+    }
+    if (char === "/" && next === "*") {
+      const close = line.indexOf("*/", i + 2)
+      const end = close === -1 ? line.length : close + 2
+      blank(out, i, end)
+      i = end
+      continue
+    }
+    if (char === '"' || char === "'") {
+      const end = quotedEnd(line, i, char)
+      blank(out, i, end)
+      i = end
+      continue
+    }
+    if (char === "`") {
+      i = maskTemplate(line, i, out)
+      continue
+    }
+    if (char === "{") depth += 1
+    if (char === "}") {
+      if (inInterpolation && depth === 0) return i
+      depth -= 1
+    }
+    i += 1
+  }
+  return line.length
+}
+
+/**
+ * Mask the template literal opened at `start`, keeping its `${…}` as code. Returns the index
+ * just past the literal.
+ */
+function maskTemplate(line: string, start: number, out: string[]): number {
+  blank(out, start, start + 1)
+  let i = start + 1
+  while (i < line.length) {
+    const char = line[i]
+    if (char === "`") {
+      blank(out, i, i + 1)
+      return i + 1
+    }
+    if (char === "$" && line[i + 1] === "{") {
+      i = maskCode(line, i + 2, out, true) + 1
+      continue
+    }
+    const end = Math.min(char === "\\" ? i + 2 : i + 1, line.length)
+    blank(out, i, end)
+    i = end
+  }
+  return line.length
+}
+
+/** The index just past the literal opened by `quote` at `start`, honouring backslash escapes. */
+function quotedEnd(line: string, start: number, quote: string): number {
+  let i = start + 1
+  while (i < line.length) {
+    if (line[i] === "\\") {
+      i += 2
+      continue
+    }
+    if (line[i] === quote) return i + 1
+    i += 1
+  }
+  return line.length
+}
+
+function blank(out: string[], from: number, to: number): void {
+  for (let k = from; k < to; k += 1) out[k] = " "
 }
 
 function extractHoverPayload(result: unknown): string | null {
