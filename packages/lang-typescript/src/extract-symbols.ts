@@ -844,6 +844,10 @@ function addNamespaceAndBody(
  * block of a reopened outer namespace (`namespace A { export class C {} }` beside `namespace A
  * { export namespace C {} }`) merges in TypeScript but is not seen here, so that namespace's
  * exports keep the dot (`A.C.x`, where one block would give `A.C::x`).
+ *
+ * The class names of a statement list are read once per list and kept for the tree, since a
+ * top-level list is the whole file: reading it again for every namespace makes a file of N
+ * namespaces cost O(N²) (lang-plugin.md §8.2).
  */
 function mergesWithClass(namespaceNode: Node, name: string): boolean {
   let statement = namespaceNode
@@ -852,14 +856,29 @@ function mergesWithClass(namespaceNode: Node, name: string): boolean {
   }
   const scope = statement.parent
   if (scope === null) return false
-  return scope.namedChildren.some((sibling) => {
+  return classNamesIn(scope).has(name)
+}
+
+/** Per tree, the class names each statement list declares, keyed by the list's node id. */
+const classNamesByScope = new WeakMap<Tree, Map<number, ReadonlySet<string>>>()
+
+function classNamesIn(scope: Node): ReadonlySet<string> {
+  let byScope = classNamesByScope.get(scope.tree)
+  if (byScope === undefined) {
+    byScope = new Map()
+    classNamesByScope.set(scope.tree, byScope)
+  }
+  const known = byScope.get(scope.id)
+  if (known !== undefined) return known
+  const names = new Set<string>()
+  for (const sibling of scope.namedChildren) {
     const declaration = sibling === null ? null : unwrappedDeclaration(sibling)
-    return (
-      declaration !== null &&
-      CLASS_DECLARATION_TYPES.has(declaration.type) &&
-      nameFieldText(declaration) === name
-    )
-  })
+    if (declaration === null || !CLASS_DECLARATION_TYPES.has(declaration.type)) continue
+    const declared = nameFieldText(declaration)
+    if (declared !== null) names.add(declared)
+  }
+  byScope.set(scope.id, names)
+  return names
 }
 
 /** The nodes whose children are statements: a module, and a namespace's body. */
