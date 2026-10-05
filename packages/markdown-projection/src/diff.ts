@@ -506,14 +506,22 @@ function renderChangedList(items: readonly (SymbolChanged | SymbolMovedChanged)[
 }
 
 function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
-  const { delta } = change
+  const { delta, before, after } = change
   const rows: string[] = []
+  // A pair across a rename is titled by its head name, so this row is the only place the old
+  // name is written. It explains a fingerprint flag only when the last segment changed, since
+  // that is all of the name the API fingerprint reads (fingerprint.md §3.3).
+  if (before.name !== after.name) {
+    rows.push(`- name: ${inlineCode(before.name)} → ${inlineCode(after.name)}`)
+  }
+  const renamed = shortName(before.name) !== shortName(after.name)
+  const named = rows.length
   appendSignatureDelta(rows, delta.signature ?? null)
   appendDecoratorDelta(rows, delta.decorators)
   appendRuleDelta(rows, delta.rules)
   appendEffectDelta(rows, delta.effects)
   appendCallDelta(rows, delta.calls)
-  const explained = rows.length > 0 || delta.visibilityChanged
+  const explained = rows.length > named || renamed || delta.visibilityChanged
   if (delta.componentChanged) rows.push(`- component: changed`)
   if (delta.visibilityChanged) rows.push(`- visibility: changed`)
   if (delta.confidenceChanged === true) {
@@ -531,7 +539,8 @@ function renderDeltaBody(change: SymbolChanged | SymbolMovedChanged): string[] {
  * inputs the structured delta does not model, so a real document can set a flag with every
  * `ArrayDelta` empty. All three flags are covered because `renderMovedChanged` reaches here
  * with syntax-only moves too. The component and confidence rows do not count as an
- * explanation, since neither is a fingerprint input; the visibility row does, as an API one.
+ * explanation, since neither is a fingerprint input; the visibility row does, as an API one, and
+ * so does the name row when the part of the name the API fingerprint reads changed.
  */
 function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
   const which = delta.apiChanged
@@ -543,6 +552,13 @@ function appendUnexplainedChangeNote(delta: SymbolDelta, rows: string[]): void {
         : null
   if (which === null) return
   rows.push(`- ${which} fingerprint changed; no field-level detail was recorded`)
+}
+
+/** The part of a qualified name the API fingerprint reads (fingerprint.md §3.3). */
+function shortName(name: string): string {
+  const at = name.lastIndexOf("::")
+  const tail = at < 0 ? name : name.slice(at + 2)
+  return tail.slice(tail.lastIndexOf(".") + 1)
 }
 
 function appendSignatureDelta(
@@ -893,14 +909,21 @@ function renderMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 }
 
 /**
- * Where a moved Symbol went. Between files, the two paths. Within one file the id changed while the
- * path did not, so the qualified name inside the id did — and the producers carry that qualified
- * name in `Symbol.name` (ir-schema.md §3.1 does not tie the two). The paths would read the same
- * twice, and the old name is the fact a reader needs to recognise the move.
+ * Where a moved Symbol went. Between files, the two paths, each with its name when the move
+ * renamed it too. Within one file the id changed while the path did not, so the qualified name
+ * inside the id did — and the producers carry that qualified name in `Symbol.name` (ir-schema.md
+ * §3.1 does not tie the two). The paths would read the same twice, and the old name is the fact a
+ * reader needs to recognise the move.
  */
 function moveRoute(before: IRSymbol, after: IRSymbol): string {
   if (before.source.file !== after.source.file) {
-    return `${inlineCode(before.source.file)} → ${inlineCode(after.source.file)}`
+    if (before.name === after.name) {
+      return `${inlineCode(before.source.file)} → ${inlineCode(after.source.file)}`
+    }
+    return (
+      `${inlineCode(before.name)} in ${inlineCode(before.source.file)}` +
+      ` → ${inlineCode(after.name)} in ${inlineCode(after.source.file)}`
+    )
   }
   return (
     `within ${inlineCode(after.source.file)}: ${inlineCode(before.name)} (L${before.source.startLine})` +
@@ -910,7 +933,10 @@ function moveRoute(before: IRSymbol, after: IRSymbol): string {
 
 /** The base side of a moved Symbol for a names-only row, which already carries the head's `file:line`. */
 function movedFrom(before: IRSymbol, after: IRSymbol): string {
-  if (before.source.file !== after.source.file) return inlineCode(before.source.file)
+  if (before.source.file !== after.source.file) {
+    if (before.name === after.name) return inlineCode(before.source.file)
+    return `${inlineCode(before.name)} in ${inlineCode(before.source.file)}`
+  }
   return `${inlineCode(before.name)} at L${before.source.startLine}`
 }
 
@@ -953,7 +979,7 @@ function indexMovedChanged(items: readonly SymbolMovedChanged[]): string[] {
 function renderMoved(items: readonly SymbolMoved[]): string[] {
   return sortByAfterId(items).map((entry) => {
     const lead =
-      entry.before.source.file === entry.after.source.file
+      entry.before.source.file === entry.after.source.file || entry.before.name !== entry.after.name
         ? ""
         : `${inlineCode(entry.after.name)}: `
     return `- ${lead}${moveRoute(entry.before, entry.after)} (${inlineCode(entry.rationale)})`
