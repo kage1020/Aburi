@@ -25,9 +25,18 @@ jobs:
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
-The action diffs the pull request's base against its head and posts the report
-as a comment. That comment carries a hidden marker, so every push rewrites it
-in place instead of piling up a new one.
+The action reports what merging the pull request would change on its base
+branch as it stands now: `actions/checkout` checks out that merge, and the
+action compares it with the base branch commit it was merged into. A pull
+request that has fallen behind is not charged with the base branch's newer
+changes. A workflow that checks out the pull request's head commit instead gets
+the pull request's own commits, compared with their merge base with the base
+branch. Any other checkout stops the action with exit code 2, since the report
+would describe a tree the pull request does not have; that includes the base
+branch, which `pull_request_target` checks out unless told otherwise. Set
+`refspec` to name both sides yourself. The report goes up as a comment, which
+carries a hidden marker, so every push rewrites it in place instead of piling
+up a new one.
 
 | Input | Effect |
 |---|---|

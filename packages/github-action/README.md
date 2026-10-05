@@ -31,7 +31,8 @@ jobs:
           fail-on: "removed,dropped-toggled:to-dropped:>10"
 ```
 
-`fetch-depth: 0` is required so `aburi diff` can resolve the base ref locally.
+`fetch-depth: 0` is required so `aburi diff` can resolve the base ref locally, and so the
+action can find that base from the commit checked out.
 
 ## Pinning
 
@@ -71,7 +72,7 @@ uses the alias.
 | Input | Default | Purpose |
 |---|---|---|
 | `version` | `latest` | npm dist-tag or exact version of `@aburi/cli`. `cli: dlx` only. |
-| `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`. Falls back to the PR's `base.sha..head.sha` for `pull_request` / `pull_request_target` events. |
+| `refspec` | *(empty)* | `<base>..<head>` passed to `aburi diff`, as given. Empty, on `pull_request` / `pull_request_target` events, it is read from the checkout, since `aburi diff` scans the working tree as the head: the merge commit a plain `actions/checkout` gives a pull request is compared with its first parent, the base branch as it stands now, and a checkout of the PR's `head.sha` with its merge base with the base branch (`origin/<base.ref>`, and `base.sha`). Any other checkout is exit 2, including the base branch a `pull_request_target` checks out by default; set `refspec` to name both sides yourself. |
 | `fail-on` | *(empty)* | Forwarded to `--fail-on`; see `docs/design/cli-spec.md` for the grammar. Empty = report only. |
 | `config` | *(empty)* | Path to `aburi.json` / `aburi.config.jsonc`. |
 | `output-dir` | `out` | Where the CLI writes `diff.json` / `diff.md`: a relative value is relative to `working-directory`, an absolute one is used as it is. Must not be empty. Always forwarded to `--output-dir`, because the action reads `diff.md` back to post it — so `config.output.dir` never applies here, and a workspace that sets it must set this input to match. |

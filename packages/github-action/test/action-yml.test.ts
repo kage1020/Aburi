@@ -31,6 +31,13 @@ const REPORT_PATHS_PATH = resolve(
   "report-paths.mjs",
 )
 
+const REFSPEC_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "scripts",
+  "resolve-refspec.mjs",
+)
+
 const UPSERT_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -51,6 +58,7 @@ interface ActionShape {
       readonly uses?: string
       readonly run?: string
       readonly shell?: string
+      readonly "working-directory"?: string
       readonly if?: string
       readonly env?: Record<string, string>
       readonly with?: Record<string, string>
@@ -413,12 +421,40 @@ describe("action.yml", () => {
     }
   })
 
-  it("rejects an event without PR refs when refspec is empty", async () => {
+  it("resolves the refspec through the committed script, from the checkout the CLI scans", async () => {
+    // What the script answers — an explicit refspec, the merge ref, the head, and every refusal —
+    // is asserted by running it against real repositories, in `resolve-refspec.test.ts`. This pins
+    // what it is given: the event's two SHAs and base branch, and `working-directory`, since the
+    // commit it reads has to be the one `aburi diff` scans as the head.
+    await expect(stat(REFSPEC_PATH)).resolves.toBeDefined()
     const action = await loadAction()
     const refspecStep = action.runs.steps.find((s) => s.id === "refspec")
-    expect(refspecStep).toBeDefined()
-    expect(refspecStep?.run).toContain("pull_request")
-    expect(refspecStep?.run).toContain("exit 2")
+    expect(refspecStep?.run).toContain(
+      'refspec=$(node "$GITHUB_ACTION_PATH/scripts/resolve-refspec.mjs")',
+    )
+    expect(refspecStep?.["working-directory"]).toBe(
+      `${EXPRESSION_OPEN} inputs.working-directory }}`,
+    )
+    expect(refspecStep?.env).toEqual({
+      INPUT_REFSPEC: `${EXPRESSION_OPEN} inputs.refspec }}`,
+      EVENT_NAME: `${EXPRESSION_OPEN} github.event_name }}`,
+      PR_BASE_SHA: `${EXPRESSION_OPEN} github.event.pull_request.base.sha }}`,
+      PR_HEAD_SHA: `${EXPRESSION_OPEN} github.event.pull_request.head.sha }}`,
+      PR_BASE_REF: `${EXPRESSION_OPEN} github.event.pull_request.base.ref }}`,
+    })
+  })
+
+  it("resolves the refspec once Node is set up, and before the diff that reads it", async () => {
+    // The resolver is a Node script, and under `cli: dlx` Node is what the setup step installs.
+    const action = await loadAction()
+    const steps = action.runs.steps
+    const setupNode = steps.findIndex((s) => s.uses?.startsWith("actions/setup-node@"))
+    const refspec = steps.findIndex((s) => s.id === "refspec")
+    const diff = steps.findIndex((s) => s.id === "diff")
+    expect(setupNode).toBeGreaterThanOrEqual(0)
+    expect(refspec).toBeGreaterThan(setupNode)
+    expect(diff).toBeGreaterThan(refspec)
+    expect(steps[diff]?.env?.REFSPEC).toBe(`${EXPRESSION_OPEN} steps.refspec.outputs.value }}`)
   })
 
   it("fails input validation when `comment: true` but `format: json`", async () => {
