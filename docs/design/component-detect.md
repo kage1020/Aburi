@@ -344,6 +344,7 @@ When multiple detectors generate the same id with different paths (§4.1):
 - Category A's core patterns apply too, the same list discovery uses rather than a copy of part of it: `node_modules/`, `vendor/`, `__pycache__/`, `out/`, `.venv/`, `*.d.ts` and the rest of [`drop-list.md` §3.1](./drop-list.md)
 - `config.ignore[]` and the loaded language plugins' file-drop globs apply when the caller has them. The census is one walk from the **workspace root**, bucketed by component root afterwards, because those patterns are workspace-root relative by contract and cannot be matched against a walk rooted inside a package
 - The one caller that has neither is `aburi init`, which detects components in order to write the first config. It honours `.gitignore` and the core patterns, which is everything knowable before a config exists
+- Symlinks are not followed, by the census or by the nx detector's search for `project.json`, because discovery does not follow them ([`drop-list.md` §3](./drop-list.md)). A file only a link reaches is never scanned, so it does not count towards a language, and a project only a link reaches would be a Component no scanned file belongs to
 - The contents of a `.git` directory are never read. A `.git` file is read only as far as its opening `gitdir: `, to tell a linked worktree's or a submodule's pointer from any other file of that name. Either one ends the workspace-root walk (§2.1)
 
 ## 9. Performance
@@ -392,6 +393,8 @@ Implementation guidance:
 | CD31 | A Component rooted at `""`, at `"/"`, or at `../vendor` | It claims no file at all, the workspace root included |
 | CD32 | cwd inside a repository that sits under another marker — a linked worktree at `.worktrees/feat` in the main checkout, a repository nested in another, a submodule | The workspace root is that checkout's own top level, the directory holding its `.git` (a directory or a `gitdir:` file), not the outer one |
 | CD33 | cwd inside a monorepo subdirectory holding a `.git` file that does not open with `gitdir:` (an empty one left behind) | The walk passes it: the workspace root is the monorepo's |
+| CD34 | A component holding twelve `.ts` files and a link to a directory outside the workspace that holds twelve `.py` files | `languages` is `["ts"]` — the census does not walk through the link |
+| CD35 | `nx.json`, `apps/billing/project.json`, and `apps/alias` a link to `apps/billing` | One Component, rooted at `apps/billing` |
 
 ## 11. Design decisions
 

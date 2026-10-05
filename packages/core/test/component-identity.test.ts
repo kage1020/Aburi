@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Component } from "@aburi/types"
@@ -132,6 +132,19 @@ describe("a directory two detectors claim", () => {
 
     expect(component.id).toBe("billing-web")
     expect(component.name).toBe("billing-web")
+  })
+})
+
+describe("an nx project behind a symlink", () => {
+  it("is not a component, as discovery does not walk there", async () => {
+    await writeJson("nx.json", {})
+    await writeJson("apps/billing/project.json", { name: "billing-web" })
+    // A junction, which is a directory link on Windows that needs no privilege to create.
+    await symlink(join(tmp, "apps", "billing"), join(tmp, "apps", "alias"), "junction")
+
+    const components = await detectComponents({ workspaceRoot: tmp })
+
+    expect(components.map((component) => component.roots[0])).toEqual(["apps/billing"])
   })
 })
 

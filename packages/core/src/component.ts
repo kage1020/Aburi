@@ -418,6 +418,8 @@ async function countLanguagesPerRoot(
     // same decision: `.git` is kept out of the census by this and not by a core pattern, and a
     // default that changed in a minor bump would start counting git objects towards a language.
     dot: false,
+    // Discovery's decision too, written out for the same reason `dot` is.
+    followSymbolicLinks: false,
     deep: Math.max(...roots.map((root) => rootDepth(root) + LANGUAGE_SCAN_DEPTH)),
   })
   const gitignore = (options.respectGitignore ?? true) ? openGitignoreTree(workspaceRoot) : null

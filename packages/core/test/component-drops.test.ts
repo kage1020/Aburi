@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -96,6 +96,25 @@ describe("detection drops what discovery drops", () => {
     await writeLanguage("fixtures", ".py")
 
     expect(await languagesOfRoot({ ignore: ["fixtures/**"] })).toEqual(["ts"])
+  })
+
+  it("does not count files only a symlink reaches, as discovery does not walk through one", async () => {
+    // Followed, a link out of the workspace counted that machine's files towards a component
+    // none of them belongs to. A junction is a directory link on Windows that needs no
+    // privilege to create, and the walk reads it as a link, so this runs everywhere.
+    const outside = `${workRoot}-linked`
+    await mkdir(outside, { recursive: true })
+    try {
+      for (let index = 0; index < 12; index += 1) {
+        await writeFile(join(outside, `f${index}.py`), "x", "utf8")
+      }
+      await writeLanguage("src", ".ts")
+      await symlink(outside, join(workRoot, "src", "linked"), "junction")
+
+      expect(await languagesOfRoot()).toEqual(["ts"])
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
   })
 
   it("leaves the ts fallback when everything a component holds was excluded", async () => {

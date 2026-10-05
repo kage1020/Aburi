@@ -249,6 +249,11 @@ export async function discoverFiles(options: DiscoverOptions): Promise<DiscoverR
     onlyFiles: true,
     dot: false,
     absolute: false,
+    // A symlink is not a candidate, to a file or to a directory, which is git's view: it stores
+    // a link as one entry and never looks behind it. Followed, a link to a directory inside the
+    // workspace gave every file under it a second Symbol id, and one out of it put a machine's
+    // files into the Document under a workspace path.
+    followSymbolicLinks: false,
   })
 
   const extensions = new Set((options.languageExtensions ?? []).map(toNfc))
