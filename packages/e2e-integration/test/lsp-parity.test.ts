@@ -1,9 +1,10 @@
 import type { LspClient, LspFailure, ServerFactory } from "@aburi/core"
+import { langTypescriptPlugin } from "@aburi/lang-typescript"
 import type { Config, Symbol as IRSymbol, LspServerConfig } from "@aburi/types"
 import { describe, expect, it } from "vitest"
 import { useFixtureCheckout } from "../src/fixture"
 import { irValidator } from "../src/ir-schema"
-import { scanFixture } from "../src/scan-helper"
+import { scanFixture, scanWith, warningCollector } from "../src/scan-helper"
 
 const baseServerConfig: LspServerConfig = {
   command: "mock-lsp",
@@ -200,5 +201,19 @@ describe("LSP hint counters in the scanned IR", () => {
     const on = await scanWithLsp(hoveringMockFactory([]))
     expect(on.ir.stats.lspEnrichment?.hintsRejected).toBeDefined()
     expect(violations(on.ir)).toEqual([])
+  })
+})
+
+describe("lsp.servers keys at the scan boundary", () => {
+  it("warns about a key that names no loaded language plugin", async () => {
+    const collector = warningCollector()
+    const config: Config = { lsp: { enabled: true, servers: { typescript: baseServerConfig } } }
+    await scanWith(fixture.root, { languages: [langTypescriptPlugin] }, config, {
+      logger: collector.logger,
+      lspServerFactory: healthyMockFactory(),
+    })
+    expect(collector.warnings).toContain(
+      "[aburi:lsp] lsp.servers.typescript matches no loaded language plugin (loaded: ts); its server is never started",
+    )
   })
 })
