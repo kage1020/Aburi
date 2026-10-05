@@ -1,14 +1,14 @@
 import { lstat, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import ignore, { type Ignore } from "ignore"
 import { CoreError } from "../errors"
 import { describeThrown, isVanishedFile } from "./faults"
+import { compileRules, type GitignoreRules, readRuleLines, type Verdict } from "./gitignore-pattern"
 
 /** The one filename git reads per directory. */
 const GITIGNORE_FILENAME = ".gitignore"
 
 /**
- * The longest rule this will hand to the regex engine.
+ * The longest rule, in bytes, this will hand to the regex engine.
  *
  * Not a style rule — a determinism one. Where a regex engine's code-size limit falls, and what
  * reaching it costs, is the engine's business: the same rule is accepted at 32,000 characters
@@ -23,15 +23,8 @@ const GITIGNORE_FILENAME = ".gitignore"
  */
 const MAX_RULE_LENGTH = 4096
 
-/** How much of a rule the failure message quotes. A pattern can be longer than a screen. */
+/** How much of a rule the failure message quotes, in bytes. A pattern can be longer than a screen. */
 const QUOTED_RULE_LENGTH = 60
-
-/** How much of the engine's own diagnostic survives, from each end. */
-const QUOTED_REASON_HEAD = 40
-const QUOTED_REASON_TAIL = 60
-
-/** What one directory's rules say about one candidate. Silence is an answer the walk needs. */
-type Verdict = "none" | "ignored" | "kept"
 
 /**
  * The `.gitignore` files of a workspace, answering the one question discovery asks.
@@ -52,10 +45,10 @@ export interface GitignoreTree {
    * Whether git would ignore this file.
    *
    * The path is workspace-relative POSIX, non-empty, with no leading `./` or `../` and no drive
-   * or root — `ignore` throws a bare `TypeError` / `RangeError` on each of those, carrying no
-   * code and no hint that a `.gitignore` was involved. It is the spelling the filesystem gave,
-   * not the Document's: git matches what is on disk, and the directory keys come from the same
-   * place, so a decomposed directory name still matches its own rule file.
+   * or root. That is the caller's contract, and what `glob({ absolute: false })` returns; nothing
+   * here checks it. It is the spelling the filesystem gave, not the Document's: git matches what
+   * is on disk, and the directory keys come from the same place, so a decomposed directory name
+   * still matches its own rule file.
    *
    * Asynchronous because the rule files are opened as the walk reaches them, which is how git
    * finds them too — a `.gitignore` under a directory that turned out to be excluded is never
@@ -93,17 +86,17 @@ export function openGitignoreTree(workspaceRoot: string): GitignoreTree {
  * - anything else that is not a regular file: git blocks forever on a FIFO, which is not a
  *   behaviour worth reproducing
  *
- * Everything else — permission denied, an IO error, a line no regex engine will take — stops
- * the scan naming the file. That is stricter than git, which warns and carries on, and
+ * Everything else — permission denied, an IO error, a rule longer than `MAX_RULE_LENGTH` —
+ * stops the scan naming the file. That is stricter than git, which warns and carries on, and
  * deliberately: a rule list that silently came up empty hands the Document files the workspace
  * had excluded, and only on the machine where the read failed.
  */
-async function readMatcher(path: string): Promise<Ignore | null> {
-  let content: string
+async function readMatcher(path: string): Promise<GitignoreRules | null> {
+  let content: Buffer
   try {
     const entry = await lstat(path)
     if (!entry.isFile()) return null
-    content = await readFile(path, "utf8")
+    content = await readFile(path)
   } catch (error) {
     if (isVanishedFile(error)) return null
     throw new CoreError(
@@ -112,79 +105,27 @@ async function readMatcher(path: string): Promise<Ignore | null> {
       { cause: error },
     )
   }
-  assertEveryRuleCompiles(content, path)
-  return ignore({ ignorecase: false }).add(content)
-}
-
-/**
- * Compile every rule now, one throwaway matcher per line, so a rule the regex engine refuses is
- * reported against the line that holds it.
- *
- * `add` only stores the lines; each rule's `RegExp` is built the first time a question reaches
- * it, and questions do not reach every rule. A negative rule is skipped while nothing has
- * matched yet, and a rule that matches shadows the same-polarity rules after it — so asking one
- * throwaway question of the assembled matcher leaves whole lines uncompiled, and they throw a
- * bare `SyntaxError` at some candidate hundreds of files later, naming neither the file nor the
- * line. One matcher per line has no such shadow: nothing precedes the rule under test.
- */
-function assertEveryRuleCompiles(content: string, path: string): void {
-  for (const [index, line] of content.split(/\r?\n/).entries()) {
-    if (isDiscardedLine(line)) continue
-    // The string `ignore` will compile, which is the line minus the trailing whitespace it
-    // strips. Measuring anything else leaves a way past this gate: `trim()` reduces a rule of
-    // four thousand spaces and one character to one character, and the engine still receives
-    // all four thousand and one.
-    const rule = line.trimEnd()
-    if (rule.length > MAX_RULE_LENGTH) {
-      throw refuseRule(path, index, rule, `it is longer than ${MAX_RULE_LENGTH} characters`)
-    }
-    try {
-      ignore({ ignorecase: false }).add(line).test("a")
-    } catch (error) {
-      throw refuseRule(path, index, rule, abbreviate(describeThrown(error)), error)
+  const lines = readRuleLines(content)
+  for (const line of lines) {
+    if (line.bytes.length > MAX_RULE_LENGTH) {
+      throw refuseRule(path, line.index, line.bytes, `it is longer than ${MAX_RULE_LENGTH} bytes`)
     }
   }
+  return compileRules(lines)
 }
 
 /**
- * The lines `ignore` itself throws away before compiling anything, and only those.
- *
- * Its own predicate, deliberately. A line is a comment when the `#` is the **first character**,
- * so `  #foo` is a live pattern to it — skipping that here would hand the engine a rule this
- * function had just promised to have checked, and it is a rule the engine can refuse.
+ * Which file, which line, an abridged quotation of the rule, and why. Abridged because a
+ * `CoreError` is not a `CliError` and the CLI prints its message verbatim, and a rule may run to
+ * the length limit. `rule` is the rule's bytes; the quotation is decoded back to text.
  */
-function isDiscardedLine(line: string): boolean {
-  return /^\s*$/.test(line) || line.startsWith("#")
-}
-
-/** Both ends of a long diagnostic: the kind of failure is at the front, the reason at the back. */
-function abbreviate(reason: string): string {
-  if (reason.length <= QUOTED_REASON_HEAD + QUOTED_REASON_TAIL) return reason
-  return `${reason.slice(0, QUOTED_REASON_HEAD)}…${reason.slice(-QUOTED_REASON_TAIL)}`
-}
-
-/**
- * The one shape both refusals take: which file, which line, an abridged quotation of the rule,
- * and why.
- *
- * Both halves are abridged, because a `CoreError` is not a `CliError` and the CLI prints its
- * message verbatim. Neither is bounded on its own: a rule may run to the length limit, and the
- * engine's own diagnostic quotes the whole pattern it refused — four kilobytes of it for a rule
- * that stops just short of that limit.
- */
-function refuseRule(
-  path: string,
-  index: number,
-  rule: string,
-  reason: string,
-  cause?: unknown,
-): CoreError {
-  const quoted = rule.length > QUOTED_RULE_LENGTH ? `${rule.slice(0, QUOTED_RULE_LENGTH)}…` : rule
+function refuseRule(path: string, index: number, rule: string, reason: string): CoreError {
+  const head = rule.length > QUOTED_RULE_LENGTH ? rule.slice(0, QUOTED_RULE_LENGTH) : rule
+  const quoted = Buffer.from(head, "latin1").toString("utf8") + (head === rule ? "" : "…")
   return new CoreError(
     `.gitignore at "${path}" line ${index + 1} is not a usable pattern ("${quoted}", ` +
-      `${rule.length} characters): ${reason}`,
+      `${rule.length} bytes): ${reason}`,
     { code: "scan-gitignore-unreadable", value: path },
-    cause === undefined ? {} : { cause },
   )
 }
 
@@ -198,14 +139,16 @@ function refuseRule(
  * nested `!g.ts` rescues nothing, while `generated/*` excludes only the contents, so the same
  * nested rule is reached and works.
  *
- * At each step the answer is the deepest directory with an opinion. `Ignore.test` reports
- * `{ ignored, unignored }` and both false is what silence looks like; `ignores()` cannot say
- * it, which is why the three-state call is the one used here.
+ * At each step the answer is the deepest directory with an opinion, and each file is asked
+ * about the candidate alone. Whether an ancestor directory was excluded is settled before, across
+ * every file at once; a file that re-derived it from its own rules would answer for a directory
+ * a deeper file had re-included, and its stale `ignored` would stand over the deeper file's
+ * silence about the candidate.
  */
 class GitignoreDescent implements GitignoreTree {
   readonly #workspaceRoot: string
   /** Directory → its rules, `null` for none. A cache: absent means "not reached yet". */
-  readonly #matchers = new Map<string, Ignore | null>()
+  readonly #matchers = new Map<string, GitignoreRules | null>()
   /** Directory → excluded, itself or by an ancestor. Directories repeat; files do not. */
   readonly #excluded = new Map<string, boolean>()
 
@@ -244,9 +187,8 @@ class GitignoreDescent implements GitignoreTree {
    * keeps `pkg/.gitignore` from re-including `pkg` after the root excluded it — and is again
    * just git not descending. For a file candidate, its own directory is above it and does count.
    *
-   * A directory is asked about with a trailing `/`, which is git's and `ignore`'s own boundary
-   * convention: without it a `dist/` rule has no opinion on the bare name `dist`, and a subtree
-   * would survive its own exclusion.
+   * A directory is asked about as one, so a `dist/` rule, which matches directories only, has
+   * an opinion on it.
    */
   async #decide(candidate: string, kind: "file" | "directory"): Promise<Verdict> {
     const subject = kind === "directory" ? `${candidate}/` : candidate
@@ -256,10 +198,9 @@ class GitignoreDescent implements GitignoreTree {
       const directory = boundary < 0 ? "" : subject.slice(0, boundary)
       const matcher = await this.#matcherFor(directory)
       if (matcher !== null) {
-        const relative = boundary < 0 ? subject : subject.slice(boundary + 1)
-        const { ignored, unignored } = matcher.test(relative)
-        if (ignored) verdict = "ignored"
-        else if (unignored) verdict = "kept"
+        const relative = boundary < 0 ? candidate : candidate.slice(boundary + 1)
+        const answer = matcher.decide(relative, kind === "directory")
+        if (answer !== "none") verdict = answer
       }
       const next = subject.indexOf("/", boundary + 1)
       // The last segment is the candidate itself. A trailing `/` makes it the empty segment,
@@ -270,7 +211,7 @@ class GitignoreDescent implements GitignoreTree {
   }
 
   /** Read at most once per directory, and only when the descent actually reached it. */
-  async #matcherFor(directory: string): Promise<Ignore | null> {
+  async #matcherFor(directory: string): Promise<GitignoreRules | null> {
     const cached = this.#matchers.get(directory)
     if (cached !== undefined) return cached
     const matcher = await readMatcher(resolve(this.#workspaceRoot, directory, GITIGNORE_FILENAME))
