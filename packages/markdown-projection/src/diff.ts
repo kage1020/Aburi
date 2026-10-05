@@ -34,9 +34,10 @@ export interface ProjectDiffOptions {
   /**
    * markdown-projection.md — hard cap on the document in UTF-8 bytes (GitHub rejects a
    * comment over 65536), honoured section by section, least important first, never by cutting
-   * the string: each section is kept at its smallest — names and locations, for a section of
-   * whole Symbols — and dropped only when even that does not fit, and the name lists then get
-   * their full entries back from the top. Must be a positive integer (`0` throws `RangeError`);
+   * the string, the note naming what was shortened counted in: each section is kept in the
+   * form that makes the smaller document — names and locations, or its full entries — and
+   * dropped only when neither fits, and the name lists then get their full entries back from
+   * the top. Must be a positive integer (`0` throws `RangeError`);
    * absent means no cap.
    */
   readonly maxBytes?: number
@@ -199,13 +200,13 @@ function assemble(
       ...omissionNote(arrangement, maxBytes, unachievable, fullReportLocation),
       ...arrangement.flatMap(({ section, shown }) => linesIn(section, shown)),
     ])
-  const fits = (arrangement: Arrangement): boolean =>
-    Buffer.byteLength(render(arrangement, false), "utf8") <= maxBytes
+  const size = (arrangement: Arrangement): number =>
+    Buffer.byteLength(render(arrangement, false), "utf8")
 
   const whole = sections.map((section) => ({ section, shown: FULL }))
-  if (fits(whole)) return render(whole, false)
-  const arrangement = arrangeWithin(sections, fits)
-  if (fits(arrangement)) return render(arrangement, false)
+  if (size(whole) <= maxBytes) return render(whole, false)
+  const arrangement = arrangeWithin(sections, size, maxBytes)
+  if (size(arrangement) <= maxBytes) return render(arrangement, false)
   return render(
     sections.map((section) => ({ section, shown: OMITTED })),
     true,
@@ -213,42 +214,111 @@ function assemble(
 }
 
 /**
- * The form of each section in a capped document, decided in two passes.
+ * The form of each section in a capped document, decided in three passes. Every size is the
+ * whole document's, note included: naming a section in the note costs bytes too, so a
+ * names-only form is not always the smaller one — a section with one thin entry saves a couple
+ * of bytes in its lines and spends more than that on its name in the note.
  *
- * 1. **Which sections stay.** Most important first, each section is kept in its smallest form —
- *    names-only where it has one, whole where it has not — if it fits beside the ones already
- *    kept, and omitted otherwise. So a section goes only when it cannot fit, at its smallest,
- *    beside every more important section that stayed: the least important go first, and a
- *    names-only list never costs a more important section its place.
+ * 1. **Which sections stay.** Most important first, each section is kept in whichever of its
+ *    forms makes the smaller document, if that fits beside the ones already kept, else in its
+ *    other form if that fits, and omitted otherwise. So a section goes only when it cannot fit,
+ *    in either form, beside every more important section that stayed: the least important go
+ *    first, and a names-only list never costs a more important section its place.
  * 2. **How much of them.** The names-only lists become whole again from the top, until one does
- *    not fit. So the sections shown whole among those that have a names-only form are the
- *    first ones, and once one is short every one below it is short or gone.
+ *    not fit. So among the sections that have a names-only form, the whole ones come first, and
+ *    once one is short every one below it is short or gone, or whole because whole is there
+ *    the smaller document (`keepsOrder`).
+ * 3. **What the second pass freed.** A list made whole can shrink the document, by taking its
+ *    name out of the note, so each section still omitted is tried again, most important first,
+ *    in a form that keeps that order, and the second pass runs again, until nothing changes. So
+ *    no omitted section could be put back, in such a form, into the document as it ends up.
+ *
+ * A section only ever moves from omitted to shown and from names-only to whole, so the passes
+ * end. Each is greedy, so this is not the best arrangement of all when the note's cost makes
+ * sizes interact — omitting a two-line section can cost more than keeping it — but every
+ * section it omits is one that does not fit, in a form that keeps the order, in the document
+ * it returns.
  *
  * Exported for its tests, which check it against every arrangement of small inputs; it is not
  * part of the package's API.
  */
 export function arrangeWithin(
   sections: readonly Section[],
-  fits: (arrangement: Arrangement) => boolean,
+  size: (arrangement: Arrangement) => number,
+  maxBytes: number,
 ): Arrangement {
   const rows = sections.map((section): { section: Section; shown: Shown } => ({
     section,
     shown: OMITTED,
   }))
-  for (const row of rows) {
-    row.shown = row.section.short === undefined ? FULL : { kind: "short", lines: row.section.short }
-    if (!fits(rows)) row.shown = OMITTED
-  }
-  for (const row of rows) {
-    const shown = row.shown
-    if (shown.kind !== "short") continue
-    row.shown = FULL
-    if (!fits(rows)) {
+  /** Show an omitted `row` in the smaller of its forms that fits and keeps the order, if any. */
+  const place = (row: { section: Section; shown: Shown }): void => {
+    let best: { shown: Shown; bytes: number } | null = null
+    for (const shown of formsOf(row.section)) {
       row.shown = shown
-      break
+      const bytes = size(rows)
+      if (bytes > maxBytes || (best !== null && bytes >= best.bytes)) continue
+      if (keepsOrder(rows, size)) best = { shown, bytes }
+    }
+    row.shown = best?.shown ?? OMITTED
+  }
+  /** Make the names-only lists whole from the top, until one does not fit; whether any did. */
+  const wholeFromTop = (): boolean => {
+    let changed = false
+    for (const row of rows) {
+      const shown = row.shown
+      if (shown.kind !== "short") continue
+      row.shown = FULL
+      if (size(rows) > maxBytes) {
+        row.shown = shown
+        break
+      }
+      changed = true
+    }
+    return changed
+  }
+
+  for (const row of rows) place(row)
+  for (let changed = true; changed; ) {
+    changed = wholeFromTop()
+    for (const row of rows) {
+      if (row.shown.kind !== "omitted") continue
+      place(row)
+      if (row.shown.kind !== "omitted") changed = true
     }
   }
   return rows
+}
+
+/** A section's forms, whole first so that a tie keeps it whole. */
+function formsOf(section: Section): Shown[] {
+  return section.short === undefined ? [FULL] : [FULL, { kind: "short", lines: section.short }]
+}
+
+/**
+ * Whether the lists — the sections that have a names-only form — are in the order the passes
+ * keep: a list shown whole below one shown names-only is there only because names-only would
+ * not make the document smaller. Without that exception a thin list below a long one would
+ * have to be names-only, in a larger document, or omitted when that did not fit, although it
+ * fits whole.
+ */
+function keepsOrder(
+  rows: Array<{ section: Section; shown: Shown }>,
+  size: (arrangement: Arrangement) => number,
+): boolean {
+  const bytes = size(rows)
+  let shortAbove = false
+  for (const row of rows) {
+    const { section, shown } = row
+    if (section.short === undefined) continue
+    if (shown.kind === "short") shortAbove = true
+    if (shown.kind !== "full" || !shortAbove) continue
+    row.shown = { kind: "short", lines: section.short }
+    const smaller = size(rows) < bytes
+    row.shown = shown
+    if (smaller) return false
+  }
+  return true
 }
 
 function linesIn(section: Section, shown: Shown): readonly string[] {
